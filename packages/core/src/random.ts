@@ -43,7 +43,7 @@ export function createRandom(seed: string | number): Random {
 
   function pick<T>(array: readonly T[]): T {
     if (array.length === 0) throw new Error('Cannot pick from an empty array')
-    return array[rangeFloor(0, array.length)]
+    return array[rangeFloor(0, array.length)]!
   }
 
   function shuffle<T>(array: readonly T[]): T[] {
@@ -51,8 +51,8 @@ export function createRandom(seed: string | number): Random {
     const result = [...array]
     for (let i = result.length - 1; i > 0; i--) {
       const j = rangeFloor(0, i + 1)
-      const tmp = result[i]
-      result[i] = result[j]
+      const tmp = result[i]!
+      result[i] = result[j]!
       result[j] = tmp
     }
     return result
