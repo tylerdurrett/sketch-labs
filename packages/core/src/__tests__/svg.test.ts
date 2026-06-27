@@ -123,14 +123,16 @@ describe('polylinesToSVG', () => {
     expect(svg).toContain('points="1.2346,2.9877 3,5"')
   })
 
-  it('converts stroke width to target units', () => {
+  it('keeps stroke width in cm user units regardless of output units', () => {
     const svg = polylinesToSVG([], {
       ...letterCm,
       units: 'mm',
       strokeWidth: 0.03,
     })
-    // 0.03 cm * 10 = 0.3 mm
-    expect(svg).toContain('stroke-width="0.3"')
+    // viewBox is in cm, so 1 user unit = 1 cm even when width/height use mm.
+    // stroke-width is a user-space length and must stay 0.03 (cm), not be
+    // rescaled — otherwise the line would render 10x too thick in this case.
+    expect(svg).toContain('stroke-width="0.03"')
   })
 
   it('escapes special characters in stroke color', () => {

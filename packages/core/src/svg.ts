@@ -56,8 +56,10 @@ export function polylinesToSVG(lines: Polyline[], options: SVGOptions): string {
     })
     .join('\n')
 
-  // Convert stroke width to target units for consistent physical rendering
-  const svgStrokeWidth = round(strokeWidth * factor)
+  // The viewBox is in cm, so user-space lengths (coordinates and stroke-width)
+  // are already in cm — stroke-width must NOT be scaled by the unit factor, or
+  // it would render at the wrong physical size whenever units !== 'cm'.
+  const svgStrokeWidth = round(strokeWidth)
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}${units}" height="${svgHeight}${units}" viewBox="0 0 ${width} ${height}">`,
