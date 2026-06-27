@@ -8,6 +8,8 @@ importers:
 
   .: {}
 
+  apps/studio: {}
+
   packages/core:
     devDependencies:
       typescript:
@@ -16,6 +18,8 @@ importers:
       vitest:
         specifier: ^1.5.0
         version: 1.6.1
+
+  packages/video: {}
 
 packages:
 
