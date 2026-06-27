@@ -100,6 +100,16 @@ Batched #<P>: <opened> PR(s) opened, <shipped> predecessor(s) squash-merged to u
 
 Call out the auto-merged tasks explicitly — they landed without individual human review (their independent `/code-review` was clean), and the reviewer should know to inspect them inside the eventual slice-promotion PR. Call out held-for-review tasks too: each blocked its dependents, so resolving and shipping it is what unblocks the rest.
 
+## Live DAG updates
+
+A batch can run for a long time. If the parent issue carries a `## Sub-issue DAG` (from `/dag`), the workflow keeps it live so you can watch progress fill in without babysitting `/workflows`:
+
+- **Amber on start.** When a task's Prep stage finishes and its branch is pushed, the workflow flips that task `ready-for-agent` → `in-progress` and recolors the parent's DAG — the node turns amber for the whole Implement → Review → Land span (the long part). Flipping at pipeline start is consistent with the label's meaning ("active work has begun"); it's earlier than a solo `/execute`'s flip-at-PR-open, which is the point — the chart should show work the moment it's underway. A task that Prep finds not-ready keeps its labels untouched.
+- **Green on merge — free via `/ship`.** Auto-shipped predecessors close through `/ship` (task tier), which already recolors the parent after a close. So those nodes turn green on their own; the workflow adds nothing for the merge case. Independent (non-shipped) tasks stay amber as open PRs until you ship them later — which is correct.
+- **Final sweep.** After every task settles, the workflow runs one authoritative recolor of the parent. Per-stage refreshes race under parallelism (last-writer-wins on the parent body), so a node can briefly show a stale color; each recolor recomputes from live state, so it self-heals, and this trailing sweep guarantees the resting chart is correct.
+
+All of this is best-effort and gated on the parent actually having a DAG section ([recolor.mjs](../dag/recolor.mjs) is a no-op otherwise) — it never blocks or fails a batch. See [the dag skill](../dag/SKILL.md#refreshing-colors-only-the-recolormjs-fast-path) for the mechanism.
+
 ## What this skill does NOT do
 
 - It does not run `/triage`, `/decompose`, or relabel anything. Non-ready children are reported, not fixed.

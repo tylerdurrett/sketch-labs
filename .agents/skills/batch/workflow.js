@@ -18,6 +18,7 @@ export const meta = {
 // Tolerate args arriving as a JSON-encoded string (some tool-call serializers stringify object args).
 const a = typeof args === 'string' ? JSON.parse(args) : (args || {})
 const tasks = a.tasks || []
+const parentIssue = a.parentIssue || null
 
 if (!tasks.length) {
   log('No ready tasks were passed to batch-execute; nothing to run.')
@@ -174,12 +175,15 @@ function prepPrompt(task) {
   return [
     `You are the PREP stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree.`,
     ``,
-    `Follow the /execute skill, Steps 1–6, per its "Running under /batch" section (Prep row): validate labels, walk the parent chain to resolve the base branch, read the brief and any contract-updating parent comments, explore the codebase, and form the numbered sub-section plan. Do NOT halt for approval (skip the Step 5 halt).`,
+    `Follow the /execute skill, Steps 1–6, per its "Running under /batch" section (Prep row): validate labels, walk the parent chain to resolve the base branch — and if that integration branch (or any ancestor up to main) does not yet exist on origin, seed the whole missing chain via /execute Step 2's recursive \`ensure_integration_branch\` rather than forking the base off main (forking off main flattens the hierarchy and corrupts the later slice/feature promotion diff) — read the brief and any contract-updating parent comments, explore the codebase, and form the numbered sub-section plan. Do NOT halt for approval (skip the Step 5 halt).`,
     `\nCreate the feature branch (Step 6), but do NOT let your worktree hold it by name — sibling stages run in separate worktrees and git forbids the same branch being checked out twice. So instead of \`git checkout -b <branch>\`, resolve the base, detach onto it (\`git fetch origin <resolved-base> && git checkout --detach FETCH_HEAD\`), and create the branch ON ORIGIN ONLY with \`git push origin HEAD:refs/heads/<branch>\`. Do NOT create a local branch ref of any kind.`,
     deps.length
       ? `\nThis task depends on #${deps.join(', #')}, already squash-merged into the integration branch. Fetch the base branch fresh before branching so it includes their code.`
       : ``,
     `\nDo NOT invoke /triage and do NOT wait for a human. If the task is not OPEN + ready-for-agent + size:task, or the Step 4 size escape-hatch fires, set ready:false and return a specific blocker (do not push a branch).`,
+    parentIssue
+      ? `\nLIVE DAG (amber-on-start): once the branch is pushed and you are about to return ready:true — and ONLY then (a not-ready task keeps its labels untouched) — mark the task active so the parent's Sub-issue DAG lights its node amber. Run \`gh issue edit ${task.number} --remove-label ready-for-agent --add-label in-progress\` (active work has genuinely begun), then recolor the parent: \`node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" ${parentIssue}\`. Both are best-effort: if either errors (e.g. the parent has no DAG section — the recolor is a clean no-op then), log it and still return ready:true. Never let this block prep.`
+      : ``,
     `\nReturn: ready, baseBranch, branch, brief (distilled for the implementer — the agent brief plus any contract updates from parent comments), plan (ordered sub-sections), blocker.`,
   ]
     .filter(Boolean)
@@ -331,6 +335,17 @@ function run(num) {
 }
 
 const results = await Promise.all(tasks.map((t) => run(t.number)))
+
+// Final DAG sweep: one authoritative recolor of the parent after everything settles. Per-stage
+// refreshes (amber at Prep, green via /ship at Land) keep the chart live during the run, but the
+// last few concurrent transitions can race to a stale resting state. This single trailing recolor
+// reads ground truth and closes that window. Best-effort — a failed sweep never fails the batch.
+if (parentIssue) {
+  await agent(
+    `Run exactly this one command and report only its output — do not edit any issue by hand:\n\n  node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" ${parentIssue}\n\nIt recolors issue #${parentIssue}'s "## Sub-issue DAG" from live sub-issue state. If it reports there is no DAG section, or prints an error, just relay that.`,
+    { label: 'dag-sweep', phase: 'Land' },
+  )
+}
 
 const opened = results.filter((r) => r.ok && !r.shipped && !r.reviewBlocked).map((r) => r.number)
 const shipped = results.filter((r) => r.shipped).map((r) => r.number)
