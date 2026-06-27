@@ -14,9 +14,11 @@
   },
   "dependencies": {
     "alea": "^1.0.1",
+    "lineclip": "^2.0.0",
     "simplex-noise": "^4.0.3"
   },
   "devDependencies": {
+    "@types/lineclip": "^2.0.0",
     "typescript": "^5.4.5",
     "vitest": "^1.5.0"
   }
