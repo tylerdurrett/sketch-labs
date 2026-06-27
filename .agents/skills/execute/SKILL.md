@@ -95,19 +95,34 @@ git ls-remote --heads origin <base-branch>
 
 - Present, continue.
 - Empty for `main`, impossible state; surface and stop.
-- Empty for a non-`main` integration branch, create it lazily on the remote, forking from the next-level-up integration branch in the chain (or `main` if the chain terminates above `<declaring-parent>`):
+- Empty for a non-`main` integration branch, create it lazily on the remote. Its fork source is the next-level-up integration branch in the chain (or `main` if the chain terminates above `<declaring-parent>`) — but that ancestor may itself never have been seeded (e.g. this is the first task under the first slice of a brand-new feature, so the feature branch doesn't exist on origin yet). Creation therefore **recurses**: ensure every missing ancestor branch exists before forking the child from it, bottoming out at `main`. This is ADR-0001's "recurse upward" rule applied to branch *creation*, not just to the declaration walk `resolve_base_branch` already does.
 
   ```bash
-  read fork_source _ < <(resolve_base_branch "$declaring_parent")
-  git fetch origin "$fork_source"
-  git push origin "origin/$fork_source:refs/heads/<base-branch>"
+  # Ensure the integration branch <branch> (declared by issue <decl>) exists on
+  # origin, recursively creating any missing ancestor first so the fork source is
+  # always present. Idempotent: an existing branch is reused. `main` is terminal.
+  ensure_integration_branch() {
+    local branch=$1 decl=$2
+    [ "$branch" = "main" ] && return 0
+    if [ -n "$(git ls-remote --heads origin "$branch")" ]; then
+      echo "Reusing existing integration branch $branch on origin" >&2
+      return 0
+    fi
+    # Fork source = nearest declared integration branch above <decl> (or main).
+    local fork_source fork_decl
+    read fork_source fork_decl < <(resolve_base_branch "$decl")
+    ensure_integration_branch "$fork_source" "$fork_decl"   # seed the chain first
+    git fetch origin "$fork_source"
+    git push origin "origin/$fork_source:refs/heads/$branch"
+    echo "Created integration branch $branch on origin from origin/$fork_source" >&2
+  }
+
+  ensure_integration_branch "$base_branch" "$declaring_parent"
   ```
 
-  This forks the integration branch off the freshest upstream branch at the moment the first child task starts. Print one of:
-  - `"Created integration branch <base-branch> on origin from origin/<fork-source>"` (just-created)
-  - `"Reusing existing integration branch <base-branch> on origin"` (already there from a prior run)
+  Each branch forks off the freshest upstream branch at the moment the first child task starts, and the entire missing chain (feature → slice → …) is seeded at that one point. The function is idempotent, so concurrent first-tasks and re-runs are safe.
 
-  A failed push (permissions, network) is a stop condition. Surface the error and halt. Either path (`/decompose` on the parent slice, `/execute` on the first task) seeds the integration branch on first use, so neither blocks on the other having run first.
+  A failed push (permissions, network) is a stop condition. Surface the error and halt. **Never silently fall back to forking `<base-branch>` off `main` when an ancestor integration branch is missing** — that flattens the hierarchy and makes the eventual slice/feature promotion diff wrong; create the missing ancestor instead. Either path (`/decompose` on the parent slice, `/execute` on the first task) seeds the integration branch on first use, so neither blocks on the other having run first.
 
 ## Step 3: Verify clean working tree and sync base branch
 
