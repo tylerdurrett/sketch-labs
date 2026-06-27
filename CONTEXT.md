@@ -31,7 +31,19 @@ The single declaration a **Sketch** makes of its tweakable knobs. It is the *spi
 _Avoid_: config, settings
 
 **Sketch contract**:
-What a Sketch file exports: a **Parameter Schema** plus a pure `generate(params, seed, t)`. The author writes only these two; all chrome (canvas, controls, timeline, presets, navigation, export) is Harness-provided.
+What a Sketch file exports: a **Parameter Schema** plus its frame logic. A *stateless* Sketch exports a pure `generate(params, seed, t)`. A *stateful* (simulation) Sketch instead exports an `initial(params, seed)` + **Step** + **Draw** triple that the Harness folds into the same `(params, seed, t) → Scene` behaviour. Either way the author writes only the schema and the frame logic; all chrome (canvas, controls, timeline, presets, navigation, export) is Harness-provided, and the author never owns the animation loop.
+
+**Draw** (verb):
+The per-frame projection of a **Sketch**'s private domain structures into a **Scene** of **Primitives** — the `draw(state) → Scene` step. Named after the Processing/p5 per-frame `draw()`. "Draw" is the **Sketch**'s job; the **Scene Renderer** then *renders* that Scene to output.
+_Avoid_: bake (now means trajectory precompute — see **Bake**), project (reserved for a future 3D path), emit (particle-system connotation), render (the backend's job)
+
+**Step** (verb):
+For a stateful (simulation) **Sketch**, one advance of the private domain state — `step(state, …) → state`, domain → domain, producing no **Scene**. The Harness folds `step` from `initial(params, seed)` to reach time `t`; the author never writes the loop.
+_Avoid_: update, tick, simulate
+
+**Bake** (verb):
+Precompute a simulation's whole trajectory and cache it (checkpoints across `t`) so scrubbing and export don't re-fold from zero. A Harness optimization invisible to output: keyed on `(params, seed)`, a bake can only change *speed*, never the frame. Matches the Blender/Houdini sense of "bake."
+_Avoid_: snapshot (collides with **Preset**), cache (as the verb for this)
 
 **Seed**:
 The single value feeding all of a **Sketch**'s internal randomness (which cells get leaves, per-leaf wobble, flow turbulence). Re-rolling the seed keeps every param value identical but produces a different specific arrangement of the same character.
@@ -48,7 +60,7 @@ A committed, per-Sketch snapshot that fully reproduces an image and resumes an e
 ## Relationships
 
 - The **Harness** hosts many **Sketches**; each **Sketch** plugs into the Harness through a shared contract.
-- A vector **Sketch**'s generator produces private domain structures (e.g. its own leaf instances), then **bakes** them into a **Scene** of **Primitives**. Domain types never leave the generator.
+- A vector **Sketch**'s generator produces private domain structures (e.g. its own leaf instances), then **draws** them into a **Scene** of **Primitives**. Domain types never leave the generator.
 - A **Sketch** binds to one or more **Renderers**. Vector Sketches use **Scene Renderers** (and get SVG/plotter/raster export for free); non-vector Sketches use **Direct Renderers**.
 - "Can this Sketch bake itself into a **Scene**?" is the dividing line between the two renderer families.
 
@@ -59,7 +71,7 @@ A Sketch's output is deterministic in `(params, seed, t)` — same inputs, same 
 - **Remotion** samples it at `t = frame / fps` for deterministic video.
 - **Static / plotter export** freezes `t` and exports that frame's vector IR exactly.
 
-There is no separate "realtime mode" vs "render mode" — one function, sampled at different `t`. Expensive, export-only work (hidden-line removal, path simplification, pen ordering) lives *outside* the exploration loop, which is only `generate → bake → painter's-order draw`. True 60fps GPU output is explicitly the lowest priority, so the early system keeps a single vector representation rather than a parallel GPU-parametric one.
+There is no separate "realtime mode" vs "render mode" — one function, sampled at different `t`. Expensive, export-only work (hidden-line removal, path simplification, pen ordering) lives *outside* the exploration loop, which is only `generate → draw → painter's-order render`. True 60fps GPU output is explicitly the lowest priority, so the early system keeps a single vector representation rather than a parallel GPU-parametric one.
 
 ### Time semantics
 
