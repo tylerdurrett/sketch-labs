@@ -142,6 +142,8 @@ Closing the sub-issue is enough on the parent side: GitHub's native sub-issue ro
 
 If no closing reference was found in T2, skip the issue-close step entirely and note in the final report that no issue was closed.
 
+Then refresh the parent's DAG (best-effort) — see [Refresh the parent's Sub-issue DAG](#refresh-the-parents-sub-issue-dag-best-effort). The task's parent is its body's `**Part of:** #<P>` line; if absent (orphan task), skip.
+
 ### T6. Delete the local feature branch
 
 ```bash
@@ -414,6 +416,8 @@ Then:
 
 3. **Do not delete the remote integration branch.** It stays on origin until a future grace-period sweep.
 
+4. **Refresh the parent's DAG (best-effort)** — see [Refresh the parent's Sub-issue DAG](#refresh-the-parents-sub-issue-dag-best-effort). The parent is this spec's `**Part of:** #<P>` line — the same `gp_num` P8 derives below. For a slice that's the feature; for a feature that's the initiative. If orphan (no `**Part of:**`), skip.
+
 ### P8. Tick the parent's progress comment (best-effort, feature tier)
 
 After the spec issue closes, check whether this spec has a parent with a sticky progress comment to tick. Only initiatives carry `<!-- progress-comment:initiative -->`, so this step only does work at the feature tier; at the slice tier (parent is a feature) the lookup falls through to a silent skip.
@@ -476,6 +480,24 @@ Next step:
 - Slice whose parent feature has zero open children remaining -> `> Next step: \`/ship #<feature>\`. The feature is now ready to ship to production.`
 - Feature whose parent initiative still has open siblings -> `Stop.` with a note that the initiative remains in flight; close it manually when its Definition of done is met.
 - Orphan slice or feature -> `Stop.`.
+
+## Refresh the parent's Sub-issue DAG (best-effort)
+
+Shared by both flows (task tier in T5, slice/feature tier in P7). When a child closes/merges, the custom Mermaid DAG that `/dag` may have written onto the **parent's** body goes stale — unlike GitHub's native rollup, it does not auto-update. So after the close, recolor it:
+
+```bash
+node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" <P>
+```
+
+`<P>` is the just-closed spec's parent (derived per the calling step). The script is a **no-op** if the parent has no `## Sub-issue DAG` section, so DAGs stay opt-in per parent — nothing is created where none existed.
+
+Rules, mirroring P8's progress-comment tick:
+
+- **Best-effort, never blocks the ship.** The close already succeeded by the time this runs. On any failure, log loudly and continue to the end-of-run output; a stale chart is not worth undoing a merge.
+- **Conditional / idempotent.** Only an existing chart is touched, and only its node colors; re-running is safe.
+- **Skip for orphans.** No parent → nothing to refresh.
+
+See [the dag skill's recolor section](../dag/SKILL.md#refreshing-colors-only-the-recolormjs-fast-path) for what the script does and why it's safe to run concurrently.
 
 ## What this skill does NOT do
 

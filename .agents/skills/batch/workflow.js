@@ -18,6 +18,7 @@ export const meta = {
 // Tolerate args arriving as a JSON-encoded string (some tool-call serializers stringify object args).
 const a = typeof args === 'string' ? JSON.parse(args) : (args || {})
 const tasks = a.tasks || []
+const parentIssue = a.parentIssue || null
 
 if (!tasks.length) {
   log('No ready tasks were passed to batch-execute; nothing to run.')
@@ -180,6 +181,9 @@ function prepPrompt(task) {
       ? `\nThis task depends on #${deps.join(', #')}, already squash-merged into the integration branch. Fetch the base branch fresh before branching so it includes their code.`
       : ``,
     `\nDo NOT invoke /triage and do NOT wait for a human. If the task is not OPEN + ready-for-agent + size:task, or the Step 4 size escape-hatch fires, set ready:false and return a specific blocker (do not push a branch).`,
+    parentIssue
+      ? `\nLIVE DAG (amber-on-start): once the branch is pushed and you are about to return ready:true — and ONLY then (a not-ready task keeps its labels untouched) — mark the task active so the parent's Sub-issue DAG lights its node amber. Run \`gh issue edit ${task.number} --remove-label ready-for-agent --add-label in-progress\` (active work has genuinely begun), then recolor the parent: \`node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" ${parentIssue}\`. Both are best-effort: if either errors (e.g. the parent has no DAG section — the recolor is a clean no-op then), log it and still return ready:true. Never let this block prep.`
+      : ``,
     `\nReturn: ready, baseBranch, branch, brief (distilled for the implementer — the agent brief plus any contract updates from parent comments), plan (ordered sub-sections), blocker.`,
   ]
     .filter(Boolean)
@@ -331,6 +335,17 @@ function run(num) {
 }
 
 const results = await Promise.all(tasks.map((t) => run(t.number)))
+
+// Final DAG sweep: one authoritative recolor of the parent after everything settles. Per-stage
+// refreshes (amber at Prep, green via /ship at Land) keep the chart live during the run, but the
+// last few concurrent transitions can race to a stale resting state. This single trailing recolor
+// reads ground truth and closes that window. Best-effort — a failed sweep never fails the batch.
+if (parentIssue) {
+  await agent(
+    `Run exactly this one command and report only its output — do not edit any issue by hand:\n\n  node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" ${parentIssue}\n\nIt recolors issue #${parentIssue}'s "## Sub-issue DAG" from live sub-issue state. If it reports there is no DAG section, or prints an error, just relay that.`,
+    { label: 'dag-sweep', phase: 'Land' },
+  )
+}
 
 const opened = results.filter((r) => r.ok && !r.shipped && !r.reviewBlocked).map((r) => r.number)
 const shipped = results.filter((r) => r.shipped).map((r) => r.number)
