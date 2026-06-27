@@ -90,12 +90,14 @@ The section lives under a `## Sub-issue DAG` heading.
 - If the body already has a `## Sub-issue DAG` section, **replace it in place** (heading through its trailing legend line) so re-running refreshes the chart rather than stacking duplicates.
 - Otherwise, **append** the section to the end of the body.
 
-Edit via a body file, not inline shell heredocs that can mangle the existing Markdown:
+Edit via a body file, not inline shell heredocs that can mangle the existing Markdown. Use a **unique** temp path (`mktemp`) — never a fixed `/tmp/dag-body.md`, which collides when several refreshes run at once (e.g. under `/batch`):
 
 ```bash
-gh issue view <N> --json body --jq .body > /tmp/dag-body.md
-# edit /tmp/dag-body.md: replace-or-append the "## Sub-issue DAG" section
-gh issue edit <N> --body-file /tmp/dag-body.md
+body_file=$(mktemp "${TMPDIR:-/tmp}/dag-body.XXXXXX")
+gh issue view <N> --json body --jq .body > "$body_file"
+# edit "$body_file": replace-or-append the "## Sub-issue DAG" section
+gh issue edit <N> --body-file "$body_file"
+rm -f "$body_file"
 ```
 
 Preserve the rest of the body byte-for-byte.
@@ -114,6 +116,23 @@ Stop.
 
 (Refreshing an existing chart terminates the chain — no natural next skill. Use `Stop.`)
 
+## Refreshing colors only (the `recolor.mjs` fast path)
+
+Steps 1–6 above are the **authoring** flow: an agent infers edges and builds (or restructures) the chart. But once a chart exists, keeping its node colors current as children move (not started → in progress → done) is pure mechanism — no judgment, no edge re-inference. That lives in [recolor.mjs](recolor.mjs) next to this file:
+
+```bash
+node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" <N>
+```
+
+It reads `<N>`'s body, and if it has a `## Sub-issue DAG` section, re-queries the live sub-issues and rewrites **only** the `class … done|inProgress|notStarted;` lines — nodes, edges, classDefs, and the legend are preserved byte-for-byte. It is a **no-op** when the issue has no DAG section (so it's safe to call unconditionally) and when the colors are already current (no wasted write).
+
+This is the hook other skills use to keep a chart live without re-running the agent flow:
+
+- **`/ship`** runs it against the closed child's parent after every close/merge, at any tier — the merged node turns green. Best-effort; a stale chart never blocks a ship.
+- **`/batch`** runs it when a task's pipeline starts (the node turns amber) and once more as a final sweep after all tasks settle. The per-merge green comes free via `/ship`.
+
+Because each run recomputes every node from live state and writes a complete body, concurrent refreshes are last-writer-wins with no corruption: a lost update self-heals on the next call, and `/batch`'s end-of-run sweep guarantees the final state is correct. It does **not** add or remove nodes — if the child set changed, re-run the full authoring flow (Steps 1–6) to restructure.
+
 ## What this skill does NOT do
 
 - It does not add the parent as a node, nor draw containment edges from parent to children. Only inter-child dependency edges.
@@ -129,3 +148,4 @@ Stop.
 4. **Independent children.** Two children with no relationship render as separate roots (no spurious edge).
 5. **No sub-issues.** Run against a leaf issue → no body edit, a plain "nothing to graph" message.
 6. **Tier-agnostic.** Works the same against a `size:feature` (slices) or `size:slice` (tasks) or an unlabeled issue.
+7. **`recolor.mjs` is colors-only.** On a parent that already has a chart, close one child and add `in-progress` to another, then run `node .agents/skills/dag/recolor.mjs <N>`. The two nodes change class (green / amber); the node ids, edges, classDefs, and legend are unchanged. Re-running with no state change writes nothing ("colors already current"). Against an issue with no DAG section it is a clean no-op.
