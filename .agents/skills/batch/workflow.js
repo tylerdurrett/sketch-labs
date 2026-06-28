@@ -111,6 +111,8 @@ const IMPL_SCHEMA = {
   properties: {
     done: { type: 'boolean', description: 'true iff every sub-section was implemented, committed, and pushed' },
     commits: { type: 'array', items: { type: 'string' }, description: 'one line per commit, in order' },
+    landedSha: { type: ['string', 'null'], description: 'origin SHA of the feature branch AFTER your final push (git ls-remote origin <branch>) — proves the commit landed' },
+    baseSha: { type: ['string', 'null'], description: 'origin SHA of the base branch (git ls-remote origin <baseBranch>) — must differ from landedSha or nothing landed' },
     deviations: { type: ['string', 'null'], description: 'any deviation from the plan' },
     blocker: { type: ['string', 'null'] },
   },
@@ -170,6 +172,11 @@ const LAND_SCHEMA = {
 const WORKTREE_PROTOCOL = (branch) =>
   `WORKTREE BRANCH PROTOCOL (critical — do not deviate): your worktree is fresh and may start on an unrelated commit. NEVER run \`git checkout ${branch}\` / \`git switch ${branch}\` — a named checkout locks the branch and the sibling stages in other worktrees must be able to read it (git forbids the same branch in two worktrees). Always work in DETACHED HEAD: get the code with \`git fetch origin ${branch} && git checkout --detach FETCH_HEAD\`, and publish commits with \`git push origin HEAD:${branch}\`.`
 
+// Supply-chain lockdown is intentional on this machine (docs/agents/locked-down-npm.md). A stage must
+// NEVER weaken it to get unblocked — that turns a one-task hiccup into a machine-wide security hole.
+const SECURITY_NOTE =
+  `SUPPLY-CHAIN LOCKDOWN (do not circumvent): this machine deliberately blocks dependency build/install scripts and packages published <7 days ago. A fresh-worktree \`pnpm install\` will NOT auto-run postinstall builds (e.g. esbuild) — that gate is intentional, not a bug. NEVER run \`pnpm config set dangerouslyAllowAllBuilds ...\`, never lower \`min-release-age\`/\`minimumReleaseAge\`, never edit \`~/.npmrc\` or the global pnpm config. You almost never need a build script: \`tsc --noEmit\` typechecks fine without one (use the package-local \`./node_modules/.bin/tsc\`, or \`pnpm install --ignore-scripts\` first). If a step GENUINELY needs a blocked build script (e.g. running the vitest suite needs esbuild built), do NOT disable the protection — set the blocker, explain exactly what's needed, and return. A human will allow that one trusted package per-repo. See docs/agents/locked-down-npm.md.`
+
 function prepPrompt(task) {
   const deps = (task.dependsOn || []).filter((d) => byNum.has(d))
   return [
@@ -190,11 +197,15 @@ function prepPrompt(task) {
     .join('\n')
 }
 
-function implPrompt(task, prep) {
+function implPrompt(task, prep, attempt = 1) {
   return [
     `You are the IMPLEMENT stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree. You are /execute Step 7's clean implementation agent — you do NOT need the base-branch bookkeeping, only the plan below.`,
-    ``,
+    attempt > 1
+      ? `\nRETRY: your previous attempt returned done but the branch never advanced past base on origin — the commit did NOT land. The usual cause: a brand-new file is UNTRACKED, so \`git diff HEAD\` shows nothing — that is NOT "nothing to do". You MUST \`git add -A\`, commit, then \`git push\`, and confirm the push landed before returning done.\n`
+      : ``,
     `Branch: \`${prep.branch}\` (already on origin, based on \`${prep.baseBranch}\`). ${WORKTREE_PROTOCOL(prep.branch)}`,
+    ``,
+    SECURITY_NOTE,
     ``,
     `The contract / brief:`,
     prep.brief || '(see issue #' + task.number + ')',
@@ -202,10 +213,12 @@ function implPrompt(task, prep) {
     `The plan — implement each sub-section, in order, as exactly one commit:`,
     ...(prep.plan || []).map((s, i) => `  ${i + 1}. ${s.title}${s.files && s.files.length ? ` [${s.files.join(', ')}]` : ''}${s.notes ? ` — ${s.notes}` : ''}`),
     ``,
-    `For each sub-section: implement → \`pnpm typecheck\` → \`pnpm lint:fix\` → \`pnpm format:fix\` → run /simplify on the changes → stage and commit with \`<type>(<scope>): <sub-section title>\`. One commit per sub-section — do not bundle. Then push all commits via refspec (you are in detached HEAD): \`git push origin HEAD:${prep.branch}\`.`,
-    `Do NOT open a PR, touch labels, or merge. If you hit a blocker, set done:false and return it.`,
+    `For each sub-section: implement → \`pnpm typecheck\` → run the repo's lint/format scripts *only if it defines them* (skip silently if absent — don't hunt for tooling that isn't there) → run /simplify on the changes → \`git add -A\` and commit with \`<type>(<scope>): <sub-section title>\`. One commit per sub-section — do not bundle. Then push via refspec (you are in detached HEAD): \`git push origin HEAD:${prep.branch}\`.`,
+    `Do NOT open a PR, touch labels, or merge. If you hit a real blocker, set done:false and return it.`,
     ``,
-    `Return: done, commits (one line each), deviations, blocker.`,
+    `LANDING PROOF (required — skip it and your work is silently lost when this worktree is torn down): after your final push, prove the commit reached origin. Run \`git ls-remote origin ${prep.branch}\` for the landed SHA and \`git ls-remote origin ${prep.baseBranch}\` for the base SHA; they MUST differ. Report them as landedSha and baseSha.`,
+    ``,
+    `Return: done, commits (one line each), landedSha, baseSha, deviations, blocker.`,
   ].join('\n')
 }
 
@@ -214,6 +227,8 @@ function reviewPrompt(task, prep, mustShip) {
     `You are the REVIEW stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree. You did NOT write this code — review it independently.`,
     ``,
     `Branch \`${prep.branch}\` (based on \`${prep.baseBranch}\`) carries the implementation on origin. ${WORKTREE_PROTOCOL(prep.branch)}`,
+    ``,
+    SECURITY_NOTE,
     ``,
     `Run \`/code-review high\` over this branch's diff against \`${prep.baseBranch}\`. Classify each finding:`,
     `  - BLOCKING — a correctness bug, logic error, or contract violation introduced by this diff.`,
@@ -238,7 +253,11 @@ function landPrompt(task, prep, { canShip, mustShip, review }) {
   const lines = [
     `You are the LAND stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree.`,
     ``,
-    `Branch \`${prep.branch}\` (based on \`${prep.baseBranch}\`) carries the finished, independently code-reviewed work on origin. ${WORKTREE_PROTOCOL(prep.branch)} Then follow the /execute skill's Step 7-review, Step 8, and Step 9:`,
+    `Branch \`${prep.branch}\` (based on \`${prep.baseBranch}\`) carries the finished, independently code-reviewed work on origin. ${WORKTREE_PROTOCOL(prep.branch)}`,
+    ``,
+    SECURITY_NOTE,
+    ``,
+    `Then follow the /execute skill's Step 7-review, Step 8, and Step 9:`,
     `  - Review the diff against \`${prep.baseBranch}\`: one commit per sub-section (plus an optional \`fix(review):\` commit from the Review stage), on-contract, no drift. Re-run \`pnpm typecheck\` (and \`pnpm test\` if the plan calls for it).`,
     `  - Step 8: re-read the agent brief on #${task.number} and verify every acceptance criterion first-hand; this populates the PR test plan.`,
     `  - Step 9: open the PR (\`Closes #${task.number}\` only when the base is main; otherwise note the integration target).${findingsNote}`,
@@ -291,10 +310,21 @@ function run(num) {
     if (!prep) return fail(num, task.title, 'Prep agent died or was skipped.')
     if (!prep.ready) return fail(num, task.title, prep.blocker || 'Prep reported not ready.')
 
-    // Stage 2 — Implement (CLEAN: only the plan + brief + branch).
-    const impl = await agent(implPrompt(task, prep), { label: `impl#${num}`, phase: 'Implement', isolation: 'worktree', schema: IMPL_SCHEMA })
-    if (!impl) return fail(num, task.title, 'Implement agent died or was skipped.')
-    if (!impl.done) return fail(num, task.title, impl.blocker || 'Implement did not finish the plan.')
+    // Stage 2 — Implement (CLEAN: only the plan + brief + branch). We do NOT trust impl.done alone: a
+    // faulty agent can write code, skip `git add/commit/push`, misread an empty `git diff HEAD`
+    // (untracked files don't show) as "nothing to do", and still return done:true — stranding the
+    // branch at base and silently losing the work when the worktree is torn down. Require PROOF the
+    // branch advanced past base (landedSha ≠ baseSha); retry once (fresh worktree) since it's intermittent.
+    let impl = null
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      impl = await agent(implPrompt(task, prep, attempt), { label: attempt === 1 ? `impl#${num}` : `impl#${num}·retry`, phase: 'Implement', isolation: 'worktree', schema: IMPL_SCHEMA })
+      if (!impl) return fail(num, task.title, 'Implement agent died or was skipped.')
+      if (!impl.done) return fail(num, task.title, impl.blocker || 'Implement did not finish the plan.')
+      if (impl.landedSha && impl.baseSha && impl.landedSha !== impl.baseSha) break
+      if (attempt === 2)
+        return fail(num, task.title, `Implement reported done but its branch never advanced past \`${prep.baseBranch}\` (landedSha=${impl.landedSha || 'none'}, baseSha=${impl.baseSha || 'none'}) — no commit landed after two attempts.`)
+      log(`#${num} Implement returned done but the branch did not advance past base — retrying once.`)
+    }
 
     // Stage 3 — Review (independent /code-review; auto-fixes blocking findings, then GATES the ship).
     const review = await agent(reviewPrompt(task, prep, mustShip), { label: `review#${num}`, phase: 'Review', isolation: 'worktree', schema: REVIEW_SCHEMA })
