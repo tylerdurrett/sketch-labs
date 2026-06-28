@@ -103,10 +103,33 @@ function sizeToBox(canvas: HTMLCanvasElement): void {
  * the effect cleanup so no frames leak — correct under React StrictMode's
  * dev-only mount→unmount→remount double-invoke (each mount captures its own
  * `frameId` and cancels exactly that frame).
+ *
+ * The loop effect is keyed on `sketch` ALONE: `params`/`seed` are read through
+ * refs inside `tick`, so changing an input feeds the next frame without tearing
+ * down the loop and snapping the clock back to `t = 0` (issue #40). Only a Sketch
+ * switch (the desired restart) recaptures the `performance.now()` baseline. A
+ * static Sketch is redrawn on input change by a separate, clockless effect.
  */
 export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // The current params/seed are read through refs inside the rAF `tick` (and the
+  // static redraw effect) so the loop effect does NOT depend on them. Keeping the
+  // loop keyed on `sketch` alone means a params/seed change feeds new inputs into
+  // the next frame WITHOUT tearing down the loop and resetting its wall-clock
+  // baseline (issue #40). They are kept up to date by an effect (not assigned
+  // during render) so a StrictMode double-render can't desync them.
+  const paramsRef = useRef(params);
+  const seedRef = useRef(seed);
+  useEffect(() => {
+    paramsRef.current = params;
+    seedRef.current = seed;
+  }, [params, seed]);
+
+  // The clock-bearing loop. Keyed on `sketch` ONLY: switching Sketch (or, once a
+  // replay signal exists, an explicit replay) re-runs this and recaptures
+  // `start`, resetting t to 0 — the desired restart. A params/seed change does
+  // NOT, so the animation continues from where it was.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
@@ -115,8 +138,9 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
 
     const time = sketch.time;
     if (time === undefined) {
-      // Static Sketch: a single frame at t = 0, no animation loop.
-      drawFrame(canvas, sketch, params, seed, 0);
+      // Static Sketch: a single frame at t = 0, no animation loop. (Re-draws on
+      // params/seed change are handled by the separate static-redraw effect.)
+      drawFrame(canvas, sketch, paramsRef.current, seedRef.current, 0);
       return;
     }
 
@@ -129,7 +153,7 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
       // repeat. one-shot is deferred — there is no one-shot Sketch yet.
       const t =
         time.mode === "loop" ? elapsedSeconds % time.duration : elapsedSeconds;
-      drawFrame(canvas, sketch, params, seed, t);
+      drawFrame(canvas, sketch, paramsRef.current, seedRef.current, t);
       frameId = requestAnimationFrame(tick);
     };
 
@@ -138,6 +162,16 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
     return () => {
       cancelAnimationFrame(frameId);
     };
+  }, [sketch]);
+
+  // Static Sketches have no clock to advance, so the loop effect above only draws
+  // them once. This redraws the single frame when params/seed change so new
+  // inputs take effect (AC#1) without introducing a clock. For an animated Sketch
+  // it is a harmless no-op redraw at t = 0: the rAF loop overwrites it next frame.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas === null || sketch.time !== undefined) return;
+    drawFrame(canvas, sketch, params, seed, 0);
   }, [sketch, params, seed]);
 
   return <canvas ref={canvasRef} className="live-canvas" />;
