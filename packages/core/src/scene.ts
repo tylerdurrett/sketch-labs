@@ -108,3 +108,69 @@ export interface Scene {
   /** Primitives in painter's draw order (first = bottom, last = top). */
   primitives: Primitive[]
 }
+
+/**
+ * A draw-friendly builder for assembling a {@link Scene} in painter's order.
+ *
+ * This is the construction path a Sketch's `draw` (or stateless `generate`) reaches
+ * for instead of hand-assembling the `{ space, primitives }` container: call
+ * {@link createScene} with the coordinate space, append Primitives in the order
+ * they should be drawn (first appended = bottom), then {@link build} the finished
+ * Scene. Each `add` returns the same builder so calls chain.
+ *
+ * The builder is a thin convenience over the IR — it adds no semantics the Scene
+ * itself does not already carry; the append order simply IS the draw order.
+ */
+export interface SceneBuilder {
+  /**
+   * Append one Primitive on top of those added so far (painter's order).
+   *
+   * @returns this builder, for chaining.
+   */
+  add(primitive: Primitive): SceneBuilder
+  /**
+   * Append a fully-styled polyline/polygon without hand-building the
+   * {@link Primitive} record. `closed` makes it a polygon.
+   *
+   * @returns this builder, for chaining.
+   */
+  addPath(
+    points: Polyline,
+    style: { fill?: Fill; stroke?: Stroke; closed?: boolean },
+  ): SceneBuilder
+  /** Finalize and return the assembled Scene. */
+  build(): Scene
+}
+
+/**
+ * Start building a {@link Scene} for the given coordinate space.
+ *
+ * The returned {@link SceneBuilder} collects Primitives in the order they are
+ * appended (painter's order) and hands back the finished Scene from
+ * {@link SceneBuilder.build}.
+ *
+ * @param space - The coordinate space the Scene's geometry is expressed in.
+ */
+export function createScene(space: CoordinateSpace): SceneBuilder {
+  const primitives: Primitive[] = []
+
+  const builder: SceneBuilder = {
+    add(primitive) {
+      primitives.push(primitive)
+      return builder
+    },
+    addPath(points, style) {
+      const primitive: Primitive = { points }
+      if (style.closed !== undefined) primitive.closed = style.closed
+      if (style.fill !== undefined) primitive.fill = style.fill
+      if (style.stroke !== undefined) primitive.stroke = style.stroke
+      primitives.push(primitive)
+      return builder
+    },
+    build() {
+      return { space, primitives }
+    },
+  }
+
+  return builder
+}
