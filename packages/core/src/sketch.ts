@@ -79,6 +79,16 @@ export interface TimeMetadata {
  * union below only has to differ on the frame logic.
  */
 export interface SketchBase {
+  /**
+   * Stable slug identifying this Sketch. ONE id serves two roles so they can
+   * never drift: it is the navigation/URL slug the Studio selects by, AND the
+   * slug naming the Sketch's preset folder on disk (`sketches/{id}/presets/`,
+   * per CONTEXT.md). Unique across the registry; lowercase-slug form (e.g.
+   * `"circles"`).
+   */
+  id: string
+  /** Human-readable display label, shown in navigation (e.g. `"Circles"`). */
+  name: string
   /** The Sketch's tweakable knobs — the spine of the Harness. */
   schema: ParamSchema
   /**

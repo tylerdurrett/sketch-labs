@@ -75,6 +75,8 @@ function circlePolygon(cx: number, cy: number, radius: number): Polyline {
  * `(params, seed, t)` reproduces the same Scene exactly.
  */
 export const circles: StatelessSketch = {
+  id: 'circles',
+  name: 'Circles',
   schema,
   time: { duration: 4, mode: 'loop' },
   generate(params: Params, seed: Seed, t: number): Scene {
