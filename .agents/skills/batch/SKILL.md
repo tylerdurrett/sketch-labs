@@ -83,30 +83,38 @@ Workflow({
 
 The workflow runs in the background and returns a structured `{ results, summary }`. It schedules each task to fire the moment *its* dependencies finish (true DAG scheduling, not whole-wave barriers), runs each task as the Prep → Implement → Review → Land pipeline in isolated worktrees, and squash-merges any task that has a batched dependent **whose independent code-review came back clean** (one held back by blocking findings stays an open PR and its dependents cascade-skip). You do not babysit it; `/workflows` shows live progress, grouped by stage.
 
+After every task settles, a final **Settle** phase makes the run self-finishing — these are deterministic, single-purpose passes that hoist the rote end-of-run bookkeeping out of the per-task agents (which were observed to drop it):
+
+- **Auto-defer.** Non-blocking code-review findings on an auto-merged task would vanish with its squash-merged, now-closed PR. The Settle phase verifies each (grep against the merged code), bundles them by seam, and files them as `needs-triage` + `cleanup` sub-issues of the slice — so flagged work is captured, not buried. Held / open-PR tasks keep their findings on the still-open PR. These land as `summary.deferred`.
+- **Reconcile.** Re-asserts the lifecycle invariant `shipped task ⇒ PR merged AND issue closed AND active-state labels stripped` and heals any drift (e.g. a PR that merged but left its issue open), then runs the one authoritative DAG recolor. Healed actions land as `summary.reconciled.healed`.
+- **Cleanup.** Prunes the run's leftover isolation worktrees and restores the pre-run branch if the main worktree was left detached.
+
 ## Step 6: Report
 
 Three-block output per [docs/agents/output-format.md](../../../docs/agents/output-format.md). Cover, from the workflow's `summary` plus the Step 2 skipped set:
 
 ```
-Batched #<P>: <opened> PR(s) opened, <shipped> predecessor(s) squash-merged to unblock dependents, <heldForReview> held by code-review, <failed> failed/skipped.
+Batched #<P>: <opened> PR(s) opened, <shipped> predecessor(s) squash-merged to unblock dependents, <heldForReview> held by code-review, <deferred> finding(s) deferred to new issues, <failed> failed/skipped.
 
 - PRs opened (awaiting review): #<N> <url> · ...
 - Squash-merged into <integration-branch> (no individual human review, code-review clean): #<N> · ...   ← only if any
 - Held from auto-ship by code-review (<blockingCount> blocking finding(s), PR open for a human): #<N> <url> · ...   ← only if any
+- Deferred to new issues (non-blocking findings from the auto-merged tasks, captured so they aren't buried): #<new> <url> (covers #<task>) · ...   ← only if any
+- Reconciled: <healed actions, e.g. "closed #34 (merged but left open)"> · pruned <n> leftover worktree(s)   ← only if the Settle pass healed anything
 - Failed / skipped: #<N> — <blocker or "not ready: run /triage"> · ...
 
-> Next step: review the open PRs, resolve any code-review-held tasks (then `/ship` them so their dependents can be re-batched), and `/ship` the slice once its children are closed.
+> Next step: review the open PRs, resolve any code-review-held tasks (then `/ship` them so their dependents can be re-batched), `/triage` the deferred issues to size and ready them, and `/ship` the slice once its children are closed.
 ```
 
-Call out the auto-merged tasks explicitly — they landed without individual human review (their independent `/code-review` was clean), and the reviewer should know to inspect them inside the eventual slice-promotion PR. Call out held-for-review tasks too: each blocked its dependents, so resolving and shipping it is what unblocks the rest.
+Call out the auto-merged tasks explicitly — they landed without individual human review (their independent `/code-review` was clean), and the reviewer should know to inspect them inside the eventual slice-promotion PR. Call out held-for-review tasks too: each blocked its dependents, so resolving and shipping it is what unblocks the rest. Call out the **deferred issues** loudly: these are the non-blocking findings from auto-merged tasks that would otherwise vanish with their closed PRs — surfacing them here is what keeps flagged work from being buried.
 
 ## Live DAG updates
 
 A batch can run for a long time. If the parent issue carries a `## Sub-issue DAG` (from `/dag`), the workflow keeps it live so you can watch progress fill in without babysitting `/workflows`:
 
 - **Amber on start.** When a task's Prep stage finishes and its branch is pushed, the workflow flips that task `ready-for-agent` → `in-progress` and recolors the parent's DAG — the node turns amber for the whole Implement → Review → Land span (the long part). Flipping at pipeline start is consistent with the label's meaning ("active work has begun"); it's earlier than a solo `/execute`'s flip-at-PR-open, which is the point — the chart should show work the moment it's underway. A task that Prep finds not-ready keeps its labels untouched.
-- **Green on merge — free via `/ship`.** Auto-shipped predecessors close through `/ship` (task tier), which already recolors the parent after a close. So those nodes turn green on their own; the workflow adds nothing for the merge case. Independent (non-shipped) tasks stay amber as open PRs until you ship them later — which is correct.
-- **Final sweep.** After every task settles, the workflow runs one authoritative recolor of the parent. Per-stage refreshes race under parallelism (last-writer-wins on the parent body), so a node can briefly show a stale color; each recolor recomputes from live state, so it self-heals, and this trailing sweep guarantees the resting chart is correct.
+- **Green on merge — free via `/ship`, guaranteed by Reconcile.** Auto-shipped predecessors close through `/ship` (task tier), which recolors the parent after a close, so those nodes usually turn green on their own. But `/ship` runs inside a budget-limited Land agent and was observed to merge a PR yet leave its issue open — so the Settle phase's **Reconcile** pass re-asserts the close and strips active-state labels for any shipped-but-still-open task, making green-on-merge a guarantee rather than a hope. Independent (non-shipped) tasks stay amber as open PRs until you ship them later — which is correct.
+- **Final sweep.** The Settle phase's Reconcile pass runs one authoritative recolor of the parent after every task settles *and* after it has healed any lifecycle drift. Per-stage refreshes race under parallelism (last-writer-wins on the parent body), so a node can briefly show a stale color; each recolor recomputes from live state, so it self-heals, and this trailing sweep guarantees the resting chart is correct. (Note: recolor only repaints **existing** nodes — any new `deferred` sub-issues the Settle phase files won't appear on the chart until you re-run `/dag <P>`.)
 
 All of this is best-effort and gated on the parent actually having a DAG section ([recolor.mjs](../dag/recolor.mjs) is a no-op otherwise) — it never blocks or fails a batch. See [the dag skill](../dag/SKILL.md#refreshing-colors-only-the-recolormjs-fast-path) for the mechanism.
 

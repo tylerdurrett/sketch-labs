@@ -7,6 +7,7 @@ export const meta = {
     { title: 'Implement', detail: 'per task: clean-context agent codes each sub-section and pushes commits' },
     { title: 'Review', detail: 'per task: independent /code-review pass; auto-fixes blocking findings, gates the ship' },
     { title: 'Land', detail: 'per task: verify ACs, open PR, and ship if a dependent needs it AND review is clean' },
+    { title: 'Settle', detail: 'reconcile lifecycle state, auto-defer non-blocking findings, recolor DAG, prune worktrees' },
   ],
 }
 
@@ -349,6 +350,7 @@ function run(num) {
       reviewBlocked,
       blockingCount: review.blockingCount ?? 0,
       reviewSummary: review.summary ?? null,
+      reviewFindings: review.findings || [],
       commits: impl.commits || [],
       prNumber: land.prNumber ?? null,
       prUrl: land.prUrl ?? null,
@@ -364,16 +366,112 @@ function run(num) {
   return p
 }
 
+// Capture the repo's current branch BEFORE any worktree-isolated agent runs, so the
+// post-run Settle phase can restore it: worktree isolation has been observed to leave
+// the main worktree in detached HEAD after a run.
+const startInfo = await agent(
+  `Run exactly: \`git rev-parse --abbrev-ref HEAD\`. Return the single line it prints as "branch" (it is "HEAD" when detached). Do nothing else — no checkout, no edits, no fetch.`,
+  { label: 'record-branch', phase: 'Prep', schema: { type: 'object', additionalProperties: false, required: ['branch'], properties: { branch: { type: 'string' } } } },
+)
+const startBranch = startInfo && startInfo.branch && startInfo.branch !== 'HEAD' ? startInfo.branch : null
+
 const results = await Promise.all(tasks.map((t) => run(t.number)))
 
-// Final DAG sweep: one authoritative recolor of the parent after everything settles. Per-stage
-// refreshes (amber at Prep, green via /ship at Land) keep the chart live during the run, but the
-// last few concurrent transitions can race to a stale resting state. This single trailing recolor
-// reads ground truth and closes that window. Best-effort — a failed sweep never fails the batch.
+// ────────────────────────────────────────────────────────────────────────────
+// Settle phase. The per-task Land agent is budget-limited and juggling many
+// concerns, so the mechanical end-of-run bookkeeping it's least reliable at is
+// hoisted here into dedicated, single-purpose passes with explicit checklists.
+// Deterministic-where-it-can-be: each agent runs a fixed command list, not its
+// own judgment, for the rote steps.
+// ────────────────────────────────────────────────────────────────────────────
+phase('Settle')
+
+// ② Auto-defer. Non-blocking code-review findings on a SHIPPED task would vanish
+//    with its squash-merged, now-closed PR — exactly the "auto-merge buries flagged
+//    work" gap. File them as tracked `needs-triage` + `cleanup` sub-issues of the
+//    slice instead. Held + open-PR tasks keep their findings on a still-open PR, so
+//    they're left alone.
+const DEFER_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['issues'],
+  properties: {
+    issues: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['number', 'title'],
+        properties: {
+          number: { type: 'number' },
+          title: { type: 'string' },
+          url: { type: ['string', 'null'] },
+          covers: { type: 'array', items: { type: 'number' }, description: 'the task numbers whose findings this issue captures' },
+        },
+      },
+    },
+    dropped: { type: ['string', 'null'], description: 'short note on findings dropped because grep/Read did not confirm them, or null' },
+  },
+}
+
+let deferred = []
+const shippedWithFindings = results.filter((r) => r.shipped && (r.reviewFindings || []).length > 0)
+if (parentIssue && shippedWithFindings.length > 0) {
+  const payload = shippedWithFindings.map((r) => ({ task: r.number, pr: r.prNumber, findings: r.reviewFindings }))
+  const dz = await agent(
+    [
+      `You are the AUTO-DEFER stage of a /batch run. The tasks below were squash-merged into slice #${parentIssue} and their PRs are now CLOSED, so the non-blocking code-review findings attached to them would be lost. Capture them as tracked issues by following the /defer skill — with ONE difference: this run is unattended, so DO NOT ask for approval (skip /defer step 4); capture by default.`,
+      ``,
+      `Findings, grouped by the task they were found on (JSON):`,
+      JSON.stringify(payload),
+      ``,
+      `Steps:`,
+      `  1. VERIFY each finding before filing (/defer step 2). Read slice #${parentIssue}'s body for its \`**Integration Branch:**\`, \`git fetch origin <that-branch>\`, then confirm each cited file:line at that ref WITHOUT checking it out — use \`git show origin/<branch>:<path>\` or \`git grep <pattern> origin/<branch>\` (never \`git checkout\`, which would detach the main worktree). DROP any finding that no longer matches; if all of a task's findings fail, skip that task.`,
+      `  2. BUNDLE surviving findings by the seam/file they touch (/defer step 3). Findings in the same file across different tasks (a repeated footgun) belong in ONE issue. Target "one focused PR could land all of this".`,
+      `  3. CREATE each issue: \`gh issue create --label needs-triage --label cleanup\`. The body MUST begin with \`**Part of:** #${parentIssue}\` (the slice — a task can't parent a task) and a \`**Surfaced by:**\` line naming the task(s) + merged PR(s). Use the /defer body template (one section per finding with clickable file:line links, a Scope, an Out of scope).`,
+      `  4. LINK each new issue as a native sub-issue of #${parentIssue}: \`owner_repo=$(gh repo view --json nameWithOwner -q .nameWithOwner); cid=$(gh api repos/$owner_repo/issues/<new#> --jq .id); gh api --method POST repos/$owner_repo/issues/${parentIssue}/sub_issues -F sub_issue_id=$cid\`.`,
+      `  5. Do NOT add \`size:task\` or \`ready-for-agent\` — those are deliberately left for /triage. Do NOT start any work.`,
+      ``,
+      `Return: issues (each {number, title, url, covers}), dropped.`,
+    ].join('\n'),
+    { label: 'auto-defer', phase: 'Settle', schema: DEFER_SCHEMA },
+  )
+  if (dz && Array.isArray(dz.issues)) deferred = dz.issues
+}
+
+// ① Reconcile + cleanup. Re-assert the lifecycle invariant the Land agent's /ship
+//    is supposed to but sometimes doesn't (observed: PR merged yet issue left OPEN):
+//    every shipped task ⇒ PR merged AND issue closed AND active-state labels stripped.
+//    Then the one authoritative DAG recolor, and worktree/HEAD hygiene (isolation has
+//    leaked worktree dirs and left the main worktree detached).
+const RECONCILE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['healed'],
+  properties: {
+    healed: { type: 'array', items: { type: 'string' }, description: 'one line per corrective action taken; empty if every invariant already held' },
+    dagRecolored: { type: ['string', 'null'], description: 'the recolor.mjs output line' },
+    worktreesPruned: { type: ['number', 'null'], description: 'count of leftover worktrees removed' },
+    headRestored: { type: ['string', 'null'], description: 'branch checked back out, or null' },
+    notes: { type: ['string', 'null'] },
+  },
+}
+const shippedSet = results.filter((r) => r.shipped).map((r) => ({ task: r.number, pr: r.prNumber }))
+let settle = null
 if (parentIssue) {
-  await agent(
-    `Run exactly this one command and report only its output — do not edit any issue by hand:\n\n  node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" ${parentIssue}\n\nIt recolors issue #${parentIssue}'s "## Sub-issue DAG" from live sub-issue state. If it reports there is no DAG section, or prints an error, just relay that.`,
-    { label: 'dag-sweep', phase: 'Land' },
+  settle = await agent(
+    [
+      `You are the RECONCILE stage of a /batch run for slice #${parentIssue}. Run this fixed checklist of git/gh commands and HEAL any drift. Do not improvise beyond it.`,
+      ``,
+      `1. LIFECYCLE INVARIANT — for each shipped task below: confirm its PR is MERGED (\`gh pr view <pr> --json state,mergedAt,baseRefName\`), then confirm its issue is CLOSED. If a merged task's issue is still OPEN, heal it: \`gh issue edit <task> --remove-label ready-for-agent --remove-label in-progress\`, then \`gh issue close <task> --comment "Shipped via #<pr> (squash-merged into <baseRefName>). Will reach \\\`main\\\` when parent #${parentIssue} ships upward."\`. If a PR is NOT merged though the task was marked shipped, do NOT close it — record that in notes.`,
+      `   Shipped tasks (JSON): ${JSON.stringify(shippedSet)}`,
+      `2. DAG — recolor the parent once, authoritatively: \`node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" ${parentIssue}\`. Relay its output (a clean no-op when there's no "## Sub-issue DAG" section).`,
+      `3. WORKTREES — clean this run's isolation leftovers: \`git worktree prune\`, then for every path under \`.claude/worktrees/\` still in \`git worktree list\`, run \`git worktree remove --force <path>\`. Count how many you removed.`,
+      `4. HEAD — check \`git rev-parse --abbrev-ref HEAD\`. ${startBranch ? `If it prints "HEAD" (detached), restore the pre-run branch: \`git checkout ${startBranch}\`.` : `If it prints "HEAD" (detached), record the detached SHA in notes — no pre-run branch was captured, so do NOT guess one.`}`,
+      ``,
+      `Return: healed (one line per corrective action, empty array if nothing needed fixing), dagRecolored, worktreesPruned, headRestored, notes.`,
+    ].join('\n'),
+    { label: 'reconcile', phase: 'Settle', schema: RECONCILE_SCHEMA },
   )
 }
 
@@ -382,12 +480,15 @@ const shipped = results.filter((r) => r.shipped).map((r) => r.number)
 const heldForReview = results.filter((r) => r.reviewBlocked)
 const failed = results.filter((r) => !r.ok)
 
+if (settle && Array.isArray(settle.healed) && settle.healed.length > 0) {
+  log(`Reconcile healed ${settle.healed.length} drifted item(s): ${settle.healed.join(' · ')}`)
+}
 log(
-  `Done: ${opened.length} PR(s) opened for review, ${shipped.length} predecessor(s) squash-merged to unblock dependents, ${heldForReview.length} held from auto-ship by code-review, ${failed.length} failed/skipped.`,
+  `Done: ${opened.length} PR(s) opened for review, ${shipped.length} predecessor(s) squash-merged to unblock dependents, ${heldForReview.length} held from auto-ship by code-review, ${failed.length} failed/skipped, ${deferred.length} finding(s) deferred to new issue(s).`,
 )
 
 return {
-  parentIssue: (args && args.parentIssue) || null,
+  parentIssue: parentIssue,
   results,
   summary: {
     opened,
@@ -399,5 +500,9 @@ return {
       reviewSummary: r.reviewSummary,
     })),
     failed: failed.map((f) => ({ number: f.number, blocker: f.blocker })),
+    deferred,
+    reconciled: settle
+      ? { healed: settle.healed || [], worktreesPruned: settle.worktreesPruned ?? null, headRestored: settle.headRestored ?? null, notes: settle.notes ?? null }
+      : null,
   },
 }
