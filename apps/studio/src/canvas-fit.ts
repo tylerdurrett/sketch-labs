@@ -39,6 +39,14 @@ export interface ContainFit {
  * `ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY)` before
  * `renderToCanvas`.
  *
+ * A DEGENERATE surface or space (any dimension zero or non-finite — e.g. a
+ * pre-layout canvas whose box hasn't been measured yet, giving a `0 × 0` backing
+ * store) would otherwise make `scale` NaN or 0 and yield a transform that paints
+ * nothing or, worse, a NaN transform the browser silently rejects. Such a frame
+ * is returned as a safe no-op fit (`scale`/offsets all 0): it draws nothing
+ * harmlessly, and the next call once the box has real dimensions repaints
+ * correctly (the caller re-fits and redraws on resize).
+ *
  * @param spaceW - Scene coordinate-space width (`scene.space.width`).
  * @param spaceH - Scene coordinate-space height (`scene.space.height`).
  * @param pixelW - Surface width in pixels (canvas backing-store width).
@@ -50,6 +58,20 @@ export function computeContainFit(
   pixelW: number,
   pixelH: number,
 ): ContainFit {
+  // A zero (or non-finite) dimension on either the space or the surface makes
+  // min(pixelW/spaceW, pixelH/spaceH) NaN or 0 — a transform that paints nothing
+  // or that the browser rejects. Return a no-op fit so a degenerate frame is a
+  // harmless no-paint and the next real-sized frame repaints correctly.
+  const finitePositive = (n: number) => Number.isFinite(n) && n > 0;
+  if (
+    !finitePositive(spaceW) ||
+    !finitePositive(spaceH) ||
+    !finitePositive(pixelW) ||
+    !finitePositive(pixelH)
+  ) {
+    return { scale: 0, offsetX: 0, offsetY: 0 };
+  }
+
   const scale = Math.min(pixelW / spaceW, pixelH / spaceH);
   const offsetX = (pixelW - spaceW * scale) / 2;
   const offsetY = (pixelH - spaceH * scale) / 2;

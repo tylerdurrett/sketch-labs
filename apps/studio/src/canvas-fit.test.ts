@@ -45,4 +45,49 @@ describe("computeContainFit", () => {
     expect(fit.offsetX).toBe(0);
     expect(fit.offsetY).toBe(0);
   });
+
+  it("returns a no-op fit for a zero-size pixel surface (pre-layout box)", () => {
+    // A canvas measured before layout has a 0x0 backing store. Naively this
+    // makes scale = min(0/spaceW, 0/spaceH) = 0 → a no-paint transform, but the
+    // offsets must not be NaN. The guard returns an all-zero fit explicitly.
+    const fit = computeContainFit(1000, 1000, 0, 0);
+
+    expect(fit.scale).toBe(0);
+    expect(fit.offsetX).toBe(0);
+    expect(fit.offsetY).toBe(0);
+  });
+
+  it("returns a no-op fit for a zero-size coordinate space", () => {
+    // A degenerate Scene space (0 width/height) would make scale = min(.../0)
+    // = Infinity and the offsets NaN. The guard returns an all-zero fit.
+    const fit = computeContainFit(0, 0, 1000, 1000);
+
+    expect(fit.scale).toBe(0);
+    expect(fit.offsetX).toBe(0);
+    expect(fit.offsetY).toBe(0);
+  });
+
+  it("returns a no-op fit when a single dimension is zero", () => {
+    // Only one axis degenerate (e.g. a collapsed-width box) is still degenerate:
+    // min(pixelW/0, ...) = Infinity, so the whole fit is a no-op.
+    expect(computeContainFit(1000, 0, 1000, 1000)).toEqual({
+      scale: 0,
+      offsetX: 0,
+      offsetY: 0,
+    });
+    expect(computeContainFit(1000, 1000, 0, 1000)).toEqual({
+      scale: 0,
+      offsetX: 0,
+      offsetY: 0,
+    });
+  });
+
+  it("returns a no-op fit for non-finite dimensions", () => {
+    // getBoundingClientRect can in principle yield NaN before layout; guard it.
+    expect(computeContainFit(NaN, 1000, 1000, 1000)).toEqual({
+      scale: 0,
+      offsetX: 0,
+      offsetY: 0,
+    });
+  });
 });
