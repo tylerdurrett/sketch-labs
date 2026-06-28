@@ -75,18 +75,36 @@ function drawFrame(
 }
 
 /**
- * Size `canvas`'s backing store to its CSS box × `devicePixelRatio`, keeping the
- * CSS box as the display size.
+ * Size `canvas`'s backing store to its CSS box × `dpr`, keeping the CSS box as
+ * the display size. Returns whether it actually changed the backing store.
  *
  * The backing store (`canvas.width`/`height`) is in device pixels so the drawing
  * is crisp on high-DPI displays; the CSS box (set via styling) stays the layout
- * size.
+ * size. Callers pass `window.devicePixelRatio || 1` (it is a parameter, not read
+ * internally, so the dedup math is unit-testable with a DOM-free stub).
+ *
+ * The no-op guard is load-bearing: assigning `canvas.width`/`height` — even to
+ * the SAME value — clears the entire backing store (an HTML spec side effect). So
+ * when the target dimensions already match, this returns `false` WITHOUT
+ * reassigning, leaving the existing pixels intact. That lets callers dedup
+ * redundant clears: the geometry effect can size-then-draw only when something
+ * really changed (`true`), while a paint-only redraw (params/seed change, no size
+ * change) just draws over the untouched store. Only a genuine box or DPR change
+ * yields new pixel dimensions → reassignment → `true`.
+ *
+ * @param canvas - The canvas to size (only `width`/`height`/`getBoundingClientRect`
+ *   are read, so a structural stub can stand in for tests).
+ * @param dpr - Device pixel ratio to multiply the CSS box by.
+ * @returns `true` if the backing store dimensions changed, `false` if already sized.
  */
-function sizeToBox(canvas: HTMLCanvasElement): void {
-  const dpr = window.devicePixelRatio || 1;
+export function sizeToBox(canvas: HTMLCanvasElement, dpr: number): boolean {
   const rect = canvas.getBoundingClientRect();
-  canvas.width = Math.round(rect.width * dpr);
-  canvas.height = Math.round(rect.height * dpr);
+  const w = Math.round(rect.width * dpr);
+  const h = Math.round(rect.height * dpr);
+  if (canvas.width === w && canvas.height === h) return false;
+  canvas.width = w;
+  canvas.height = h;
+  return true;
 }
 
 /**
@@ -150,7 +168,7 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
   const refitAndRedraw = useCallback(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
-    sizeToBox(canvas);
+    sizeToBox(canvas, window.devicePixelRatio || 1);
     drawFrame(
       canvas,
       sketchRef.current,
@@ -168,7 +186,7 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
     const canvas = canvasRef.current;
     if (canvas === null) return;
 
-    sizeToBox(canvas);
+    sizeToBox(canvas, window.devicePixelRatio || 1);
 
     const time = sketch.time;
     if (time === undefined) {
