@@ -211,5 +211,49 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
     refitAndRedraw();
   }, [sketch, params, seed, refitAndRedraw]);
 
+  // Re-fit on box-size AND devicePixelRatio change (AC#1-3). DECOUPLED from the
+  // clock effect on purpose: it depends on `refitAndRedraw` alone (referentially
+  // stable), never on `sketch`, so it never tears down the rAF loop or re-captures
+  // the `start` baseline — a resize must not snap the animation clock back to 0
+  // (issue #40 / the parent-comment contract). Both signals just call the helper,
+  // which re-reads window.devicePixelRatio and the box on every fire.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas === null) return;
+
+    // ResizeObserver covers CSS-box changes (window/container resize). It also
+    // fires on observe, so it doubles as the initial fit.
+    const observer = new ResizeObserver(() => {
+      refitAndRedraw();
+    });
+    observer.observe(canvas);
+
+    // A pure DPR change (dragging the window to a different-DPI monitor with the
+    // SAME CSS box) does NOT resize the box, so ResizeObserver stays silent. A
+    // matchMedia `(resolution: <dpr>dppx)` listener fires exactly on that
+    // transition. The query string is DPR-specific, so it must be RE-ARMED after
+    // each fire against the new ratio (the old query no longer matches). A
+    // recursive arm() keeps a live listener at the current DPR; only the latest
+    // MediaQueryList is retained for cleanup.
+    let dprQuery: MediaQueryList | null = null;
+    const onDprChange = () => {
+      refitAndRedraw();
+      arm();
+    };
+    const arm = () => {
+      dprQuery?.removeEventListener("change", onDprChange);
+      dprQuery = window.matchMedia(
+        `(resolution: ${window.devicePixelRatio}dppx)`,
+      );
+      dprQuery.addEventListener("change", onDprChange);
+    };
+    arm();
+
+    return () => {
+      observer.disconnect();
+      dprQuery?.removeEventListener("change", onDprChange);
+    };
+  }, [refitAndRedraw]);
+
   return <canvas ref={canvasRef} className="live-canvas" />;
 }
