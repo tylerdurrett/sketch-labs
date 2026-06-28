@@ -8,6 +8,30 @@
 }
 
 /*
+ * Sketch navigation: a row of buttons, one per registered Sketch, listed by
+ * name. The selected button is marked via aria-current.
+ */
+.sketch-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.sketch-nav__item {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.sketch-nav__item[aria-current="true"] {
+  border-color: #333;
+  background: #333;
+  color: #fff;
+}
+
+/*
  * The large live canvas. A fixed-aspect CSS box is the display size; LiveCanvas
  * sizes the backing store to this box x devicePixelRatio and contain-fits the
  * Scene into it, so the box aspect need not match the Scene's (letterboxing
