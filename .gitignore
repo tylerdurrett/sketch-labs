@@ -63,3 +63,6 @@ temp/
 # Coverage
 coverage/
 .nyc_output/
+
+# Agent harness — transient worktrees created by /batch's worktree-isolated agents
+.claude/worktrees/

@@ -238,18 +238,24 @@ The flow is stateful but presents as a single invocation: it detects whether a p
 
 ### P1. Verify all native sub-issues are closed
 
+Partition open children into **blocking** (real scope that must land before promotion) and **deferred** (`cleanup`- or `deferred`-labeled housekeeping — typically findings parked by `/defer` or auto-filed by a `/batch` Settle pass, explicitly future work):
+
 ```bash
 owner_repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-open_children=$(gh api "repos/${owner_repo}/issues/<N>/sub_issues" \
-  --jq '.[] | select(.state == "open") | "#\(.number) — \(.title)"')
+open_blocking=$(gh api "repos/${owner_repo}/issues/<N>/sub_issues" \
+  --jq '.[] | select(.state == "open") | select([.labels[].name] | (index("cleanup") or index("deferred")) | not) | "#\(.number) — \(.title)"')
+open_deferred=$(gh api "repos/${owner_repo}/issues/<N>/sub_issues" \
+  --jq '.[] | select(.state == "open") | select([.labels[].name] | (index("cleanup") or index("deferred"))) | "#\(.number) — \(.title)"')
 ```
 
-If `open_children` is non-empty, stop and tell the user:
+If `open_blocking` is non-empty, stop and tell the user:
 
 > Parent #<N> still has open sub-issues. Close each one via `/ship` (PR-merge or defensive close, picked automatically):
 > <list>
 
 Do not force-close children. The user re-engages explicitly per child.
+
+`open_deferred` does **not** block promotion — deferred work is, by definition, for later. But carry it forward: surface it loudly in the P9 report so it's acknowledged at the gate instead of silently promoted past (this is the anti-burial guarantee — a slice never ships while quietly orphaning the cleanup it spawned). Keep the list for P9.
 
 ### P2. Identify the integration branch and verify clean tree
 
@@ -473,6 +479,13 @@ Three-block template. Outcome line carries the moment-of-truth signal:
 - Feature -> "Feature #<N> shipped to production." (Or the orphan-feature analog.)
 
 Links: promotion PR URL, closed spec URL, parent's ticked row when applicable.
+
+If `open_deferred` (from P1) is non-empty, add a **Deferred work carried forward** line listing those issues — the cleanup/findings this spec spawned that are now promoting un-addressed. They didn't block the ship, but the reader should know they're outstanding:
+
+```
+> Deferred work carried forward (not blocking, but now in `<promotion-target>` un-addressed): #<N> <title> · ...
+>   Run `/triage` on each to size and ready it, then `/execute` (or `/batch`) before they rot.
+```
 
 Next step:
 
