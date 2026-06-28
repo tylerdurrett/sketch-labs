@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import {
   renderToCanvas,
@@ -121,10 +121,44 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
   // during render) so a StrictMode double-render can't desync them.
   const paramsRef = useRef(params);
   const seedRef = useRef(seed);
+  // `sketchRef` lets the clockless re-fit helper read the current Sketch without
+  // a `sketch` dependency (so a resize never re-runs the clock effect). Kept in
+  // sync by the same effect — assigned post-commit, not during render, so a
+  // StrictMode double-render can't desync it.
+  const sketchRef = useRef(sketch);
   useEffect(() => {
     paramsRef.current = params;
     seedRef.current = seed;
-  }, [params, seed]);
+    sketchRef.current = sketch;
+  }, [params, seed, sketch]);
+
+  // The latest `t` the loop has drawn (0 for a static Sketch). The resize re-fit
+  // redraws THIS frame so a box change repaints the current moment, not t = 0 —
+  // and crucially WITHOUT touching the clock's `start` baseline (the rAF loop
+  // keeps advancing from where it was). It is a ref, not state, so updating it
+  // every frame never re-renders.
+  const tRef = useRef(0);
+
+  // Re-fit the backing store to the CSS box × current devicePixelRatio and
+  // redraw the latest frame. Shared by the mount/loop path and the resize+DPR
+  // effect. Params/seed/the current Sketch are read through refs so this helper
+  // carries no params/seed/sketch dependency — calling it on resize never
+  // re-runs the clock effect or resets `start` (issue #40 / the parent-comment
+  // contract). For a static Sketch tRef stays 0; for an animated one it holds
+  // the last drawn t, so a resize repaints the current frame with no one-frame
+  // stretch (the next rAF tick then overwrites it anyway).
+  const refitAndRedraw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (canvas === null) return;
+    sizeToBox(canvas);
+    drawFrame(
+      canvas,
+      sketchRef.current,
+      paramsRef.current,
+      seedRef.current,
+      tRef.current,
+    );
+  }, []);
 
   // The clock-bearing loop. Keyed on `sketch` ONLY: switching Sketch (or, once a
   // replay signal exists, an explicit replay) re-runs this and recaptures
@@ -140,6 +174,7 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
     if (time === undefined) {
       // Static Sketch: a single frame at t = 0, no animation loop. (Re-draws on
       // params/seed change are handled by the separate static-redraw effect.)
+      tRef.current = 0;
       drawFrame(canvas, sketch, paramsRef.current, seedRef.current, 0);
       return;
     }
@@ -153,6 +188,7 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
       // repeat. one-shot is deferred — there is no one-shot Sketch yet.
       const t =
         time.mode === "loop" ? elapsedSeconds % time.duration : elapsedSeconds;
+      tRef.current = t;
       drawFrame(canvas, sketch, paramsRef.current, seedRef.current, t);
       frameId = requestAnimationFrame(tick);
     };
@@ -167,12 +203,57 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
   // Static Sketches have no clock to advance, so the loop effect above only draws
   // them once. This redraws the single frame when params/seed change so new
   // inputs take effect (AC#1) without introducing a clock. For an animated Sketch
-  // it is a harmless no-op redraw at t = 0: the rAF loop overwrites it next frame.
+  // the early return skips it — the rAF loop owns its frames. `refitAndRedraw`
+  // re-fits the box (tRef is 0 for a static Sketch) and redraws through the refs,
+  // so this stays clockless and reuses the single re-fit path.
+  useEffect(() => {
+    if (sketch.time !== undefined) return;
+    refitAndRedraw();
+  }, [sketch, params, seed, refitAndRedraw]);
+
+  // Re-fit on box-size AND devicePixelRatio change (AC#1-3). DECOUPLED from the
+  // clock effect on purpose: it depends on `refitAndRedraw` alone (referentially
+  // stable), never on `sketch`, so it never tears down the rAF loop or re-captures
+  // the `start` baseline — a resize must not snap the animation clock back to 0
+  // (issue #40 / the parent-comment contract). Both signals just call the helper,
+  // which re-reads window.devicePixelRatio and the box on every fire.
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (canvas === null || sketch.time !== undefined) return;
-    drawFrame(canvas, sketch, params, seed, 0);
-  }, [sketch, params, seed]);
+    if (canvas === null) return;
+
+    // ResizeObserver covers CSS-box changes (window/container resize). It also
+    // fires on observe, so it doubles as the initial fit.
+    const observer = new ResizeObserver(() => {
+      refitAndRedraw();
+    });
+    observer.observe(canvas);
+
+    // A pure DPR change (dragging the window to a different-DPI monitor with the
+    // SAME CSS box) does NOT resize the box, so ResizeObserver stays silent. A
+    // matchMedia `(resolution: <dpr>dppx)` listener fires exactly on that
+    // transition. The query string is DPR-specific, so it must be RE-ARMED after
+    // each fire against the new ratio (the old query no longer matches). A
+    // recursive arm() keeps a live listener at the current DPR; only the latest
+    // MediaQueryList is retained for cleanup.
+    let dprQuery: MediaQueryList | null = null;
+    const onDprChange = () => {
+      refitAndRedraw();
+      arm();
+    };
+    const arm = () => {
+      dprQuery?.removeEventListener("change", onDprChange);
+      dprQuery = window.matchMedia(
+        `(resolution: ${window.devicePixelRatio}dppx)`,
+      );
+      dprQuery.addEventListener("change", onDprChange);
+    };
+    arm();
+
+    return () => {
+      observer.disconnect();
+      dprQuery?.removeEventListener("change", onDprChange);
+    };
+  }, [refitAndRedraw]);
 
   return <canvas ref={canvasRef} className="live-canvas" />;
 }
