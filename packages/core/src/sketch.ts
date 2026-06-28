@@ -16,6 +16,8 @@
  *   stateful variant can join WITHOUT reworking the stateless path.
  */
 
+import type { Scene } from './scene'
+
 /**
  * The single value feeding all of a Sketch's internal randomness.
  *
@@ -70,19 +72,6 @@ export interface TimeMetadata {
    */
   mode: 'loop' | 'one-shot'
 }
-
-/**
- * Forward declaration of the renderer-agnostic Scene IR.
- *
- * The real Scene type ("coordinate space + draw-ordered Primitives") is owned by
- * issue #26 and is not yet landed. This placeholder lets the Sketch contract
- * compile and name its return type now; replace this with the re-exported Scene
- * once the IR lands. Kept structurally empty on purpose so nothing accidentally
- * depends on a guessed shape.
- */
-// TODO(#26): replace with the real Scene IR once the Scene/Primitive record
-// shape lands; this is a sanctioned thin forward declaration.
-export type Scene = Record<string, unknown>
 
 /**
  * Fields every Sketch carries regardless of variant: its Parameter Schema and
