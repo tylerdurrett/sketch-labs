@@ -93,9 +93,16 @@ function sizeToBox(canvas: HTMLCanvasElement): void {
  * A large live canvas that renders a Sketch's Scene through core's Canvas2D
  * Scene Renderer.
  *
- * This commit renders a single frame at `t = 0` (the wall-clock t-driving rAF
- * loop is added next); the canvas is sized to its CSS box × `devicePixelRatio`
- * and the Scene is contain-fit into it.
+ * Time driver (this slice owns it): when `sketch.time` is present the component
+ * runs a `requestAnimationFrame` loop feeding `t` as wall-clock ELAPSED SECONDS,
+ * measured from a `performance.now()` baseline captured when the loop starts
+ * (wall clock, not frame count). For `mode: 'loop'` the elapsed time is wrapped
+ * into `[0, duration)` (`t = elapsedSeconds % duration`); one-shot driving is out
+ * of scope (no one-shot Sketch exists yet). A STATIC Sketch (`sketch.time`
+ * absent) renders ONCE at `t = 0` and starts no loop. The loop is cancelled in
+ * the effect cleanup so no frames leak — correct under React StrictMode's
+ * dev-only mount→unmount→remount double-invoke (each mount captures its own
+ * `frameId` and cancels exactly that frame).
  */
 export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -105,7 +112,32 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
     if (canvas === null) return;
 
     sizeToBox(canvas);
-    drawFrame(canvas, sketch, params, seed, 0);
+
+    const time = sketch.time;
+    if (time === undefined) {
+      // Static Sketch: a single frame at t = 0, no animation loop.
+      drawFrame(canvas, sketch, params, seed, 0);
+      return;
+    }
+
+    let frameId = 0;
+    const start = performance.now();
+
+    const tick = (now: number) => {
+      const elapsedSeconds = (now - start) / 1000;
+      // mode: 'loop' wraps elapsed seconds into [0, duration) for a seamless
+      // repeat. one-shot is deferred — there is no one-shot Sketch yet.
+      const t =
+        time.mode === "loop" ? elapsedSeconds % time.duration : elapsedSeconds;
+      drawFrame(canvas, sketch, params, seed, t);
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+    };
   }, [sketch, params, seed]);
 
   return <canvas ref={canvasRef} className="live-canvas" />;
