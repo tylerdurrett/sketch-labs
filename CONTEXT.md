@@ -75,11 +75,11 @@ There is no separate "realtime mode" vs "render mode" — one function, sampled 
 
 ### Time semantics
 
-`generate` is always `(params, seed, t)`; only *how the Harness drives `t`* varies, declared by optional time metadata (a duration, and whether it loops) alongside the **Parameter Schema**. No time metadata ⇒ static.
+`generate` is always `(params, seed, t)`, where **`t` is in seconds** uniformly across every mode; only *how the Harness drives `t`* varies, declared by optional time metadata (a duration, and whether it loops) alongside the **Parameter Schema**. No time metadata ⇒ static. A Sketch that wants normalized progress derives it itself as `t / duration` (e.g. circles computes its loop phase this way) — the contract never hands the Sketch a normalized `t`.
 
 - **Static** — output is constant in `t`; the Harness hides the scrubber. Not a "paused" mode — `t` is simply unused.
-- **Loop** — `t` wraps `0 → duration → 0`; periodic (use periodic noise for seamless loops). Any frame is a valid export.
-- **One-shot / reveal** — `t` runs `0 → 1` once and clamps; the drawing reveals over time. Canonical export frame is `t = 1`. For a plotter Sketch, `t` *is* pen-path progress — the time axis and the draw-over-time axis are one and the same.
+- **Loop** — `t` wraps `0 → duration → 0` (seconds); periodic (use periodic noise for seamless loops). Any frame is a valid export.
+- **One-shot / reveal** — `t` runs `0 → duration` once and clamps at `duration` (seconds); the drawing reveals over time. Canonical export frame is `t = duration`. For a plotter Sketch, `t` *is* pen-path progress — the time axis and the draw-over-time axis are one and the same. (A Sketch wanting `0 → 1` reveal progress computes `t / duration`.)
 
 ## Deliberately deferred
 
