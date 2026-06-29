@@ -1,9 +1,17 @@
 import { useState } from "react";
 
-import { defaultParams, newSeed, randomize, type Sketch } from "@harness/core";
+import {
+  applyPreset,
+  defaultParams,
+  newSeed,
+  randomize,
+  type Preset,
+  type Sketch,
+} from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
 import { LiveCanvas } from "./LiveCanvas";
+import { PresetControls } from "./PresetControls";
 
 /**
  * Props for {@link SketchControls}.
@@ -71,6 +79,18 @@ export function SketchControls({ sketch }: SketchControlsProps) {
     setParams((prev) => randomize(sketch.schema, prev, locks, Math.random));
   };
 
+  // Reload a saved Preset: reconcile it against the CURRENT schema via core's
+  // `applyPreset` (the authority on which keys exist), then hydrate all three
+  // state axes TOGETHER. The array→Set conversion on `locks` is this owner's
+  // job — `applyPreset` returns a sorted string[], the studio's live lock state
+  // is a Set<string>.
+  const reloadPreset = (preset: Preset) => {
+    const state = applyPreset(sketch.schema, preset);
+    setParams(state.params);
+    setSeed(state.seed);
+    setLocks(new Set(state.locks));
+  };
+
   return (
     <div className="sketch-controls">
       <ControlPanel
@@ -87,6 +107,13 @@ export function SketchControls({ sketch }: SketchControlsProps) {
         <button type="button" className="action-button" onClick={rollParams}>
           Randomize
         </button>
+        <PresetControls
+          sketchId={sketch.id}
+          params={params}
+          seed={seed}
+          locks={locks}
+          onReload={reloadPreset}
+        />
       </div>
       <div className="seed-box">
         <label className="seed-box__label" htmlFor="sketch-seed">
