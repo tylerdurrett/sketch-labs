@@ -30,16 +30,55 @@ import type { Scene } from './scene'
 export type Seed = string | number
 
 /**
+ * A numeric knob's declaration — a continuous (or whole-number) range with a
+ * default. The only inhabited {@link ParamSpec} member today.
+ *
+ * `integer` and `step` are ORTHOGONAL and answer different questions:
+ *
+ * - `integer` is a VALUE-DOMAIN constraint: when `true`, the legal values of
+ *   this param are whole numbers (the control panel and Randomize must only ever
+ *   hand the Sketch an integer). It is about *which values are valid*.
+ * - `step` is a UI DRAG-GRANULARITY HINT ONLY: how coarsely a slider/drag should
+ *   advance. It says nothing about which values are legal. A `step` of 10 on a
+ *   non-integer param is perfectly legal — it just means the UI nudges by 10
+ *   while any real number in `[min, max]` remains a valid value.
+ *
+ * Because they are orthogonal, neither implies the other: an `integer` param may
+ * omit `step`, and a `step` does not make a param integer.
+ */
+export interface NumberParamSpec {
+  /** Discriminant. The open {@link ParamSpec} union is keyed on this. */
+  kind: 'number'
+  /** Inclusive lower bound of the legal range. */
+  min: number
+  /** Inclusive upper bound of the legal range. */
+  max: number
+  /** The value {@link defaultParams} seeds this knob with. */
+  default: number
+  /**
+   * UI drag-granularity hint ONLY — how coarsely a slider advances. Does NOT
+   * constrain which values are legal (see the type doc). Optional.
+   */
+  step?: number
+  /**
+   * VALUE-DOMAIN constraint: when `true`, only whole-number values are legal.
+   * Orthogonal to {@link NumberParamSpec.step} (see the type doc). Optional;
+   * absent ⇒ any real in `[min, max]` is legal.
+   */
+  integer?: boolean
+}
+
+/**
  * One tweakable knob's declaration within a {@link ParamSchema}.
  *
- * Deliberately open: the concrete field format (control kind, bounds, default,
- * lock metadata, …) is left to emerge during implementation — CONTEXT.md
- * "Deliberately deferred" calls out the Parameter Schema field format as not yet
- * frozen. An open record with `unknown` values: authoring code should treat a
- * `ParamSpec` as opaque for now, and the format can widen (never rework) as the
- * control panel, Lock, Randomize, and Preset shape derive their needs from it.
+ * An OPEN union discriminated on `kind`, mirroring the open {@link Sketch} union
+ * in this same file: today {@link NumberParamSpec} (`kind: 'number'`) is the
+ * ONLY inhabited member, and future control kinds (boolean, color, enum, …) join
+ * as new `kind`-tagged members WITHOUT reworking this one — purely additive. The
+ * control panel, Lock, Randomize, and Preset shape are all derived views that
+ * widen alongside the union, never against it.
  */
-export type ParamSpec = Record<string, unknown>
+export type ParamSpec = NumberParamSpec
 
 /**
  * The single declaration a Sketch makes of its tweakable knobs — the spine of
@@ -57,6 +96,87 @@ export type ParamSchema = Record<string, ParamSpec>
  * shape emerges alongside the schema field format.
  */
 export type Params = Record<string, unknown>
+
+/**
+ * Derive the inhabited default params from a schema: every key set to its spec's
+ * `default`. Pure and headless — the first of the core engine functions
+ * (randomize / newSeed are siblings), and the value the Harness starts a Sketch
+ * from before any Randomize or Preset is applied.
+ *
+ * @param schema - The Sketch's Parameter Schema.
+ * @returns A {@link Params} with one entry per schema key, each its spec default.
+ */
+export function defaultParams(schema: ParamSchema): Params {
+  const params: Params = {}
+  for (const [key, spec] of Object.entries(schema)) {
+    params[key] = spec.default
+  }
+  return params
+}
+
+/**
+ * Roll a fresh set of param values, leaving locked and non-rolled keys untouched
+ * — the engine behind the Studio's Randomize button. Pure and headless, a sibling
+ * of {@link defaultParams}; the randomness arrives INJECTED as `rand` so the
+ * function is deterministically testable (tests pass a scripted stub; the Studio
+ * later passes a `Math.random`-backed one — same shape as `value()` in
+ * `random.ts`).
+ *
+ * For each schema key whose spec is a numeric param (`kind === 'number'`) AND is
+ * NOT locked, a new value is rolled uniformly across the spec's `[min, max]` via
+ * `min + rand() * (max - min)`, then `Math.round`ed iff the spec's `integer` is
+ * `true`. The spec's `step` is IGNORED — `step` is a UI drag-granularity hint, not
+ * a value-domain constraint (see {@link NumberParamSpec}).
+ *
+ * Everything else passes through from `params` UNCHANGED: locked params (Lock is
+ * Randomize-exclusion only), and any non-numeric / future-kind specs the `kind`
+ * switch doesn't roll. This is PER-PARAM only — there are deliberately NO
+ * cross-param constraints (CONTEXT.md "Deliberately deferred"); a Sketch owns its
+ * own inter-param coherence inside `generate`.
+ *
+ * @param schema - The Sketch's Parameter Schema.
+ * @param params - The current inhabited param values; NOT mutated.
+ * @param locks - The set of locked param keys; only READ (the Studio owns the
+ *   lock state). A locked key keeps its current value.
+ * @param rand - Injected uniform `[0, 1)` source (matches `value()` in
+ *   `random.ts`).
+ * @returns A NEW {@link Params}; unlocked numeric keys re-rolled, the rest as-is.
+ */
+export function randomize(
+  schema: ParamSchema,
+  params: Params,
+  locks: ReadonlySet<string>,
+  rand: () => number,
+): Params {
+  const next: Params = { ...params }
+  for (const [key, spec] of Object.entries(schema)) {
+    if (locks.has(key)) continue
+    if (spec.kind === 'number') {
+      const rolled = spec.min + rand() * (spec.max - spec.min)
+      next[key] = spec.integer ? Math.round(rolled) : rolled
+    }
+  }
+  return next
+}
+
+/**
+ * Produce a fresh random {@link Seed} — the engine behind the Studio's re-seed
+ * ("roll the dice on the arrangement"). Pure and headless, a sibling of
+ * {@link defaultParams}, with randomness INJECTED as `rand` for the same
+ * deterministic-testability reason as {@link randomize}.
+ *
+ * Returns a RANDOM integer (not monotonic): `alea` takes a number seed natively,
+ * and re-seeding is meant to land somewhere new, not advance a counter. Re-seeding
+ * is INDEPENDENT of Randomize — a new seed reshuffles a Sketch's internal
+ * randomness while leaving every param value untouched.
+ *
+ * @param rand - Injected uniform `[0, 1)` source (matches `value()` in
+ *   `random.ts`).
+ * @returns A fresh numeric {@link Seed}.
+ */
+export function newSeed(rand: () => number): Seed {
+  return Math.floor(rand() * Number.MAX_SAFE_INTEGER)
+}
 
 /**
  * How the Harness should drive time `t` for a Sketch, declared alongside the
