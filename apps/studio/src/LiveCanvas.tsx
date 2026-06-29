@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   renderToCanvas,
@@ -6,9 +6,25 @@ import {
   type Params,
   type Seed,
   type Sketch,
+  type TimeMetadata,
 } from "@harness/core";
 
 import { computeContainFit } from "./canvas-fit";
+
+/**
+ * Map a wall-clock elapsed time onto the Sketch's timeline per its `mode`
+ * (ADR-0002 time semantics): `loop` wraps `elapsed → [0, duration)` for a
+ * seamless repeat; `one-shot` clamps at `duration` (plays once and holds). This
+ * is the SINGLE owner of the mode→`t` mapping, shared by the rAF loop and the
+ * scrubber's range so both honor the same `loop`/`one-shot` contract. Playback
+ * (the rAF path) stays loop-only for now (ADR-0005), but this clamp arm is what
+ * the scrubber's one-shot range relies on.
+ */
+function timeForElapsed(elapsedSeconds: number, time: TimeMetadata): number {
+  return time.mode === "loop"
+    ? elapsedSeconds % time.duration
+    : Math.min(elapsedSeconds, time.duration);
+}
 
 /**
  * Props for {@link LiveCanvas}.
@@ -172,6 +188,30 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
   // every frame never re-renders.
   const tRef = useRef(0);
 
+  // The transport's PLAYING gate. An animated Sketch mounts playing (ADR-0005):
+  // the rAF loop drives `t` and the scrubber thumb follows. Grabbing the scrubber
+  // flips this to `false`, pausing the loop so `t` is held at the scrubbed frame.
+  // This is React STATE (not a ref) because the play/pause control and the loop
+  // effect both react to it — flipping it is what starts/stops the loop. Static
+  // Sketches never start the loop, so the value is inert for them.
+  const [playing, setPlaying] = useState(true);
+
+  // The baseline-recapture offset (ADR-0005): when play RESUMES from a scrubbed
+  // frame, the loop must continue from that `t`, not snap back to 0. We carry the
+  // resume point as a ref the loop reads on (re)start to set
+  // `start = performance.now() - resumeT*1000`, so the first tick computes
+  // `elapsed` continuous from where the scrub left off. It is a ref (not a loop
+  // dependency) so updating it never re-runs the loop on its own — only the
+  // `playing` flip does, and it reads the latest resume point at that moment.
+  const resumeTRef = useRef(0);
+
+  // The scrubber range input. While PLAYING its thumb must FOLLOW `t` without
+  // forcing a React re-render every frame (the whole reason `t` lives in a ref):
+  // the rAF tick writes `scrubberRef.current.value` DOM-direct instead. While
+  // PAUSED the user drives it and `onInput` becomes the source of `t`. Held as a
+  // ref so the tick can reach the live element imperatively.
+  const scrubberRef = useRef<HTMLInputElement>(null);
+
   // Draw the latest frame onto the canvas through the refs WITHOUT touching the
   // backing-store size. Params/seed/the current Sketch and the last drawn t are
   // read through refs so this helper carries no params/seed/sketch dependency —
@@ -202,35 +242,47 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
     drawCurrentFrame();
   }, [drawCurrentFrame]);
 
-  // The clock-bearing loop. Keyed on `sketch` ONLY: switching Sketch (or, once a
-  // replay signal exists, an explicit replay) re-runs this and recaptures
-  // `start`, resetting t to 0 — the desired restart. A params/seed change does
-  // NOT, so the animation continues from where it was. This effect owns ANIMATED
+  // The clock-bearing loop — the PLAYING half of the transport (ADR-0005). Keyed
+  // on `[sketch, playing]`: switching Sketch re-runs this and recaptures `start`
+  // (the desired restart); toggling `playing` starts the loop on resume or, via
+  // the cleanup, cancels the pending frame on pause so `t` is held at the
+  // scrubbed frame. A params/seed change does NOT re-run it (read through refs),
+  // so the animation continues from where it was. This effect owns ANIMATED
   // sketches ONLY: the `sketch.time === undefined` early-return is FIRST, before
   // any sizing or drawing, so a static Sketch makes it a complete no-op (the
   // static-redraw effect is the sole owner of static frames — no triple draw).
   useEffect(() => {
     const time = sketch.time;
     if (time === undefined) return;
+    // Paused: the scrubber owns `t` (held at `resumeTRef`/`tRef`); run no loop.
+    if (!playing) return;
 
     const canvas = canvasRef.current;
     if (canvas === null) return;
 
     // Animated Sketch: size the backing store once, then run the rAF loop. The
-    // return value is ignored — this is a fresh mount/Sketch switch, so a draw
-    // happens on the first tick regardless.
+    // return value is ignored — this is a fresh mount/Sketch switch/resume, so a
+    // draw happens on the first tick regardless.
     sizeToBox(canvas, window.devicePixelRatio || 1);
 
     let frameId = 0;
-    const start = performance.now();
+    // Baseline recapture (ADR-0005): subtract the resume point so the next tick's
+    // `elapsed` continues from the scrubbed `t`, NOT from 0. On a fresh mount /
+    // Sketch switch `resumeTRef` is 0, so this is `performance.now()` — the
+    // original #6 behavior. After a scrub-then-play it is the scrubbed offset.
+    const start = performance.now() - resumeTRef.current * 1000;
 
     const tick = (now: number) => {
       const elapsedSeconds = (now - start) / 1000;
-      // mode: 'loop' wraps elapsed seconds into [0, duration) for a seamless
-      // repeat. one-shot is deferred — there is no one-shot Sketch yet.
-      const t =
-        time.mode === "loop" ? elapsedSeconds % time.duration : elapsedSeconds;
+      // Playback is loop-only for now (ADR-0005); `timeForElapsed` still routes
+      // through the mode so the day a one-shot Sketch plays, this is correct.
+      const t = timeForElapsed(elapsedSeconds, time);
       tRef.current = t;
+      // The thumb follows `t` DOM-direct — no React state write, so the loop
+      // never triggers a per-frame re-render (the #40 no-per-frame-render
+      // property). The scrubber is uncontrolled while playing; React owns it
+      // again only when the user grabs it (paused).
+      if (scrubberRef.current !== null) scrubberRef.current.value = String(t);
       drawFrame(canvas, sketch, paramsRef.current, seedRef.current, t);
       frameId = requestAnimationFrame(tick);
     };
@@ -240,7 +292,7 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
     return () => {
       cancelAnimationFrame(frameId);
     };
-  }, [sketch]);
+  }, [sketch, playing]);
 
   // The SOLE owner of static frames: the loop effect now early-returns for a
   // static Sketch, so this is the only path that sizes+draws one — on mount, on a
@@ -309,5 +361,82 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
     };
   }, [drawCurrentFrame]);
 
-  return <canvas ref={canvasRef} className="live-canvas" />;
+  // Play/pause toggle — the transport's mode switch (ADR-0005). Pausing simply
+  // flips `playing` to `false`, whose effect cleanup cancels the pending frame
+  // and freezes `t` at the last drawn value. Resuming captures that frozen `t`
+  // into `resumeTRef` so the loop effect's `start` recapture continues from there
+  // (NOT 0), then flips `playing` true to (re)start the loop.
+  const togglePlay = useCallback(() => {
+    setPlaying((wasPlaying) => {
+      if (wasPlaying) return false;
+      // Resuming: net the baseline off the held frame so play is continuous.
+      resumeTRef.current = tRef.current;
+      return true;
+    });
+  }, []);
+
+  // Grab/drag the scrubber: PAUSE the wall-clock loop and make `t` the scrubber's
+  // value directly, re-rendering THAT exact frame (ADR-0005). Pausing flips
+  // `playing` false so the loop effect's cleanup cancels the pending frame and
+  // stops fighting the user. We write `tRef` AND `resumeTRef` to the scrubbed `t`
+  // so the frozen frame is exact AND a later Play resumes from here (not 0), then
+  // draw the frame straight away — the `setPlaying` re-render's loop teardown
+  // won't draw, so this direct paint is what shows the scrubbed moment.
+  const scrubTo = useCallback((value: number) => {
+    tRef.current = value;
+    resumeTRef.current = value;
+    setPlaying(false);
+    const canvas = canvasRef.current;
+    if (canvas !== null) {
+      drawFrame(
+        canvas,
+        sketchRef.current,
+        paramsRef.current,
+        seedRef.current,
+        value,
+      );
+    }
+  }, []);
+
+  // No time metadata ⇒ a static Sketch: render the canvas alone, no transport.
+  const time = sketch.time;
+  if (time === undefined) {
+    return <canvas ref={canvasRef} className="live-canvas" />;
+  }
+
+  return (
+    <>
+      <canvas ref={canvasRef} className="live-canvas" />
+      <div className="transport">
+        <button
+          type="button"
+          className="transport__play"
+          aria-pressed={playing}
+          onClick={togglePlay}
+        >
+          {playing ? "Pause" : "Play"}
+        </button>
+        {/*
+         * The scrubber. Range is metadata-driven: [0, duration] seconds, with
+         * `loop`/`one-shot` differing only in how the rAF loop maps elapsed → `t`
+         * (`timeForElapsed`) — the input bound stays `duration` either way. It is
+         * UNCONTROLLED (no React `value`): while playing the rAF tick writes its
+         * `.value` DOM-direct (thumb follows `t`, no per-frame re-render); while
+         * grabbed `onInput` drives `t`. A small `step` gives a smooth drag.
+         */}
+        <input
+          ref={scrubberRef}
+          className="transport__scrubber"
+          type="range"
+          aria-label="time scrubber"
+          min={0}
+          max={time.duration}
+          step={time.duration / 1000}
+          defaultValue={0}
+          onPointerDown={() => setPlaying(false)}
+          onInput={(event) => scrubTo(Number(event.currentTarget.value))}
+        />
+      </div>
+    </>
+  );
 }
