@@ -68,3 +68,27 @@
   flex: 0 0 auto;
   width: 5rem;
 }
+
+/*
+ * The schema-driven control surface: a vertical stack of control rows, one per
+ * declared param.
+ */
+.control-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/*
+ * Loud fallback for an unsupported control kind. Deliberately high-contrast so
+ * an unhandled ParamSpec kind is impossible to miss in the UI — never a silent
+ * skip.
+ */
+.control--unsupported {
+  padding: 0.5rem 0.75rem;
+  border: 2px solid #b00020;
+  border-radius: 4px;
+  background: #ffe5e9;
+  color: #b00020;
+  font-weight: 600;
+}
