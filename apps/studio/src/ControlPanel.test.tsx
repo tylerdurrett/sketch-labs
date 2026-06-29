@@ -79,6 +79,42 @@ describe("ControlPanel", () => {
     );
     expect(html).toContain('value="73"');
   });
+
+  it("renders a lock affordance per control, reflecting `locks` membership", () => {
+    const schema: ParamSchema = {
+      radius: numberSpec(),
+      count: numberSpec(),
+    };
+    const html = renderToStaticMarkup(
+      <ControlPanel
+        schema={schema}
+        params={{ radius: 10, count: 5 }}
+        locks={new Set(["radius"])}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+      />,
+    );
+    // One lock toggle per param.
+    expect((html.match(/class="control__lock"/g) ?? []).length).toBe(2);
+    // The locked param's toggle is pressed; the unlocked one is not.
+    expect(html).toContain('aria-label="radius lock" aria-pressed="true"');
+    expect(html).toContain('aria-label="count lock" aria-pressed="false"');
+  });
+
+  it("a locked control is NOT disabled — lock excludes from Randomize only", () => {
+    const schema: ParamSchema = { radius: numberSpec() };
+    const html = renderToStaticMarkup(
+      <ControlPanel
+        schema={schema}
+        params={{ radius: 10 }}
+        locks={new Set(["radius"])}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+      />,
+    );
+    // The lock NEVER gates the input: the control markup carries no `disabled`.
+    expect(html).not.toContain("disabled");
+  });
 });
 
 describe("SketchControls reset-by-defaults", () => {
