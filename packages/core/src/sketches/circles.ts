@@ -16,7 +16,12 @@
 import { createScene } from '../scene'
 import type { Scene } from '../scene'
 import { createRandom } from '../random'
-import type { Params, Seed, StatelessSketch } from '../sketch'
+import type {
+  NumberParamSpec,
+  Params,
+  Seed,
+  StatelessSketch,
+} from '../sketch'
 import type { Point, Polyline } from '../types'
 
 /** Coordinate-space extent the Scene is baked into (square, unitless). */
@@ -30,17 +35,19 @@ const PERIMETER_SEGMENTS = 64
 const PULSE_AMPLITUDE = 0.15
 
 /**
- * The circles Parameter Schema. Each knob is a minimal `{ kind, min, max,
- * default }` numeric range — deliberately not over-frozen (ParamSpec is open).
+ * The circles Parameter Schema. Every knob is a {@link NumberParamSpec} range.
+ * `count` is marked `integer` (you cannot scatter a fractional circle); the
+ * radii are continuous. `satisfies` keeps the literal key set (so `numberParam`
+ * below can index by `keyof typeof schema`) while enforcing the spec type.
  */
 const schema = {
-  /** How many circles to scatter. */
-  count: { kind: 'number', min: 1, max: 80, default: 24 },
+  /** How many circles to scatter. Whole-number domain. */
+  count: { kind: 'number', min: 1, max: 80, default: 24, integer: true },
   /** Smallest circle radius, in coordinate-space units. */
   minRadius: { kind: 'number', min: 2, max: 100, default: 12 },
   /** Largest circle radius, in coordinate-space units. */
   maxRadius: { kind: 'number', min: 2, max: 200, default: 60 },
-} as const
+} satisfies Record<string, NumberParamSpec>
 
 /**
  * Read a numeric param value, falling back to the schema default when the caller
