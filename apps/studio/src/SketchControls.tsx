@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { defaultParams, type Sketch } from "@harness/core";
+import { defaultParams, newSeed, type Sketch } from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
 import { LiveCanvas } from "./LiveCanvas";
@@ -24,12 +24,19 @@ export interface SketchControlsProps {
  *
  * RESET-BY-REMOUNT: App mounts this with `key={sketch.id}`, so selecting a
  * different Sketch unmounts this instance and mounts a fresh one — the lazy
- * `useState` initializer re-runs against the new Sketch's schema and the params
- * reset to that Sketch's defaults. There is deliberately NO manual reset effect;
- * the key remount IS the reset mechanism.
+ * `useState` initializers re-run against the new Sketch and the params AND seed
+ * reset (params to that Sketch's defaults, seed to a fresh roll). There is
+ * deliberately NO manual reset effect; the key remount IS the reset mechanism.
+ *
+ * SEED is the FIRST randomness axis — a plain numeric value (groundwork for
+ * Presets #8: the seed is the literal value a Preset captures and copies). The
+ * studio backs the engine's `rand` with `Math.random` (the `value()` [0, 1)
+ * shape). Editing the seed re-renders the canvas (LiveCanvas reads `seed`
+ * through a ref) WITHOUT touching any param value — the two axes are independent.
  */
 export function SketchControls({ sketch }: SketchControlsProps) {
   const [params, setParams] = useState(() => defaultParams(sketch.schema));
+  const [seed, setSeed] = useState(() => newSeed(Math.random));
 
   const setParam = (key: string, value: number) => {
     setParams((prev) => ({ ...prev, [key]: value }));
@@ -42,7 +49,23 @@ export function SketchControls({ sketch }: SketchControlsProps) {
         params={params}
         onChange={setParam}
       />
-      <LiveCanvas sketch={sketch} params={params} seed={`${sketch.id}-demo`} />
+      <div className="seed-box">
+        <label className="seed-box__label" htmlFor="sketch-seed">
+          seed
+        </label>
+        <input
+          id="sketch-seed"
+          className="seed-box__input"
+          type="number"
+          value={seed}
+          onChange={(event) => {
+            const parsed = Number(event.target.value);
+            if (Number.isNaN(parsed)) return;
+            setSeed(parsed);
+          }}
+        />
+      </div>
+      <LiveCanvas sketch={sketch} params={params} seed={seed} />
     </div>
   );
 }

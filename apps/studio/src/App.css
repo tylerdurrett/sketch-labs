@@ -80,6 +80,28 @@
 }
 
 /*
+ * The seed box: the first randomness axis. A plain numeric input bound to the
+ * studio's seed state — copyable groundwork for Presets (#8). Editing it
+ * re-renders the canvas without touching any param value (the axes are
+ * independent).
+ */
+.seed-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.seed-box__label {
+  flex: 0 0 auto;
+  min-width: 8rem;
+}
+
+.seed-box__input {
+  flex: 0 0 auto;
+  width: 12rem;
+}
+
+/*
  * Loud fallback for an unsupported control kind. Deliberately high-contrast so
  * an unhandled ParamSpec kind is impossible to miss in the UI — never a silent
  * skip.
