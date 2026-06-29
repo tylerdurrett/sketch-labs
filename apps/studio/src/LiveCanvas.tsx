@@ -205,6 +205,13 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
   // `playing` flip does, and it reads the latest resume point at that moment.
   const resumeTRef = useRef(0);
 
+  // The scrubber range input. While PLAYING its thumb must FOLLOW `t` without
+  // forcing a React re-render every frame (the whole reason `t` lives in a ref):
+  // the rAF tick writes `scrubberRef.current.value` DOM-direct instead. While
+  // PAUSED the user drives it and `onInput` becomes the source of `t`. Held as a
+  // ref so the tick can reach the live element imperatively.
+  const scrubberRef = useRef<HTMLInputElement>(null);
+
   // Draw the latest frame onto the canvas through the refs WITHOUT touching the
   // backing-store size. Params/seed/the current Sketch and the last drawn t are
   // read through refs so this helper carries no params/seed/sketch dependency —
@@ -271,6 +278,11 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
       // through the mode so the day a one-shot Sketch plays, this is correct.
       const t = timeForElapsed(elapsedSeconds, time);
       tRef.current = t;
+      // The thumb follows `t` DOM-direct — no React state write, so the loop
+      // never triggers a per-frame re-render (the #40 no-per-frame-render
+      // property). The scrubber is uncontrolled while playing; React owns it
+      // again only when the user grabs it (paused).
+      if (scrubberRef.current !== null) scrubberRef.current.value = String(t);
       drawFrame(canvas, sketch, paramsRef.current, seedRef.current, t);
       frameId = requestAnimationFrame(tick);
     };
@@ -363,8 +375,32 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
     });
   }, []);
 
+  // Grab/drag the scrubber: PAUSE the wall-clock loop and make `t` the scrubber's
+  // value directly, re-rendering THAT exact frame (ADR-0005). Pausing flips
+  // `playing` false so the loop effect's cleanup cancels the pending frame and
+  // stops fighting the user. We write `tRef` AND `resumeTRef` to the scrubbed `t`
+  // so the frozen frame is exact AND a later Play resumes from here (not 0), then
+  // draw the frame straight away — the `setPlaying` re-render's loop teardown
+  // won't draw, so this direct paint is what shows the scrubbed moment.
+  const scrubTo = useCallback((value: number) => {
+    tRef.current = value;
+    resumeTRef.current = value;
+    setPlaying(false);
+    const canvas = canvasRef.current;
+    if (canvas !== null) {
+      drawFrame(
+        canvas,
+        sketchRef.current,
+        paramsRef.current,
+        seedRef.current,
+        value,
+      );
+    }
+  }, []);
+
   // No time metadata ⇒ a static Sketch: render the canvas alone, no transport.
-  if (sketch.time === undefined) {
+  const time = sketch.time;
+  if (time === undefined) {
     return <canvas ref={canvasRef} className="live-canvas" />;
   }
 
@@ -380,6 +416,26 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
         >
           {playing ? "Pause" : "Play"}
         </button>
+        {/*
+         * The scrubber. Range is metadata-driven: [0, duration] seconds, with
+         * `loop`/`one-shot` differing only in how the rAF loop maps elapsed → `t`
+         * (`timeForElapsed`) — the input bound stays `duration` either way. It is
+         * UNCONTROLLED (no React `value`): while playing the rAF tick writes its
+         * `.value` DOM-direct (thumb follows `t`, no per-frame re-render); while
+         * grabbed `onInput` drives `t`. A small `step` gives a smooth drag.
+         */}
+        <input
+          ref={scrubberRef}
+          className="transport__scrubber"
+          type="range"
+          aria-label="time scrubber"
+          min={0}
+          max={time.duration}
+          step={time.duration / 1000}
+          defaultValue={0}
+          onPointerDown={() => setPlaying(false)}
+          onInput={(event) => scrubTo(Number(event.currentTarget.value))}
+        />
       </div>
     </>
   );
