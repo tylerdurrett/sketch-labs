@@ -98,6 +98,23 @@ export type ParamSchema = Record<string, ParamSpec>
 export type Params = Record<string, unknown>
 
 /**
+ * Derive the inhabited default params from a schema: every key set to its spec's
+ * `default`. Pure and headless — the first of the core engine functions
+ * (randomize / newSeed are siblings), and the value the Harness starts a Sketch
+ * from before any Randomize or Preset is applied.
+ *
+ * @param schema - The Sketch's Parameter Schema.
+ * @returns A {@link Params} with one entry per schema key, each its spec default.
+ */
+export function defaultParams(schema: ParamSchema): Params {
+  const params: Params = {}
+  for (const [key, spec] of Object.entries(schema)) {
+    params[key] = spec.default
+  }
+  return params
+}
+
+/**
  * How the Harness should drive time `t` for a Sketch, declared alongside the
  * Parameter Schema (ADR-0002). Its ABSENCE means the Sketch is static — a single
  * frame, with no timeline.
