@@ -14,8 +14,16 @@ export interface NumberControlProps {
   spec: NumberParamSpec;
   /** The current value. The number input is the source of truth for it. */
   value: number;
+  /**
+   * Whether this param is locked. Lock is Randomize-EXCLUSION only: it drives
+   * the toggle's pressed state but NEVER disables the slider/input — a locked
+   * control stays fully hand-editable.
+   */
+  locked: boolean;
   /** Lift a committed value change up to the owner. */
   onChange: (value: number) => void;
+  /** Toggle this param's lock membership. */
+  onToggleLock: () => void;
 }
 
 /**
@@ -49,12 +57,19 @@ export function coerceToDomain(raw: number, spec: NumberParamSpec): number {
  * snapped onto the step grid. So the slider drags in coarse `step` increments
  * while the number input can still hold and edit an off-step value (e.g. `23`
  * under `step: 10`).
+ *
+ * LOCK affordance: a toggle button whose pressed state reflects `locked`. Lock
+ * is Randomize-EXCLUSION only — it is read by the studio solely to skip this
+ * param in a roll. It deliberately does NOT disable the slider or input: a
+ * locked control stays fully hand-editable.
  */
 export function NumberControl({
   paramKey,
   spec,
   value,
+  locked,
   onChange,
+  onToggleLock,
 }: NumberControlProps) {
   const inputId = `control-${paramKey}`;
 
@@ -88,6 +103,15 @@ export function NumberControl({
         value={value}
         onChange={(event) => commit(event.target.value)}
       />
+      <button
+        type="button"
+        className="control__lock"
+        aria-label={`${paramKey} lock`}
+        aria-pressed={locked}
+        onClick={onToggleLock}
+      >
+        {locked ? "Locked" : "Lock"}
+      </button>
     </div>
   );
 }

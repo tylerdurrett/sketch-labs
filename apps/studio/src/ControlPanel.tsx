@@ -15,8 +15,16 @@ export interface ControlPanelProps {
   schema: ParamSchema;
   /** The current value of every param, keyed as in `schema`. */
   params: Params;
+  /**
+   * The set of locked param keys. Lock is Randomize-EXCLUSION only: a locked
+   * control is excluded from a roll but stays fully hand-editable — this set
+   * NEVER gates a control's input.
+   */
+  locks: ReadonlySet<string>;
   /** Update a single param by key. */
   onChange: (key: string, value: number) => void;
+  /** Toggle a single param's lock membership. */
+  onToggleLock: (key: string) => void;
 }
 
 /**
@@ -32,7 +40,9 @@ function renderControl(
   key: string,
   spec: ParamSpec,
   value: unknown,
+  locked: boolean,
   onChange: (key: string, value: number) => void,
+  onToggleLock: (key: string) => void,
 ) {
   switch (spec.kind) {
     case "number":
@@ -41,7 +51,9 @@ function renderControl(
           paramKey={key}
           spec={spec}
           value={typeof value === "number" ? value : spec.default}
+          locked={locked}
           onChange={(next) => onChange(key, next)}
+          onToggleLock={() => onToggleLock(key)}
         />
       );
     default:
@@ -63,12 +75,25 @@ function renderControl(
  * gets a working control (or a loud fallback for an unsupported kind) with zero
  * per-Sketch code.
  */
-export function ControlPanel({ schema, params, onChange }: ControlPanelProps) {
+export function ControlPanel({
+  schema,
+  params,
+  locks,
+  onChange,
+  onToggleLock,
+}: ControlPanelProps) {
   return (
     <div className="control-panel">
       {Object.entries(schema).map(([key, spec]) => (
         <div key={key} className="control-panel__row">
-          {renderControl(key, spec, params[key], onChange)}
+          {renderControl(
+            key,
+            spec,
+            params[key],
+            locks.has(key),
+            onChange,
+            onToggleLock,
+          )}
         </div>
       ))}
     </div>

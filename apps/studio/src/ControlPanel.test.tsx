@@ -30,7 +30,9 @@ describe("ControlPanel", () => {
       <ControlPanel
         schema={schema}
         params={defaultParams(schema)}
+        locks={new Set()}
         onChange={() => {}}
+        onToggleLock={() => {}}
       />,
     );
     // One number input per param (the slider is also type=range; count number
@@ -49,7 +51,13 @@ describe("ControlPanel", () => {
       mystery: { kind: "color", default: "#fff" },
     } as unknown as ParamSchema;
     const html = renderToStaticMarkup(
-      <ControlPanel schema={schema} params={{}} onChange={() => {}} />,
+      <ControlPanel
+        schema={schema}
+        params={{}}
+        locks={new Set()}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+      />,
     );
     expect(html).toContain("unsupported control kind: color");
     // The fallback names the offending param and is an alert (not hidden).
@@ -64,7 +72,9 @@ describe("ControlPanel", () => {
       <ControlPanel
         schema={schema}
         params={{ radius: 73 }}
+        locks={new Set()}
         onChange={() => {}}
+        onToggleLock={() => {}}
       />,
     );
     expect(html).toContain('value="73"');

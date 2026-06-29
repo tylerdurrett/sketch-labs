@@ -57,7 +57,9 @@ describe("NumberControl markup", () => {
         paramKey="radius"
         spec={numberSpec({ min: 0, max: 100, step: 10 })}
         value={23}
+        locked={false}
         onChange={() => {}}
+        onToggleLock={() => {}}
       />,
     );
     expect(html).toContain('type="range"');
@@ -75,7 +77,9 @@ describe("NumberControl markup", () => {
         paramKey="x"
         spec={numberSpec()}
         value={50}
+        locked={false}
         onChange={() => {}}
+        onToggleLock={() => {}}
       />,
     );
     expect(html).toContain('step="any"');

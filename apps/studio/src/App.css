@@ -70,6 +70,28 @@
 }
 
 /*
+ * Per-param lock affordance: a toggle button marking a param as
+ * Randomize-excluded. Its pressed state (aria-pressed) reflects the lock; it
+ * NEVER disables the control's slider/input — a locked param stays
+ * hand-editable.
+ */
+.control__lock {
+  flex: 0 0 auto;
+  width: 5rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.control__lock[aria-pressed="true"] {
+  border-color: #333;
+  background: #333;
+  color: #fff;
+}
+
+/*
  * The schema-driven control surface: a vertical stack of control rows, one per
  * declared param.
  */
