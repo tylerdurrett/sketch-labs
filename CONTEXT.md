@@ -87,7 +87,7 @@ These are intentionally **not** pinned here — they are implementation specific
 
 - The exact record shape of a **Primitive** (how fill vs stroke is modeled — a tagged union vs an SVG-path-style record carrying optional fill and stroke; how layering and source-tagging are represented).
 - The exact shape of the **Scene** container beyond "coordinate space + draw-ordered Primitives."
-- The concrete field format of the **Parameter Schema** and the serialized **Preset** object.
+- The concrete field format of the **Parameter Schema**'s _non-numeric_ specs (boolean / color / enum / … members of the open `ParamSpec` union) and the serialized **Preset** object. The numeric spec is now frozen: `NumberParamSpec = { kind: 'number'; min; max; default; step?; integer? }`, the sole inhabited member of the open `kind`-discriminated union (issue #47).
 - Any GPU / instance-model data structures (the realtime GPU path is deferred entirely).
 - A **cross-param constraint** model — inter-param relationships the single-param **Parameter Schema** cannot express (e.g. `minRadius ≤ maxRadius`, params that only apply when another is enabled, sum-to-one groups). v1 **Randomize** rolls each unlocked numeric param independently within *its own* bounds, so it can hand a Sketch any in-bounds combination; a Sketch owns its own inter-param coherence inside `generate` (e.g. circles taking `Math.min`/`Math.max` of its two radii). A real constraint language is future work and deserves its own grilling before it is built.
 
