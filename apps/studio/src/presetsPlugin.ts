@@ -28,11 +28,18 @@
  * and the request type is a minimal structural interface rather than
  * `http.IncomingMessage`.
  */
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import type { Connect, Plugin } from "vite";
 
 /** URL prefix all preset middleware routes live under. */
 const API_PREFIX = "/__api/presets/";
+
+/**
+ * Logical URL prefix the sketches root is exposed at in dev, so a preset reads
+ * as a plain static file at `/sketches/{id}/presets/{name}.json` (ADR-0006:
+ * read-one is a static file, list + write are dev middleware).
+ */
+const STATIC_PREFIX = "/sketches/";
 
 /** Cap on request body size (1 MB) to prevent abuse. */
 const MAX_BODY_BYTES = 1_048_576;
@@ -235,34 +242,116 @@ export async function handlePresetRequest(
 }
 
 /**
- * Vite dev-server plugin exposing the preset write + list middleware. Dev-only
- * (`apply: 'serve'`); presets are stored as JSON alongside sketch code at
+ * A request handler bound to a `sketchesRoot`, as used by both dev plugins.
+ */
+type RequestHandler = (
+  req: PresetRequest,
+  res: ServerResponse,
+) => Promise<void>;
+
+/**
+ * Build a dev-only (`apply: 'serve'`) Vite plugin whose middleware runs
+ * `handler` for every request under `prefix` and passes everything else to the
+ * next middleware. Both preset plugins share this shape — only the prefix and
+ * handler differ — including the boundary cast (the real request structurally
+ * satisfies {@link PresetRequest}, but its `http.IncomingMessage` base is
+ * untyped without `@types/node`) and the 500 fallback for an unhandled reject.
+ */
+function devMiddlewarePlugin(
+  name: string,
+  prefix: string,
+  handler: RequestHandler,
+): Plugin {
+  return {
+    name,
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const presetReq = req as unknown as PresetRequest;
+        if (!(presetReq.url ?? "").startsWith(prefix)) {
+          next();
+          return;
+        }
+        handler(presetReq, res).catch((err: unknown) => {
+          console.error(`[${name}]`, err);
+          if (!res.headersSent) {
+            sendError(res, 500, "Internal server error");
+          }
+        });
+      });
+    },
+  };
+}
+
+/**
+ * Vite dev-server plugin exposing the preset write + list middleware. Dev-only;
+ * presets are stored as JSON alongside sketch code at
  * `{sketchesRoot}/{id}/presets/{name}.json`. `sketchesRoot` is supplied by
  * `vite.config.ts` and already points at the sketches directory.
  */
 export function presetsPlugin(sketchesRoot: string): Plugin {
-  return {
-    name: "harness:presets",
-    apply: "serve",
-    configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        // Boundary cast: the real request structurally satisfies PresetRequest,
-        // but its http.IncomingMessage base is untyped without @types/node.
-        const presetReq = req as unknown as PresetRequest;
-        const url = presetReq.url ?? "";
-        if (!url.startsWith(API_PREFIX)) {
-          next();
-          return;
-        }
-        handlePresetRequest(sketchesRoot, presetReq, res).catch(
-          (err: unknown) => {
-            console.error("[harness:presets]", err);
-            if (!res.headersSent) {
-              sendError(res, 500, "Internal server error");
-            }
-          },
-        );
-      });
-    },
-  };
+  return devMiddlewarePlugin("harness:presets", API_PREFIX, (req, res) =>
+    handlePresetRequest(sketchesRoot, req, res),
+  );
+}
+
+/**
+ * Serve a preset as a plain static file in dev. Resolves
+ * `/sketches/{id}/presets/{name}.json` to `{sketchesRoot}/{id}/presets/{name}.json`
+ * and returns its bytes. Exported for testing.
+ *
+ * Only that exact `{id}/presets/{name}.json` shape is served (every segment is
+ * slug-validated, which also blocks `..` traversal); anything else is a 404.
+ */
+export async function handleStaticRequest(
+  sketchesRoot: string,
+  req: PresetRequest,
+  res: ServerResponse,
+): Promise<void> {
+  const path = (req.url ?? "").split("?")[0] ?? "";
+  const segments = path.slice(STATIC_PREFIX.length).split("/").filter(Boolean);
+
+  // Exactly `{id}/presets/{name}.json`.
+  const [id, presetsSeg, file] = segments;
+  if (
+    segments.length !== 3 ||
+    presetsSeg !== "presets" ||
+    !file?.endsWith(".json")
+  ) {
+    sendError(res, 404, "Not found");
+    return;
+  }
+  const name = file.slice(0, -".json".length);
+  if (id === undefined || !isValidName(id) || !isValidName(name)) {
+    sendError(res, 404, "Not found");
+    return;
+  }
+
+  try {
+    const content = await readFile(presetFile(sketchesRoot, id, name), "utf-8");
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Content-Length": utf8.encode(content).length,
+    });
+    res.end(content);
+  } catch (err: unknown) {
+    if (isENOENT(err)) {
+      sendError(res, 404, "Not found");
+    } else {
+      throw err;
+    }
+  }
+}
+
+/**
+ * Vite dev-server plugin that exposes `{sketchesRoot}` at the logical URL
+ * `/sketches/`, so a preset is readable as a static file by every consumer
+ * (ADR-0006). Dev-only; `sketchesRoot` is supplied by `vite.config.ts`.
+ */
+export function sketchesStaticPlugin(sketchesRoot: string): Plugin {
+  return devMiddlewarePlugin(
+    "harness:sketches-static",
+    STATIC_PREFIX,
+    (req, res) => handleStaticRequest(sketchesRoot, req, res),
+  );
 }

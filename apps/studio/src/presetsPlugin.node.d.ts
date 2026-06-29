@@ -10,6 +10,7 @@
  */
 declare module "node:fs/promises" {
   export function readdir(path: string): Promise<string[]>;
+  export function readFile(path: string, encoding: "utf-8"): Promise<string>;
   export function mkdir(
     path: string,
     options: { recursive: boolean },
