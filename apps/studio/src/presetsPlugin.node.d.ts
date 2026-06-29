@@ -20,4 +20,14 @@ declare module "node:fs/promises" {
     data: string,
     encoding: "utf-8",
   ): Promise<void>;
+  // Used only by the tests, to stage and tear down a temp sketchesRoot.
+  export function mkdtemp(prefix: string): Promise<string>;
+  export function rm(
+    path: string,
+    options: { recursive: boolean; force: boolean },
+  ): Promise<void>;
+}
+
+declare module "node:os" {
+  export function tmpdir(): string;
 }
