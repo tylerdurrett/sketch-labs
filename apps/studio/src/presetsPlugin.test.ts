@@ -190,14 +190,37 @@ describe("presetsPlugin handlers", () => {
     await post(root, SKETCH, preset);
 
     const res = fakeRes();
+    let nextCalled = false;
+    const next = (): void => {
+      nextCalled = true;
+    };
     await handleStaticRequest(
       root,
       fakeReq(`/sketches/${SKETCH}/presets/warm.json`, "GET") as never,
       res as never,
+      next as never,
     );
     expect(res.status).toBe(200);
     expect(res.headers["Content-Type"]).toBe("application/json");
     expect(JSON.parse(res.body)).toEqual(preset);
+    expect(nextCalled).toBe(false);
+  });
+
+  it("falls through to the next middleware for an off-shape /sketches/ URL", async () => {
+    const res = fakeRes();
+    let nextCalled = false;
+    const next = (): void => {
+      nextCalled = true;
+    };
+    await handleStaticRequest(
+      root,
+      fakeReq(`/sketches/${SKETCH}/index.ts`, "GET") as never,
+      res as never,
+      next as never,
+    );
+    expect(nextCalled).toBe(true);
+    expect(res.status).toBe(0);
+    expect(res.headersSent).toBe(false);
   });
 
   it("isValidName enforces the lowercase-slug rule", () => {

@@ -7,8 +7,9 @@
  * - `POST /__api/presets/{id}` — persist a Preset JSON at
  *   `{sketchesRoot}/{id}/presets/{name}.json` (name in the JSON-body `name`
  *   field), creating the `presets/` dir recursively. The bytes are owned by
- *   core's Preset model (#61): this writes them back verbatim (re-serialized for
- *   stable formatting) and performs no shape transformation.
+ *   core's Preset model (#61): this writes them back verbatim, pretty-printed
+ *   (2-space indent) for stable formatting without reordering keys or otherwise
+ *   reshaping the parsed JSON.
  * - `GET /__api/presets/{id}` — list the sketch's preset names (sorted); a
  *   missing dir returns `[]` (ENOENT).
  *
@@ -106,13 +107,14 @@ function readBody(req: PresetRequest): Promise<string> {
     const chunks: string[] = [];
     let size = 0;
     req.on("data", (chunk) => {
-      size += chunk.length;
+      const text = chunk.toString("utf-8");
+      size += utf8.encode(text).length;
       if (size > MAX_BODY_BYTES) {
         reject(new Error("Request body too large"));
         req.destroy();
         return;
       }
-      chunks.push(chunk.toString("utf-8"));
+      chunks.push(text);
     });
     req.on("end", () => resolve(chunks.join("")));
     req.on("error", reject);
@@ -157,8 +159,8 @@ async function handleList(
 /**
  * Write a Preset JSON, creating `presets/` if needed. The `name` is taken from
  * the request body's `name` field (the record's filename stem) and validated as
- * a slug. Bytes are owned by core (#61) — re-serialized for stable formatting,
- * never reshaped.
+ * a slug. Bytes are owned by core (#61) — pretty-printed verbatim (2-space
+ * indent, no key canonicalization), never reshaped.
  */
 async function handleWrite(
   sketchesRoot: string,
@@ -247,6 +249,7 @@ export async function handlePresetRequest(
 type RequestHandler = (
   req: PresetRequest,
   res: ServerResponse,
+  next: Connect.NextFunction,
 ) => Promise<void>;
 
 /**
@@ -272,7 +275,7 @@ function devMiddlewarePlugin(
           next();
           return;
         }
-        handler(presetReq, res).catch((err: unknown) => {
+        handler(presetReq, res, next).catch((err: unknown) => {
           console.error(`[${name}]`, err);
           if (!res.headersSent) {
             sendError(res, 500, "Internal server error");
@@ -301,12 +304,15 @@ export function presetsPlugin(sketchesRoot: string): Plugin {
  * and returns its bytes. Exported for testing.
  *
  * Only that exact `{id}/presets/{name}.json` shape is served (every segment is
- * slug-validated, which also blocks `..` traversal); anything else is a 404.
+ * slug-validated, which also blocks `..` traversal). Off-shape `/sketches/`
+ * requests fall through to the next middleware (Vite) so it can serve other
+ * assets/source under the prefix; a missing preset file is a real 404.
  */
 export async function handleStaticRequest(
   sketchesRoot: string,
   req: PresetRequest,
   res: ServerResponse,
+  next: Connect.NextFunction,
 ): Promise<void> {
   const path = (req.url ?? "").split("?")[0] ?? "";
   const segments = path.slice(STATIC_PREFIX.length).split("/").filter(Boolean);
@@ -318,12 +324,12 @@ export async function handleStaticRequest(
     presetsSeg !== "presets" ||
     !file?.endsWith(".json")
   ) {
-    sendError(res, 404, "Not found");
+    next();
     return;
   }
   const name = file.slice(0, -".json".length);
   if (id === undefined || !isValidName(id) || !isValidName(name)) {
-    sendError(res, 404, "Not found");
+    next();
     return;
   }
 
@@ -352,6 +358,6 @@ export function sketchesStaticPlugin(sketchesRoot: string): Plugin {
   return devMiddlewarePlugin(
     "harness:sketches-static",
     STATIC_PREFIX,
-    (req, res) => handleStaticRequest(sketchesRoot, req, res),
+    (req, res, next) => handleStaticRequest(sketchesRoot, req, res, next),
   );
 }
