@@ -21,7 +21,7 @@
  *   saved from, defeating the entire point of a Preset.
  */
 
-import type { Params, Seed } from './sketch'
+import type { Params, ParamSchema, Seed } from './sketch'
 
 /**
  * The current (and only) Preset schema version.
@@ -182,3 +182,66 @@ export function deserialize(value: unknown): Preset {
   }
 }
 
+/**
+ * The live Studio/engine state a Preset reconciles INTO — `params`, `seed`, and
+ * `locks` (still the SORTED array; the Studio is the one that turns it into a
+ * `Set<string>` when it adopts this result).
+ */
+export interface PresetState {
+  /** The reconciled inhabited param values. */
+  params: Params
+  /** The Preset's {@link Seed}, passed through unchanged. */
+  seed: Seed
+  /** The Preset's SORTED locked keys, passed through unchanged. */
+  locks: string[]
+}
+
+/**
+ * Reconcile a {@link Preset} against a Sketch's CURRENT schema — the
+ * schema-authoritative load.
+ *
+ * The schema, not the stored record, is the authority on which keys exist. This
+ * is what lets a Sketch's knobs evolve (rename, add, remove) without old Presets
+ * becoming poison. Three rules, applied by iterating the SCHEMA (never the
+ * preset's params):
+ *
+ * - DROP unknown keys: a param in the Preset but ABSENT from the schema is
+ *   discarded. It falls out naturally — iterating schema keys never visits it.
+ * - DEFAULT missing keys: a schema key ABSENT from the Preset is filled from its
+ *   spec `default` (the same pattern as `defaultParams` in `sketch.ts`).
+ * - LOAD out-of-bounds AS-IS, UNCLAMPED: a stored value outside the spec's
+ *   `[min, max]` is taken verbatim. Clamping would silently reproduce a
+ *   DIFFERENT frame than the Preset was saved from — exact-image fidelity beats
+ *   range hygiene. (Range hygiene is the control panel's live concern.)
+ *
+ * Because Remotion and the Studio both run THIS function, a Preset reconciles
+ * identically in every consumer — the reason this lives in `core`.
+ *
+ * `version` is re-asserted here so the public apply path can never run on a
+ * wrong-version record even if a caller skipped {@link deserialize}. `seed` and
+ * the sorted `locks` pass through untouched — `locks` does not affect the frame
+ * (Lock is Randomize-exclusion only), and the Studio converts it to a Set.
+ *
+ * @param schema - The Sketch's CURRENT Parameter Schema — the authority.
+ * @param preset - The Preset record to load.
+ * @returns The reconciled {@link PresetState}.
+ * @throws If `preset.version` is not {@link PRESET_VERSION}.
+ */
+export function applyPreset(schema: ParamSchema, preset: Preset): PresetState {
+  if (preset.version !== PRESET_VERSION) {
+    throw new Error(
+      `applyPreset: unsupported Preset version ${String(preset.version)} (expected ${PRESET_VERSION})`,
+    )
+  }
+  const params: Params = {}
+  for (const [key, spec] of Object.entries(schema)) {
+    // Prefer the stored value (loaded AS-IS, unclamped); else fall back to the
+    // spec default. Iterating the schema is what drops preset-only keys.
+    params[key] = key in preset.params ? preset.params[key] : spec.default
+  }
+  return {
+    params,
+    seed: preset.seed,
+    locks: preset.locks,
+  }
+}
