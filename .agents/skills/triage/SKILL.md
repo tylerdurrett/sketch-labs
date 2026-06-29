@@ -67,7 +67,7 @@ Clear `needs-triage` and apply one of the seven canonical state labels (or, for 
 | `ready-for-human` | Needs judgment, external access, design decisions, or manual testing an agent can't safely do. | Note why in a comment. | Maintainer. |
 | `deferred` | Intentionally parked. | Short comment naming the trigger and the unpark condition. | `Stop.` |
 | `wontfix` (bug) | Will not be actioned. | Polite explanation, close. | `Stop.` |
-| `wontfix` (enhancement) | Will not be actioned. | Write to `.out-of-scope/` and link from the closing comment (see [OUT-OF-SCOPE.md](OUT-OF-SCOPE.md)). | `Stop.` |
+| `wontfix` (enhancement) | Will not be actioned. | Close with a brief explanatory comment — the closed issue **is** the record. Do **not** write a repo file by default. Only when the maintainer explicitly wants the reasoning preserved in-tree for a durable, likely-to-recur rejection (not a deferral — see the `deferred` row), offer to write to `.out-of-scope/`, and do so only on a yes (see [OUT-OF-SCOPE.md](OUT-OF-SCOPE.md)). | `Stop.` |
 
 Apply the transition in one call (omit `--add-label` for `size:feature` / `size:initiative` happy path):
 
