@@ -4,6 +4,21 @@ import { defineConfig } from "vite";
 import { presetsPlugin, sketchesStaticPlugin } from "./src/presetsPlugin";
 
 /**
+ * Resolve a path relative to THIS config file into an absolute filesystem path,
+ * without `node:url`/`node:path` (kept out by the supply-chain lockdown, so no
+ * `@types/node` either). On Windows `URL.pathname` is the broken `/C:/…` form;
+ * strip the leading slash when a drive letter follows so the path is correct
+ * cross-platform. On POSIX the drive-letter branch never matches, so the result
+ * is unchanged.
+ */
+function resolveFromHere(relativePath: string): string {
+  const pathname = decodeURIComponent(
+    new URL(relativePath, import.meta.url).pathname,
+  );
+  return /^\/[A-Za-z]:/.test(pathname) ? pathname.slice(1) : pathname;
+}
+
+/**
  * Absolute path to the folder that holds every Sketch (one folder per Sketch,
  * each colocating its code and `presets/` per ADR-0006). This is the single knob
  * the Presets slice's write middleware and dev static-serve mapping will resolve
@@ -12,12 +27,12 @@ import { presetsPlugin, sketchesStaticPlugin } from "./src/presetsPlugin";
  * is wired up yet (later tasks in slice #8).
  *
  * Resolved relative to THIS config file (`import.meta.url`), never the process
- * CWD, so it stays correct however Vite is launched. Uses the standard WHATWG
- * `URL` resolver rather than `node:path`/`node:url` so it needs no `@types/node`
- * (the repo's supply-chain lockdown keeps that dependency out).
+ * CWD, so it stays correct however Vite is launched. The WHATWG `URL` resolver
+ * (rather than `node:path`/`node:url`) keeps `@types/node` out per the repo's
+ * supply-chain lockdown; `resolveFromHere` makes it Windows-safe.
  */
-export const sketchesRoot = decodeURIComponent(
-  new URL("../../packages/core/src/sketches", import.meta.url).pathname,
+export const sketchesRoot = resolveFromHere(
+  "../../packages/core/src/sketches",
 );
 
 /**
@@ -25,9 +40,7 @@ export const sketchesRoot = decodeURIComponent(
  * `server.fs.allow` so Vite is permitted to serve files under `sketchesRoot`,
  * which sits outside the studio's own root in `packages/core` (ADR-0006).
  */
-const workspaceRoot = decodeURIComponent(
-  new URL("../..", import.meta.url).pathname,
-);
+const workspaceRoot = resolveFromHere("../..");
 
 export default defineConfig({
   plugins: [
