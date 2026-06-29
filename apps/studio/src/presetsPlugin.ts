@@ -248,6 +248,7 @@ export async function handlePresetRequest(
 type RequestHandler = (
   req: PresetRequest,
   res: ServerResponse,
+  next: Connect.NextFunction,
 ) => Promise<void>;
 
 /**
@@ -273,7 +274,7 @@ function devMiddlewarePlugin(
           next();
           return;
         }
-        handler(presetReq, res).catch((err: unknown) => {
+        handler(presetReq, res, next).catch((err: unknown) => {
           console.error(`[${name}]`, err);
           if (!res.headersSent) {
             sendError(res, 500, "Internal server error");
@@ -302,12 +303,15 @@ export function presetsPlugin(sketchesRoot: string): Plugin {
  * and returns its bytes. Exported for testing.
  *
  * Only that exact `{id}/presets/{name}.json` shape is served (every segment is
- * slug-validated, which also blocks `..` traversal); anything else is a 404.
+ * slug-validated, which also blocks `..` traversal). Off-shape `/sketches/`
+ * requests fall through to the next middleware (Vite) so it can serve other
+ * assets/source under the prefix; a missing preset file is a real 404.
  */
 export async function handleStaticRequest(
   sketchesRoot: string,
   req: PresetRequest,
   res: ServerResponse,
+  next: Connect.NextFunction,
 ): Promise<void> {
   const path = (req.url ?? "").split("?")[0] ?? "";
   const segments = path.slice(STATIC_PREFIX.length).split("/").filter(Boolean);
@@ -319,12 +323,12 @@ export async function handleStaticRequest(
     presetsSeg !== "presets" ||
     !file?.endsWith(".json")
   ) {
-    sendError(res, 404, "Not found");
+    next();
     return;
   }
   const name = file.slice(0, -".json".length);
   if (id === undefined || !isValidName(id) || !isValidName(name)) {
-    sendError(res, 404, "Not found");
+    next();
     return;
   }
 
@@ -353,6 +357,6 @@ export function sketchesStaticPlugin(sketchesRoot: string): Plugin {
   return devMiddlewarePlugin(
     "harness:sketches-static",
     STATIC_PREFIX,
-    (req, res) => handleStaticRequest(sketchesRoot, req, res),
+    (req, res, next) => handleStaticRequest(sketchesRoot, req, res, next),
   );
 }
