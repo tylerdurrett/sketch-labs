@@ -7,8 +7,9 @@
  * - `POST /__api/presets/{id}` — persist a Preset JSON at
  *   `{sketchesRoot}/{id}/presets/{name}.json` (name in the JSON-body `name`
  *   field), creating the `presets/` dir recursively. The bytes are owned by
- *   core's Preset model (#61): this writes them back verbatim (re-serialized for
- *   stable formatting) and performs no shape transformation.
+ *   core's Preset model (#61): this writes them back verbatim, pretty-printed
+ *   (2-space indent) for stable formatting without reordering keys or otherwise
+ *   reshaping the parsed JSON.
  * - `GET /__api/presets/{id}` — list the sketch's preset names (sorted); a
  *   missing dir returns `[]` (ENOENT).
  *
@@ -158,8 +159,8 @@ async function handleList(
 /**
  * Write a Preset JSON, creating `presets/` if needed. The `name` is taken from
  * the request body's `name` field (the record's filename stem) and validated as
- * a slug. Bytes are owned by core (#61) — re-serialized for stable formatting,
- * never reshaped.
+ * a slug. Bytes are owned by core (#61) — pretty-printed verbatim (2-space
+ * indent, no key canonicalization), never reshaped.
  */
 async function handleWrite(
   sketchesRoot: string,
