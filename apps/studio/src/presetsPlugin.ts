@@ -106,13 +106,14 @@ function readBody(req: PresetRequest): Promise<string> {
     const chunks: string[] = [];
     let size = 0;
     req.on("data", (chunk) => {
-      size += chunk.length;
+      const text = chunk.toString("utf-8");
+      size += utf8.encode(text).length;
       if (size > MAX_BODY_BYTES) {
         reject(new Error("Request body too large"));
         req.destroy();
         return;
       }
-      chunks.push(chunk.toString("utf-8"));
+      chunks.push(text);
     });
     req.on("end", () => resolve(chunks.join("")));
     req.on("error", reject);
