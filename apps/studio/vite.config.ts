@@ -1,6 +1,8 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+import { presetsPlugin, sketchesStaticPlugin } from "./src/presetsPlugin";
+
 /**
  * Absolute path to the folder that holds every Sketch (one folder per Sketch,
  * each colocating its code and `presets/` per ADR-0006). This is the single knob
@@ -18,6 +20,29 @@ export const sketchesRoot = decodeURIComponent(
   new URL("../../packages/core/src/sketches", import.meta.url).pathname,
 );
 
+/**
+ * The pnpm workspace root (this config lives at `<root>/apps/studio/`). Added to
+ * `server.fs.allow` so Vite is permitted to serve files under `sketchesRoot`,
+ * which sits outside the studio's own root in `packages/core` (ADR-0006).
+ */
+const workspaceRoot = decodeURIComponent(
+  new URL("../..", import.meta.url).pathname,
+);
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Dev-only preset write + list middleware, and the read-one static-serve
+    // mapping that exposes sketchesRoot at /sketches/ (ADR-0006). Both resolve
+    // against the single sketchesRoot knob above.
+    presetsPlugin(sketchesRoot),
+    sketchesStaticPlugin(sketchesRoot),
+  ],
+  server: {
+    fs: {
+      // Allow serving sketch/preset files from packages/core, outside the
+      // studio's own Vite root.
+      allow: [workspaceRoot],
+    },
+  },
 });
