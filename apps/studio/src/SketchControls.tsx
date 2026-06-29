@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { defaultParams, newSeed, type Sketch } from "@harness/core";
+import { defaultParams, newSeed, randomize, type Sketch } from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
 import { LiveCanvas } from "./LiveCanvas";
@@ -42,6 +42,17 @@ export function SketchControls({ sketch }: SketchControlsProps) {
     setParams((prev) => ({ ...prev, [key]: value }));
   };
 
+  // New seed: roll a fresh arrangement, leaving every param value untouched —
+  // the seed axis is independent of the param (Randomize) axis.
+  const rollSeed = () => setSeed(newSeed(Math.random));
+
+  // Randomize: re-roll the unlocked numeric params. The engine reads `locks`
+  // (sub-section 3 wires the real lock set; an empty set rolls everything for
+  // now) and a `Math.random`-backed source — no roll logic lives here.
+  const rollParams = () => {
+    setParams((prev) => randomize(sketch.schema, prev, new Set<string>(), Math.random));
+  };
+
   return (
     <div className="sketch-controls">
       <ControlPanel
@@ -49,6 +60,14 @@ export function SketchControls({ sketch }: SketchControlsProps) {
         params={params}
         onChange={setParam}
       />
+      <div className="sketch-controls__actions">
+        <button type="button" className="action-button" onClick={rollSeed}>
+          New seed
+        </button>
+        <button type="button" className="action-button" onClick={rollParams}>
+          Randomize
+        </button>
+      </div>
       <div className="seed-box">
         <label className="seed-box__label" htmlFor="sketch-seed">
           seed

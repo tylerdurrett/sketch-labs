@@ -80,6 +80,28 @@
 }
 
 /*
+ * The two randomness-axis action buttons: "New seed" (reshuffle the
+ * arrangement) and "Randomize" (re-roll the params). A horizontal row above
+ * the seed box.
+ */
+.sketch-controls__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.action-button {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.action-button:hover {
+  border-color: #333;
+}
+
+/*
  * The seed box: the first randomness axis. A plain numeric input bound to the
  * studio's seed state — copyable groundwork for Presets (#8). Editing it
  * re-renders the canvas without touching any param value (the axes are
