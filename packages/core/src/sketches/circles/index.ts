@@ -13,16 +13,16 @@
  * function of `(params, seed, t)`.
  */
 
-import { createScene } from '../scene'
-import type { Scene } from '../scene'
-import { createRandom } from '../random'
+import { createScene } from '../../scene'
+import type { Scene } from '../../scene'
+import { createRandom } from '../../random'
 import type {
   NumberParamSpec,
   Params,
   Seed,
   StatelessSketch,
-} from '../sketch'
-import type { Point, Polyline } from '../types'
+} from '../../sketch'
+import type { Point, Polyline } from '../../types'
 
 /** Coordinate-space extent the Scene is baked into (square, unitless). */
 const WIDTH = 1000
