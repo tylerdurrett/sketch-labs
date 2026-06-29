@@ -115,6 +115,70 @@ export function defaultParams(schema: ParamSchema): Params {
 }
 
 /**
+ * Roll a fresh set of param values, leaving locked and non-rolled keys untouched
+ * — the engine behind the Studio's Randomize button. Pure and headless, a sibling
+ * of {@link defaultParams}; the randomness arrives INJECTED as `rand` so the
+ * function is deterministically testable (tests pass a scripted stub; the Studio
+ * later passes a `Math.random`-backed one — same shape as `value()` in
+ * `random.ts`).
+ *
+ * For each schema key whose spec is a numeric param (`kind === 'number'`) AND is
+ * NOT locked, a new value is rolled uniformly across the spec's `[min, max]` via
+ * `min + rand() * (max - min)`, then `Math.round`ed iff the spec's `integer` is
+ * `true`. The spec's `step` is IGNORED — `step` is a UI drag-granularity hint, not
+ * a value-domain constraint (see {@link NumberParamSpec}).
+ *
+ * Everything else passes through from `params` UNCHANGED: locked params (Lock is
+ * Randomize-exclusion only), and any non-numeric / future-kind specs the `kind`
+ * switch doesn't roll. This is PER-PARAM only — there are deliberately NO
+ * cross-param constraints (CONTEXT.md "Deliberately deferred"); a Sketch owns its
+ * own inter-param coherence inside `generate`.
+ *
+ * @param schema - The Sketch's Parameter Schema.
+ * @param params - The current inhabited param values; NOT mutated.
+ * @param locks - The set of locked param keys; only READ (the Studio owns the
+ *   lock state). A locked key keeps its current value.
+ * @param rand - Injected uniform `[0, 1)` source (matches `value()` in
+ *   `random.ts`).
+ * @returns A NEW {@link Params}; unlocked numeric keys re-rolled, the rest as-is.
+ */
+export function randomize(
+  schema: ParamSchema,
+  params: Params,
+  locks: ReadonlySet<string>,
+  rand: () => number,
+): Params {
+  const next: Params = { ...params }
+  for (const [key, spec] of Object.entries(schema)) {
+    if (locks.has(key)) continue
+    if (spec.kind === 'number') {
+      const rolled = spec.min + rand() * (spec.max - spec.min)
+      next[key] = spec.integer ? Math.round(rolled) : rolled
+    }
+  }
+  return next
+}
+
+/**
+ * Produce a fresh random {@link Seed} — the engine behind the Studio's re-seed
+ * ("roll the dice on the arrangement"). Pure and headless, a sibling of
+ * {@link defaultParams}, with randomness INJECTED as `rand` for the same
+ * deterministic-testability reason as {@link randomize}.
+ *
+ * Returns a RANDOM integer (not monotonic): `alea` takes a number seed natively,
+ * and re-seeding is meant to land somewhere new, not advance a counter. Re-seeding
+ * is INDEPENDENT of Randomize — a new seed reshuffles a Sketch's internal
+ * randomness while leaving every param value untouched.
+ *
+ * @param rand - Injected uniform `[0, 1)` source (matches `value()` in
+ *   `random.ts`).
+ * @returns A fresh numeric {@link Seed}.
+ */
+export function newSeed(rand: () => number): Seed {
+  return Math.floor(rand() * Number.MAX_SAFE_INTEGER)
+}
+
+/**
  * How the Harness should drive time `t` for a Sketch, declared alongside the
  * Parameter Schema (ADR-0002). Its ABSENCE means the Sketch is static — a single
  * frame, with no timeline.
