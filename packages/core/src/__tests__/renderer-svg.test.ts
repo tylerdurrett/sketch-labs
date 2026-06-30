@@ -231,6 +231,15 @@ describe('renderToSVG', () => {
     expect(svg).toMatch(/<svg\b[^>]*xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)
   })
 
+  it('emits no blank line between <svg> and </svg> for an empty Scene', () => {
+    const svg = renderToSVG({ space, primitives: [] })
+
+    // The closing tag follows the open tag directly — no empty `paths` line.
+    expect(svg).toContain('>\n</svg>')
+    // No doubled newline (which would be a blank line) anywhere.
+    expect(svg).not.toMatch(/\n\n/)
+  })
+
   it('contributes no <path> for a Primitive with fewer than one point', () => {
     const scene: Scene = {
       space,
