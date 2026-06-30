@@ -2,8 +2,10 @@ import { useRef, useState } from "react";
 
 import {
   applyPreset,
+  buildReproMetadata,
   defaultParams,
   exportFilename,
+  insertPngMetadata,
   newSeed,
   randomize,
   renderToSVG,
@@ -115,9 +117,30 @@ export function SketchControls({ sketch }: SketchControlsProps) {
     // Time-gate the `-t{t}` filename segment on `sketch.time`: a time-driven
     // Sketch carries its captured moment, a static one omits `t` entirely.
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
+    // The reproduction envelope embedded into BOTH exports (issue #76), built
+    // once from the same displayed `(params, seed, locks, t)` spine.
+    const metadata = buildReproMetadata({
+      sketchId: sketch.id,
+      seed,
+      params,
+      locks,
+      t,
+    });
     canvas.toBlob((blob) => {
       if (blob === null) return;
-      downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "png"));
+      const filename = exportFilename({ sketchId: sketch.id, seed, t }, "png");
+      // Splice the iTXt reproduction chunk into the PNG bytes before saving, so
+      // the downloaded file traces back to this exact frame. Byte work is core's
+      // (`insertPngMetadata`); the Studio only does the Blob ⇄ ArrayBuffer dance.
+      void blob.arrayBuffer().then((buffer) => {
+        const withMeta = insertPngMetadata(new Uint8Array(buffer), metadata);
+        // `withMeta` spans its whole backing buffer (core's `concat` allocates a
+        // fresh, offset-0 array), so `.buffer` is exactly these bytes.
+        downloadBlob(
+          new Blob([withMeta.buffer as ArrayBuffer], { type: "image/png" }),
+          filename,
+        );
+      });
     }, "image/png");
   };
 
@@ -139,7 +162,17 @@ export function SketchControls({ sketch }: SketchControlsProps) {
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
     const scene = sketch.generate(params, seed, t ?? 0);
-    const svg = renderToSVG(scene);
+    // Embed the same reproduction envelope as a <metadata> element (issue #76),
+    // built from the displayed `(params, seed, locks, t)` spine — core's
+    // `renderToSVG` does the injection (ADR-0004: serialization lives in core).
+    const metadata = buildReproMetadata({
+      sketchId: sketch.id,
+      seed,
+      params,
+      locks,
+      t,
+    });
+    const svg = renderToSVG(scene, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "svg"));
   };
