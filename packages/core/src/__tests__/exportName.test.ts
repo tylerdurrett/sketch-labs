@@ -23,6 +23,17 @@ describe('exportFilename', () => {
     )
   })
 
+  it('caps the precision of a long-fraction t (rounds, no trailing-zero pad)', () => {
+    // A noisy float must not bloat the name: round to a few decimals and trim
+    // the padding so the segment stays compact and stable.
+    expect(
+      exportFilename({ sketchId: 'circles', seed: 42, t: 2.5000000001 }, 'png'),
+    ).toBe('circles-seed42-t2.5.png')
+    expect(
+      exportFilename({ sketchId: 'circles', seed: 42, t: 1 / 3 }, 'png'),
+    ).toBe('circles-seed42-t0.333.png')
+  })
+
   it('accepts a string seed verbatim', () => {
     expect(exportFilename({ sketchId: 'waves', seed: 'abc' }, 'png')).toBe(
       'waves-seedabc.png',
