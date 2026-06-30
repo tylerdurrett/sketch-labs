@@ -21,6 +21,7 @@
  */
 
 import type { Scene } from './scene'
+import { escapeAttr, round } from './svgHelpers'
 
 /**
  * The minimal structural Canvas2D port the {@link renderToCanvas} renderer draws
@@ -109,16 +110,6 @@ export function renderToCanvas(ctx: Canvas2DContext, scene: Scene): void {
 
     ctx.restore()
   }
-}
-
-/** Round a number to 4 decimal places to keep SVG output compact. */
-function round(n: number): number {
-  return Math.round(n * 10000) / 10000
-}
-
-/** Escape XML special characters in an attribute value (e.g. a color string). */
-function escapeAttr(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 }
 
 /**
