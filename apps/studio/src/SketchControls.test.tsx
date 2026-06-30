@@ -1,21 +1,47 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, useImperativeHandle, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ParamSchema, Preset, Seed } from "@harness/core";
 
+import type { LiveCanvasHandle } from "./LiveCanvas";
 import { SketchControls } from "./SketchControls";
+
+// The fake canvas node the mocked LiveCanvas hands back through its handle, with
+// a `toBlob` the export test drives. Reassigned per-test so each case controls
+// the blob the export receives (or a null blob to exercise the guard).
+let fakeCanvasToBlob: HTMLCanvasElement["toBlob"];
+// The current-t the mocked handle reports — the export's `-t{t}` source.
+let fakeCurrentT = 0;
 
 // LiveCanvas is a browser-only sink (canvas2d, ResizeObserver, matchMedia) and
 // is NOT under test here — these are wiring tests for the control state. Replace
-// it with a probe that surfaces the `seed` it is fed into the DOM, so we can
-// assert the seed the canvas receives without polyfilling the whole canvas
-// stack. The seed feeding the canvas IS the wiring we care about.
+// it with a probe that surfaces the `seed` it is fed into the DOM AND wires the
+// `handleRef` to a fake canvas + current-t, so we can assert the seed the canvas
+// receives AND drive the PNG export without polyfilling the whole canvas stack.
 vi.mock("./LiveCanvas", () => ({
-  LiveCanvas: ({ seed }: { seed: Seed }) => (
-    <div data-testid="canvas-seed">{String(seed)}</div>
-  ),
+  LiveCanvas: ({
+    seed,
+    handleRef,
+  }: {
+    seed: Seed;
+    handleRef?: Ref<LiveCanvasHandle>;
+  }) => {
+    useImperativeHandle(handleRef, () => ({
+      getCanvas: () =>
+        ({ toBlob: fakeCanvasToBlob }) as unknown as HTMLCanvasElement,
+      getCurrentT: () => fakeCurrentT,
+    }));
+    return <div data-testid="canvas-seed">{String(seed)}</div>;
+  },
+}));
+
+// downloadBlob is the DOM-coupled file-save seam (tested on its own); stub it so
+// the export wiring test can capture the (blob, filename) it is handed.
+const downloadBlob = vi.fn<[Blob, string], void>();
+vi.mock("./downloadBlob", () => ({
+  downloadBlob: (blob: Blob, filename: string) => downloadBlob(blob, filename),
 }));
 
 // The Preset network client is the seam under test for the save/reload wiring:
@@ -80,6 +106,13 @@ beforeEach(() => {
   listPresets.mockResolvedValue([]);
   loadPreset.mockReset();
   savePreset.mockReset().mockResolvedValue(undefined);
+  // Export defaults: a toBlob that yields a non-null PNG blob, t = 0, and a fresh
+  // downloadBlob spy. Per-test overrides drive the time-gated / guard cases.
+  fakeCurrentT = 0;
+  fakeCanvasToBlob = ((cb: BlobCallback) => {
+    cb(new Blob(["png"], { type: "image/png" }));
+  }) as HTMLCanvasElement["toBlob"];
+  downloadBlob.mockReset();
 });
 
 afterEach(() => {
@@ -364,5 +397,56 @@ describe("SketchControls — preset save/reload wiring", () => {
     clickButton(el, "Save");
     await flush();
     expect(savePreset).not.toHaveBeenCalled();
+  });
+});
+
+describe("SketchControls — PNG export wiring", () => {
+  // A static sketch (no time) for the no-`-t` filename case.
+  const staticSketch = (id: string) =>
+    sketchWith(id, { radius: numberSpec({ default: 10 }) });
+
+  // A time-driven sketch so the export carries a `-t{t}` segment.
+  const timedSketch = (id: string) => {
+    const base = staticSketch(id) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      time: { duration: 4, mode: "loop" },
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  it("snapshots the live canvas and downloads a PNG named for a STATIC sketch (no -t)", () => {
+    const el = mount(<SketchControls sketch={staticSketch("circles")} />);
+    const seed = (el.querySelector("#sketch-seed") as HTMLInputElement).value;
+
+    clickButton(el, "Export PNG");
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    const [blob, filename] = downloadBlob.mock.calls[0]!;
+    expect(blob).toBeInstanceOf(Blob);
+    // Static sketch ⇒ no `-t` segment.
+    expect(filename).toBe(`circles-seed${seed}.png`);
+  });
+
+  it("includes the captured -t{t} segment for a time-driven sketch", () => {
+    fakeCurrentT = 2.5; // the handle reports the displayed moment
+    const el = mount(<SketchControls sketch={timedSketch("waves")} />);
+    const seed = (el.querySelector("#sketch-seed") as HTMLInputElement).value;
+
+    clickButton(el, "Export PNG");
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    const [, filename] = downloadBlob.mock.calls[0]!;
+    expect(filename).toBe(`waves-seed${seed}-t2.5.png`);
+  });
+
+  it("does not download when toBlob yields a null blob (export unsupported)", () => {
+    fakeCanvasToBlob = ((cb: BlobCallback) => {
+      cb(null);
+    }) as HTMLCanvasElement["toBlob"];
+    const el = mount(<SketchControls sketch={staticSketch("circles")} />);
+
+    clickButton(el, "Export PNG");
+
+    expect(downloadBlob).not.toHaveBeenCalled();
   });
 });

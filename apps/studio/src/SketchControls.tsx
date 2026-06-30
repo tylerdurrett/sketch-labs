@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   applyPreset,
   defaultParams,
+  exportFilename,
   newSeed,
   randomize,
   type Preset,
@@ -10,7 +11,8 @@ import {
 } from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
-import { LiveCanvas } from "./LiveCanvas";
+import { downloadBlob } from "./downloadBlob";
+import { LiveCanvas, type LiveCanvasHandle } from "./LiveCanvas";
 import { PresetControls } from "./PresetControls";
 
 /**
@@ -53,6 +55,11 @@ export function SketchControls({ sketch }: SketchControlsProps) {
   const [seed, setSeed] = useState(() => newSeed(Math.random));
   const [locks, setLocks] = useState<ReadonlySet<string>>(() => new Set());
 
+  // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
+  // export snapshots. It is a ref, not state — export reads it imperatively on a
+  // button click, never during render.
+  const canvasHandle = useRef<LiveCanvasHandle>(null);
+
   const setParam = (key: string, value: number) => {
     setParams((prev) => ({ ...prev, [key]: value }));
   };
@@ -91,6 +98,28 @@ export function SketchControls({ sketch }: SketchControlsProps) {
     setLocks(new Set(state.locks));
   };
 
+  // Export the CURRENTLY DISPLAYED frame as a PNG — a one-shot user action that
+  // lives OUTSIDE the per-frame generate→bake→draw loop (it never re-renders or
+  // re-generates). "Option A": snapshot the live canvas's backing-store pixels
+  // (already DPR-sized by sizeToBox), so a retina user gets the crisp image they
+  // see, not a downscaled one. `toBlob('image/png')` reads those pixels as-is.
+  //
+  // The filename's `-t{t}` segment is TIME-GATED on `sketch.time`: a time-driven
+  // Sketch passes the captured `t` (the last-drawn moment from the handle), a
+  // static Sketch omits `t` entirely so the name carries no segment.
+  const exportPng = () => {
+    const handle = canvasHandle.current;
+    const canvas = handle?.getCanvas();
+    if (handle == null || canvas == null) return;
+    // Time-gate the `-t{t}` filename segment on `sketch.time`: a time-driven
+    // Sketch carries its captured moment, a static one omits `t` entirely.
+    const t = sketch.time === undefined ? undefined : handle.getCurrentT();
+    canvas.toBlob((blob) => {
+      if (blob === null) return;
+      downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "png"));
+    }, "image/png");
+  };
+
   return (
     <div className="sketch-controls">
       <ControlPanel
@@ -114,6 +143,16 @@ export function SketchControls({ sketch }: SketchControlsProps) {
           locks={locks}
           onReload={reloadPreset}
         />
+        {/*
+         * Export controls — the shared home the SVG export sibling reuses. PNG is
+         * the first path: it snapshots the live canvas's displayed frame (no
+         * re-render, no offscreen canvas).
+         */}
+        <div className="export-controls">
+          <button type="button" className="action-button" onClick={exportPng}>
+            Export PNG
+          </button>
+        </div>
       </div>
       <div className="seed-box">
         <label className="seed-box__label" htmlFor="sketch-seed">
@@ -131,7 +170,12 @@ export function SketchControls({ sketch }: SketchControlsProps) {
           }}
         />
       </div>
-      <LiveCanvas sketch={sketch} params={params} seed={seed} />
+      <LiveCanvas
+        handleRef={canvasHandle}
+        sketch={sketch}
+        params={params}
+        seed={seed}
+      />
     </div>
   );
 }
