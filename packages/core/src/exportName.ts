@@ -34,10 +34,12 @@ export interface ExportNameParts {
   seed: Seed
   /**
    * The captured time in seconds. Supplied ONLY for a time-driven Sketch
-   * (`sketch.time` present); OMIT it for a static Sketch so the name carries no
-   * `-t{t}` segment. An omitted value is the static case, NOT `t = 0`.
+   * (`sketch.time` present); OMIT it (or pass `undefined`) for a static Sketch so
+   * the name carries no `-t{t}` segment. An absent value is the static case, NOT
+   * `t = 0`. Explicit `undefined` is accepted so a caller can pass a computed
+   * `time === undefined ? undefined : t` directly under `exactOptionalPropertyTypes`.
    */
-  t?: number
+  t?: number | undefined
 }
 
 /**

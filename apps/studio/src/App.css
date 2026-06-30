@@ -186,6 +186,17 @@
 }
 
 /*
+ * The export controls (#74): the shared home for export buttons, sitting in the
+ * actions column alongside the randomness buttons and the Preset surface. PNG is
+ * the first path; the SVG export sibling adds its button to this same row. Reuses
+ * the shared `.action-button` styling.
+ */
+.export-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/*
  * The transport row (#7): a play/pause toggle plus the time scrubber, shown ONLY
  * for animated Sketches (those with time metadata). The scrubber flexes to fill
  * the row; the toggle stays a fixed control to its left. Hidden entirely for
