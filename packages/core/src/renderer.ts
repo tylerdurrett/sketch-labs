@@ -110,3 +110,77 @@ export function renderToCanvas(ctx: Canvas2DContext, scene: Scene): void {
     ctx.restore()
   }
 }
+
+/** Round a number to 4 decimal places to keep SVG output compact. */
+function round(n: number): number {
+  return Math.round(n * 10000) / 10000
+}
+
+/** Escape XML special characters in an attribute value (e.g. a color string). */
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+}
+
+/**
+ * The SVG Scene Renderer — a pure, headless serializer that turns a {@link Scene}
+ * into a standalone SVG string (the sibling of {@link renderToCanvas}, the
+ * second Scene Renderer per slice #9 / ADR-0004).
+ *
+ * It mirrors {@link renderToCanvas} exactly in geometry and ordering, but emits
+ * markup instead of driving a context: each {@link Primitive} becomes one
+ * `<path>`, built by pure string assembly. There are NO DOM types — core's
+ * tsconfig stays `lib: ["ES2022"]` — so this never reaches for `XMLSerializer`,
+ * `document`, or any `lib.dom` global; it is the same headless guardrail the
+ * Canvas2D port upholds, expressed here as plain string building.
+ *
+ * Primitives are serialized in STRICT array order — `scene.primitives[0]` first
+ * (bottom), the last element last (top): the document order IS the painter's
+ * (z-)order, so a later path paints over an earlier one. Each path's geometry is
+ * `M` to the first point then `L` to the rest; a `closed` Primitive appends `Z`
+ * (an open polyline omits it, staying open). Style is emitted PER ELEMENT, never
+ * via a global `<g>` wrapper: `fill="<fill.color>"` when a fill is present and
+ * `fill="none"` when absent; `stroke="<stroke.color>"` plus
+ * `stroke-width="<stroke.width>"` when a stroke is present and no stroke attrs at
+ * all when absent. `stroke.width` is written in Scene-space units, unscaled —
+ * the `viewBox` puts user space in the Scene's own coordinate space, so the width
+ * renders at the right size with no conversion (contrast `polylinesToSVG`, the
+ * plotter serializer in `svg.ts`, which is cm-space and single-pen — deliberately
+ * NOT reused here).
+ *
+ * The root `<svg>` carries `viewBox="0 0 {space.width} {space.height}"` in the
+ * Scene's own coordinate space (top-left origin), so geometry maps 1:1 with no
+ * transform. A Primitive with fewer than one point contributes no `<path>` (it
+ * has no geometry to draw — the same guard spirit as the renderer and
+ * `svg.ts`).
+ *
+ * @param scene - The Scene whose Primitives to serialize, in painter's order.
+ * @returns A complete, standalone SVG document string.
+ */
+export function renderToSVG(scene: Scene): string {
+  const { width, height } = scene.space
+
+  const paths = scene.primitives
+    .filter((primitive) => primitive.points.length >= 1)
+    .map((primitive) => {
+      const { points, closed, fill, stroke } = primitive
+
+      const d =
+        points
+          .map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${round(x)} ${round(y)}`)
+          .join(' ') + (closed ? ' Z' : '')
+
+      const fillAttr = `fill="${fill ? escapeAttr(fill.color) : 'none'}"`
+      const strokeAttr = stroke
+        ? ` stroke="${escapeAttr(stroke.color)}" stroke-width="${round(stroke.width)}"`
+        : ''
+
+      return `  <path d="${d}" ${fillAttr}${strokeAttr} />`
+    })
+    .join('\n')
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">`,
+    paths,
+    '</svg>',
+  ].join('\n')
+}

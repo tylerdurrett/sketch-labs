@@ -6,6 +6,7 @@ import {
   exportFilename,
   newSeed,
   randomize,
+  renderToSVG,
   type Preset,
   type Sketch,
 } from "@harness/core";
@@ -120,6 +121,29 @@ export function SketchControls({ sketch }: SketchControlsProps) {
     }, "image/png");
   };
 
+  // Export the CURRENTLY DISPLAYED frame as a vector SVG — the sibling export
+  // path to {@link exportPng}, also a one-shot click OUTSIDE the per-frame loop.
+  // Unlike PNG (which snapshots the live canvas's pixels), SVG re-bakes the
+  // displayed `(params, seed, t)` into a Scene via `sketch.generate` and serializes
+  // it with core's `renderToSVG` — matching the PNG path's pattern keeps
+  // LiveCanvas's handle unchanged (no Scene is threaded out of it).
+  //
+  // `t` is read from the handle and TIME-GATED on `sketch.time` exactly as the
+  // PNG path does, so the regenerated Scene and the `-t{t}` filename segment both
+  // reflect the same displayed moment (static Sketches pass `undefined`, not 0).
+  const exportSvg = () => {
+    const handle = canvasHandle.current;
+    if (handle == null) return;
+    const t = sketch.time === undefined ? undefined : handle.getCurrentT();
+    // `generate` takes a concrete `t` (static Sketches conventionally get 0 and
+    // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
+    // filename's time-segment source, so both reflect the same displayed moment.
+    const scene = sketch.generate(params, seed, t ?? 0);
+    const svg = renderToSVG(scene);
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "svg"));
+  };
+
   return (
     <div className="sketch-controls">
       <ControlPanel
@@ -151,6 +175,9 @@ export function SketchControls({ sketch }: SketchControlsProps) {
         <div className="export-controls">
           <button type="button" className="action-button" onClick={exportPng}>
             Export PNG
+          </button>
+          <button type="button" className="action-button" onClick={exportSvg}>
+            Export SVG
           </button>
         </div>
       </div>
