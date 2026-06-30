@@ -14,8 +14,11 @@
  * headless.
  *
  * The anchor is never attached to the document — a programmatic `click()` works
- * on a detached element, so there is nothing to clean up but the object URL,
- * which is revoked synchronously after the click.
+ * on a detached element, so there is nothing to clean up but the object URL.
+ * The revoke is DEFERRED to a macrotask (`setTimeout(…, 0)`) rather than run
+ * synchronously after the click: some browsers read the object URL
+ * asynchronously when they begin the save, so an immediate revoke can race the
+ * download and drop the file. Deferring lets the click start the save first.
  *
  * @param blob - The file contents to download.
  * @param filename - The name to save the file under (e.g. from `exportFilename`).
@@ -26,5 +29,5 @@ export function downloadBlob(blob: Blob, filename: string): void {
   anchor.href = url;
   anchor.download = filename;
   anchor.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

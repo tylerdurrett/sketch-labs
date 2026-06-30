@@ -25,6 +25,8 @@ let revokeObjectURL: MockInstance<[string], void>;
 let clickSpy: MockInstance<[], void>;
 
 beforeEach(() => {
+  // The revoke is deferred to a macrotask, so drive timers deterministically.
+  vi.useFakeTimers();
   createObjectURL = vi.fn((_blob: Blob) => OBJECT_URL);
   revokeObjectURL = vi.fn((_url: string) => {});
   vi.stubGlobal("URL", {
@@ -41,6 +43,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("downloadBlob", () => {
@@ -60,7 +63,12 @@ describe("downloadBlob", () => {
     expect(clickSpy).toHaveBeenCalledTimes(1);
     expect(clickedAnchor?.href).toContain(OBJECT_URL);
     expect(clickedAnchor?.download).toBe("circles-seed42.png");
-    // The URL is revoked after the click so the Blob can be collected.
+    // The revoke is DEFERRED to a macrotask so it cannot race the browser's
+    // async read of the object URL when the download starts: it has not fired
+    // synchronously with the click...
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    // ...but it does fire once the macrotask drains, freeing the Blob.
+    vi.runAllTimers();
     expect(revokeObjectURL).toHaveBeenCalledWith(OBJECT_URL);
   });
 });

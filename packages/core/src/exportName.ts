@@ -56,6 +56,11 @@ export interface ExportNameParts {
  * @returns The filename string.
  */
 export function exportFilename(parts: ExportNameParts, ext: string): string {
-  const timeSegment = parts.t === undefined ? '' : `-t${parts.t}`
+  // Cap the captured time to a few decimals so a noisy float (e.g.
+  // `2.5000000001`) does not bloat the name. Round, then re-`Number()` to trim
+  // the trailing-zero padding `toFixed` adds, keeping `0` -> `0` and `1.5` ->
+  // `1.5` byte-for-byte identical to the un-rounded values.
+  const timeSegment =
+    parts.t === undefined ? '' : `-t${Number(parts.t.toFixed(3))}`
   return `${parts.sketchId}-seed${parts.seed}${timeSegment}.${ext}`
 }
