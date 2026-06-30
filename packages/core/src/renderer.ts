@@ -122,6 +122,17 @@ function escapeAttr(s: string): string {
 }
 
 /**
+ * Escape XML special characters for TEXT content (between tags). Unlike
+ * {@link escapeAttr} it need not escape `"` (no surrounding quotes) but MUST
+ * escape `>` as well — a `]]>`-free JSON payload is safe inline, but escaping `&`,
+ * `<`, and `>` keeps the document well-formed for any payload without resorting to
+ * a CDATA section.
+ */
+function escapeText(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/**
  * The SVG Scene Renderer — a pure, headless serializer that turns a {@link Scene}
  * into a standalone SVG string (the sibling of {@link renderToCanvas}, the
  * second Scene Renderer per slice #9 / ADR-0004).
@@ -153,10 +164,20 @@ function escapeAttr(s: string): string {
  * has no geometry to draw — the same guard spirit as the renderer and
  * `svg.ts`).
  *
+ * When `metadata` is supplied, it is embedded as a `<metadata>` element (the SVG
+ * leg of issue #76, "self-describing exports") so the file traces back to the
+ * exact frame that produced it. The injection lives HERE — core-level, testable —
+ * rather than as a string post-process in the Studio, consistent with ADR-0004
+ * (Scene Renderers live in core). The string is XML-escaped as text content
+ * (`&`, `<`, `>`); a JSON payload is safe inline with no CDATA section. An omitted
+ * `metadata` emits no `<metadata>` element (the unchanged plain-SVG path).
+ *
  * @param scene - The Scene whose Primitives to serialize, in painter's order.
+ * @param metadata - Optional metadata string (e.g. the reproduction JSON from
+ *   `buildReproMetadata`) embedded as a `<metadata>` element.
  * @returns A complete, standalone SVG document string.
  */
-export function renderToSVG(scene: Scene): string {
+export function renderToSVG(scene: Scene, metadata?: string): string {
   const { width, height } = scene.space
 
   const paths = scene.primitives
@@ -178,9 +199,17 @@ export function renderToSVG(scene: Scene): string {
     })
     .join('\n')
 
+  const metadataEl =
+    metadata === undefined
+      ? undefined
+      : `  <metadata>${escapeText(metadata)}</metadata>`
+
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">`,
+    metadataEl,
     paths,
     '</svg>',
-  ].join('\n')
+  ]
+    .filter((line) => line !== undefined)
+    .join('\n')
 }
