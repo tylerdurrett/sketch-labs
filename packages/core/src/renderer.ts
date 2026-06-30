@@ -201,6 +201,8 @@ export function renderToSVG(scene: Scene, metadata?: string): string {
     paths,
     '</svg>',
   ]
-    .filter((line) => line !== undefined)
+    // Drop both the absent metadata (`undefined`) and an empty `paths` segment
+    // (an empty / all-filtered Scene) so neither emits a blank line.
+    .filter((line) => line)
     .join('\n')
 }
