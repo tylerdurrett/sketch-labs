@@ -3,7 +3,7 @@ import { act, useImperativeHandle, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ParamSchema, Preset, Seed } from "@harness/core";
+import { crc32, type ParamSchema, type Preset, type Seed } from "@harness/core";
 
 import type { LiveCanvasHandle } from "./LiveCanvas";
 import { SketchControls } from "./SketchControls";
@@ -100,17 +100,47 @@ function mount(node: React.ReactElement): HTMLDivElement {
   return container;
 }
 
+/** Big-endian 4-byte encoding of an unsigned 32-bit integer. */
+function uint32BE(value: number): number[] {
+  return [
+    (value >>> 24) & 0xff,
+    (value >>> 16) & 0xff,
+    (value >>> 8) & 0xff,
+    value & 0xff,
+  ];
+}
+
+/** Frame a PNG chunk: length | type | data | CRC (over type+data). */
+function pngChunk(type: string, data: number[]): number[] {
+  const typeBytes = [...type].map((c) => c.charCodeAt(0));
+  const crc = crc32(Uint8Array.from([...typeBytes, ...data]));
+  return [...uint32BE(data.length), ...typeBytes, ...data, ...uint32BE(crc)];
+}
+
+/**
+ * A minimal, well-formed PNG byte stream (signature + IHDR + IDAT + IEND) the
+ * mocked canvas hands back, so the export's `insertPngMetadata` byte-splice has a
+ * real PNG to operate on (the live `toBlob` would supply one).
+ */
+const MINIMAL_PNG = Uint8Array.from([
+  137, 80, 78, 71, 13, 10, 26, 10, // signature
+  ...pngChunk("IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]),
+  ...pngChunk("IDAT", [0, 1, 2, 3]),
+  ...pngChunk("IEND", []),
+]);
+
 beforeEach(() => {
   // Sensible defaults so a mount's list-on-mount effect resolves quietly; the
   // save/reload tests override loadPreset/savePreset per case.
   listPresets.mockResolvedValue([]);
   loadPreset.mockReset();
   savePreset.mockReset().mockResolvedValue(undefined);
-  // Export defaults: a toBlob that yields a non-null PNG blob, t = 0, and a fresh
-  // downloadBlob spy. Per-test overrides drive the time-gated / guard cases.
+  // Export defaults: a toBlob that yields a non-null, valid PNG blob, t = 0, and
+  // a fresh downloadBlob spy. Per-test overrides drive the time-gated / guard
+  // cases. The blob is a real minimal PNG so the metadata byte-splice succeeds.
   fakeCurrentT = 0;
   fakeCanvasToBlob = ((cb: BlobCallback) => {
-    cb(new Blob(["png"], { type: "image/png" }));
+    cb(new Blob([MINIMAL_PNG], { type: "image/png" }));
   }) as HTMLCanvasElement["toBlob"];
   downloadBlob.mockReset();
 });
@@ -464,6 +494,19 @@ describe("SketchControls — SVG export wiring", () => {
     expect(svg).toMatch(/<path\b[^>]*fill="tomato"/);
     // Static sketch ⇒ no `-t` segment, `.svg` extension.
     expect(filename).toBe(`circles-seed${seed}.svg`);
+
+    // The SVG embeds the reproduction envelope in a <metadata> element (#76),
+    // round-tripping back to the displayed (seed, params, name-stem) — no t.
+    const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
+    expect(meta).toBeDefined();
+    expect(JSON.parse(meta!)).toMatchObject({
+      version: 1,
+      sketch: "circles",
+      name: `circles-seed${seed}`,
+      seed: Number(seed),
+      params: { radius: 10 },
+      locks: [],
+    });
   });
 
   it("includes the captured -t{t} segment for a time-driven sketch", () => {
@@ -493,38 +536,90 @@ describe("SketchControls — PNG export wiring", () => {
     } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
   };
 
-  it("snapshots the live canvas and downloads a PNG named for a STATIC sketch (no -t)", () => {
+  /** Read a Blob's bytes (jsdom-safe, via FileReader → ArrayBuffer). */
+  function blobBytes(blob: Blob): Promise<Uint8Array> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(blob);
+    });
+  }
+
+  /** Extract the iTXt chunk's UTF-8 text payload from a PNG byte stream. */
+  function readITxtText(png: Uint8Array): string {
+    const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+    let offset = 8; // skip the signature
+    while (offset + 8 <= png.length) {
+      const length = view.getUint32(offset);
+      const type = String.fromCharCode(
+        png[offset + 4]!,
+        png[offset + 5]!,
+        png[offset + 6]!,
+        png[offset + 7]!,
+      );
+      if (type === "iTXt") {
+        const data = png.subarray(offset + 8, offset + 8 + length);
+        // keyword | NUL | flag | method | lang+NUL | translated+NUL | text.
+        const nul = data.indexOf(0);
+        const transEnd = data.indexOf(0, data.indexOf(0, nul + 3) + 1);
+        return new TextDecoder().decode(data.subarray(transEnd + 1));
+      }
+      offset += 12 + length;
+    }
+    throw new Error("no iTXt chunk found");
+  }
+
+  it("snapshots the live canvas and downloads a PNG named for a STATIC sketch (no -t)", async () => {
     const el = mount(<SketchControls sketch={staticSketch("circles")} />);
     const seed = (el.querySelector("#sketch-seed") as HTMLInputElement).value;
 
     clickButton(el, "Export PNG");
+    await flush();
 
     expect(downloadBlob).toHaveBeenCalledTimes(1);
     const [blob, filename] = downloadBlob.mock.calls[0]!;
     expect(blob).toBeInstanceOf(Blob);
     // Static sketch ⇒ no `-t` segment.
     expect(filename).toBe(`circles-seed${seed}.png`);
+
+    // The downloaded PNG carries the reproduction envelope in an iTXt chunk,
+    // round-tripping back to the displayed (seed, params, name-stem) — no t.
+    const json = JSON.parse(readITxtText(await blobBytes(blob)));
+    expect(json).toMatchObject({
+      version: 1,
+      sketch: "circles",
+      name: `circles-seed${seed}`,
+      seed: Number(seed),
+      params: { radius: 10 },
+      locks: [],
+    });
+    expect("t" in json).toBe(false);
   });
 
-  it("includes the captured -t{t} segment for a time-driven sketch", () => {
+  it("includes the captured -t{t} segment for a time-driven sketch", async () => {
     fakeCurrentT = 2.5; // the handle reports the displayed moment
     const el = mount(<SketchControls sketch={timedSketch("waves")} />);
     const seed = (el.querySelector("#sketch-seed") as HTMLInputElement).value;
 
     clickButton(el, "Export PNG");
+    await flush();
 
     expect(downloadBlob).toHaveBeenCalledTimes(1);
-    const [, filename] = downloadBlob.mock.calls[0]!;
+    const [blob, filename] = downloadBlob.mock.calls[0]!;
     expect(filename).toBe(`waves-seed${seed}-t2.5.png`);
+    // The embedded envelope captures the same moment.
+    expect(JSON.parse(readITxtText(await blobBytes(blob))).t).toBe(2.5);
   });
 
-  it("does not download when toBlob yields a null blob (export unsupported)", () => {
+  it("does not download when toBlob yields a null blob (export unsupported)", async () => {
     fakeCanvasToBlob = ((cb: BlobCallback) => {
       cb(null);
     }) as HTMLCanvasElement["toBlob"];
     const el = mount(<SketchControls sketch={staticSketch("circles")} />);
 
     clickButton(el, "Export PNG");
+    await flush();
 
     expect(downloadBlob).not.toHaveBeenCalled();
   });

@@ -243,4 +243,69 @@ describe('renderToSVG', () => {
     // Only the one-point Primitive yields a path; the empty one is dropped.
     expect(paths(renderToSVG(scene))).toHaveLength(1)
   })
+
+  describe('embedded <metadata> (issue #76)', () => {
+    /** The text inside the first <metadata>…</metadata> element, if present. */
+    const metaText = (svg: string): string | undefined =>
+      svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1]
+
+    it('emits no <metadata> element when no metadata is supplied', () => {
+      expect(renderToSVG({ space, primitives: [] })).not.toMatch(/<metadata>/)
+    })
+
+    it('embeds the metadata string as a <metadata> element', () => {
+      const json = '{"version":1,"sketch":"circles","t":2.5}'
+      const svg = renderToSVG({ space, primitives: [] }, json)
+
+      expect(metaText(svg)).toBe(json)
+    })
+
+    it('round-trips a JSON reproduction envelope through the <metadata> element', () => {
+      const envelope = {
+        version: 1,
+        sketch: 'waves',
+        name: 'waves-seed7-t1.5',
+        seed: 7,
+        params: { radius: 10 },
+        locks: ['radius'],
+        t: 1.5,
+      }
+      const svg = renderToSVG(
+        { space, primitives: [] },
+        JSON.stringify(envelope),
+      )
+
+      const text = metaText(svg)!
+      // Un-escape the XML text entities, then parse — equals the original.
+      const unescaped = text
+        .replace(/&gt;/g, '>')
+        .replace(/&lt;/g, '<')
+        .replace(/&amp;/g, '&')
+      expect(JSON.parse(unescaped)).toEqual(envelope)
+    })
+
+    it('XML-escapes &, <, and > in the metadata text content', () => {
+      const svg = renderToSVG(
+        { space, primitives: [] },
+        '{"a":"x < y & z > 1"}',
+      )
+      const text = metaText(svg)!
+      expect(text).toContain('&lt;')
+      expect(text).toContain('&amp;')
+      expect(text).toContain('&gt;')
+      // No raw, unescaped angle brackets leaked into the element text.
+      expect(text).not.toMatch(/[<>]/)
+    })
+
+    it('places <metadata> before the <path> elements', () => {
+      const scene: Scene = {
+        space,
+        primitives: [
+          { points: [[0, 0]], stroke: { color: 'black', width: 1 } },
+        ],
+      }
+      const svg = renderToSVG(scene, '{}')
+      expect(svg.indexOf('<metadata>')).toBeLessThan(svg.indexOf('<path'))
+    })
+  })
 })
