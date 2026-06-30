@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 
 import {
   renderToCanvas,
@@ -27,6 +34,33 @@ function timeForElapsed(elapsedSeconds: number, time: TimeMetadata): number {
 }
 
 /**
+ * The imperative handle {@link LiveCanvas} exposes to its owner — the read-only
+ * window the studio chrome needs to snapshot the DISPLAYED frame for export.
+ *
+ * LiveCanvas owns both the `<canvas>` DOM node and the live `t` (`tRef`), and
+ * keeps them deliberately internal so nothing outside can drive the single-owner
+ * draw model. Export, though, is a one-shot user action that must read the frame
+ * already on screen WITHOUT entering the per-frame loop — so this handle surfaces
+ * exactly two read-only getters and nothing that could mutate state or trigger a
+ * draw. The owner (SketchControls) calls them on a button click to rasterize the
+ * current backing-store pixels.
+ */
+export interface LiveCanvasHandle {
+  /**
+   * The live `<canvas>` element, or `null` before it mounts. Its backing store is
+   * already DPR-sized by `sizeToBox`, so a `toBlob` snapshot is crisp by
+   * construction (the displayed frame at device resolution).
+   */
+  getCanvas(): HTMLCanvasElement | null;
+  /**
+   * The last-drawn `t` (0 for a static Sketch, the held/last frame for an
+   * animated one) — the captured moment the export filename's `-t{t}` segment
+   * encodes. Read-only; reading it never advances or resets the clock.
+   */
+  getCurrentT(): number;
+}
+
+/**
  * Props for {@link LiveCanvas}.
  *
  * The Sketch and its inputs are passed in (the studio shell hardcodes the
@@ -39,6 +73,14 @@ export interface LiveCanvasProps {
   params: Params;
   /** The explicit Seed all of the Sketch's randomness derives from. */
   seed: Seed;
+  /**
+   * Optional ref the owner passes to obtain the read-only {@link LiveCanvasHandle}
+   * — the live canvas node + current `t` — so the studio chrome can snapshot the
+   * displayed frame for export WITHOUT reaching into the draw model. A plain prop
+   * (not `forwardRef`) keeps the component a normal function and the handle an
+   * explicit, documented part of the contract.
+   */
+  handleRef?: Ref<LiveCanvasHandle>;
 }
 
 /**
@@ -159,7 +201,7 @@ export function sizeToBox(canvas: HTMLCanvasElement, dpr: number): boolean {
  *     on stable callbacks means a resize never re-runs the loop effect or resets
  *     the clock baseline (issue #40 / the #41 resize contract).
  */
-export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
+export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // The current params/seed are read through refs inside the rAF `tick` (and the
@@ -187,6 +229,21 @@ export function LiveCanvas({ sketch, params, seed }: LiveCanvasProps) {
   // keeps advancing from where it was). It is a ref, not state, so updating it
   // every frame never re-renders.
   const tRef = useRef(0);
+
+  // Expose the read-only export window to the owner: the live canvas node and the
+  // current `t`. Both are READ through the existing refs — the getters never
+  // advance the clock, resize the store, or trigger a draw, so the single-owner
+  // draw model and the rAF baseline (ADR-0005, issue #40) are untouched. The
+  // empty dep array keeps the handle identity stable; the getters always read the
+  // latest ref values at call time.
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      getCanvas: () => canvasRef.current,
+      getCurrentT: () => tRef.current,
+    }),
+    [],
+  );
 
   // The transport's PLAYING gate. An animated Sketch mounts playing (ADR-0005):
   // the rAF loop drives `t` and the scrubber thumb follows. Grabbing the scrubber

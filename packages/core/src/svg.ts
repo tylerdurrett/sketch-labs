@@ -1,4 +1,5 @@
 import type { LengthUnit, Polyline } from './types'
+import { escapeAttr, round } from './svgHelpers'
 
 /** Options for serializing polylines to SVG */
 export interface SVGOptions {
@@ -19,16 +20,6 @@ const CM_TO: Record<LengthUnit, number> = {
   cm: 1,
   in: 1 / 2.54,
   mm: 10,
-}
-
-/** Round a number to 4 decimal places to keep SVG output compact */
-function round(n: number): number {
-  return Math.round(n * 10000) / 10000
-}
-
-/** Escape XML special characters in attribute values */
-function escapeAttr(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 }
 
 /**

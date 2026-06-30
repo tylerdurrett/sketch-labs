@@ -1,16 +1,21 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   applyPreset,
+  buildReproMetadata,
   defaultParams,
+  exportFilename,
+  insertPngMetadata,
   newSeed,
   randomize,
+  renderToSVG,
   type Preset,
   type Sketch,
 } from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
-import { LiveCanvas } from "./LiveCanvas";
+import { downloadBlob } from "./downloadBlob";
+import { LiveCanvas, type LiveCanvasHandle } from "./LiveCanvas";
 import { PresetControls } from "./PresetControls";
 
 /**
@@ -53,6 +58,11 @@ export function SketchControls({ sketch }: SketchControlsProps) {
   const [seed, setSeed] = useState(() => newSeed(Math.random));
   const [locks, setLocks] = useState<ReadonlySet<string>>(() => new Set());
 
+  // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
+  // export snapshots. It is a ref, not state — export reads it imperatively on a
+  // button click, never during render.
+  const canvasHandle = useRef<LiveCanvasHandle>(null);
+
   const setParam = (key: string, value: number) => {
     setParams((prev) => ({ ...prev, [key]: value }));
   };
@@ -91,6 +101,82 @@ export function SketchControls({ sketch }: SketchControlsProps) {
     setLocks(new Set(state.locks));
   };
 
+  // Export the CURRENTLY DISPLAYED frame as a PNG — a one-shot user action that
+  // lives OUTSIDE the per-frame generate→bake→draw loop (it never re-renders or
+  // re-generates). "Option A": snapshot the live canvas's backing-store pixels
+  // (already DPR-sized by sizeToBox), so a retina user gets the crisp image they
+  // see, not a downscaled one. `toBlob('image/png')` reads those pixels as-is.
+  //
+  // The filename's `-t{t}` segment is TIME-GATED on `sketch.time`: a time-driven
+  // Sketch passes the captured `t` (the last-drawn moment from the handle), a
+  // static Sketch omits `t` entirely so the name carries no segment.
+  const exportPng = () => {
+    const handle = canvasHandle.current;
+    const canvas = handle?.getCanvas();
+    if (handle == null || canvas == null) return;
+    // Time-gate the `-t{t}` filename segment on `sketch.time`: a time-driven
+    // Sketch carries its captured moment, a static one omits `t` entirely.
+    const t = sketch.time === undefined ? undefined : handle.getCurrentT();
+    // The reproduction envelope embedded into BOTH exports (issue #76), built
+    // once from the same displayed `(params, seed, locks, t)` spine.
+    const metadata = buildReproMetadata({
+      sketchId: sketch.id,
+      seed,
+      params,
+      locks,
+      t,
+    });
+    canvas.toBlob((blob) => {
+      if (blob === null) return;
+      const filename = exportFilename({ sketchId: sketch.id, seed, t }, "png");
+      // Splice the iTXt reproduction chunk into the PNG bytes before saving, so
+      // the downloaded file traces back to this exact frame. Byte work is core's
+      // (`insertPngMetadata`); the Studio only does the Blob ⇄ ArrayBuffer dance.
+      void blob.arrayBuffer().then((buffer) => {
+        const withMeta = insertPngMetadata(new Uint8Array(buffer), metadata);
+        // `withMeta` spans its whole backing buffer (core's `concat` allocates a
+        // fresh, offset-0 array), so `.buffer` is exactly these bytes.
+        downloadBlob(
+          new Blob([withMeta.buffer as ArrayBuffer], { type: "image/png" }),
+          filename,
+        );
+      });
+    }, "image/png");
+  };
+
+  // Export the CURRENTLY DISPLAYED frame as a vector SVG — the sibling export
+  // path to {@link exportPng}, also a one-shot click OUTSIDE the per-frame loop.
+  // Unlike PNG (which snapshots the live canvas's pixels), SVG re-bakes the
+  // displayed `(params, seed, t)` into a Scene via `sketch.generate` and serializes
+  // it with core's `renderToSVG` — matching the PNG path's pattern keeps
+  // LiveCanvas's handle unchanged (no Scene is threaded out of it).
+  //
+  // `t` is read from the handle and TIME-GATED on `sketch.time` exactly as the
+  // PNG path does, so the regenerated Scene and the `-t{t}` filename segment both
+  // reflect the same displayed moment (static Sketches pass `undefined`, not 0).
+  const exportSvg = () => {
+    const handle = canvasHandle.current;
+    if (handle == null) return;
+    const t = sketch.time === undefined ? undefined : handle.getCurrentT();
+    // `generate` takes a concrete `t` (static Sketches conventionally get 0 and
+    // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
+    // filename's time-segment source, so both reflect the same displayed moment.
+    const scene = sketch.generate(params, seed, t ?? 0);
+    // Embed the same reproduction envelope as a <metadata> element (issue #76),
+    // built from the displayed `(params, seed, locks, t)` spine — core's
+    // `renderToSVG` does the injection (ADR-0004: serialization lives in core).
+    const metadata = buildReproMetadata({
+      sketchId: sketch.id,
+      seed,
+      params,
+      locks,
+      t,
+    });
+    const svg = renderToSVG(scene, metadata);
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "svg"));
+  };
+
   return (
     <div className="sketch-controls">
       <ControlPanel
@@ -114,6 +200,19 @@ export function SketchControls({ sketch }: SketchControlsProps) {
           locks={locks}
           onReload={reloadPreset}
         />
+        {/*
+         * Export controls — the shared home the SVG export sibling reuses. PNG is
+         * the first path: it snapshots the live canvas's displayed frame (no
+         * re-render, no offscreen canvas).
+         */}
+        <div className="export-controls">
+          <button type="button" className="action-button" onClick={exportPng}>
+            Export PNG
+          </button>
+          <button type="button" className="action-button" onClick={exportSvg}>
+            Export SVG
+          </button>
+        </div>
       </div>
       <div className="seed-box">
         <label className="seed-box__label" htmlFor="sketch-seed">
@@ -131,7 +230,12 @@ export function SketchControls({ sketch }: SketchControlsProps) {
           }}
         />
       </div>
-      <LiveCanvas sketch={sketch} params={params} seed={seed} />
+      <LiveCanvas
+        handleRef={canvasHandle}
+        sketch={sketch}
+        params={params}
+        seed={seed}
+      />
     </div>
   );
 }

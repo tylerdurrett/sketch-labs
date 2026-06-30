@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Scene, Sketch, TimeMetadata } from "@harness/core";
 
-import { LiveCanvas } from "./LiveCanvas";
+import { LiveCanvas, type LiveCanvasHandle } from "./LiveCanvas";
 
 /**
  * LiveCanvas IS under test here (unlike SketchControls.test, which mocks it), so
@@ -251,6 +251,41 @@ describe("LiveCanvas transport — resume from scrubbed t, no snap to 0 (AC3)", 
 
     tick(6000);
     expect(lastDrawnT(generate)).toBeCloseTo(5, 5);
+  });
+});
+
+describe("LiveCanvas export handle — read-only canvas + current t", () => {
+  it("exposes the live canvas node and current t without disturbing the loop", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+      />,
+    );
+
+    // The handle surfaces the SAME canvas node the component rendered.
+    expect(handle.current).not.toBeNull();
+    expect(handle.current!.getCanvas()).toBe(el.querySelector("canvas"));
+
+    // getCurrentT tracks the last-drawn t — the loop advanced to 2s here — and
+    // reading it does NOT advance the clock (no extra generate call).
+    tick(2000);
+    const drawsAfterTick = generate.mock.calls.length;
+    expect(handle.current!.getCurrentT()).toBeCloseTo(2, 5);
+    expect(generate.mock.calls.length).toBe(drawsAfterTick);
+  });
+
+  it("reports t = 0 for a static Sketch", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const { sketch } = animatedSketch(undefined);
+    mount(<LiveCanvas handleRef={handle} sketch={sketch} params={{}} seed={1} />);
+
+    expect(handle.current!.getCurrentT()).toBe(0);
+    expect(handle.current!.getCanvas()).not.toBeNull();
   });
 });
 
