@@ -400,6 +400,85 @@ describe("SketchControls — preset save/reload wiring", () => {
   });
 });
 
+describe("SketchControls — SVG export wiring", () => {
+  // A Scene the mocked sketch.generate returns — its single Primitive lets the
+  // test assert the downloaded SVG is the serialized vector of THAT Scene.
+  const svgScene = {
+    space: { width: 100, height: 100 },
+    primitives: [
+      {
+        points: [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+        ],
+        closed: true,
+        fill: { color: "tomato" },
+      },
+    ],
+  };
+
+  // A static sketch whose generate yields svgScene (overriding the no-op default).
+  const svgStaticSketch = (id: string) => {
+    const base = sketchWith(id, {
+      radius: numberSpec({ default: 10 }),
+    }) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      generate: () => svgScene,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  // A time-driven variant so the export carries a `-t{t}` segment.
+  const svgTimedSketch = (id: string) => {
+    const base = svgStaticSketch(id) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      time: { duration: 4, mode: "loop" },
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  /** Read the text of the Blob the export handed downloadBlob (jsdom-safe). */
+  function blobText(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+  }
+
+  it("downloads a vector SVG of the displayed Scene named for a STATIC sketch (no -t)", async () => {
+    const el = mount(<SketchControls sketch={svgStaticSketch("circles")} />);
+    const seed = (el.querySelector("#sketch-seed") as HTMLInputElement).value;
+
+    clickButton(el, "Export SVG");
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    const [blob, filename] = downloadBlob.mock.calls[0]!;
+    expect(blob).toBeInstanceOf(Blob);
+    expect(blob.type).toBe("image/svg+xml");
+    // The Blob is the serialized vector of the generated Scene.
+    const svg = await blobText(blob);
+    expect(svg).toMatch(/<svg\b[^>]*viewBox="0 0 100 100"/);
+    expect(svg).toMatch(/<path\b[^>]*fill="tomato"/);
+    // Static sketch ⇒ no `-t` segment, `.svg` extension.
+    expect(filename).toBe(`circles-seed${seed}.svg`);
+  });
+
+  it("includes the captured -t{t} segment for a time-driven sketch", () => {
+    fakeCurrentT = 2.5;
+    const el = mount(<SketchControls sketch={svgTimedSketch("waves")} />);
+    const seed = (el.querySelector("#sketch-seed") as HTMLInputElement).value;
+
+    clickButton(el, "Export SVG");
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    const [, filename] = downloadBlob.mock.calls[0]!;
+    expect(filename).toBe(`waves-seed${seed}-t2.5.svg`);
+  });
+});
+
 describe("SketchControls — PNG export wiring", () => {
   // A static sketch (no time) for the no-`-t` filename case.
   const staticSketch = (id: string) =>
