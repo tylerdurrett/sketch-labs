@@ -1,21 +1,24 @@
 /**
  * The "leaf-field" Sketch — stage 4 of the Leaf Field build-up (parent #3):
  * a dense, tunable field of a fixed-shape leaf scattered across the coordinate
- * space at blue-noise (Poisson-disk) points and composited in painter's order.
+ * space at blue-noise (Poisson-disk) points, ORIENTED along a seeded curl-noise
+ * flow field, and composited in painter's order.
  *
  * It samples the seeded variable-radius Poisson-disk sampler under a CONSTANT
  * radius field (the field's spacing is driven by the `density` knob), bakes one
- * copy of a single fixed {@link LeafShape} at every sampled point, and draws
- * them into a painter's-order Scene — earlier points sit under later ones, so
- * the overlap reads as a real composited field, not a flat stamp sheet.
+ * copy of a single fixed {@link LeafShape} at every sampled point, rotates each
+ * so its spine aligns with the local flow direction, and draws them into a
+ * painter's-order Scene — earlier points sit under later ones, so the overlap
+ * reads as a real composited field, not a flat stamp sheet.
  *
  * BUILD-UP STAGE / DEFERRED KNOBS: this task lands the scatter + placement +
- * compositing only. There is NO flow-field orientation and NO per-leaf
- * variation yet — every leaf is geometrically identical. The `fieldScale`,
- * `turbulence`, and `variation` knobs are DECLARED now (so the schema is stable
- * and the control panel is complete) but are CONSUMED in #TASK2, where flow
- * orientation and seeded per-leaf shape/size rolls land. Only `density`,
- * `leafSizeMin`, and `leafSizeMax` are read in this task.
+ * flow-field orientation + compositing. Orientation is now LIVE: `fieldScale`
+ * (curl base frequency) and `turbulence` (curl octave falloff → fbm `gain`) are
+ * CONSUMED here to bend each leaf into the flow. Per-leaf shape/size variation
+ * is still DEFERRED — every leaf is still geometrically identical (only its
+ * rotation differs) — so the `variation` knob is DECLARED but CONSUMED in
+ * #TASK2. `density`, `leafSizeMin`, `leafSizeMax`, `fieldScale`, and
+ * `turbulence` are read in this task.
  *
  * DRAW BOUNDARY (load-bearing): only generic {@link Primitive}s cross into the
  * Scene. The leaf domain type ({@link LeafShape}) is reached ONLY through the
@@ -23,11 +26,13 @@
  * private and never leaks across the public barrel / draw boundary.
  *
  * STATIC / DETERMINISTIC: there is no `time` metadata (the Harness hides the
- * scrubber), and `generate` is a pure function of `(params, seed, t)` — `t` is
- * threaded for the stateless contract but not read. Everything random flows from
- * the explicit Seed via `createRandom` / the sampler's seed: NO `Math.random`,
- * no clock read, and no state carried across `generate` calls. Re-seeding
- * reshuffles the whole field while the params hold.
+ * scrubber), and `generate` is a pure function of `(params, seed, t)`. `t` is
+ * threaded LIVE into the 3D curl overload as the field's z slice (ADR-0002) so
+ * animating later is a metadata swap, not a rewrite; with no `time` metadata t
+ * is 0 in practice, so the field is a static slice today. Everything random
+ * flows from the explicit Seed via `createRandom` / the sampler's seed: NO
+ * `Math.random`, no clock read, and no state carried across `generate` calls.
+ * Re-seeding reshuffles the whole field while the params hold.
  *
  * PAPER-RIM RATIONALE (2026-07-01 audit): a matching dark stroke would make the
  * painter's-order overlap visually unobservable — adjacent dark leaves merge
@@ -37,6 +42,7 @@
  * live.
  */
 
+import { curl } from '../../curl'
 import { samplePoissonDisk } from '../../poisson'
 import { createRandom } from '../../random'
 import { createScene } from '../../scene'
@@ -61,9 +67,9 @@ import type { LeafShape } from '../single-leaf/leaf'
  * type.
  */
 const schema = {
-  /** Field base frequency. Declared now; consumed in #TASK2 (flow orientation). */
+  /** Curl-field base frequency (scales the sampled coordinates). Consumed NOW (flow orientation). */
   fieldScale: { kind: 'number', min: 0.5, max: 8, default: 1.25 },
-  /** Field roughness. Declared now; consumed in #TASK2 (flow orientation). */
+  /** Curl-field roughness — mapped to fbm's octave falloff (`gain`). Consumed NOW (flow orientation). */
   turbulence: { kind: 'number', min: 0.1, max: 0.9, default: 0.5 },
   /** Drives the Poisson spacing radius (radius = REFERENCE_SPACING / density). Consumed NOW. */
   density: { kind: 'number', min: 1, max: 12, default: 5 },
@@ -107,38 +113,59 @@ const LEAF_STROKE_WIDTH = 2
  * The {@link leaf} generator grows from the origin (0, 0) along +y with signed
  * ±x spread, so a raw outline is anchored at the origin, not at the sampled
  * point. This mirrors single-leaf's `center()` — computing the bbox-center-to-
- * target offset — but with the offset precomputed by the caller: because the
- * fixed-shape leaf's geometry (and thus its bbox center) is identical for every
- * point, the caller hoists the one bbox scan out of the placement loop and only
- * varies the translation.
+ * target offset — then translating the (already-rotated) outline so its center
+ * lands on the sampled point.
  */
 function translate(outline: Polyline, dx: number, dy: number): Polyline {
   return outline.map(([x, y]): Point => [x + dx, y + dy])
 }
 
 /**
- * The leaf-field Sketch: a static, stateless field of a fixed-shape leaf.
+ * Rotate a leaf outline by `angle` radians about the origin (0, 0), returning a
+ * NEW Polyline (the input is not mutated).
  *
- * `generate` reads the spacing/size knobs, blue-noise-samples the coordinate
- * space, bakes ONE fixed {@link LeafShape} at every sampled point (in sampler
- * order — that IS painter's order), and emits each as a dark-filled,
- * paper-rimmed closed polygon. No accumulated state — re-calling with the same
- * `(params, seed, t)` reproduces the same Scene exactly.
+ * Applied to a raw, origin-anchored {@link leaf} outline BEFORE {@link translate}
+ * so the leaf's spine (which grows along +y) can be turned to face the local
+ * flow direction. Rotating about the origin — the leaf's own base anchor —
+ * keeps the pivot at the shape's root; the subsequent bbox-center translation
+ * then places the rotated silhouette onto the sampled point. Standard 2D
+ * rotation: `x' = x·cosθ − y·sinθ`, `y' = x·sinθ + y·cosθ`.
+ */
+function rotate(outline: Polyline, angle: number): Polyline {
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  return outline.map(([x, y]): Point => [x * cos - y * sin, x * sin + y * cos])
+}
+
+/**
+ * The leaf-field Sketch: a static, stateless field of a fixed-shape leaf,
+ * oriented along a seeded curl-noise flow field.
+ *
+ * `generate` reads the spacing/size/field knobs, blue-noise-samples the
+ * coordinate space, bakes ONE fixed {@link LeafShape} at every sampled point (in
+ * sampler order — that IS painter's order), rotates each so its spine tracks the
+ * local flow direction, and emits each as a dark-filled, paper-rimmed closed
+ * polygon. No accumulated state — re-calling with the same `(params, seed, t)`
+ * reproduces the same Scene exactly.
  */
 export const leafField: StatelessSketch = {
   id: 'leaf-field',
   name: 'Leaf Field',
   schema,
   // NO `time` metadata ⇒ ships static (single frame, scrubber hidden).
-  generate(params: Params, seed: Seed, _t: number): Scene {
+  generate(params: Params, seed: Seed, t: number): Scene {
     // Shared seeded Random threaded into `leaf()`. It drives per-leaf variation
     // in #TASK2; here the shape is fixed (wobble 0), so it only advances the
-    // sequence and does not change geometry.
+    // sequence and does not change geometry. It ALSO seeds the curl field via
+    // its (separate, non-advancing) noise instances — sampling curl does not
+    // consume value()/gaussian() draws, so the leaf() sequence stays untouched.
     const rng = createRandom(seed)
 
     const density = numberParam(params, schema, 'density')
     const leafSizeMin = numberParam(params, schema, 'leafSizeMin')
     const leafSizeMax = numberParam(params, schema, 'leafSizeMax')
+    const fieldScale = numberParam(params, schema, 'fieldScale')
+    const turbulence = numberParam(params, schema, 'turbulence')
 
     // Constant radius field ⇒ uniform blue-noise spacing driven by `density`.
     // `minRadius` equals the constant so the accel grid is sized accurately
@@ -165,25 +192,28 @@ export const leafField: StatelessSketch = {
 
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
-    // The fixed-shape leaf's raw geometry is identical for every point (wobble
-    // 0), so its bbox center is a loop invariant. Compute it ONCE, lazily, from
-    // the first rolled outline instead of re-scanning inside the placement loop.
-    // Roll from the SAME `rng` (no extra pre-loop `leaf()` call, so the shared
-    // rng sequence is untouched — the seam #TASK2 relies on) and reuse that
-    // outline as the first placement. Every later point translates by its own
-    // offset from this fixed center.
-    let centerX = 0
-    let centerY = 0
+    // Sampler order IS painter's order: index 0 is drawn first (bottom). Each
+    // leaf is rotated by its own flow angle, so the bbox center is no longer a
+    // loop invariant (the #126 hoist is superseded) — compute it per-leaf after
+    // rotation.
+    points.forEach(([x, y]) => {
+      // Sample the divergence-free flow at this point via the 3D curl overload
+      // (z = t) so animating later is a metadata swap, not a rewrite (ADR-0002).
+      // `turbulence` maps to fbm's per-octave falloff (`gain`). curl reads the
+      // rng's separate noise instances, so it does NOT advance the leaf()
+      // sequence — placement and shape rolls stay independent.
+      const flow = curl(rng, x * fieldScale, y * fieldScale, t, { gain: turbulence })
+      const angle = Math.atan2(flow[1], flow[0])
 
-    // Sampler order IS painter's order: index 0 is drawn first (bottom).
-    points.forEach(([x, y], i) => {
-      const raw = leaf(shape, rng)
-      if (i === 0) {
-        const { minX, minY, maxX, maxY } = bbox(raw)
-        centerX = (minX + maxX) / 2
-        centerY = (minY + maxY) / 2
-      }
-      builder.addPath(translate(raw, x - centerX, y - centerY), {
+      // The leaf spine grows along +y; rotate by `angle - π/2` so that +y axis
+      // aligns with the flow direction, then translate the rotated bbox-center
+      // onto the sampled point.
+      const rotated = rotate(leaf(shape, rng), angle - Math.PI / 2)
+      const { minX, minY, maxX, maxY } = bbox(rotated)
+      const centerX = (minX + maxX) / 2
+      const centerY = (minY + maxY) / 2
+
+      builder.addPath(translate(rotated, x - centerX, y - centerY), {
         closed: true,
         fill: { color: LEAF_FILL },
         stroke: { color: PAPER_STROKE, width: LEAF_STROKE_WIDTH },

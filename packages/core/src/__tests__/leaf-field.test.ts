@@ -111,11 +111,17 @@ describe('leaf-field determinism (ADR-0002)', () => {
     expect(again).toEqual(first)
   })
 
-  it('ignores t (static): the same params/seed at different t yield the same Scene', () => {
+  it('threads t LIVE into the flow field (ADR-0002 plumbing), staying static via no time metadata', () => {
+    // #127 makes t the curl field's z slice, so a different t reorients the
+    // field. The Sketch still ships static: it declares NO `time` metadata, so
+    // the Harness pins t=0 and this live plumbing is a metadata swap away from
+    // animating rather than a rewrite. (Determinism at a fixed t is covered
+    // above; here we assert the z-slice is genuinely wired through.)
     const params: Params = { density: 5 }
     const atZero = leafField.generate(params, 's', 0)
     const atLater = leafField.generate(params, 's', 42)
-    expect(atLater).toEqual(atZero)
+    expect(atLater).not.toEqual(atZero)
+    expect(leafField.time).toBeUndefined()
   })
 })
 
