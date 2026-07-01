@@ -1,24 +1,25 @@
 /**
  * The "leaf-field" Sketch — stage 4 of the Leaf Field build-up (parent #3):
- * a dense, tunable field of a fixed-shape leaf scattered across the coordinate
- * space at blue-noise (Poisson-disk) points, ORIENTED along a seeded curl-noise
- * flow field, and composited in painter's order.
+ * a dense, tunable field of leaves scattered across the coordinate space at
+ * blue-noise (Poisson-disk) points, ORIENTED along a seeded curl-noise flow
+ * field, carrying seeded per-leaf shape variation, and composited in painter's
+ * order.
  *
  * It samples the seeded variable-radius Poisson-disk sampler under a CONSTANT
- * radius field (the field's spacing is driven by the `density` knob), bakes one
- * copy of a single fixed {@link LeafShape} at every sampled point, rotates each
- * so its spine aligns with the local flow direction, and draws them into a
- * painter's-order Scene — earlier points sit under later ones, so the overlap
- * reads as a real composited field, not a flat stamp sheet.
+ * radius field (the field's spacing is driven by the `density` knob), rolls a
+ * seeded {@link LeafShape} at every sampled point (size/curl/wobble scaled by
+ * the `variation` knob), rotates each so its spine aligns with the local flow
+ * direction, and draws them into a painter's-order Scene — earlier points sit
+ * under later ones, so the overlap reads as a real composited field, not a flat
+ * stamp sheet.
  *
- * BUILD-UP STAGE / DEFERRED KNOBS: this task lands the scatter + placement +
- * flow-field orientation + compositing. Orientation is now LIVE: `fieldScale`
- * (curl base frequency) and `turbulence` (curl octave falloff → fbm `gain`) are
- * CONSUMED here to bend each leaf into the flow. Per-leaf shape/size variation
- * is still DEFERRED — every leaf is still geometrically identical (only its
- * rotation differs) — so the `variation` knob is DECLARED but CONSUMED in
- * #TASK2. `density`, `leafSizeMin`, `leafSizeMax`, `fieldScale`, and
- * `turbulence` are read in this task.
+ * ALL SIX KNOBS LIVE: this task completes the scatter + placement + flow-field
+ * orientation + per-leaf variation + compositing. `density` drives spacing;
+ * `fieldScale` (curl base frequency) and `turbulence` (curl octave falloff →
+ * fbm `gain`) bend each leaf into the flow; `leafSizeMin`/`leafSizeMax` bound
+ * the seeded size and `variation` scales how far each leaf's size/curl/wobble
+ * strays from the fixed base. At `variation` 0 every leaf collapses back to the
+ * midpoint base shape (matching the pre-variation field), so the knob is live.
  *
  * DRAW BOUNDARY (load-bearing): only generic {@link Primitive}s cross into the
  * Scene. The leaf domain type ({@link LeafShape}) is reached ONLY through the
@@ -43,6 +44,7 @@
  */
 
 import { curl } from '../../curl'
+import { lerp } from '../../math'
 import { samplePoissonDisk } from '../../poisson'
 import { createRandom } from '../../random'
 import { createScene } from '../../scene'
@@ -87,15 +89,19 @@ const REFERENCE_SPACING = 400
 /** Fixed leaf width as a fraction of its length (size). */
 const LEAF_WIDTH_RATIO = 0.6
 
-// Fixed shape constants for this task — no per-leaf variation yet. With
-// `wobble: 0` the private `leaf()` generator adds no per-vertex jitter, so it
-// produces IDENTICAL geometry for every point regardless of how far the RNG has
-// advanced (rng-independent). That is exactly what "fixed shape, no per-leaf
-// variation yet" means: per-leaf variation — nonzero wobble plus seeded
-// size/shape rolls — lands in #TASK2.
+// Base shape constants. Each leaf's shape is rolled from these: size lerps from
+// the range midpoint toward a seeded in-range draw by `variation`; curl and
+// wobble stray from their base by seeded amounts scaled by `variation`. At
+// `variation` 0 every leaf collapses to the fixed base (midpoint size, base
+// curl, zero wobble) — the pre-variation field.
 const FIXED_CURL = 0.12
 const FIXED_TIP_SHARPNESS = 0.7
-const FIXED_WOBBLE = 0
+
+/** Std-dev of the seeded per-leaf curl jitter (radians of bend), scaled by `variation`. */
+const CURL_JITTER_STD = 0.15
+
+/** Max seeded per-leaf wobble amplitude at `variation` 1; the base (variation 0) is 0. */
+const MAX_WOBBLE = 2
 
 /** Bold dark leaf fill (linocut idiom, initiative #3). */
 const LEAF_FILL = '#1a1a1a'
@@ -138,13 +144,13 @@ function rotate(outline: Polyline, angle: number): Polyline {
 }
 
 /**
- * The leaf-field Sketch: a static, stateless field of a fixed-shape leaf,
+ * The leaf-field Sketch: a static, stateless field of seeded-variant leaves,
  * oriented along a seeded curl-noise flow field.
  *
- * `generate` reads the spacing/size/field knobs, blue-noise-samples the
- * coordinate space, bakes ONE fixed {@link LeafShape} at every sampled point (in
- * sampler order — that IS painter's order), rotates each so its spine tracks the
- * local flow direction, and emits each as a dark-filled, paper-rimmed closed
+ * `generate` reads the spacing/size/field/variation knobs, blue-noise-samples
+ * the coordinate space, rolls a seeded {@link LeafShape} at every sampled point
+ * (in sampler order — that IS painter's order), rotates each so its spine tracks
+ * the local flow direction, and emits each as a dark-filled, paper-rimmed closed
  * polygon. No accumulated state — re-calling with the same `(params, seed, t)`
  * reproduces the same Scene exactly.
  */
@@ -154,11 +160,11 @@ export const leafField: StatelessSketch = {
   schema,
   // NO `time` metadata ⇒ ships static (single frame, scrubber hidden).
   generate(params: Params, seed: Seed, t: number): Scene {
-    // Shared seeded Random threaded into `leaf()`. It drives per-leaf variation
-    // in #TASK2; here the shape is fixed (wobble 0), so it only advances the
-    // sequence and does not change geometry. It ALSO seeds the curl field via
-    // its (separate, non-advancing) noise instances — sampling curl does not
-    // consume value()/gaussian() draws, so the leaf() sequence stays untouched.
+    // Shared seeded Random. It drives the per-leaf shape rolls (size, curl,
+    // wobble) AND is threaded into `leaf()` for its per-vertex wobble jitter. It
+    // ALSO seeds the curl field via its (separate, non-advancing) noise
+    // instances — sampling curl does not consume value()/gaussian() draws, so
+    // the placement/shape roll sequence stays untouched by orientation.
     const rng = createRandom(seed)
 
     const density = numberParam(params, schema, 'density')
@@ -166,6 +172,7 @@ export const leafField: StatelessSketch = {
     const leafSizeMax = numberParam(params, schema, 'leafSizeMax')
     const fieldScale = numberParam(params, schema, 'fieldScale')
     const turbulence = numberParam(params, schema, 'turbulence')
+    const variation = numberParam(params, schema, 'variation')
 
     // Constant radius field ⇒ uniform blue-noise spacing driven by `density`.
     // `minRadius` equals the constant so the accel grid is sized accurately
@@ -179,16 +186,10 @@ export const leafField: StatelessSketch = {
       seed,
     })
 
-    // Fixed shape for the whole field (no per-leaf variation yet). Size is the
-    // midpoint of the declared range; width follows the fixed length ratio.
-    const length = (leafSizeMin + leafSizeMax) / 2
-    const shape: LeafShape = {
-      length,
-      width: length * LEAF_WIDTH_RATIO,
-      curl: FIXED_CURL,
-      wobble: FIXED_WOBBLE,
-      tipSharpness: FIXED_TIP_SHARPNESS,
-    }
+    // Size base: the range midpoint. At `variation` 0 each leaf's length is
+    // exactly this midpoint (the pre-variation field); as variation → 1 it lerps
+    // toward a seeded in-range draw.
+    const sizeMidpoint = (leafSizeMin + leafSizeMax) / 2
 
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
@@ -204,6 +205,24 @@ export const leafField: StatelessSketch = {
       // sequence — placement and shape rolls stay independent.
       const flow = curl(rng, x * fieldScale, y * fieldScale, t, { gain: turbulence })
       const angle = Math.atan2(flow[1], flow[0])
+
+      // Roll this leaf's shape from `rng`, scaled by `variation`. CRUCIAL: roll
+      // all three (length, curl, wobble) UNCONDITIONALLY and in a fixed order,
+      // even when variation is 0 — the rng-consumption COUNT per leaf must stay
+      // constant regardless of knob values so the deterministic seam holds and
+      // changing `variation` reshapes the field without desyncing the sequence.
+      // At variation 0 the rolls collapse to the fixed base (midpoint / FIXED
+      // curl / zero wobble) while still consuming their draws.
+      const length = lerp(sizeMidpoint, rng.range(leafSizeMin, leafSizeMax), variation)
+      const curlAmount = FIXED_CURL + rng.gaussian(0, CURL_JITTER_STD) * variation
+      const wobble = MAX_WOBBLE * variation * rng.value()
+      const shape: LeafShape = {
+        length,
+        width: length * LEAF_WIDTH_RATIO,
+        curl: curlAmount,
+        wobble,
+        tipSharpness: FIXED_TIP_SHARPNESS,
+      }
 
       // The leaf spine grows along +y; rotate by `angle - π/2` so that +y axis
       // aligns with the flow direction, then translate the rotated bbox-center
