@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Canvas2DContext } from '../renderer'
-import { renderToCanvas } from '../renderer'
+import { drawSceneFitted, renderToCanvas } from '../renderer'
 import type { Scene } from '../scene'
 
 /**
@@ -41,6 +41,7 @@ function createRecordingContext(): Canvas2DContext & { events: Event[] } {
     closePath: record('closePath'),
     fill: record('fill'),
     stroke: record('stroke'),
+    setTransform: record('setTransform'),
     get fillStyle() {
       return fillStyle
     },
@@ -280,5 +281,30 @@ describe('renderToCanvas', () => {
     const ctx = createRecordingContext()
     renderToCanvas(ctx, { space, primitives: [] })
     expect(ctx.events).toEqual([])
+  })
+})
+
+describe('drawSceneFitted', () => {
+  it('applies the contain-fit transform via setTransform BEFORE the draw calls', () => {
+    const ctx = createRecordingContext()
+    // A 800x400 (2:1) space into a 1000x1000 surface: contain-fit yields a
+    // uniform scale of 1.25 and a 250px vertical letterbox (offsetY), offsetX 0.
+    const scene: Scene = {
+      space: { width: 800, height: 400 },
+      primitives: [{ points: [[0, 0]], stroke: { color: 'black', width: 1 } }],
+    }
+
+    drawSceneFitted(ctx, scene, 1000, 1000)
+
+    // setTransform is the very first recorded event, carrying the fit's
+    // scale/offsets, and precedes every renderToCanvas draw call.
+    expect(ctx.events[0]).toEqual({
+      method: 'setTransform',
+      args: [1.25, 0, 0, 1.25, 0, 250],
+    })
+    const names = methodNames(ctx.events)
+    expect(names.indexOf('setTransform')).toBeLessThan(names.indexOf('save'))
+    // The scene is still drawn (the renderToCanvas leg ran after the transform).
+    expect(names).toContain('stroke')
   })
 })
