@@ -59,6 +59,10 @@ A committed, per-Sketch snapshot that fully reproduces an image and resumes an e
 
 The serialized record is a self-describing envelope over the studio's live state: `{ version, sketch, name, seed, params, locks }` — `seed` + `params` reproduce the image (the ADR-0002 determinism spine), `locks` (a sorted array of param keys) resume the session and do _not_ affect the rendered frame. The **Parameter Schema** is authoritative _on read_, not just on write: a Preset is a derived view, so reloading reconciles its `params` against the live schema — keys absent from the schema are dropped, keys missing from the Preset are filled from their spec `default`, and out-of-bounds values load **as-is, unclamped** (exact-image fidelity beats staying in-bounds; a clamp would silently reproduce a different frame). `version` is the migration escape hatch: v1 stores `1` and does presence-only reconciliation; a future breaking change bumps it and branches the loader.
 
+**Render Settings**:
+The per-render output configuration a consumer chooses when turning a **Sketch** into a concrete artifact — frame rate and pixel dimensions today, format and frame range later. Orthogonal to the three determinism inputs: Render Settings are _not_ **Params** (Sketch knobs), _not_ the **Seed**, and _not_ captured in a **Preset**; they change how a frame is _sampled and sized_, never which frame `generate(params, seed, t)` produces. Because a Sketch is continuous in `t` (ADR-0002), frame rate is a caller concern — the same `generate` sampled at any fps serves every caller — so fps lives here, never in the **Sketch contract**. In the Remotion consumer they arrive as composition input props (a default set plus per-render overrides); the same concept covers export dimensions for the **Scene Renderer** paths.
+_Avoid_: config, params, options, export options
+
 ## Relationships
 
 - The **Harness** hosts many **Sketches**; each **Sketch** plugs into the Harness through a shared contract.
