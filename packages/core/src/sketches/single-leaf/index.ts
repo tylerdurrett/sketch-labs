@@ -27,12 +27,9 @@ import type {
   StatelessSketch,
 } from '../../sketch'
 import type { Point, Polyline } from '../../types'
+import { bbox, HEIGHT, numberParam, WIDTH } from '../sketch-util'
 import { leaf } from './leaf'
 import type { LeafShape } from './leaf'
-
-/** Coordinate-space extent the Scene is baked into (square, unitless). */
-const WIDTH = 1000
-const HEIGHT = 1000
 
 /**
  * The single-leaf Parameter Schema — one {@link NumberParamSpec} per leaf shape
@@ -56,17 +53,6 @@ const schema = {
 } satisfies Record<string, NumberParamSpec>
 
 /**
- * Read a numeric param value, falling back to the schema default when the caller
- * left the knob unset. Keeps `generate` total over partial `Params` without
- * freezing the (deliberately emergent) ParamSpec shape.
- */
-function numberParam(params: Params, key: keyof typeof schema): number {
-  const value = params[key as string]
-  if (typeof value === 'number') return value
-  return schema[key].default
-}
-
-/**
  * Center a leaf outline into the coordinate space.
  *
  * The {@link leaf} generator grows from the origin (0, 0) along +y with signed
@@ -75,16 +61,7 @@ function numberParam(params: Params, key: keyof typeof schema): number {
  * whatever length/width/curl produce, without rescaling geometry.
  */
 function center(points: Polyline): Polyline {
-  let minX = Infinity
-  let minY = Infinity
-  let maxX = -Infinity
-  let maxY = -Infinity
-  for (const [x, y] of points) {
-    if (x < minX) minX = x
-    if (x > maxX) maxX = x
-    if (y < minY) minY = y
-    if (y > maxY) maxY = y
-  }
+  const { minX, minY, maxX, maxY } = bbox(points)
   const dx = (WIDTH - (maxX - minX)) / 2 - minX
   const dy = (HEIGHT - (maxY - minY)) / 2 - minY
   return points.map(([x, y]): Point => [x + dx, y + dy])
@@ -107,11 +84,11 @@ export const singleLeaf: StatelessSketch = {
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
     const shape: LeafShape = {
-      length: numberParam(params, 'length'),
-      width: numberParam(params, 'width'),
-      curl: numberParam(params, 'curl'),
-      wobble: numberParam(params, 'wobble'),
-      tipSharpness: numberParam(params, 'tipSharpness'),
+      length: numberParam(params, schema, 'length'),
+      width: numberParam(params, schema, 'width'),
+      curl: numberParam(params, schema, 'curl'),
+      wobble: numberParam(params, schema, 'wobble'),
+      tipSharpness: numberParam(params, schema, 'tipSharpness'),
     }
 
     const outline = center(leaf(shape, rng))
