@@ -16,9 +16,15 @@ export interface CurlOptions extends FbmOptions {
  * Resolve the finite-difference step. It defaults relative to `scale` so a
  * zoomed-in (large-scale) field still differentiates over a small fraction of a
  * feature. `scale` defaults to fbm's own default of 1.
+ *
+ * An explicit `epsilon` is honoured only when it is finite and nonzero; a
+ * zero or non-finite (NaN/Infinity) value would collapse the central
+ * finite-difference `/(2*eps)` into Infinity/NaN, so it degrades to the
+ * scale-derived default step rather than throwing — mirroring the degenerate
+ * `scale === 0` fallback below. A negative finite epsilon is returned as-is.
  */
 function resolveEpsilon({ epsilon, scale = 1 }: CurlOptions): number {
-  if (epsilon !== undefined) return epsilon
+  if (epsilon !== undefined && Number.isFinite(epsilon) && epsilon !== 0) return epsilon
   // Guard against a zero/degenerate scale collapsing the step to Infinity.
   return scale === 0 ? 1e-4 : 1e-4 / Math.abs(scale)
 }

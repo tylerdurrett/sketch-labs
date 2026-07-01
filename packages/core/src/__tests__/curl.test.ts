@@ -158,3 +158,24 @@ describe('curl — shape', () => {
     expect(Number.isFinite(v[1])).toBe(true)
   })
 })
+
+describe('curl — robustness', () => {
+  it('falls back to the default step for an explicit epsilon of 0', () => {
+    const rng = createRandom('eps-zero')
+    const v = curl(rng, 0.4, 0.9, { epsilon: 0 })
+    expect(Number.isFinite(v[0])).toBe(true)
+    expect(Number.isFinite(v[1])).toBe(true)
+    // A zero epsilon degrades to the scale-derived default step.
+    expect(v).toEqual(curl(rng, 0.4, 0.9))
+  })
+
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY] as const) {
+    it(`returns a finite Vec2 for a non-finite epsilon (${bad})`, () => {
+      const rng = createRandom('eps-nonfinite')
+      const v = curl(rng, 0.4, 0.9, { epsilon: bad })
+      expect(Number.isFinite(v[0])).toBe(true)
+      expect(Number.isFinite(v[1])).toBe(true)
+      expect(v).toEqual(curl(rng, 0.4, 0.9))
+    })
+  }
+})
