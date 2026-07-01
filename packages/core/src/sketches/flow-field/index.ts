@@ -56,15 +56,15 @@ const HEIGHT = 1000
  */
 const schema = {
   /** Base frequency of the field (curl `scale`): lower = broader swirls. */
-  fieldScale: { kind: 'number', min: 0.5, max: 8, default: 2 },
+  fieldScale: { kind: 'number', min: 0.5, max: 8, default: 1.25 },
   /** Number of fbm octaves compounded into the potential (curl `octaves`). */
-  octaves: { kind: 'number', min: 1, max: 8, default: 4, integer: true },
+  octaves: { kind: 'number', min: 1, max: 8, default: 2, integer: true },
   /** Per-octave amplitude falloff (curl `gain`): higher = rougher/turbulent. */
   turbulence: { kind: 'number', min: 0.1, max: 0.9, default: 0.5 },
   /** Grid resolution per axis — a `tickDensity` × `tickDensity` lattice. */
-  tickDensity: { kind: 'number', min: 4, max: 64, default: 24, integer: true },
+  tickDensity: { kind: 'number', min: 4, max: 64, default: 56, integer: true },
   /** Length of each oriented tick, in coordinate-space units. */
-  tickLength: { kind: 'number', min: 2, max: 60, default: 18 },
+  tickLength: { kind: 'number', min: 2, max: 60, default: 13 },
 } satisfies Record<string, NumberParamSpec>
 
 /**
