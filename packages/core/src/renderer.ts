@@ -227,6 +227,11 @@ function escapeText(s: string): string {
  * has no geometry to draw — the same guard spirit as the renderer and
  * `svg.ts`).
  *
+ * The `background` is emitted as a full-`viewBox` `<rect>` FIRST (before metadata
+ * and paths), so it sits at the bottom of the z-order — the SVG mirror of the
+ * canvas's opaque backdrop (issue #92), keeping SVG == raster. It defaults to
+ * `'white'`; `'transparent'` emits NO rect (matching the canvas's `clearRect`).
+ *
  * When `metadata` is supplied, it is embedded as a `<metadata>` element (the SVG
  * leg of issue #76, "self-describing exports") so the file traces back to the
  * exact frame that produced it. The injection lives HERE — core-level, testable —
@@ -238,10 +243,17 @@ function escapeText(s: string): string {
  * @param scene - The Scene whose Primitives to serialize, in painter's order.
  * @param metadata - Optional metadata string (e.g. the reproduction JSON from
  *   `buildReproMetadata`) embedded as a `<metadata>` element.
+ * @param background - Opaque backdrop CSS color emitted as a full-viewBox `<rect>`
+ *   below everything; `'transparent'` emits no rect. Defaults to `'white'`.
  * @returns A complete, standalone SVG document string.
  */
-export function renderToSVG(scene: Scene, metadata?: string): string {
+export function renderToSVG(scene: Scene, metadata?: string, background = 'white'): string {
   const { width, height } = scene.space
+
+  const backgroundEl =
+    background === 'transparent'
+      ? undefined
+      : `  <rect x="0" y="0" width="${width}" height="${height}" fill="${escapeAttr(background)}" />`
 
   const paths = scene.primitives
     .filter((primitive) => primitive.points.length >= 1)
@@ -269,12 +281,14 @@ export function renderToSVG(scene: Scene, metadata?: string): string {
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">`,
+    backgroundEl,
     metadataEl,
     paths,
     '</svg>',
   ]
-    // Drop both the absent metadata (`undefined`) and an empty `paths` segment
-    // (an empty / all-filtered Scene) so neither emits a blank line.
+    // Drop the transparent-background rect and absent metadata (`undefined`) plus
+    // an empty `paths` segment (an empty / all-filtered Scene) so none emit a
+    // blank line.
     .filter((line) => line)
     .join('\n')
 }
