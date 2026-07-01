@@ -1,13 +1,13 @@
 /**
  * Caller-side coordinate-space → pixel mapping for a Scene Renderer (ADR-0004).
  *
- * The Canvas2D Scene Renderer (`renderToCanvas` in `@harness/core`) draws in the
- * Scene's OWN coordinate space and establishes NO transform of its own — fit,
- * letterbox, and devicePixelRatio are deliberately a CALLER concern layered over
- * it. This module owns that mapping as a pure function so the (aspect-ratio
- * sensitive) math is unit-testable without a DOM: the {@link LiveCanvas}
- * component applies the returned transform to the real `CanvasRenderingContext2D`
- * and then calls `renderToCanvas`.
+ * The Canvas2D Scene Renderer (`renderToCanvas`) draws in the Scene's OWN
+ * coordinate space and establishes NO transform of its own — fit, letterbox, and
+ * devicePixelRatio are deliberately a CALLER concern layered over it. This module
+ * owns that mapping as a pure function so the (aspect-ratio sensitive) math is
+ * unit-testable without a DOM: `drawSceneFitted` applies the returned transform to
+ * the injected `Canvas2DContext` and then calls `renderToCanvas`, and every
+ * consumer (studio #6, Remotion #11) runs that ONE shared pipeline.
  */
 
 /**
@@ -22,11 +22,11 @@
  */
 export interface ContainFit {
   /** Uniform scale factor applied to both axes (Scene units → pixels). */
-  scale: number;
+  scale: number
   /** Horizontal pixel offset that centers the scaled Scene (left letterbox). */
-  offsetX: number;
+  offsetX: number
   /** Vertical pixel offset that centers the scaled Scene (top letterbox). */
-  offsetY: number;
+  offsetY: number
 }
 
 /**
@@ -62,18 +62,18 @@ export function computeContainFit(
   // min(pixelW/spaceW, pixelH/spaceH) NaN or 0 — a transform that paints nothing
   // or that the browser rejects. Return a no-op fit so a degenerate frame is a
   // harmless no-paint and the next real-sized frame repaints correctly.
-  const finitePositive = (n: number) => Number.isFinite(n) && n > 0;
+  const finitePositive = (n: number) => Number.isFinite(n) && n > 0
   if (
     !finitePositive(spaceW) ||
     !finitePositive(spaceH) ||
     !finitePositive(pixelW) ||
     !finitePositive(pixelH)
   ) {
-    return { scale: 0, offsetX: 0, offsetY: 0 };
+    return { scale: 0, offsetX: 0, offsetY: 0 }
   }
 
-  const scale = Math.min(pixelW / spaceW, pixelH / spaceH);
-  const offsetX = (pixelW - spaceW * scale) / 2;
-  const offsetY = (pixelH - spaceH * scale) / 2;
-  return { scale, offsetX, offsetY };
+  const scale = Math.min(pixelW / spaceW, pixelH / spaceH)
+  const offsetX = (pixelW - spaceW * scale) / 2
+  const offsetY = (pixelH - spaceH * scale) / 2
+  return { scale, offsetX, offsetY }
 }

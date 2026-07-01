@@ -8,15 +8,13 @@ import {
 } from "react";
 
 import {
-  renderToCanvas,
+  drawSceneFitted,
   type Canvas2DContext,
   type Params,
   type Seed,
   type Sketch,
   type TimeMetadata,
 } from "@harness/core";
-
-import { computeContainFit } from "./canvas-fit";
 
 /**
  * Map a wall-clock elapsed time onto the Sketch's timeline per its `mode`
@@ -87,15 +85,21 @@ export interface LiveCanvasProps {
  * Draw one frame of `sketch` at time `t` onto `canvas`.
  *
  * This is the WHOLE per-frame path (the slice #6 contract): generate the Scene
- * at `t`, then hand the real `CanvasRenderingContext2D` straight to core's
- * `renderToCanvas` — no HLR, no path simplification, no pen ordering, no export
- * work. The coordinate-space → pixel mapping (ADR-0004) lives here on the caller
- * side: the canvas backing store is sized to its CSS box × `devicePixelRatio`,
- * and a contain-fit transform (uniform scale + centering letterbox) maps the
- * Scene's declared space onto those pixels, so `Stroke.width` (Scene-space units)
- * scales correctly and the aspect ratio is preserved. The browser
- * `CanvasRenderingContext2D` is structurally assignable to core's
- * `Canvas2DContext` port, so it is passed directly with no adapter.
+ * at `t`, then hand the real `CanvasRenderingContext2D` straight to core's shared
+ * render pipeline (`drawSceneFitted`) — no HLR, no path simplification, no pen
+ * ordering, no export work. This component keeps the CALLER concerns ADR-0004
+ * assigns to it: the canvas backing store is sized to its CSS box ×
+ * `devicePixelRatio`. Clearing and the opaque background NO LONGER live here —
+ * they graduated into `drawSceneFitted`, which resets to identity and paints the
+ * full surface (defaulting to opaque white) before the fit, so the studio no
+ * longer relies on the page's CSS background and a PNG export snapshots those
+ * opaque pixels automatically (ADR-0004 amendment, issue #92). The
+ * coordinate-space → pixel mapping itself — contain-fit (uniform scale + centering
+ * letterbox), so `Stroke.width` (Scene-space units) scales correctly and the
+ * aspect ratio is preserved — lives in that same ONE pipeline the studio and the
+ * Remotion renderer both run (#85). The browser `CanvasRenderingContext2D` is
+ * structurally assignable to core's `Canvas2DContext` port, so it is passed
+ * directly with no adapter.
  */
 function drawFrame(
   canvas: HTMLCanvasElement,
@@ -116,20 +120,13 @@ function drawFrame(
   const portCtx = ctx as Canvas2DContext;
 
   const scene = sketch.generate(params, seed, t);
-  const { scale, offsetX, offsetY } = computeContainFit(
-    scene.space.width,
-    scene.space.height,
-    canvas.width,
-    canvas.height,
-  );
 
-  // Clear in device pixels (identity transform), then apply the contain-fit
-  // transform so renderToCanvas draws in the Scene's own coordinate space.
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
-
-  renderToCanvas(portCtx, scene);
+  // Hand the background-fit-and-draw to core's shared pipeline: `drawSceneFitted`
+  // resets to identity, paints the full surface (opaque white by default — the
+  // per-frame clear graduated in with it), computes the contain-fit, and draws.
+  // The studio and the Remotion renderer thus run one identical mapping AND one
+  // identical backdrop — structural parity, not coincidence (ADR-0004 / #85 / #92).
+  drawSceneFitted(portCtx, scene, canvas.width, canvas.height);
 }
 
 /**
