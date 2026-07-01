@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import {
+  computeContainFit,
   renderToCanvas,
   type Canvas2DContext,
   type Params,
@@ -15,8 +16,6 @@ import {
   type Sketch,
   type TimeMetadata,
 } from "@harness/core";
-
-import { computeContainFit } from "./canvas-fit";
 
 /**
  * Map a wall-clock elapsed time onto the Sketch's timeline per its `mode`
