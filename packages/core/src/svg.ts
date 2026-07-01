@@ -1,0 +1,62 @@
+import type { LengthUnit, Polyline } from './types'
+import { escapeAttr, round } from './svgHelpers'
+
+/** Options for serializing polylines to SVG */
+export interface SVGOptions {
+  /** Paper width in cm */
+  width: number
+  /** Paper height in cm */
+  height: number
+  /** Output length unit for SVG width/height attributes (default: cm) */
+  units?: LengthUnit
+  /** Stroke width in cm (default: 0.03) */
+  strokeWidth?: number
+  /** Stroke color (default: black) */
+  strokeColor?: string
+}
+
+/** Conversion factors from cm to other units */
+const CM_TO: Record<LengthUnit, number> = {
+  cm: 1,
+  in: 1 / 2.54,
+  mm: 10,
+}
+
+/**
+ * Serialize polylines to a physically accurate SVG string.
+ *
+ * `width` and `height` in options are paper dimensions in **cm**.
+ * The SVG `width`/`height` attributes are converted to the target `units`.
+ * The `viewBox` always stays in cm so polyline coordinates map 1:1.
+ */
+export function polylinesToSVG(lines: Polyline[], options: SVGOptions): string {
+  const units = options.units ?? 'cm'
+  const strokeWidth = options.strokeWidth ?? 0.03
+  const strokeColor = options.strokeColor ?? 'black'
+  const { width, height } = options
+
+  const factor = CM_TO[units]
+  const svgWidth = round(width * factor)
+  const svgHeight = round(height * factor)
+
+  const polylineEls = lines
+    .filter((line) => line.length >= 2)
+    .map((line) => {
+      const pts = line.map(([x, y]) => `${round(x)},${round(y)}`).join(' ')
+      return `  <polyline points="${pts}" />`
+    })
+    .join('\n')
+
+  // The viewBox is in cm, so user-space lengths (coordinates and stroke-width)
+  // are already in cm — stroke-width must NOT be scaled by the unit factor, or
+  // it would render at the wrong physical size whenever units !== 'cm'.
+  const svgStrokeWidth = round(strokeWidth)
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}${units}" height="${svgHeight}${units}" viewBox="0 0 ${width} ${height}">`,
+    `<g fill="none" stroke="${escapeAttr(strokeColor)}" stroke-width="${svgStrokeWidth}" stroke-linecap="round" stroke-linejoin="round">`,
+    polylineEls,
+    '</g>',
+    '</svg>',
+  ].join('\n')
+}

@@ -55,7 +55,13 @@ An action distinct from re-seeding: it rolls new *values* for every unlocked num
 A per-param flag that pins its value and excludes it from **Randomize**.
 
 **Preset**:
-A committed, per-Sketch snapshot that fully reproduces an image and resumes an exploration session — it captures the param values, the seed, and which params were locked. Stored as a JSON file per Sketch under `sketches/{sketch}/presets/`, written in dev via a Vite dev-server middleware plugin (no standalone server) and read by every consumer (studio, Remotion) as a static file.
+A committed, per-Sketch snapshot that fully reproduces an image and resumes an exploration session — it captures the param values, the seed, and which params were locked. Stored as a JSON file per Sketch under `{sketchesRoot}/{id}/presets/`, colocated with the Sketch's code (a Sketch is a folder, `{sketchesRoot}/{id}/index.ts`). `sketchesRoot` is a single configured knob — today `packages/core/src/sketches` — so sketches and their presets can later move out of the harness by repointing it (ADR-0006). Presets are written in dev via a Vite dev-server middleware plugin (no standalone server) and read by every consumer (studio, Remotion) as a static file at the stable logical URL `/sketches/{id}/presets/{name}.json`.
+
+The serialized record is a self-describing envelope over the studio's live state: `{ version, sketch, name, seed, params, locks }` — `seed` + `params` reproduce the image (the ADR-0002 determinism spine), `locks` (a sorted array of param keys) resume the session and do _not_ affect the rendered frame. The **Parameter Schema** is authoritative _on read_, not just on write: a Preset is a derived view, so reloading reconciles its `params` against the live schema — keys absent from the schema are dropped, keys missing from the Preset are filled from their spec `default`, and out-of-bounds values load **as-is, unclamped** (exact-image fidelity beats staying in-bounds; a clamp would silently reproduce a different frame). `version` is the migration escape hatch: v1 stores `1` and does presence-only reconciliation; a future breaking change bumps it and branches the loader.
+
+**Render Settings**:
+The per-render output configuration a consumer chooses when turning a **Sketch** into a concrete artifact — frame rate and pixel dimensions today, format and frame range later. Orthogonal to the three determinism inputs: Render Settings are _not_ **Params** (Sketch knobs), _not_ the **Seed**, and _not_ captured in a **Preset**; they change how a frame is _sampled and sized_, never which frame `generate(params, seed, t)` produces. Because a Sketch is continuous in `t` (ADR-0002), frame rate is a caller concern — the same `generate` sampled at any fps serves every caller — so fps lives here, never in the **Sketch contract**. In the Remotion consumer they arrive as composition input props (a default set plus per-render overrides); the same concept covers export dimensions for the **Scene Renderer** paths.
+_Avoid_: config, params, options, export options
 
 ## Relationships
 
@@ -75,11 +81,11 @@ There is no separate "realtime mode" vs "render mode" — one function, sampled 
 
 ### Time semantics
 
-`generate` is always `(params, seed, t)`; only *how the Harness drives `t`* varies, declared by optional time metadata (a duration, and whether it loops) alongside the **Parameter Schema**. No time metadata ⇒ static.
+`generate` is always `(params, seed, t)`, where **`t` is in seconds** uniformly across every mode; only *how the Harness drives `t`* varies, declared by optional time metadata (a duration, and whether it loops) alongside the **Parameter Schema**. No time metadata ⇒ static. A Sketch that wants normalized progress derives it itself as `t / duration` (e.g. circles computes its loop phase this way) — the contract never hands the Sketch a normalized `t`.
 
 - **Static** — output is constant in `t`; the Harness hides the scrubber. Not a "paused" mode — `t` is simply unused.
-- **Loop** — `t` wraps `0 → duration → 0`; periodic (use periodic noise for seamless loops). Any frame is a valid export.
-- **One-shot / reveal** — `t` runs `0 → 1` once and clamps; the drawing reveals over time. Canonical export frame is `t = 1`. For a plotter Sketch, `t` *is* pen-path progress — the time axis and the draw-over-time axis are one and the same.
+- **Loop** — `t` wraps `0 → duration → 0` (seconds); periodic (use periodic noise for seamless loops). Any frame is a valid export.
+- **One-shot / reveal** — `t` runs `0 → duration` once and clamps at `duration` (seconds); the drawing reveals over time. Canonical export frame is `t = duration`. For a plotter Sketch, `t` *is* pen-path progress — the time axis and the draw-over-time axis are one and the same. (A Sketch wanting `0 → 1` reveal progress computes `t / duration`.)
 
 ## Deliberately deferred
 
@@ -87,8 +93,9 @@ These are intentionally **not** pinned here — they are implementation specific
 
 - The exact record shape of a **Primitive** (how fill vs stroke is modeled — a tagged union vs an SVG-path-style record carrying optional fill and stroke; how layering and source-tagging are represented).
 - The exact shape of the **Scene** container beyond "coordinate space + draw-ordered Primitives."
-- The concrete field format of the **Parameter Schema** and the serialized **Preset** object.
+- The concrete field format of the **Parameter Schema**'s _non-numeric_ specs (boolean / color / enum / … members of the open `ParamSpec` union). The numeric spec is now frozen: `NumberParamSpec = { kind: 'number'; min; max; default; step?; integer? }`, the sole inhabited member of the open `kind`-discriminated union (issue #47). The serialized **Preset** object is no longer deferred — its shape and read-reconciliation policy are pinned in the **Preset** glossary entry above (issue #8).
 - Any GPU / instance-model data structures (the realtime GPU path is deferred entirely).
+- A **cross-param constraint** model — inter-param relationships the single-param **Parameter Schema** cannot express (e.g. `minRadius ≤ maxRadius`, params that only apply when another is enabled, sum-to-one groups). v1 **Randomize** rolls each unlocked numeric param independently within *its own* bounds, so it can hand a Sketch any in-bounds combination; a Sketch owns its own inter-param coherence inside `generate` (e.g. circles taking `Math.min`/`Math.max` of its two radii). A real constraint language is future work and deserves its own grilling before it is built.
 
 ## Flagged ambiguities
 

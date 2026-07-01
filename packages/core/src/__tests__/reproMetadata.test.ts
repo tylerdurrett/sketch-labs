@@ -1,0 +1,113 @@
+import { describe, expect, it } from 'vitest'
+
+import { PRESET_VERSION } from '../preset'
+import { buildReproMetadata, reproFilenameStem } from '../reproMetadata'
+
+/**
+ * These prove the embedded payload reuses the six-field {@link Preset} envelope
+ * (no new schema) plus the frame time `t`, and that `name` carries the export
+ * filename STEM. The JSON must parse back to
+ * `{ version:1, sketch, name, seed, params, locks, t? }`.
+ */
+
+describe('reproFilenameStem', () => {
+  it('omits the -t segment (and the extension) for a static Sketch', () => {
+    expect(reproFilenameStem({ sketchId: 'circles', seed: 42 })).toBe(
+      'circles-seed42',
+    )
+  })
+
+  it('includes the -t segment for a time-driven Sketch', () => {
+    expect(reproFilenameStem({ sketchId: 'waves', seed: 7, t: 1.5 })).toBe(
+      'waves-seed7-t1.5',
+    )
+  })
+
+  it('includes -t0 (a real captured moment, not the static case)', () => {
+    expect(reproFilenameStem({ sketchId: 'waves', seed: 7, t: 0 })).toBe(
+      'waves-seed7-t0',
+    )
+  })
+})
+
+describe('buildReproMetadata', () => {
+  it('serializes the full six-field Preset envelope plus t for a timed Sketch', () => {
+    const json = buildReproMetadata({
+      sketchId: 'waves',
+      seed: 123,
+      params: { radius: 10, count: 5 },
+      locks: new Set(['count', 'radius']),
+      t: 2.5,
+    })
+
+    expect(JSON.parse(json)).toEqual({
+      version: PRESET_VERSION,
+      sketch: 'waves',
+      name: 'waves-seed123-t2.5',
+      seed: 123,
+      params: { radius: 10, count: 5 },
+      locks: ['count', 'radius'],
+      t: 2.5,
+    })
+  })
+
+  it('omits t for a static Sketch and stems the name without -t', () => {
+    const json = buildReproMetadata({
+      sketchId: 'circles',
+      seed: 42,
+      params: { radius: 10 },
+      locks: new Set(),
+      t: undefined,
+    })
+    const parsed = JSON.parse(json)
+
+    expect(parsed).toEqual({
+      version: PRESET_VERSION,
+      sketch: 'circles',
+      name: 'circles-seed42',
+      seed: 42,
+      params: { radius: 10 },
+      locks: [],
+    })
+    // The static case carries NO `t` key (absent, not 0).
+    expect('t' in parsed).toBe(false)
+  })
+
+  it('keeps t=0 (a captured moment) in the payload', () => {
+    const parsed = JSON.parse(
+      buildReproMetadata({
+        sketchId: 'waves',
+        seed: 1,
+        params: {},
+        locks: new Set(),
+        t: 0,
+      }),
+    )
+    expect(parsed.t).toBe(0)
+    expect(parsed.name).toBe('waves-seed1-t0')
+  })
+
+  it('sorts locks (the serialized form is stable/diffable)', () => {
+    const parsed = JSON.parse(
+      buildReproMetadata({
+        sketchId: 'a',
+        seed: 1,
+        params: { x: 1 },
+        locks: new Set(['z', 'a', 'm']),
+      }),
+    )
+    expect(parsed.locks).toEqual(['a', 'm', 'z'])
+  })
+
+  it('does not alias the caller’s live params object', () => {
+    const params = { radius: 10 }
+    const json = buildReproMetadata({
+      sketchId: 'circles',
+      seed: 1,
+      params,
+      locks: new Set(),
+    })
+    params.radius = 999
+    expect(JSON.parse(json).params.radius).toBe(10)
+  })
+})

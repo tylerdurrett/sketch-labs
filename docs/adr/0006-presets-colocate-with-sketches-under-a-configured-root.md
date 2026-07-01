@@ -1,0 +1,11 @@
+# Presets colocate with sketch code under a single configured sketches root
+
+A Sketch is a **folder** (`{sketchesRoot}/{id}/index.ts` + `{sketchesRoot}/{id}/presets/*.json`), and the studio resolves a single `sketchesRoot` knob — today `packages/core/src/sketches` — that both the dev-server preset write middleware and the dev static-serve mapping point at. The studio always reads/writes the stable logical URL `/sketches/{id}/presets/{name}.json`; Remotion reads the same file off disk at `{sketchesRoot}/{id}/presets/{name}.json`. We chose this over writing presets under the studio's own Vite root (`apps/studio/sketches/…`), which would have been zero-config for static serving but split a Sketch's identity across two packages (code in `packages/core`, preset data in `apps/studio`).
+
+The deciding factor is a stated future: sketches (code **and** presets) may move to an external repo the harness is merely *pointed at*. Colocating every per-sketch artifact in one movable folder addressed by one knob makes that migration "repoint `sketchesRoot`, move the tree" rather than a scattered hunt across packages. The cost paid now is small and bounded — a few lines of dev static-serve config (the write middleware already had to know the same directory) plus a folder-per-sketch refactor of the existing `circles.ts`.
+
+## Consequences
+
+- The studio's Vite dev server serves files from outside its own root (`packages/core/src/sketches`). This works because the pnpm workspace root is already within Vite's `server.fs.allow`; exposing it at the `/sketches/` URL is an explicit dev static-serve mapping, not a default.
+- Preset save is dev-only (the write middleware); the read-one path is a plain static file so it serves *every* consumer — the dev studio (via Vite), a built studio (via the served asset), and Remotion (via `fs`). Directory listing for the studio's reload picker stays a dev-middleware `GET`, since a listing can't be a static file.
+- Externalizing sketches later still requires real refactoring (the registry currently hard-imports `./sketches/circles`, compiled into `core`); this ADR only guarantees the *file-layout and addressing* seam is a single knob, not that the build/packaging seam is solved.
