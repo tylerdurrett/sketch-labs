@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import * as core from '../index'
 import { createRandom } from '../random'
 import { leaf, type LeafShape } from '../sketches/single-leaf/leaf'
 import type { Polyline } from '../types'
@@ -101,6 +102,20 @@ describe('leaf', () => {
       const rough = leaf({ ...baseShape, wobble: 5 }, createRandom(1))
       expect(rough).not.toEqual(smooth)
     })
+  })
+
+  it('does not leak the leaf generator or a leaf domain type across the public barrel', () => {
+    // The leaf module is module-private: task 2's Sketch imports it via a
+    // relative path, but nothing leaf-shaped may appear in packages/core's
+    // public barrel (index.ts). `LeafShape` is a type and erases at runtime,
+    // so the enforceable runtime guard is the absence of the `leaf` value
+    // export and of any leaf-named surface on the barrel.
+    const surface = core as Record<string, unknown>
+    expect(surface).not.toHaveProperty('leaf')
+    const leafNamed = Object.keys(surface).filter((k) =>
+      k.toLowerCase().includes('leaf'),
+    )
+    expect(leafNamed).toEqual([])
   })
 
   it('re-seeding varies wobble but gross proportions (bbox) stay within tolerance', () => {
