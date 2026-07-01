@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import * as barrel from '../index'
+import { curl } from '../curl'
+import { createRandom } from '../random'
 import { circles } from '../sketches/circles'
 import { leafField } from '../sketches/leaf-field'
 import { bbox as pointsBBox } from '../sketches/sketch-util'
 import type { Params } from '../sketch'
+import type { Point } from '../types'
 import type { Primitive } from '../scene'
 
 /** The six leaf-field knobs, in declaration order. */
@@ -32,6 +35,105 @@ function bboxesOverlap(
   b: ReturnType<typeof primitiveBBox>,
 ): boolean {
   return a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY
+}
+
+/**
+ * Schema defaults the source reads, mirrored here so the orientation test can
+ * reconstruct the same curl field the sketch samples. Kept in sync with the
+ * sketch's `schema` block.
+ */
+const DEFAULT_FIELD_SCALE = 1.25
+const DEFAULT_TURBULENCE = 0.5
+
+/** Center of a primitive's bounding box — the point the sketch translated it onto. */
+function primitiveCentroid(primitive: Primitive): Point {
+  const { minX, minY, maxX, maxY } = primitiveBBox(primitive)
+  return [(minX + maxX) / 2, (minY + maxY) / 2]
+}
+
+/**
+ * The delta vector between a leaf's two farthest-apart vertices — its long axis
+ * (base↔apex). This single scan backs both the leaf's undirected spine ANGLE
+ * (`atan2`, with a 180° ambiguity callers resolve by angle-doubling) and its
+ * rotation-invariant LENGTH (`hypot`).
+ */
+function farthestVertexDelta(primitive: Primitive): Point {
+  const pts = primitive.points
+  let best = -1
+  let ax = 0
+  let ay = 0
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const dx = pts[j]![0] - pts[i]![0]
+      const dy = pts[j]![1] - pts[i]![1]
+      const d2 = dx * dx + dy * dy
+      if (d2 > best) {
+        best = d2
+        ax = dx
+        ay = dy
+      }
+    }
+  }
+  return [ax, ay]
+}
+
+/** Undirected spine axis angle (radians); the 180° ambiguity is caller-resolved. */
+function spineAxisAngle(primitive: Primitive): number {
+  const [dx, dy] = farthestVertexDelta(primitive)
+  return Math.atan2(dy, dx)
+}
+
+/**
+ * Mean resultant length of the DOUBLED angle differences between each leaf's
+ * spine axis and the field axis at its centroid. Doubling collapses the 180°
+ * spine ambiguity (an axis, not a direction); the resultant length is ~1 when
+ * the differences cluster tightly (orientation tracks the field) and ~0 when
+ * they scatter (random). `sampleAxis` lets callers pair each leaf with either
+ * its own centroid (coherent) or a mismatched one (random baseline).
+ */
+function fieldAlignment(
+  primitives: Primitive[],
+  seed: string,
+  sampleAxis: (i: number) => number,
+): number {
+  let sumCos = 0
+  let sumSin = 0
+  for (let i = 0; i < primitives.length; i++) {
+    const spine = spineAxisAngle(primitives[i]!)
+    const diff = 2 * (spine - sampleAxis(i))
+    sumCos += Math.cos(diff)
+    sumSin += Math.sin(diff)
+  }
+  return Math.hypot(sumCos, sumSin) / primitives.length
+}
+
+/**
+ * Field axis angle at a leaf's centroid, reconstructed the same way the source
+ * does: same curl overload, same fieldScale/turbulence, same rng-from-seed, t=0.
+ */
+function fieldAxisAt(primitive: Primitive, seed: string): number {
+  const rng = createRandom(seed)
+  const [cx, cy] = primitiveCentroid(primitive)
+  const flow = curl(rng, cx * DEFAULT_FIELD_SCALE, cy * DEFAULT_FIELD_SCALE, 0, {
+    gain: DEFAULT_TURBULENCE,
+  })
+  return Math.atan2(flow[1], flow[0])
+}
+
+/**
+ * Rotation-invariant leaf length: the distance between the two farthest-apart
+ * vertices (base↔apex). Unlike an axis-aligned bbox diagonal, this is unaffected
+ * by the leaf's flow rotation, so at variation 0 all leaves measure equal.
+ */
+function spineLength(primitive: Primitive): number {
+  const [dx, dy] = farthestVertexDelta(primitive)
+  return Math.hypot(dx, dy)
+}
+
+/** Spread (max − min) of the leaf spine lengths in a scene, a proxy for size variation. */
+function spineLengthSpread(primitives: Primitive[]): number {
+  const lengths = primitives.map(spineLength)
+  return Math.max(...lengths) - Math.min(...lengths)
 }
 
 describe('leaf-field Sketch contract', () => {
@@ -132,6 +234,68 @@ describe('leaf-field seed independence', () => {
     const sceneB = leafField.generate(params, 'seed-b', 0)
     // The Poisson scatter is seeded, so a re-seed reshuffles placement.
     expect(sceneB).not.toEqual(sceneA)
+  })
+
+  it('a re-seed shifts BOTH orientation and variation, not just placement', () => {
+    // With variation live, a re-seed must reshuffle scatter, reroll every leaf's
+    // shape, AND re-anchor the flow field (curl reads the same seed). Assert the
+    // per-leaf spine-length multisets differ — that only holds if the seeded
+    // shape rolls (and their flow-driven orientation) genuinely changed.
+    const params: Params = { density: 6, variation: 0.6 }
+    const a = leafField.generate(params, 'orient-a', 0)
+    const b = leafField.generate(params, 'orient-b', 0)
+    // Rotation-invariant spine lengths: differences here come from the seeded
+    // SHAPE rolls (size variation), not merely from different rotations.
+    const lengths = (scene: typeof a): number[] =>
+      scene.primitives.map((p) => Math.round(spineLength(p))).sort((x, y) => x - y)
+    expect(lengths(b)).not.toEqual(lengths(a))
+  })
+})
+
+describe('leaf-field flow-field orientation (#127)', () => {
+  it('orients leaves coherently with the flow field, not randomly', () => {
+    const seed = 'orient'
+    // Sparse enough that farthest-vertex spine recovery is unambiguous, variation
+    // 0 so the spine axis reflects orientation alone (not per-leaf shape noise).
+    const scene = leafField.generate({ density: 4, variation: 0 }, seed, 0)
+    const leaves = scene.primitives
+    expect(leaves.length).toBeGreaterThan(5)
+
+    // Each leaf paired with the field at its OWN centroid ⇒ tight cluster.
+    const coherent = fieldAlignment(leaves, seed, (i) => fieldAxisAt(leaves[i]!, seed))
+    expect(coherent).toBeGreaterThan(0.8)
+
+    // Baseline: pair each leaf with a MISMATCHED (rotated-index) centroid's field
+    // axis ⇒ should NOT cluster, proving the test has teeth.
+    const shuffled = fieldAlignment(leaves, seed, (i) =>
+      fieldAxisAt(leaves[(i + 1) % leaves.length]!, seed),
+    )
+    expect(shuffled).toBeLessThan(coherent)
+    expect(shuffled).toBeLessThan(0.6)
+  })
+})
+
+describe('leaf-field per-leaf variation (#127)', () => {
+  it('at nonzero variation, no two leaves are geometrically identical', () => {
+    const scene = leafField.generate({ density: 6, variation: 0.6 }, 'vary', 0)
+    const hashes = scene.primitives.map((p) => JSON.stringify(p.points))
+    expect(new Set(hashes).size).toBe(hashes.length)
+  })
+
+  it('a higher variation yields strictly more size spread than a lower one at the same seed', () => {
+    const seed = 'spread'
+    const low = leafField.generate({ density: 6, variation: 0.2 }, seed, 0)
+    const high = leafField.generate({ density: 6, variation: 0.8 }, seed, 0)
+    expect(spineLengthSpread(high.primitives)).toBeGreaterThan(
+      spineLengthSpread(low.primitives),
+    )
+  })
+
+  it('at variation 0 every leaf shares the same base size (spread ~0), confirming the knob is live', () => {
+    const scene = leafField.generate({ density: 6, variation: 0 }, 'flat', 0)
+    // Leaves are all the fixed base shape (only rotated), so spine lengths — a
+    // rotation-invariant diagonal measure — match to within float noise.
+    expect(spineLengthSpread(scene.primitives)).toBeLessThan(1e-6)
   })
 })
 
