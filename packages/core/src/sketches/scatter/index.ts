@@ -30,10 +30,7 @@ import type {
   StatelessSketch,
 } from '../../sketch'
 import type { Point, Polyline } from '../../types'
-
-/** Coordinate-space extent the Scene is baked into (square, unitless). */
-const WIDTH = 1000
-const HEIGHT = 1000
+import { HEIGHT, numberParam, WIDTH } from '../sketch-util'
 
 /** Points used to approximate each dot's perimeter as a closed polygon. */
 const DOT_SEGMENTS = 12
@@ -75,17 +72,6 @@ const schema = {
 } satisfies Record<string, NumberParamSpec>
 
 /**
- * Read a numeric param value, falling back to the schema default when the caller
- * left the knob unset. Keeps `generate` total over partial `Params` without
- * freezing the (deliberately emergent) ParamSpec shape.
- */
-function numberParam(params: Params, key: keyof typeof schema): number {
-  const value = params[key as string]
-  if (typeof value === 'number') return value
-  return schema[key].default
-}
-
-/**
  * Approximate one dot as a closed polygon: a ring of `DOT_SEGMENTS`
  * evenly-spaced points around (cx, cy) at the given radius.
  */
@@ -115,9 +101,9 @@ export const scatter: StatelessSketch = {
   generate(params: Params, seed: Seed, _t: number): Scene {
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
-    const baseRadius = numberParam(params, 'baseRadius')
-    const jitter = numberParam(params, 'jitter')
-    const kSamples = Math.round(numberParam(params, 'kSamples'))
+    const baseRadius = numberParam(params, schema, 'baseRadius')
+    const jitter = numberParam(params, schema, 'jitter')
+    const kSamples = Math.round(numberParam(params, schema, 'kSamples'))
 
     // Constant radius field ⇒ uniform blue-noise spacing. `minRadius` equals the
     // constant so the accel grid is sized accurately (variable/density-driven
