@@ -126,10 +126,20 @@ export const flowField: StatelessSketch = {
         const cx = (col + 0.5) * cellW
         const cy = (row + 0.5) * cellH
 
+        // Sample the field in NORMALIZED [0,1) coordinates, not raw pixel space.
+        // curl's `scale` (fieldScale) is a frequency *per unit* of input, and the
+        // field's coherence length is ~1 unit; feeding raw 0..WIDTH coordinates
+        // multiplies the sample coords by hundreds, decorrelating every adjacent
+        // tick (≈π/2 apart) so no coherent current emerges. Dividing by the
+        // extent makes `fieldScale` a true swirls-per-canvas knob: low = broad
+        // swirls, high = tighter detail — the behavior the schema documents.
+        const nx = cx / WIDTH
+        const ny = cy / HEIGHT
+
         // 3D curl path: `t` is passed as `z` to thread animation. Held fixed
         // per frame, so within a frame the field is a plain function of (x, y).
         // `fieldScale`→scale, `octaves`→octaves, `turbulence`→gain (see schema).
-        const [vx, vy] = curl(rng, cx, cy, t, {
+        const [vx, vy] = curl(rng, nx, ny, t, {
           scale: fieldScale,
           octaves,
           gain: turbulence,
