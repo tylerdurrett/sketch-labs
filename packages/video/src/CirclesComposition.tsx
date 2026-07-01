@@ -38,13 +38,23 @@ export const DEFAULT_FPS = 30
 export const DEFAULT_SEED: Seed = 1
 
 /**
+ * The default background — the opaque backdrop the shared `drawSceneFitted`
+ * pipeline paints over the full surface (issue #92). A Render Setting with a safe
+ * opaque default (white), so a black-stroked Sketch is never black-on-black in the
+ * alpha-less `.mp4`. Overridable per render via `--props` (e.g. `'transparent'`).
+ */
+export const DEFAULT_BACKGROUND: string = 'white'
+
+/**
  * The circles Composition's input props — the render-time knobs, split into two
  * kinds:
  *
- * - Render Settings (`fps`, `width`, `height`): how the discrete renderer samples
- *   and sizes the output. `fps` defaults to {@link DEFAULT_FPS}; `width`/`height`
- *   default (via {@link calculateCirclesMetadata}) to the Sketch's own coordinate
- *   space so the video matches the Scene's aspect ratio with no letterboxing.
+ * - Render Settings (`fps`, `width`, `height`, `background`): how the discrete
+ *   renderer samples, sizes, and backs the output. `fps` defaults to
+ *   {@link DEFAULT_FPS}; `width`/`height` default (via
+ *   {@link calculateCirclesMetadata}) to the Sketch's own coordinate space so the
+ *   video matches the Scene's aspect ratio with no letterboxing; `background`
+ *   defaults to {@link DEFAULT_BACKGROUND}.
  * - Determinism inputs (`params`, `seed`): what the Sketch draws. `params`
  *   defaults to `defaultParams(sketch.schema)`; `seed` to {@link DEFAULT_SEED}.
  *
@@ -58,6 +68,8 @@ export interface CirclesProps extends Record<string, unknown> {
   width: number
   /** Output height in pixels; defaults to the Sketch's coordinate-space height. */
   height: number
+  /** Opaque backdrop CSS color painted over the full surface; `'transparent'` clears. */
+  background: string
   /** Inhabited param values handed to the Sketch's `generate`. */
   params: Params
   /** The explicit Seed all of the Sketch's randomness derives from. */
@@ -108,10 +120,17 @@ export const calculateCirclesMetadata: CalculateMetadataFunction<CirclesProps> =
  *
  * Each frame: resolve the Sketch from the registry, sample it at `t = frame /
  * fps` via the pure {@link frameToScene} (no cross-frame state — this component
- * holds none), then `drawSceneFitted(ctx, scene, width, height)` onto the canvas.
- * `width`/`height` come from `useVideoConfig` (the metadata-resolved output size),
- * and the canvas backing store is sized to them. `mode` never enters the frame
- * math.
+ * holds none), then `drawSceneFitted(ctx, scene, width, height, background)` onto
+ * the canvas. `width`/`height` come from `useVideoConfig` (the metadata-resolved
+ * output size), and the canvas backing store is sized to them. `mode` never
+ * enters the frame math.
+ *
+ * `background` is NOT part of Remotion's returned metadata (only
+ * `fps`/`durationInFrames`/`width`/`height` round-trip through `useVideoConfig`),
+ * so it is received as a PROP directly (validated in {@link calculateCirclesMetadata}
+ * via `resolveRenderSettings`). Painting it in `drawSceneFitted` also does the
+ * per-frame surface clear unconditionally, subsuming the previously-missing
+ * `clearRect` here — no cross-frame ghosting in the loop (issue #92).
  *
  * The browser `CanvasRenderingContext2D` is structurally assignable to core's
  * `Canvas2DContext` port except its `fillStyle`/`strokeStyle` getters are typed
@@ -119,7 +138,7 @@ export const calculateCirclesMetadata: CalculateMetadataFunction<CirclesProps> =
  * this single boundary keeps core headless with no runtime adapter — the same
  * boundary the studio's `drawFrame` establishes.
  */
-export function CirclesComposition({ params, seed }: CirclesProps) {
+export function CirclesComposition({ params, seed, background }: CirclesProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const frame = useCurrentFrame()
   const { fps, width, height } = useVideoConfig()
@@ -132,8 +151,8 @@ export function CirclesComposition({ params, seed }: CirclesProps) {
 
     const sketch = registry.get(CIRCLES_ID)
     const scene = frameToScene(sketch, params, seed, frame, fps)
-    drawSceneFitted(ctx as Canvas2DContext, scene, width, height)
-  }, [frame, fps, width, height, params, seed])
+    drawSceneFitted(ctx as Canvas2DContext, scene, width, height, background)
+  }, [frame, fps, width, height, params, seed, background])
 
   return <canvas ref={canvasRef} width={width} height={height} />
 }

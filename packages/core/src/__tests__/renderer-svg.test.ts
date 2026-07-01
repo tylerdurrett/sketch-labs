@@ -231,12 +231,20 @@ describe('renderToSVG', () => {
     expect(svg).toMatch(/<svg\b[^>]*xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)
   })
 
-  it('emits no blank line between <svg> and </svg> for an empty Scene', () => {
+  it('emits no blank line between the background rect and </svg> for an empty Scene', () => {
     const svg = renderToSVG({ space, primitives: [] })
 
-    // The closing tag follows the open tag directly — no empty `paths` line.
-    expect(svg).toContain('>\n</svg>')
+    // The closing tag follows the background rect directly — no empty `paths` line.
+    expect(svg).toMatch(/\/>\n<\/svg>/)
     // No doubled newline (which would be a blank line) anywhere.
+    expect(svg).not.toMatch(/\n\n/)
+  })
+
+  it('emits no blank line between <svg> and </svg> for a transparent empty Scene', () => {
+    const svg = renderToSVG({ space, primitives: [] }, undefined, 'transparent')
+
+    // No background rect, no paths — the closing tag follows the open tag directly.
+    expect(svg).toContain('>\n</svg>')
     expect(svg).not.toMatch(/\n\n/)
   })
 
@@ -251,6 +259,44 @@ describe('renderToSVG', () => {
 
     // Only the one-point Primitive yields a path; the empty one is dropped.
     expect(paths(renderToSVG(scene))).toHaveLength(1)
+  })
+
+  describe('background rect (issue #92)', () => {
+    /** The first `<rect>` line from the emitted SVG, if any. */
+    const bgRect = (svg: string): string | undefined =>
+      svg.match(/<rect\b[^>]*>/)?.[0]
+
+    it('emits a full-viewBox white background rect as the first element by default', () => {
+      const scene: Scene = {
+        space: { width: 640, height: 480 },
+        primitives: [
+          { points: [[0, 0]], stroke: { color: 'black', width: 1 } },
+        ],
+      }
+      const svg = renderToSVG(scene)
+
+      const rect = bgRect(svg)!
+      expect(rect).toMatch(/x="0"/)
+      expect(rect).toMatch(/y="0"/)
+      expect(rect).toMatch(/width="640"/)
+      expect(rect).toMatch(/height="480"/)
+      expect(rect).toMatch(/fill="white"/)
+      // It sits below everything — before the first <path> (bottom of z-order).
+      expect(svg.indexOf('<rect')).toBeLessThan(svg.indexOf('<path'))
+    })
+
+    it('emits no background rect for a transparent background', () => {
+      const svg = renderToSVG({ space, primitives: [] }, undefined, 'transparent')
+      expect(svg).not.toMatch(/<rect\b/)
+    })
+
+    it('honors and XML-escapes a custom background color', () => {
+      const svg = renderToSVG({ space, primitives: [] }, undefined, '#0a0a0a')
+      expect(bgRect(svg)).toMatch(/fill="#0a0a0a"/)
+
+      const escaped = renderToSVG({ space, primitives: [] }, undefined, 'a"b&c')
+      expect(bgRect(escaped)).toContain('fill="a&quot;b&amp;c"')
+    })
   })
 
   describe('embedded <metadata> (issue #76)', () => {

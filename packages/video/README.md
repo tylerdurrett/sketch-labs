@@ -39,11 +39,17 @@ The Remotion entry is `src/index.ts` and the circles composition id is `Circles`
 npx remotion render src/index.ts Circles out/circles.mp4
 ```
 
+The default background is **opaque white** (a Render Setting the shared pipeline
+paints, issue #92), so this now produces black circles on WHITE — not the
+all-black frame you'd get if the alpha-less `.mp4` flattened a transparent
+backdrop. `background` is a `--props` knob like the rest; pass
+`--props='{"background":"transparent"}'` (or any CSS color) to override it.
+
 Render Settings and determinism inputs are **input props**, overridable per
 render (defaults: `fps` 30, `width`/`height` from the Sketch's coordinate space,
-`params` = the Sketch's schema defaults, `seed` = 1). `durationInFrames` is
-derived by `calculateMetadata` from the Sketch's `time.duration`. Override any of
-them with `--props`, e.g.:
+`background` = `white`, `params` = the Sketch's schema defaults, `seed` = 1).
+`durationInFrames` is derived by `calculateMetadata` from the Sketch's
+`time.duration`. Override any of them with `--props`, e.g.:
 
 ```sh
 npx remotion render src/index.ts Circles out/circles.mp4 \

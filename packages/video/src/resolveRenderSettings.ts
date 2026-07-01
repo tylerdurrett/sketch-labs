@@ -21,6 +21,7 @@ export interface RenderSettings {
   fps: number
   width: number
   height: number
+  background: string
 }
 
 /**
@@ -43,31 +44,44 @@ export interface RenderSettings {
  *   `space.height`. ANY other value must be finite and `> 0`; negative, `NaN`,
  *   and `Infinity` are rejected rather than passed through (the old `|| space.*`
  *   fallback only caught falsy values, letting a truthy `-100` or `NaN` slip in).
+ * - `background` is the opaque backdrop the shared pipeline paints (issue #92). It
+ *   is a CSS color string OR `'transparent'`, and the default white lives in
+ *   `defaultProps` (Root.tsx) rather than here. We cannot fully validate a CSS
+ *   color headlessly (no DOM), so the boundary is minimal: reject a non-string or
+ *   empty string; any non-empty string (`'transparent'` included) passes through.
  *
- * Validation uses {@link Number.isFinite}, which correctly rejects `NaN`,
+ * Numeric validation uses {@link Number.isFinite}, which correctly rejects `NaN`,
  * `Infinity`, and non-number inputs — the exact failure modes `--props` can
  * introduce.
  *
- * @param props - The render's `fps`/`width`/`height` input props.
+ * @param props - The render's `fps`/`width`/`height`/`background` input props.
  * @param space - The Sketch's coordinate space, read from a probe `generate`.
- * @returns The resolved {@link RenderSettings}, all finite positives.
+ * @returns The resolved {@link RenderSettings}, dimensions finite positive.
  * @throws if `fps`, or an explicitly-provided (non-zero) `width`/`height`, is not
- *   a finite positive number — the message names the offending prop and its value.
+ *   a finite positive number, or `background` is not a non-empty string — the
+ *   message names the offending prop and its value.
  */
 export function resolveRenderSettings(
-  props: Pick<CirclesProps, 'fps' | 'width' | 'height'>,
+  props: Pick<CirclesProps, 'fps' | 'width' | 'height' | 'background'>,
   space: Space,
 ): RenderSettings {
-  const { fps, width, height } = props
+  const { fps, width, height, background } = props
 
   if (!Number.isFinite(fps) || fps <= 0) {
     throw new Error(`resolveRenderSettings: fps must be a finite positive number, got ${fps}`)
+  }
+
+  if (typeof background !== 'string' || background === '') {
+    throw new Error(
+      `resolveRenderSettings: background must be a non-empty CSS color string (or 'transparent'), got ${background}`,
+    )
   }
 
   return {
     fps,
     width: resolveDimension('width', width, space.width),
     height: resolveDimension('height', height, space.height),
+    background,
   }
 }
 

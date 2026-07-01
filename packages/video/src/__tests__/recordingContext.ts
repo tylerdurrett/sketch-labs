@@ -9,12 +9,14 @@ import type { Canvas2DContext } from '@harness/core'
  *
  * The log captures ORDER, not just presence: path ops (`moveTo`, `lineTo`, …),
  * paint ops (`fill`, `stroke`), state ops (`save`, `restore`), the style-property
- * writes (`fillStyle=`, `strokeStyle=`, `lineWidth=`), AND `setTransform` — the
+ * writes (`fillStyle=`, `strokeStyle=`, `lineWidth=`), `setTransform` — the
  * contain-fit transform `drawSceneFitted` establishes before it delegates to
- * `renderToCanvas`. Recording `setTransform` as an ordered event is deliberate
- * (#85 adopted the port-widen path): the fit transform is an ASSERTED ordered
- * event in the parity log, not invisible glue, so the proof covers the whole
- * fit-and-draw pipeline, not just the primitive drawing.
+ * `renderToCanvas` — AND the background paint ops (`fillRect`/`clearRect`) that
+ * open every draw (issue #92: the opaque backdrop over the full surface).
+ * Recording these as ordered events is deliberate (#85 adopted the port-widen
+ * path): the fit transform and the background paint are ASSERTED ordered events in
+ * the parity log, not invisible glue, so the proof covers the whole
+ * background-fit-and-draw pipeline, not just the primitive drawing.
  *
  * It implements the FULL port surface so it is structurally a `Canvas2DContext`
  * with no casts — the same object both callers draw through in the parity test.
@@ -61,6 +63,14 @@ export class RecordingContext implements Canvas2DContext {
 
   setTransform(a: number, b: number, c: number, d: number, e: number, f: number): void {
     this.log.push(`setTransform(${a},${b},${c},${d},${e},${f})`)
+  }
+
+  fillRect(x: number, y: number, w: number, h: number): void {
+    this.log.push(`fillRect(${x},${y},${w},${h})`)
+  }
+
+  clearRect(x: number, y: number, w: number, h: number): void {
+    this.log.push(`clearRect(${x},${y},${w},${h})`)
   }
 
   get fillStyle(): string {
