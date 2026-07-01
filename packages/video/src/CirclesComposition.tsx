@@ -14,6 +14,7 @@ import {
 } from '@harness/core'
 
 import { frameToScene } from './frameToScene'
+import { resolveRenderSettings } from './resolveRenderSettings'
 
 /** The Sketch this Composition renders — resolved from core's PUBLIC registry by
  * its stable id, NOT a direct import of the circles module. The video package is
@@ -78,19 +79,25 @@ export interface CirclesProps extends Record<string, unknown> {
  * its geometry is discarded. Keeping this in `calculateMetadata` (not the
  * component) means the frame count and default dimensions are settled ONCE per
  * render, before any frame draws.
+ *
+ * The Render Settings (`fps`, `width`, `height`) are validated via
+ * {@link resolveRenderSettings} before use — `--props` is untyped JSON at the
+ * boundary, so a negative/`NaN`/`Infinity` value that TypeScript's `number` type
+ * does not exclude fails loudly here rather than corrupting the frame count or
+ * canvas size.
  */
 export const calculateCirclesMetadata: CalculateMetadataFunction<CirclesProps> = ({ props }) => {
   const sketch = registry.get(CIRCLES_ID)
-  const fps = props.fps
   const durationSeconds = sketch.time?.duration ?? 1
 
   const probe = sketch.generate(props.params, props.seed, 0)
+  const { fps, width, height } = resolveRenderSettings(props, probe.space)
 
   return {
     fps,
     durationInFrames: Math.round(durationSeconds * fps),
-    width: props.width || probe.space.width,
-    height: props.height || probe.space.height,
+    width,
+    height,
   }
 }
 
