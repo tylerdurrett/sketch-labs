@@ -44,13 +44,13 @@ const HEIGHT = 1000
  */
 const schema = {
   /** Length of the leaf along its spine, in coordinate-space units. */
-  length: { kind: 'number', min: 100, max: 900, default: 700 },
+  length: { kind: 'number', min: 100, max: 900, default: 168 },
   /** Maximum width across the spine, in coordinate-space units. */
-  width: { kind: 'number', min: 40, max: 500, default: 260 },
+  width: { kind: 'number', min: 40, max: 500, default: 198 },
   /** Sideways spine bend, as a fraction of length (signed). */
-  curl: { kind: 'number', min: -0.5, max: 0.5, default: 0.12 },
+  curl: { kind: 'number', min: -0.5, max: 0.5, default: -0.08 },
   /** Amplitude of seeded per-vertex jitter along the outline. */
-  wobble: { kind: 'number', min: 0, max: 30, default: 6 },
+  wobble: { kind: 'number', min: 0, max: 30, default: 0.19 },
   /** Apex sharpness in [0, 1]: higher pinches the tip, lower rounds it. */
   tipSharpness: { kind: 'number', min: 0, max: 1, default: 0.6 },
 } satisfies Record<string, NumberParamSpec>
