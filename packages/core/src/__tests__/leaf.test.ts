@@ -106,16 +106,18 @@ describe('leaf', () => {
 
   it('does not leak the leaf generator or a leaf domain type across the public barrel', () => {
     // The leaf module is module-private: task 2's Sketch imports it via a
-    // relative path, but nothing leaf-shaped may appear in packages/core's
-    // public barrel (index.ts). `LeafShape` is a type and erases at runtime,
-    // so the enforceable runtime guard is the absence of the `leaf` value
-    // export and of any leaf-named surface on the barrel.
+    // relative path, but the leaf DOMAIN surface (`leaf` generator, `LeafShape`
+    // type) must never appear in packages/core's public barrel (index.ts).
+    // `LeafShape` is a type and erases at runtime, so the enforceable runtime
+    // guard is the absence of the `leaf`/`LeafShape` value exports.
+    //
+    // The `single-leaf` Sketch itself IS a legitimate public export — the
+    // barrel exposes the `singleLeaf` Sketch object (a generic Sketch, not a
+    // leaf-typed value), so the guard checks for the private domain names
+    // exactly rather than any substring containing "leaf".
     const surface = core as Record<string, unknown>
     expect(surface).not.toHaveProperty('leaf')
-    const leafNamed = Object.keys(surface).filter((k) =>
-      k.toLowerCase().includes('leaf'),
-    )
-    expect(leafNamed).toEqual([])
+    expect(surface).not.toHaveProperty('LeafShape')
   })
 
   it('re-seeding varies wobble but gross proportions (bbox) stay within tolerance', () => {
