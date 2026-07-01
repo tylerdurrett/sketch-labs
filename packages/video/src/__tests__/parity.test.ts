@@ -20,9 +20,9 @@ import { RecordingContext } from './recordingContext'
  *
  * With the frame/fps chosen so `frame / fps === t`, and the same params/seed/dims,
  * the two callers MUST emit identical ordered logs — including the `setTransform`
- * contain-fit call `drawSceneFitted` establishes before drawing (the recording
- * stub records it as an ordered event, so the fit transform is part of the proof,
- * not invisible glue).
+ * contain-fit call AND the opaque-background paint `drawSceneFitted` establishes
+ * before drawing (the recording stub records both as ordered events, so the fit
+ * transform and backdrop are part of the proof, not invisible glue).
  */
 describe('cross-caller draw-call parity', () => {
   const sketch = registry.get('circles')
@@ -50,20 +50,37 @@ describe('cross-caller draw-call parity', () => {
     expect(videoCtx.log).toEqual(studioCtx.log)
     // The join is the byte-level assertion the proof is named for.
     expect(videoCtx.log.join('\n')).toBe(studioCtx.log.join('\n'))
+
+    // The opaque-background paint (default white, over the full surface) is part
+    // of the byte-identical log — the AC that the recording-context test covers
+    // the background paint (issue #92).
+    expect(studioCtx.log.slice(0, 3)).toEqual([
+      'setTransform(1,0,0,1,0,0)',
+      'fillStyle=white',
+      `fillRect(0,0,${pixelW},${pixelH})`,
+    ])
   })
 
-  it('records the contain-fit setTransform as the first ordered event', () => {
+  it('opens with the background paint, then the contain-fit setTransform', () => {
     const ctx = new RecordingContext()
     const scene = sketch.generate(params, seed, t)
     drawSceneFitted(ctx, scene, pixelW, pixelH)
 
-    // drawSceneFitted establishes the fit transform BEFORE renderToCanvas draws,
-    // so the very first logged event is the setTransform with a real scale/offset.
-    expect(ctx.log[0]).toMatch(/^setTransform\(/)
-    // The transform is non-identity here (square Scene into a portrait surface).
-    expect(ctx.log[0]).not.toBe('setTransform(1,0,0,1,0,0)')
-    // And it is present exactly once (the fit is established once per draw).
-    expect(ctx.log.filter((entry) => entry.startsWith('setTransform(')).length).toBe(1)
+    // The log STARTS with the background paint sequence: identity reset, white
+    // fill of the full surface (both callers inherit the white default).
+    expect(ctx.log.slice(0, 3)).toEqual([
+      'setTransform(1,0,0,1,0,0)',
+      'fillStyle=white',
+      `fillRect(0,0,${pixelW},${pixelH})`,
+    ])
+
+    // There are exactly TWO setTransforms: the background's identity reset, then
+    // the fit transform — which is the SECOND and is non-identity here (square
+    // Scene into a portrait surface).
+    const setTransforms = ctx.log.filter((entry) => entry.startsWith('setTransform('))
+    expect(setTransforms).toHaveLength(2)
+    expect(setTransforms[0]).toBe('setTransform(1,0,0,1,0,0)')
+    expect(setTransforms[1]).not.toBe('setTransform(1,0,0,1,0,0)')
   })
 
   it('produces a non-empty draw stream (the proof is not vacuously equal)', () => {
