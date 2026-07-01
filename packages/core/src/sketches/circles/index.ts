@@ -23,10 +23,7 @@ import type {
   StatelessSketch,
 } from '../../sketch'
 import type { Point, Polyline } from '../../types'
-
-/** Coordinate-space extent the Scene is baked into (square, unitless). */
-const WIDTH = 1000
-const HEIGHT = 1000
+import { HEIGHT, numberParam, WIDTH } from '../sketch-util'
 
 /** Points used to approximate each circle's perimeter as a closed polygon. */
 const PERIMETER_SEGMENTS = 64
@@ -48,17 +45,6 @@ const schema = {
   /** Largest circle radius, in coordinate-space units. */
   maxRadius: { kind: 'number', min: 2, max: 200, default: 60 },
 } satisfies Record<string, NumberParamSpec>
-
-/**
- * Read a numeric param value, falling back to the schema default when the caller
- * left the knob unset. Keeps `generate` total over partial `Params` without
- * freezing the (deliberately emergent) ParamSpec shape.
- */
-function numberParam(params: Params, key: keyof typeof schema): number {
-  const value = params[key as string]
-  if (typeof value === 'number') return value
-  return schema[key].default
-}
 
 /**
  * Approximate one circle as a closed polygon: a ring of `PERIMETER_SEGMENTS`
@@ -90,9 +76,9 @@ export const circles: StatelessSketch = {
     const rng = createRandom(seed)
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
-    const count = Math.round(numberParam(params, 'count'))
-    const minRadius = numberParam(params, 'minRadius')
-    const maxRadius = numberParam(params, 'maxRadius')
+    const count = Math.round(numberParam(params, schema, 'count'))
+    const minRadius = numberParam(params, schema, 'minRadius')
+    const maxRadius = numberParam(params, schema, 'maxRadius')
 
     const duration = circles.time?.duration ?? 1
     // Phase of the loop in [0, 1): same at t and t + duration, so the animation
