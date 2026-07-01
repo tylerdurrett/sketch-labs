@@ -35,9 +35,10 @@ import { escapeAttr, round } from './svgHelpers'
  * The real browser `CanvasRenderingContext2D` is structurally assignable to this
  * port, so callers pass `canvas.getContext('2d')` directly with no adapter; a
  * node test passes a recording stub. The port can widen (never rework) as
- * renderers grow — the `setTransform` member is one such ADR-0004-sanctioned
- * widening, added so {@link drawSceneFitted} can establish the caller's
- * contain-fit transform through the same headless port (no `lib.dom` reach).
+ * renderers grow — the `setTransform`, `fillRect`, and `clearRect` members are
+ * ADR-0004-sanctioned widenings, added so {@link drawSceneFitted} can establish
+ * the caller's contain-fit transform AND paint/clear the opaque background
+ * (issue #92) through the same headless port (no `lib.dom` reach).
  */
 export interface Canvas2DContext {
   /** Push the current drawing state (style, transform) onto the state stack. */
@@ -64,6 +65,10 @@ export interface Canvas2DContext {
   lineWidth: number
   /** Replace the current transform with `[a b c d e f]` (a→scaleX, d→scaleY, e/f→translate). */
   setTransform(a: number, b: number, c: number, d: number, e: number, f: number): void
+  /** Fill the `(x, y, w, h)` rectangle with {@link Canvas2DContext.fillStyle} (the opaque background). */
+  fillRect(x: number, y: number, w: number, h: number): void
+  /** Clear the `(x, y, w, h)` rectangle to transparent (the `'transparent'` background). */
+  clearRect(x: number, y: number, w: number, h: number): void
 }
 
 /**
@@ -130,22 +135,45 @@ export function renderToCanvas(ctx: Canvas2DContext, scene: Scene): void {
  * its own coordinate space (aspect ratio preserved, `Stroke.width` scaled with the
  * geometry) letterboxed into the surface.
  *
+ * The `background` is painted FIRST — under identity, over the FULL pixel surface
+ * (letterbox included) — before the fit transform, so it is the bottom of the
+ * z-order and every caller inherits a safe opaque backdrop with zero author
+ * discipline (issue #92). The default is `'white'`, so a black-stroked Sketch is
+ * never black-on-black (the Remotion `.mp4` has no alpha and flattens transparent
+ * → black); `'transparent'` clears instead of fills. The paint/clear is
+ * UNCONDITIONAL, so it doubles as the per-frame surface clear — no cross-frame
+ * ghosting in the Remotion loop, and callers no longer clear themselves.
+ *
  * It reads NEITHER `devicePixelRatio` NOR the surface's CSS box — DPR and
  * backing-store sizing stay a CALLER concern (the caller passes the already-sized
- * pixel dimensions and owns any clear). `renderToCanvas` itself stays transform-
- * free; this function is the thin fit-and-draw layer over it, not a change to it.
+ * pixel dimensions). `renderToCanvas` itself stays transform-free; this function
+ * is the thin background-fit-and-draw layer over it, not a change to it.
  *
  * @param ctx - The Canvas2D port to draw through (must satisfy `setTransform`).
  * @param scene - The Scene to fit and draw, in painter's order.
  * @param pixelW - Surface width in pixels (backing-store width, DPR already applied).
  * @param pixelH - Surface height in pixels (backing-store height, DPR already applied).
+ * @param background - Opaque backdrop CSS color painted over the full surface
+ *   before the scene; `'transparent'` clears instead of fills. Defaults to `'white'`.
  */
 export function drawSceneFitted(
   ctx: Canvas2DContext,
   scene: Scene,
   pixelW: number,
   pixelH: number,
+  background = 'white',
 ): void {
+  // Paint (or clear) the FULL pixel surface under identity, before the fit
+  // transform — the background sits at the bottom of the z-order and the
+  // unconditional clear/fill subsumes the per-frame surface clear.
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  if (background === 'transparent') {
+    ctx.clearRect(0, 0, pixelW, pixelH)
+  } else {
+    ctx.fillStyle = background
+    ctx.fillRect(0, 0, pixelW, pixelH)
+  }
+
   const { scale, offsetX, offsetY } = computeContainFit(
     scene.space.width,
     scene.space.height,

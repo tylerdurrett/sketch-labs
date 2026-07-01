@@ -42,6 +42,8 @@ function createRecordingContext(): Canvas2DContext & { events: Event[] } {
     fill: record('fill'),
     stroke: record('stroke'),
     setTransform: record('setTransform'),
+    fillRect: record('fillRect'),
+    clearRect: record('clearRect'),
     get fillStyle() {
       return fillStyle
     },
@@ -285,26 +287,74 @@ describe('renderToCanvas', () => {
 })
 
 describe('drawSceneFitted', () => {
+  // A 800x400 (2:1) space into a 1000x1000 surface: contain-fit yields a
+  // uniform scale of 1.25 and a 250px vertical letterbox (offsetY), offsetX 0.
+  const fitScene: Scene = {
+    space: { width: 800, height: 400 },
+    primitives: [{ points: [[0, 0]], stroke: { color: 'black', width: 1 } }],
+  }
+
+  it('paints the opaque background under identity BEFORE the fit transform', () => {
+    const ctx = createRecordingContext()
+
+    drawSceneFitted(ctx, fitScene, 1000, 1000)
+
+    // The background paint is the very first sequence: identity setTransform,
+    // then fillStyle=white + fillRect over the full pixel surface (letterbox
+    // included), all BEFORE the fit transform and any draw call.
+    expect(ctx.events.slice(0, 3)).toEqual([
+      { method: 'setTransform', args: [1, 0, 0, 1, 0, 0] },
+      { prop: 'fillStyle', value: 'white' },
+      { method: 'fillRect', args: [0, 0, 1000, 1000] },
+    ])
+    // The default paints, never clears.
+    expect(methodNames(ctx.events)).not.toContain('clearRect')
+  })
+
   it('applies the contain-fit transform via setTransform BEFORE the draw calls', () => {
     const ctx = createRecordingContext()
-    // A 800x400 (2:1) space into a 1000x1000 surface: contain-fit yields a
-    // uniform scale of 1.25 and a 250px vertical letterbox (offsetY), offsetX 0.
-    const scene: Scene = {
-      space: { width: 800, height: 400 },
-      primitives: [{ points: [[0, 0]], stroke: { color: 'black', width: 1 } }],
-    }
 
-    drawSceneFitted(ctx, scene, 1000, 1000)
+    drawSceneFitted(ctx, fitScene, 1000, 1000)
 
-    // setTransform is the very first recorded event, carrying the fit's
-    // scale/offsets, and precedes every renderToCanvas draw call.
-    expect(ctx.events[0]).toEqual({
-      method: 'setTransform',
-      args: [1.25, 0, 0, 1.25, 0, 250],
-    })
+    // The fit transform is the SECOND setTransform (the first is the background's
+    // identity reset), carrying the fit's scale/offsets, and precedes every draw.
+    const setTransforms = ctx.events.filter(
+      (e): e is { method: string; args: number[] } =>
+        'method' in e && e.method === 'setTransform',
+    )
+    expect(setTransforms).toEqual([
+      { method: 'setTransform', args: [1, 0, 0, 1, 0, 0] },
+      { method: 'setTransform', args: [1.25, 0, 0, 1.25, 0, 250] },
+    ])
     const names = methodNames(ctx.events)
-    expect(names.indexOf('setTransform')).toBeLessThan(names.indexOf('save'))
+    expect(names.lastIndexOf('setTransform')).toBeLessThan(names.indexOf('save'))
     // The scene is still drawn (the renderToCanvas leg ran after the transform).
     expect(names).toContain('stroke')
+  })
+
+  it('clears (never fills) the full surface for a transparent background', () => {
+    const ctx = createRecordingContext()
+
+    drawSceneFitted(ctx, fitScene, 1000, 1000, 'transparent')
+
+    // Identity reset, then a full-surface clearRect and NO fill of the backdrop.
+    expect(ctx.events.slice(0, 2)).toEqual([
+      { method: 'setTransform', args: [1, 0, 0, 1, 0, 0] },
+      { method: 'clearRect', args: [0, 0, 1000, 1000] },
+    ])
+    expect(methodNames(ctx.events)).not.toContain('fillRect')
+    expect(ctx.events).not.toContainEqual({ prop: 'fillStyle', value: 'transparent' })
+  })
+
+  it('honors a custom background color', () => {
+    const ctx = createRecordingContext()
+
+    drawSceneFitted(ctx, fitScene, 1000, 1000, '#0a0a0a')
+
+    expect(ctx.events.slice(0, 3)).toEqual([
+      { method: 'setTransform', args: [1, 0, 0, 1, 0, 0] },
+      { prop: 'fillStyle', value: '#0a0a0a' },
+      { method: 'fillRect', args: [0, 0, 1000, 1000] },
+    ])
   })
 })
