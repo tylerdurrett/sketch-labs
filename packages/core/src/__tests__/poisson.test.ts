@@ -146,3 +146,46 @@ describe('min-distance guarantee (variable radius, pinned max rule)', () => {
     }
   })
 })
+
+describe('minRadius lower-bound guard', () => {
+  // A non-smooth field: 50 almost everywhere, with a narrow low-radius well of 3
+  // supported on a small disc. The well center (25, 55) sits STRICTLY BETWEEN the
+  // 9x9 probe lattice nodes (x = 0,50,100,…; y = 0,37.5,75,…), and its support
+  // radius (25) is small enough that no lattice node falls inside the well disc:
+  // the nearest node (50, 37.5) is hypot(25, 17.5) ≈ 30.5 away > 25. So the coarse
+  // probe never observes the dip, yet the disc is broad enough that the sampler
+  // reliably lands a point inside and then packs the well densely — which is what
+  // exposes the too-coarse grid.
+  const WELL_CENTER: Point = [25, 55]
+  const WELL_SUPPORT = 25
+  const LOW_RADIUS = 3
+  const HIGH_RADIUS = 50
+  const radius = (x: number, y: number): number =>
+    dist([x, y], WELL_CENTER) <= WELL_SUPPORT ? LOW_RADIUS : HIGH_RADIUS
+
+  it('throws when minRadius is derived by a probe that misses the dip', () => {
+    // No hint → probe overestimates minRadius (never sees the 3-well) → the grid
+    // is too coarse → two accepted points collide in one cell → the guard fires.
+    expect(() =>
+      samplePoissonDisk({ ...REGION, radius, seed: 'dip' })
+    ).toThrow(/minRadius was not a true lower bound/)
+  })
+
+  it('succeeds and honors min-distance with an accurate minRadius hint', () => {
+    const points = samplePoissonDisk({
+      ...REGION,
+      radius,
+      minRadius: LOW_RADIUS,
+      seed: 'dip',
+    })
+    expect(points.length).toBeGreaterThan(10)
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        const a = points[i]!
+        const b = points[j]!
+        const required = Math.max(radius(a[0], a[1]), radius(b[0], b[1]))
+        expect(dist(a, b)).toBeGreaterThanOrEqual(required - 1e-9)
+      }
+    }
+  })
+})
