@@ -20,6 +20,7 @@
  * concern layered over this function (a later task, #34), not baked into it.
  */
 
+import { computeContainFit } from './canvas-fit'
 import type { Scene } from './scene'
 import { escapeAttr, round } from './svgHelpers'
 
@@ -34,7 +35,9 @@ import { escapeAttr, round } from './svgHelpers'
  * The real browser `CanvasRenderingContext2D` is structurally assignable to this
  * port, so callers pass `canvas.getContext('2d')` directly with no adapter; a
  * node test passes a recording stub. The port can widen (never rework) as
- * renderers grow.
+ * renderers grow — the `setTransform` member is one such ADR-0004-sanctioned
+ * widening, added so {@link drawSceneFitted} can establish the caller's
+ * contain-fit transform through the same headless port (no `lib.dom` reach).
  */
 export interface Canvas2DContext {
   /** Push the current drawing state (style, transform) onto the state stack. */
@@ -59,6 +62,8 @@ export interface Canvas2DContext {
   strokeStyle: string
   /** The stroke width, in the Scene's coordinate-space units. */
   lineWidth: number
+  /** Replace the current transform with `[a b c d e f]` (a→scaleX, d→scaleY, e/f→translate). */
+  setTransform(a: number, b: number, c: number, d: number, e: number, f: number): void
 }
 
 /**
@@ -110,6 +115,45 @@ export function renderToCanvas(ctx: Canvas2DContext, scene: Scene): void {
 
     ctx.restore()
   }
+}
+
+/**
+ * Draw a {@link Scene} onto a `pixelW × pixelH` surface through the SHARED render
+ * pipeline: compute the contain-fit transform, apply it to the injected
+ * {@link Canvas2DContext} port, then delegate to {@link renderToCanvas}.
+ *
+ * This is the ONE mapping every consumer runs — the studio's live canvas (#6) and
+ * the Remotion renderer (#11) both call this, so their fit is structurally
+ * identical, not coincidentally matched. `computeContainFit` yields a single
+ * uniform `scale` plus centering `offsetX`/`offsetY`; those become
+ * `ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY)`, so the Scene draws in
+ * its own coordinate space (aspect ratio preserved, `Stroke.width` scaled with the
+ * geometry) letterboxed into the surface.
+ *
+ * It reads NEITHER `devicePixelRatio` NOR the surface's CSS box — DPR and
+ * backing-store sizing stay a CALLER concern (the caller passes the already-sized
+ * pixel dimensions and owns any clear). `renderToCanvas` itself stays transform-
+ * free; this function is the thin fit-and-draw layer over it, not a change to it.
+ *
+ * @param ctx - The Canvas2D port to draw through (must satisfy `setTransform`).
+ * @param scene - The Scene to fit and draw, in painter's order.
+ * @param pixelW - Surface width in pixels (backing-store width, DPR already applied).
+ * @param pixelH - Surface height in pixels (backing-store height, DPR already applied).
+ */
+export function drawSceneFitted(
+  ctx: Canvas2DContext,
+  scene: Scene,
+  pixelW: number,
+  pixelH: number,
+): void {
+  const { scale, offsetX, offsetY } = computeContainFit(
+    scene.space.width,
+    scene.space.height,
+    pixelW,
+    pixelH,
+  )
+  ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY)
+  renderToCanvas(ctx, scene)
 }
 
 /**
