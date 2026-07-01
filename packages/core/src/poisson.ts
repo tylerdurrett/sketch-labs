@@ -96,7 +96,24 @@ export function samplePoissonDisk(options: PoissonSampleOptions): Point[] {
   const addPoint = (p: Point): void => {
     const index = points.length
     points.push(p)
-    grid[gridIndex(p[0], p[1])] = index
+    // Backstop invariant: the acceleration grid holds at most one point per cell.
+    // For a genuine lower bound this can never fire — the cell diagonal equals
+    // minRadius and acceptance already requires separation >= minRadius — so an
+    // occupied target cell means minRadius (probed or hinted) was NOT a true lower
+    // bound. Assert here to convert a silent min-distance violation into a loud
+    // failure. Compute the cell index once and reuse it for the check and write.
+    const cell = gridIndex(p[0], p[1])
+    if (grid[cell] !== -1) {
+      throw new Error(
+        'samplePoissonDisk: two accepted points fell in the same acceleration-grid ' +
+          'cell, so minRadius was not a true lower bound of the radius field (it was ' +
+          'overestimated, whether derived by probing or passed as a hint). The grid ' +
+          'is sized from minRadius, so a too-large value makes cells coarse enough to ' +
+          'hold two points, which would silently violate the min-distance guarantee. ' +
+          "Pass an accurate `minRadius` hint that is <= the field's true minimum."
+      )
+    }
+    grid[cell] = index
     active.push(index)
     const r = radius(p[0], p[1])
     if (r > maxPlacedRadius) maxPlacedRadius = r
