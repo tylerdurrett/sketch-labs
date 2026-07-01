@@ -32,10 +32,7 @@ import type {
   StatelessSketch,
 } from '../../sketch'
 import type { Point, Polyline } from '../../types'
-
-/** Coordinate-space extent the Scene is baked into (square, unitless). */
-const WIDTH = 1000
-const HEIGHT = 1000
+import { HEIGHT, numberParam, WIDTH } from '../sketch-util'
 
 /**
  * The flow-field Parameter Schema — the five knobs the brief exposes, all
@@ -66,17 +63,6 @@ const schema = {
   /** Length of each oriented tick, in coordinate-space units. */
   tickLength: { kind: 'number', min: 2, max: 60, default: 13 },
 } satisfies Record<string, NumberParamSpec>
-
-/**
- * Read a numeric param value, falling back to the schema default when the caller
- * left the knob unset. Keeps `generate` total over partial `Params` without
- * freezing the (deliberately emergent) ParamSpec shape.
- */
-function numberParam(params: Params, key: keyof typeof schema): number {
-  const value = params[key as string]
-  if (typeof value === 'number') return value
-  return schema[key].default
-}
 
 /**
  * One oriented tick: a 2-point open Polyline of length `length` centered on
@@ -110,11 +96,11 @@ export const flowField: StatelessSketch = {
     const rng = createRandom(seed)
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
-    const fieldScale = numberParam(params, 'fieldScale')
-    const octaves = Math.round(numberParam(params, 'octaves'))
-    const turbulence = numberParam(params, 'turbulence')
-    const density = Math.round(numberParam(params, 'tickDensity'))
-    const tickLength = numberParam(params, 'tickLength')
+    const fieldScale = numberParam(params, schema, 'fieldScale')
+    const octaves = Math.round(numberParam(params, schema, 'octaves'))
+    const turbulence = numberParam(params, schema, 'turbulence')
+    const density = Math.round(numberParam(params, schema, 'tickDensity'))
+    const tickLength = numberParam(params, schema, 'tickLength')
 
     // Grid points sit at cell centers, so the lattice is inset from the edges
     // symmetrically (spacing/2 margin) rather than crowding the borders.
