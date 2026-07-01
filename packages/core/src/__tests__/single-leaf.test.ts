@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import * as barrel from '../index'
 import { circles } from '../sketches/circles'
 import { singleLeaf } from '../sketches/single-leaf'
+import { bbox as pointsBBox } from '../sketches/sketch-util'
 import type { Params } from '../sketch'
 import type { Scene } from '../scene'
 
@@ -10,25 +11,8 @@ import type { Scene } from '../scene'
 const KNOBS = ['length', 'width', 'curl', 'wobble', 'tipSharpness'] as const
 
 /** Axis-aligned bounding box of every point across a Scene's primitives. */
-function bbox(scene: Scene): {
-  minX: number
-  minY: number
-  maxX: number
-  maxY: number
-} {
-  let minX = Infinity
-  let minY = Infinity
-  let maxX = -Infinity
-  let maxY = -Infinity
-  for (const primitive of scene.primitives) {
-    for (const [x, y] of primitive.points) {
-      if (x < minX) minX = x
-      if (x > maxX) maxX = x
-      if (y < minY) minY = y
-      if (y > maxY) maxY = y
-    }
-  }
-  return { minX, minY, maxX, maxY }
+function bbox(scene: Scene) {
+  return pointsBBox(scene.primitives.flatMap((p) => p.points))
 }
 
 describe('single-leaf Sketch contract', () => {
