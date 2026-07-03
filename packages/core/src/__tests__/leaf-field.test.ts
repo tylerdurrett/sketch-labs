@@ -2,9 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import * as barrel from '../index'
 import { curl } from '../curl'
+import { samplePoissonDisk } from '../poisson'
 import { createRandom } from '../random'
 import { circles } from '../sketches/circles'
 import { leafField } from '../sketches/leaf-field'
+import {
+  insideAnyClearing,
+  NEGATIVE_SPACES,
+} from '../sketches/leaf-field/negative-space'
 import { bbox as pointsBBox, HEIGHT, WIDTH } from '../sketches/sketch-util'
 import type { Params } from '../sketch'
 import type { Point } from '../types'
@@ -358,6 +363,125 @@ describe('leaf-field shape knobs — width & pointiness (#127)', () => {
     const round = leafField.generate({ ...params, pointiness: 0.05 }, 'point', 0)
     const sharp = leafField.generate({ ...params, pointiness: 0.95 }, 'point', 0)
     expect(sharp).not.toEqual(round)
+  })
+})
+
+describe('leaf-field negative-space clearings (#131)', () => {
+  /** Mirror of the sketch's REFERENCE_SPACING (radius = REFERENCE_SPACING / density). */
+  const REFERENCE_SPACING = 400
+  /** A density dense enough that the field carries a robust statistical sample. */
+  const CLEARING_DENSITY = 8
+  const BASE_SPACING = REFERENCE_SPACING / CLEARING_DENSITY
+
+  /**
+   * Find a seed whose UNGUARDED initial Poisson seed (the sampler's first two rng
+   * draws, reconstructed from `createRandom(seed)`) would land inside a clearing.
+   * Such a seed is the one that, without the domain gate, would strand a lone
+   * leaf in a hole — so it is exactly the case the reseed loop must handle.
+   */
+  function seedWithInitialPointInClearing(): string {
+    for (let i = 0; i < 4000; i++) {
+      const seed = `clearing-seed-${i}`
+      const rng = createRandom(seed)
+      const x = rng.range(0, WIDTH)
+      const y = rng.range(0, HEIGHT)
+      if (insideAnyClearing(x, y)) return seed
+    }
+    throw new Error('no seed found whose initial point lands in a clearing')
+  }
+
+  /** All leaf centroids (== the sampled points the leaves are centered on). */
+  function centroids(scene: ReturnType<typeof leafField.generate>): Point[] {
+    return scene.primitives.map(primitiveCentroid)
+  }
+
+  it('leaves exactly ZERO leaves inside the clearings, across multiple seeds', () => {
+    const seeds = ['seed-a', 'seed-b', 'clearing', seedWithInitialPointInClearing()]
+    for (const seed of seeds) {
+      const scene = leafField.generate({ density: CLEARING_DENSITY }, seed, 0)
+      // The field must still fill (it reseeded past the hole rather than bailing).
+      expect(scene.primitives.length).toBeGreaterThan(50)
+      const inside = centroids(scene).filter(([x, y]) => insideAnyClearing(x, y))
+      expect(inside).toHaveLength(0)
+    }
+  })
+
+  it('the seeded reseed keeps the strand-in-a-hole seed from placing a leaf inside', () => {
+    // Focused assertion on the audited leak: the very seed whose unguarded first
+    // point lands in a clearing produces a full field with no leaf in the hole.
+    const seed = seedWithInitialPointInClearing()
+    const scene = leafField.generate({ density: CLEARING_DENSITY }, seed, 0)
+    for (const [x, y] of centroids(scene)) expect(insideAnyClearing(x, y)).toBe(false)
+  })
+
+  it('density holds STATISTICALLY outside the clearings (no thinning of the field proper)', () => {
+    const seed = 'clearing-density'
+    const scene = leafField.generate({ density: CLEARING_DENSITY, variation: 0 }, seed, 0)
+    // Every leaf is outside a clearing (asserted above), so the masked count is
+    // the count of sampled points OUTSIDE the holes.
+    const maskedOutside = scene.primitives.length
+    // Baseline: an unmasked uniform field at the SAME spacing/seed, counting only
+    // the points that fall outside the clearings. Outside the holes both fields
+    // see the identical local radius, so the areal density there must match —
+    // NOT the exact coordinates (the mask reshuffles the whole blue-noise set).
+    const unmasked = samplePoissonDisk({
+      width: WIDTH,
+      height: HEIGHT,
+      radius: () => BASE_SPACING,
+      minRadius: BASE_SPACING,
+      seed,
+    })
+    const unmaskedOutside = unmasked.filter(([x, y]) => !insideAnyClearing(x, y)).length
+    expect(maskedOutside).toBeGreaterThan(50)
+    const ratio = maskedOutside / unmaskedOutside
+    expect(ratio).toBeGreaterThan(0.85)
+    expect(ratio).toBeLessThan(1.15)
+  })
+
+  it('preserves blue-noise spacing outside — no two leaves closer than the base spacing', () => {
+    const scene = leafField.generate({ density: CLEARING_DENSITY, variation: 0 }, 'spacing', 0)
+    const pts = centroids(scene)
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        const d = Math.hypot(pts[i]![0] - pts[j]![0], pts[i]![1] - pts[j]![1])
+        expect(d).toBeGreaterThanOrEqual(BASE_SPACING - 1e-9)
+      }
+    }
+  })
+
+  it('never trips the sampler minRadius lower-bound assertion (mask only raises radius)', () => {
+    // The mask multiplies the base spacing UP inside the holes; minRadius stays
+    // pinned to the base, so the accel-grid guard must never fire for any seed.
+    for (const seed of ['a', 'b', 'c', seedWithInitialPointInClearing()]) {
+      expect(() => leafField.generate({ density: CLEARING_DENSITY }, seed, 0)).not.toThrow()
+    }
+  })
+
+  it('is deterministic with the mask engaged (same params, seed, t)', () => {
+    const params: Params = { density: CLEARING_DENSITY, variation: 0.4 }
+    const a = leafField.generate(params, 'masked-det', 0)
+    const b = leafField.generate(params, 'masked-det', 0)
+    expect(a).toEqual(b)
+  })
+
+  it('actually carves holes — the field spans the canvas but the clearings stay empty', () => {
+    // Sanity that the clearings are real negative space, not a degenerate no-op:
+    // there ARE leaves elsewhere near each clearing, yet none inside it.
+    const scene = leafField.generate({ density: CLEARING_DENSITY }, 'carve', 0)
+    for (const space of NEGATIVE_SPACES) {
+      const nearby = centroids(scene).filter(([x, y]) => {
+        const d = Math.hypot(x - space.cx, y - space.cy)
+        return d > space.radius && d < space.radius + 2 * BASE_SPACING
+      })
+      // Leaves ring the clearing (proving it sits within the populated field)…
+      expect(nearby.length).toBeGreaterThan(0)
+      // …while its interior is empty.
+      const inside = centroids(scene).filter(([x, y]) => {
+        const d = Math.hypot(x - space.cx, y - space.cy)
+        return d <= space.radius
+      })
+      expect(inside).toHaveLength(0)
+    }
   })
 })
 

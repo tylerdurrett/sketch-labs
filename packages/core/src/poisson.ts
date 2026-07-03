@@ -4,6 +4,14 @@ import type { Point, Random } from './types'
 /** A spatially-varying minimum-distance field: returns the min radius at (x, y). */
 export type RadiusField = (x: number, y: number) => number
 
+/**
+ * Upper bound on redraws when hunting for an in-domain initial seed. Generous
+ * enough that any non-pathological domain (one covering a non-trivial fraction
+ * of the region) seeds on the first few tries, but finite so a vanishing/empty
+ * domain terminates deterministically with `[]` instead of spinning forever.
+ */
+const MAX_SEED_ATTEMPTS = 10_000
+
 export interface PoissonSampleOptions {
   /** Width of the region to fill. */
   width: number
@@ -24,6 +32,19 @@ export interface PoissonSampleOptions {
    * passing an accurate hint is cheaper and safer.
    */
   minRadius?: number
+  /**
+   * Optional geometric DOMAIN predicate: `(x, y) => boolean` returning `true`
+   * for points that are allowed to land. Defaults to `() => true` (the whole
+   * region). This is pure geometry — a domain is a spatial concept, so the
+   * sampler stays ignorant of what the domain means (e.g. leaf-free clearings).
+   *
+   * It gates BOTH the initial seed (redrawn in a bounded loop until in-domain;
+   * an empty domain yields `[]`) AND every candidate (alongside the bounds and
+   * min-distance checks), so no accepted point ever falls outside the domain.
+   * The seed-reseed loop consumes RNG draws in a fixed order, so determinism is
+   * preserved regardless of the predicate.
+   */
+  accept?: (x: number, y: number) => boolean
   /** Candidate samples per active point before it is retired. Defaults to 30. */
   k?: number
   /** Seed for the RNG — a seed string/number, or an already-constructed Random. */
@@ -40,6 +61,11 @@ function isRandom(seed: PoissonSampleOptions['seed']): seed is Random {
  * Fills a `width × height` region with blue-noise points whose local spacing is
  * governed by the `radius` field, and returns them as `Point[]`. This is a pure
  * geometry routine — it knows nothing about scenes, primitives, or leaves.
+ *
+ * An optional `accept` DOMAIN predicate restricts where points may land (see
+ * {@link PoissonSampleOptions.accept}); by default the domain is the whole
+ * region. It is pure geometry too — the sampler does not know what the domain
+ * represents.
  *
  * All randomness flows from a {@link Random} instance (via `createRandom`); there
  * is no `Math.random`. RNG consumption order is fixed by deterministic iteration
@@ -58,7 +84,7 @@ function isRandom(seed: PoissonSampleOptions['seed']): seed is Random {
  * the field varies, so the rule is pinned here and covered by tests.
  */
 export function samplePoissonDisk(options: PoissonSampleOptions): Point[] {
-  const { width, height, radius, k = 30 } = options
+  const { width, height, radius, accept = () => true, k = 30 } = options
   const rng: Random = isRandom(options.seed)
     ? options.seed
     : createRandom(options.seed ?? 'poisson')
@@ -150,8 +176,23 @@ export function samplePoissonDisk(options: PoissonSampleOptions): Point[] {
     return true
   }
 
-  // Seed the first point deterministically from the RNG.
-  addPoint([rng.range(0, width), rng.range(0, height)])
+  // Seed the first point deterministically from the RNG, redrawing until it
+  // lands inside the domain. Each attempt consumes exactly two draws (x then y)
+  // in a fixed order, so the RNG stream stays deterministic no matter how many
+  // rejections `accept` forces. Bounded: if no in-domain seed is found within
+  // the attempt cap the domain is treated as (effectively) empty and we bail
+  // with `[]` — a deterministic outcome, not a hang.
+  let seeded = false
+  for (let attempt = 0; attempt < MAX_SEED_ATTEMPTS; attempt++) {
+    const sx = rng.range(0, width)
+    const sy = rng.range(0, height)
+    if (accept(sx, sy)) {
+      addPoint([sx, sy])
+      seeded = true
+      break
+    }
+  }
+  if (!seeded) return []
 
   while (active.length > 0) {
     // Deterministic active-point selection.
@@ -168,6 +209,10 @@ export function samplePoissonDisk(options: PoissonSampleOptions): Point[] {
       const cx = origin[0] + Math.cos(angle) * dist
       const cy = origin[1] + Math.sin(angle) * dist
       if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue
+      // Belt-and-suspenders domain gate on every candidate, alongside the bounds
+      // and min-distance (`isAccepted`) checks, so no accepted point escapes the
+      // domain even if a placed point sits near its boundary.
+      if (!accept(cx, cy)) continue
       const candidate: Point = [cx, cy]
       if (isAccepted(candidate)) {
         addPoint(candidate)
