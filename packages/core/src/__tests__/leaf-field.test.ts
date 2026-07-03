@@ -15,7 +15,7 @@ import type { Params } from '../sketch'
 import type { Point } from '../types'
 import type { Primitive } from '../scene'
 
-/** The nine leaf-field knobs, in declaration order. */
+/** The eleven leaf-field knobs, in declaration order (fixed contract). */
 const KNOBS = [
   'fieldScale',
   'turbulence',
@@ -26,6 +26,8 @@ const KNOBS = [
   'leafWidth',
   'pointiness',
   'variation',
+  'edgeFalloff',
+  'rimIntrusion',
 ] as const
 
 /** The bold dark fill and paper-colored rim the audit pinned (see the sketch header). */
@@ -174,7 +176,7 @@ function meanLeafArea(primitives: Primitive[]): number {
 }
 
 describe('leaf-field Sketch contract', () => {
-  it('declares exactly the nine knobs in order and NO time metadata (static)', () => {
+  it('declares exactly the eleven knobs in order and NO time metadata (static)', () => {
     expect(Object.keys(leafField.schema)).toEqual([...KNOBS])
     // Static Sketch: absence of `time` is what makes the Harness hide the scrubber.
     expect(leafField.time).toBeUndefined()
@@ -581,6 +583,82 @@ describe('leaf-field negative-space clearings — seeded organic rim (#131 + #13
       // …while the interior (under the perturbed rim) is empty.
       const inside = cents.filter(([x, y]) => mask.insideAnyClearing(x, y))
       expect(inside).toHaveLength(0)
+    }
+  })
+
+  // --- Boundary knobs: edge falloff + rim intrusion (#133) ---------------------
+  // Both knobs feed the SAME perturbed-boundary mechanism. `maskFor` (built with
+  // default falloff/intrusion) recovers the underlying PERTURBED rim, independent
+  // of either knob, so every assertion below measures the knob's effect against
+  // that fixed reference boundary.
+
+  it('edgeFalloff thins the near-rim band — graded reads spherical, hard reads a flat hole (#133)', () => {
+    const seed = 'edge-falloff'
+    const mask = maskFor(seed)
+    const space = NEGATIVE_SPACES[0]!
+    // A band just OUTSIDE the perturbed rim, measured through the (falloff-
+    // independent) mask so both scenes share the same rim reference.
+    const band = space.radius * 0.5
+    const nearRimCount = (
+      scene: ReturnType<typeof leafField.generate>,
+    ): number =>
+      centroids(scene).filter(([x, y]) => {
+        const dx = x - space.cx
+        const dy = y - space.cy
+        const theta = Math.atan2(dy, dx)
+        const r = boundaryRadiusAt(mask, space, theta)
+        const d = Math.hypot(dx, dy)
+        return d > r && d < r + band
+      }).length
+
+    const hard = leafField.generate({ density: CLEARING_DENSITY, edgeFalloff: 0 }, seed, 0)
+    const graded = leafField.generate({ density: CLEARING_DENSITY, edgeFalloff: 0.9 }, seed, 0)
+    // The hard hole fills the near-rim band at full density; the graded ramp raises
+    // the local spacing toward VOID there, so the same band carries strictly fewer.
+    expect(nearRimCount(hard)).toBeGreaterThan(0)
+    expect(nearRimCount(graded)).toBeLessThan(nearRimCount(hard))
+  })
+
+  it('rimIntrusion pulls leaf centers across the base rim into the clearing (#133)', () => {
+    const seed = 'rim-intrusion'
+    // The base (un-intruded) perturbed rim — the reference the intrusion is measured against.
+    const baseMask = maskFor(seed)
+    const insideBaseRim = (
+      scene: ReturnType<typeof leafField.generate>,
+    ): number => centroids(scene).filter(([x, y]) => baseMask.insideAnyClearing(x, y)).length
+
+    const clean = leafField.generate({ density: CLEARING_DENSITY, rimIntrusion: 0 }, seed, 0)
+    const intruded = leafField.generate({ density: CLEARING_DENSITY, rimIntrusion: 0.4 }, seed, 0)
+    // Clean edge: no center crosses the perturbed rim. Intrusion pulls the exclusion
+    // boundary inward, so centers now sit between the effective and perturbed rims.
+    expect(insideBaseRim(clean)).toBe(0)
+    expect(insideBaseRim(intruded)).toBeGreaterThan(0)
+  })
+
+  it('is deterministic with the boundary knobs engaged (same params, seed, t) (#133)', () => {
+    const params: Params = {
+      density: CLEARING_DENSITY,
+      edgeFalloff: 0.6,
+      rimIntrusion: 0.3,
+      variation: 0.4,
+    }
+    const a = leafField.generate(params, 'boundary-det', 0)
+    const b = leafField.generate(params, 'boundary-det', 0)
+    expect(a).toEqual(b)
+  })
+
+  it('never trips the sampler minRadius assertion with the boundary knobs engaged (#133)', () => {
+    // The falloff ramp only ever RAISES the multiplier (1 → VOID) and intrusion
+    // never lowers it below 1, so the accel-grid guard (minRadius pinned to the
+    // base spacing) must never fire for any seed at the knob extremes.
+    for (const seed of ['a', 'b', 'c', seedWithInitialPointInClearing()]) {
+      expect(() =>
+        leafField.generate(
+          { density: CLEARING_DENSITY, edgeFalloff: 0.9, rimIntrusion: 0.5 },
+          seed,
+          0,
+        ),
+      ).not.toThrow()
     }
   })
 })
