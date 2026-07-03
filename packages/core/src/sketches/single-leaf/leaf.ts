@@ -73,13 +73,27 @@ export function leaf(shape: LeafShape, rng: Random): Polyline {
   const bellyY = length * 0.35
   const shoulderY = length * (0.55 + 0.35 * sharpness)
 
-  const rightLower: Point = [halfWidth, bellyY + curlOffset * 0.12]
-  const rightUpper: Point = [halfWidth * (1 - sharpness) * 0.6, shoulderY]
+  // Each flank's control points are offset SYMMETRICALLY about the (curled)
+  // spine at their own height — `spineAt` gives the spine's sideways position
+  // there. Anchoring to the spine (rather than to x = 0) keeps both flanks'
+  // upper controls on their own side of the apex, so they converge on the tip
+  // from opposite sides instead of crossing over it. The old formula offset the
+  // left control by `2 * curlOffset`, which overshot the curled apex and made
+  // the flanks cross — hooking a little loop onto the tip.
+  const bellySpineX = spineAt(bellyY / length, length, curlOffset)[0]
+  const shoulderSpineX = spineAt(shoulderY / length, length, curlOffset)[0]
+
+  // Sideways pinch of the tip controls toward the spine; a higher tipSharpness
+  // pinches harder (smaller offset) for a sharper, more pointed apex.
+  const tipHalfWidth = halfWidth * (1 - sharpness) * 0.6
+
+  const rightLower: Point = [bellySpineX + halfWidth, bellyY]
+  const rightUpper: Point = [shoulderSpineX + tipHalfWidth, shoulderY]
   const rightFlank = cubic(base, rightLower, rightUpper, apex, FLANK_SEGMENTS)
 
-  // Left flank mirrors the right about the (curled) spine, apex -> base.
-  const leftUpper: Point = [-rightUpper[0] + 2 * curlOffset, shoulderY]
-  const leftLower: Point = [-halfWidth, bellyY + curlOffset * 0.12]
+  // Left flank mirrors the right about the spine, apex -> base.
+  const leftUpper: Point = [shoulderSpineX - tipHalfWidth, shoulderY]
+  const leftLower: Point = [bellySpineX - halfWidth, bellyY]
   const leftFlank = cubic(apex, leftUpper, leftLower, base, FLANK_SEGMENTS)
 
   // Stitch flanks into one ring, dropping the duplicated apex vertex shared

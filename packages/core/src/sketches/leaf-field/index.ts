@@ -13,13 +13,28 @@
  * under later ones, so the overlap reads as a real composited field, not a flat
  * stamp sheet.
  *
- * ALL SIX KNOBS LIVE: this task completes the scatter + placement + flow-field
+ * ALL NINE KNOBS LIVE: this task completes the scatter + placement + flow-field
  * orientation + per-leaf variation + compositing. `density` drives spacing;
- * `fieldScale` (curl base frequency) and `turbulence` (curl octave falloff →
- * fbm `gain`) bend each leaf into the flow; `leafSizeMin`/`leafSizeMax` bound
- * the seeded size and `variation` scales how far each leaf's size/curl/wobble
- * strays from the fixed base. At `variation` 0 every leaf collapses back to the
- * midpoint base shape (matching the pre-variation field), so the knob is live.
+ * `fieldScale` (curl base frequency, in features across the canvas),
+ * `octaves` (how many noise layers stack) and `turbulence` (curl octave falloff
+ * → fbm `gain`) shape the flow each leaf bends into; `leafSizeMin`/`leafSizeMax`
+ * bound the seeded length, `leafWidth` sets width as a fraction of that length
+ * (slenderness) and `pointiness` sets the tip sharpness; `variation` scales how
+ * far each leaf's length/curl/wobble strays from the fixed base. At `variation`
+ * 0 every leaf collapses back to the midpoint base shape (matching the
+ * pre-variation field), so the knob is live.
+ *
+ * FLOW COHERENCE (2026-07-02): `fieldScale` samples the curl field over
+ * CANVAS-NORMALIZED coordinates (x/WIDTH, y/HEIGHT), so the knob reads directly
+ * as "how many noise features span the canvas" — a value near 1–2 gives a
+ * smooth, current-like sweep, not the near-random per-leaf scatter you get when
+ * the base frequency runs into the tens. Fewer `octaves` keeps the field's broad
+ * shape from dissolving into fine turbulence.
+ *
+ * SCALES OVERLAP (2026-07-02): the scatter is drawn TOP-OF-CANVAS FIRST (points
+ * sorted by ascending y), so leaves lower on the canvas paint last and overlap
+ * the ones above them — the field reads like overlapping scales / roof shingles
+ * rather than an arbitrary stack.
  *
  * DRAW BOUNDARY (load-bearing): only generic {@link Primitive}s cross into the
  * Scene. The leaf domain type ({@link LeafShape}) is reached ONLY through the
@@ -61,41 +76,47 @@ import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
 /**
- * The leaf-field Parameter Schema — six {@link NumberParamSpec} knobs. Three are
- * consumed NOW (`density`, `leafSizeMin`, `leafSizeMax`); the other three are
- * declared now for a stable schema but consumed in #TASK2 (see each doc). Order
- * is fixed and part of the contract. `satisfies` keeps the literal key set (so
- * `numberParam` can index by `keyof typeof schema`) while enforcing the spec
- * type.
+ * The leaf-field Parameter Schema — nine {@link NumberParamSpec} knobs, all
+ * consumed NOW. Order is fixed and part of the contract. `satisfies` keeps the
+ * literal key set (so `numberParam` can index by `keyof typeof schema`) while
+ * enforcing the spec type.
  */
 const schema = {
-  /** Curl-field base frequency (scales the sampled coordinates). Consumed NOW (flow orientation). */
-  fieldScale: { kind: 'number', min: 0.5, max: 8, default: 1.25 },
-  /** Curl-field roughness — mapped to fbm's octave falloff (`gain`). Consumed NOW (flow orientation). */
+  /**
+   * Curl-field base frequency, in noise features across the canvas (the sampled
+   * coords are canvas-normalized). A tight range with a low default: the flow
+   * stays coherent near 1–2 and the low end is where the fine control lives —
+   * higher values start to look random. Consumed NOW (flow orientation).
+   */
+  fieldScale: { kind: 'number', min: 0.25, max: 4, default: 0.5, step: 0.05 },
+  /** Curl-field roughness — mapped to fbm's per-octave amplitude falloff (`gain`). Consumed NOW. */
   turbulence: { kind: 'number', min: 0.1, max: 0.9, default: 0.5 },
+  /** Number of noise layers stacked into the flow field (fbm `octaves`); fewer = broader, less turbulent. Consumed NOW. */
+  octaves: { kind: 'number', min: 1, max: 6, default: 2, step: 1, integer: true },
   /** Drives the Poisson spacing radius (radius = REFERENCE_SPACING / density). Consumed NOW. */
-  density: { kind: 'number', min: 1, max: 12, default: 5 },
-  /** Leaf size range low. Consumed NOW (fixed size = the min/max midpoint). */
-  leafSizeMin: { kind: 'number', min: 40, max: 300, default: 100 },
-  /** Leaf size range high. Consumed NOW (fixed size = the min/max midpoint). */
-  leafSizeMax: { kind: 'number', min: 40, max: 400, default: 180 },
-  /** Per-leaf variation amount. Declared now; consumed in #TASK2. */
-  variation: { kind: 'number', min: 0, max: 1, default: 0.4 },
+  density: { kind: 'number', min: 1, max: 16, default: 12.9 },
+  /** Leaf length range low (length = the min/max midpoint at variation 0). Consumed NOW. */
+  leafSizeMin: { kind: 'number', min: 40, max: 300, default: 50 },
+  /** Leaf length range high (length = the min/max midpoint at variation 0). Consumed NOW. */
+  leafSizeMax: { kind: 'number', min: 40, max: 400, default: 155.5 },
+  /** Leaf width as a fraction of its length — lower = long & slender, higher = short & fat. Consumed NOW. */
+  leafWidth: { kind: 'number', min: 0.15, max: 1, default: 0.9, step: 0.05 },
+  /** Tip pointiness (leaf `tipSharpness`) — 0 = round, blunt apex; 1 = sharp, pointed. Consumed NOW. */
+  pointiness: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
+  /** Per-leaf variation amount — scales how far each leaf strays from the base shape. Consumed NOW. */
+  variation: { kind: 'number', min: 0, max: 1, default: 0 },
 } satisfies Record<string, NumberParamSpec>
 
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
 const REFERENCE_SPACING = 400
 
-/** Fixed leaf width as a fraction of its length (size). */
-const LEAF_WIDTH_RATIO = 0.6
-
 // Base shape constants. Each leaf's shape is rolled from these: size lerps from
 // the range midpoint toward a seeded in-range draw by `variation`; curl and
 // wobble stray from their base by seeded amounts scaled by `variation`. At
 // `variation` 0 every leaf collapses to the fixed base (midpoint size, base
-// curl, zero wobble) — the pre-variation field.
+// curl, zero wobble) — the pre-variation field. (Width ratio and tip pointiness
+// are their own live knobs — `leafWidth` / `pointiness` — applied uniformly.)
 const FIXED_CURL = 0.12
-const FIXED_TIP_SHARPNESS = 0.7
 
 /** Std-dev of the seeded per-leaf curl jitter (radians of bend), scaled by `variation`. */
 const CURL_JITTER_STD = 0.15
@@ -170,21 +191,32 @@ export const leafField: StatelessSketch = {
     const density = numberParam(params, schema, 'density')
     const leafSizeMin = numberParam(params, schema, 'leafSizeMin')
     const leafSizeMax = numberParam(params, schema, 'leafSizeMax')
+    const leafWidth = numberParam(params, schema, 'leafWidth')
+    const pointiness = numberParam(params, schema, 'pointiness')
     const fieldScale = numberParam(params, schema, 'fieldScale')
     const turbulence = numberParam(params, schema, 'turbulence')
+    const octaves = numberParam(params, schema, 'octaves')
     const variation = numberParam(params, schema, 'variation')
 
     // Constant radius field ⇒ uniform blue-noise spacing driven by `density`.
     // `minRadius` equals the constant so the accel grid is sized accurately
     // (mirror scatter). Variable/flow-driven radius is out of scope (#TASK2).
     const radius = REFERENCE_SPACING / density
-    const points = samplePoissonDisk({
+    const sampled = samplePoissonDisk({
       width: WIDTH,
       height: HEIGHT,
       radius: () => radius,
       minRadius: radius,
       seed,
     })
+
+    // Painter's order = TOP-OF-CANVAS FIRST: sort by ascending y (ties broken by
+    // x for a stable, deterministic order) so leaves lower on the canvas paint
+    // last and overlap the ones above them — the field reads like overlapping
+    // scales, not an arbitrary stack. Sorting only re-orders draw/roll sequence;
+    // each leaf still consumes exactly its three rng draws, so the deterministic
+    // seam holds (a copy is sorted — the sampler output is not mutated).
+    const points = [...sampled].sort(([ax, ay], [bx, by]) => ay - by || ax - bx)
 
     // Size base: the range midpoint. At `variation` 0 each leaf's length is
     // exactly this midpoint (the pre-variation field); as variation → 1 it lerps
@@ -200,10 +232,16 @@ export const leafField: StatelessSketch = {
     points.forEach(([x, y]) => {
       // Sample the divergence-free flow at this point via the 3D curl overload
       // (z = t) so animating later is a metadata swap, not a rewrite (ADR-0002).
-      // `turbulence` maps to fbm's per-octave falloff (`gain`). curl reads the
-      // rng's separate noise instances, so it does NOT advance the leaf()
-      // sequence — placement and shape rolls stay independent.
-      const flow = curl(rng, x * fieldScale, y * fieldScale, t, { gain: turbulence })
+      // Coords are CANVAS-NORMALIZED (x/WIDTH, y/HEIGHT) so `fieldScale` reads as
+      // features across the canvas — a low value keeps the sweep coherent instead
+      // of dissolving into per-leaf randomness. `octaves` sets how many noise
+      // layers stack and `turbulence` maps to fbm's per-octave amplitude falloff
+      // (`gain`). curl reads the rng's separate noise instances, so it does NOT
+      // advance the leaf() sequence — placement and shape rolls stay independent.
+      const flow = curl(rng, (x / WIDTH) * fieldScale, (y / HEIGHT) * fieldScale, t, {
+        gain: turbulence,
+        octaves,
+      })
       const angle = Math.atan2(flow[1], flow[0])
 
       // Roll this leaf's shape from `rng`, scaled by `variation`. CRUCIAL: roll
@@ -218,10 +256,10 @@ export const leafField: StatelessSketch = {
       const wobble = MAX_WOBBLE * variation * rng.value()
       const shape: LeafShape = {
         length,
-        width: length * LEAF_WIDTH_RATIO,
+        width: length * leafWidth,
         curl: curlAmount,
         wobble,
-        tipSharpness: FIXED_TIP_SHARPNESS,
+        tipSharpness: pointiness,
       }
 
       // The leaf spine grows along +y; rotate by `angle - π/2` so that +y axis

@@ -5,18 +5,21 @@ import { curl } from '../curl'
 import { createRandom } from '../random'
 import { circles } from '../sketches/circles'
 import { leafField } from '../sketches/leaf-field'
-import { bbox as pointsBBox } from '../sketches/sketch-util'
+import { bbox as pointsBBox, HEIGHT, WIDTH } from '../sketches/sketch-util'
 import type { Params } from '../sketch'
 import type { Point } from '../types'
 import type { Primitive } from '../scene'
 
-/** The six leaf-field knobs, in declaration order. */
+/** The nine leaf-field knobs, in declaration order. */
 const KNOBS = [
   'fieldScale',
   'turbulence',
+  'octaves',
   'density',
   'leafSizeMin',
   'leafSizeMax',
+  'leafWidth',
+  'pointiness',
   'variation',
 ] as const
 
@@ -38,11 +41,13 @@ function bboxesOverlap(
 }
 
 /**
- * Schema defaults the source reads, mirrored here so the orientation test can
- * reconstruct the same curl field the sketch samples. Kept in sync with the
- * sketch's `schema` block.
+ * Field params the orientation test drives the sketch with and mirrors here so
+ * it can reconstruct the same curl field the sketch samples. A higher fieldScale
+ * than the smooth default is used deliberately so mismatched (shuffled) leaf↔
+ * field pairings decorrelate and the coherence assertion keeps its teeth.
  */
-const DEFAULT_FIELD_SCALE = 1.25
+const ORIENT_FIELD_SCALE = 3
+const ORIENT_OCTAVES = 2
 const DEFAULT_TURBULENCE = 0.5
 
 /** Center of a primitive's bounding box — the point the sketch translated it onto. */
@@ -109,14 +114,19 @@ function fieldAlignment(
 
 /**
  * Field axis angle at a leaf's centroid, reconstructed the same way the source
- * does: same curl overload, same fieldScale/turbulence, same rng-from-seed, t=0.
+ * does: same curl overload, CANVAS-NORMALIZED coords, same fieldScale/octaves/
+ * turbulence, same rng-from-seed, t=0.
  */
 function fieldAxisAt(primitive: Primitive, seed: string): number {
   const rng = createRandom(seed)
   const [cx, cy] = primitiveCentroid(primitive)
-  const flow = curl(rng, cx * DEFAULT_FIELD_SCALE, cy * DEFAULT_FIELD_SCALE, 0, {
-    gain: DEFAULT_TURBULENCE,
-  })
+  const flow = curl(
+    rng,
+    (cx / WIDTH) * ORIENT_FIELD_SCALE,
+    (cy / HEIGHT) * ORIENT_FIELD_SCALE,
+    0,
+    { gain: DEFAULT_TURBULENCE, octaves: ORIENT_OCTAVES },
+  )
   return Math.atan2(flow[1], flow[0])
 }
 
@@ -136,8 +146,30 @@ function spineLengthSpread(primitives: Primitive[]): number {
   return Math.max(...lengths) - Math.min(...lengths)
 }
 
+/**
+ * Shoelace area of a closed leaf outline — a ROTATION-INVARIANT measure of how
+ * much a leaf covers, so it isolates the `leafWidth` (slenderness) knob from the
+ * per-leaf flow rotation. The ring is closed (last === first), so the walk stops
+ * one short of the end.
+ */
+function polygonArea(primitive: Primitive): number {
+  const pts = primitive.points
+  let acc = 0
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x1, y1] = pts[i]!
+    const [x2, y2] = pts[i + 1]!
+    acc += x1 * y2 - x2 * y1
+  }
+  return Math.abs(acc) / 2
+}
+
+/** Mean leaf area across a scene. */
+function meanLeafArea(primitives: Primitive[]): number {
+  return primitives.reduce((sum, p) => sum + polygonArea(p), 0) / primitives.length
+}
+
 describe('leaf-field Sketch contract', () => {
-  it('declares exactly the six knobs in order and NO time metadata (static)', () => {
+  it('declares exactly the nine knobs in order and NO time metadata (static)', () => {
     expect(Object.keys(leafField.schema)).toEqual([...KNOBS])
     // Static Sketch: absence of `time` is what makes the Harness hide the scrubber.
     expect(leafField.time).toBeUndefined()
@@ -257,7 +289,17 @@ describe('leaf-field flow-field orientation (#127)', () => {
     const seed = 'orient'
     // Sparse enough that farthest-vertex spine recovery is unambiguous, variation
     // 0 so the spine axis reflects orientation alone (not per-leaf shape noise).
-    const scene = leafField.generate({ density: 4, variation: 0 }, seed, 0)
+    // fieldScale/octaves are pinned to match the reconstruction in fieldAxisAt.
+    const scene = leafField.generate(
+      {
+        density: 4,
+        variation: 0,
+        fieldScale: ORIENT_FIELD_SCALE,
+        octaves: ORIENT_OCTAVES,
+      },
+      seed,
+      0,
+    )
     const leaves = scene.primitives
     expect(leaves.length).toBeGreaterThan(5)
 
@@ -296,6 +338,26 @@ describe('leaf-field per-leaf variation (#127)', () => {
     // Leaves are all the fixed base shape (only rotated), so spine lengths — a
     // rotation-invariant diagonal measure — match to within float noise.
     expect(spineLengthSpread(scene.primitives)).toBeLessThan(1e-6)
+  })
+})
+
+describe('leaf-field shape knobs — width & pointiness (#127)', () => {
+  it('a wider leafWidth yields larger leaves (rotation-invariant area) at the same seed', () => {
+    const seed = 'width'
+    // variation 0 so every leaf is the same base shape (only rotated) — the area
+    // difference then comes from `leafWidth` alone, not per-leaf size rolls.
+    const slender = leafField.generate({ density: 5, variation: 0, leafWidth: 0.2 }, seed, 0)
+    const fat = leafField.generate({ density: 5, variation: 0, leafWidth: 0.9 }, seed, 0)
+    // Same seed/density ⇒ same placement/count; only the per-leaf width differs.
+    expect(fat.primitives.length).toBe(slender.primitives.length)
+    expect(meanLeafArea(fat.primitives)).toBeGreaterThan(meanLeafArea(slender.primitives))
+  })
+
+  it('pointiness is live — changing the tip sharpness rebakes the field', () => {
+    const params: Params = { density: 5, variation: 0 }
+    const round = leafField.generate({ ...params, pointiness: 0.05 }, 'point', 0)
+    const sharp = leafField.generate({ ...params, pointiness: 0.95 }, 'point', 0)
+    expect(sharp).not.toEqual(round)
   })
 })
 
