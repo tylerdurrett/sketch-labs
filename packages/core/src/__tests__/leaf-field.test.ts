@@ -546,25 +546,12 @@ describe('leaf-field negative-space clearings — seeded organic rim (#131 + #13
     }
   })
 
-  it('never trips the sampler minRadius lower-bound assertion (mask only raises radius)', () => {
-    // The mask multiplies the base spacing UP inside the holes; minRadius stays
-    // pinned to the base, so the accel-grid guard must never fire for any seed —
-    // the perturbed rim keeps the multiplier strictly two-valued {1, VOID}.
+  it('never trips the sampler minRadius lower-bound assertion (constant radius field)', () => {
+    // The radius field is the constant `baseSpacing`, and minRadius is pinned to
+    // that same base — so the accel-grid guard (which throws if minRadius was
+    // over-estimated) can never fire for any seed.
     for (const seed of ['a', 'b', 'c', seedWithInitialPointInClearing()]) {
       expect(() => leafField.generate({ density: CLEARING_DENSITY }, seed, 0)).not.toThrow()
-    }
-  })
-
-  it('the multiplier stays strictly {1, VOID} — perturbation never lowers spacing (#132 AC4)', () => {
-    const mask = maskFor('multiplier')
-    // Probe a grid across the canvas: every sample is exactly 1 (outside) or the
-    // void multiplier (inside), and always ≥ 1 so minRadius stays pinned.
-    for (let gx = 0; gx <= 20; gx++) {
-      for (let gy = 0; gy <= 20; gy++) {
-        const m = mask.radiusMultiplier((gx / 20) * WIDTH, (gy / 20) * HEIGHT)
-        expect([1, 1000]).toContain(m)
-        expect(m).toBeGreaterThanOrEqual(1)
-      }
     }
   })
 

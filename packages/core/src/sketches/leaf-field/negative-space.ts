@@ -19,12 +19,10 @@
  * and a pure function of the noise field, which is itself a pure function of the
  * seed (ADR-0002) — bind it via {@link createNegativeSpaceField}.
  *
- * ONE MECHANISM: the field derives BOTH the radius multiplier and the
- * inside-predicate from the SAME perturbed-boundary test ({@link NEGATIVE_SPACES}
- * plus the shared rim perturbation) — one mechanism, no second code path. The
- * multiplier stays strictly {@link VOID_RADIUS_MULTIPLIER} inside / 1 outside, so
- * it only ever RAISES the local Poisson spacing; the field minimum stays the
- * dense-outside base the sampler sizes its acceleration grid from.
+ * INSIDE-PREDICATE: the field exposes a single perturbed-boundary test — is
+ * `(x, y)` inside any clearing under its seeded rim ({@link NEGATIVE_SPACES} plus
+ * the shared rim perturbation)? The sampler uses it as its domain predicate so no
+ * sample center lands in a hole.
  *
  * Falloff / rim-intrusion knobs and moving centers remain out of scope here.
  */
@@ -52,24 +50,12 @@ export interface NegativeSpace {
  * the diagonal so the holes read as deliberate composition, not a centered
  * bullseye. Positions are fractions of the canvas extent so they track WIDTH /
  * HEIGHT. This is the SINGLE source of truth the perturbed-boundary test (and
- * hence both {@link NegativeSpaceField.insideAnyClearing} and
- * {@link NegativeSpaceField.radiusMultiplier}) reads from.
+ * hence {@link NegativeSpaceField.insideAnyClearing}) reads from.
  */
 export const NEGATIVE_SPACES: readonly NegativeSpace[] = [
   { cx: WIDTH * 0.34, cy: HEIGHT * 0.4, radius: Math.min(WIDTH, HEIGHT) * 0.18 },
   { cx: WIDTH * 0.7, cy: HEIGHT * 0.66, radius: Math.min(WIDTH, HEIGHT) * 0.11 },
 ]
-
-/**
- * Radius multiplier applied INSIDE a negative space. Large enough that the local
- * Poisson spacing (base spacing × this) far exceeds the canvas, so no candidate
- * can ever satisfy the min-distance rule there — the field thins to zero. Outside
- * every region the multiplier is 1 (spacing unchanged).
- *
- * This ONLY ever raises the radius; the field minimum stays the dense-outside
- * base value, which the sampler relies on to size its acceleration grid.
- */
-export const VOID_RADIUS_MULTIPLIER = 1000
 
 /**
  * Angular frequency of the rim noise: the RADIUS of the circle traced through
@@ -88,9 +74,8 @@ const RIM_NOISE_FREQUENCY = 1.6
 const RIM_NOISE_AMPLITUDE = 0.2
 
 /**
- * The seeded negative-space field: the inside-predicate and the radius
- * multiplier, both derived from the SAME perturbed-boundary test so they can
- * never disagree (one mechanism, no second code path).
+ * The seeded negative-space field: a single inside-predicate derived from the
+ * perturbed-boundary test.
  */
 export interface NegativeSpaceField {
   /**
@@ -99,12 +84,6 @@ export interface NegativeSpaceField {
    * no sample center lands inside a clearing.
    */
   insideAnyClearing(x: number, y: number): boolean
-  /**
-   * Spacing multiplier at `(x, y)`: {@link VOID_RADIUS_MULTIPLIER} inside any
-   * clearing, 1 everywhere else — strictly two-valued, so it only ever raises
-   * the base spacing.
-   */
-  radiusMultiplier(x: number, y: number): number
 }
 
 /**
@@ -133,9 +112,8 @@ export function createNegativeSpaceField(
   }
 
   /**
-   * Shared perturbed-boundary test: is `(x, y)` within any clearing's seeded
-   * rim? Both public members read ONLY this, so the multiplier field and the
-   * domain predicate are derived from a single source and cannot diverge.
+   * The perturbed-boundary test: is `(x, y)` within any clearing's seeded rim?
+   * This backs the field's sole public member, the domain predicate.
    */
   function insidePerturbed(x: number, y: number): boolean {
     return NEGATIVE_SPACES.some((space) => {
@@ -149,7 +127,5 @@ export function createNegativeSpaceField(
 
   return {
     insideAnyClearing: insidePerturbed,
-    radiusMultiplier: (x, y) =>
-      insidePerturbed(x, y) ? VOID_RADIUS_MULTIPLIER : 1,
   }
 }
