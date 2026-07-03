@@ -71,7 +71,7 @@ function isRandom(seed: PoissonSampleOptions['seed']): seed is Random {
  * is no `Math.random`. RNG consumption order is fixed by deterministic iteration
  * (the active point is chosen with `rangeFloor` over the active list, and each of
  * the `k` candidates is generated in a fixed order), so the same
- * `(seed, width, height, radius, k)` always produces an identical array — same
+ * `(seed, width, height, radius, accept, k)` always produces an identical array — same
  * count, order, and coordinates. Changing the seed (with the region and field
  * held) yields a different point set.
  *

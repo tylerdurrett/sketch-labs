@@ -211,24 +211,20 @@ export const leafField: StatelessSketch = {
     // prng — the per-leaf placement/shape roll sequence below stays untouched and
     // the field stays a pure function of the seed (ADR-0002).
     //
-    // The radius field is the dense-outside base spacing scaled by the clearing
-    // multiplier: ~1× outside, huge inside (so local spacing exceeds the canvas ⇒
-    // no leaves survive there). `accept` excludes the clearing interiors outright,
-    // so not even the initial seed can strand a lone leaf in a hole. Both come
-    // from the SAME perturbed-boundary test — one mechanism, no second code path.
+    // The radius field is a uniform `baseSpacing` blue-noise everywhere; the
+    // clearings are carved purely by `accept`, which excludes the clearing
+    // interiors outright, so not even the initial seed can strand a lone leaf in
+    // a hole. `insideAnyClearing` is the sole clearing gate.
     //
-    // minRadius is PINNED to the base (dense-outside) spacing — the field's true
-    // MINIMUM, since the multiplier only ever RAISES radius. The sampler sizes
-    // its acceleration grid from minRadius and throws if it was over-estimated,
-    // so this must never be lowered below the base.
-    const { insideAnyClearing, radiusMultiplier } = createNegativeSpaceField(
-      rng.noise2D,
-    )
+    // minRadius is PINNED to `baseSpacing`, which is exactly what the constant
+    // radius field returns everywhere — so the accel-grid guard (which throws if
+    // minRadius was over-estimated) can never fire.
+    const { insideAnyClearing } = createNegativeSpaceField(rng.noise2D)
     const baseSpacing = REFERENCE_SPACING / density
     const sampled = samplePoissonDisk({
       width: WIDTH,
       height: HEIGHT,
-      radius: (x, y) => baseSpacing * radiusMultiplier(x, y),
+      radius: () => baseSpacing,
       minRadius: baseSpacing,
       accept: (x, y) => !insideAnyClearing(x, y),
       seed,
