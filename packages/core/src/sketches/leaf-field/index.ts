@@ -5,8 +5,10 @@
  * field, carrying seeded per-leaf shape variation, and composited in painter's
  * order.
  *
- * It samples the seeded variable-radius Poisson-disk sampler under a CONSTANT
- * radius field (the field's spacing is driven by the `density` knob), rolls a
+ * It samples the seeded variable-radius Poisson-disk sampler under a radius
+ * field that is uniform (spacing driven by the `density` knob) EXCEPT inside the
+ * static negative-space clearings, where the spacing blows up so the field thins
+ * to leaf-free holes (see ./negative-space); rolls a
  * seeded {@link LeafShape} at every sampled point (size/curl/wobble scaled by
  * the `variation` knob), rotates each so its spine aligns with the local flow
  * direction, and draws them into a painter's-order Scene — earlier points sit
@@ -72,6 +74,7 @@ import type {
 } from '../../sketch'
 import type { Point, Polyline } from '../../types'
 import { bbox, HEIGHT, numberParam, WIDTH } from '../sketch-util'
+import { insideAnyClearing, radiusMultiplier } from './negative-space'
 import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
@@ -198,15 +201,25 @@ export const leafField: StatelessSketch = {
     const octaves = numberParam(params, schema, 'octaves')
     const variation = numberParam(params, schema, 'variation')
 
-    // Constant radius field ⇒ uniform blue-noise spacing driven by `density`.
-    // `minRadius` equals the constant so the accel grid is sized accurately
-    // (mirror scatter). Variable/flow-driven radius is out of scope (#TASK2).
-    const radius = REFERENCE_SPACING / density
+    // Blue-noise spacing driven by `density`, thinned to zero inside the static
+    // negative-space clearings. The radius field is the dense-outside base
+    // spacing scaled by the clearing multiplier: ~1× outside, huge inside (so
+    // local spacing exceeds the canvas ⇒ no leaves survive there). `accept`
+    // excludes the clearing interiors outright, so not even the initial seed can
+    // strand a lone leaf in a hole. Both come from the SAME region defs — one
+    // mechanism, no second code path.
+    //
+    // minRadius is PINNED to the base (dense-outside) spacing — the field's true
+    // MINIMUM, since the multiplier only ever RAISES radius. The sampler sizes
+    // its acceleration grid from minRadius and throws if it was over-estimated,
+    // so this must never be lowered below the base.
+    const baseSpacing = REFERENCE_SPACING / density
     const sampled = samplePoissonDisk({
       width: WIDTH,
       height: HEIGHT,
-      radius: () => radius,
-      minRadius: radius,
+      radius: (x, y) => baseSpacing * radiusMultiplier(x, y),
+      minRadius: baseSpacing,
+      accept: (x, y) => !insideAnyClearing(x, y),
       seed,
     })
 
