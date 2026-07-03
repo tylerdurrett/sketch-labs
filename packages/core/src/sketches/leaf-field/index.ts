@@ -17,8 +17,9 @@
  * under later ones, so the overlap reads as a real composited field, not a flat
  * stamp sheet.
  *
- * ALL NINE KNOBS LIVE: this task completes the scatter + placement + flow-field
- * orientation + per-leaf variation + compositing. `density` drives spacing;
+ * ALL KNOBS LIVE: this task completes the scatter + placement + flow-field
+ * orientation + per-leaf variation + compositing, plus the clearing's boundary
+ * treatment. `density` drives spacing;
  * `fieldScale` (curl base frequency, in features across the canvas),
  * `octaves` (how many noise layers stack) and `turbulence` (curl octave falloff
  * → fbm `gain`) shape the flow each leaf bends into; `leafSizeMin`/`leafSizeMax`
@@ -26,7 +27,9 @@
  * (slenderness) and `pointiness` sets the tip sharpness; `variation` scales how
  * far each leaf's length/curl/wobble strays from the fixed base. At `variation`
  * 0 every leaf collapses back to the midpoint base shape (matching the
- * pre-variation field), so the knob is live.
+ * pre-variation field), so the knob is live. `edgeFalloff` grades the clearing
+ * rim — 0 is a hard flat hole, wider feathers density into a spherical volume
+ * (see ./negative-space).
  *
  * FLOW COHERENCE (2026-07-02): `fieldScale` samples the curl field over
  * CANVAS-NORMALIZED coordinates (x/WIDTH, y/HEIGHT), so the knob reads directly
@@ -81,10 +84,11 @@ import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
 /**
- * The leaf-field Parameter Schema — nine {@link NumberParamSpec} knobs, all
- * consumed NOW. Order is fixed and part of the contract. `satisfies` keeps the
- * literal key set (so `numberParam` can index by `keyof typeof schema`) while
- * enforcing the spec type.
+ * The leaf-field Parameter Schema — ten {@link NumberParamSpec} knobs, all
+ * consumed NOW. Order is fixed and part of the contract (new knobs are APPENDED
+ * so the existing keys keep their positions). `satisfies` keeps the literal key
+ * set (so `numberParam` can index by `keyof typeof schema`) while enforcing the
+ * spec type.
  */
 const schema = {
   /**
@@ -110,6 +114,13 @@ const schema = {
   pointiness: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
   /** Per-leaf variation amount — scales how far each leaf strays from the base shape. Consumed NOW. */
   variation: { kind: 'number', min: 0, max: 1, default: 0 },
+  /**
+   * Edge falloff — how sharply density drops across a clearing's rim, as a
+   * fraction of the clearing radius over which the void multiplier ramps 1 → VOID
+   * just OUTSIDE the rim. 0 = a hard, flat-hole edge; wider = density thins
+   * gradually so the clearing reads as a rounded, spherical volume. Consumed NOW.
+   */
+  edgeFalloff: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
 } satisfies Record<string, NumberParamSpec>
 
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
@@ -202,6 +213,7 @@ export const leafField: StatelessSketch = {
     const turbulence = numberParam(params, schema, 'turbulence')
     const octaves = numberParam(params, schema, 'octaves')
     const variation = numberParam(params, schema, 'variation')
+    const edgeFalloff = numberParam(params, schema, 'edgeFalloff')
 
     // Blue-noise spacing driven by `density`, thinned to zero inside the static
     // negative-space clearings. Each clearing carries a SEEDED ORGANIC RIM — its
@@ -211,20 +223,25 @@ export const leafField: StatelessSketch = {
     // prng — the per-leaf placement/shape roll sequence below stays untouched and
     // the field stays a pure function of the seed (ADR-0002).
     //
-    // The radius field is a uniform `baseSpacing` blue-noise everywhere; the
-    // clearings are carved purely by `accept`, which excludes the clearing
-    // interiors outright, so not even the initial seed can strand a lone leaf in
-    // a hole. `insideAnyClearing` is the sole clearing gate.
+    // The radius field is the dense-outside base spacing scaled by the clearing
+    // multiplier: ~1× outside, huge inside (so local spacing exceeds the canvas ⇒
+    // no leaves survive there). `accept` excludes the clearing interiors outright,
+    // so not even the initial seed can strand a lone leaf in a hole. Both come
+    // from the SAME perturbed-boundary test — one mechanism, no second code path.
     //
-    // minRadius is PINNED to `baseSpacing`, which is exactly what the constant
-    // radius field returns everywhere — so the accel-grid guard (which throws if
-    // minRadius was over-estimated) can never fire.
-    const { insideAnyClearing } = createNegativeSpaceField(rng.noise2D)
+    // minRadius is PINNED to the base (dense-outside) spacing — the field's true
+    // MINIMUM, since the multiplier only ever RAISES radius. The sampler sizes
+    // its acceleration grid from minRadius and throws if it was over-estimated,
+    // so this must never be lowered below the base.
+    const { insideAnyClearing, radiusMultiplier } = createNegativeSpaceField(
+      rng.noise2D,
+      edgeFalloff,
+    )
     const baseSpacing = REFERENCE_SPACING / density
     const sampled = samplePoissonDisk({
       width: WIDTH,
       height: HEIGHT,
-      radius: () => baseSpacing,
+      radius: (x, y) => baseSpacing * radiusMultiplier(x, y),
       minRadius: baseSpacing,
       accept: (x, y) => !insideAnyClearing(x, y),
       seed,
