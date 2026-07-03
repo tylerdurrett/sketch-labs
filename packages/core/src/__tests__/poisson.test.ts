@@ -147,6 +147,87 @@ describe('min-distance guarantee (variable radius, pinned max rule)', () => {
   })
 })
 
+describe('accept domain predicate', () => {
+  it('keeps every accepted point inside the domain (a half-plane)', () => {
+    // Domain = left half only.
+    const accept = (x: number): boolean => x < REGION.width / 2
+    const points = samplePoissonDisk({
+      ...REGION,
+      radius: () => 18,
+      accept,
+      seed: 'half-plane',
+    })
+    expect(points.length).toBeGreaterThan(10)
+    for (const [x] of points) expect(x).toBeLessThan(REGION.width / 2)
+  })
+
+  it('excludes a circular hole entirely (no center lands inside)', () => {
+    const HOLE_CENTER: Point = [200, 150]
+    const HOLE_RADIUS = 80
+    const accept = (x: number, y: number): boolean =>
+      dist([x, y], HOLE_CENTER) > HOLE_RADIUS
+    const points = samplePoissonDisk({
+      ...REGION,
+      radius: () => 16,
+      accept,
+      seed: 'hole',
+    })
+    expect(points.length).toBeGreaterThan(10)
+    for (const p of points) expect(dist(p, HOLE_CENTER)).toBeGreaterThan(HOLE_RADIUS)
+  })
+
+  it('reseeds when the unguarded initial point would fall outside the domain', () => {
+    // With this seed the FIRST rng draw pair (the initial seed) lands inside the
+    // hole; the bounded reseed loop must skip past it. We assert both that the
+    // sampler still fills (so it did reseed rather than bail) and that nothing
+    // lands in the hole.
+    const HOLE_CENTER: Point = [200, 150]
+    const HOLE_RADIUS = 90
+    const accept = (x: number, y: number): boolean =>
+      dist([x, y], HOLE_CENTER) > HOLE_RADIUS
+    // Find a seed whose unguarded initial point lands inside the hole.
+    let seed = ''
+    for (let i = 0; i < 500; i++) {
+      const rng = createRandom(`reseed-${i}`)
+      const sx = rng.range(0, REGION.width)
+      const sy = rng.range(0, REGION.height)
+      if (dist([sx, sy], HOLE_CENTER) <= HOLE_RADIUS) {
+        seed = `reseed-${i}`
+        break
+      }
+    }
+    expect(seed).not.toBe('')
+    const points = samplePoissonDisk({ ...REGION, radius: () => 16, accept, seed })
+    expect(points.length).toBeGreaterThan(10)
+    for (const p of points) expect(dist(p, HOLE_CENTER)).toBeGreaterThan(HOLE_RADIUS)
+  })
+
+  it('returns [] deterministically for an empty domain', () => {
+    const empty = (): boolean => false
+    const a = samplePoissonDisk({ ...REGION, radius: () => 18, accept: empty, seed: 'x' })
+    const b = samplePoissonDisk({ ...REGION, radius: () => 18, accept: empty, seed: 'y' })
+    expect(a).toEqual([])
+    expect(b).toEqual([])
+  })
+
+  it('preserves determinism with a domain predicate', () => {
+    const accept = (x: number, y: number): boolean => dist([x, y], [200, 150]) > 70
+    const opts = { ...REGION, radius: () => 18, accept, seed: 'det-domain' }
+    expect(samplePoissonDisk(opts)).toEqual(samplePoissonDisk(opts))
+  })
+
+  it('an omitted predicate matches the whole-region default', () => {
+    const withDefault = samplePoissonDisk({ ...REGION, radius: () => 18, seed: 'default' })
+    const withTrue = samplePoissonDisk({
+      ...REGION,
+      radius: () => 18,
+      accept: () => true,
+      seed: 'default',
+    })
+    expect(withTrue).toEqual(withDefault)
+  })
+})
+
 describe('minRadius lower-bound guard', () => {
   // A non-smooth field: 50 almost everywhere, with a narrow low-radius well of 3
   // supported on a small disc. The well center (25, 55) sits STRICTLY BETWEEN the
