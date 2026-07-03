@@ -4,6 +4,10 @@ Any instructions in this file must be VERY concise since this loads in every age
 
 This repo uses the tdog engineering skill set; its conventions live under [docs/agents/](docs/agents/) — read [docs/agents/README.md](docs/agents/README.md) first. Specs are GitHub issues on `tylerdurrett/experiment-harness`.
 
+## Recording decisions
+
+ADRs in [docs/adr/](docs/adr/) are for **system** decisions (Harness, Sketch contract, renderers, determinism, workflow). A decision local to one **sketch** gets **no** ADR — put its rationale in that sketch's own module header comments. See [ADR-0007](docs/adr/0007-adrs-record-system-decisions-not-sketch-decisions.md).
+
 ## Landing changes
 
 Small, low-risk tweaks (skill text, docs, config) not tied to an issue-spec: commit straight to `main`, no branch or PR. Reserve branch + PR for issue-spec work (via `/ship`), risky/large changes, or when a review gate is wanted.
