@@ -33,7 +33,16 @@
  * ever RAISES the local Poisson spacing; the field minimum stays the
  * dense-outside base the sampler sizes its acceleration grid from.
  *
- * Rim-intrusion and moving centers remain out of scope here.
+ * RIM INTRUSION (#133): `rimIntrusion` pulls the SAME boundary the predicate and
+ * the multiplier are measured against INWARD by a fraction of the clearing's base
+ * radius — one boundary ({@link signedClearance}'s effective rim), not a second
+ * code path. Shrinking the exclusion boundary lets sample centers approach and
+ * cross the perturbed rim so their tips break organically into the clearing
+ * instead of stopping at a clean stamped edge; at `rimIntrusion` 0 the effective
+ * rim is exactly the perturbed rim (the clean edge). It is pure geometry, adding
+ * no rng draws.
+ *
+ * Moving centers remain out of scope here.
  */
 
 import { lerp } from '../../math'
@@ -104,8 +113,10 @@ const RIM_NOISE_AMPLITUDE = 0.2
 export interface NegativeSpaceField {
   /**
    * True when `(x, y)` lies within any negative-space region under its seeded
-   * organic rim (boundary inclusive). Drives the sampler's domain predicate so
-   * no sample center lands inside a clearing.
+   * organic rim, pulled inward by `rimIntrusion` (boundary inclusive). Drives the
+   * sampler's domain predicate: no sample center lands inside the effective rim,
+   * so with intrusion > 0 centers may sit between the effective and perturbed rims
+   * and their leaf tips intrude into the clearing.
    */
   insideAnyClearing(x: number, y: number): boolean
   /**
@@ -128,12 +139,16 @@ export interface NegativeSpaceField {
  * `edgeFalloff` (fraction of a clearing's base radius, >= 0) widens the band just
  * OUTSIDE the rim over which {@link NegativeSpaceField.radiusMultiplier} ramps
  * 1 → {@link VOID_RADIUS_MULTIPLIER}, feathering the void into a spherical volume;
- * 0 recovers the hard two-valued step. It is a pure geometric parameter — it adds
- * NO rng draws, so determinism (ADR-0002) is untouched.
+ * 0 recovers the hard two-valued step. `rimIntrusion` (also a fraction of the base
+ * radius, >= 0) pulls the effective exclusion rim INWARD so leaf centers may cross
+ * the perturbed rim and their tips intrude into the clearing; 0 keeps the clean
+ * edge. Both are pure geometric parameters — they add NO rng draws, so determinism
+ * (ADR-0002) is untouched.
  */
 export function createNegativeSpaceField(
   noise2D: Noise2D,
   edgeFalloff = 0,
+  rimIntrusion = 0,
 ): NegativeSpaceField {
   /**
    * The seeded effective radius of `space` at angle `θ` (radians). Sampling
@@ -151,16 +166,19 @@ export function createNegativeSpaceField(
 
   /**
    * Shared perturbed-boundary measure: the signed radial clearance of `(x, y)`
-   * from `space`'s seeded rim — negative inside the clearing, 0 on the rim,
-   * positive outside. Both public members derive from ONLY this, so the
-   * multiplier field and the domain predicate read a single boundary and cannot
-   * diverge (one mechanism, no second code path).
+   * from `space`'s EFFECTIVE rim — the seeded perturbed rim pulled inward by
+   * `rimIntrusion · base radius`. Negative inside the (intruded) clearing, 0 on
+   * the effective rim, positive outside. Both public members derive from ONLY
+   * this, so the multiplier field and the domain predicate read a single boundary
+   * and cannot diverge (one mechanism, no second code path).
    */
   function signedClearance(space: NegativeSpace, x: number, y: number): number {
     const dx = x - space.cx
     const dy = y - space.cy
     const theta = Math.atan2(dy, dx)
-    return Math.hypot(dx, dy) - perturbedRadius(space, theta)
+    const effectiveRadius =
+      perturbedRadius(space, theta) - rimIntrusion * space.radius
+    return Math.hypot(dx, dy) - effectiveRadius
   }
 
   /**

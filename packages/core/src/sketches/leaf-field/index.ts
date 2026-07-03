@@ -28,8 +28,9 @@
  * far each leaf's length/curl/wobble strays from the fixed base. At `variation`
  * 0 every leaf collapses back to the midpoint base shape (matching the
  * pre-variation field), so the knob is live. `edgeFalloff` grades the clearing
- * rim — 0 is a hard flat hole, wider feathers density into a spherical volume
- * (see ./negative-space).
+ * rim — 0 is a hard flat hole, wider feathers density into a spherical volume —
+ * and `rimIntrusion` pulls the exclusion boundary inward so leaf tips break past
+ * the rim into the clearing (0 = a clean stamped edge); see ./negative-space.
  *
  * FLOW COHERENCE (2026-07-02): `fieldScale` samples the curl field over
  * CANVAS-NORMALIZED coordinates (x/WIDTH, y/HEIGHT), so the knob reads directly
@@ -84,7 +85,7 @@ import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
 /**
- * The leaf-field Parameter Schema — ten {@link NumberParamSpec} knobs, all
+ * The leaf-field Parameter Schema — eleven {@link NumberParamSpec} knobs, all
  * consumed NOW. Order is fixed and part of the contract (new knobs are APPENDED
  * so the existing keys keep their positions). `satisfies` keeps the literal key
  * set (so `numberParam` can index by `keyof typeof schema`) while enforcing the
@@ -121,6 +122,13 @@ const schema = {
    * gradually so the clearing reads as a rounded, spherical volume. Consumed NOW.
    */
   edgeFalloff: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
+  /**
+   * Rim intrusion — how far leaf tips are allowed to cross a clearing's rim, as a
+   * fraction of the clearing radius the exclusion boundary is pulled INWARD. 0 = a
+   * clean stamped edge (centers stop at the rim); higher lets centers approach and
+   * cross the perturbed rim so tips break organically into the clearing. Consumed NOW.
+   */
+  rimIntrusion: { kind: 'number', min: 0, max: 0.5, default: 0, step: 0.05 },
 } satisfies Record<string, NumberParamSpec>
 
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
@@ -214,6 +222,7 @@ export const leafField: StatelessSketch = {
     const octaves = numberParam(params, schema, 'octaves')
     const variation = numberParam(params, schema, 'variation')
     const edgeFalloff = numberParam(params, schema, 'edgeFalloff')
+    const rimIntrusion = numberParam(params, schema, 'rimIntrusion')
 
     // Blue-noise spacing driven by `density`, thinned to zero inside the static
     // negative-space clearings. Each clearing carries a SEEDED ORGANIC RIM — its
@@ -236,6 +245,7 @@ export const leafField: StatelessSketch = {
     const { insideAnyClearing, radiusMultiplier } = createNegativeSpaceField(
       rng.noise2D,
       edgeFalloff,
+      rimIntrusion,
     )
     const baseSpacing = REFERENCE_SPACING / density
     const sampled = samplePoissonDisk({
