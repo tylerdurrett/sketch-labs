@@ -2,8 +2,9 @@
  * The "leaf-field" Sketch — a dense, tunable field of leaves scattered across
  * the coordinate space at blue-noise (Poisson-disk) points, ORIENTED along a
  * seeded curl-noise flow field, carrying seeded per-leaf shape variation,
- * composited in painter's order, and — with ONE opaque occluder disc spliced
- * into that order — reading as an IMPLIED SPHERE in the field's negative space.
+ * composited in painter's order, and — with a SEEDED SET of opaque occluder
+ * discs spliced into that order — reading as IMPLIED SPHERES in the field's
+ * negative space.
  *
  * It samples the seeded variable-radius Poisson-disk sampler under a CONSTANT
  * radius field (the field's spacing is driven by the `density` knob), rolls a
@@ -13,8 +14,11 @@
  * under later ones, so the overlap reads as a real composited field, not a flat
  * stamp sheet.
  *
- * ALL NINE KNOBS LIVE: this task completes the scatter + placement + flow-field
- * orientation + per-leaf variation + compositing. `density` drives spacing;
+ * ALL TWELVE KNOBS LIVE: the first nine complete the scatter + placement +
+ * flow-field orientation + per-leaf variation + compositing, and the three
+ * appended sphere-set knobs (`sphereCount`, `sphereRadiusMin`,
+ * `sphereRadiusMax`) drive the implied-sphere occluders (below). `density`
+ * drives spacing;
  * `fieldScale` (curl base frequency, in features across the canvas),
  * `octaves` (how many noise layers stack) and `turbulence` (curl octave falloff
  * → fbm `gain`) shape the flow each leaf bends into; `leafSizeMin`/`leafSizeMax`
@@ -37,21 +41,27 @@
  * rather than an arbitrary stack. That ascending-y draw sequence IS the seam the
  * occluder exploits (below).
  *
- * IMPLIED-SPHERE OCCLUDER (2026-07-03, slice #139 / task #140): the field's
- * negative space is made to read as a round volume NOT by thinning the scatter
- * but by OCCLUSION. A single opaque disc — filled with the render BACKGROUND
+ * IMPLIED-SPHERE OCCLUDERS (2026-07-03, slice #139 / tasks #140, #141): the
+ * field's negative space is made to read as round volumes NOT by thinning the
+ * scatter but by OCCLUSION. Each opaque disc — filled with the render BACKGROUND
  * color ({@link DISC_FILL} = 'white'), so it is invisible AS AN OBJECT and reads
  * as pure figure-ground, never a drawn circle — is spliced into the painter's
- * order at a seeded DEPTH index. Leaves drawn BEFORE it (top/back of the field)
- * are painted over where they cross it, so the disc's TRUE circular silhouette
- * cuts a hard, genuinely round edge on the sphere's FAR side; leaves drawn AFTER
- * it (bottom/front) lap OVER its near side, breaking that edge into organic leaf
- * tips. Roundness comes from the real circle; organic-ness comes from the front
- * leaves; the eye fuses the two into an implied sphere. The disc is a closed
- * polyline from the shared {@link circle} helper (fill only, no stroke). ONE
- * sphere this task; center/radius/depth are fixed constants of the Seed — NO
- * schema knobs (sphereCount / radius / depth follow in later slice #139 tasks),
- * and no shading, highlight, cast-shadow, or per-leaf clipping against the disc.
+ * order at its own seeded DEPTH index. Leaves drawn BEFORE it (top/back of the
+ * field) are painted over where they cross it, so the disc's TRUE circular
+ * silhouette cuts a hard, genuinely round edge on the sphere's FAR side; leaves
+ * drawn AFTER it (bottom/front) lap OVER its near side, breaking that edge into
+ * organic leaf tips. Roundness comes from the real circle; organic-ness comes
+ * from the front leaves; the eye fuses the two into an implied sphere. Each disc
+ * is a closed polyline from the shared {@link circle} helper (fill only, no
+ * stroke). #141 turns the single hardcoded disc into a SEEDED SET of N discs
+ * driven by three knobs: `sphereCount` (how many), `sphereRadiusMin`/
+ * `sphereRadiusMax` (per-disc radius bounds, in coordinate units — superseding
+ * the old radius-fraction constants). Each disc's center, radius, and depth are
+ * still seeded (per-sphere, off the leaf stream — see below); discs sharing a
+ * splice index draw in sphere order, and any whose depth lands past the last
+ * leaf paint on top after the loop. `sphereDepth` becomes its own knob NEXT
+ * (#142); no shading, highlight, cast-shadow, or per-leaf clipping against the
+ * discs (styling / clipping slices).
  *
  * DRAW BOUNDARY (load-bearing): only generic {@link Primitive}s cross into the
  * Scene. The leaf domain type ({@link LeafShape}) is reached ONLY through the
@@ -67,12 +77,14 @@
  * `Math.random`, no clock read, and no state carried across `generate` calls.
  * Re-seeding reshuffles the whole field while the params hold.
  *
- * SPHERE STREAM OFF THE LEAF SEQUENCE (2026-07-03 audit): the disc's
- * center/radius/depth are drawn from a SEPARATE, dedicated rng stream
+ * SPHERE STREAM OFF THE LEAF SEQUENCE (2026-07-03 audit): every sphere's
+ * center/radius/depth is drawn from a SEPARATE, dedicated rng stream
  * (`createRandom(`${seed}-sphere`)`), never interleaved before or inside the
- * per-leaf loop. Each leaf still consumes exactly its three `rng` draws, so a
- * future `sphereCount` knob can consume more draws from the sphere stream
- * without shifting a single per-leaf roll and desyncing the field.
+ * per-leaf loop, and each sphere consumes that stream in a FIXED order (cx, cy,
+ * r, depth). Each leaf still consumes exactly its three `rng` draws, so raising
+ * `sphereCount` consumes MORE draws from the sphere stream WITHOUT shifting a
+ * single per-leaf roll and desyncing the field (#141). The sphere state is never
+ * drawn up-front from the main `rng` (explicitly rejected by the audit).
  *
  * PAPER-RIM RATIONALE (2026-07-01 audit): a matching dark stroke would make the
  * painter's-order overlap visually unobservable — adjacent dark leaves merge
@@ -101,10 +113,11 @@ import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
 /**
- * The leaf-field Parameter Schema — nine {@link NumberParamSpec} knobs, all
- * consumed NOW. Order is fixed and part of the contract. `satisfies` keeps the
- * literal key set (so `numberParam` can index by `keyof typeof schema`) while
- * enforcing the spec type.
+ * The leaf-field Parameter Schema — twelve {@link NumberParamSpec} knobs, all
+ * consumed NOW. Order is fixed and part of the contract; the three sphere-set
+ * knobs are APPENDED last so the existing nine keep their positions. `satisfies`
+ * keeps the literal key set (so `numberParam` can index by `keyof typeof schema`)
+ * while enforcing the spec type.
  */
 const schema = {
   /**
@@ -130,6 +143,24 @@ const schema = {
   pointiness: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
   /** Per-leaf variation amount — scales how far each leaf strays from the base shape. Consumed NOW. */
   variation: { kind: 'number', min: 0, max: 1, default: 0 },
+  /**
+   * How many implied-sphere occluder discs to scatter into the field. Each disc
+   * is placed/sized/depth-sorted from the dedicated sphere rng stream (OFF the
+   * per-leaf rolls), so raising this consumes more sphere draws without shifting
+   * a single leaf. Consumed NOW (sphere-set count). Appended last (#141).
+   */
+  sphereCount: { kind: 'number', min: 1, max: 6, default: 1, step: 1, integer: true },
+  /**
+   * Sphere radius range low, in coordinate-space units (WIDTH=1000). Supersedes
+   * the old SPHERE_RADIUS_MIN_FRAC constant (0.18·WIDTH ≈ 180). Consumed NOW.
+   */
+  sphereRadiusMin: { kind: 'number', min: 40, max: 400, default: 180 },
+  /**
+   * Sphere radius range high, in coordinate-space units (WIDTH=1000). Supersedes
+   * the old SPHERE_RADIUS_MAX_FRAC constant (0.26·WIDTH ≈ 260). `generate` guards
+   * min ≤ max internally (Sketch owns its inter-param coherence). Consumed NOW.
+   */
+  sphereRadiusMax: { kind: 'number', min: 40, max: 400, default: 260 },
 } satisfies Record<string, NumberParamSpec>
 
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
@@ -170,14 +201,11 @@ const DISC_FILL = 'white'
 
 /**
  * Sphere placement, all derived from a SEPARATE seeded rng stream (see below).
- * The disc center is kept inside `[margin, 1 - margin]` of each axis so the full
- * circular silhouette lands on-canvas and reads as a complete round edge.
+ * Each disc center is kept inside `[margin, 1 - margin]` of each axis so the full
+ * circular silhouette lands on-canvas and reads as a complete round edge. (Radius
+ * bounds are now the live `sphereRadiusMin`/`sphereRadiusMax` knobs, #141.)
  */
 const SPHERE_CENTER_MARGIN = 0.32
-
-/** Sphere radius range, as a fraction of the canvas width. */
-const SPHERE_RADIUS_MIN_FRAC = 0.18
-const SPHERE_RADIUS_MAX_FRAC = 0.26
 
 /**
  * Translate a leaf outline by a fixed `(dx, dy)` offset, returning a NEW Polyline
@@ -212,16 +240,16 @@ function rotate(outline: Polyline, angle: number): Polyline {
 
 /**
  * The leaf-field Sketch: a static, stateless field of seeded-variant leaves,
- * oriented along a seeded curl-noise flow field, with one opaque occluder disc
- * implying a sphere in the negative space.
+ * oriented along a seeded curl-noise flow field, with a seeded set of opaque
+ * occluder discs implying spheres in the negative space.
  *
  * `generate` reads the spacing/size/field/variation knobs, blue-noise-samples
  * the coordinate space, rolls a seeded {@link LeafShape} at every sampled point
  * (in sorted ascending-y order — that IS painter's order), rotates each so its
  * spine tracks the local flow direction, emits each as a dark-filled,
- * paper-rimmed closed polygon, and splices one background-colored occluder disc
- * into the draw order at a seeded depth (see the file header's occluder
- * rationale). No accumulated state — re-calling with the same `(params, seed, t)`
+ * paper-rimmed closed polygon, and splices a seeded set of background-colored
+ * occluder discs into the draw order at their own seeded depths (see the file
+ * header's occluder rationale). No accumulated state — re-calling with the same `(params, seed, t)`
  * reproduces the same Scene exactly.
  */
 export const leafField: StatelessSketch = {
@@ -246,21 +274,35 @@ export const leafField: StatelessSketch = {
     const turbulence = numberParam(params, schema, 'turbulence')
     const octaves = numberParam(params, schema, 'octaves')
     const variation = numberParam(params, schema, 'variation')
+    const sphereCount = numberParam(params, schema, 'sphereCount')
 
-    // Sphere placement is drawn from a SEPARATE, dedicated rng stream (keyed off
+    // Sphere-set radius bounds. The Sketch owns its own inter-param coherence
+    // (CONTEXT.md), so guarantee a valid draw range by swapping if a user sets
+    // min > max — the radius draw below must always be well-formed.
+    let sphereRadiusMin = numberParam(params, schema, 'sphereRadiusMin')
+    let sphereRadiusMax = numberParam(params, schema, 'sphereRadiusMax')
+    if (sphereRadiusMin > sphereRadiusMax) {
+      ;[sphereRadiusMin, sphereRadiusMax] = [sphereRadiusMax, sphereRadiusMin]
+    }
+
+    // The sphere set is drawn from a SEPARATE, dedicated rng stream (keyed off
     // the seed) so it stays OFF the per-leaf roll sequence (2026-07-03 audit,
-    // finding 2): a future `sphereCount` knob can consume more draws here without
-    // shifting a single per-leaf roll and desyncing the field. Each leaf still
-    // consumes exactly its three `rng` draws below. Center/radius are fixed
-    // constants of the Seed this task (NO schema knobs yet — later slice tasks).
+    // finding 2): raising `sphereCount` consumes MORE draws here without shifting
+    // a single per-leaf roll and desyncing the field. Each leaf still consumes
+    // exactly its three `rng` draws below. Every sphere draws center/radius/depth
+    // from this stream in a FIXED per-sphere order (cx, cy, r, depth) so the set
+    // is fully reproducible from (params, seed).
     const sphereRng = createRandom(`${seed}-sphere`)
-    const sphereCX = sphereRng.range(WIDTH * SPHERE_CENTER_MARGIN, WIDTH * (1 - SPHERE_CENTER_MARGIN))
-    const sphereCY = sphereRng.range(HEIGHT * SPHERE_CENTER_MARGIN, HEIGHT * (1 - SPHERE_CENTER_MARGIN))
-    const sphereR = sphereRng.range(WIDTH * SPHERE_RADIUS_MIN_FRAC, WIDTH * SPHERE_RADIUS_MAX_FRAC)
-    // Depth = the disc's fractional position in the (ascending-y) painter's order:
-    // 0 ⇒ behind every leaf, 1 ⇒ in front of every leaf. Drawn AFTER center/radius
-    // in this same dedicated stream, so it never perturbs their values.
-    const sphereDepth = sphereRng.value()
+    const spheres = Array.from({ length: sphereCount }, () => {
+      const cx = sphereRng.range(WIDTH * SPHERE_CENTER_MARGIN, WIDTH * (1 - SPHERE_CENTER_MARGIN))
+      const cy = sphereRng.range(HEIGHT * SPHERE_CENTER_MARGIN, HEIGHT * (1 - SPHERE_CENTER_MARGIN))
+      const r = sphereRng.range(sphereRadiusMin, sphereRadiusMax)
+      // Depth = the disc's fractional position in the (ascending-y) painter's
+      // order: 0 ⇒ behind every leaf, 1 ⇒ in front of every leaf. Drawn LAST in
+      // each sphere's fixed order, so it never perturbs that sphere's cx/cy/r.
+      const depth = sphereRng.value()
+      return { cx, cy, r, depth }
+    })
 
     // Constant radius field ⇒ uniform blue-noise spacing driven by `density`.
     // `minRadius` equals the constant so the accel grid is sized accurately
@@ -289,19 +331,35 @@ export const leafField: StatelessSketch = {
 
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
-    // Splice the opaque occluder disc into the painter's order at the index
-    // matching its seeded depth: the top/back leaves (drawn first) fall UNDER it
-    // and are occluded where they cross it — the disc's true circular silhouette
-    // reads as a hard, genuinely round edge on the sphere's far side — while the
-    // bottom/front leaves (drawn after) lap OVER its near side for organic tip
-    // breakup. `Math.round(depth · N)` maps depth 0 → behind all leaves and
-    // depth 1 → in front of all. Fill only, no stroke: pure figure-ground.
-    const discIndex = Math.round(sphereDepth * points.length)
-    const drawDisc = (): void => {
-      builder.addPath(circle(sphereCX, sphereCY, sphereR), {
+    // Splice each opaque occluder disc into the painter's order at the index
+    // matching its own seeded depth: the top/back leaves (drawn first) fall UNDER
+    // it and are occluded where they cross it — the disc's true circular
+    // silhouette reads as a hard, genuinely round edge on the sphere's far side —
+    // while the bottom/front leaves (drawn after) lap OVER its near side for
+    // organic tip breakup. `Math.round(depth · N)` maps depth 0 → behind all
+    // leaves and depth 1 → in front of all. Fill only, no stroke: pure
+    // figure-ground.
+    const drawDisc = (sphere: { cx: number; cy: number; r: number }): void => {
+      builder.addPath(circle(sphere.cx, sphere.cy, sphere.r), {
         closed: true,
         fill: { color: DISC_FILL },
       })
+    }
+
+    // Group each sphere's disc by its splice index. Several discs may share an
+    // index (drawn in sphere order there); any disc whose depth lands past the
+    // last leaf (index ≥ N) is deferred and painted on top after the loop.
+    const discsBeforeLeaf = new Map<number, typeof spheres>()
+    const discsOnTop: typeof spheres = []
+    for (const sphere of spheres) {
+      const idx = Math.round(sphere.depth * points.length)
+      if (idx >= points.length) {
+        discsOnTop.push(sphere)
+        continue
+      }
+      const existing = discsBeforeLeaf.get(idx)
+      if (existing) existing.push(sphere)
+      else discsBeforeLeaf.set(idx, [sphere])
     }
 
     // Sampler order IS painter's order: index 0 is drawn first (bottom). Each
@@ -309,7 +367,8 @@ export const leafField: StatelessSketch = {
     // loop invariant (the #126 hoist is superseded) — compute it per-leaf after
     // rotation.
     points.forEach(([x, y], i) => {
-      if (i === discIndex) drawDisc()
+      const discsHere = discsBeforeLeaf.get(i)
+      if (discsHere) for (const sphere of discsHere) drawDisc(sphere)
       // Sample the divergence-free flow at this point via the 3D curl overload
       // (z = t) so animating later is a metadata swap, not a rewrite (ADR-0002).
       // Coords are CANVAS-NORMALIZED (x/WIDTH, y/HEIGHT) so `fieldScale` reads as
@@ -357,8 +416,8 @@ export const leafField: StatelessSketch = {
       })
     })
 
-    // depth 1 lands the disc past the last leaf index ⇒ draw it on top of all.
-    if (discIndex >= points.length) drawDisc()
+    // depth ~1 lands a disc past the last leaf index ⇒ draw those on top of all.
+    for (const sphere of discsOnTop) drawDisc(sphere)
 
     return builder.build()
   },
