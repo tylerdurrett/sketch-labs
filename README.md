@@ -22,11 +22,22 @@ pnpm install
 ## Run the studio
 
 ```sh
+pnpm dev
+```
+
+Or launch the binary directly:
+
+```sh
 cd apps/studio && node_modules/.bin/vite
 ```
 
 Open the printed URL (default http://localhost:5173) to watch the `circles` Sketch
 render live.
+
+> `pnpm dev` is a root convenience script (like `pnpm test` / `pnpm typecheck`). The
+> "package-local binaries, not `pnpm run`" note above is about the typecheck/test/build
+> toolchain, where the benign `ERR_PNPM_IGNORED_BUILDS` exit-1 otherwise gets chased — a
+> dev-server launch never hits it.
 
 ## Tests
 
