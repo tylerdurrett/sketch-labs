@@ -101,10 +101,11 @@ import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
 /**
- * The leaf-field Parameter Schema — nine {@link NumberParamSpec} knobs, all
- * consumed NOW. Order is fixed and part of the contract. `satisfies` keeps the
- * literal key set (so `numberParam` can index by `keyof typeof schema`) while
- * enforcing the spec type.
+ * The leaf-field Parameter Schema — twelve {@link NumberParamSpec} knobs, all
+ * consumed NOW. Order is fixed and part of the contract; the three sphere-set
+ * knobs are APPENDED last so the existing nine keep their positions. `satisfies`
+ * keeps the literal key set (so `numberParam` can index by `keyof typeof schema`)
+ * while enforcing the spec type.
  */
 const schema = {
   /**
@@ -130,6 +131,24 @@ const schema = {
   pointiness: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
   /** Per-leaf variation amount — scales how far each leaf strays from the base shape. Consumed NOW. */
   variation: { kind: 'number', min: 0, max: 1, default: 0 },
+  /**
+   * How many implied-sphere occluder discs to scatter into the field. Each disc
+   * is placed/sized/depth-sorted from the dedicated sphere rng stream (OFF the
+   * per-leaf rolls), so raising this consumes more sphere draws without shifting
+   * a single leaf. Consumed NOW (sphere-set count). Appended last (#141).
+   */
+  sphereCount: { kind: 'number', min: 1, max: 6, default: 1, step: 1, integer: true },
+  /**
+   * Sphere radius range low, in coordinate-space units (WIDTH=1000). Supersedes
+   * the old SPHERE_RADIUS_MIN_FRAC constant (0.18·WIDTH ≈ 180). Consumed NOW.
+   */
+  sphereRadiusMin: { kind: 'number', min: 40, max: 400, default: 180 },
+  /**
+   * Sphere radius range high, in coordinate-space units (WIDTH=1000). Supersedes
+   * the old SPHERE_RADIUS_MAX_FRAC constant (0.26·WIDTH ≈ 260). `generate` guards
+   * min ≤ max internally (Sketch owns its inter-param coherence). Consumed NOW.
+   */
+  sphereRadiusMax: { kind: 'number', min: 40, max: 400, default: 260 },
 } satisfies Record<string, NumberParamSpec>
 
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
