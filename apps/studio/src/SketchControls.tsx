@@ -224,6 +224,9 @@ export function SketchControls({ sketch }: SketchControlsProps) {
           type="number"
           value={seed}
           onChange={(event) => {
+            // A blank field is a no-op, not seed 0: `Number("") === 0`, so an
+            // empty value would otherwise silently commit 0. A typed 0 stays valid.
+            if (event.target.value.trim() === "") return;
             const parsed = Number(event.target.value);
             if (Number.isNaN(parsed)) return;
             setSeed(parsed);
