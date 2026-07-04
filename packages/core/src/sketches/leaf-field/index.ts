@@ -59,6 +59,7 @@
  */
 
 import { curl } from '../../curl'
+import { circle } from '../../geometry'
 import { lerp } from '../../math'
 import { samplePoissonDisk } from '../../poisson'
 import { createRandom } from '../../random'
@@ -134,6 +135,27 @@ const PAPER_STROKE = '#f4f1ea'
 const LEAF_STROKE_WIDTH = 2
 
 /**
+ * The opaque occluder disc's fill — the render BACKGROUND color (see
+ * `renderPreview`'s `background = 'white'` default), NOT {@link PAPER_STROKE}.
+ * The disc must be invisible AS AN OBJECT (pure figure-ground) so that only the
+ * OCCLUSION of the leaves it covers reads as an implied round volume; a tinted
+ * fill (e.g. the leaf rim's `#f4f1ea`) would show up as a faint disc instead
+ * (2026-07-03 audit). See the file header's occluder rationale.
+ */
+const DISC_FILL = 'white'
+
+/**
+ * Sphere placement, all derived from a SEPARATE seeded rng stream (see below).
+ * The disc center is kept inside `[margin, 1 - margin]` of each axis so the full
+ * circular silhouette lands on-canvas and reads as a complete round edge.
+ */
+const SPHERE_CENTER_MARGIN = 0.32
+
+/** Sphere radius range, as a fraction of the canvas width. */
+const SPHERE_RADIUS_MIN_FRAC = 0.18
+const SPHERE_RADIUS_MAX_FRAC = 0.26
+
+/**
  * Translate a leaf outline by a fixed `(dx, dy)` offset, returning a NEW Polyline
  * (the input is not mutated).
  *
@@ -197,6 +219,17 @@ export const leafField: StatelessSketch = {
     const turbulence = numberParam(params, schema, 'turbulence')
     const octaves = numberParam(params, schema, 'octaves')
     const variation = numberParam(params, schema, 'variation')
+
+    // Sphere placement is drawn from a SEPARATE, dedicated rng stream (keyed off
+    // the seed) so it stays OFF the per-leaf roll sequence (2026-07-03 audit,
+    // finding 2): a future `sphereCount` knob can consume more draws here without
+    // shifting a single per-leaf roll and desyncing the field. Each leaf still
+    // consumes exactly its three `rng` draws below. Center/radius are fixed
+    // constants of the Seed this task (NO schema knobs yet — later slice tasks).
+    const sphereRng = createRandom(`${seed}-sphere`)
+    const sphereCX = sphereRng.range(WIDTH * SPHERE_CENTER_MARGIN, WIDTH * (1 - SPHERE_CENTER_MARGIN))
+    const sphereCY = sphereRng.range(HEIGHT * SPHERE_CENTER_MARGIN, HEIGHT * (1 - SPHERE_CENTER_MARGIN))
+    const sphereR = sphereRng.range(WIDTH * SPHERE_RADIUS_MIN_FRAC, WIDTH * SPHERE_RADIUS_MAX_FRAC)
 
     // Constant radius field ⇒ uniform blue-noise spacing driven by `density`.
     // `minRadius` equals the constant so the accel grid is sized accurately
@@ -275,6 +308,15 @@ export const leafField: StatelessSketch = {
         fill: { color: LEAF_FILL },
         stroke: { color: PAPER_STROKE, width: LEAF_STROKE_WIDTH },
       })
+    })
+
+    // The opaque, background-colored occluder disc. Appended LAST for now (top of
+    // the draw order); the next step splices it in at the seeded painter's-order
+    // depth so back leaves fall under it and front leaves lap over it. Fill only,
+    // no stroke — pure figure-ground (see DISC_FILL / the file header).
+    builder.addPath(circle(sphereCX, sphereCY, sphereR), {
+      closed: true,
+      fill: { color: DISC_FILL },
     })
 
     return builder.build()
