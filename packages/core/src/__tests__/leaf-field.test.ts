@@ -441,7 +441,7 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
   }
 
   it('bakes exactly one opaque background-colored disc — fill only, closed, no stroke (figure-ground)', () => {
-    const scene = leafField.generate({}, 'orient', 0)
+    const scene = leafField.generate({ sphereCount: 1 }, 'orient', 0)
     const disc = discOf(scene)
     expect(disc.closed).toBe(true)
     // Invisible AS AN OBJECT: filled with the render background, never stroked,
@@ -452,7 +452,7 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
   })
 
   it('the occluder is a genuinely round silhouette — every rim point equidistant from center', () => {
-    const scene = leafField.generate({}, 'orient', 0)
+    const scene = leafField.generate({ sphereCount: 1 }, 'orient', 0)
     const disc = discOf(scene)
     // Drop the closing duplicate vertex, then measure each rim point's radius.
     const ring = disc.points.slice(0, -1)
@@ -472,7 +472,7 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
     // depth-0.5 splice — placement is now inset by the disc's OWN radius (#146),
     // so a disc can sit near an edge with no back leaves reaching it; this fixture
     // seed keeps both sides of the occlusion observable (assertions unchanged).
-    const scene = leafField.generate({}, 'disc', 0)
+    const scene = leafField.generate({ sphereCount: 1 }, 'disc', 0)
     const prims = scene.primitives
     const discIdx = prims.findIndex((p) => p.fill?.color === DISC_FILL)
     const disc = prims[discIdx]!
@@ -498,7 +498,7 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
   })
 
   it('OCCLUDES rather than THINS — leaf density under the disc matches the surrounding field', () => {
-    const scene = leafField.generate({}, 'orient', 0)
+    const scene = leafField.generate({ sphereCount: 1 }, 'orient', 0)
     const disc = discOf(scene)
     const [cx, cy] = discCenter(disc)
     const r = discRadius(disc)
@@ -522,7 +522,7 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
   })
 
   it('is deterministic including the occluder — identical Scene for identical (params, seed, t) (ADR-0002)', () => {
-    const params: Params = { density: 8 }
+    const params: Params = { density: 8, sphereCount: 1 }
     const a = leafField.generate(params, 'disc-det', 0)
     const b = leafField.generate(params, 'disc-det', 0)
     expect(a).toEqual(b)
@@ -560,6 +560,19 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     expect(discsOf(few)).toHaveLength(1)
     expect(discsOf(many)).toHaveLength(5)
     expect(discsOf(many).length).toBeGreaterThan(discsOf(few).length)
+  })
+
+  it('sphereCount 0 (the default) yields a disc-free field — spheres are opt-in', () => {
+    // The set is opt-in: at count 0 no occluder disc is spliced in, so the field
+    // ships as a plain leaf scatter. The default is 0, so a bare generate is also
+    // disc-free; a field of leaves still bakes.
+    const explicit = leafField.generate({ sphereCount: 0 }, 'set-none', 0)
+    const byDefault = leafField.generate({}, 'set-none', 0)
+    expect(discsOf(explicit)).toHaveLength(0)
+    expect(discsOf(byDefault)).toHaveLength(0)
+    // A disc-free field is still a field — leaves are unaffected.
+    expect(leavesOf(explicit).length).toBeGreaterThan(1)
+    expect(leavesOf(byDefault)).toEqual(leavesOf(explicit))
   })
 
   it("every disc's radius falls within [sphereRadiusMin, sphereRadiusMax]", () => {

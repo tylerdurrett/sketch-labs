@@ -54,7 +54,8 @@
  * circle; organic-ness comes from the front leaves; the eye fuses the two into an
  * implied sphere. Each disc is a closed polyline from the shared {@link circle}
  * helper (fill only, no stroke). #141 turns the single hardcoded disc into a
- * SEEDED SET of N discs driven by three knobs: `sphereCount` (how many),
+ * SEEDED SET of N discs driven by three knobs: `sphereCount` (how many — 0 by
+ * default, so the field ships plain and the implied-sphere set is opt-in),
  * `sphereRadiusMin`/`sphereRadiusMax` (per-disc radius bounds, in coordinate
  * units — superseding the old radius-fraction constants). Each disc's center and
  * radius are seeded (per-sphere, off the leaf stream — see below). #142 makes the
@@ -154,9 +155,11 @@ const schema = {
    * How many implied-sphere occluder discs to scatter into the field. Each disc
    * is placed/sized/depth-sorted from the dedicated sphere rng stream (OFF the
    * per-leaf rolls), so raising this consumes more sphere draws without shifting
-   * a single leaf. Consumed NOW (sphere-set count). Appended last (#141).
+   * a single leaf. The set is OPT-IN: the min (and default) is 0 — a plain leaf
+   * field with no implied spheres — and raising it splices in that many discs.
+   * Consumed NOW (sphere-set count). Appended last (#141).
    */
-  sphereCount: { kind: 'number', min: 1, max: 6, default: 1, step: 1, integer: true },
+  sphereCount: { kind: 'number', min: 0, max: 6, default: 0, step: 1, integer: true },
   /**
    * Sphere radius range low, in coordinate-space units (WIDTH=1000). Supersedes
    * the old SPHERE_RADIUS_MIN_FRAC constant (0.18·WIDTH ≈ 180). Consumed NOW.
