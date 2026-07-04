@@ -468,7 +468,11 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
   })
 
   it('occludes far-side (back) leaves while front leaves lap over the near side', () => {
-    const scene = leafField.generate({}, 'orient', 0)
+    // Seed picked so the default-radius disc lands mid-canvas, straddling the
+    // depth-0.5 splice — placement is now inset by the disc's OWN radius (#146),
+    // so a disc can sit near an edge with no back leaves reaching it; this fixture
+    // seed keeps both sides of the occlusion observable (assertions unchanged).
+    const scene = leafField.generate({}, 'disc', 0)
     const prims = scene.primitives
     const discIdx = prims.findIndex((p) => p.fill?.color === DISC_FILL)
     const disc = prims[discIdx]!
@@ -620,6 +624,36 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     const b = leafField.generate(params, 'set-det', 0)
     expect(a).toEqual(b)
     expect(discsOf(a)).toEqual(discsOf(b))
+  })
+
+  it('keeps every disc fully on-canvas even at the max radius (silhouette bounded by drawn radius)', () => {
+    // Center placement is inset by each disc's OWN drawn radius, so even at the
+    // largest possible radius (400) a full sphere-set lands entirely within the
+    // canvas. The tiny epsilon absorbs circle-tessellation float noise.
+    const eps = 1e-6
+    const scene = leafField.generate(
+      { sphereCount: 6, sphereRadiusMin: 400, sphereRadiusMax: 400 },
+      'on-canvas',
+      0,
+    )
+    const discs = discsOf(scene)
+    expect(discs).toHaveLength(6)
+    for (const disc of discs) {
+      const { minX, minY, maxX, maxY } = primitiveBBox(disc)
+      expect(minX).toBeGreaterThanOrEqual(-eps)
+      expect(minY).toBeGreaterThanOrEqual(-eps)
+      expect(maxX).toBeLessThanOrEqual(WIDTH + eps)
+      expect(maxY).toBeLessThanOrEqual(HEIGHT + eps)
+    }
+  })
+
+  it('re-seeding still moves discs at a smaller radius (placement stays seeded)', () => {
+    const params: Params = { sphereCount: 4, sphereRadiusMin: 80, sphereRadiusMax: 80 }
+    const a = leafField.generate(params, 'move-a', 0)
+    const b = leafField.generate(params, 'move-b', 0)
+    expect(discsOf(a)).toHaveLength(4)
+    expect(discsOf(b)).toHaveLength(4)
+    expect(discsOf(b)).not.toEqual(discsOf(a))
   })
 })
 

@@ -218,14 +218,6 @@ const LEAF_STROKE_WIDTH = 2
 const DISC_FILL = 'white'
 
 /**
- * Sphere placement, all derived from a SEPARATE seeded rng stream (see below).
- * Each disc center is kept inside `[margin, 1 - margin]` of each axis so the full
- * circular silhouette lands on-canvas and reads as a complete round edge. (Radius
- * bounds are now the live `sphereRadiusMin`/`sphereRadiusMax` knobs, #141.)
- */
-const SPHERE_CENTER_MARGIN = 0.32
-
-/**
  * Translate a leaf outline by a fixed `(dx, dy)` offset, returning a NEW Polyline
  * (the input is not mutated).
  *
@@ -319,9 +311,19 @@ export const leafField: StatelessSketch = {
     // above, NOT a per-sphere roll — dropping that draw leaves cx/cy/r identical.
     const sphereRng = createRandom(`${seed}-sphere`)
     const spheres = Array.from({ length: sphereCount }, () => {
-      const cx = sphereRng.range(WIDTH * SPHERE_CENTER_MARGIN, WIDTH * (1 - SPHERE_CENTER_MARGIN))
-      const cy = sphereRng.range(HEIGHT * SPHERE_CENTER_MARGIN, HEIGHT * (1 - SPHERE_CENTER_MARGIN))
+      // Draw center fractions first, radius last — this PRESERVES the documented
+      // per-sphere draw order (center-x, center-y, radius = three draws) and the
+      // separate-stream seam, so no per-leaf roll shifts. Each center is then inset
+      // by the disc's OWN radius (not a fixed fraction) so the full circular
+      // silhouette always lands on-canvas for ANY radius: radius ≤ 400 < WIDTH/2,
+      // so [r, WIDTH − r] is always a valid range and reads as a complete round
+      // edge. (Radius bounds are the live `sphereRadiusMin`/`sphereRadiusMax`
+      // knobs, #141.)
+      const cxFrac = sphereRng.value()
+      const cyFrac = sphereRng.value()
       const r = sphereRng.range(sphereRadiusMin, sphereRadiusMax)
+      const cx = lerp(r, WIDTH - r, cxFrac)
+      const cy = lerp(r, HEIGHT - r, cyFrac)
       return { cx, cy, r }
     })
 
