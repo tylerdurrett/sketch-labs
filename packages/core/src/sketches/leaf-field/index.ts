@@ -230,6 +230,10 @@ export const leafField: StatelessSketch = {
     const sphereCX = sphereRng.range(WIDTH * SPHERE_CENTER_MARGIN, WIDTH * (1 - SPHERE_CENTER_MARGIN))
     const sphereCY = sphereRng.range(HEIGHT * SPHERE_CENTER_MARGIN, HEIGHT * (1 - SPHERE_CENTER_MARGIN))
     const sphereR = sphereRng.range(WIDTH * SPHERE_RADIUS_MIN_FRAC, WIDTH * SPHERE_RADIUS_MAX_FRAC)
+    // Depth = the disc's fractional position in the (ascending-y) painter's order:
+    // 0 ⇒ behind every leaf, 1 ⇒ in front of every leaf. Drawn AFTER center/radius
+    // in this same dedicated stream, so it never perturbs their values.
+    const sphereDepth = sphereRng.value()
 
     // Constant radius field ⇒ uniform blue-noise spacing driven by `density`.
     // `minRadius` equals the constant so the accel grid is sized accurately
@@ -258,11 +262,27 @@ export const leafField: StatelessSketch = {
 
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
+    // Splice the opaque occluder disc into the painter's order at the index
+    // matching its seeded depth: the top/back leaves (drawn first) fall UNDER it
+    // and are occluded where they cross it — the disc's true circular silhouette
+    // reads as a hard, genuinely round edge on the sphere's far side — while the
+    // bottom/front leaves (drawn after) lap OVER its near side for organic tip
+    // breakup. `Math.round(depth · N)` maps depth 0 → behind all leaves and
+    // depth 1 → in front of all. Fill only, no stroke: pure figure-ground.
+    const discIndex = Math.round(sphereDepth * points.length)
+    const drawDisc = (): void => {
+      builder.addPath(circle(sphereCX, sphereCY, sphereR), {
+        closed: true,
+        fill: { color: DISC_FILL },
+      })
+    }
+
     // Sampler order IS painter's order: index 0 is drawn first (bottom). Each
     // leaf is rotated by its own flow angle, so the bbox center is no longer a
     // loop invariant (the #126 hoist is superseded) — compute it per-leaf after
     // rotation.
-    points.forEach(([x, y]) => {
+    points.forEach(([x, y], i) => {
+      if (i === discIndex) drawDisc()
       // Sample the divergence-free flow at this point via the 3D curl overload
       // (z = t) so animating later is a metadata swap, not a rewrite (ADR-0002).
       // Coords are CANVAS-NORMALIZED (x/WIDTH, y/HEIGHT) so `fieldScale` reads as
@@ -310,14 +330,8 @@ export const leafField: StatelessSketch = {
       })
     })
 
-    // The opaque, background-colored occluder disc. Appended LAST for now (top of
-    // the draw order); the next step splices it in at the seeded painter's-order
-    // depth so back leaves fall under it and front leaves lap over it. Fill only,
-    // no stroke — pure figure-ground (see DISC_FILL / the file header).
-    builder.addPath(circle(sphereCX, sphereCY, sphereR), {
-      closed: true,
-      fill: { color: DISC_FILL },
-    })
+    // depth 1 lands the disc past the last leaf index ⇒ draw it on top of all.
+    if (discIndex >= points.length) drawDisc()
 
     return builder.build()
   },
