@@ -11,9 +11,10 @@ import type { Point } from '../types'
 import type { Primitive } from '../scene'
 
 /**
- * The twelve leaf-field knobs, in declaration order. The three sphere-set knobs
- * (#141) are APPENDED last — the first nine keep their positions (order is part
- * of the contract).
+ * The thirteen leaf-field knobs, in declaration order. The sphere knobs are
+ * APPENDED last (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then
+ * `sphereDepth` #142) — the first nine keep their positions (order is part of
+ * the contract).
  */
 const KNOBS = [
   'fieldScale',
@@ -28,6 +29,7 @@ const KNOBS = [
   'sphereCount',
   'sphereRadiusMin',
   'sphereRadiusMax',
+  'sphereDepth',
 ] as const
 
 /** The bold dark fill and paper-colored rim the audit pinned (see the sketch header). */
@@ -189,7 +191,7 @@ function meanLeafArea(primitives: Primitive[]): number {
 }
 
 describe('leaf-field Sketch contract', () => {
-  it('declares exactly the twelve knobs in order and NO time metadata (static)', () => {
+  it('declares exactly the thirteen knobs in order and NO time metadata (static)', () => {
     expect(Object.keys(leafField.schema)).toEqual([...KNOBS])
     // Static Sketch: absence of `time` is what makes the Harness hide the scrubber.
     expect(leafField.time).toBeUndefined()
@@ -618,5 +620,49 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     const b = leafField.generate(params, 'set-det', 0)
     expect(a).toEqual(b)
     expect(discsOf(a)).toEqual(discsOf(b))
+  })
+})
+
+/**
+ * The global `sphereDepth` knob (#142): where every disc inserts into the
+ * (ascending-y) painter's-order stack — the front/behind split. Higher depth ⇒
+ * MORE leaves drawn before the disc (occluded / behind ⇒ cleaner round edge);
+ * lower depth ⇒ fewer leaves before it (more front overlap / more embedded). One
+ * global depth for the whole set this slice.
+ */
+describe('leaf-field sphereDepth — front/behind split (#142)', () => {
+  /** Count of leaf Primitives drawn BEFORE the single disc (its splice position). */
+  function leavesBeforeDisc(scene: { primitives: Primitive[] }): number {
+    const discIdx = scene.primitives.findIndex((p) => p.fill?.color === DISC_FILL)
+    expect(discIdx).toBeGreaterThanOrEqual(0)
+    return scene.primitives.slice(0, discIdx).filter(isLeaf).length
+  }
+
+  it('raising sphereDepth draws strictly more leaves before the disc (splits front/behind)', () => {
+    // One disc so the split reads off a single splice position; same seed/density
+    // ⇒ identical leaf set, only the disc's insert index moves with the knob.
+    const base: Params = { sphereCount: 1, density: 8 }
+    const seed = 'depth-split'
+    const shallow = leafField.generate({ ...base, sphereDepth: 0.1 }, seed, 0)
+    const deep = leafField.generate({ ...base, sphereDepth: 0.9 }, seed, 0)
+    // Higher depth ⇒ more leaves painted before (behind) the disc ⇒ cleaner edge.
+    expect(leavesBeforeDisc(deep)).toBeGreaterThan(leavesBeforeDisc(shallow))
+  })
+
+  it('is a pure splice reorder — the leaf primitives are untouched by sphereDepth', () => {
+    // sphereDepth touches only the insert index, never an rng draw, so the leaf
+    // set stays byte-identical while only the disc's stack position shifts.
+    const base: Params = { sphereCount: 1, density: 8 }
+    const seed = 'depth-seam'
+    const shallow = leafField.generate({ ...base, sphereDepth: 0.1 }, seed, 0)
+    const deep = leafField.generate({ ...base, sphereDepth: 0.9 }, seed, 0)
+    expect(leavesOf(deep)).toEqual(leavesOf(shallow))
+  })
+
+  it('is deterministic for identical (params, seed, t) (ADR-0002)', () => {
+    const params: Params = { sphereCount: 3, sphereDepth: 0.7, density: 6 }
+    const a = leafField.generate(params, 'depth-det', 0)
+    const b = leafField.generate(params, 'depth-det', 0)
+    expect(a).toEqual(b)
   })
 })
