@@ -53,7 +53,7 @@ Clear `needs-triage` and apply one of the seven canonical state labels (or, for 
 | Size | New state | Next step |
 | ---- | --------- | --------- |
 | `size:task` | `ready-for-agent` | `/execute <N>` |
-| `size:slice` | `ready-for-agent` | `/decompose <N>` |
+| `size:slice` | `ready-for-agent` | `/decompose <N>` (or `/autopilot <N>` to run the whole slice autonomously) |
 | `size:feature` / `size:initiative` | *(no state label)* | `/decompose <N>` |
 
 `size:feature` and `size:initiative` skip `ready-for-agent` because they decompose, not execute (see [triage-labels.md §Size axis](../../../docs/agents/triage-labels.md#size-axis)). For `ready-for-agent` outcomes, post an agent brief comment (see [AGENT-BRIEF.md](AGENT-BRIEF.md)) **only if the spec body is thin**; `/to-spec`-published specs usually make a separate brief redundant.
@@ -103,7 +103,7 @@ Conversational mode. Walk the tracker and present these buckets in order:
 
 3. **Active features and slices (`in-progress`)**: specs that `/decompose` produced children for. Group by parent. Show the auto-rollup (`X of Y children shipped`). On an `in-progress` `size:slice` with open task children, the recommended next action is `/execute <task#>` on the lowest-numbered open task, not further triage on the slice itself.
 
-4. **`ready-for-agent`**: fully specified, waiting for the next move. Only `size:task` and `size:slice` land here (features and initiatives skip `ready-for-agent`). `/execute <N>` for tasks; `/decompose <N>` for slices.
+4. **`ready-for-agent`**: fully specified, waiting for the next move. Only `size:task` and `size:slice` land here (features and initiatives skip `ready-for-agent`). `/execute <N>` for tasks; `/decompose <N>` for slices (or `/autopilot <N>` to run the whole slice autonomously).
 
    Plus **decompose-ready features and initiatives**: `size:feature` / `size:initiative` carrying no state-axis label after `/triage`'s bookkeeping pass. Recommended action: `/decompose <N>`.
 
@@ -117,7 +117,7 @@ Show counts and a one-line summary per spec. After the buckets, **recommend the 
 
 1. An `in-progress` slice with an open task child → `/execute <task#>` on the lowest-numbered open task.
 2. A `ready-for-agent` `size:task` → `/execute <N>`.
-3. A `ready-for-agent` `size:slice`, or a `size:feature` / `size:initiative` with no state-axis label → `/decompose <N>`.
+3. A `ready-for-agent` `size:slice` → `/decompose <N>` (or `/autopilot <N>` to run the whole slice autonomously); a `size:feature` / `size:initiative` with no state-axis label → `/decompose <N>`.
 4. A `needs-triage` spec → `/triage <N>`.
 5. A `needs-grilling` spec → `/grill-with-docs <N>`.
 
