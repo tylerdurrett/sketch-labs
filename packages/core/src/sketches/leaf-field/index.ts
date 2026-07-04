@@ -14,10 +14,10 @@
  * under later ones, so the overlap reads as a real composited field, not a flat
  * stamp sheet.
  *
- * ALL TWELVE KNOBS LIVE: the first nine complete the scatter + placement +
- * flow-field orientation + per-leaf variation + compositing, and the three
- * appended sphere-set knobs (`sphereCount`, `sphereRadiusMin`,
- * `sphereRadiusMax`) drive the implied-sphere occluders (below). `density`
+ * ALL THIRTEEN KNOBS LIVE: the first nine complete the scatter + placement +
+ * flow-field orientation + per-leaf variation + compositing, and the four
+ * appended sphere knobs (`sphereCount`, `sphereRadiusMin`, `sphereRadiusMax`,
+ * `sphereDepth`) drive the implied-sphere occluders (below). `density`
  * drives spacing;
  * `fieldScale` (curl base frequency, in features across the canvas),
  * `octaves` (how many noise layers stack) and `turbulence` (curl octave falloff
@@ -41,27 +41,30 @@
  * rather than an arbitrary stack. That ascending-y draw sequence IS the seam the
  * occluder exploits (below).
  *
- * IMPLIED-SPHERE OCCLUDERS (2026-07-03, slice #139 / tasks #140, #141): the
+ * IMPLIED-SPHERE OCCLUDERS (2026-07-03, slice #139 / tasks #140, #141, #142): the
  * field's negative space is made to read as round volumes NOT by thinning the
  * scatter but by OCCLUSION. Each opaque disc — filled with the render BACKGROUND
  * color ({@link DISC_FILL} = 'white'), so it is invisible AS AN OBJECT and reads
  * as pure figure-ground, never a drawn circle — is spliced into the painter's
- * order at its own seeded DEPTH index. Leaves drawn BEFORE it (top/back of the
- * field) are painted over where they cross it, so the disc's TRUE circular
- * silhouette cuts a hard, genuinely round edge on the sphere's FAR side; leaves
- * drawn AFTER it (bottom/front) lap OVER its near side, breaking that edge into
- * organic leaf tips. Roundness comes from the real circle; organic-ness comes
- * from the front leaves; the eye fuses the two into an implied sphere. Each disc
- * is a closed polyline from the shared {@link circle} helper (fill only, no
- * stroke). #141 turns the single hardcoded disc into a SEEDED SET of N discs
- * driven by three knobs: `sphereCount` (how many), `sphereRadiusMin`/
- * `sphereRadiusMax` (per-disc radius bounds, in coordinate units — superseding
- * the old radius-fraction constants). Each disc's center, radius, and depth are
- * still seeded (per-sphere, off the leaf stream — see below); discs sharing a
- * splice index draw in sphere order, and any whose depth lands past the last
- * leaf paint on top after the loop. `sphereDepth` becomes its own knob NEXT
- * (#142); no shading, highlight, cast-shadow, or per-leaf clipping against the
- * discs (styling / clipping slices).
+ * order at a DEPTH index driven by the global `sphereDepth` knob. Leaves drawn
+ * BEFORE it (top/back of the field) are painted over where they cross it, so the
+ * disc's TRUE circular silhouette cuts a hard, genuinely round edge on the
+ * sphere's FAR side; leaves drawn AFTER it (bottom/front) lap OVER its near side,
+ * breaking that edge into organic leaf tips. Roundness comes from the real
+ * circle; organic-ness comes from the front leaves; the eye fuses the two into an
+ * implied sphere. Each disc is a closed polyline from the shared {@link circle}
+ * helper (fill only, no stroke). #141 turns the single hardcoded disc into a
+ * SEEDED SET of N discs driven by three knobs: `sphereCount` (how many),
+ * `sphereRadiusMin`/`sphereRadiusMax` (per-disc radius bounds, in coordinate
+ * units — superseding the old radius-fraction constants). Each disc's center and
+ * radius are seeded (per-sphere, off the leaf stream — see below). #142 makes the
+ * front/behind split its own GLOBAL knob `sphereDepth` (0 ⇒ behind every leaf,
+ * max front overlap / most embedded; 1 ⇒ in front of every leaf, clean round edge
+ * / most spherical), applied uniformly to EVERY disc — replacing the per-sphere
+ * seeded depth roll (per-sphere depth variation is out of scope for this slice).
+ * All discs therefore share one splice index; if it lands past the last leaf they
+ * paint on top after the loop. No shading, highlight, cast-shadow, or per-leaf
+ * clipping against the discs (styling / clipping slices).
  *
  * DRAW BOUNDARY (load-bearing): only generic {@link Primitive}s cross into the
  * Scene. The leaf domain type ({@link LeafShape}) is reached ONLY through the
@@ -78,13 +81,16 @@
  * Re-seeding reshuffles the whole field while the params hold.
  *
  * SPHERE STREAM OFF THE LEAF SEQUENCE (2026-07-03 audit): every sphere's
- * center/radius/depth is drawn from a SEPARATE, dedicated rng stream
+ * center/radius is drawn from a SEPARATE, dedicated rng stream
  * (`createRandom(`${seed}-sphere`)`), never interleaved before or inside the
  * per-leaf loop, and each sphere consumes that stream in a FIXED order (cx, cy,
- * r, depth). Each leaf still consumes exactly its three `rng` draws, so raising
+ * r). Each leaf still consumes exactly its three `rng` draws, so raising
  * `sphereCount` consumes MORE draws from the sphere stream WITHOUT shifting a
  * single per-leaf roll and desyncing the field (#141). The sphere state is never
- * drawn up-front from the main `rng` (explicitly rejected by the audit).
+ * drawn up-front from the main `rng` (explicitly rejected by the audit). The
+ * splice depth is NOT rolled — it is the global `sphereDepth` knob (#142), so it
+ * touches only the insert index and never consumes an rng draw from either
+ * stream: changing it leaves every disc's cx/cy/r AND every leaf byte-identical.
  *
  * PAPER-RIM RATIONALE (2026-07-01 audit): a matching dark stroke would make the
  * painter's-order overlap visually unobservable — adjacent dark leaves merge
@@ -113,9 +119,10 @@ import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
 /**
- * The leaf-field Parameter Schema — twelve {@link NumberParamSpec} knobs, all
- * consumed NOW. Order is fixed and part of the contract; the three sphere-set
- * knobs are APPENDED last so the existing nine keep their positions. `satisfies`
+ * The leaf-field Parameter Schema — thirteen {@link NumberParamSpec} knobs, all
+ * consumed NOW. Order is fixed and part of the contract; the sphere knobs are
+ * APPENDED last (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then
+ * `sphereDepth` #142) so the existing nine keep their positions. `satisfies`
  * keeps the literal key set (so `numberParam` can index by `keyof typeof schema`)
  * while enforcing the spec type.
  */
@@ -161,6 +168,17 @@ const schema = {
    * min ≤ max internally (Sketch owns its inter-param coherence). Consumed NOW.
    */
   sphereRadiusMax: { kind: 'number', min: 40, max: 400, default: 260 },
+  /**
+   * Where every disc inserts into the (ascending-y) painter's-order stack — the
+   * front/behind split, applied GLOBALLY to all discs. 0 ⇒ each disc sits behind
+   * every leaf (max front overlap, most embedded); 1 ⇒ each disc sits in front of
+   * every leaf (clean round edge, most spherical). Raising it draws MORE leaves
+   * before the disc (occluded / behind), so the round far-side edge grows and the
+   * front overlap shrinks. One global depth for the whole set this slice
+   * (per-sphere depth variation is out of scope). Consumed NOW. Appended last
+   * (#142).
+   */
+  sphereDepth: { kind: 'number', min: 0, max: 1, default: 0.5 },
 } satisfies Record<string, NumberParamSpec>
 
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
@@ -285,23 +303,26 @@ export const leafField: StatelessSketch = {
       ;[sphereRadiusMin, sphereRadiusMax] = [sphereRadiusMax, sphereRadiusMin]
     }
 
+    // The front/behind split: one GLOBAL depth (0 ⇒ behind every leaf, 1 ⇒ in
+    // front of every leaf) applied to EVERY disc (#142). It is a knob, not an rng
+    // roll, so it touches only the splice index — it never consumes a draw from
+    // either stream, leaving cx/cy/r and every leaf byte-identical.
+    const sphereDepth = numberParam(params, schema, 'sphereDepth')
+
     // The sphere set is drawn from a SEPARATE, dedicated rng stream (keyed off
     // the seed) so it stays OFF the per-leaf roll sequence (2026-07-03 audit,
     // finding 2): raising `sphereCount` consumes MORE draws here without shifting
     // a single per-leaf roll and desyncing the field. Each leaf still consumes
-    // exactly its three `rng` draws below. Every sphere draws center/radius/depth
-    // from this stream in a FIXED per-sphere order (cx, cy, r, depth) so the set
-    // is fully reproducible from (params, seed).
+    // exactly its three `rng` draws below. Every sphere draws center/radius from
+    // this stream in a FIXED per-sphere order (cx, cy, r) so the set is fully
+    // reproducible from (params, seed). Depth is the global `sphereDepth` knob
+    // above, NOT a per-sphere roll — dropping that draw leaves cx/cy/r identical.
     const sphereRng = createRandom(`${seed}-sphere`)
     const spheres = Array.from({ length: sphereCount }, () => {
       const cx = sphereRng.range(WIDTH * SPHERE_CENTER_MARGIN, WIDTH * (1 - SPHERE_CENTER_MARGIN))
       const cy = sphereRng.range(HEIGHT * SPHERE_CENTER_MARGIN, HEIGHT * (1 - SPHERE_CENTER_MARGIN))
       const r = sphereRng.range(sphereRadiusMin, sphereRadiusMax)
-      // Depth = the disc's fractional position in the (ascending-y) painter's
-      // order: 0 ⇒ behind every leaf, 1 ⇒ in front of every leaf. Drawn LAST in
-      // each sphere's fixed order, so it never perturbs that sphere's cx/cy/r.
-      const depth = sphereRng.value()
-      return { cx, cy, r, depth }
+      return { cx, cy, r }
     })
 
     // Constant radius field ⇒ uniform blue-noise spacing driven by `density`.
@@ -331,14 +352,14 @@ export const leafField: StatelessSketch = {
 
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
-    // Splice each opaque occluder disc into the painter's order at the index
-    // matching its own seeded depth: the top/back leaves (drawn first) fall UNDER
-    // it and are occluded where they cross it — the disc's true circular
-    // silhouette reads as a hard, genuinely round edge on the sphere's far side —
-    // while the bottom/front leaves (drawn after) lap OVER its near side for
-    // organic tip breakup. `Math.round(depth · N)` maps depth 0 → behind all
-    // leaves and depth 1 → in front of all. Fill only, no stroke: pure
-    // figure-ground.
+    // Splice the opaque occluder discs into the painter's order at the GLOBAL
+    // depth index: the top/back leaves (drawn first) fall UNDER them and are
+    // occluded where they cross a disc — the disc's true circular silhouette reads
+    // as a hard, genuinely round edge on the sphere's far side — while the
+    // bottom/front leaves (drawn after) lap OVER the near side for organic tip
+    // breakup. `Math.round(sphereDepth · N)` maps depth 0 → behind all leaves
+    // (max front overlap) and depth 1 → in front of all (clean round edge); every
+    // disc shares this one index. Fill only, no stroke: pure figure-ground.
     const drawDisc = (sphere: { cx: number; cy: number; r: number }): void => {
       builder.addPath(circle(sphere.cx, sphere.cy, sphere.r), {
         closed: true,
@@ -346,29 +367,18 @@ export const leafField: StatelessSketch = {
       })
     }
 
-    // Group each sphere's disc by its splice index. Several discs may share an
-    // index (drawn in sphere order there); any disc whose depth lands past the
-    // last leaf (index ≥ N) is deferred and painted on top after the loop.
-    const discsBeforeLeaf = new Map<number, typeof spheres>()
-    const discsOnTop: typeof spheres = []
-    for (const sphere of spheres) {
-      const idx = Math.round(sphere.depth * points.length)
-      if (idx >= points.length) {
-        discsOnTop.push(sphere)
-        continue
-      }
-      const existing = discsBeforeLeaf.get(idx)
-      if (existing) existing.push(sphere)
-      else discsBeforeLeaf.set(idx, [sphere])
-    }
+    // One global splice index for the whole set (#142). All discs draw (in sphere
+    // order) just before the leaf at this index; if it lands past the last leaf
+    // (index ≥ N, i.e. depth ~1) the in-loop `i === spliceIdx` never fires and the
+    // discs are deferred to the on-top pass after the loop instead.
+    const spliceIdx = Math.round(sphereDepth * points.length)
 
     // Sampler order IS painter's order: index 0 is drawn first (bottom). Each
     // leaf is rotated by its own flow angle, so the bbox center is no longer a
     // loop invariant (the #126 hoist is superseded) — compute it per-leaf after
     // rotation.
     points.forEach(([x, y], i) => {
-      const discsHere = discsBeforeLeaf.get(i)
-      if (discsHere) for (const sphere of discsHere) drawDisc(sphere)
+      if (i === spliceIdx) for (const sphere of spheres) drawDisc(sphere)
       // Sample the divergence-free flow at this point via the 3D curl overload
       // (z = t) so animating later is a metadata swap, not a rewrite (ADR-0002).
       // Coords are CANVAS-NORMALIZED (x/WIDTH, y/HEIGHT) so `fieldScale` reads as
@@ -416,8 +426,8 @@ export const leafField: StatelessSketch = {
       })
     })
 
-    // depth ~1 lands a disc past the last leaf index ⇒ draw those on top of all.
-    for (const sphere of discsOnTop) drawDisc(sphere)
+    // sphereDepth ~1 lands the splice index past the last leaf ⇒ draw on top of all.
+    if (spliceIdx >= points.length) for (const sphere of spheres) drawDisc(sphere)
 
     return builder.build()
   },
