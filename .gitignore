@@ -67,3 +67,6 @@ coverage/
 
 # Agent harness — transient worktrees created by /batch's worktree-isolated agents
 .claude/worktrees/
+
+# per-machine pointer to the tdog skills library (backport-skill)
+.tdog-skills-path
