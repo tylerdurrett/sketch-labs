@@ -27,6 +27,19 @@ const KNOBS = [
 const LEAF_FILL = '#1a1a1a'
 const PAPER_STROKE = '#f4f1ea'
 
+/** The occluder disc's fill — the render BACKGROUND color (see the sketch header). */
+const DISC_FILL = 'white'
+
+/** A leaf Primitive (the dark-filled polygons) as opposed to the occluder disc. */
+function isLeaf(primitive: Primitive): boolean {
+  return primitive.fill?.color === LEAF_FILL
+}
+
+/** Just the leaf Primitives of a scene, with the single occluder disc filtered out. */
+function leavesOf(scene: { primitives: Primitive[] }): Primitive[] {
+  return scene.primitives.filter(isLeaf)
+}
+
 /** Axis-aligned bounding box of a single primitive's points. */
 function primitiveBBox(primitive: Primitive) {
   return pointsBBox(primitive.points)
@@ -177,9 +190,10 @@ describe('leaf-field Sketch contract', () => {
 
   it('bakes a FIELD of closed leaves, each dark-filled with a distinct paper rim', () => {
     const scene = leafField.generate({}, 'seed-a', 0)
+    const leaves = leavesOf(scene)
     // A field, not one leaf.
-    expect(scene.primitives.length).toBeGreaterThan(1)
-    for (const primitive of scene.primitives) {
+    expect(leaves.length).toBeGreaterThan(1)
+    for (const primitive of leaves) {
       expect(primitive.closed).toBe(true)
       // Audit's painter's-order-observability requirement: bold dark FILL AND a
       // light paper STROKE, and the two colors must be distinct so overlap reads.
@@ -197,7 +211,7 @@ describe('leaf-field density is live-tunable', () => {
     const seed = 'held'
     const sparse = leafField.generate({ density: 2 }, seed, 0)
     const dense = leafField.generate({ density: 10 }, seed, 0)
-    expect(dense.primitives.length).toBeGreaterThan(sparse.primitives.length)
+    expect(leavesOf(dense).length).toBeGreaterThan(leavesOf(sparse).length)
   })
 })
 
@@ -279,7 +293,9 @@ describe('leaf-field seed independence', () => {
     // Rotation-invariant spine lengths: differences here come from the seeded
     // SHAPE rolls (size variation), not merely from different rotations.
     const lengths = (scene: typeof a): number[] =>
-      scene.primitives.map((p) => Math.round(spineLength(p))).sort((x, y) => x - y)
+      leavesOf(scene)
+        .map((p) => Math.round(spineLength(p)))
+        .sort((x, y) => x - y)
     expect(lengths(b)).not.toEqual(lengths(a))
   })
 })
@@ -300,7 +316,7 @@ describe('leaf-field flow-field orientation (#127)', () => {
       seed,
       0,
     )
-    const leaves = scene.primitives
+    const leaves = leavesOf(scene)
     expect(leaves.length).toBeGreaterThan(5)
 
     // Each leaf paired with the field at its OWN centroid ⇒ tight cluster.
@@ -320,7 +336,7 @@ describe('leaf-field flow-field orientation (#127)', () => {
 describe('leaf-field per-leaf variation (#127)', () => {
   it('at nonzero variation, no two leaves are geometrically identical', () => {
     const scene = leafField.generate({ density: 6, variation: 0.6 }, 'vary', 0)
-    const hashes = scene.primitives.map((p) => JSON.stringify(p.points))
+    const hashes = leavesOf(scene).map((p) => JSON.stringify(p.points))
     expect(new Set(hashes).size).toBe(hashes.length)
   })
 
@@ -328,16 +344,17 @@ describe('leaf-field per-leaf variation (#127)', () => {
     const seed = 'spread'
     const low = leafField.generate({ density: 6, variation: 0.2 }, seed, 0)
     const high = leafField.generate({ density: 6, variation: 0.8 }, seed, 0)
-    expect(spineLengthSpread(high.primitives)).toBeGreaterThan(
-      spineLengthSpread(low.primitives),
+    expect(spineLengthSpread(leavesOf(high))).toBeGreaterThan(
+      spineLengthSpread(leavesOf(low)),
     )
   })
 
   it('at variation 0 every leaf shares the same base size (spread ~0), confirming the knob is live', () => {
     const scene = leafField.generate({ density: 6, variation: 0 }, 'flat', 0)
     // Leaves are all the fixed base shape (only rotated), so spine lengths — a
-    // rotation-invariant diagonal measure — match to within float noise.
-    expect(spineLengthSpread(scene.primitives)).toBeLessThan(1e-6)
+    // rotation-invariant diagonal measure — match to within float noise. (The
+    // occluder disc is filtered out; its diameter is unrelated to leaf size.)
+    expect(spineLengthSpread(leavesOf(scene))).toBeLessThan(1e-6)
   })
 })
 
@@ -349,8 +366,8 @@ describe('leaf-field shape knobs — width & pointiness (#127)', () => {
     const slender = leafField.generate({ density: 5, variation: 0, leafWidth: 0.2 }, seed, 0)
     const fat = leafField.generate({ density: 5, variation: 0, leafWidth: 0.9 }, seed, 0)
     // Same seed/density ⇒ same placement/count; only the per-leaf width differs.
-    expect(fat.primitives.length).toBe(slender.primitives.length)
-    expect(meanLeafArea(fat.primitives)).toBeGreaterThan(meanLeafArea(slender.primitives))
+    expect(leavesOf(fat).length).toBe(leavesOf(slender).length)
+    expect(meanLeafArea(leavesOf(fat))).toBeGreaterThan(meanLeafArea(leavesOf(slender)))
   })
 
   it('pointiness is live — changing the tip sharpness rebakes the field', () => {
@@ -386,5 +403,119 @@ describe('leaf-field draw boundary', () => {
     // The private leaf generator/type must never leak across the public barrel.
     expect('leaf' in barrel).toBe(false)
     expect('LeafShape' in barrel).toBe(false)
+  })
+})
+
+/**
+ * The single opaque occluder disc that makes the field's negative space read as
+ * an implied sphere (#140). Its center/radius are recovered from the disc
+ * Primitive itself; `orient` is a seed whose seeded depth lands leaves both
+ * behind (occluded) and in front of (lapping) the disc.
+ */
+describe('leaf-field implied-sphere occluder (#140)', () => {
+  /** The lone occluder disc — the only background-filled Primitive in a scene. */
+  function discOf(scene: { primitives: Primitive[] }): Primitive {
+    const discs = scene.primitives.filter((p) => p.fill?.color === DISC_FILL)
+    expect(discs).toHaveLength(1)
+    return discs[0]!
+  }
+
+  /** Disc center (bbox center of a circle == its true center). */
+  function discCenter(disc: Primitive): Point {
+    return primitiveCentroid(disc)
+  }
+
+  /** Disc radius, read off the bbox width of the circular silhouette. */
+  function discRadius(disc: Primitive): number {
+    const { minX, maxX } = primitiveBBox(disc)
+    return (maxX - minX) / 2
+  }
+
+  it('bakes exactly one opaque background-colored disc — fill only, closed, no stroke (figure-ground)', () => {
+    const scene = leafField.generate({}, 'orient', 0)
+    const disc = discOf(scene)
+    expect(disc.closed).toBe(true)
+    // Invisible AS AN OBJECT: filled with the render background, never stroked,
+    // and NOT the paper rim color (which would read as a faint tinted circle).
+    expect(disc.stroke).toBeUndefined()
+    expect(disc.fill?.color).toBe('white')
+    expect(disc.fill?.color).not.toBe(PAPER_STROKE)
+  })
+
+  it('the occluder is a genuinely round silhouette — every rim point equidistant from center', () => {
+    const scene = leafField.generate({}, 'orient', 0)
+    const disc = discOf(scene)
+    // Drop the closing duplicate vertex, then measure each rim point's radius.
+    const ring = disc.points.slice(0, -1)
+    const cx = ring.reduce((s, p) => s + p[0]!, 0) / ring.length
+    const cy = ring.reduce((s, p) => s + p[1]!, 0) / ring.length
+    const radii = ring.map(([x, y]) => Math.hypot(x! - cx, y! - cy))
+    const mean = radii.reduce((a, b) => a + b, 0) / radii.length
+    expect(mean).toBeGreaterThan(0)
+    // A true circle: the far-side occluded arc is genuinely round, not lumpy.
+    for (const r of radii) {
+      expect(Math.abs(r - mean) / mean).toBeLessThan(1e-3)
+    }
+  })
+
+  it('occludes far-side (back) leaves while front leaves lap over the near side', () => {
+    const scene = leafField.generate({}, 'orient', 0)
+    const prims = scene.primitives
+    const discIdx = prims.findIndex((p) => p.fill?.color === DISC_FILL)
+    const disc = prims[discIdx]!
+    const [cx, cy] = discCenter(disc)
+    const r = discRadius(disc)
+
+    // Back leaves: drawn BEFORE the disc with a centroid inside it ⇒ painted
+    // over ⇒ they contribute the hard round far-side edge (occlusion happened).
+    const occludedBack = prims.slice(0, discIdx).filter((p) => {
+      if (!isLeaf(p)) return false
+      const [x, y] = primitiveCentroid(p)
+      return Math.hypot(x - cx, y - cy) <= r
+    })
+    expect(occludedBack.length).toBeGreaterThan(0)
+
+    // Front leaves: drawn AFTER the disc and overlapping it ⇒ they lap over the
+    // near side for organic tip breakup.
+    const discBBox = primitiveBBox(disc)
+    const front = prims
+      .slice(discIdx + 1)
+      .filter((p) => isLeaf(p) && bboxesOverlap(primitiveBBox(p), discBBox))
+    expect(front.length).toBeGreaterThan(0)
+  })
+
+  it('OCCLUDES rather than THINS — leaf density under the disc matches the surrounding field', () => {
+    const scene = leafField.generate({}, 'orient', 0)
+    const disc = discOf(scene)
+    const [cx, cy] = discCenter(disc)
+    const r = discRadius(disc)
+    const leaves = leavesOf(scene)
+
+    const inside = leaves.filter((p) => {
+      const [x, y] = primitiveCentroid(p)
+      return Math.hypot(x - cx, y - cy) <= r
+    }).length
+
+    const areaInside = Math.PI * r * r
+    const densityInside = inside / areaInside
+    const densityOutside = (leaves.length - inside) / (WIDTH * HEIGHT - areaInside)
+
+    // The mechanism is occlusion, not density-thinning: the leaves under the
+    // sphere are all still present (just painted over), so per-area leaf density
+    // inside the disc matches the field outside it.
+    const ratio = densityInside / densityOutside
+    expect(ratio).toBeGreaterThan(0.75)
+    expect(ratio).toBeLessThan(1.35)
+  })
+
+  it('is deterministic including the occluder — identical Scene for identical (params, seed, t) (ADR-0002)', () => {
+    const params: Params = { density: 8 }
+    const a = leafField.generate(params, 'disc-det', 0)
+    const b = leafField.generate(params, 'disc-det', 0)
+    expect(a).toEqual(b)
+    // The disc placement (off the per-leaf rng stream) reproduces exactly too.
+    expect(a.primitives.filter((p) => p.fill?.color === DISC_FILL)).toEqual(
+      b.primitives.filter((p) => p.fill?.color === DISC_FILL),
+    )
   })
 })
