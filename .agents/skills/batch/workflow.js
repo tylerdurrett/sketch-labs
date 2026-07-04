@@ -1,13 +1,13 @@
 export const meta = {
   name: 'batch-execute',
   description:
-    'DAG-schedule /execute (inline) across a parent issue\'s ready sub-tasks: one worktree-isolated agent per task, each firing the moment its dependencies finish, independently code-reviewing each task and auto-shipping dependency predecessors (only when their review is clean) so dependents can build on them.',
+    "DAG-schedule /execute (inline) across a parent slice's ready sub-tasks: one worktree-isolated agent per task, each firing the moment its dependencies finish, independently code-reviewing each task and squash-merging every code-review-clean task into the slice branch — then, once all tasks land clean, opening one slice promotion PR for review.",
   phases: [
     { title: 'Prep', detail: 'per task: validate, resolve base branch, explore, plan, push empty branch' },
     { title: 'Implement', detail: 'per task: clean-context agent codes each sub-section and pushes commits' },
     { title: 'Review', detail: 'per task: independent /code-review pass; auto-fixes blocking findings, gates the ship' },
-    { title: 'Land', detail: 'per task: verify ACs, open PR, and ship if a dependent needs it AND review is clean' },
-    { title: 'Settle', detail: 'reconcile lifecycle state, auto-defer non-blocking findings, recolor DAG, prune worktrees' },
+    { title: 'Land', detail: 'per task: verify ACs, open PR, and squash-merge into the slice branch when review is clean' },
+    { title: 'Settle', detail: 'reconcile lifecycle state, auto-defer non-blocking findings, open the slice promotion PR, recolor DAG, prune worktrees' },
   ],
 }
 
@@ -29,7 +29,9 @@ if (!tasks.length) {
 const byNum = new Map(tasks.map((t) => [t.number, t]))
 
 // dependents.get(T) = the tasks in this batch that depend on T.
-// A task with ≥1 dependent must be shipped (squash-merged) so dependents see its code.
+// Every code-review-clean task is squash-merged into the slice branch (not just predecessors).
+// Dependents still matter for the CASCADE-SKIP: if T is held back by blocking findings, its
+// dependents can't build on it and are skipped — and the messaging tells the reviewer so.
 const dependents = new Map(tasks.map((t) => [t.number, []]))
 for (const t of tasks) {
   for (const d of t.dependsOn || []) {
@@ -74,8 +76,9 @@ if (cycle) {
 // Each task is a 4-stage pipeline of sibling agents — Prep / Implement / Review / Land — relocating
 // /execute's Step-7 delegation up here so the Implement stage keeps a clean context. Review is an
 // independent /code-review pass (a different agent than the implementer): it auto-fixes blocking
-// findings and gates the auto-ship — a predecessor with surviving blocking findings is NOT merged,
-// so the scheduler cascade-skips its dependents rather than stacking on suspect code.
+// findings and gates the auto-ship — a task with surviving blocking findings is NOT merged into the
+// slice branch (it stays an open PR for a human), and if any dependent needed it, the scheduler
+// cascade-skips that dependent rather than stacking on suspect code. Every clean task IS merged.
 // State flows stage→stage via these structured returns plus origin (each stage fetches the branch).
 
 const PREP_SCHEMA = {
@@ -155,7 +158,7 @@ const LAND_SCHEMA = {
     ok: { type: 'boolean', description: 'true iff the PR was opened (and, when required, squash-merged) successfully' },
     prNumber: { type: ['number', 'null'] },
     prUrl: { type: ['string', 'null'] },
-    shipped: { type: 'boolean', description: 'true iff squash-merged into the integration branch to unblock dependents' },
+    shipped: { type: 'boolean', description: 'true iff squash-merged into the slice integration branch' },
     blocker: { type: ['string', 'null'] },
   },
 }
@@ -225,7 +228,7 @@ function implPrompt(task, prep, attempt = 1) {
   ].join('\n')
 }
 
-function reviewPrompt(task, prep, mustShip) {
+function reviewPrompt(task, prep, hasDependents) {
   return [
     `You are the REVIEW stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree. You did NOT write this code — review it independently.`,
     ``,
@@ -240,15 +243,13 @@ function reviewPrompt(task, prep, mustShip) {
     `If there are any BLOCKING findings, fix them in place (you may use \`/code-review --fix\`, or edit by hand), then \`pnpm typecheck\` → \`pnpm lint:fix\` → \`pnpm format:fix\`, commit with \`fix(review): address code-review findings\`, and push via refspec (you are in detached HEAD): \`git push origin HEAD:${prep.branch}\`. Then re-run \`/code-review high\` ONCE more to recount. Do not loop further — report whatever blocking findings still survive that single fix pass.`,
     ``,
     `Do NOT open a PR, change labels, merge, or ship.`,
-    mustShip
-      ? `Other batched tasks depend on #${task.number}, so any surviving BLOCKING finding will hold it back from auto-shipping and cause its dependents to be skipped — only fixes you actually push count.`
-      : `No batched task depends on #${task.number}; surviving findings will be posted on its PR for a human reviewer.`,
+    `Every code-review-clean task is squash-merged into the slice branch, so any surviving BLOCKING finding holds #${task.number} back from that merge — it stays an OPEN PR for a human to resolve, and the slice promotion PR won't open until it does. Only fixes you actually push count.${hasDependents ? ` Other batched tasks depend on #${task.number}, so holding it will also cause those dependents to be skipped.` : ``}`,
     ``,
     `Return: reviewed, blockingCount (BLOCKING findings remaining AFTER your fix pass), fixed (did you commit+push fixes), findings (the remaining items), summary (a short digest for the PR/report), blocker (only if /code-review could not run at all).`,
   ].join('\n')
 }
 
-function landPrompt(task, prep, { canShip, mustShip, review }) {
+function landPrompt(task, prep, { shipEligible, hasDependents, review }) {
   const findingsNote =
     review && review.summary
       ? `\n  - Fold this Review-stage digest into the PR body under a "Review notes" heading:\n${review.summary}`
@@ -265,17 +266,13 @@ function landPrompt(task, prep, { canShip, mustShip, review }) {
     `  - Step 8: re-read the agent brief on #${task.number} and verify every acceptance criterion first-hand; this populates the PR test plan.`,
     `  - Step 9: open the PR (\`Closes #${task.number}\` only when the base is main; otherwise note the integration target).${findingsNote}`,
   ]
-  if (canShip) {
+  if (shipEligible) {
     lines.push(
-      `\nOther batched tasks depend on #${task.number} and code-review came back clean (no blocking findings). After the PR is open and green, you MUST run /ship for #${task.number} (task tier) to squash-merge it into \`${prep.baseBranch}\` so dependents can build on it. If /ship refuses (failing checks, unresolved review), set ok:false with that blocker and shipped:false. Set shipped:true only if the squash-merge actually landed.`,
-    )
-  } else if (mustShip) {
-    lines.push(
-      `\nOther batched tasks depend on #${task.number}, BUT code-review left ${review.blockingCount} surviving blocking finding(s), so this task is HELD from auto-ship. DO NOT ship or merge. Open the PR, then post the blocking findings as a PR comment (\`gh pr comment <pr> --body "..."\`) so a human reviewer sees them inline:\n${review.findings && review.findings.length ? JSON.stringify(review.findings) : review.summary || '(see the Review stage)'}\nSet ok:true if the PR opened, and shipped:false. The batch will skip the dependents until a human resolves and ships #${task.number}.`,
+      `\nCode-review came back clean (no blocking findings), so #${task.number} is merged into the slice branch — the slice, not the individual task, is your review surface. After the PR is open and green, you MUST run /ship for #${task.number} (task tier) to squash-merge it into \`${prep.baseBranch}\`. If /ship refuses (failing checks, unresolved review), set ok:false with that blocker and shipped:false. Set shipped:true only if the squash-merge actually landed.${hasDependents ? ` Other batched tasks depend on #${task.number} and build on this merge.` : ``}`,
     )
   } else {
     lines.push(
-      `\nNo batched task depends on #${task.number}. Open the PR and STOP — do NOT ship or merge it (landing is a separate, human-reviewed step).${review && review.findings && review.findings.length ? ` Post the remaining code-review findings as a PR comment (\`gh pr comment <pr> --body "..."\`) for the reviewer.` : ``} Set shipped:false.`,
+      `\nCode-review left ${review.blockingCount} surviving blocking finding(s), so #${task.number} is HELD from the slice merge. DO NOT ship or merge. Open the PR, then post the blocking findings as a PR comment (\`gh pr comment <pr> --body "..."\`) so a human reviewer sees them inline:\n${review.findings && review.findings.length ? JSON.stringify(review.findings) : review.summary || '(see the Review stage)'}\nSet ok:true if the PR opened, and shipped:false. The slice promotion PR will not open until a human resolves and ships #${task.number}.${hasDependents ? ` The batch will also skip the dependents until then.` : ``}`,
     )
   }
   lines.push(``, `Return: ok, prNumber, prUrl, shipped, blocker.`)
@@ -306,7 +303,7 @@ function run(num) {
       return fail(num, task.title, `Dependency #${deps[idx]} reported ok but was not shipped into the integration branch; cannot build on it.`, true)
     }
 
-    const mustShip = (dependents.get(num) || []).length > 0
+    const hasDependents = (dependents.get(num) || []).length > 0
 
     // Stage 1 — Prep (heavy: bookkeeping + plan; pushes the empty branch).
     const prep = await agent(prepPrompt(task), { label: `prep#${num}`, phase: 'Prep', isolation: 'worktree', schema: PREP_SCHEMA })
@@ -330,17 +327,18 @@ function run(num) {
     }
 
     // Stage 3 — Review (independent /code-review; auto-fixes blocking findings, then GATES the ship).
-    const review = await agent(reviewPrompt(task, prep, mustShip), { label: `review#${num}`, phase: 'Review', isolation: 'worktree', schema: REVIEW_SCHEMA })
+    const review = await agent(reviewPrompt(task, prep, hasDependents), { label: `review#${num}`, phase: 'Review', isolation: 'worktree', schema: REVIEW_SCHEMA })
     if (!review) return fail(num, task.title, 'Review agent died or was skipped.')
     if (!review.reviewed) return fail(num, task.title, review.blocker || 'Review stage did not complete.')
     const reviewClean = review.blockingCount === 0
-    // A predecessor a dependent needs must be CLEAN to auto-ship. Surviving blocking findings → no
-    // merge; the scheduler then cascade-skips its dependents (can't build on un-shipped, suspect code).
-    const canShip = mustShip && reviewClean
-    const reviewBlocked = mustShip && !reviewClean
+    // Every clean task is squash-merged into the slice branch (the slice PR is the human review gate).
+    // Surviving blocking findings → NOT merged: the task stays an open PR, it blocks the slice PR from
+    // opening, and the scheduler cascade-skips any dependents (can't build on un-shipped, suspect code).
+    const shipEligible = reviewClean
+    const reviewBlocked = !reviewClean
 
-    // Stage 4 — Land (verify ACs, open PR, post findings, ship iff canShip).
-    const land = await agent(landPrompt(task, prep, { canShip, mustShip, review }), { label: `land#${num}`, phase: 'Land', isolation: 'worktree', schema: LAND_SCHEMA })
+    // Stage 4 — Land (verify ACs, open PR, post findings, squash-merge iff review is clean).
+    const land = await agent(landPrompt(task, prep, { shipEligible, hasDependents, review }), { label: `land#${num}`, phase: 'Land', isolation: 'worktree', schema: LAND_SCHEMA })
     if (!land) return fail(num, task.title, 'Land agent died or was skipped.')
 
     return {
@@ -477,6 +475,49 @@ if (parentIssue) {
   )
 }
 
+// ③ Slice promotion PR. The tasks are decomposition scaffolding; the human's review altitude is the
+//    SLICE. So once every batched task squash-merged cleanly (the slice branch now holds the whole
+//    slice), open ONE promotion PR onto the parent's branch — in review-first mode: open it, do NOT
+//    merge it. That single PR is the review gate. We only attempt it when every task shipped; if any
+//    task is held/failed the slice is incomplete, so we skip and the report says what to resolve.
+//    Even when we do attempt it, the agent re-runs /ship's own P1 gate, so a sibling that was skipped
+//    in the /batch pre-flight (never passed to this workflow) still correctly blocks the PR.
+const SLICE_PR_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['opened'],
+  properties: {
+    opened: { type: 'boolean', description: 'true iff a slice promotion PR is now open (or already open/merged)' },
+    prNumber: { type: ['number', 'null'] },
+    prUrl: { type: ['string', 'null'] },
+    promotionTarget: { type: ['string', 'null'], description: 'the base branch the PR targets (feature branch or main)' },
+    alreadyExisted: { type: ['boolean', 'null'], description: 'true iff a PR was already open/merged (idempotent no-op)' },
+    blockedBy: { type: 'array', items: { type: 'number' }, description: 'open blocking child issue numbers that prevented opening (e.g. pre-flight-skipped siblings)' },
+    blocker: { type: ['string', 'null'], description: 'why no PR was opened, if opened is false' },
+  },
+}
+const allShipped = results.length > 0 && results.every((r) => r.shipped)
+let slicePr = null
+if (parentIssue && allShipped) {
+  slicePr = await agent(
+    [
+      `You are the SLICE-PROMOTION stage of a /batch run. Every batched task under #${parentIssue} squash-merged cleanly into its integration branch, so the slice may now be promotable. Open its promotion PR for human review by following the /ship skill's slice-tier "Promotion flow", steps P1–P5, in REVIEW-FIRST mode: open the PR but DO NOT merge it (skip P6 entirely). The human reviews and merges the slice PR — that is the whole point; never merge it yourself.`,
+      ``,
+      `Do NOT check out any branch — you must not disturb the main worktree's HEAD (other workflows may be running). A promotion PR is opened by refspec against origin; \`git fetch\` is fine, \`git checkout\`/\`git switch\` is NOT.`,
+      ``,
+      `Steps:`,
+      `  1. Confirm #${parentIssue} is a \`size:slice\` (\`gh issue view ${parentIssue} --json labels\`). If it is NOT (orphan parent, or a different tier), STOP: return opened:false, blocker:"parent #${parentIssue} is not a size:slice; nothing to promote".`,
+      `  2. P1 GATE — \`owner_repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)\`; list #${parentIssue}'s OPEN native sub-issues (\`gh api repos/$owner_repo/issues/${parentIssue}/sub_issues\`). Partition them: BLOCKING = open children WITHOUT a \`cleanup\`/\`deferred\` label; deferred = open children WITH one. If ANY blocking child remains, DO NOT open a PR — return opened:false, blockedBy:[their numbers]. (Deferred/cleanup children never block.) This catches siblings skipped in the /batch pre-flight.`,
+      `  3. P2/P3 — read #${parentIssue}'s body for \`**Integration Branch:**\`; \`git fetch origin <that-branch>\`. Resolve the promotion target per P3: read \`**Part of:** #<P>\`; if present and that parent declares an \`**Integration Branch:**\`, target that; otherwise target \`main\` (orphan slice, or parent is an initiative).`,
+      `  4. P4 — if a PR from the integration branch to the target already exists (\`gh pr list --base <target> --head <integration-branch> --state all --json number,state,url\`): if OPEN or MERGED, return opened:true, alreadyExisted:true with its number/url — do NOT open a duplicate.`,
+      `  5. P5 — open the promotion PR: \`gh pr create --base <target> --head <integration-branch>\` with the P5 body template (Summary; \`Closes #${parentIssue}\`; a "Children shipped" list derived from \`git log --merges origin/<target>..<integration-branch> --pretty='format:%s'\`; a Test plan). When the target is not \`main\`, note in the body that it targets \`<target>\` and reaches \`main\` when the parent ships. DO NOT merge it.`,
+      ``,
+      `Return: opened, prNumber, prUrl, promotionTarget, alreadyExisted, blockedBy, blocker.`,
+    ].join('\n'),
+    { label: 'slice-pr', phase: 'Settle', schema: SLICE_PR_SCHEMA },
+  )
+}
+
 const opened = results.filter((r) => r.ok && !r.shipped && !r.reviewBlocked).map((r) => r.number)
 const shipped = results.filter((r) => r.shipped).map((r) => r.number)
 const heldForReview = results.filter((r) => r.reviewBlocked)
@@ -485,8 +526,15 @@ const failed = results.filter((r) => !r.ok)
 if (settle && Array.isArray(settle.healed) && settle.healed.length > 0) {
   log(`Reconcile healed ${settle.healed.length} drifted item(s): ${settle.healed.join(' · ')}`)
 }
+const slicePrLine = slicePr
+  ? slicePr.opened
+    ? ` Slice promotion PR ${slicePr.alreadyExisted ? 'already open' : 'opened'}: ${slicePr.prUrl || '#' + slicePr.prNumber} (review-first — merge it to promote the slice).`
+    : ` Slice PR not opened: ${slicePr.blockedBy && slicePr.blockedBy.length ? 'blocked by open child #' + slicePr.blockedBy.join(', #') : slicePr.blocker || 'gate not met'}.`
+  : allShipped
+    ? ''
+    : ` Slice PR not opened: ${heldForReview.length + failed.length} task(s) held/failed — resolve them, then \`/ship #${parentIssue}\`.`
 log(
-  `Done: ${opened.length} PR(s) opened for review, ${shipped.length} predecessor(s) squash-merged to unblock dependents, ${heldForReview.length} held from auto-ship by code-review, ${failed.length} failed/skipped, ${deferred.length} finding(s) deferred to new issue(s).`,
+  `Done: ${shipped.length} task(s) squash-merged into the slice branch, ${opened.length} clean PR(s) whose ship did not complete, ${heldForReview.length} held by code-review, ${failed.length} failed/skipped, ${deferred.length} finding(s) deferred to new issue(s).${slicePrLine}`,
 )
 
 return {
@@ -503,6 +551,17 @@ return {
     })),
     failed: failed.map((f) => ({ number: f.number, blocker: f.blocker })),
     deferred,
+    slicePr: slicePr
+      ? {
+          opened: slicePr.opened,
+          prNumber: slicePr.prNumber ?? null,
+          prUrl: slicePr.prUrl ?? null,
+          promotionTarget: slicePr.promotionTarget ?? null,
+          alreadyExisted: slicePr.alreadyExisted ?? null,
+          blockedBy: slicePr.blockedBy || [],
+          blocker: slicePr.blocker ?? null,
+        }
+      : { opened: false, blocker: allShipped ? 'slice-promotion stage did not run' : `${heldForReview.length + failed.length} task(s) held/failed — slice incomplete`, blockedBy: heldForReview.map((r) => r.number).concat(failed.map((f) => f.number)) },
     reconciled: settle
       ? { healed: settle.healed || [], worktreesPruned: settle.worktreesPruned ?? null, headRestored: settle.headRestored ?? null, notes: settle.notes ?? null }
       : null,
