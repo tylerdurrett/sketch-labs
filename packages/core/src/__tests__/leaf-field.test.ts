@@ -10,7 +10,11 @@ import type { Params } from '../sketch'
 import type { Point } from '../types'
 import type { Primitive } from '../scene'
 
-/** The nine leaf-field knobs, in declaration order. */
+/**
+ * The twelve leaf-field knobs, in declaration order. The three sphere-set knobs
+ * (#141) are APPENDED last — the first nine keep their positions (order is part
+ * of the contract).
+ */
 const KNOBS = [
   'fieldScale',
   'turbulence',
@@ -21,6 +25,9 @@ const KNOBS = [
   'leafWidth',
   'pointiness',
   'variation',
+  'sphereCount',
+  'sphereRadiusMin',
+  'sphereRadiusMax',
 ] as const
 
 /** The bold dark fill and paper-colored rim the audit pinned (see the sketch header). */
@@ -182,7 +189,7 @@ function meanLeafArea(primitives: Primitive[]): number {
 }
 
 describe('leaf-field Sketch contract', () => {
-  it('declares exactly the nine knobs in order and NO time metadata (static)', () => {
+  it('declares exactly the twelve knobs in order and NO time metadata (static)', () => {
     expect(Object.keys(leafField.schema)).toEqual([...KNOBS])
     // Static Sketch: absence of `time` is what makes the Harness hide the scrubber.
     expect(leafField.time).toBeUndefined()
@@ -517,5 +524,99 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
     expect(a.primitives.filter((p) => p.fill?.color === DISC_FILL)).toEqual(
       b.primitives.filter((p) => p.fill?.color === DISC_FILL),
     )
+  })
+})
+
+/**
+ * The seeded SET of implied-sphere occluder discs, driven by the three appended
+ * knobs (#141): `sphereCount` (how many), `sphereRadiusMin`/`sphereRadiusMax`
+ * (per-disc radius bounds, in coordinate units). This block carries the slice's
+ * regression guard (audit finding 2): the sphere-set's count/radius bounds, its
+ * seeded rearrangement, the per-leaf rng seam, and Scene-level determinism
+ * including all discs.
+ */
+describe('leaf-field sphere-set knobs (#141)', () => {
+  /** All occluder discs in a scene (background-filled Primitives). */
+  function discsOf(scene: { primitives: Primitive[] }): Primitive[] {
+    return scene.primitives.filter((p) => p.fill?.color === DISC_FILL)
+  }
+
+  /** A disc's radius, read off the bbox half-width of the circular silhouette. */
+  function discRadius(disc: Primitive): number {
+    const { minX, maxX } = primitiveBBox(disc)
+    return (maxX - minX) / 2
+  }
+
+  it('emits exactly `sphereCount` discs, so raising it yields strictly more', () => {
+    const seed = 'set-count'
+    const few = leafField.generate({ sphereCount: 1 }, seed, 0)
+    const many = leafField.generate({ sphereCount: 5 }, seed, 0)
+    expect(discsOf(few)).toHaveLength(1)
+    expect(discsOf(many)).toHaveLength(5)
+    expect(discsOf(many).length).toBeGreaterThan(discsOf(few).length)
+  })
+
+  it("every disc's radius falls within [sphereRadiusMin, sphereRadiusMax]", () => {
+    const sphereRadiusMin = 90
+    const sphereRadiusMax = 240
+    const scene = leafField.generate(
+      { sphereCount: 6, sphereRadiusMin, sphereRadiusMax },
+      'set-radius',
+      0,
+    )
+    const discs = discsOf(scene)
+    expect(discs).toHaveLength(6)
+    for (const disc of discs) {
+      const r = discRadius(disc)
+      // Tiny epsilon absorbs the circle-tessellation / float noise on the bbox.
+      expect(r).toBeGreaterThanOrEqual(sphereRadiusMin - 1e-6)
+      expect(r).toBeLessThanOrEqual(sphereRadiusMax + 1e-6)
+    }
+  })
+
+  it('guards sphereRadiusMin > sphereRadiusMax by swapping — the radius draw stays valid', () => {
+    // Inverted bounds must not throw or produce out-of-range discs; the Sketch
+    // owns its inter-param coherence (swap so [min,max] is well-formed).
+    const lo = 100
+    const hi = 200
+    const scene = leafField.generate(
+      { sphereCount: 5, sphereRadiusMin: hi, sphereRadiusMax: lo },
+      'set-swap',
+      0,
+    )
+    for (const disc of discsOf(scene)) {
+      const r = discRadius(disc)
+      expect(r).toBeGreaterThanOrEqual(lo - 1e-6)
+      expect(r).toBeLessThanOrEqual(hi + 1e-6)
+    }
+  })
+
+  it('a re-seed rearranges the sphere set while the params hold', () => {
+    const params: Params = { sphereCount: 4 }
+    const a = leafField.generate(params, 'spheres-a', 0)
+    const b = leafField.generate(params, 'spheres-b', 0)
+    // Same count, but the seeded centers/radii/depths differ ⇒ the disc set moves.
+    expect(discsOf(a)).toHaveLength(4)
+    expect(discsOf(b)).toHaveLength(4)
+    expect(discsOf(b)).not.toEqual(discsOf(a))
+  })
+
+  it('changing a sphere knob leaves the leaf primitives untouched (per-leaf rng seam intact)', () => {
+    // The sphere set draws from a SEPARATE rng stream, so raising sphereCount
+    // must consume more sphere draws WITHOUT shifting a single per-leaf roll.
+    const seed = 'seam'
+    const base: Params = { density: 6, variation: 0.6 }
+    const one = leafField.generate({ ...base, sphereCount: 1 }, seed, 0)
+    const many = leafField.generate({ ...base, sphereCount: 5 }, seed, 0)
+    // The leaf primitives (filtered from the disc splices) are byte-identical.
+    expect(leavesOf(many)).toEqual(leavesOf(one))
+  })
+
+  it('is deterministic including every disc for identical (params, seed, t) (ADR-0002)', () => {
+    const params: Params = { density: 6, sphereCount: 4, sphereRadiusMin: 120, sphereRadiusMax: 260 }
+    const a = leafField.generate(params, 'set-det', 0)
+    const b = leafField.generate(params, 'set-det', 0)
+    expect(a).toEqual(b)
+    expect(discsOf(a)).toEqual(discsOf(b))
   })
 })
