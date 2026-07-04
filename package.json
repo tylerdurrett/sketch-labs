@@ -7,6 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "dev": "pnpm --filter @harness/studio dev",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   }
