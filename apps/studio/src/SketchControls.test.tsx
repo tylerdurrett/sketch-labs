@@ -254,6 +254,29 @@ describe("SketchControls — seed axis wiring", () => {
     // No param value was touched by a seed edit.
     expect(paramInput(el, "radius").value).toBe("10");
   });
+
+  it("clearing the seed box is a no-op — does NOT commit seed 0", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const seedInput = el.querySelector("#sketch-seed") as HTMLInputElement;
+
+    // Commit a known non-zero seed, then clear the field. `Number("") === 0`, so
+    // without the empty guard the clear would silently overwrite the seed with 0.
+    setInput(seedInput, "12345");
+    setInput(seedInput, "");
+
+    // The clear was ignored: the last committed seed still feeds the canvas...
+    expect(el.querySelector('[data-testid="canvas-seed"]')?.textContent).toBe(
+      "12345",
+    );
+    // ...and the controlled input reflects that unchanged state (not "" or "0").
+    expect((el.querySelector("#sketch-seed") as HTMLInputElement).value).toBe(
+      "12345",
+    );
+  });
 });
 
 describe("SketchControls — randomize / lock wiring", () => {
