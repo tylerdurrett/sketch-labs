@@ -14,6 +14,10 @@
 
 import type { Sketch } from './sketch'
 import { circles } from './sketches/circles'
+import { scatter } from './sketches/scatter'
+import { flowField } from './sketches/flow-field'
+import { singleLeaf } from './sketches/single-leaf'
+import { leafField } from './sketches/leaf-field'
 
 /** A read-only index of Sketches keyed by their stable {@link Sketch.id}. */
 export interface SketchRegistry {
@@ -63,6 +67,13 @@ export function createRegistry(sketches: readonly Sketch[]): SketchRegistry {
 
 /**
  * The default registry of built-in Sketches — what the Studio navigates over.
- * Today it holds only {@link circles}; new Sketches join this list as they land.
+ * Holds {@link circles}, {@link scatter}, {@link flowField}, {@link singleLeaf},
+ * and {@link leafField}; new Sketches join this list as they land.
  */
-export const registry: SketchRegistry = createRegistry([circles])
+export const registry: SketchRegistry = createRegistry([
+  circles,
+  scatter,
+  flowField,
+  singleLeaf,
+  leafField,
+])
