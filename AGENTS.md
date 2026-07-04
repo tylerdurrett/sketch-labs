@@ -4,6 +4,8 @@ Any instructions in this file must be VERY concise since this loads in every age
 
 This repo uses the tdog engineering skill set; its conventions live under [docs/agents/](docs/agents/) — read [docs/agents/README.md](docs/agents/README.md) first. Specs are GitHub issues on `tylerdurrett/experiment-harness`.
 
+Skill sources live in `.agents/skills/<name>/`; each `.claude/skills/<name>` is a symlink to it. Author and edit the `.agents/skills/` copy, and symlink any new skill the same way (`ln -s ../../.agents/skills/<name> .claude/skills/<name>`).
+
 ## Recording decisions
 
 ADRs in [docs/adr/](docs/adr/) are for **system** decisions (Harness, Sketch contract, renderers, determinism, workflow). A decision local to one **sketch** gets **no** ADR — put its rationale in that sketch's own module header comments. See [ADR-0007](docs/adr/0007-adrs-record-system-decisions-not-sketch-decisions.md).
