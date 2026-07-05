@@ -6,12 +6,14 @@ import { cn } from "../../lib/utils";
 /**
  * The shadcn Slider, on Base UI (ADR-0008). Unlike the Button, Base UI DOES ship
  * a Slider primitive, so the shadcn recipe composes its parts —
- * `Root > Control > Track > Indicator + Thumb` — and styles each with the
+ * `Root > Control > (Track > Indicator) + Thumb` — and styles each with the
  * dark-theme design tokens (bg-muted, bg-primary, border, ring, …) from
- * `src/index.css`, flowing every class through {@link cn}. The visible track/
- * range/thumb are pure presentation; the Thumb renders a visually-hidden native
- * `<input type="range">` that carries the real value/min/max/step and keyboard
- * semantics.
+ * `src/index.css`, flowing every class through {@link cn}. The Thumb is a
+ * sibling of the Track (NOT nested inside it): the Track clips to its own 1.5px
+ * height via `overflow-hidden` to round the range fill, which would otherwise
+ * shave the round thumb down to a sliver. The visible track/range/thumb are pure
+ * presentation; the Thumb renders a visually-hidden native `<input type="range">`
+ * that carries the real value/min/max/step and keyboard semantics.
  *
  * All of Root's value props — `min`, `max`, `step`, `value`, `onValueChange` —
  * are forwarded straight through, so this is a drop-in full-width slider. Typed
@@ -37,11 +39,11 @@ function Slider({
       <SliderPrimitive.Control className="flex w-full items-center py-1.5">
         <SliderPrimitive.Track className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-muted">
           <SliderPrimitive.Indicator className="absolute h-full rounded-full bg-primary" />
-          <SliderPrimitive.Thumb
-            aria-label={ariaLabel}
-            className="block size-4 shrink-0 rounded-full border border-primary bg-background shadow-sm transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          />
         </SliderPrimitive.Track>
+        <SliderPrimitive.Thumb
+          aria-label={ariaLabel}
+          className="block size-4 shrink-0 rounded-full border border-primary bg-primary shadow-sm transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        />
       </SliderPrimitive.Control>
     </SliderPrimitive.Root>
   );
