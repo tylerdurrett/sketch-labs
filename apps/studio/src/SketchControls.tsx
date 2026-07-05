@@ -273,19 +273,6 @@ export function SketchControls({
               locks={locks}
               onReload={reloadPreset}
             />
-            {/*
-             * Export controls — the shared home the SVG export sibling reuses. PNG is
-             * the first path: it snapshots the live canvas's displayed frame (no
-             * re-render, no offscreen canvas).
-             */}
-            <div className="export-controls">
-              <button type="button" className="action-button" onClick={exportPng}>
-                Export PNG
-              </button>
-              <button type="button" className="action-button" onClick={exportSvg}>
-                Export SVG
-              </button>
-            </div>
           </div>
           <div className="seed-box flex items-center gap-2">
             <label
@@ -308,6 +295,33 @@ export function SketchControls({
                 setSeed(parsed);
               }}
             />
+          </div>
+          {/*
+           * Export controls — the shared home for both export paths (PNG snapshots
+           * the live canvas frame; SVG re-bakes the displayed Scene). `mt-auto`
+           * pins this group to the BOTTOM of the flex-column sidebar (#158) so it
+           * stays anchored while everything above stacks from the top; the two
+           * buttons split the row evenly (`flex-1`).
+           */}
+          <div className="export-controls mt-auto flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={exportPng}
+            >
+              Export PNG
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={exportSvg}
+            >
+              Export SVG
+            </Button>
           </div>
         </aside>
       )}
