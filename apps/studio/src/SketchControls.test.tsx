@@ -481,8 +481,12 @@ describe("SketchControls — preset save/reload wiring", () => {
       el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
       "Not A Slug",
     );
-    // Inline hint shown; Save is disabled and clicking it is a no-op.
-    expect(el.querySelector(".preset-controls__hint")).not.toBeNull();
+    // Inline hint shown; Save is disabled and clicking it is a no-op. The hint
+    // is the only alert in this invalid-name scenario (no error <p> renders), so
+    // a class-independent role + hint-text match pins it.
+    const hint = el.querySelector('p[role="alert"]');
+    expect(hint).not.toBeNull();
+    expect(hint?.textContent).toContain("Name must be a lowercase slug");
     const save = [...el.querySelectorAll("button")].find(
       (b) => b.textContent === "Save",
     ) as HTMLButtonElement;

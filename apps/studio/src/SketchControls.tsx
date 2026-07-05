@@ -268,7 +268,7 @@ export function SketchControls({
             onChange={setParam}
             onToggleLock={toggleLock}
           />
-          <div className="sketch-controls__actions flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               variant="secondary"
@@ -293,16 +293,16 @@ export function SketchControls({
               onReload={reloadPreset}
             />
           </div>
-          <div className="seed-box flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <label
-              className="seed-box__label flex-none min-w-16 text-sm text-muted-foreground"
+              className="flex-none min-w-16 text-sm text-muted-foreground"
               htmlFor="sketch-seed"
             >
               seed
             </label>
             <input
               id="sketch-seed"
-              className="seed-box__input flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
               type="number"
               value={seed}
               onChange={(event) => {
@@ -322,7 +322,7 @@ export function SketchControls({
            * stays anchored while everything above stacks from the top; the two
            * buttons split the row evenly (`flex-1`).
            */}
-          <div className="export-controls mt-auto flex gap-2">
+          <div className="mt-auto flex gap-2">
             <Button
               type="button"
               variant="outline"
