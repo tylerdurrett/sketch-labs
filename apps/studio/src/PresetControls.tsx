@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { makePreset, type Params, type Preset, type Seed } from "@harness/core";
 
+import { Button } from "./components/ui/button";
 import {
   isValidName,
   listPresets,
@@ -99,34 +100,38 @@ export function PresetControls({
   };
 
   return (
-    <div className="preset-controls">
-      <div className="preset-controls__row">
+    <div className="preset-controls flex w-full flex-col gap-2">
+      <div className="preset-controls__row flex items-center gap-2">
         <input
-          className="preset-controls__name"
+          className="preset-controls__name flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
           type="text"
           placeholder="preset name"
           aria-label="preset name"
           value={name}
           onChange={(event) => setName(event.target.value)}
         />
-        <button
+        <Button
           type="button"
-          className="action-button"
+          variant="secondary"
+          size="sm"
           onClick={onSave}
           disabled={!nameValid}
         >
           Save
-        </button>
+        </Button>
       </div>
       {name !== "" && !nameValid && (
-        <p className="preset-controls__hint" role="alert">
+        <p
+          className="preset-controls__hint m-0 text-sm text-muted-foreground"
+          role="alert"
+        >
           Name must be a lowercase slug: a-z, 0-9, hyphen or underscore (no
           spaces or uppercase).
         </p>
       )}
-      <div className="preset-controls__row">
+      <div className="preset-controls__row flex items-center gap-2">
         <select
-          className="preset-controls__picker"
+          className="preset-controls__picker flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           aria-label="saved presets"
           value={selected}
           onChange={(event) => setSelected(event.target.value)}
@@ -138,17 +143,21 @@ export function PresetControls({
             </option>
           ))}
         </select>
-        <button
+        <Button
           type="button"
-          className="action-button"
+          variant="secondary"
+          size="sm"
           onClick={onReloadClick}
           disabled={selected === ""}
         >
           Reload
-        </button>
+        </Button>
       </div>
       {error !== null && (
-        <p className="preset-controls__error" role="alert">
+        <p
+          className="preset-controls__error m-0 text-sm text-destructive"
+          role="alert"
+        >
           {error}
         </p>
       )}

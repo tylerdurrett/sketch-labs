@@ -14,6 +14,7 @@ import {
 } from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
+import { Button } from "./components/ui/button";
 import { downloadBlob } from "./downloadBlob";
 import { LiveCanvas, type LiveCanvasHandle } from "./LiveCanvas";
 import { PresetControls } from "./PresetControls";
@@ -248,13 +249,23 @@ export function SketchControls({
             onChange={setParam}
             onToggleLock={toggleLock}
           />
-          <div className="sketch-controls__actions">
-            <button type="button" className="action-button" onClick={rollSeed}>
+          <div className="sketch-controls__actions flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={rollSeed}
+            >
               New seed
-            </button>
-            <button type="button" className="action-button" onClick={rollParams}>
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={rollParams}
+            >
               Randomize
-            </button>
+            </Button>
             <PresetControls
               sketchId={sketch.id}
               params={params}
@@ -276,13 +287,16 @@ export function SketchControls({
               </button>
             </div>
           </div>
-          <div className="seed-box">
-            <label className="seed-box__label" htmlFor="sketch-seed">
+          <div className="seed-box flex items-center gap-2">
+            <label
+              className="seed-box__label flex-none min-w-16 text-sm text-muted-foreground"
+              htmlFor="sketch-seed"
+            >
               seed
             </label>
             <input
               id="sketch-seed"
-              className="seed-box__input"
+              className="seed-box__input flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
               type="number"
               value={seed}
               onChange={(event) => {

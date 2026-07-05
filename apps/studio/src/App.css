@@ -174,17 +174,6 @@
   gap: 0.5rem;
 }
 
-/*
- * The two randomness-axis action buttons: "New seed" (reshuffle the
- * arrangement) and "Randomize" (re-roll the params). A horizontal row above
- * the seed box.
- */
-.sketch-controls__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
 .action-button {
   padding: 0.375rem 0.75rem;
   border: 1px solid #ccc;
@@ -195,70 +184,6 @@
 
 .action-button:hover {
   border-color: #333;
-}
-
-/*
- * The seed box: the first randomness axis. A plain numeric input bound to the
- * studio's seed state — copyable groundwork for Presets (#8). Editing it
- * re-renders the canvas without touching any param value (the axes are
- * independent).
- */
-.seed-box {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.seed-box__label {
-  flex: 0 0 auto;
-  min-width: 8rem;
-}
-
-.seed-box__input {
-  flex: 0 0 auto;
-  width: 12rem;
-}
-
-/*
- * The Preset save/reload surface (#63): a vertical stack of two rows — a
- * slug-validated name field + Save, and a saved-preset picker + Reload — plus an
- * inline validation hint / error line. Reuses the shared `.action-button` for
- * its buttons; the name field and picker flex to fill their row.
- */
-.preset-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  /* Fills the inspector column (#154) — the old min(80vmin, 800px) coupling
-     overflowed the fixed ~320px sidebar. */
-  width: 100%;
-}
-
-.preset-controls__row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.preset-controls__name,
-.preset-controls__picker {
-  flex: 1 1 auto;
-  padding: 0.375rem 0.5rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-}
-
-.preset-controls__hint {
-  margin: 0;
-  color: #555;
-  font-size: 0.875rem;
-}
-
-.preset-controls__error {
-  margin: 0;
-  color: #b00020;
-  font-size: 0.875rem;
 }
 
 /*
