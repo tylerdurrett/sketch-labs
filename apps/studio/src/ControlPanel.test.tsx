@@ -45,6 +45,29 @@ describe("ControlPanel", () => {
     expect(html).toContain("speed");
   });
 
+  it("nests each control row once (no wrapper duplicating NumberControl's root)", () => {
+    // NumberControl's own root is `flex flex-col gap-1.5`. The panel must NOT
+    // re-wrap each row in a second `flex flex-col gap-1.5` div — that per-row
+    // gap is inert around a single child and duplicates the child's own root.
+    // So the class appears exactly once per control (not twice).
+    const schema: ParamSchema = {
+      radius: numberSpec(),
+      count: numberSpec(),
+      speed: numberSpec(),
+    };
+    const html = renderToStaticMarkup(
+      <ControlPanel
+        schema={schema}
+        params={defaultParams(schema)}
+        locks={new Set()}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+      />,
+    );
+    const rowRoots = html.match(/class="flex flex-col gap-1\.5"/g) ?? [];
+    expect(rowRoots.length).toBe(3);
+  });
+
   it("renders a LOUD visible fallback for an unsupported kind (never silent)", () => {
     // An unknown kind that the open ParamSpec union does not (yet) inhabit.
     const schema = {
