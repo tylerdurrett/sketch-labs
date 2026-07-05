@@ -137,6 +137,7 @@
  */
 .live-canvas {
   display: block;
+  box-sizing: border-box;
   --paper-aspect: 1;
   aspect-ratio: var(--paper-aspect);
   width: min(100cqw, 100cqh * var(--paper-aspect));
