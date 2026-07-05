@@ -1,27 +1,13 @@
 /*
- * The studio shell fills the viewport as a vertical stack: a fixed-height header
- * (title + toolchain-proof card) on top, then the two-region shell (#154)
- * consuming the remaining height. `height: 100vh` (not min-height) bounds the
- * shell so the inspector sidebar's own `overflow-y: auto` has something to scroll
- * against.
+ * The studio shell fills the viewport with the two-region shell (#154). `height:
+ * 100vh` (not min-height) bounds the shell so the inspector sidebar's own
+ * `overflow-y: auto` has something to scroll against.
  */
 .app {
   display: flex;
   flex-direction: column;
   height: 100vh;
   box-sizing: border-box;
-}
-
-.app__header {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
-  flex: 0 0 auto;
-}
-
-.app__title {
-  margin: 0;
 }
 
 /*
