@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { registry } from "@harness/core";
 
@@ -61,6 +67,29 @@ export function App() {
   const [collapsed, setCollapsed] = useState(false);
   const toggleCollapsed = useCallback(() => setCollapsed((prev) => !prev), []);
 
+  // FOCUS RETENTION ACROSS THE SWITCH REMOUNT (#165). Picking a Sketch re-keys
+  // SketchControls (`key={selected.id}` below), remounting the whole subtree —
+  // including the switcher's DOM, which lives in the inspector INSIDE that keyed
+  // instance — so the trigger loses keyboard focus even though `selectedId`
+  // (owned here, above the remount) survives. The fix must live here, in the
+  // stable parent: keep a ref to the trigger, and after the remount return focus
+  // to it. `triggerRef` is threaded onto the SelectTrigger (Base UI's Trigger is
+  // a forwardRef over its `<button>`, and our wrapper spreads `...props` — incl.
+  // `ref` in React 19 — straight through). `restoreFocus` records that the
+  // pending selectedId change came from the switcher, so we only refocus on a
+  // real selection and never steal focus on first load.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
+
+  // Runs AFTER the keyed remount, BEFORE paint, so the refocus is invisible.
+  // Gated on `restoreFocus`: false on mount (so first load never steals focus)
+  // and only set true by the switcher's onValueChange.
+  useLayoutEffect(() => {
+    if (!restoreFocus.current) return;
+    restoreFocus.current = false;
+    triggerRef.current?.focus();
+  }, [selectedId]);
+
   // The keyboard shortcut for the collapse toggle: `[` toggles the inspector.
   // Bound once on `window` (empty deps; the functional `setCollapsed` needs no
   // dependency), and ignored while typing in a form field or with a modifier
@@ -102,14 +131,18 @@ export function App() {
     <Select
       value={selectedId}
       onValueChange={(value: string | null) => {
-        if (value !== null) setSelectedId(value);
+        if (value === null) return;
+        // Record that this change came from the switcher so the post-remount
+        // layout effect restores focus to the trigger (see `restoreFocus`).
+        restoreFocus.current = true;
+        setSelectedId(value);
       }}
       items={sketches.map((sketch) => ({
         value: sketch.id,
         label: sketch.name,
       }))}
     >
-      <SelectTrigger aria-label="Sketches">
+      <SelectTrigger ref={triggerRef} aria-label="Sketches">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
