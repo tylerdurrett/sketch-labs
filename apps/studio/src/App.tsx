@@ -1,5 +1,5 @@
 import { Sparkles } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { registry } from "@harness/core";
 
@@ -37,10 +37,47 @@ function defaultSketchId(): string {
  * so it renders the whole two-region layout; App hands it the Sketch switcher as
  * a slot (`switcher`) rendered at the sidebar top. The switcher lives ABOVE the
  * keyed remount so selection state survives a Sketch switch.
+ *
+ * COLLAPSE (#154): the inspector sidebar hides via a toggle (in the canvas
+ * region, so it stays reachable while collapsed) and a keyboard shortcut
+ * (`[`). Both the `collapsed` flag and the shortcut effect live HERE, above the
+ * keyed SketchControls remount, so the collapsed state persists across Sketch
+ * switches. Collapsing hands the canvas the full width; toggling restores the
+ * sidebar.
  */
 export function App() {
   const [selectedId, setSelectedId] = useState(defaultSketchId);
   const selected = registry.get(selectedId);
+
+  const [collapsed, setCollapsed] = useState(false);
+  const toggleCollapsed = useCallback(() => setCollapsed((prev) => !prev), []);
+
+  // The keyboard shortcut for the collapse toggle: `[` toggles the inspector.
+  // Bound once on `window` (empty deps; the functional `setCollapsed` needs no
+  // dependency), and ignored while typing in a form field or with a modifier
+  // held so it never hijacks text entry or a browser/OS chord.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target !== null &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      ) {
+        return;
+      }
+      if (event.key === "[") {
+        event.preventDefault();
+        setCollapsed((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // The Sketch switcher, owned by App (it drives `selectedId`) but handed to
   // SketchControls as a slot so it can render inside the inspector sidebar.
@@ -85,7 +122,13 @@ export function App() {
           </Button>
         </div>
       </header>
-      <SketchControls key={selected.id} sketch={selected} switcher={switcher} />
+      <SketchControls
+        key={selected.id}
+        sketch={selected}
+        switcher={switcher}
+        collapsed={collapsed}
+        onToggleCollapse={toggleCollapsed}
+      />
     </main>
   );
 }

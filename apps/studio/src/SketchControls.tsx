@@ -33,6 +33,15 @@ export interface SketchControlsProps {
    * in which case the sidebar simply renders no switcher slot.
    */
   switcher?: ReactNode;
+  /**
+   * Whether the inspector sidebar is hidden (#154). Owned by App (above this
+   * keyed remount) so it persists across Sketch switches. When true the sidebar
+   * is not rendered and the canvas region takes the full width. Defaults to
+   * shown for the wiring tests, which mount without this prop.
+   */
+  collapsed?: boolean;
+  /** Toggle the {@link collapsed} state — wired to the canvas-region toggle button. */
+  onToggleCollapse?: () => void;
 }
 
 /**
@@ -62,7 +71,12 @@ export interface SketchControlsProps {
  * hand-editable. Like `seed` and `params`, `locks` lives in keyed-remount state,
  * so a Sketch switch clears every lock for free (no manual reset).
  */
-export function SketchControls({ sketch, switcher }: SketchControlsProps) {
+export function SketchControls({
+  sketch,
+  switcher,
+  collapsed = false,
+  onToggleCollapse,
+}: SketchControlsProps) {
   const [params, setParams] = useState(() => defaultParams(sketch.schema));
   const [seed, setSeed] = useState(() => newSeed(Math.random));
   const [locks, setLocks] = useState<ReadonlySet<string>>(() => new Set());
@@ -198,6 +212,23 @@ export function SketchControls({ sketch, switcher }: SketchControlsProps) {
   return (
     <div className="studio-shell">
       <section className="canvas-region" aria-label="Canvas">
+        {/*
+         * The collapse toggle lives in the canvas region — NOT inside the
+         * collapsing sidebar — so it stays visible (and the sidebar re-openable)
+         * while collapsed. `[` is the equivalent keyboard shortcut (owned by App).
+         */}
+        <div className="canvas-region__bar">
+          <button
+            type="button"
+            className="inspector-toggle"
+            aria-expanded={!collapsed}
+            aria-controls="inspector"
+            onClick={onToggleCollapse}
+            title="Toggle inspector ([)"
+          >
+            {collapsed ? "Show inspector" : "Hide inspector"}
+          </button>
+        </div>
         <div className="canvas-region__stage">
           <LiveCanvas
             handleRef={canvasHandle}
@@ -207,63 +238,65 @@ export function SketchControls({ sketch, switcher }: SketchControlsProps) {
           />
         </div>
       </section>
-      <aside className="inspector" aria-label="Inspector">
-        {switcher}
-        <ControlPanel
-          schema={sketch.schema}
-          params={params}
-          locks={locks}
-          onChange={setParam}
-          onToggleLock={toggleLock}
-        />
-        <div className="sketch-controls__actions">
-          <button type="button" className="action-button" onClick={rollSeed}>
-            New seed
-          </button>
-          <button type="button" className="action-button" onClick={rollParams}>
-            Randomize
-          </button>
-          <PresetControls
-            sketchId={sketch.id}
+      {!collapsed && (
+        <aside id="inspector" className="inspector" aria-label="Inspector">
+          {switcher}
+          <ControlPanel
+            schema={sketch.schema}
             params={params}
-            seed={seed}
             locks={locks}
-            onReload={reloadPreset}
+            onChange={setParam}
+            onToggleLock={toggleLock}
           />
-          {/*
-           * Export controls — the shared home the SVG export sibling reuses. PNG is
-           * the first path: it snapshots the live canvas's displayed frame (no
-           * re-render, no offscreen canvas).
-           */}
-          <div className="export-controls">
-            <button type="button" className="action-button" onClick={exportPng}>
-              Export PNG
+          <div className="sketch-controls__actions">
+            <button type="button" className="action-button" onClick={rollSeed}>
+              New seed
             </button>
-            <button type="button" className="action-button" onClick={exportSvg}>
-              Export SVG
+            <button type="button" className="action-button" onClick={rollParams}>
+              Randomize
             </button>
+            <PresetControls
+              sketchId={sketch.id}
+              params={params}
+              seed={seed}
+              locks={locks}
+              onReload={reloadPreset}
+            />
+            {/*
+             * Export controls — the shared home the SVG export sibling reuses. PNG is
+             * the first path: it snapshots the live canvas's displayed frame (no
+             * re-render, no offscreen canvas).
+             */}
+            <div className="export-controls">
+              <button type="button" className="action-button" onClick={exportPng}>
+                Export PNG
+              </button>
+              <button type="button" className="action-button" onClick={exportSvg}>
+                Export SVG
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="seed-box">
-          <label className="seed-box__label" htmlFor="sketch-seed">
-            seed
-          </label>
-          <input
-            id="sketch-seed"
-            className="seed-box__input"
-            type="number"
-            value={seed}
-            onChange={(event) => {
-              // A blank field is a no-op, not seed 0: `Number("") === 0`, so an
-              // empty value would otherwise silently commit 0. A typed 0 stays valid.
-              if (event.target.value.trim() === "") return;
-              const parsed = Number(event.target.value);
-              if (Number.isNaN(parsed)) return;
-              setSeed(parsed);
-            }}
-          />
-        </div>
-      </aside>
+          <div className="seed-box">
+            <label className="seed-box__label" htmlFor="sketch-seed">
+              seed
+            </label>
+            <input
+              id="sketch-seed"
+              className="seed-box__input"
+              type="number"
+              value={seed}
+              onChange={(event) => {
+                // A blank field is a no-op, not seed 0: `Number("") === 0`, so an
+                // empty value would otherwise silently commit 0. A typed 0 stays valid.
+                if (event.target.value.trim() === "") return;
+                const parsed = Number(event.target.value);
+                if (Number.isNaN(parsed)) return;
+                setSeed(parsed);
+              }}
+            />
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

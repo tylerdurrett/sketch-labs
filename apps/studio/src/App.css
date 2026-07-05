@@ -48,6 +48,31 @@
   min-width: 0;
 }
 
+/*
+ * The canvas-region top bar holds the collapse toggle (#154). It lives in the
+ * canvas region — outside the collapsing sidebar — so the toggle stays visible
+ * and the sidebar re-openable while collapsed.
+ */
+.canvas-region__bar {
+  display: flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  padding: 1rem 1rem 0;
+}
+
+.inspector-toggle {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--card-foreground);
+  cursor: pointer;
+}
+
+.inspector-toggle:hover {
+  border-color: var(--foreground);
+}
+
 .canvas-region__stage {
   display: flex;
   flex-direction: column;
