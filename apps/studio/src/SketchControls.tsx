@@ -261,87 +261,87 @@ export function SketchControls({
         hidden={collapsed}
       >
         {switcher}
-          <ControlPanel
-            schema={sketch.schema}
+        <ControlPanel
+          schema={sketch.schema}
+          params={params}
+          locks={locks}
+          onChange={setParam}
+          onToggleLock={toggleLock}
+        />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={rollSeed}
+          >
+            New seed
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={rollParams}
+          >
+            Randomize
+          </Button>
+          <PresetControls
+            sketchId={sketch.id}
             params={params}
+            seed={seed}
             locks={locks}
-            onChange={setParam}
-            onToggleLock={toggleLock}
+            onReload={reloadPreset}
           />
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={rollSeed}
-            >
-              New seed
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={rollParams}
-            >
-              Randomize
-            </Button>
-            <PresetControls
-              sketchId={sketch.id}
-              params={params}
-              seed={seed}
-              locks={locks}
-              onReload={reloadPreset}
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <label
-              className="flex-none min-w-16 text-sm text-muted-foreground"
-              htmlFor="sketch-seed"
-            >
-              seed
-            </label>
-            <input
-              id="sketch-seed"
-              className="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              type="number"
-              value={seed}
-              onChange={(event) => {
-                // A blank field is a no-op, not seed 0: `Number("") === 0`, so an
-                // empty value would otherwise silently commit 0. A typed 0 stays valid.
-                if (event.target.value.trim() === "") return;
-                const parsed = Number(event.target.value);
-                if (Number.isNaN(parsed)) return;
-                setSeed(parsed);
-              }}
-            />
-          </div>
-          {/*
-           * Export controls — the shared home for both export paths (PNG snapshots
-           * the live canvas frame; SVG re-bakes the displayed Scene). `mt-auto`
-           * pins this group to the BOTTOM of the flex-column sidebar (#158) so it
-           * stays anchored while everything above stacks from the top; the two
-           * buttons split the row evenly (`flex-1`).
-           */}
-          <div className="mt-auto flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              onClick={exportPng}
-            >
-              Export PNG
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              onClick={exportSvg}
-            >
-              Export SVG
-            </Button>
-          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <label
+            className="flex-none min-w-16 text-sm text-muted-foreground"
+            htmlFor="sketch-seed"
+          >
+            seed
+          </label>
+          <input
+            id="sketch-seed"
+            className="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            type="number"
+            value={seed}
+            onChange={(event) => {
+              // A blank field is a no-op, not seed 0: `Number("") === 0`, so an
+              // empty value would otherwise silently commit 0. A typed 0 stays valid.
+              if (event.target.value.trim() === "") return;
+              const parsed = Number(event.target.value);
+              if (Number.isNaN(parsed)) return;
+              setSeed(parsed);
+            }}
+          />
+        </div>
+        {/*
+         * Export controls — the shared home for both export paths (PNG snapshots
+         * the live canvas frame; SVG re-bakes the displayed Scene). `mt-auto`
+         * pins this group to the BOTTOM of the flex-column sidebar (#158) so it
+         * stays anchored while everything above stacks from the top; the two
+         * buttons split the row evenly (`flex-1`).
+         */}
+        <div className="mt-auto flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            onClick={exportPng}
+          >
+            Export PNG
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            onClick={exportSvg}
+          >
+            Export SVG
+          </Button>
+        </div>
       </aside>
     </div>
   );

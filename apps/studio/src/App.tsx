@@ -131,7 +131,10 @@ export function App() {
     <Select
       value={selectedId}
       onValueChange={(value: string | null) => {
-        if (value === null) return;
+        // Guard the no-op path: a same-value selection never changes
+        // `selectedId`, so the `[selectedId]`-keyed layout effect that clears
+        // `restoreFocus` would never run, leaving the flag stuck `true`.
+        if (value === null || value === selectedId) return;
         // Record that this change came from the switcher so the post-remount
         // layout effect restores focus to the trigger (see `restoreFocus`).
         restoreFocus.current = true;
