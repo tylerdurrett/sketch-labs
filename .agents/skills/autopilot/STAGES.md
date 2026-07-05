@@ -1,6 +1,6 @@
 # Autopilot stages — skip checks and sub-agent briefs
 
-One section per stage: the idempotency skip check (always run first, against live tracker state), then how the stage runs — a `Task` sub-agent brief for stages 1–4, or the inline procedure the orchestrator itself follows for stage 5 (batch) — and the summary shape the run must produce. Prompts are shapes to adapt, not scripts to paste — but keep their load-bearing sentences (marked inline) intact.
+One section per stage: the idempotency skip check (always run first, against live tracker state), then how the stage runs — a `Task` sub-agent brief for stages 1–4, or the inline procedure the orchestrator itself follows for the batch legs (stage 5, and stage 6's cleanup-sweep loop) — and the summary shape the run must produce. Prompts are shapes to adapt, not scripts to paste — but keep their load-bearing sentences (marked inline) intact.
 
 Shared conventions:
 
@@ -82,4 +82,48 @@ Children without `needs-triage` are already triaged — skip them. If none carry
 
 **Report to relay:** the approved DAG plus batch's own end-of-run report content, folded into autopilot's end-of-run output.
 
-**Orchestrator decision:** Slice PR opened → completed-run shape. Slice PR withheld (held/failed tasks, pre-flight blockers) → this is still the end of the autopilot run, not a halt-and-retry: report what batch reported, loudly, with the user's unblocking actions as the next step.
+**Orchestrator decision:** Slice PR opened → proceed to stage 6 (the cleanup sweep) if batch deferred anything, else completed-run shape. Slice PR withheld (held/failed tasks, pre-flight blockers) → **do not run stage 6** (there is no reviewable slice PR to fold cleanup into yet); this is the end of the run, not a halt-and-retry: report what batch reported, loudly, with the user's unblocking actions as the next step.
+
+## Stage 6: Cleanup sweep (runs inline in the orchestrator)
+
+Stage 5's batch Settle phase auto-defers each non-blocking code-review finding on a merged task as a `needs-triage`+`cleanup` sub-issue of the slice. This stage triages and batches those onto the *same* slice PR, draining the queue so the reviewer sees the slice and its own cleanup in one diff instead of rubber-stamping a pile of `cleanup` issues later.
+
+**Precondition:** only run this stage if stage 5 actually opened (or found already-open) the slice promotion PR. If the slice PR was withheld, skip stage 6 entirely — there is nothing to fold cleanup into.
+
+**Skip check** — no open `needs-triage`+`cleanup` child of the slice remains:
+
+```bash
+gh api "repos/{owner}/{repo}/issues/<S>/sub_issues" \
+  --jq '[.[] | select(.state == "open") | select([.labels[].name] | index("cleanup")) | select([.labels[].name] | index("needs-triage"))] | length'
+```
+
+Zero → skip the whole stage (record `cleanup-sweep: nothing deferred`). Non-zero → run the drain loop. (Read the work-list from this live query, **not** from batch's in-memory `deferred` list — that keeps the sweep resumable across re-runs.)
+
+**Drain-until-dry loop — the orchestrator runs this itself, capped at 3 rounds:**
+
+```
+for round in 1..3:
+  1. Query the open `needs-triage`+`cleanup` children of <S> (the skip-check query above).
+     If none remain → the queue is drained; STOP the loop (success).
+  2. TRIAGE them: dispatch one `/triage #<C>` sub-agent per child, all in parallel — identical
+     brief to Stage 4's per-task brief. A cleanup issue lands with no `size:*` label, so triage
+     assigns size + state. Happy path is `size:task` + `ready-for-agent`; honor an honest
+     non-happy state (a cleanup that's actually slice-sized, or needs-info) without forcing it.
+  3. BATCH: run `/batch #<S>` inline, exactly as Stage 5 (its own Step 5 inline procedure).
+     Batch's pre-flight now finds ONLY the newly-ready cleanup tasks (every prior task is
+     closed → ineligible), merges the clean ones into the slice branch (updating the open PR),
+     and its Settle auto-defers any NEW cleanup-of-cleanup findings as fresh `needs-triage`
+     `cleanup` children — which the next round's step-1 query will pick up.
+  4. Next round.
+after the loop (drained or cap hit): gather what was swept and what remains.
+```
+
+**Load-bearing rules for this stage:**
+
+- **The slice PR is owned by stage 5; stage 6 only augments it.** Every stage-6 batch will report its slice-PR Settle step as `alreadyExisted: true` (an update, no new PR). If a *held* cleanup task makes batch's report say "slice incomplete — PR not opened," **do not relay that as the PR being withheld** — the PR was opened in stage 5 and still stands; a held cleanup task just stays an open task-PR against the slice branch.
+- **Never halt.** A cleanup task that triage moves off the happy path, or that code-review holds, is reported and left as an open issue/task-PR. The run still ends by handing back the slice PR. The severity gate (stage 2) does not apply here — these are cosmetic findings, and the human PR review is the safety net.
+- **The cap is a backstop.** Convergence in 1–2 rounds is normal; 3 rounds is the termination guarantee for a pathological cleanup-of-cleanup chain. If round 3 finishes with `needs-triage`+`cleanup` children still open, stop and report them as remaining — do not loop further.
+
+**Summary shape:** `cleanup sweep: <c> task(s) merged onto the slice PR over <rounds> round(s)` + one line per swept task (`#<C> <title>`) + a `remaining:` line listing any cleanup still open (cap hit, held by review, or triaged off the happy path) — or `remaining: none (queue drained)`.
+
+**Orchestrator decision:** always the end of the run — emit the completed-run output with the cleanup-sweep line filled in. The slice PR (opened in stage 5, augmented here) is the handoff; anything the sweep left open is reported, not halted on.
