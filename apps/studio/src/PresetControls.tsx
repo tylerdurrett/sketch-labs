@@ -100,10 +100,10 @@ export function PresetControls({
   };
 
   return (
-    <div className="preset-controls flex w-full flex-col gap-2">
-      <div className="preset-controls__row flex items-center gap-2">
+    <div className="flex w-full flex-col gap-2">
+      <div className="flex items-center gap-2">
         <input
-          className="preset-controls__name flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
           type="text"
           placeholder="preset name"
           aria-label="preset name"
@@ -122,16 +122,16 @@ export function PresetControls({
       </div>
       {name !== "" && !nameValid && (
         <p
-          className="preset-controls__hint m-0 text-sm text-muted-foreground"
+          className="m-0 text-sm text-muted-foreground"
           role="alert"
         >
           Name must be a lowercase slug: a-z, 0-9, hyphen or underscore (no
           spaces or uppercase).
         </p>
       )}
-      <div className="preset-controls__row flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <select
-          className="preset-controls__picker flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           aria-label="saved presets"
           value={selected}
           onChange={(event) => setSelected(event.target.value)}
@@ -155,7 +155,7 @@ export function PresetControls({
       </div>
       {error !== null && (
         <p
-          className="preset-controls__error m-0 text-sm text-destructive"
+          className="m-0 text-sm text-destructive"
           role="alert"
         >
           {error}
