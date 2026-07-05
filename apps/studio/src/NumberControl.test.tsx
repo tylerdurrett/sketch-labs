@@ -51,7 +51,7 @@ describe("coerceToDomain", () => {
 });
 
 describe("NumberControl markup", () => {
-  it("renders a range slider and a number input bound to the same value", () => {
+  it("renders TWO lines: a number input + lock, and a Slider, bound to one value", () => {
     const html = renderToStaticMarkup(
       <NumberControl
         paramKey="radius"
@@ -62,26 +62,64 @@ describe("NumberControl markup", () => {
         onToggleLock={() => {}}
       />,
     );
-    expect(html).toContain('type="range"');
+    // Top line: the free-entry number input. Bottom line: the shadcn Slider,
+    // whose Base UI Thumb renders a native range input. Both present == two lines.
     expect(html).toContain('type="number"');
+    expect(html).toContain('type="range"');
     // The slider carries the step attr (UI drag granularity)...
     expect(html).toContain('step="10"');
-    // ...while BOTH inputs display the same off-step value 23.
+    // ...while BOTH the number input and the slider display the same OFF-STEP
+    // value 23 (step is a drag hint, never snapped — 23 stays legal & editable).
     const matches = html.match(/value="23"/g) ?? [];
     expect(matches.length).toBe(2);
   });
 
-  it("uses step=\"any\" on the slider when the spec omits step", () => {
+  it("falls back to a fine sub-integer step (continuous drag) when spec omits step", () => {
     const html = renderToStaticMarkup(
       <NumberControl
         paramKey="x"
-        spec={numberSpec()}
+        spec={numberSpec({ min: 0, max: 100 })}
         value={50}
         locked={false}
         onChange={() => {}}
         onToggleLock={() => {}}
       />,
     );
-    expect(html).toContain('step="any"');
+    // No native `step="any"` sentinel on a Base UI slider; an omitted step
+    // becomes a fine range-relative increment ((100-0)/1000 = 0.1), standing in
+    // for continuous drag — deliberately NOT the coarse default `step="1"`.
+    expect(html).toContain('step="0.1"');
+    expect(html).not.toContain('step="1"');
+  });
+
+  it("renders the lucide lock as a toggle: aria-pressed reflects lock, never disables", () => {
+    const locked = renderToStaticMarkup(
+      <NumberControl
+        paramKey="radius"
+        spec={numberSpec()}
+        value={10}
+        locked={true}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+      />,
+    );
+    const unlocked = renderToStaticMarkup(
+      <NumberControl
+        paramKey="radius"
+        spec={numberSpec()}
+        value={10}
+        locked={false}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+      />,
+    );
+    // The lock keeps its accessible label and toggle semantics...
+    expect(locked).toContain('aria-label="radius lock"');
+    expect(locked).toContain('aria-pressed="true"');
+    expect(unlocked).toContain('aria-pressed="false"');
+    // ...is a lucide icon (an inline svg), not the old text button...
+    expect(locked).toContain("<svg");
+    // ...and NEVER gates the inputs: a locked control carries no `disabled`.
+    expect(locked).not.toContain("disabled");
   });
 });

@@ -16,9 +16,14 @@ import { cn } from "../../lib/utils";
  * All of Root's value props — `min`, `max`, `step`, `value`, `onValueChange` —
  * are forwarded straight through, so this is a drop-in full-width slider. Typed
  * to the single-thumb `number` case (the control row never uses a range).
+ *
+ * `aria-label` is routed to the Thumb rather than the Root, since the Thumb owns
+ * the focusable `<input type="range">` a screen reader actually announces (the
+ * Root is a presentational `<div>`).
  */
 function Slider({
   className,
+  "aria-label": ariaLabel,
   ...props
 }: ComponentProps<typeof SliderPrimitive.Root<number>>) {
   return (
@@ -32,7 +37,10 @@ function Slider({
       <SliderPrimitive.Control className="flex w-full items-center py-1.5">
         <SliderPrimitive.Track className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-muted">
           <SliderPrimitive.Indicator className="absolute h-full rounded-full bg-primary" />
-          <SliderPrimitive.Thumb className="block size-4 shrink-0 rounded-full border border-primary bg-background shadow-sm transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" />
+          <SliderPrimitive.Thumb
+            aria-label={ariaLabel}
+            className="block size-4 shrink-0 rounded-full border border-primary bg-background shadow-sm transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          />
         </SliderPrimitive.Track>
       </SliderPrimitive.Control>
     </SliderPrimitive.Root>
