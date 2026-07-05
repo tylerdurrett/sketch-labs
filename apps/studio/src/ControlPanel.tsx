@@ -48,6 +48,7 @@ function renderControl(
     case "number":
       return (
         <NumberControl
+          key={key}
           paramKey={key}
           spec={spec}
           value={typeof value === "number" ? value : spec.default}
@@ -59,6 +60,7 @@ function renderControl(
     default:
       return (
         <div
+          key={key}
           role="alert"
           className="rounded-md border-2 border-destructive bg-destructive/10 px-3 py-2 text-sm font-semibold text-destructive"
         >
@@ -87,18 +89,16 @@ export function ControlPanel({
 }: ControlPanelProps) {
   return (
     <div className="flex flex-col gap-4">
-      {Object.entries(schema).map(([key, spec]) => (
-        <div key={key} className="flex flex-col gap-1.5">
-          {renderControl(
-            key,
-            spec,
-            params[key],
-            locks.has(key),
-            onChange,
-            onToggleLock,
-          )}
-        </div>
-      ))}
+      {Object.entries(schema).map(([key, spec]) =>
+        renderControl(
+          key,
+          spec,
+          params[key],
+          locks.has(key),
+          onChange,
+          onToggleLock,
+        ),
+      )}
     </div>
   );
 }
