@@ -207,9 +207,10 @@ export function SketchControls({
   // of the existing controls — their markup/styling is unchanged, only relocated
   // (shadcn restyling is later sibling work). Both regions read the SAME
   // params/seed/locks state this component owns, which is why the layout lives
-  // here rather than in App. The LiveCanvas transport stays where LiveCanvas
-  // renders it (inside the canvas region for now; a canvas bottom bar is sibling
-  // work). The App-owned `switcher` slot renders at the sidebar top.
+  // here rather than in App. The canvas stage hands its full height to
+  // LiveCanvas's own layout, which centers the canvas and pins the transport to a
+  // slim bar at the bottom of the canvas area (#156). The App-owned `switcher`
+  // slot renders at the sidebar top.
   return (
     <div className="studio-shell">
       <section className="canvas-region" aria-label="Canvas">
