@@ -1,3 +1,4 @@
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 
 import {
@@ -220,16 +221,19 @@ export function SketchControls({
          * while collapsed. `[` is the equivalent keyboard shortcut (owned by App).
          */}
         <div className="canvas-region__bar">
-          <button
+          <Button
             type="button"
-            className="inspector-toggle"
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground"
             aria-expanded={!collapsed}
             aria-controls="inspector"
+            aria-label={collapsed ? "Show inspector" : "Hide inspector"}
             onClick={onToggleCollapse}
             title="Toggle inspector ([)"
           >
-            {collapsed ? "Show inspector" : "Hide inspector"}
-          </button>
+            {collapsed ? <PanelRightOpen aria-hidden /> : <PanelRightClose aria-hidden />}
+          </Button>
         </div>
         <div className="canvas-region__stage">
           <LiveCanvas
