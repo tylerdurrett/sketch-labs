@@ -244,9 +244,23 @@ export function SketchControls({
           />
         </div>
       </section>
-      {!collapsed && (
-        <aside id="inspector" className="inspector" aria-label="Inspector">
-          {switcher}
+      {/*
+       * The inspector stays MOUNTED in both states and merely `hidden` while
+       * collapsed (#165), rather than being conditionally rendered. The
+       * canvas-region toggle carries `aria-controls="inspector"`, so the target
+       * element must exist even while collapsed — otherwise the very affordance a
+       * screen-reader user relies on to RE-open the panel points at nothing. The
+       * `[hidden]` attribute both removes it from the a11y tree and (via the
+       * `.inspector[hidden] { display: none }` rule in App.css, which beats the
+       * author `display: flex`) collapses it so the canvas takes the full width.
+       */}
+      <aside
+        id="inspector"
+        className="inspector"
+        aria-label="Inspector"
+        hidden={collapsed}
+      >
+        {switcher}
           <ControlPanel
             schema={sketch.schema}
             params={params}
@@ -328,8 +342,7 @@ export function SketchControls({
               Export SVG
             </Button>
           </div>
-        </aside>
-      )}
+      </aside>
     </div>
   );
 }
