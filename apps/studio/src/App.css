@@ -163,61 +163,12 @@
 }
 
 /*
- * One numeric control: a label, a slider, and a number input on a single row.
- * The slider flexes to fill the available width; the number input stays a fixed
- * narrow box for free-entry of the exact value.
+ * NOTE: the numeric control rows, their lock affordance, and the schema-driven
+ * control surface are now Tailwind/shadcn components (#157) — NumberControl,
+ * the Slider primitive, and ControlPanel style themselves against the design
+ * tokens in `src/index.css`. The old `.control`, `.control__*`, and
+ * `.control-panel` rules were retired with that rebuild.
  */
-.control {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.control__label {
-  flex: 0 0 auto;
-  min-width: 8rem;
-}
-
-.control__slider {
-  flex: 1 1 auto;
-}
-
-.control__number {
-  flex: 0 0 auto;
-  width: 5rem;
-}
-
-/*
- * Per-param lock affordance: a toggle button marking a param as
- * Randomize-excluded. Its pressed state (aria-pressed) reflects the lock; it
- * NEVER disables the control's slider/input — a locked param stays
- * hand-editable.
- */
-.control__lock {
-  flex: 0 0 auto;
-  width: 5rem;
-  padding: 0.25rem 0.5rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-}
-
-.control__lock[aria-pressed="true"] {
-  border-color: #333;
-  background: #333;
-  color: #fff;
-}
-
-/*
- * The schema-driven control surface: a vertical stack of control rows, one per
- * declared param.
- */
-.control-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
 
 /*
  * The two randomness-axis action buttons: "New seed" (reshuffle the
@@ -348,18 +299,4 @@
 
 .transport__scrubber {
   flex: 1 1 auto;
-}
-
-/*
- * Loud fallback for an unsupported control kind. Deliberately high-contrast so
- * an unhandled ParamSpec kind is impossible to miss in the UI — never a silent
- * skip.
- */
-.control--unsupported {
-  padding: 0.5rem 0.75rem;
-  border: 2px solid #b00020;
-  border-radius: 4px;
-  background: #ffe5e9;
-  color: #b00020;
-  font-weight: 600;
 }
