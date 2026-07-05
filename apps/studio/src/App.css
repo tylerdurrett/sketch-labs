@@ -123,6 +123,18 @@
 }
 
 /*
+ * COLLAPSED (#165): the inspector stays mounted (so the toggle's
+ * `aria-controls="inspector"` always resolves) and hides via `[hidden]`. The
+ * author `.inspector { display: flex }` above beats the UA `[hidden] {
+ * display: none }` rule, so without this explicit override the panel would stay
+ * laid out while collapsed. Re-asserting `display: none` collapses it for real,
+ * handing the canvas region the full width.
+ */
+.inspector[hidden] {
+  display: none;
+}
+
+/*
  * The framed "paper" (#155). Its CSS box is sized to the SKETCH's OWN aspect —
  * not a fixed square — and contain-fit against the stage: `--paper-aspect` (a
  * unitless width/height ratio) is threaded on inline by LiveCanvas from the
