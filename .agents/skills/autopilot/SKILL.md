@@ -99,12 +99,15 @@ Autopiloted slice #<S>: decomposed into <n> tasks, audited (<r> routine findings
 - 🚀 Slice promotion PR (review-first — this is your review gate; holds the slice AND its swept cleanup): <url>
 - audit synthesis: <comment url>
 - cleanup swept onto the PR: #<C> · ... (or "none deferred")
+- local checkout: on <slice-branch>, fast-forwarded to the PR head (or "left as-is — <reason>")
 - <any cleanup still queued (cap hit / held / didn't triage), held/failed/skipped tasks, or skipped stages, one line each>
 
 > Next step: review the slice PR <url> and merge it (or `/ship #<S>`) to promote the slice.
 ```
 
 The cleanup-sweep line is not optional: state how many cleanup tasks were swept in and over how many rounds, or say the batch deferred nothing. If the cap was hit or a cleanup task was held/couldn't-triage, list what remains and note it's captured as open issues — the run still handed back, but the reviewer should know the queue isn't empty.
+
+Before this output, a completed run performs the **handoff**: it fast-forwards the local slice branch to `origin` so the reviewer is looking at the actual PR head, not a stale pre-run tree (batch pushes its merges to the remote). The mechanic and its safety rails — `--ff-only`, never discard local work — are in [STAGES.md](STAGES.md#handoff-sync-the-local-slice-branch-completed-runs-only). This runs on completed runs only; a halted run leaves the user's checkout untouched.
 
 Halted run (blocking finding, failed stage, or tasks that didn't reach `ready-for-agent`):
 

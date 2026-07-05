@@ -126,4 +126,19 @@ after the loop (drained or cap hit): gather what was swept and what remains.
 
 **Summary shape:** `cleanup sweep: <c> task(s) merged onto the slice PR over <rounds> round(s)` + one line per swept task (`#<C> <title>`) + a `remaining:` line listing any cleanup still open (cap hit, held by review, or triaged off the happy path) — or `remaining: none (queue drained)`.
 
-**Orchestrator decision:** always the end of the run — emit the completed-run output with the cleanup-sweep line filled in. The slice PR (opened in stage 5, augmented here) is the handoff; anything the sweep left open is reported, not halted on.
+**Orchestrator decision:** always the end of the run — proceed to the handoff (sync the local branch), then emit the completed-run output with the cleanup-sweep line filled in. The slice PR (opened in stage 5, augmented here) is the handoff; anything the sweep left open is reported, not halted on.
+
+## Handoff: sync the local slice branch (completed runs only)
+
+Batch pushes every squash-merge (and every cleanup merge) to the *remote* slice branch, so by the time autopilot hands back, `origin/<slice-branch>` holds the real PR head while the **local** slice branch ref is stale — the user is left on the right branch but staring at a pre-run tree. Before emitting the completed-run output, fast-forward the local checkout so what they see locally matches what the PR shows.
+
+Run this **only on a completed run** (slice PR open). Skip it on a halted run: there may be no pushed slice state worth syncing, and the user is likely mid-fix on their own working tree — don't touch it.
+
+```bash
+# <slice-branch> is the **Integration Branch** declared in issue #<S>'s body.
+git checkout <slice-branch>              # batch already leaves HEAD here; make it explicit
+git fetch origin <slice-branch>
+git merge --ff-only origin/<slice-branch>
+```
+
+`--ff-only` is deliberate. If the local branch carries commits that aren't on origin (the user did local work between runs), the fast-forward *refuses* rather than rewriting history — report it (`local slice branch has unpushed commits; left as-is`) and move on. A dirty working tree that blocks the checkout or merge is handled the same way: report, never `stash`/`reset`/force. The goal is to land the reviewer on the real diff, never to discard their work. Record the outcome (synced / already up to date / left as-is + why) for the completed-run output's local-checkout line.
