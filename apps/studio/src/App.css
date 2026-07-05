@@ -37,9 +37,10 @@
 }
 
 /*
- * The canvas region: the left half of the shell. It centers the live canvas (and
- * the transport LiveCanvas renders beneath it) in the space the sidebar leaves.
- * `min-width: 0` lets it shrink below the canvas's intrinsic width when narrow.
+ * The canvas region: the left half of the shell. It hands the space the sidebar
+ * leaves to LiveCanvas's own fill-the-region layout (canvas + bottom transport
+ * bar, #156). `min-width: 0` lets it shrink below the canvas's intrinsic width
+ * when narrow.
  */
 .canvas-region {
   display: flex;
@@ -73,12 +74,42 @@
   border-color: var(--foreground);
 }
 
+/*
+ * The canvas stage: the region below the collapse bar. It just hands its full
+ * height to LiveCanvas's own layout (#156) — LiveCanvas centers the canvas and
+ * pins the transport bar to the bottom — so this is a plain filling flex column,
+ * NOT a centering box (centering the layout would shrink the bottom bar off the
+ * full width).
+ */
 .canvas-region__stage {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/*
+ * LiveCanvas's own layout root (#156): a column that FILLS the canvas stage — the
+ * canvas centered/fitted on top, the slim transport bar pinned to the bottom. It
+ * lives here (not split across the stage boundary) so the transport markup stays
+ * with the clock/scrub handlers LiveCanvas owns.
+ */
+.live-canvas-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/*
+ * The stage half of that layout: centers the live canvas in the space above the
+ * transport bar, with breathing-room padding, and scrolls if the canvas overflows.
+ */
+.live-canvas-stage {
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
   flex: 1 1 auto;
   min-height: 0;
   padding: 1rem;
@@ -297,16 +328,21 @@
 }
 
 /*
- * The transport row (#7): a play/pause toggle plus the time scrubber, shown ONLY
- * for animated Sketches (those with time metadata). The scrubber flexes to fill
- * the row; the toggle stays a fixed control to its left. Hidden entirely for
- * static Sketches — LiveCanvas renders no transport at all in that case.
+ * The transport bar (#7, relocated to a slim canvas bottom bar in #156): a
+ * play/pause toggle plus the time scrubber, shown ONLY for animated Sketches
+ * (those with time metadata). It is pinned to the bottom of the canvas area as a
+ * full-width slim bar — `flex: 0 0 auto` keeps it out of the stage's flex-grow so
+ * it hugs its content height. The scrubber flexes to fill the row; the toggle
+ * stays a fixed control to its left. Hidden entirely for static Sketches —
+ * LiveCanvas renders no transport at all in that case.
  */
 .transport {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  width: min(80vmin, 800px);
+  flex: 0 0 auto;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid #ccc;
 }
 
 .transport__play {

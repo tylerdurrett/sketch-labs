@@ -452,45 +452,52 @@ export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps)
     }
   }, []);
 
-  // No time metadata ⇒ a static Sketch: render the canvas alone, no transport.
+  // LAYOUT (#156): LiveCanvas owns a column that FILLS the canvas region — the
+  // canvas centered/fitted in the stage on top, the slim transport bar pinned to
+  // the bottom. The transport handlers/refs live here alongside the canvas, so
+  // keeping the markup together (rather than splitting it across the stage
+  // boundary) is what lets the driver stay untouched. The transport shows ONLY
+  // for an animated Sketch (`sketch.time` present); a static Sketch renders the
+  // canvas alone in the same layout — no clock, no bar (exactly as before).
   const time = sketch.time;
-  if (time === undefined) {
-    return <canvas ref={canvasRef} className="live-canvas" />;
-  }
-
   return (
-    <>
-      <canvas ref={canvasRef} className="live-canvas" />
-      <div className="transport">
-        <button
-          type="button"
-          className="transport__play"
-          aria-pressed={playing}
-          onClick={togglePlay}
-        >
-          {playing ? "Pause" : "Play"}
-        </button>
-        {/*
-         * The scrubber. Range is metadata-driven: [0, duration] seconds, with
-         * `loop`/`one-shot` differing only in how the rAF loop maps elapsed → `t`
-         * (`timeForElapsed`) — the input bound stays `duration` either way. It is
-         * UNCONTROLLED (no React `value`): while playing the rAF tick writes its
-         * `.value` DOM-direct (thumb follows `t`, no per-frame re-render); while
-         * grabbed `onInput` drives `t`. A small `step` gives a smooth drag.
-         */}
-        <input
-          ref={scrubberRef}
-          className="transport__scrubber"
-          type="range"
-          aria-label="time scrubber"
-          min={0}
-          max={time.duration}
-          step={time.duration / 1000}
-          defaultValue={0}
-          onPointerDown={() => setPlaying(false)}
-          onInput={(event) => scrubTo(Number(event.currentTarget.value))}
-        />
+    <div className="live-canvas-layout">
+      <div className="live-canvas-stage">
+        <canvas ref={canvasRef} className="live-canvas" />
       </div>
-    </>
+      {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
+      {time !== undefined && (
+        <div className="transport">
+          <button
+            type="button"
+            className="transport__play"
+            aria-pressed={playing}
+            onClick={togglePlay}
+          >
+            {playing ? "Pause" : "Play"}
+          </button>
+          {/*
+           * The scrubber. Range is metadata-driven: [0, duration] seconds, with
+           * `loop`/`one-shot` differing only in how the rAF loop maps elapsed → `t`
+           * (`timeForElapsed`) — the input bound stays `duration` either way. It is
+           * UNCONTROLLED (no React `value`): while playing the rAF tick writes its
+           * `.value` DOM-direct (thumb follows `t`, no per-frame re-render); while
+           * grabbed `onInput` drives `t`. A small `step` gives a smooth drag.
+           */}
+          <input
+            ref={scrubberRef}
+            className="transport__scrubber"
+            type="range"
+            aria-label="time scrubber"
+            min={0}
+            max={time.duration}
+            step={time.duration / 1000}
+            defaultValue={0}
+            onPointerDown={() => setPlaying(false)}
+            onInput={(event) => scrubTo(Number(event.currentTarget.value))}
+          />
+        </div>
+      )}
+    </div>
   );
 }
