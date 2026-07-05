@@ -7,7 +7,7 @@ export const meta = {
     { title: 'Implement', detail: 'per task: clean-context agent codes each sub-section and pushes commits' },
     { title: 'Review', detail: 'per task: independent /code-review pass; auto-fixes blocking findings, gates the ship' },
     { title: 'Land', detail: 'per task: verify ACs, open PR, and squash-merge into the slice branch when review is clean' },
-    { title: 'Settle', detail: 'reconcile lifecycle state, auto-defer non-blocking findings, open the slice promotion PR, recolor DAG, prune worktrees' },
+    { title: 'Settle', detail: 'reconcile lifecycle state, auto-defer non-blocking findings, open the slice promotion PR, recolor DAG, prune this run\'s worktrees, leave HEAD on the slice branch' },
   ],
 }
 
@@ -366,14 +366,22 @@ function run(num) {
   return p
 }
 
-// Capture the repo's current branch BEFORE any worktree-isolated agent runs, so the
-// post-run Settle phase can restore it: worktree isolation has been observed to leave
-// the main worktree in detached HEAD after a run.
+// Capture, BEFORE any worktree-isolated agent runs: (a) the repo's current branch, so the
+// Settle phase can restore it (worktree isolation has been observed to leave the main worktree
+// detached); and (b) the isolation worktrees that ALREADY exist — leftovers from OTHER runs
+// (a concurrent batch, or an orphaned dir). The cleanup pass removes only worktrees NOT in this
+// baseline, i.e. only ones THIS run created — so it never force-removes another run's live work
+// (which also stops the "removing worktrees you didn't create this session" safety trip).
 const startInfo = await agent(
-  `Run exactly: \`git rev-parse --abbrev-ref HEAD\`. Return the single line it prints as "branch" (it is "HEAD" when detached). Do nothing else — no checkout, no edits, no fetch.`,
-  { label: 'record-branch', phase: 'Prep', schema: { type: 'object', additionalProperties: false, required: ['branch'], properties: { branch: { type: 'string' } } } },
+  [
+    `Run these two READ-ONLY commands and report their output. Do nothing else — no checkout, no edits, no fetch, no removal.`,
+    `1. \`git rev-parse --abbrev-ref HEAD\` → its single line is "branch" (it is "HEAD" when detached).`,
+    `2. \`git worktree list --porcelain\` → for every "worktree <path>" whose <path> contains \`.claude/worktrees/\`, return that <path> in the "preexistingWorktrees" array (empty array if none).`,
+  ].join('\n'),
+  { label: 'record-branch', phase: 'Prep', schema: { type: 'object', additionalProperties: false, required: ['branch'], properties: { branch: { type: 'string' }, preexistingWorktrees: { type: 'array', items: { type: 'string' } } } } },
 )
 const startBranch = startInfo && startInfo.branch && startInfo.branch !== 'HEAD' ? startInfo.branch : null
+const preexistingWorktrees = startInfo && Array.isArray(startInfo.preexistingWorktrees) ? startInfo.preexistingWorktrees : []
 
 const results = await Promise.all(tasks.map((t) => run(t.number)))
 
@@ -442,8 +450,9 @@ if (parentIssue && shippedWithFindings.length > 0) {
 // ① Reconcile + cleanup. Re-assert the lifecycle invariant the Land agent's /ship
 //    is supposed to but sometimes doesn't (observed: PR merged yet issue left OPEN):
 //    every shipped task ⇒ PR merged AND issue closed AND active-state labels stripped.
-//    Then the one authoritative DAG recolor, and worktree/HEAD hygiene (isolation has
-//    leaked worktree dirs and left the main worktree detached).
+//    Then the one authoritative DAG recolor, and worktree hygiene — removing only THIS
+//    run's leaked isolation dirs (HEAD is settled last, in step ④, so it can land on the
+//    slice branch once the promotion PR is known).
 const RECONCILE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -452,7 +461,6 @@ const RECONCILE_SCHEMA = {
     healed: { type: 'array', items: { type: 'string' }, description: 'one line per corrective action taken; empty if every invariant already held' },
     dagRecolored: { type: ['string', 'null'], description: 'the recolor.mjs output line' },
     worktreesPruned: { type: ['number', 'null'], description: 'count of leftover worktrees removed' },
-    headRestored: { type: ['string', 'null'], description: 'branch checked back out, or null' },
     notes: { type: ['string', 'null'] },
   },
 }
@@ -466,10 +474,9 @@ if (parentIssue) {
       `1. LIFECYCLE INVARIANT — for each shipped task below: confirm its PR is MERGED (\`gh pr view <pr> --json state,mergedAt,baseRefName\`), then confirm its issue is CLOSED. If a merged task's issue is still OPEN, heal it: \`gh issue edit <task> --remove-label ready-for-agent --remove-label in-progress\`, then \`gh issue close <task> --comment "Shipped via #<pr> (squash-merged into <baseRefName>). Will reach \\\`main\\\` when parent #${parentIssue} ships upward."\`. If a PR is NOT merged though the task was marked shipped, do NOT close it — record that in notes.`,
       `   Shipped tasks (JSON): ${JSON.stringify(shippedSet)}`,
       `2. DAG — recolor the parent once, authoritatively: \`node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" ${parentIssue}\`. Relay its output (a clean no-op when there's no "## Sub-issue DAG" section).`,
-      `3. WORKTREES — clean this run's isolation leftovers: \`git worktree prune\`, then for every path under \`.claude/worktrees/\` still in \`git worktree list\`, run \`git worktree remove --force <path>\`. Count how many you removed.`,
-      `4. HEAD — check \`git rev-parse --abbrev-ref HEAD\`. ${startBranch ? `If it prints "HEAD" (detached), restore the pre-run branch: \`git checkout ${startBranch}\`.` : `If it prints "HEAD" (detached), record the detached SHA in notes — no pre-run branch was captured, so do NOT guess one.`}`,
+      `3. WORKTREES — remove ONLY the isolation worktrees THIS run created; NEVER touch another run's (force-removing a concurrent run's worktree destroys its in-flight work). First \`git worktree prune\` (drops stale admin entries). Then, from \`git worktree list\`, remove each path under \`.claude/worktrees/\` with \`git worktree remove --force <path>\` — EXCEPT these pre-existing worktrees, which existed before this run began and belong to other runs; leave them alone: ${preexistingWorktrees.length ? JSON.stringify(preexistingWorktrees) : '(none pre-existed)'}. Every path you DO remove is one this run created and whose work is already pushed to origin, so --force discards nothing of value there. Count how many you removed.`,
       ``,
-      `Return: healed (one line per corrective action, empty array if nothing needed fixing), dagRecolored, worktreesPruned, headRestored, notes.`,
+      `Return: healed (one line per corrective action, empty array if nothing needed fixing), dagRecolored, worktreesPruned, notes.`,
     ].join('\n'),
     { label: 'reconcile', phase: 'Settle', schema: RECONCILE_SCHEMA },
   )
@@ -518,6 +525,32 @@ if (parentIssue && allShipped) {
   )
 }
 
+// ④ Leave the main worktree on the right branch — the FINAL Settle step, after every isolation
+//    worktree is pruned. Put HEAD where the human's next action wants it: on the slice's integration
+//    branch when a promotion PR was opened (so they can review/build the slice locally without first
+//    switching), else restore the pre-run branch if isolation left HEAD detached. Runs last so no
+//    other Settle agent's origin work is disturbed, and best-effort — a checkout failure (dirty tree,
+//    branch held elsewhere) never fails the run; it just reports where HEAD was left. (Concurrency
+//    note: like the reconcile HEAD-restore before it, this moves the shared main worktree's HEAD; a
+//    second batch sharing this worktree is already unsafe, so this doesn't regress that.)
+let headResult = null
+if (parentIssue) {
+  const wantSlice = !!(slicePr && slicePr.opened)
+  headResult = await agent(
+    [
+      `You are the CHECKOUT stage of a /batch run — the FINAL step. Leave the main worktree's HEAD on the branch the human needs next. Best-effort: if a checkout would fail (dirty tree blocks it, or the branch is held in another worktree), do NOT force it — just report where you left HEAD and why in notes.`,
+      wantSlice
+        ? `A slice promotion PR was opened for #${parentIssue}, so leave HEAD on that slice's integration branch — the human is about to review it and shouldn't have to switch first. Read #${parentIssue}'s body for its \`**Integration Branch:**\` line, then \`git fetch origin <that-branch>\` and \`git checkout <that-branch>\` (a plain named checkout is correct now: every isolation worktree has been pruned, so the branch is held nowhere else). Report headLeftOn:"<that-branch>".`
+        : startBranch
+          ? `No slice PR was opened. If \`git rev-parse --abbrev-ref HEAD\` prints "HEAD" (detached), restore the pre-run branch: \`git checkout ${startBranch}\`; otherwise leave HEAD as-is. Report headLeftOn.`
+          : `No slice PR was opened and no pre-run branch was captured. If HEAD is detached, record the detached SHA in notes and leave it — do NOT guess a branch. Report headLeftOn (null if left detached).`,
+      ``,
+      `Return: headLeftOn (the branch you left HEAD on, or null if detached), notes.`,
+    ].join('\n'),
+    { label: 'checkout', phase: 'Settle', schema: { type: 'object', additionalProperties: false, required: ['headLeftOn'], properties: { headLeftOn: { type: ['string', 'null'] }, notes: { type: ['string', 'null'] } } } },
+  )
+}
+
 const opened = results.filter((r) => r.ok && !r.shipped && !r.reviewBlocked).map((r) => r.number)
 const shipped = results.filter((r) => r.shipped).map((r) => r.number)
 const heldForReview = results.filter((r) => r.reviewBlocked)
@@ -563,7 +596,7 @@ return {
         }
       : { opened: false, blocker: allShipped ? 'slice-promotion stage did not run' : `${heldForReview.length + failed.length} task(s) held/failed — slice incomplete`, blockedBy: heldForReview.map((r) => r.number).concat(failed.map((f) => f.number)) },
     reconciled: settle
-      ? { healed: settle.healed || [], worktreesPruned: settle.worktreesPruned ?? null, headRestored: settle.headRestored ?? null, notes: settle.notes ?? null }
+      ? { healed: settle.healed || [], worktreesPruned: settle.worktreesPruned ?? null, headLeftOn: headResult ? headResult.headLeftOn ?? null : null, notes: settle.notes ?? null }
       : null,
   },
 }
