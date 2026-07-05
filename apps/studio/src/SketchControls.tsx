@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import {
   applyPreset,
@@ -24,6 +24,15 @@ import { PresetControls } from "./PresetControls";
 export interface SketchControlsProps {
   /** The selected Sketch whose schema drives the controls and whose Scene renders. */
   sketch: Sketch;
+  /**
+   * The Sketch switcher, owned by App (it drives selection, which lives ABOVE
+   * this keyed-remount instance) and rendered as a slot at the inspector
+   * sidebar's top. Passed in rather than built here so switching Sketch — which
+   * remounts this component — never resets the switcher's own selection state.
+   * Optional: the control-wiring tests mount this component without a switcher,
+   * in which case the sidebar simply renders no switcher slot.
+   */
+  switcher?: ReactNode;
 }
 
 /**
@@ -53,7 +62,7 @@ export interface SketchControlsProps {
  * hand-editable. Like `seed` and `params`, `locks` lives in keyed-remount state,
  * so a Sketch switch clears every lock for free (no manual reset).
  */
-export function SketchControls({ sketch }: SketchControlsProps) {
+export function SketchControls({ sketch, switcher }: SketchControlsProps) {
   const [params, setParams] = useState(() => defaultParams(sketch.schema));
   const [seed, setSeed] = useState(() => newSeed(Math.random));
   const [locks, setLocks] = useState<ReadonlySet<string>>(() => new Set());
@@ -177,68 +186,84 @@ export function SketchControls({ sketch }: SketchControlsProps) {
     downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "svg"));
   };
 
+  // TWO-REGION SHELL (#154): the canvas region (left) fills the remaining space
+  // and centers the live canvas; the fixed-width inspector sidebar (right,
+  // vertically scrollable) houses EVERY per-sketch control. This is a re-housing
+  // of the existing controls — their markup/styling is unchanged, only relocated
+  // (shadcn restyling is later sibling work). Both regions read the SAME
+  // params/seed/locks state this component owns, which is why the layout lives
+  // here rather than in App. The LiveCanvas transport stays where LiveCanvas
+  // renders it (inside the canvas region for now; a canvas bottom bar is sibling
+  // work). The App-owned `switcher` slot renders at the sidebar top.
   return (
-    <div className="sketch-controls">
-      <ControlPanel
-        schema={sketch.schema}
-        params={params}
-        locks={locks}
-        onChange={setParam}
-        onToggleLock={toggleLock}
-      />
-      <div className="sketch-controls__actions">
-        <button type="button" className="action-button" onClick={rollSeed}>
-          New seed
-        </button>
-        <button type="button" className="action-button" onClick={rollParams}>
-          Randomize
-        </button>
-        <PresetControls
-          sketchId={sketch.id}
-          params={params}
-          seed={seed}
-          locks={locks}
-          onReload={reloadPreset}
-        />
-        {/*
-         * Export controls — the shared home the SVG export sibling reuses. PNG is
-         * the first path: it snapshots the live canvas's displayed frame (no
-         * re-render, no offscreen canvas).
-         */}
-        <div className="export-controls">
-          <button type="button" className="action-button" onClick={exportPng}>
-            Export PNG
-          </button>
-          <button type="button" className="action-button" onClick={exportSvg}>
-            Export SVG
-          </button>
+    <div className="studio-shell">
+      <section className="canvas-region" aria-label="Canvas">
+        <div className="canvas-region__stage">
+          <LiveCanvas
+            handleRef={canvasHandle}
+            sketch={sketch}
+            params={params}
+            seed={seed}
+          />
         </div>
-      </div>
-      <div className="seed-box">
-        <label className="seed-box__label" htmlFor="sketch-seed">
-          seed
-        </label>
-        <input
-          id="sketch-seed"
-          className="seed-box__input"
-          type="number"
-          value={seed}
-          onChange={(event) => {
-            // A blank field is a no-op, not seed 0: `Number("") === 0`, so an
-            // empty value would otherwise silently commit 0. A typed 0 stays valid.
-            if (event.target.value.trim() === "") return;
-            const parsed = Number(event.target.value);
-            if (Number.isNaN(parsed)) return;
-            setSeed(parsed);
-          }}
+      </section>
+      <aside className="inspector" aria-label="Inspector">
+        {switcher}
+        <ControlPanel
+          schema={sketch.schema}
+          params={params}
+          locks={locks}
+          onChange={setParam}
+          onToggleLock={toggleLock}
         />
-      </div>
-      <LiveCanvas
-        handleRef={canvasHandle}
-        sketch={sketch}
-        params={params}
-        seed={seed}
-      />
+        <div className="sketch-controls__actions">
+          <button type="button" className="action-button" onClick={rollSeed}>
+            New seed
+          </button>
+          <button type="button" className="action-button" onClick={rollParams}>
+            Randomize
+          </button>
+          <PresetControls
+            sketchId={sketch.id}
+            params={params}
+            seed={seed}
+            locks={locks}
+            onReload={reloadPreset}
+          />
+          {/*
+           * Export controls — the shared home the SVG export sibling reuses. PNG is
+           * the first path: it snapshots the live canvas's displayed frame (no
+           * re-render, no offscreen canvas).
+           */}
+          <div className="export-controls">
+            <button type="button" className="action-button" onClick={exportPng}>
+              Export PNG
+            </button>
+            <button type="button" className="action-button" onClick={exportSvg}>
+              Export SVG
+            </button>
+          </div>
+        </div>
+        <div className="seed-box">
+          <label className="seed-box__label" htmlFor="sketch-seed">
+            seed
+          </label>
+          <input
+            id="sketch-seed"
+            className="seed-box__input"
+            type="number"
+            value={seed}
+            onChange={(event) => {
+              // A blank field is a no-op, not seed 0: `Number("") === 0`, so an
+              // empty value would otherwise silently commit 0. A typed 0 stays valid.
+              if (event.target.value.trim() === "") return;
+              const parsed = Number(event.target.value);
+              if (Number.isNaN(parsed)) return;
+              setSeed(parsed);
+            }}
+          />
+        </div>
+      </aside>
     </div>
   );
 }
