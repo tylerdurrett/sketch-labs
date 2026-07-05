@@ -15,13 +15,17 @@ import "./App.css";
 /** The Sketches the navigation lists, in registration order. */
 const sketches = registry.list();
 
-/** The id selected on first load — the registry's first entry. */
+/**
+ * The id selected on first load — the registry's LAST entry, i.e. the most
+ * recently added Sketch. New Sketches join the registry list at the end (see
+ * `registry.ts`), so the newest one shows by default when the page loads.
+ */
 function defaultSketchId(): string {
-  const first = sketches[0];
-  if (first === undefined) {
+  const latest = sketches[sketches.length - 1];
+  if (latest === undefined) {
     throw new Error("Sketch registry is empty: nothing to render.");
   }
-  return first.id;
+  return latest.id;
 }
 
 /**
