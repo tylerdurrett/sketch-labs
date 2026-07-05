@@ -5,6 +5,13 @@ import { registry } from "@harness/core";
 
 import { SketchControls } from "./SketchControls";
 import { Button } from "./components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./components/ui/select";
 import "./App.css";
 
 /** The Sketches the navigation lists, in registration order. */
@@ -80,21 +87,37 @@ export function App() {
   }, []);
 
   // The Sketch switcher, owned by App (it drives `selectedId`) but handed to
-  // SketchControls as a slot so it can render inside the inspector sidebar.
+  // SketchControls as a slot so it can render inside the inspector sidebar. It is
+  // a shadcn Select (on Base UI): the registry-order items populate the popup,
+  // the current Sketch shows in the trigger, and picking one drives
+  // `setSelectedId` — which the App-level `key={selected.id}` turns into the
+  // remount that resets that Sketch's params/seed/locks. The switcher lives
+  // ABOVE that keyed remount, so its own selection survives a switch. A real
+  // Select expresses the current choice through its value/aria-selected (not the
+  // old button-row aria-current), and `aria-label="Sketches"` keeps the control
+  // named.
   const switcher = (
-    <nav className="sketch-nav" aria-label="Sketches">
-      {sketches.map((sketch) => (
-        <button
-          key={sketch.id}
-          type="button"
-          className="sketch-nav__item"
-          aria-current={sketch.id === selectedId}
-          onClick={() => setSelectedId(sketch.id)}
-        >
-          {sketch.name}
-        </button>
-      ))}
-    </nav>
+    <Select
+      value={selectedId}
+      onValueChange={(value: string | null) => {
+        if (value !== null) setSelectedId(value);
+      }}
+      items={sketches.map((sketch) => ({
+        value: sketch.id,
+        label: sketch.name,
+      }))}
+    >
+      <SelectTrigger aria-label="Sketches">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {sketches.map((sketch) => (
+          <SelectItem key={sketch.id} value={sketch.id}>
+            {sketch.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 
   return (

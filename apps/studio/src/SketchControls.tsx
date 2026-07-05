@@ -14,6 +14,7 @@ import {
 } from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
+import { Button } from "./components/ui/button";
 import { downloadBlob } from "./downloadBlob";
 import { LiveCanvas, type LiveCanvasHandle } from "./LiveCanvas";
 import { PresetControls } from "./PresetControls";
@@ -248,13 +249,23 @@ export function SketchControls({
             onChange={setParam}
             onToggleLock={toggleLock}
           />
-          <div className="sketch-controls__actions">
-            <button type="button" className="action-button" onClick={rollSeed}>
+          <div className="sketch-controls__actions flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={rollSeed}
+            >
               New seed
-            </button>
-            <button type="button" className="action-button" onClick={rollParams}>
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={rollParams}
+            >
               Randomize
-            </button>
+            </Button>
             <PresetControls
               sketchId={sketch.id}
               params={params}
@@ -262,27 +273,17 @@ export function SketchControls({
               locks={locks}
               onReload={reloadPreset}
             />
-            {/*
-             * Export controls — the shared home the SVG export sibling reuses. PNG is
-             * the first path: it snapshots the live canvas's displayed frame (no
-             * re-render, no offscreen canvas).
-             */}
-            <div className="export-controls">
-              <button type="button" className="action-button" onClick={exportPng}>
-                Export PNG
-              </button>
-              <button type="button" className="action-button" onClick={exportSvg}>
-                Export SVG
-              </button>
-            </div>
           </div>
-          <div className="seed-box">
-            <label className="seed-box__label" htmlFor="sketch-seed">
+          <div className="seed-box flex items-center gap-2">
+            <label
+              className="seed-box__label flex-none min-w-16 text-sm text-muted-foreground"
+              htmlFor="sketch-seed"
+            >
               seed
             </label>
             <input
               id="sketch-seed"
-              className="seed-box__input"
+              className="seed-box__input flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
               type="number"
               value={seed}
               onChange={(event) => {
@@ -294,6 +295,33 @@ export function SketchControls({
                 setSeed(parsed);
               }}
             />
+          </div>
+          {/*
+           * Export controls — the shared home for both export paths (PNG snapshots
+           * the live canvas frame; SVG re-bakes the displayed Scene). `mt-auto`
+           * pins this group to the BOTTOM of the flex-column sidebar (#158) so it
+           * stays anchored while everything above stacks from the top; the two
+           * buttons split the row evenly (`flex-1`).
+           */}
+          <div className="export-controls mt-auto flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={exportPng}
+            >
+              Export PNG
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={exportSvg}
+            >
+              Export SVG
+            </Button>
           </div>
         </aside>
       )}
