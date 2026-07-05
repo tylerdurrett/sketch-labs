@@ -60,10 +60,11 @@ describe("ControlPanel", () => {
       />,
     );
     expect(html).toContain("unsupported control kind: color");
-    // The fallback names the offending param and is an alert (not hidden).
+    // The fallback names the offending param and is an alert (not hidden)...
     expect(html).toContain("mystery");
     expect(html).toContain('role="alert"');
-    expect(html).toContain("control--unsupported");
+    // ...styled LOUD via the destructive theme token (high-contrast, not silent).
+    expect(html).toContain("border-destructive");
   });
 
   it("reflects the supplied param values in the controls", () => {
@@ -94,8 +95,8 @@ describe("ControlPanel", () => {
         onToggleLock={() => {}}
       />,
     );
-    // One lock toggle per param.
-    expect((html.match(/class="control__lock"/g) ?? []).length).toBe(2);
+    // One lock toggle per param — each is the only element carrying aria-pressed.
+    expect((html.match(/aria-pressed=/g) ?? []).length).toBe(2);
     // The locked param's toggle is pressed; the unlocked one is not.
     expect(html).toContain('aria-label="radius lock" aria-pressed="true"');
     expect(html).toContain('aria-label="count lock" aria-pressed="false"');

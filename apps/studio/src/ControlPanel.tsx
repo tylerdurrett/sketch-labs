@@ -58,7 +58,10 @@ function renderControl(
       );
     default:
       return (
-        <div className="control control--unsupported" role="alert">
+        <div
+          role="alert"
+          className="rounded-md border-2 border-destructive bg-destructive/10 px-3 py-2 text-sm font-semibold text-destructive"
+        >
           unsupported control kind: {String((spec as ParamSpec).kind)} (param
           &ldquo;{key}&rdquo;)
         </div>
@@ -83,9 +86,9 @@ export function ControlPanel({
   onToggleLock,
 }: ControlPanelProps) {
   return (
-    <div className="control-panel">
+    <div className="flex flex-col gap-4">
       {Object.entries(schema).map(([key, spec]) => (
-        <div key={key} className="control-panel__row">
+        <div key={key} className="flex flex-col gap-1.5">
           {renderControl(
             key,
             spec,
