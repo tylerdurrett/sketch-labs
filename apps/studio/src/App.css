@@ -1,10 +1,107 @@
+/*
+ * The studio shell fills the viewport as a vertical stack: a fixed-height header
+ * (title + toolchain-proof card) on top, then the two-region shell (#154)
+ * consuming the remaining height. `height: 100vh` (not min-height) bounds the
+ * shell so the inspector sidebar's own `overflow-y: auto` has something to scroll
+ * against.
+ */
 .app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+.app__header {
   display: flex;
   flex-direction: column;
   gap: 1rem;
   padding: 1rem;
+  flex: 0 0 auto;
+}
+
+.app__title {
+  margin: 0;
+}
+
+/*
+ * TWO-REGION SHELL (#154): a horizontal split — the canvas region flexes to fill
+ * the space left of the fixed-width inspector sidebar. `min-height: 0` lets the
+ * row shrink so the sidebar's overflow scrolls instead of stretching the shell.
+ */
+.studio-shell {
+  display: flex;
+  flex-direction: row;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/*
+ * The canvas region: the left half of the shell. It centers the live canvas (and
+ * the transport LiveCanvas renders beneath it) in the space the sidebar leaves.
+ * `min-width: 0` lets it shrink below the canvas's intrinsic width when narrow.
+ */
+.canvas-region {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+ * The canvas-region top bar holds the collapse toggle (#154). It lives in the
+ * canvas region — outside the collapsing sidebar — so the toggle stays visible
+ * and the sidebar re-openable while collapsed.
+ */
+.canvas-region__bar {
+  display: flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  padding: 1rem 1rem 0;
+}
+
+.inspector-toggle {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--card-foreground);
+  cursor: pointer;
+}
+
+.inspector-toggle:hover {
+  border-color: var(--foreground);
+}
+
+.canvas-region__stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 1rem;
+  overflow: auto;
+}
+
+/*
+ * The inspector sidebar: the fixed ~320px right column housing every per-sketch
+ * control (switcher, control panel, seed box, randomness + preset + export
+ * actions). Drag-resize is out of scope, so the width is fixed. It scrolls
+ * vertically on overflow, independent of the canvas region.
+ */
+.inspector {
+  flex: 0 0 320px;
+  width: 320px;
+  height: 100%;
+  overflow-y: auto;
   box-sizing: border-box;
-  min-height: 100vh;
+  padding: 1rem;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 /*
@@ -108,6 +205,7 @@
  */
 .sketch-controls__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
@@ -155,7 +253,9 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  width: min(80vmin, 800px);
+  /* Fills the inspector column (#154) — the old min(80vmin, 800px) coupling
+     overflowed the fixed ~320px sidebar. */
+  width: 100%;
 }
 
 .preset-controls__row {
