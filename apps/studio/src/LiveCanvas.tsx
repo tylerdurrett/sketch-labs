@@ -2,8 +2,10 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type Ref,
 } from "react";
 
@@ -200,6 +202,28 @@ export function sizeToBox(canvas: HTMLCanvasElement, dpr: number): boolean {
  */
 export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // The paper's CSS-box aspect (#155): the `<canvas>` box is sized to the
+  // SKETCH's OWN aspect, not a fixed square. The `Sketch` type does not
+  // statically expose its coordinate space — only a generated `Scene` carries
+  // `space` — so we derive the width/height ratio from a Scene generated at
+  // t = 0, re-deriving on any sketch/params/seed change (a param could resize
+  // the space). It is threaded onto `.live-canvas` as the `--paper-aspect`
+  // custom property; the CSS there contain-fits the box against the stage at
+  // that ratio. This is a DISPLAY-BOX concern only — the DPR backing store
+  // (`sizeToBox`) and the in-canvas contain-fit (`drawSceneFitted`) are
+  // untouched, so PNG/SVG export still snapshots the displayed frame. A
+  // degenerate space (zero/non-finite extent) falls back to a square.
+  const paperAspect = useMemo(() => {
+    const { space } = sketch.generate(params, seed, 0);
+    const ratio = space.width / space.height;
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+  }, [sketch, params, seed]);
+
+  // Inline the derived ratio as the `--paper-aspect` custom property the
+  // `.live-canvas` rule reads for its `aspect-ratio` + contain-fit width. Cast
+  // through CSSProperties: React types don't model custom-property keys.
+  const paperStyle = { "--paper-aspect": paperAspect } as CSSProperties;
 
   // The current params/seed are read through refs inside the rAF `tick` (and the
   // static redraw effect) so the loop effect does NOT depend on them. Keeping the
@@ -463,7 +487,13 @@ export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps)
   return (
     <div className="live-canvas-layout">
       <div className="live-canvas-stage">
-        <canvas ref={canvasRef} className="live-canvas" />
+        {/*
+         * The framed "paper" canvas (#155): its display box is aspect-sized to the
+         * Scene's own space via the `--paper-aspect` custom property `paperStyle`
+         * threads in, contain-fitting against `.live-canvas-stage` (the size-query
+         * container). Relocated into #156's fill-the-region layout unchanged.
+         */}
+        <canvas ref={canvasRef} className="live-canvas" style={paperStyle} />
       </div>
       {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
       {time !== undefined && (

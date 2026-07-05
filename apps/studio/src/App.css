@@ -79,7 +79,9 @@
  * height to LiveCanvas's own layout (#156) — LiveCanvas centers the canvas and
  * pins the transport bar to the bottom — so this is a plain filling flex column,
  * NOT a centering box (centering the layout would shrink the bottom bar off the
- * full width).
+ * full width). The DARK CHROME backdrop + `container-type: size` size-query
+ * container that frames the paper (#155) moved down onto `.live-canvas-stage`,
+ * the box that actually bounds the canvas in this layout.
  */
 .canvas-region__stage {
   display: flex;
@@ -105,6 +107,10 @@
 /*
  * The stage half of that layout: centers the live canvas in the space above the
  * transport bar, with breathing-room padding, and scrolls if the canvas overflows.
+ * It is also the DARK CHROME backdrop and the `container-type: size` size-query
+ * container (#155, relocated here from `.canvas-region__stage` in #156): the box
+ * that actually bounds the canvas, so `.live-canvas` can contain-fit itself
+ * against its `cqw`/`cqh` at the paper's aspect — independent of the viewport.
  */
 .live-canvas-stage {
   display: flex;
@@ -114,6 +120,8 @@
   min-height: 0;
   padding: 1rem;
   overflow: auto;
+  background: var(--background);
+  container-type: size;
 }
 
 /*
@@ -160,16 +168,27 @@
 }
 
 /*
- * The large live canvas. A fixed-aspect CSS box is the display size; LiveCanvas
- * sizes the backing store to this box x devicePixelRatio and contain-fits the
- * Scene into it, so the box aspect need not match the Scene's (letterboxing
- * handles the difference).
+ * The framed "paper" (#155). Its CSS box is sized to the SKETCH's OWN aspect —
+ * not a fixed square — and contain-fit against the stage: `--paper-aspect` (a
+ * unitless width/height ratio) is threaded on inline by LiveCanvas from the
+ * generated Scene's `space`, defaulting here to 1 (square) so the box is
+ * coherent before any JS runs. `width: min(100cqw, 100cqh * aspect)` picks the
+ * largest width that fits BOTH the stage's width and its height-at-aspect (a
+ * pure-CSS contain-fit), and `aspect-ratio` derives the matching height; the
+ * stage flex-centers the result. The border + drop shadow read as a paper frame
+ * lifted off the dark chrome. LiveCanvas still sizes the backing store to this
+ * box x devicePixelRatio and contain-fits the Scene into it, so `Stroke.width`
+ * scales correctly and PNG/SVG export snapshots the displayed frame unchanged.
  */
 .live-canvas {
   display: block;
-  width: min(80vmin, 800px);
-  height: min(80vmin, 800px);
-  border: 1px solid #ccc;
+  --paper-aspect: 1;
+  aspect-ratio: var(--paper-aspect);
+  width: min(100cqw, 100cqh * var(--paper-aspect));
+  max-width: 100%;
+  max-height: 100%;
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 60%);
 }
 
 /*
@@ -340,9 +359,13 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  /* Pinned to the bottom of the canvas area as a full-width slim bar (#156):
+     `flex: 0 0 auto` keeps it out of the stage's flex-grow. `border-top` uses the
+     themed `--border` (not a hardcoded gray) so it reads correctly against the
+     dark chrome the framed paper (#155) brought in. */
   flex: 0 0 auto;
   padding: 0.5rem 1rem;
-  border-top: 1px solid #ccc;
+  border-top: 1px solid var(--border);
 }
 
 .transport__play {
