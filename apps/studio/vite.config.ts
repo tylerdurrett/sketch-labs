@@ -1,3 +1,4 @@
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
@@ -45,6 +46,10 @@ const workspaceRoot = resolveFromHere("../..");
 export default defineConfig({
   plugins: [
     react(),
+    // Tailwind v4's Vite plugin: scans the app for utility classes and compiles
+    // the CSS entry (src/index.css) via its prebuilt oxide binary (ADR-0008). No
+    // config knobs — v4 is CSS-first, driven entirely from the stylesheet.
+    tailwindcss(),
     // Dev-only preset write + list middleware, and the read-one static-serve
     // mapping that exposes sketchesRoot at /sketches/ (ADR-0006). Both resolve
     // against the single sketchesRoot knob above.

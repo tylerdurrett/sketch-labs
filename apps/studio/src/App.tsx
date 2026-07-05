@@ -1,8 +1,10 @@
+import { Sparkles } from "lucide-react";
 import { useState } from "react";
 
 import { registry } from "@harness/core";
 
 import { SketchControls } from "./SketchControls";
+import { Button } from "./components/ui/button";
 import "./App.css";
 
 /** The Sketches the navigation lists, in registration order. */
@@ -36,6 +38,25 @@ export function App() {
   return (
     <main className="app">
       <h1>Harness Studio</h1>
+      {/*
+        Toolchain proof for the Tailwind v4 + shadcn (Base UI) foundation
+        (ADR-0008): a dark-surface card styled purely with Tailwind utilities +
+        the shadcn design tokens, holding a shadcn Button with a lucide-react
+        icon. It exercises the whole new stack — Tailwind compile, token
+        resolution, cva/cn, Base UI render, and the icon set — without touching
+        any existing control/canvas behavior below.
+      */}
+      <div className="flex items-center justify-between gap-4 rounded-lg border bg-card p-4 text-card-foreground">
+        <div className="flex items-center gap-2">
+          <Sparkles className="text-muted-foreground" aria-hidden />
+          <span className="text-sm text-muted-foreground">
+            Tailwind v4 + shadcn (Base UI) foundation
+          </span>
+        </div>
+        <Button type="button" size="sm">
+          Styled with shadcn
+        </Button>
+      </div>
       <nav className="sketch-nav" aria-label="Sketches">
         {sketches.map((sketch) => (
           <button
