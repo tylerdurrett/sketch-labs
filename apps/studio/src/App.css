@@ -73,6 +73,14 @@
   border-color: var(--foreground);
 }
 
+/*
+ * The canvas-region stage is the DARK CHROME backdrop (#155): a neutral dark
+ * surface (the shadcn `--background` token, ADR-0008) around which the framed
+ * "paper" floats. The stage flex-centers its child (the live canvas, plus the
+ * transport for animated sketches). `container-type: size` makes it a size
+ * query container so `.live-canvas` can contain-fit itself against the stage's
+ * OWN box (`cqw`/`cqh`) at the paper's aspect — independent of the viewport.
+ */
 .canvas-region__stage {
   display: flex;
   flex-direction: column;
@@ -83,6 +91,8 @@
   min-height: 0;
   padding: 1rem;
   overflow: auto;
+  background: var(--background);
+  container-type: size;
 }
 
 /*
@@ -105,16 +115,27 @@
 }
 
 /*
- * The large live canvas. A fixed-aspect CSS box is the display size; LiveCanvas
- * sizes the backing store to this box x devicePixelRatio and contain-fits the
- * Scene into it, so the box aspect need not match the Scene's (letterboxing
- * handles the difference).
+ * The framed "paper" (#155). Its CSS box is sized to the SKETCH's OWN aspect —
+ * not a fixed square — and contain-fit against the stage: `--paper-aspect` (a
+ * unitless width/height ratio) is threaded on inline by LiveCanvas from the
+ * generated Scene's `space`, defaulting here to 1 (square) so the box is
+ * coherent before any JS runs. `width: min(100cqw, 100cqh * aspect)` picks the
+ * largest width that fits BOTH the stage's width and its height-at-aspect (a
+ * pure-CSS contain-fit), and `aspect-ratio` derives the matching height; the
+ * stage flex-centers the result. The border + drop shadow read as a paper frame
+ * lifted off the dark chrome. LiveCanvas still sizes the backing store to this
+ * box x devicePixelRatio and contain-fits the Scene into it, so `Stroke.width`
+ * scales correctly and PNG/SVG export snapshots the displayed frame unchanged.
  */
 .live-canvas {
   display: block;
-  width: min(80vmin, 800px);
-  height: min(80vmin, 800px);
-  border: 1px solid #ccc;
+  --paper-aspect: 1;
+  aspect-ratio: var(--paper-aspect);
+  width: min(100cqw, 100cqh * var(--paper-aspect));
+  max-width: 100%;
+  max-height: 100%;
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 60%);
 }
 
 /*
@@ -184,7 +205,9 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  width: min(80vmin, 800px);
+  /* Fills the stage width (#155) — decoupled from the old min(80vmin, 800px)
+     square so the fixed square is not reintroduced under the aspect-sized paper. */
+  width: 100%;
 }
 
 .transport__play {
