@@ -11,9 +11,9 @@ import type { Point } from '../types'
 import type { Primitive } from '../scene'
 
 /**
- * The thirteen leaf-field knobs, in declaration order. The sphere knobs are
+ * The fourteen leaf-field knobs, in declaration order. The sphere knobs are
  * APPENDED last (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then
- * `sphereDepth` #142) — the first nine keep their positions (order is part of
+ * `sphereDepth` #142) — the first ten keep their positions (order is part of
  * the contract).
  */
 const KNOBS = [
@@ -24,7 +24,8 @@ const KNOBS = [
   'leafSizeMin',
   'leafSizeMax',
   'leafWidth',
-  'pointiness',
+  'pointinessMin',
+  'pointinessMax',
   'variation',
   'sphereCount',
   'sphereRadiusMin',
@@ -191,7 +192,7 @@ function meanLeafArea(primitives: Primitive[]): number {
 }
 
 describe('leaf-field Sketch contract', () => {
-  it('declares exactly the thirteen knobs in order and NO time metadata (static)', () => {
+  it('declares exactly the fourteen knobs in order and NO time metadata (static)', () => {
     expect(Object.keys(leafField.schema)).toEqual([...KNOBS])
     // Static Sketch: absence of `time` is what makes the Harness hide the scrubber.
     expect(leafField.time).toBeUndefined()
@@ -399,9 +400,50 @@ describe('leaf-field shape knobs — width & pointiness (#127)', () => {
 
   it('pointiness is live — changing the tip sharpness rebakes the field', () => {
     const params: Params = { density: 5, variation: 0 }
-    const round = leafField.generate({ ...params, pointiness: 0.05 }, 'point', 0)
-    const sharp = leafField.generate({ ...params, pointiness: 0.95 }, 'point', 0)
+    const round = leafField.generate(
+      { ...params, pointinessMin: 0.05, pointinessMax: 0.05 },
+      'point',
+      0,
+    )
+    const sharp = leafField.generate(
+      { ...params, pointinessMin: 0.95, pointinessMax: 0.95 },
+      'point',
+      0,
+    )
     expect(sharp).not.toEqual(round)
+  })
+
+  it('a wide pointiness range bakes a different field than a narrow one at the same seed', () => {
+    // Tip sharpness is owned by the [pointinessMin, pointinessMax] range now:
+    // widening it makes each leaf draw its own tipSharpness across a broader
+    // span, so the baked field differs from a uniform (narrow) one. Same
+    // seed/density ⇒ same placement/count; only the per-leaf tip roll differs.
+    const seed = 'point-range'
+    const uniform = leafField.generate(
+      { density: 6, variation: 0, pointinessMin: 0.5, pointinessMax: 0.5 },
+      seed,
+      0,
+    )
+    const wide = leafField.generate(
+      { density: 6, variation: 0, pointinessMin: 0, pointinessMax: 1 },
+      seed,
+      0,
+    )
+    expect(wide).not.toEqual(uniform)
+  })
+
+  it('pointinessMin == pointinessMax is deterministic and reproducible (uniform tips)', () => {
+    // With the range collapsed to a point every leaf draws the same tipSharpness,
+    // so two identical-param generations reproduce the same Scene exactly.
+    const params: Params = {
+      density: 6,
+      variation: 0,
+      pointinessMin: 0.4,
+      pointinessMax: 0.4,
+    }
+    const a = leafField.generate(params, 'point-uniform', 0)
+    const b = leafField.generate(params, 'point-uniform', 0)
+    expect(a).toEqual(b)
   })
 })
 
