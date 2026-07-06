@@ -64,13 +64,19 @@
  * `sphereRadiusMin`/`sphereRadiusMax` (per-disc radius bounds, in coordinate
  * units — superseding the old radius-fraction constants). Each disc's center and
  * radius are seeded (per-sphere, off the leaf stream — see below). #142 makes the
- * front/behind split its own GLOBAL knob `sphereDepth` (0 ⇒ behind every leaf,
- * max front overlap / most embedded; 1 ⇒ in front of every leaf, clean round edge
- * / most spherical), applied uniformly to EVERY disc — replacing the per-sphere
- * seeded depth roll (per-sphere depth variation is out of scope for this slice).
- * All discs therefore share one splice index; if it lands past the last leaf they
- * paint on top after the loop. No shading, highlight, cast-shadow, or per-leaf
- * clipping against the discs (styling / clipping slices).
+ * front/behind split its own knob `sphereDepth` (0 ⇒ behind every overlapping
+ * leaf, max front overlap / most embedded; 1 ⇒ in front of every overlapping leaf,
+ * clean round edge / most spherical). Because the field draws top-of-canvas first
+ * (ascending y), applying that knob as ONE global splice index made it a single y
+ * threshold across the whole canvas — so at any fixed value the low discs came out
+ * buried while the high discs floated with no overlap (or vice-versa), with no
+ * value reading the same top and bottom. So `sphereDepth` is POSITION-RELATIVE
+ * (2026-07-06): each disc derives its OWN splice index from a threshold anchored to
+ * its own center and radius (the disc's overlap band, [cy − r − margin,
+ * cy + r + margin], with margin = half the max leaf length), so the knob reads as a
+ * CONSISTENT depth wherever the disc sits. A disc whose threshold clears the last
+ * leaf paints on top after the loop. No shading, highlight, cast-shadow, or
+ * per-leaf clipping against the discs (styling / clipping slices).
  *
  * DRAW BOUNDARY (load-bearing): only generic {@link Primitive}s cross into the
  * Scene. The leaf domain type ({@link LeafShape}) is reached ONLY through the
@@ -94,9 +100,11 @@
  * `sphereCount` consumes MORE draws from the sphere stream WITHOUT shifting a
  * single per-leaf roll and desyncing the field (#141). The sphere state is never
  * drawn up-front from the main `rng` (explicitly rejected by the audit). The
- * splice depth is NOT rolled — it is the global `sphereDepth` knob (#142), so it
- * touches only the insert index and never consumes an rng draw from either
- * stream: changing it leaves every disc's cx/cy/r AND every leaf byte-identical.
+ * splice depth is NOT rolled — it derives from the `sphereDepth` knob and each
+ * disc's own (already-seeded) cy/r (#142, position-relative 2026-07-06), so it
+ * touches only the per-disc insert indices and never consumes an rng draw from
+ * either stream: changing it leaves every disc's cx/cy/r AND every leaf
+ * byte-identical.
  *
  * PAPER-RIM RATIONALE (2026-07-01 audit): a matching dark stroke would make the
  * painter's-order overlap visually unobservable — adjacent dark leaves merge
@@ -181,14 +189,15 @@ const schema = {
    */
   sphereRadiusMax: { kind: 'number', min: 40, max: 400, default: 260 },
   /**
-   * Where every disc inserts into the (ascending-y) painter's-order stack — the
-   * front/behind split, applied GLOBALLY to all discs. 0 ⇒ each disc sits behind
-   * every leaf (max front overlap, most embedded); 1 ⇒ each disc sits in front of
-   * every leaf (clean round edge, most spherical). Raising it draws MORE leaves
-   * before the disc (occluded / behind), so the round far-side edge grows and the
-   * front overlap shrinks. One global depth for the whole set this slice
-   * (per-sphere depth variation is out of scope). Consumed NOW. Appended last
-   * (#142).
+   * How embedded each disc reads in the field — the front/behind split, applied
+   * as a POSITION-RELATIVE depth (2026-07-06). Because the field draws
+   * top-of-canvas first (ascending y), a single global splice index meant one y
+   * threshold for the whole canvas and so a different apparent depth at every
+   * height; instead each disc's threshold is anchored to its OWN center/radius, so
+   * one knob value reads consistently wherever a disc sits. 0 ⇒ the disc sits
+   * behind every leaf that overlaps it (max front overlap, most embedded); 1 ⇒ in
+   * front of every overlapping leaf (clean round edge, most spherical); 0.5 splits
+   * at the disc's center. Consumed NOW. Appended last (#142).
    */
   sphereDepth: { kind: 'number', min: 0, max: 1, default: 0.5 },
 } satisfies Record<string, NumberParamSpec>
@@ -379,18 +388,46 @@ export const leafField: StatelessSketch = {
       })
     }
 
-    // One global splice index for the whole set (#142). All discs draw (in sphere
-    // order) just before the leaf at this index; if it lands past the last leaf
-    // (index ≥ N, i.e. depth ~1) the in-loop `i === spliceIdx` never fires and the
-    // discs are deferred to the on-top pass after the loop instead.
-    const spliceIdx = Math.round(sphereDepth * points.length)
+    // PER-DISC, POSITION-RELATIVE DEPTH (2026-07-06): a single global splice index
+    // made `sphereDepth` mean DIFFERENT things at different canvas heights. The
+    // field draws top-of-canvas first (ascending y), so one index is one y
+    // threshold across the WHOLE canvas — at any fixed value the low discs came out
+    // buried (their overlapping leaves paint late/in-front) while the high discs
+    // floated with a clean edge, or vice-versa. There was no value that read the
+    // same top and bottom. So each disc now gets its OWN splice index from a
+    // threshold anchored to ITS center and radius, and the knob reads as a
+    // CONSISTENT depth wherever the disc sits.
+    //
+    // The band is the disc's own overlap zone padded by half the max leaf length
+    // (the farthest a leaf CENTER can sit from the disc edge and still cross it):
+    // [cy − r − margin, cy + r + margin]. sphereDepth 0 drops the threshold BELOW
+    // that band ⇒ every overlapping leaf draws AFTER ⇒ disc sits behind all of them
+    // (max front overlap, embedded); sphereDepth 1 lifts it ABOVE ⇒ every
+    // overlapping leaf draws BEFORE ⇒ disc sits in front (clean round edge); 0.5
+    // splits the band at the disc's center. Points are y-sorted, so the count of
+    // points below the threshold IS that disc's splice index. Still a knob, not an
+    // rng roll — it touches only these indices, leaving every cx/cy/r and every
+    // leaf byte-identical.
+    const depthMargin = leafSizeMax / 2
+    const placedSpheres = spheres.map((sphere) => {
+      const thresholdY = lerp(
+        sphere.cy - sphere.r - depthMargin,
+        sphere.cy + sphere.r + depthMargin,
+        sphereDepth,
+      )
+      let spliceIdx = 0
+      while (spliceIdx < points.length && (points[spliceIdx]?.[1] ?? Infinity) < thresholdY) {
+        spliceIdx++
+      }
+      return { ...sphere, spliceIdx }
+    })
 
     // Sampler order IS painter's order: index 0 is drawn first (bottom). Each
     // leaf is rotated by its own flow angle, so the bbox center is no longer a
     // loop invariant (the #126 hoist is superseded) — compute it per-leaf after
     // rotation.
     points.forEach(([x, y], i) => {
-      if (i === spliceIdx) for (const sphere of spheres) drawDisc(sphere)
+      for (const sphere of placedSpheres) if (sphere.spliceIdx === i) drawDisc(sphere)
       // Sample the divergence-free flow at this point via the 3D curl overload
       // (z = t) so animating later is a metadata swap, not a rewrite (ADR-0002).
       // Coords are CANVAS-NORMALIZED (x/WIDTH, y/HEIGHT) so `fieldScale` reads as
@@ -449,8 +486,12 @@ export const leafField: StatelessSketch = {
       })
     })
 
-    // sphereDepth ~1 lands the splice index past the last leaf ⇒ draw on top of all.
-    if (spliceIdx >= points.length) for (const sphere of spheres) drawDisc(sphere)
+    // A disc whose threshold cleared the last leaf (spliceIdx === N — its whole
+    // padded band sits at/above the bottom of the field) never fired in the loop,
+    // so draw it on top of all leaves here.
+    for (const sphere of placedSpheres) {
+      if (sphere.spliceIdx >= points.length) drawDisc(sphere)
+    }
 
     return builder.build()
   },
