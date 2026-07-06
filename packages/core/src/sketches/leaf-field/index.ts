@@ -14,7 +14,7 @@
  * under later ones, so the overlap reads as a real composited field, not a flat
  * stamp sheet.
  *
- * ALL FOURTEEN KNOBS LIVE: the first ten complete the scatter + placement +
+ * ALL FIFTEEN KNOBS LIVE: the first eleven complete the scatter + placement +
  * flow-field orientation + per-leaf variation + compositing, and the four
  * appended sphere knobs (`sphereCount`, `sphereRadiusMin`, `sphereRadiusMax`,
  * `sphereDepth`) drive the implied-sphere occluders (below). `density`
@@ -22,10 +22,12 @@
  * `fieldScale` (curl base frequency, in features across the canvas),
  * `octaves` (how many noise layers stack) and `turbulence` (curl octave falloff
  * → fbm `gain`) shape the flow each leaf bends into; `leafSizeMin`/`leafSizeMax`
- * bound the seeded length, `leafWidth` sets width as a fraction of that length
- * (slenderness) and `pointinessMin`/`pointinessMax` bound the seeded tip
- * sharpness; each leaf's length draws uniformly across [leafSizeMin, leafSizeMax]
- * and its tip sharpness draws uniformly across [pointinessMin, pointinessMax]
+ * bound the seeded length, `leafWidthMin`/`leafWidthMax` bound the seeded width
+ * (as a fraction of that length — slenderness) and `pointinessMin`/`pointinessMax`
+ * bound the seeded tip
+ * sharpness; each leaf's length draws uniformly across [leafSizeMin, leafSizeMax],
+ * its width fraction across [leafWidthMin, leafWidthMax], and its tip sharpness
+ * across [pointinessMin, pointinessMax]
  * (set each pair equal for a uniform field), while `variation` scales how far
  * each leaf's curl/wobble
  * strays from the fixed base — at `variation` 0 the curl/wobble collapse back to
@@ -123,10 +125,10 @@ import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
 /**
- * The leaf-field Parameter Schema — fourteen {@link NumberParamSpec} knobs, all
+ * The leaf-field Parameter Schema — fifteen {@link NumberParamSpec} knobs, all
  * consumed NOW. Order is fixed and part of the contract; the sphere knobs are
  * APPENDED last (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then
- * `sphereDepth` #142) so the existing ten keep their positions. `satisfies`
+ * `sphereDepth` #142) so the existing eleven keep their positions. `satisfies`
  * keeps the literal key set (so `numberParam` can index by `keyof typeof schema`)
  * while enforcing the spec type.
  */
@@ -148,8 +150,10 @@ const schema = {
   leafSizeMin: { kind: 'number', min: 10, max: 300, default: 50 },
   /** Leaf length range high — each leaf's length draws uniformly in [min, max]. Consumed NOW. */
   leafSizeMax: { kind: 'number', min: 10, max: 400, default: 155.5 },
-  /** Leaf width as a fraction of its length — lower = long & slender, higher = short & fat. Consumed NOW. */
-  leafWidth: { kind: 'number', min: 0.15, max: 1, default: 0.9, step: 0.05 },
+  /** Leaf width range low — width as a fraction of the leaf's own length; each leaf draws uniformly in [min, max]. Lower = long & slender, higher = short & fat. Set equal to max for a uniform-width field. Consumed NOW. */
+  leafWidthMin: { kind: 'number', min: 0.15, max: 1, default: 0.9, step: 0.05 },
+  /** Leaf width range high — width as a fraction of the leaf's own length; each leaf draws uniformly in [min, max]. Consumed NOW. */
+  leafWidthMax: { kind: 'number', min: 0.15, max: 1, default: 0.9, step: 0.05 },
   /** Leaf tip sharpness range low — each leaf's `tipSharpness` draws uniformly in [min, max]; 0 = round/blunt apex, 1 = sharp/pointed. Set equal to max for a uniform field. Consumed NOW. */
   pointinessMin: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
   /** Leaf tip sharpness range high — each leaf's `tipSharpness` draws uniformly in [min, max]; 0 = round/blunt apex, 1 = sharp/pointed. Consumed NOW. */
@@ -193,12 +197,12 @@ const schema = {
 const REFERENCE_SPACING = 400
 
 // Base shape constants. Each leaf's length draws uniformly in its own
-// [leafSizeMin, leafSizeMax] range, and its tip sharpness draws uniformly in its
-// own [pointinessMin, pointinessMax] range (both independent of `variation` —
+// [leafSizeMin, leafSizeMax] range, its tip sharpness in its own
+// [pointinessMin, pointinessMax] range, and its width fraction in its own
+// [leafWidthMin, leafWidthMax] range (all three independent of `variation` —
 // that knob owns curl/wobble only). Curl and wobble stray from these bases by
 // seeded amounts scaled by `variation`; at `variation` 0 they collapse to the
-// fixed base (base curl, zero wobble). (Width ratio is its own live knob —
-// `leafWidth` — applied uniformly.)
+// fixed base (base curl, zero wobble).
 const FIXED_CURL = 0.12
 
 /** Std-dev of the seeded per-leaf curl jitter (radians of bend), scaled by `variation`. */
@@ -287,7 +291,8 @@ export const leafField: StatelessSketch = {
     const density = numberParam(params, schema, 'density')
     const leafSizeMin = numberParam(params, schema, 'leafSizeMin')
     const leafSizeMax = numberParam(params, schema, 'leafSizeMax')
-    const leafWidth = numberParam(params, schema, 'leafWidth')
+    const leafWidthMin = numberParam(params, schema, 'leafWidthMin')
+    const leafWidthMax = numberParam(params, schema, 'leafWidthMax')
     const pointinessMin = numberParam(params, schema, 'pointinessMin')
     const pointinessMax = numberParam(params, schema, 'pointinessMax')
     const fieldScale = numberParam(params, schema, 'fieldScale')
@@ -400,26 +405,30 @@ export const leafField: StatelessSketch = {
       })
       const angle = Math.atan2(flow[1], flow[0])
 
-      // Roll this leaf's shape from `rng`. CRUCIAL: roll all four (length, curl,
-      // wobble, tipSharpness) UNCONDITIONALLY and in a fixed order — the
-      // rng-consumption COUNT per leaf must stay constant regardless of knob values
-      // so the deterministic seam holds and changing a knob reshapes the field
-      // without desyncing the sequence. Length draws uniformly across the full
-      // [leafSizeMin, leafSizeMax] range so leaves genuinely differ in size, and
+      // Roll this leaf's shape from `rng`. CRUCIAL: roll all five (length, curl,
+      // wobble, tipSharpness, widthRatio) UNCONDITIONALLY and in a fixed order —
+      // the rng-consumption COUNT per leaf must stay constant regardless of knob
+      // values so the deterministic seam holds and changing a knob reshapes the
+      // field without desyncing the sequence. Length draws uniformly across the
+      // full [leafSizeMin, leafSizeMax] range so leaves genuinely differ in size,
       // tipSharpness draws uniformly across [pointinessMin, pointinessMax] so tip
-      // pointiness varies per leaf — pointiness variation is owned by that range
-      // (set either pair equal for a uniform field). `variation` governs only the
-      // curl/wobble shape strays, which collapse to the fixed base (FIXED curl /
-      // zero wobble) at variation 0 while still consuming their draws. The
-      // tipSharpness draw is APPENDED LAST so the pre-existing length/curl/wobble
-      // order is untouched.
+      // pointiness varies per leaf, and widthRatio draws uniformly across
+      // [leafWidthMin, leafWidthMax] so width (as a fraction of length) varies per
+      // leaf — size, pointiness, and width variation are each owned by their own
+      // range (set any pair equal for a uniform field). `variation` governs only
+      // the curl/wobble shape strays, which collapse to the fixed base (FIXED curl
+      // / zero wobble) at variation 0 while still consuming their draws. The
+      // tipSharpness and widthRatio draws are APPENDED LAST (in that order) so the
+      // pre-existing length/curl/wobble order is untouched; widthRatio is the last
+      // per-leaf roll.
       const length = rng.range(leafSizeMin, leafSizeMax)
       const curlAmount = FIXED_CURL + rng.gaussian(0, CURL_JITTER_STD) * variation
       const wobble = MAX_WOBBLE * variation * rng.value()
       const tipSharpness = rng.range(pointinessMin, pointinessMax)
+      const widthRatio = rng.range(leafWidthMin, leafWidthMax)
       const shape: LeafShape = {
         length,
-        width: length * leafWidth,
+        width: length * widthRatio,
         curl: curlAmount,
         wobble,
         tipSharpness,
