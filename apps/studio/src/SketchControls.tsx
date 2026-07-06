@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { useRef, useState, type ReactNode } from "react";
 
 import {
   applyPreset,
@@ -14,6 +15,7 @@ import {
 } from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
+import { Button } from "./components/ui/button";
 import { downloadBlob } from "./downloadBlob";
 import { LiveCanvas, type LiveCanvasHandle } from "./LiveCanvas";
 import { PresetControls } from "./PresetControls";
@@ -24,6 +26,24 @@ import { PresetControls } from "./PresetControls";
 export interface SketchControlsProps {
   /** The selected Sketch whose schema drives the controls and whose Scene renders. */
   sketch: Sketch;
+  /**
+   * The Sketch switcher, owned by App (it drives selection, which lives ABOVE
+   * this keyed-remount instance) and rendered as a slot at the inspector
+   * sidebar's top. Passed in rather than built here so switching Sketch — which
+   * remounts this component — never resets the switcher's own selection state.
+   * Optional: the control-wiring tests mount this component without a switcher,
+   * in which case the sidebar simply renders no switcher slot.
+   */
+  switcher?: ReactNode;
+  /**
+   * Whether the inspector sidebar is hidden (#154). Owned by App (above this
+   * keyed remount) so it persists across Sketch switches. When true the sidebar
+   * is not rendered and the canvas region takes the full width. Defaults to
+   * shown for the wiring tests, which mount without this prop.
+   */
+  collapsed?: boolean;
+  /** Toggle the {@link collapsed} state — wired to the canvas-region toggle button. */
+  onToggleCollapse?: () => void;
 }
 
 /**
@@ -53,7 +73,12 @@ export interface SketchControlsProps {
  * hand-editable. Like `seed` and `params`, `locks` lives in keyed-remount state,
  * so a Sketch switch clears every lock for free (no manual reset).
  */
-export function SketchControls({ sketch }: SketchControlsProps) {
+export function SketchControls({
+  sketch,
+  switcher,
+  collapsed = false,
+  onToggleCollapse,
+}: SketchControlsProps) {
   const [params, setParams] = useState(() => defaultParams(sketch.schema));
   const [seed, setSeed] = useState(() => newSeed(Math.random));
   const [locks, setLocks] = useState<ReadonlySet<string>>(() => new Set());
@@ -177,68 +202,147 @@ export function SketchControls({ sketch }: SketchControlsProps) {
     downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "svg"));
   };
 
+  // TWO-REGION SHELL (#154): the canvas region (left) fills the remaining space
+  // and centers the live canvas; the fixed-width inspector sidebar (right,
+  // vertically scrollable) houses EVERY per-sketch control. This is a re-housing
+  // of the existing controls — their markup/styling is unchanged, only relocated
+  // (shadcn restyling is later sibling work). Both regions read the SAME
+  // params/seed/locks state this component owns, which is why the layout lives
+  // here rather than in App. The canvas stage hands its full height to
+  // LiveCanvas's own layout, which centers the canvas and pins the transport to a
+  // slim bar at the bottom of the canvas area (#156). The App-owned `switcher`
+  // slot renders at the sidebar top.
   return (
-    <div className="sketch-controls">
-      <ControlPanel
-        schema={sketch.schema}
-        params={params}
-        locks={locks}
-        onChange={setParam}
-        onToggleLock={toggleLock}
-      />
-      <div className="sketch-controls__actions">
-        <button type="button" className="action-button" onClick={rollSeed}>
-          New seed
-        </button>
-        <button type="button" className="action-button" onClick={rollParams}>
-          Randomize
-        </button>
-        <PresetControls
-          sketchId={sketch.id}
-          params={params}
-          seed={seed}
-          locks={locks}
-          onReload={reloadPreset}
-        />
+    <div className="studio-shell">
+      <section className="canvas-region" aria-label="Canvas">
         {/*
-         * Export controls — the shared home the SVG export sibling reuses. PNG is
-         * the first path: it snapshots the live canvas's displayed frame (no
-         * re-render, no offscreen canvas).
+         * The collapse toggle lives in the canvas region — NOT inside the
+         * collapsing sidebar — so it stays visible (and the sidebar re-openable)
+         * while collapsed. `[` is the equivalent keyboard shortcut (owned by App).
          */}
-        <div className="export-controls">
-          <button type="button" className="action-button" onClick={exportPng}>
-            Export PNG
-          </button>
-          <button type="button" className="action-button" onClick={exportSvg}>
-            Export SVG
-          </button>
+        <div className="canvas-region__bar">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground"
+            aria-expanded={!collapsed}
+            aria-controls="inspector"
+            aria-label={collapsed ? "Show inspector" : "Hide inspector"}
+            onClick={onToggleCollapse}
+            title="Toggle inspector ([)"
+          >
+            {collapsed ? <PanelRightOpen aria-hidden /> : <PanelRightClose aria-hidden />}
+          </Button>
         </div>
-      </div>
-      <div className="seed-box">
-        <label className="seed-box__label" htmlFor="sketch-seed">
-          seed
-        </label>
-        <input
-          id="sketch-seed"
-          className="seed-box__input"
-          type="number"
-          value={seed}
-          onChange={(event) => {
-            // A blank field is a no-op, not seed 0: `Number("") === 0`, so an
-            // empty value would otherwise silently commit 0. A typed 0 stays valid.
-            if (event.target.value.trim() === "") return;
-            const parsed = Number(event.target.value);
-            if (Number.isNaN(parsed)) return;
-            setSeed(parsed);
-          }}
+        <div className="canvas-region__stage">
+          <LiveCanvas
+            handleRef={canvasHandle}
+            sketch={sketch}
+            params={params}
+            seed={seed}
+          />
+        </div>
+      </section>
+      {/*
+       * The inspector stays MOUNTED in both states and merely `hidden` while
+       * collapsed (#165), rather than being conditionally rendered. The
+       * canvas-region toggle carries `aria-controls="inspector"`, so the target
+       * element must exist even while collapsed — otherwise the very affordance a
+       * screen-reader user relies on to RE-open the panel points at nothing. The
+       * `[hidden]` attribute both removes it from the a11y tree and (via the
+       * `.inspector[hidden] { display: none }` rule in App.css, which beats the
+       * author `display: flex`) collapses it so the canvas takes the full width.
+       */}
+      <aside
+        id="inspector"
+        className="inspector"
+        aria-label="Inspector"
+        hidden={collapsed}
+      >
+        {switcher}
+        <ControlPanel
+          schema={sketch.schema}
+          params={params}
+          locks={locks}
+          onChange={setParam}
+          onToggleLock={toggleLock}
         />
-      </div>
-      <LiveCanvas
-        handleRef={canvasHandle}
-        sketch={sketch}
-        params={params}
-        seed={seed}
-      />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={rollSeed}
+          >
+            New seed
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={rollParams}
+          >
+            Randomize
+          </Button>
+          <PresetControls
+            sketchId={sketch.id}
+            params={params}
+            seed={seed}
+            locks={locks}
+            onReload={reloadPreset}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <label
+            className="flex-none min-w-16 text-sm text-muted-foreground"
+            htmlFor="sketch-seed"
+          >
+            seed
+          </label>
+          <input
+            id="sketch-seed"
+            className="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            type="number"
+            value={seed}
+            onChange={(event) => {
+              // A blank field is a no-op, not seed 0: `Number("") === 0`, so an
+              // empty value would otherwise silently commit 0. A typed 0 stays valid.
+              if (event.target.value.trim() === "") return;
+              const parsed = Number(event.target.value);
+              if (Number.isNaN(parsed)) return;
+              setSeed(parsed);
+            }}
+          />
+        </div>
+        {/*
+         * Export controls — the shared home for both export paths (PNG snapshots
+         * the live canvas frame; SVG re-bakes the displayed Scene). `mt-auto`
+         * pins this group to the BOTTOM of the flex-column sidebar (#158) so it
+         * stays anchored while everything above stacks from the top; the two
+         * buttons split the row evenly (`flex-1`).
+         */}
+        <div className="mt-auto flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            onClick={exportPng}
+          >
+            Export PNG
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            onClick={exportSvg}
+          >
+            Export SVG
+          </Button>
+        </div>
+      </aside>
     </div>
   );
 }

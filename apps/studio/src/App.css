@@ -1,212 +1,190 @@
+/*
+ * The studio shell fills the viewport with the two-region shell (#154). `height:
+ * 100vh` (not min-height) bounds the shell so the inspector sidebar's own
+ * `overflow-y: auto` has something to scroll against.
+ */
 .app {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
+  height: 100vh;
   box-sizing: border-box;
-  min-height: 100vh;
 }
 
 /*
- * Sketch navigation: a row of buttons, one per registered Sketch, listed by
- * name. The selected button is marked via aria-current.
+ * TWO-REGION SHELL (#154): a horizontal split — the canvas region flexes to fill
+ * the space left of the fixed-width inspector sidebar. `min-height: 0` lets the
+ * row shrink so the sidebar's overflow scrolls instead of stretching the shell.
  */
-.sketch-nav {
+.studio-shell {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.sketch-nav__item {
-  padding: 0.375rem 0.75rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-}
-
-.sketch-nav__item[aria-current="true"] {
-  border-color: #333;
-  background: #333;
-  color: #fff;
+  flex-direction: row;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /*
- * The large live canvas. A fixed-aspect CSS box is the display size; LiveCanvas
- * sizes the backing store to this box x devicePixelRatio and contain-fits the
- * Scene into it, so the box aspect need not match the Scene's (letterboxing
- * handles the difference).
+ * The canvas region: the left half of the shell. It hands the space the sidebar
+ * leaves to LiveCanvas's own fill-the-region layout (canvas + bottom transport
+ * bar, #156). `min-width: 0` lets it shrink below the canvas's intrinsic width
+ * when narrow.
+ */
+.canvas-region {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+}
+
+/*
+ * The canvas-region top bar holds the collapse toggle (#154). It lives in the
+ * canvas region — outside the collapsing sidebar — so the toggle stays visible
+ * and the sidebar re-openable while collapsed. It's an ABSOLUTE overlay pinned to
+ * the region's top-right corner (over the dark chrome), NOT a flex row: in flow
+ * it added a fixed-height band above the stage that pushed the centered canvas
+ * down, leaving noticeably more space above the sketch than below. Overlaying it
+ * reclaims that height so the canvas centers symmetrically and fills the region.
+ */
+.canvas-region__bar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  padding: 0.5rem;
+}
+
+/*
+ * The canvas stage: the region below the collapse bar. It just hands its full
+ * height to LiveCanvas's own layout (#156) — LiveCanvas centers the canvas and
+ * pins the transport bar to the bottom — so this is a plain filling flex column,
+ * NOT a centering box (centering the layout would shrink the bottom bar off the
+ * full width). The DARK CHROME backdrop + `container-type: size` size-query
+ * container that frames the paper (#155) moved down onto `.live-canvas-stage`,
+ * the box that actually bounds the canvas in this layout.
+ */
+.canvas-region__stage {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/*
+ * LiveCanvas's own layout root (#156): a column that FILLS the canvas stage — the
+ * canvas centered/fitted on top, the slim transport bar pinned to the bottom. It
+ * lives here (not split across the stage boundary) so the transport markup stays
+ * with the clock/scrub handlers LiveCanvas owns.
+ */
+.live-canvas-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/*
+ * The stage half of that layout: centers the live canvas in the space above the
+ * transport bar, with breathing-room padding, and scrolls if the canvas overflows.
+ * It is also the DARK CHROME backdrop and the `container-type: size` size-query
+ * container (#155, relocated here from `.canvas-region__stage` in #156): the box
+ * that actually bounds the canvas, so `.live-canvas` can contain-fit itself
+ * against its `cqw`/`cqh` at the paper's aspect — independent of the viewport.
+ */
+.live-canvas-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0.5rem;
+  overflow: auto;
+  background: var(--background);
+  container-type: size;
+}
+
+/*
+ * The inspector sidebar: the fixed ~320px right column housing every per-sketch
+ * control (switcher, control panel, seed box, randomness + preset + export
+ * actions). Drag-resize is out of scope, so the width is fixed. It scrolls
+ * vertically on overflow, independent of the canvas region.
+ */
+.inspector {
+  flex: 0 0 320px;
+  width: 320px;
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 1rem;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/*
+ * COLLAPSED (#165): the inspector stays mounted (so the toggle's
+ * `aria-controls="inspector"` always resolves) and hides via `[hidden]`. The
+ * author `.inspector { display: flex }` above beats the UA `[hidden] {
+ * display: none }` rule, so without this explicit override the panel would stay
+ * laid out while collapsed. Re-asserting `display: none` collapses it for real,
+ * handing the canvas region the full width.
+ */
+.inspector[hidden] {
+  display: none;
+}
+
+/*
+ * The framed "paper" (#155). Its CSS box is sized to the SKETCH's OWN aspect —
+ * not a fixed square — and contain-fit against the stage: `--paper-aspect` (a
+ * unitless width/height ratio) is threaded on inline by LiveCanvas from the
+ * generated Scene's `space`, defaulting here to 1 (square) so the box is
+ * coherent before any JS runs. `width: min(100cqw, 100cqh * aspect)` picks the
+ * largest width that fits BOTH the stage's width and its height-at-aspect (a
+ * pure-CSS contain-fit), and `aspect-ratio` derives the matching height; the
+ * stage flex-centers the result. The border + drop shadow read as a paper frame
+ * lifted off the dark chrome. LiveCanvas still sizes the backing store to this
+ * box x devicePixelRatio and contain-fits the Scene into it, so `Stroke.width`
+ * scales correctly and PNG/SVG export snapshots the displayed frame unchanged.
  */
 .live-canvas {
   display: block;
-  width: min(80vmin, 800px);
-  height: min(80vmin, 800px);
-  border: 1px solid #ccc;
+  box-sizing: border-box;
+  --paper-aspect: 1;
+  aspect-ratio: var(--paper-aspect);
+  width: min(100cqw, 100cqh * var(--paper-aspect));
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 60%);
 }
 
 /*
- * One numeric control: a label, a slider, and a number input on a single row.
- * The slider flexes to fill the available width; the number input stays a fixed
- * narrow box for free-entry of the exact value.
+ * NOTE: the numeric control rows, their lock affordance, and the schema-driven
+ * control surface are now Tailwind/shadcn components (#157) — NumberControl,
+ * the Slider primitive, and ControlPanel style themselves against the design
+ * tokens in `src/index.css`. The old `.control`, `.control__*`, and
+ * `.control-panel` rules were retired with that rebuild.
  */
-.control {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.control__label {
-  flex: 0 0 auto;
-  min-width: 8rem;
-}
-
-.control__slider {
-  flex: 1 1 auto;
-}
-
-.control__number {
-  flex: 0 0 auto;
-  width: 5rem;
-}
 
 /*
- * Per-param lock affordance: a toggle button marking a param as
- * Randomize-excluded. Its pressed state (aria-pressed) reflects the lock; it
- * NEVER disables the control's slider/input — a locked param stays
- * hand-editable.
- */
-.control__lock {
-  flex: 0 0 auto;
-  width: 5rem;
-  padding: 0.25rem 0.5rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-}
-
-.control__lock[aria-pressed="true"] {
-  border-color: #333;
-  background: #333;
-  color: #fff;
-}
-
-/*
- * The schema-driven control surface: a vertical stack of control rows, one per
- * declared param.
- */
-.control-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-/*
- * The two randomness-axis action buttons: "New seed" (reshuffle the
- * arrangement) and "Randomize" (re-roll the params). A horizontal row above
- * the seed box.
- */
-.sketch-controls__actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.action-button {
-  padding: 0.375rem 0.75rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-}
-
-.action-button:hover {
-  border-color: #333;
-}
-
-/*
- * The seed box: the first randomness axis. A plain numeric input bound to the
- * studio's seed state — copyable groundwork for Presets (#8). Editing it
- * re-renders the canvas without touching any param value (the axes are
- * independent).
- */
-.seed-box {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.seed-box__label {
-  flex: 0 0 auto;
-  min-width: 8rem;
-}
-
-.seed-box__input {
-  flex: 0 0 auto;
-  width: 12rem;
-}
-
-/*
- * The Preset save/reload surface (#63): a vertical stack of two rows — a
- * slug-validated name field + Save, and a saved-preset picker + Reload — plus an
- * inline validation hint / error line. Reuses the shared `.action-button` for
- * its buttons; the name field and picker flex to fill their row.
- */
-.preset-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  width: min(80vmin, 800px);
-}
-
-.preset-controls__row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.preset-controls__name,
-.preset-controls__picker {
-  flex: 1 1 auto;
-  padding: 0.375rem 0.5rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-}
-
-.preset-controls__hint {
-  margin: 0;
-  color: #555;
-  font-size: 0.875rem;
-}
-
-.preset-controls__error {
-  margin: 0;
-  color: #b00020;
-  font-size: 0.875rem;
-}
-
-/*
- * The export controls (#74): the shared home for export buttons, sitting in the
- * actions column alongside the randomness buttons and the Preset surface. PNG is
- * the first path; the SVG export sibling adds its button to this same row. Reuses
- * the shared `.action-button` styling.
- */
-.export-controls {
-  display: flex;
-  gap: 0.5rem;
-}
-
-/*
- * The transport row (#7): a play/pause toggle plus the time scrubber, shown ONLY
- * for animated Sketches (those with time metadata). The scrubber flexes to fill
- * the row; the toggle stays a fixed control to its left. Hidden entirely for
- * static Sketches — LiveCanvas renders no transport at all in that case.
+ * The transport bar (#7, relocated to a slim canvas bottom bar in #156): a
+ * play/pause toggle plus the time scrubber, shown ONLY for animated Sketches
+ * (those with time metadata). It is pinned to the bottom of the canvas area as a
+ * full-width slim bar — `flex: 0 0 auto` keeps it out of the stage's flex-grow so
+ * it hugs its content height. The scrubber flexes to fill the row; the toggle
+ * stays a fixed control to its left. Hidden entirely for static Sketches —
+ * LiveCanvas renders no transport at all in that case.
  */
 .transport {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  width: min(80vmin, 800px);
+  /* Pinned to the bottom of the canvas area as a full-width slim bar (#156):
+     `flex: 0 0 auto` keeps it out of the stage's flex-grow. `border-top` uses the
+     themed `--border` (not a hardcoded gray) so it reads correctly against the
+     dark chrome the framed paper (#155) brought in. */
+  flex: 0 0 auto;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border);
 }
 
 .transport__play {
@@ -225,18 +203,4 @@
 
 .transport__scrubber {
   flex: 1 1 auto;
-}
-
-/*
- * Loud fallback for an unsupported control kind. Deliberately high-contrast so
- * an unhandled ParamSpec kind is impossible to miss in the UI — never a silent
- * skip.
- */
-.control--unsupported {
-  padding: 0.5rem 0.75rem;
-  border: 2px solid #b00020;
-  border-radius: 4px;
-  background: #ffe5e9;
-  color: #b00020;
-  font-weight: 600;
 }

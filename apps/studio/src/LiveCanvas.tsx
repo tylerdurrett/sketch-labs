@@ -2,8 +2,10 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type Ref,
 } from "react";
 
@@ -200,6 +202,28 @@ export function sizeToBox(canvas: HTMLCanvasElement, dpr: number): boolean {
  */
 export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // The paper's CSS-box aspect (#155): the `<canvas>` box is sized to the
+  // SKETCH's OWN aspect, not a fixed square. The `Sketch` type does not
+  // statically expose its coordinate space — only a generated `Scene` carries
+  // `space` — so we derive the width/height ratio from a Scene generated at
+  // t = 0, re-deriving on any sketch/params/seed change (a param could resize
+  // the space). It is threaded onto `.live-canvas` as the `--paper-aspect`
+  // custom property; the CSS there contain-fits the box against the stage at
+  // that ratio. This is a DISPLAY-BOX concern only — the DPR backing store
+  // (`sizeToBox`) and the in-canvas contain-fit (`drawSceneFitted`) are
+  // untouched, so PNG/SVG export still snapshots the displayed frame. A
+  // degenerate space (zero/non-finite extent) falls back to a square.
+  const paperAspect = useMemo(() => {
+    const { space } = sketch.generate(params, seed, 0);
+    const ratio = space.width / space.height;
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+  }, [sketch, params, seed]);
+
+  // Inline the derived ratio as the `--paper-aspect` custom property the
+  // `.live-canvas` rule reads for its `aspect-ratio` + contain-fit width. Cast
+  // through CSSProperties: React types don't model custom-property keys.
+  const paperStyle = { "--paper-aspect": paperAspect } as CSSProperties;
 
   // The current params/seed are read through refs inside the rAF `tick` (and the
   // static redraw effect) so the loop effect does NOT depend on them. Keeping the
@@ -452,45 +476,58 @@ export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps)
     }
   }, []);
 
-  // No time metadata ⇒ a static Sketch: render the canvas alone, no transport.
+  // LAYOUT (#156): LiveCanvas owns a column that FILLS the canvas region — the
+  // canvas centered/fitted in the stage on top, the slim transport bar pinned to
+  // the bottom. The transport handlers/refs live here alongside the canvas, so
+  // keeping the markup together (rather than splitting it across the stage
+  // boundary) is what lets the driver stay untouched. The transport shows ONLY
+  // for an animated Sketch (`sketch.time` present); a static Sketch renders the
+  // canvas alone in the same layout — no clock, no bar (exactly as before).
   const time = sketch.time;
-  if (time === undefined) {
-    return <canvas ref={canvasRef} className="live-canvas" />;
-  }
-
   return (
-    <>
-      <canvas ref={canvasRef} className="live-canvas" />
-      <div className="transport">
-        <button
-          type="button"
-          className="transport__play"
-          aria-pressed={playing}
-          onClick={togglePlay}
-        >
-          {playing ? "Pause" : "Play"}
-        </button>
+    <div className="live-canvas-layout">
+      <div className="live-canvas-stage">
         {/*
-         * The scrubber. Range is metadata-driven: [0, duration] seconds, with
-         * `loop`/`one-shot` differing only in how the rAF loop maps elapsed → `t`
-         * (`timeForElapsed`) — the input bound stays `duration` either way. It is
-         * UNCONTROLLED (no React `value`): while playing the rAF tick writes its
-         * `.value` DOM-direct (thumb follows `t`, no per-frame re-render); while
-         * grabbed `onInput` drives `t`. A small `step` gives a smooth drag.
+         * The framed "paper" canvas (#155): its display box is aspect-sized to the
+         * Scene's own space via the `--paper-aspect` custom property `paperStyle`
+         * threads in, contain-fitting against `.live-canvas-stage` (the size-query
+         * container). Relocated into #156's fill-the-region layout unchanged.
          */}
-        <input
-          ref={scrubberRef}
-          className="transport__scrubber"
-          type="range"
-          aria-label="time scrubber"
-          min={0}
-          max={time.duration}
-          step={time.duration / 1000}
-          defaultValue={0}
-          onPointerDown={() => setPlaying(false)}
-          onInput={(event) => scrubTo(Number(event.currentTarget.value))}
-        />
+        <canvas ref={canvasRef} className="live-canvas" style={paperStyle} />
       </div>
-    </>
+      {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
+      {time !== undefined && (
+        <div className="transport">
+          <button
+            type="button"
+            className="transport__play"
+            aria-pressed={playing}
+            onClick={togglePlay}
+          >
+            {playing ? "Pause" : "Play"}
+          </button>
+          {/*
+           * The scrubber. Range is metadata-driven: [0, duration] seconds, with
+           * `loop`/`one-shot` differing only in how the rAF loop maps elapsed → `t`
+           * (`timeForElapsed`) — the input bound stays `duration` either way. It is
+           * UNCONTROLLED (no React `value`): while playing the rAF tick writes its
+           * `.value` DOM-direct (thumb follows `t`, no per-frame re-render); while
+           * grabbed `onInput` drives `t`. A small `step` gives a smooth drag.
+           */}
+          <input
+            ref={scrubberRef}
+            className="transport__scrubber"
+            type="range"
+            aria-label="time scrubber"
+            min={0}
+            max={time.duration}
+            step={time.duration / 1000}
+            defaultValue={0}
+            onPointerDown={() => setPlaying(false)}
+            onInput={(event) => scrubTo(Number(event.currentTarget.value))}
+          />
+        </div>
+      )}
+    </div>
   );
 }

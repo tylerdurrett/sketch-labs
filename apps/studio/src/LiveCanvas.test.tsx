@@ -44,6 +44,25 @@ function animatedSketch(time: TimeMetadata | undefined) {
   return { sketch, generate };
 }
 
+/** Build a static Sketch whose generated Scene has the given coordinate space. */
+function spacedSketch(width: number, height: number) {
+  const scene: Scene = { space: { width, height }, primitives: [] };
+  const generate = vi.fn((_p: unknown, _s: unknown, _t: number): Scene => scene);
+  return {
+    id: "spaced",
+    name: "Spaced",
+    schema: {},
+    generate,
+  } as unknown as Sketch;
+}
+
+/** The `<canvas>` the component rendered (LiveCanvas renders exactly one). */
+function canvasEl(el: HTMLElement): HTMLCanvasElement {
+  const canvas = el.querySelector("canvas");
+  if (canvas === null) throw new Error("no canvas");
+  return canvas;
+}
+
 /** The most recent `t` the Sketch was asked to render (the drawn frame). */
 function lastDrawnT(generate: { mock: { calls: unknown[][] } }): number {
   const calls = generate.mock.calls;
@@ -286,6 +305,27 @@ describe("LiveCanvas export handle — read-only canvas + current t", () => {
 
     expect(handle.current!.getCurrentT()).toBe(0);
     expect(handle.current!.getCanvas()).not.toBeNull();
+  });
+});
+
+describe("LiveCanvas paper aspect — sized to the Scene's space (#155)", () => {
+  it("threads the generated Scene's width/height ratio onto the canvas box", () => {
+    // A 1600x900 space is a 16:9 paper — the CSS box must carry that ratio via
+    // the `--paper-aspect` custom property, not stay a fixed square.
+    const el = mount(
+      <LiveCanvas sketch={spacedSketch(1600, 900)} params={{}} seed={1} />,
+    );
+    const aspect = canvasEl(el).style.getPropertyValue("--paper-aspect");
+    expect(Number(aspect)).toBeCloseTo(1600 / 900, 5);
+  });
+
+  it("falls back to a square (1) for a degenerate zero-height space", () => {
+    // A zero (or non-finite) extent would make width/height NaN/∞; the derivation
+    // must clamp that to a square so the box stays coherent.
+    const el = mount(
+      <LiveCanvas sketch={spacedSketch(1000, 0)} params={{}} seed={1} />,
+    );
+    expect(Number(canvasEl(el).style.getPropertyValue("--paper-aspect"))).toBe(1);
   });
 });
 

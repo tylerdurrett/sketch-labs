@@ -279,6 +279,46 @@ describe("SketchControls — seed axis wiring", () => {
   });
 });
 
+describe("SketchControls — collapsed-state a11y (#165)", () => {
+  it("keeps #inspector mounted while collapsed so aria-controls resolves", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+        collapsed={true}
+      />,
+    );
+
+    // The toggle references the inspector by id; while collapsed that target
+    // MUST still exist (it is the affordance a screen-reader user uses to
+    // re-open the panel) — present but `hidden`, not removed from the DOM.
+    const toggle = el.querySelector<HTMLButtonElement>("button[aria-controls]");
+    expect(toggle?.getAttribute("aria-controls")).toBe("inspector");
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+
+    const inspector = el.querySelector("#inspector");
+    expect(inspector).not.toBeNull();
+    // `hidden` collapses it (and drops it from the a11y tree) without unmounting.
+    expect((inspector as HTMLElement).hidden).toBe(true);
+  });
+
+  it("shows #inspector (present, not hidden) when expanded", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+        collapsed={false}
+      />,
+    );
+
+    const toggle = el.querySelector<HTMLButtonElement>("button[aria-controls]");
+    expect(toggle?.getAttribute("aria-controls")).toBe("inspector");
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+
+    const inspector = el.querySelector("#inspector");
+    expect(inspector).not.toBeNull();
+    expect((inspector as HTMLElement).hidden).toBe(false);
+  });
+});
+
 describe("SketchControls — randomize / lock wiring", () => {
   it("Randomize rolls unlocked params but never touches a locked param", () => {
     const el = mount(
@@ -441,8 +481,12 @@ describe("SketchControls — preset save/reload wiring", () => {
       el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
       "Not A Slug",
     );
-    // Inline hint shown; Save is disabled and clicking it is a no-op.
-    expect(el.querySelector(".preset-controls__hint")).not.toBeNull();
+    // Inline hint shown; Save is disabled and clicking it is a no-op. The hint
+    // is the only alert in this invalid-name scenario (no error <p> renders), so
+    // a class-independent role + hint-text match pins it.
+    const hint = el.querySelector('p[role="alert"]');
+    expect(hint).not.toBeNull();
+    expect(hint?.textContent).toContain("Name must be a lowercase slug");
     const save = [...el.querySelectorAll("button")].find(
       (b) => b.textContent === "Save",
     ) as HTMLButtonElement;

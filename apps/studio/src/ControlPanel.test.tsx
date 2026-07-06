@@ -45,6 +45,29 @@ describe("ControlPanel", () => {
     expect(html).toContain("speed");
   });
 
+  it("nests each control row once (no wrapper duplicating NumberControl's root)", () => {
+    // NumberControl's own root is `flex flex-col gap-1.5`. The panel must NOT
+    // re-wrap each row in a second `flex flex-col gap-1.5` div — that per-row
+    // gap is inert around a single child and duplicates the child's own root.
+    // So the class appears exactly once per control (not twice).
+    const schema: ParamSchema = {
+      radius: numberSpec(),
+      count: numberSpec(),
+      speed: numberSpec(),
+    };
+    const html = renderToStaticMarkup(
+      <ControlPanel
+        schema={schema}
+        params={defaultParams(schema)}
+        locks={new Set()}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+      />,
+    );
+    const rowRoots = html.match(/class="flex flex-col gap-1\.5"/g) ?? [];
+    expect(rowRoots.length).toBe(3);
+  });
+
   it("renders a LOUD visible fallback for an unsupported kind (never silent)", () => {
     // An unknown kind that the open ParamSpec union does not (yet) inhabit.
     const schema = {
@@ -60,10 +83,11 @@ describe("ControlPanel", () => {
       />,
     );
     expect(html).toContain("unsupported control kind: color");
-    // The fallback names the offending param and is an alert (not hidden).
+    // The fallback names the offending param and is an alert (not hidden)...
     expect(html).toContain("mystery");
     expect(html).toContain('role="alert"');
-    expect(html).toContain("control--unsupported");
+    // ...styled LOUD via the destructive theme token (high-contrast, not silent).
+    expect(html).toContain("border-destructive");
   });
 
   it("reflects the supplied param values in the controls", () => {
@@ -94,8 +118,8 @@ describe("ControlPanel", () => {
         onToggleLock={() => {}}
       />,
     );
-    // One lock toggle per param.
-    expect((html.match(/class="control__lock"/g) ?? []).length).toBe(2);
+    // One lock toggle per param — each is the only element carrying aria-pressed.
+    expect((html.match(/aria-pressed=/g) ?? []).length).toBe(2);
     // The locked param's toggle is pressed; the unlocked one is not.
     expect(html).toContain('aria-label="radius lock" aria-pressed="true"');
     expect(html).toContain('aria-label="count lock" aria-pressed="false"');

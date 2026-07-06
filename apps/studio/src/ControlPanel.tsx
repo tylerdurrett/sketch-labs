@@ -48,6 +48,7 @@ function renderControl(
     case "number":
       return (
         <NumberControl
+          key={key}
           paramKey={key}
           spec={spec}
           value={typeof value === "number" ? value : spec.default}
@@ -58,7 +59,11 @@ function renderControl(
       );
     default:
       return (
-        <div className="control control--unsupported" role="alert">
+        <div
+          key={key}
+          role="alert"
+          className="rounded-md border-2 border-destructive bg-destructive/10 px-3 py-2 text-sm font-semibold text-destructive"
+        >
           unsupported control kind: {String((spec as ParamSpec).kind)} (param
           &ldquo;{key}&rdquo;)
         </div>
@@ -83,19 +88,17 @@ export function ControlPanel({
   onToggleLock,
 }: ControlPanelProps) {
   return (
-    <div className="control-panel">
-      {Object.entries(schema).map(([key, spec]) => (
-        <div key={key} className="control-panel__row">
-          {renderControl(
-            key,
-            spec,
-            params[key],
-            locks.has(key),
-            onChange,
-            onToggleLock,
-          )}
-        </div>
-      ))}
+    <div className="flex flex-col gap-4">
+      {Object.entries(schema).map(([key, spec]) =>
+        renderControl(
+          key,
+          spec,
+          params[key],
+          locks.has(key),
+          onChange,
+          onToggleLock,
+        ),
+      )}
     </div>
   );
 }
