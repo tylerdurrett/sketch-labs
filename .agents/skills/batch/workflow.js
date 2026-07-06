@@ -336,14 +336,14 @@ const EXPRESS_SCHEMA = {
   },
 }
 
-function expressPrompt(task, prep, hasDependents) {
+function expressPrompt(task, prep, hasDependents, landedSince) {
   return [
     `You are the EXPRESS stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree. Prep judged this task TRIVIAL (one sub-section, ≤2 files, small diff), so you run the whole implement→review→land pipeline as one agent. If it turns out NOT to be trivial (the diff balloons, new deps needed), stop and return ok:false with blocker "not trivial — route through the full pipeline".`,
     ``,
     `Branch: \`${prep.branch}\` (already on origin, based on \`${prep.baseBranch}\`). ${WORKTREE_PROTOCOL(prep.branch)}`,
     ``,
     TOOLING_NOTE,
-    ``,
+    stalenessNote(prep.baseBranch, landedSince),
     `The contract / brief:`,
     prep.brief || '(see issue #' + task.number + ')',
     ``,
@@ -356,6 +356,7 @@ function expressPrompt(task, prep, hasDependents) {
     `  3. LAND: open the PR (\`Closes #${task.number}\` only when the base is main; otherwise note it targets \`${prep.baseBranch}\`) with a 2-3 line body — this PR auto-merges and is never individually human-reviewed. Then:`,
     `     - blockingCount 0 → squash-merge via the task-tier ship flow in ${SHIP_TASK_DOC} (do NOT load the full /ship skill); shipped:true only if the merge landed.${hasDependents ? ` Other batched tasks depend on this merge.` : ``}`,
     `     - blockingCount > 0 → do NOT merge; post the findings as a PR comment, shipped:false.`,
+    `     - If the squash-merge is blocked or conflicting because the base advanced MID-RUN (a sibling merged into \`${prep.baseBranch}\` while you worked — possible even without a BASE ADVANCED note above, which only sees merges before you spawned), integrate by MERGE ONLY: \`git fetch origin ${prep.baseBranch} && git merge FETCH_HEAD\`, commit, push via refspec, and re-run the step-2 recount ONCE if the merge touched your files. NEVER rebase, NEVER force-push.`,
     ``,
     `Return: ok, shipped, commits, landedSha, baseSha, blockingCount, findings, reviewSummary, prNumber, prUrl, blocker.`,
   ].join('\n')
@@ -369,11 +370,17 @@ function fail(num, title, blocker, skipped = false) {
 // - landedSiblings: tasks already squash-merged into the base, with the files their plan declared.
 //   Snapshotted per task at prep time; anything that lands AFTER that snapshot is handed to the
 //   Review/Land prompts as staleness context (they'd otherwise re-derive it via merge archaeology).
-// - fileClaims: first prep to declare a file claims it; a LATER prep declaring the same file waits
-//   for the claimer's whole pipeline before implementing — over-serializing beats two agents
-//   resolving the same conflict. Waits go only to LOWER task numbers, which (with the acyclic dep
-//   graph) provably cannot deadlock: a dep edge means the dependent's prep starts only after the
-//   dependency's pipeline finished, so it can never be waited on by that dependency.
+// - fileClaims: the most recent prep to declare a file holds its claim; a later prep declaring the
+//   same file waits for the holder's whole pipeline before implementing, then TAKES OVER the claim
+//   — so overlapping tasks form a chain (C waits on B, whose own pipeline waited on A), not a
+//   fan-in on the first claimer. Over-serializing beats two agents resolving the same conflict.
+//   Waits follow CLAIM order, not task numbers (observed live: #179's prep finished before #178's,
+//   and the old lower-number-only test let both edit the same file in parallel). Deadlock-freedom
+//   argument, by claim-time ordering: the scheduler is single-threaded and claims are installed
+//   synchronously when a prep's continuation runs, so a wait edge always points at a task whose
+//   prep continuation ran strictly earlier; a task's own `done` promise resolves only after its
+//   waits; wait edges therefore strictly decrease in prep-completion time — the wait graph is
+//   acyclic, so no deadlock.
 const landedSiblings = [] // { number, title, files }
 const fileClaims = new Map() // file -> { num, done: Promise }
 const planFilesOf = (prep) => [...new Set((prep.plan || []).flatMap((s) => s.files || []))]
@@ -411,14 +418,16 @@ function run(num) {
     if (!prep) return fail(num, task.title, 'Prep agent died or was skipped.')
     if (!prep.ready) return fail(num, task.title, prep.blocker || 'Prep reported not ready.')
 
-    // Overlap guard: wait for any lower-numbered sibling that already claimed one of our planned
-    // files (see fileClaims above) before implementing on top of a base it is about to change.
+    // Overlap guard: wait for whichever sibling currently claims one of our planned files —
+    // regardless of task number; claim order is what's deadlock-safe (see fileClaims above) —
+    // before implementing on top of a base it is about to change. ALWAYS take over the claim,
+    // waiting or not, so the next overlapping task serializes behind THIS one's whole pipeline.
     const myDone = memo.get(num)
     const overlapping = new Map()
     for (const f of planFilesOf(prep)) {
       const holder = fileClaims.get(f)
-      if (holder && holder.num !== num && holder.num < num) overlapping.set(holder.num, holder)
-      if (!holder) fileClaims.set(f, { num, done: myDone })
+      if (holder && holder.num !== num) overlapping.set(holder.num, holder)
+      fileClaims.set(f, { num, done: myDone })
     }
     if (overlapping.size) {
       log(`#${num} waits for #${[...overlapping.keys()].join(', #')} — overlapping planned files; serializing to avoid a conflicting parallel merge.`)
@@ -426,8 +435,10 @@ function run(num) {
     }
 
     // Express path — Prep judged the task trivial: one agent implements, self-reviews, lands.
+    // landedSince() is computed at spawn time: the express agent spawns AFTER the overlap wait,
+    // so a just-finished overlapping sibling is captured in its staleness note.
     if (prep.trivial) {
-      const x = await agent(expressPrompt(task, prep, hasDependents), { label: `express#${num}`, phase: 'Implement', isolation: 'worktree', schema: EXPRESS_SCHEMA })
+      const x = await agent(expressPrompt(task, prep, hasDependents, landedSince()), { label: `express#${num}`, phase: 'Implement', isolation: 'worktree', schema: EXPRESS_SCHEMA })
       if (!x) return fail(num, task.title, 'Express agent died or was skipped.')
       if (x.ok && !(x.landedSha && x.baseSha && x.landedSha !== x.baseSha)) {
         return fail(num, task.title, `Express reported ok but its branch never advanced past \`${prep.baseBranch}\` — no commit landed.`)
