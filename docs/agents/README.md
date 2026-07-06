@@ -93,7 +93,7 @@ The full skill set, organized by phase of the loop.
 | `/check`     | Single-agent sanity check on a decomposition. Tier-aware: initiative input runs Outcome / Definition-of-done coverage; feature input runs user-story coverage; slice input runs AC coverage + codebase grounding + per-task sizing + sequencing; task input runs codebase grounding + AC sanity-check, with lightweight sibling-context checks when the task has a parent. Read-only, fast, conversational. |
 | `/audit`     | Multi-agent (Claude + Codex) version of `/check`. Synthesizes findings with provenance, gates on user approval, writes back additive body edits + a synthesis comment. Reach for it when the cost of a flawed decomposition is high. |
 
-### Execute (once per task)
+### Execute (once per task, or once per slice via the batch orchestrators)
 
 | Skill            | What it does                                                                                                |
 | ---------------- | ----------------------------------------------------------------------------------------------------------- |
