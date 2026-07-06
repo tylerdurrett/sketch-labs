@@ -3,6 +3,8 @@ name: triage
 description: Verify the size `/to-spec` picked, lay down per-tier bookkeeping (integration branch declaration, sticky progress comment), apply the next state label, and clear `needs-triage`. Also surfaces what's most actionable across the tracker when invoked without a specific spec. Use after `/to-spec` publishes a spec, when picking up a hand-created spec, or when asking "what should I look at next?"
 ---
 
+*Pipeline agents (running under /autopilot): read [PIPELINE.md](PIPELINE.md) instead of this file — it is the autopilot-facing subset. Keep the two in sync when editing either.*
+
 # Triage
 
 The bookkeeping pass that turns a freshly-published spec into a fully-functional tracker artifact, and a conversational survey of what's most actionable across the queue.
