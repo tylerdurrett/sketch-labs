@@ -115,7 +115,7 @@ Pick the first match top-down. Each match resolves to exactly one recommended sk
 
 10. **The grilling queue has issues in `needs-grilling`** → **`/grill-with-docs <N>`** on the oldest. (Synthesized children awaiting alignment.)
 
-11. **None of the above (truly idle)** → **`/grill-with-docs`** if there's a hint of an idea in recent activity, otherwise **`/to-spec`**. Pick one and explain why briefly. In this idle case only, also include a short one-liner pointing the user at `/how-to-use` for a project-wide overview if they want one.
+11. **None of the above (truly idle)** → **`/grill-with-docs`** if there's a hint of an idea in recent activity, otherwise **`/to-spec`**. Pick one and explain why briefly.
 
 ## Step 5: Compose the report
 
