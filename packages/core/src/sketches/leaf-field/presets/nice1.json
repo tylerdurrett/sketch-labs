@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "sketch": "leaf-field",
+  "name": "nice1",
+  "seed": 789019568114854,
+  "params": {
+    "fieldScale": 0.75,
+    "turbulence": 0.1536,
+    "octaves": 2,
+    "density": 18.696,
+    "leafSizeMin": 50,
+    "leafSizeMax": 64.6,
+    "leafWidthMin": 0.5,
+    "leafWidthMax": 1.15,
+    "pointinessMin": 0,
+    "pointinessMax": 0,
+    "variation": 0,
+    "sphereCount": 6,
+    "sphereRadiusMin": 40,
+    "sphereRadiusMax": 190.12,
+    "sphereDepth": 0.5
+  },
+  "locks": []
+}
