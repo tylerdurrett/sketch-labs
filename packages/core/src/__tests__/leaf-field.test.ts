@@ -72,7 +72,10 @@ function bboxesOverlap(
  */
 const ORIENT_FIELD_SCALE = 3
 const ORIENT_OCTAVES = 2
-const DEFAULT_TURBULENCE = 0.5
+// Pinned in the generate call below AND in fieldAxisAt's reconstruction so the
+// two agree — the field must be sampled with the same gain the test rebuilds it
+// with, independent of the sketch's shipped `turbulence` default.
+const ORIENT_TURBULENCE = 0.5
 
 /** Center of a primitive's bounding box — the point the sketch translated it onto. */
 function primitiveCentroid(primitive: Primitive): Point {
@@ -149,7 +152,7 @@ function fieldAxisAt(primitive: Primitive, seed: string): number {
     (cx / WIDTH) * ORIENT_FIELD_SCALE,
     (cy / HEIGHT) * ORIENT_FIELD_SCALE,
     0,
-    { gain: DEFAULT_TURBULENCE, octaves: ORIENT_OCTAVES },
+    { gain: ORIENT_TURBULENCE, octaves: ORIENT_OCTAVES },
   )
   return Math.atan2(flow[1], flow[0])
 }
@@ -323,6 +326,7 @@ describe('leaf-field flow-field orientation (#127)', () => {
         variation: 0,
         fieldScale: ORIENT_FIELD_SCALE,
         octaves: ORIENT_OCTAVES,
+        turbulence: ORIENT_TURBULENCE,
       },
       seed,
       0,
@@ -665,15 +669,16 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     expect(discsOf(many).length).toBeGreaterThan(discsOf(few).length)
   })
 
-  it('sphereCount 0 (the default) yields a disc-free field — spheres are opt-in', () => {
-    // The set is opt-in: at count 0 no occluder disc is spliced in, so the field
-    // ships as a plain leaf scatter. The default is 0, so a bare generate is also
-    // disc-free; a field of leaves still bakes.
+  it('sphereCount 0 opts out to a disc-free field; the default (6) ships the full set', () => {
+    // Count 0 opts out: no occluder disc is spliced in, so the field ships as a
+    // plain leaf scatter. The default is now 6 (the "Nice One" preset), so a bare
+    // generate carries the full implied-sphere set. Either way a field of leaves
+    // still bakes, and the disc count never perturbs the leaves (separate stream).
     const explicit = leafField.generate({ sphereCount: 0 }, 'set-none', 0)
     const byDefault = leafField.generate({}, 'set-none', 0)
     expect(discsOf(explicit)).toHaveLength(0)
-    expect(discsOf(byDefault)).toHaveLength(0)
-    // A disc-free field is still a field — leaves are unaffected.
+    expect(discsOf(byDefault)).toHaveLength(6)
+    // A disc-free field is still a field — leaves are unaffected by disc count.
     expect(leavesOf(explicit).length).toBeGreaterThan(1)
     expect(leavesOf(byDefault)).toEqual(leavesOf(explicit))
   })

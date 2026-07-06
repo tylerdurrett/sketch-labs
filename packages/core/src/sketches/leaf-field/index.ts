@@ -59,8 +59,9 @@
  * circle; organic-ness comes from the front leaves; the eye fuses the two into an
  * implied sphere. Each disc is a closed polyline from the shared {@link circle}
  * helper (fill only, no stroke). #141 turns the single hardcoded disc into a
- * SEEDED SET of N discs driven by three knobs: `sphereCount` (how many — 0 by
- * default, so the field ships plain and the implied-sphere set is opt-in),
+ * SEEDED SET of N discs driven by three knobs: `sphereCount` (how many — default
+ * 6, from the "Nice One" preset, so the field ships with the full implied-sphere
+ * set; drop to 0 for a plain field),
  * `sphereRadiusMin`/`sphereRadiusMax` (per-disc radius bounds, in coordinate
  * units — superseding the old radius-fraction constants). Each disc's center and
  * radius are seeded (per-sphere, off the leaf stream — see below). #142 makes the
@@ -147,21 +148,21 @@ const schema = {
    * stays coherent near 1–2 and the low end is where the fine control lives —
    * higher values start to look random. Consumed NOW (flow orientation).
    */
-  fieldScale: { kind: 'number', min: 0.25, max: 4, default: 0.5, step: 0.05 },
+  fieldScale: { kind: 'number', min: 0.25, max: 4, default: 0.75, step: 0.05 },
   /** Curl-field roughness — mapped to fbm's per-octave amplitude falloff (`gain`). Consumed NOW. */
-  turbulence: { kind: 'number', min: 0.1, max: 0.9, default: 0.5 },
+  turbulence: { kind: 'number', min: 0.1, max: 0.9, default: 0.1536 },
   /** Number of noise layers stacked into the flow field (fbm `octaves`); fewer = broader, less turbulent. Consumed NOW. */
   octaves: { kind: 'number', min: 1, max: 6, default: 2, step: 1, integer: true },
   /** Drives the Poisson spacing radius (radius = REFERENCE_SPACING / density). Consumed NOW. */
-  density: { kind: 'number', min: 1, max: 80, default: 12.9 },
+  density: { kind: 'number', min: 1, max: 80, default: 18.696 },
   /** Leaf length range low — each leaf's length draws uniformly in [min, max]. Set equal to max for a uniform-size field. Consumed NOW. */
   leafSizeMin: { kind: 'number', min: 10, max: 300, default: 50 },
   /** Leaf length range high — each leaf's length draws uniformly in [min, max]. Consumed NOW. */
-  leafSizeMax: { kind: 'number', min: 10, max: 400, default: 155.5 },
+  leafSizeMax: { kind: 'number', min: 10, max: 400, default: 64.6 },
   /** Leaf width range low — width as a fraction of the leaf's own length; each leaf draws uniformly in [min, max]. Lower = long & slender, higher = short & fat. Set equal to max for a uniform-width field. Consumed NOW. */
-  leafWidthMin: { kind: 'number', min: 0.15, max: 2, default: 0.9, step: 0.05 },
+  leafWidthMin: { kind: 'number', min: 0.15, max: 2, default: 0.5, step: 0.05 },
   /** Leaf width range high — width as a fraction of the leaf's own length; each leaf draws uniformly in [min, max]. Above 1 the leaf is wider than it is long. Consumed NOW. */
-  leafWidthMax: { kind: 'number', min: 0.15, max: 2, default: 0.9, step: 0.05 },
+  leafWidthMax: { kind: 'number', min: 0.15, max: 2, default: 1.15, step: 0.05 },
   /** Leaf tip sharpness range low — each leaf's `tipSharpness` draws uniformly in [min, max]; 0 = round/blunt apex, 1 = sharp/pointed. Set equal to max for a uniform field. Consumed NOW. */
   pointinessMin: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
   /** Leaf tip sharpness range high — each leaf's `tipSharpness` draws uniformly in [min, max]; 0 = round/blunt apex, 1 = sharp/pointed. Consumed NOW. */
@@ -172,22 +173,22 @@ const schema = {
    * How many implied-sphere occluder discs to scatter into the field. Each disc
    * is placed/sized/depth-sorted from the dedicated sphere rng stream (OFF the
    * per-leaf rolls), so raising this consumes more sphere draws without shifting
-   * a single leaf. The set is OPT-IN: the min (and default) is 0 — a plain leaf
-   * field with no implied spheres — and raising it splices in that many discs.
-   * Consumed NOW (sphere-set count). Appended last (#141).
+   * a single leaf. The min is 0 (a plain leaf field with no implied spheres); the
+   * default is 6 (the "Nice One" preset), so the field ships with the full
+   * implied-sphere set. Consumed NOW (sphere-set count). Appended last (#141).
    */
-  sphereCount: { kind: 'number', min: 0, max: 6, default: 0, step: 1, integer: true },
+  sphereCount: { kind: 'number', min: 0, max: 6, default: 6, step: 1, integer: true },
   /**
-   * Sphere radius range low, in coordinate-space units (WIDTH=1000). Supersedes
-   * the old SPHERE_RADIUS_MIN_FRAC constant (0.18·WIDTH ≈ 180). Consumed NOW.
+   * Sphere radius range low, in coordinate-space units (WIDTH=1000). Default from
+   * the "Nice One" preset (40). Consumed NOW.
    */
-  sphereRadiusMin: { kind: 'number', min: 40, max: 400, default: 180 },
+  sphereRadiusMin: { kind: 'number', min: 40, max: 400, default: 40 },
   /**
-   * Sphere radius range high, in coordinate-space units (WIDTH=1000). Supersedes
-   * the old SPHERE_RADIUS_MAX_FRAC constant (0.26·WIDTH ≈ 260). `generate` guards
-   * min ≤ max internally (Sketch owns its inter-param coherence). Consumed NOW.
+   * Sphere radius range high, in coordinate-space units (WIDTH=1000). Default from
+   * the "Nice One" preset (190.12). `generate` guards min ≤ max internally (Sketch
+   * owns its inter-param coherence). Consumed NOW.
    */
-  sphereRadiusMax: { kind: 'number', min: 40, max: 400, default: 260 },
+  sphereRadiusMax: { kind: 'number', min: 40, max: 400, default: 190.12 },
   /**
    * How embedded each disc reads in the field — the front/behind split, applied
    * as a POSITION-RELATIVE depth (2026-07-06). Because the field draws
