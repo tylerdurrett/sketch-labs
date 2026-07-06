@@ -79,7 +79,8 @@ if (cycle) {
 // findings and gates the auto-ship — a task with surviving blocking findings is NOT merged into the
 // slice branch (it stays an open PR for a human), and if any dependent needed it, the scheduler
 // cascade-skips that dependent rather than stacking on suspect code. Every clean task IS merged.
-// State flows stage→stage via these structured returns plus origin (each stage fetches the branch).
+// State flows stage→stage via these structured returns, plus the task's shared worktree and origin
+// (Prep hands off by pushing the branch; later stages find the shared tree already at the tip).
 
 const PREP_SCHEMA = {
   type: 'object',
@@ -168,25 +169,48 @@ const LAND_SCHEMA = {
   },
 }
 
-// Worktree branch protocol — the root-cause fix for the cross-worktree branch collision.
-// Every task's four stages (Prep/Implement/Review/Land) run in SEPARATE fresh worktrees and hand the
-// branch off through origin. Git allows a branch to be checked out BY NAME in only one worktree at a
-// time, and a stage's worktree isn't reliably torn down before the next stage starts — so a lingering
-// sibling that holds the branch name strands the next stage ("fatal: '<branch>' is already used by
-// worktree ..."). The fix: NO stage ever holds the branch by name. Every stage works in DETACHED HEAD
-// (HEAD pointing straight at the commit, not via the branch ref) and publishes with an explicit
-// refspec. Detached HEADs at the same commit never collide, so the one-branch-per-worktree rule can
-// never fire. This also immunises against a fresh worktree starting on an unrelated base commit: the
-// fetch+detach lands every stage on the right tree regardless of where its worktree started.
+// Worktree branch protocol — the root-cause fix for the cross-worktree branch collision, carried
+// over unchanged in spirit to the shared-task-worktree model. Stages of ONE task now share a single
+// worktree (created detached at origin/<branch> by the first implementing stage) and hand off
+// through it plus origin; parallel TASKS each get their own worktree. But git still allows a branch
+// to be checked out BY NAME in only one worktree at a time, and the MAIN checkout plus every other
+// task's worktree are all live — a named checkout anywhere strands someone ("fatal: '<branch>' is
+// already used by worktree ..."). So the rule stands: NO stage ever holds the branch by name. Every
+// stage works in DETACHED HEAD (HEAD pointing straight at the commit, not via the branch ref) and
+// publishes with an explicit refspec. Detached HEADs never collide, the one-branch-per-worktree
+// rule can never fire, and ship/TASK.md's "local branch doesn't exist → skip" step stays trivially
+// true. A stage arriving mid-task simply finds the shared tree already at the branch tip.
 const WORKTREE_PROTOCOL = (branch) =>
-  `WORKTREE BRANCH PROTOCOL (critical — do not deviate): your worktree is fresh and may start on an unrelated commit. NEVER run \`git checkout ${branch}\` / \`git switch ${branch}\` — a named checkout locks the branch and the sibling stages in other worktrees must be able to read it (git forbids the same branch in two worktrees). Always work in DETACHED HEAD: get the code with \`git fetch origin ${branch} && git checkout --detach FETCH_HEAD\`, and publish commits with \`git push origin HEAD:${branch}\`.`
+  `WORKTREE BRANCH PROTOCOL (critical — do not deviate): NEVER run \`git checkout ${branch}\` / \`git switch ${branch}\` — a named checkout locks the branch, and the main checkout plus every parallel task's worktree must stay able to read it (git forbids the same branch in two worktrees). Your task worktree is created DETACHED at \`origin/${branch}\` and stays that way: always work in DETACHED HEAD (HEAD pointing straight at the commit, not via the branch ref), and publish commits with \`git push origin HEAD:${branch}\`. Arriving mid-task, the tree is already at the branch tip; if you ever need to re-sync it, \`git fetch origin ${branch} && git checkout --detach origin/${branch}\` — never a named checkout.`
+
+// One SHARED worktree per TASK. Stages within a task are strictly serial, so isolation is only
+// needed BETWEEN tasks — yet the old stage-per-worktree model paid a fresh `pnpm install` + binary
+// discovery + branch re-fetch for every stage of every task. The Workflow runtime has no
+// worktree-reuse option (`isolation: 'worktree'` is strictly per-agent-call), so the task worktree
+// is hand-rolled: Implement/Express/Review/Land spawn in the MAIN checkout (no runtime isolation)
+// and their FIRST action is creating/entering `.claude/worktrees/task-<num>`. Living under
+// `.claude/worktrees/` means Settle's baseline-scoped reconcile prunes it with zero extra logic —
+// no stage removes its own worktree. The crash-leftover removal below is the ONE sanctioned
+// worktree removal outside Settle: it targets exactly this task's own path, which is safe because
+// the tracker prevents the same task legitimately running in two live batches (and a live duplicate
+// batch of the same slice is already declared unsafe). Creation detaches at `origin/<branch>`, not
+// FETCH_HEAD: parallel tasks fetch concurrently in the shared main checkout, and FETCH_HEAD races
+// between them while the remote-tracking ref does not. Prep is the exception to all of this — it
+// stays runtime-isolated (read/plan/push-refs-only, safe in a throwaway).
+const TASK_WORKTREE = (num, branch) =>
+  [
+    `TASK WORKTREE (do this FIRST, before anything else): you spawn in the repo's MAIN checkout — do not edit, build, or run anything here. Your task's shared worktree is \`WT="$(git rev-parse --show-toplevel)/.claude/worktrees/task-${num}"\`.`,
+    `- If it already exists AND you are the first implementing stage or the Implement retry: it is a leftover from a crashed run of this same task — remove it (\`git worktree remove --force "$WT" || rm -rf "$WT"; git worktree prune\`) and recreate. If you are Review or Land, just reuse it (it already holds the branch tip and node_modules).`,
+    `- Create (Implement/Express — or Review/Land when it's missing): \`git fetch origin ${branch} && git worktree add --detach "$WT" origin/${branch}\`. Use \`origin/${branch}\` — NEVER \`FETCH_HEAD\` (parallel tasks fetch concurrently in the main checkout; FETCH_HEAD races between them, the remote-tracking ref does not).`,
+    `- Then \`cd "$WT"\` and STAY there: begin EVERY subsequent shell invocation with \`cd "$WT"\` (shell cwd may reset between invocations).`,
+  ].join('\n')
 
 // Supply-chain lockdown is intentional on this machine (docs/agents/locked-down-npm.md). A stage must
 // NEVER weaken it to get unblocked — that turns a one-task hiccup into a machine-wide security hole.
 // Kept tight: this block is re-ingested by every stage of every task, so it carries only the
 // operative facts (rationale lives in docs/agents/locked-down-npm.md).
 const TOOLING_NOTE =
-  `TOOLING (locked-down npm — do not circumvent; see docs/agents/locked-down-npm.md): your fresh worktree has no node_modules. Run \`pnpm install\` ONCE, first — expect it to EXIT 1 with \`ERR_PNPM_IGNORED_BUILDS\`; that is deliberate and benign (deps install fine; the toolchain runs on prebuilt binaries). Then use the package-local binaries — \`./node_modules/.bin/tsc --noEmit\` to typecheck, \`./node_modules/.bin/vitest run\` to test — never \`pnpm run <script>\` (its pre-flight rejects the ignored-builds state), and never hunt for tooling the repo doesn't define (no prettier config = no prettier gate; check before assuming). NEVER weaken the lockdown: no \`dangerouslyAllowAllBuilds\`, no \`min-release-age\` change, no \`~/.npmrc\` / global pnpm edits; if a package truly needs its build script, set your blocker and stop — a human allows it per-repo (pnpm-workspace.yaml). Shell note: this machine's shell is zsh — never read an exit code through a pipe (\`\${PIPESTATUS[0]}\` is bash-only and expands EMPTY here, so a silently failing test reads as success); run the command bare and check \`$?\` directly.`
+  `TOOLING (locked-down npm — do not circumvent; see docs/agents/locked-down-npm.md): if your task worktree lacks \`node_modules\` AND you actually need to typecheck or test (doc-only work doesn't), run \`pnpm install\` once — expect it to EXIT 1 with \`ERR_PNPM_IGNORED_BUILDS\`; that is deliberate and benign (deps install fine; the toolchain runs on prebuilt binaries). Later stages of this task reuse the same worktree, so it's usually already there. Then use the package-local binaries — \`./node_modules/.bin/tsc --noEmit\` to typecheck, \`./node_modules/.bin/vitest run\` to test — never \`pnpm run <script>\` (its pre-flight rejects the ignored-builds state), and never hunt for tooling the repo doesn't define (no prettier config = no prettier gate; check before assuming). NEVER weaken the lockdown: no \`dangerouslyAllowAllBuilds\`, no \`min-release-age\` change, no \`~/.npmrc\` / global pnpm edits; if a package truly needs its build script, set your blocker and stop — a human allows it per-repo (pnpm-workspace.yaml). Shell note: this machine's shell is zsh — never read an exit code through a pipe (\`\${PIPESTATUS[0]}\` is bash-only and expands EMPTY here, so a silently failing test reads as success); run the command bare and check \`$?\` directly.`
 
 // The parent-chain walk trips agents up the same way every run; state the one correct mechanism.
 const PARENT_CHAIN_NOTE = `parent links live in \`**Part of:** #<P>\` lines in issue BODIES, read via \`gh issue view <N> --json body\` — there is no \`--json parent\` field, don't try it`
@@ -215,8 +239,10 @@ function prepPrompt(task) {
     ``,
     TOOLING_NOTE,
     ``,
+    `Do NOT run \`pnpm install\` — Prep never builds or tests. (Your throwaway worktree is auto-removed by the runtime only when clean; installing node_modules wastes a minute and can leave it dirty.)`,
+    ``,
     `Read ${EXECUTE_BATCH_DOC} and follow its "Prep" section (the /batch-facing subset of /execute Steps 1–6 — do NOT load the full /execute skill): validate labels, walk the parent chain to resolve the base branch (${PARENT_CHAIN_NOTE}) — and if that integration branch (or any ancestor up to main) does not yet exist on origin, seed the whole missing chain per that doc rather than forking the base off main (forking off main flattens the hierarchy and corrupts the later slice/feature promotion diff) — read the brief and any contract-updating parent comments, explore the codebase, and form the numbered sub-section plan. Do NOT halt for approval.`,
-    `\nCreate the feature branch (Step 6), but do NOT let your worktree hold it by name — sibling stages run in separate worktrees and git forbids the same branch being checked out twice. So instead of \`git checkout -b <branch>\`, resolve the base, detach onto it (\`git fetch origin <resolved-base> && git checkout --detach FETCH_HEAD\`), and create the branch ON ORIGIN ONLY with \`git push origin HEAD:refs/heads/<branch>\`. Do NOT create a local branch ref of any kind.`,
+    `\nCreate the feature branch (Step 6), but do NOT let your worktree hold it by name — the later stages' shared task worktree works detached at \`origin/<branch>\`, and no worktree in this pipeline ever holds a task branch by name (git forbids the same branch being checked out twice). So instead of \`git checkout -b <branch>\`, resolve the base, detach onto it (\`git fetch origin <resolved-base> && git checkout --detach FETCH_HEAD\`), and create the branch ON ORIGIN ONLY with \`git push origin HEAD:refs/heads/<branch>\`. Do NOT create a local branch ref of any kind.`,
     deps.length
       ? `\nThis task depends on #${deps.join(', #')}, already squash-merged into the integration branch. Fetch the base branch fresh before branching so it includes their code.`
       : ``,
@@ -232,9 +258,11 @@ function prepPrompt(task) {
 
 function implPrompt(task, prep, attempt = 1) {
   return [
-    `You are the IMPLEMENT stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree. You are /execute Step 7's clean implementation agent — you do NOT need the base-branch bookkeeping, only the plan below.`,
+    `You are the IMPLEMENT stage of a /batch run for GitHub issue #${task.number} ("${task.title}"). You are /execute Step 7's clean implementation agent — you do NOT need the base-branch bookkeeping, only the plan below.`,
+    ``,
+    TASK_WORKTREE(task.number, prep.branch),
     attempt > 1
-      ? `\nRETRY: your previous attempt returned done but the branch never advanced past base on origin — the commit did NOT land. The usual cause: a brand-new file is UNTRACKED, so \`git diff HEAD\` shows nothing — that is NOT "nothing to do". You MUST \`git add -A\`, commit, then \`git push\`, and confirm the push landed before returning done.\n`
+      ? `\nRETRY: your previous attempt returned done but the branch never advanced past base on origin — the commit did NOT land. You are the Implement retry: remove and recreate the task worktree per the block above (a fresh tree is the point — attempt 1 may have stranded uncommitted work in it). The usual cause: a brand-new file is UNTRACKED, so \`git diff HEAD\` shows nothing — that is NOT "nothing to do". You MUST \`git add -A\`, commit, then \`git push\`, and confirm the push landed before returning done.\n`
       : ``,
     `Branch: \`${prep.branch}\` (already on origin, based on \`${prep.baseBranch}\`). ${WORKTREE_PROTOCOL(prep.branch)}`,
     ``,
@@ -257,7 +285,11 @@ function implPrompt(task, prep, attempt = 1) {
 
 function reviewPrompt(task, prep, hasDependents, landedSince) {
   return [
-    `You are the REVIEW stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree. You did NOT write this code — review it independently.`,
+    `You are the REVIEW stage of a /batch run for GitHub issue #${task.number} ("${task.title}"). You did NOT write this code — review it independently.`,
+    ``,
+    TASK_WORKTREE(task.number, prep.branch),
+    ``,
+    `You are Review, so REUSE the worktree (Implement left it at the branch tip with node_modules in place); recreate it per the block above only if it is missing. Before reviewing, sanity-check it: \`git status --porcelain\` should be clean-ish, and after \`git fetch origin ${prep.branch}\`, \`git log -1 HEAD\` should match \`origin/${prep.branch}\` — if the tree drifted, re-sync with \`git checkout --detach origin/${prep.branch}\`.`,
     ``,
     `Branch \`${prep.branch}\` (based on \`${prep.baseBranch}\`) carries the implementation on origin. ${WORKTREE_PROTOCOL(prep.branch)}`,
     ``,
@@ -285,7 +317,11 @@ function landPrompt(task, prep, { shipEligible, hasDependents, review, landedSin
       ? `\n  - Fold this Review-stage digest into the PR body under a "Review notes" heading:\n${review.summary}`
       : ``
   const lines = [
-    `You are the LAND stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree.`,
+    `You are the LAND stage of a /batch run for GitHub issue #${task.number} ("${task.title}").`,
+    ``,
+    TASK_WORKTREE(task.number, prep.branch),
+    ``,
+    `You are Land, so REUSE the worktree (it already holds the branch tip and node_modules); recreate it per the block above only if it is missing. Sanity-check it first: \`git status --porcelain\` should be clean-ish, and after \`git fetch origin ${prep.branch}\`, \`git log -1 HEAD\` should match \`origin/${prep.branch}\` — if the tree drifted, re-sync with \`git checkout --detach origin/${prep.branch}\`.`,
     ``,
     `Branch \`${prep.branch}\` (based on \`${prep.baseBranch}\`) carries the finished, independently code-reviewed work on origin. ${WORKTREE_PROTOCOL(prep.branch)}`,
     ``,
@@ -338,7 +374,9 @@ const EXPRESS_SCHEMA = {
 
 function expressPrompt(task, prep, hasDependents, landedSince) {
   return [
-    `You are the EXPRESS stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree. Prep judged this task TRIVIAL (one sub-section, ≤2 files, small diff), so you run the whole implement→review→land pipeline as one agent. If it turns out NOT to be trivial (the diff balloons, new deps needed), stop and return ok:false with blocker "not trivial — route through the full pipeline".`,
+    `You are the EXPRESS stage of a /batch run for GitHub issue #${task.number} ("${task.title}"). Prep judged this task TRIVIAL (one sub-section, ≤2 files, small diff), so you run the whole implement→review→land pipeline as one agent. If it turns out NOT to be trivial (the diff balloons, new deps needed), stop and return ok:false with blocker "not trivial — route through the full pipeline".`,
+    ``,
+    TASK_WORKTREE(task.number, prep.branch),
     ``,
     `Branch: \`${prep.branch}\` (already on origin, based on \`${prep.baseBranch}\`). ${WORKTREE_PROTOCOL(prep.branch)}`,
     ``,
@@ -438,7 +476,7 @@ function run(num) {
     // landedSince() is computed at spawn time: the express agent spawns AFTER the overlap wait,
     // so a just-finished overlapping sibling is captured in its staleness note.
     if (prep.trivial) {
-      const x = await agent(expressPrompt(task, prep, hasDependents, landedSince()), { label: `express#${num}`, phase: 'Implement', isolation: 'worktree', schema: EXPRESS_SCHEMA })
+      const x = await agent(expressPrompt(task, prep, hasDependents, landedSince()), { label: `express#${num}`, phase: 'Implement', schema: EXPRESS_SCHEMA })
       if (!x) return fail(num, task.title, 'Express agent died or was skipped.')
       if (x.ok && !(x.landedSha && x.baseSha && x.landedSha !== x.baseSha)) {
         return fail(num, task.title, `Express reported ok but its branch never advanced past \`${prep.baseBranch}\` — no commit landed.`)
@@ -468,10 +506,11 @@ function run(num) {
     // faulty agent can write code, skip `git add/commit/push`, misread an empty `git diff HEAD`
     // (untracked files don't show) as "nothing to do", and still return done:true — stranding the
     // branch at base and silently losing the work when the worktree is torn down. Require PROOF the
-    // branch advanced past base (landedSha ≠ baseSha); retry once (fresh worktree) since it's intermittent.
+    // branch advanced past base (landedSha ≠ baseSha); retry once since it's intermittent — the
+    // retry removes and recreates the task worktree, so it still gets the fresh tree it needs.
     let impl = null
     for (let attempt = 1; attempt <= 2; attempt++) {
-      impl = await agent(implPrompt(task, prep, attempt), { label: attempt === 1 ? `impl#${num}` : `impl#${num}·retry`, phase: 'Implement', isolation: 'worktree', schema: IMPL_SCHEMA })
+      impl = await agent(implPrompt(task, prep, attempt), { label: attempt === 1 ? `impl#${num}` : `impl#${num}·retry`, phase: 'Implement', schema: IMPL_SCHEMA })
       if (!impl) return fail(num, task.title, 'Implement agent died or was skipped.')
       if (!impl.done) return fail(num, task.title, impl.blocker || 'Implement did not finish the plan.')
       if (impl.landedSha && impl.baseSha && impl.landedSha !== impl.baseSha) break
@@ -481,7 +520,7 @@ function run(num) {
     }
 
     // Stage 3 — Review (independent /code-review; auto-fixes blocking findings, then GATES the ship).
-    const review = await agent(reviewPrompt(task, prep, hasDependents, landedSince()), { label: `review#${num}`, phase: 'Review', isolation: 'worktree', schema: REVIEW_SCHEMA })
+    const review = await agent(reviewPrompt(task, prep, hasDependents, landedSince()), { label: `review#${num}`, phase: 'Review', schema: REVIEW_SCHEMA })
     if (!review) return fail(num, task.title, 'Review agent died or was skipped.')
     if (!review.reviewed) return fail(num, task.title, review.blocker || 'Review stage did not complete.')
     const reviewClean = review.blockingCount === 0
@@ -492,7 +531,7 @@ function run(num) {
     const reviewBlocked = !reviewClean
 
     // Stage 4 — Land (verify ACs, open PR, post findings, squash-merge iff review is clean).
-    const land = await agent(landPrompt(task, prep, { shipEligible, hasDependents, review, landedSince: landedSince() }), { label: `land#${num}`, phase: 'Land', isolation: 'worktree', schema: LAND_SCHEMA })
+    const land = await agent(landPrompt(task, prep, { shipEligible, hasDependents, review, landedSince: landedSince() }), { label: `land#${num}`, phase: 'Land', schema: LAND_SCHEMA })
     if (!land) return fail(num, task.title, 'Land agent died or was skipped.')
     if (land.shipped) landedSiblings.push({ number: num, title: task.title, files: planFilesOf(prep) })
 
@@ -610,7 +649,9 @@ if (parentIssue && shippedWithFindings.length > 0) {
 //    is supposed to but sometimes doesn't (observed: PR merged yet issue left OPEN):
 //    every shipped task ⇒ PR merged AND issue closed AND active-state labels stripped.
 //    Then the one authoritative DAG recolor, and worktree hygiene — removing only THIS
-//    run's leaked isolation dirs (HEAD is settled last, in step ④, so it can land on the
+//    run's leaked worktrees, runtime isolation dirs and task-<N> dirs alike (no stage removes
+//    its own task worktree; this pass is the one sanctioned remover besides the crash-leftover
+//    case in TASK_WORKTREE). (HEAD is settled last, in step ④, so it can land on the
 //    slice branch once the promotion PR is known).
 const RECONCILE_SCHEMA = {
   type: 'object',
@@ -633,7 +674,7 @@ if (parentIssue) {
       `1. LIFECYCLE INVARIANT — for each shipped task below: confirm its PR is MERGED (\`gh pr view <pr> --json state,mergedAt,baseRefName\`), then confirm its issue is CLOSED. If a merged task's issue is still OPEN, heal it: \`gh issue edit <task> --remove-label ready-for-agent --remove-label in-progress\`, then \`gh issue close <task> --comment "Shipped via #<pr> (squash-merged into <baseRefName>). Will reach \\\`main\\\` when parent #${parentIssue} ships upward."\`. If a PR is NOT merged though the task was marked shipped, do NOT close it — record that in notes.`,
       `   Shipped tasks (JSON): ${JSON.stringify(shippedSet)}`,
       `2. DAG — recolor the parent once, authoritatively: \`node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" ${parentIssue}\`. Relay its output (a clean no-op when there's no "## Sub-issue DAG" section).`,
-      `3. WORKTREES — remove ONLY the isolation worktrees THIS run created; NEVER touch another run's (force-removing a concurrent run's worktree destroys its in-flight work). First \`git worktree prune\` (drops stale admin entries). Then, from \`git worktree list\`, remove each path under \`.claude/worktrees/\` with \`git worktree remove --force <path>\` — EXCEPT these pre-existing worktrees, which existed before this run began and belong to other runs; leave them alone: ${preexistingWorktrees.length ? JSON.stringify(preexistingWorktrees) : '(none pre-existed)'}. Every path you DO remove is one this run created and whose work is already pushed to origin, so --force discards nothing of value there. Count how many you removed.`,
+      `3. WORKTREES — remove ONLY the worktrees THIS run created (the runtime's isolation dirs AND the shared \`task-<N>\` worktrees — both live under \`.claude/worktrees/\`); NEVER touch another run's (force-removing a concurrent run's worktree destroys its in-flight work). First \`git worktree prune\` (drops stale admin entries). Then, from \`git worktree list\`, remove each path under \`.claude/worktrees/\` with \`git worktree remove --force <path>\` — EXCEPT these pre-existing worktrees, which existed before this run began and belong to other runs; leave them alone: ${preexistingWorktrees.length ? JSON.stringify(preexistingWorktrees) : '(none pre-existed)'}. Every path you DO remove is one this run created and whose work is already pushed to origin, so --force discards nothing of value there. Count how many you removed.`,
       ``,
       `Return: healed (one line per corrective action, empty array if nothing needed fixing), dagRecolored, worktreesPruned, notes.`,
     ].join('\n'),
