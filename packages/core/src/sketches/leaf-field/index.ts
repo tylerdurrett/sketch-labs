@@ -151,9 +151,9 @@ const schema = {
   /** Leaf length range high — each leaf's length draws uniformly in [min, max]. Consumed NOW. */
   leafSizeMax: { kind: 'number', min: 10, max: 400, default: 155.5 },
   /** Leaf width range low — width as a fraction of the leaf's own length; each leaf draws uniformly in [min, max]. Lower = long & slender, higher = short & fat. Set equal to max for a uniform-width field. Consumed NOW. */
-  leafWidthMin: { kind: 'number', min: 0.15, max: 1, default: 0.9, step: 0.05 },
-  /** Leaf width range high — width as a fraction of the leaf's own length; each leaf draws uniformly in [min, max]. Consumed NOW. */
-  leafWidthMax: { kind: 'number', min: 0.15, max: 1, default: 0.9, step: 0.05 },
+  leafWidthMin: { kind: 'number', min: 0.15, max: 2, default: 0.9, step: 0.05 },
+  /** Leaf width range high — width as a fraction of the leaf's own length; each leaf draws uniformly in [min, max]. Above 1 the leaf is wider than it is long. Consumed NOW. */
+  leafWidthMax: { kind: 'number', min: 0.15, max: 2, default: 0.9, step: 0.05 },
   /** Leaf tip sharpness range low — each leaf's `tipSharpness` draws uniformly in [min, max]; 0 = round/blunt apex, 1 = sharp/pointed. Set equal to max for a uniform field. Consumed NOW. */
   pointinessMin: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
   /** Leaf tip sharpness range high — each leaf's `tipSharpness` draws uniformly in [min, max]; 0 = round/blunt apex, 1 = sharp/pointed. Consumed NOW. */
