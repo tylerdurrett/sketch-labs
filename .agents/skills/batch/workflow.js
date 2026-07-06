@@ -200,9 +200,9 @@ const WORKTREE_PROTOCOL = (branch) =>
 const TASK_WORKTREE = (num, branch) =>
   [
     `TASK WORKTREE (do this FIRST, before anything else): you spawn in the repo's MAIN checkout — do not edit, build, or run anything here. Your task's shared worktree is \`WT="$(git rev-parse --show-toplevel)/.claude/worktrees/task-${num}"\`.`,
-    `- If it already exists AND you are the first implementing stage or the Implement retry: it is a leftover from a crashed run of this same task — remove it (\`git worktree remove --force "$WT" || rm -rf "$WT"; git worktree prune\`) and recreate. If you are Review or Land, just reuse it (it already holds the branch tip and node_modules).`,
+    `- If it already exists AND you are the first implementing stage or the Implement retry: it is a leftover from a crashed run of this same task — or, if you are the Implement retry, attempt 1's stranded tree — remove it (\`git worktree remove --force "$WT" || rm -rf "$WT"; git worktree prune\`) and recreate. If you are Review or Land, just reuse it (it already holds the branch tip and node_modules).`,
     `- Create (Implement/Express — or Review/Land when it's missing): \`git fetch origin ${branch} && git worktree add --detach "$WT" origin/${branch}\`. Use \`origin/${branch}\` — NEVER \`FETCH_HEAD\` (parallel tasks fetch concurrently in the main checkout; FETCH_HEAD races between them, the remote-tracking ref does not).`,
-    `- Then \`cd "$WT"\` and STAY there: begin EVERY subsequent shell invocation with \`cd "$WT"\` (shell cwd may reset between invocations).`,
+    `- Then enter it and work there. Shell cwd AND variables reset between invocations — a bare \`cd "$WT"\` in a fresh shell sees $WT unset, and \`cd ""\` silently no-ops, leaving you in the MAIN checkout. So begin EVERY subsequent shell invocation by FIRST re-deriving the path, then entering it: \`WT="$(git rev-parse --git-common-dir)/../.claude/worktrees/task-${num}" && cd "$WT"\` (the git-common-dir form resolves correctly from both the main checkout and inside the task worktree).`,
   ].join('\n')
 
 // Supply-chain lockdown is intentional on this machine (docs/agents/locked-down-npm.md). A stage must
@@ -277,7 +277,7 @@ function implPrompt(task, prep, attempt = 1) {
     `For each sub-section: implement → typecheck (per TOOLING) → run the repo's lint/format scripts *only if it defines them* (skip silently if absent — don't hunt for tooling that isn't there) → \`git add -A\` and commit with \`<type>(<scope>): <sub-section title>\`. One commit per sub-section — do not bundle. Then push via refspec (you are in detached HEAD): \`git push origin HEAD:${prep.branch}\`. Do NOT run /simplify — the independent Review stage covers cleanup altitude; duplicate passes were measured pure waste.`,
     `Do NOT open a PR, touch labels, or merge. If you hit a real blocker, set done:false and return it.`,
     ``,
-    `LANDING PROOF (required — skip it and your work is silently lost when this worktree is torn down): after your final push, prove the commit reached origin. Run \`git ls-remote origin ${prep.branch}\` for the landed SHA and \`git ls-remote origin ${prep.baseBranch}\` for the base SHA; they MUST differ. Report them as landedSha and baseSha.`,
+    `LANDING PROOF (required — skip it and your work is silently lost when the retry wipes the tree or Settle prunes it): after your final push, prove the commit reached origin. Run \`git ls-remote origin ${prep.branch}\` for the landed SHA and \`git ls-remote origin ${prep.baseBranch}\` for the base SHA; they MUST differ. Report them as landedSha and baseSha.`,
     ``,
     `Return: done, commits (one line each), landedSha, baseSha, deviations, blocker.`,
   ].join('\n')
@@ -665,6 +665,10 @@ const RECONCILE_SCHEMA = {
   },
 }
 const shippedSet = results.filter((r) => r.shipped).map((r) => ({ task: r.number, pr: r.prNumber }))
+// Task numbers are globally unique on the tracker, so `task-<N>` for one of THIS run's task
+// numbers is provably this run's worktree — and a `task-<M>` for any other M provably is not
+// (it belongs to a concurrent or future run, regardless of whether it existed at baseline time).
+const myTaskWorktrees = tasks.map((t) => 'task-' + t.number)
 let settle = null
 if (parentIssue) {
   settle = await agent(
@@ -674,7 +678,7 @@ if (parentIssue) {
       `1. LIFECYCLE INVARIANT — for each shipped task below: confirm its PR is MERGED (\`gh pr view <pr> --json state,mergedAt,baseRefName\`), then confirm its issue is CLOSED. If a merged task's issue is still OPEN, heal it: \`gh issue edit <task> --remove-label ready-for-agent --remove-label in-progress\`, then \`gh issue close <task> --comment "Shipped via #<pr> (squash-merged into <baseRefName>). Will reach \\\`main\\\` when parent #${parentIssue} ships upward."\`. If a PR is NOT merged though the task was marked shipped, do NOT close it — record that in notes.`,
       `   Shipped tasks (JSON): ${JSON.stringify(shippedSet)}`,
       `2. DAG — recolor the parent once, authoritatively: \`node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" ${parentIssue}\`. Relay its output (a clean no-op when there's no "## Sub-issue DAG" section).`,
-      `3. WORKTREES — remove ONLY the worktrees THIS run created (the runtime's isolation dirs AND the shared \`task-<N>\` worktrees — both live under \`.claude/worktrees/\`); NEVER touch another run's (force-removing a concurrent run's worktree destroys its in-flight work). First \`git worktree prune\` (drops stale admin entries). Then, from \`git worktree list\`, remove each path under \`.claude/worktrees/\` with \`git worktree remove --force <path>\` — EXCEPT these pre-existing worktrees, which existed before this run began and belong to other runs; leave them alone: ${preexistingWorktrees.length ? JSON.stringify(preexistingWorktrees) : '(none pre-existed)'}. Every path you DO remove is one this run created and whose work is already pushed to origin, so --force discards nothing of value there. Count how many you removed.`,
+      `3. WORKTREES — remove ONLY the worktrees THIS run created (the runtime's isolation dirs AND this run's shared \`task-<N>\` worktrees — both live under \`.claude/worktrees/\`); NEVER touch another run's (force-removing a concurrent run's worktree destroys its in-flight work). First \`git worktree prune\` (drops stale admin entries). Then, from \`git worktree list\`, for each path under \`.claude/worktrees/\`, apply these rules: (a) a path whose basename is one of THIS run's task worktrees — ${JSON.stringify(myTaskWorktrees)} — remove it with \`git worktree remove --force <path>\` (task numbers are globally unique on the tracker, so \`task-<N>\` for our N is provably ours); (b) a \`task-<M>\` path for ANY other M — NEVER remove it, even if it is absent from the baseline below (it belongs to a concurrent or future run); (c) any other (non-task-named) path — remove it UNLESS it is in these pre-existing worktrees, which existed before this run began and belong to other runs: ${preexistingWorktrees.length ? JSON.stringify(preexistingWorktrees) : '(none pre-existed)'}. Every path you DO remove is one this run created and whose work is already pushed to origin, so --force discards nothing of value there. Count how many you removed.`,
       ``,
       `Return: healed (one line per corrective action, empty array if nothing needed fixing), dagRecolored, worktreesPruned, notes.`,
     ].join('\n'),
@@ -725,8 +729,8 @@ if (parentIssue && allShipped) {
   )
 }
 
-// ④ Leave the main worktree on the right branch — the FINAL Settle step, after every isolation
-//    worktree is pruned. Put HEAD where the human's next action wants it: on the slice's integration
+// ④ Leave the main worktree on the right branch — the FINAL Settle step, after every one of
+//    this run's worktrees (runtime + task-<N>) has been pruned. Put HEAD where the human's next action wants it: on the slice's integration
 //    branch when a promotion PR was opened (so they can review/build the slice locally without first
 //    switching), else restore the pre-run branch if isolation left HEAD detached. Runs last so no
 //    other Settle agent's origin work is disturbed, and best-effort — a checkout failure (dirty tree,
@@ -740,7 +744,7 @@ if (parentIssue) {
     [
       `You are the CHECKOUT stage of a /batch run — the FINAL step. Leave the main worktree's HEAD on the branch the human needs next. Best-effort: if a checkout would fail (dirty tree blocks it, or the branch is held in another worktree), do NOT force it — just report where you left HEAD and why in notes.`,
       wantSlice
-        ? `A slice promotion PR was opened for #${parentIssue}, so leave HEAD on that slice's integration branch — the human is about to review it and shouldn't have to switch first. Read #${parentIssue}'s body for its \`**Integration Branch:**\` line, then \`git fetch origin <that-branch>\` and \`git checkout <that-branch>\` (a plain named checkout is correct now: every isolation worktree has been pruned, so the branch is held nowhere else). Report headLeftOn:"<that-branch>".`
+        ? `A slice promotion PR was opened for #${parentIssue}, so leave HEAD on that slice's integration branch — the human is about to review it and shouldn't have to switch first. Read #${parentIssue}'s body for its \`**Integration Branch:**\` line, then \`git fetch origin <that-branch>\` and \`git checkout <that-branch>\` (a plain named checkout is correct now: every one of this run's worktrees (runtime + task-<N>) has been pruned, so the branch is held nowhere else). Report headLeftOn:"<that-branch>".`
         : startBranch
           ? `No slice PR was opened. If \`git rev-parse --abbrev-ref HEAD\` prints "HEAD" (detached), restore the pre-run branch: \`git checkout ${startBranch}\`; otherwise leave HEAD as-is. Report headLeftOn.`
           : `No slice PR was opened and no pre-run branch was captured. If HEAD is detached, record the detached SHA in notes and leave it — do NOT guess a branch. Report headLeftOn (null if left detached).`,
