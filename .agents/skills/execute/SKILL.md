@@ -3,6 +3,8 @@ name: execute
 description: Implement a `size:task` spec end-to-end on a branch off the parent's integration branch and open the PR with `Closes #<N>`. Use when the user says "execute #<N>", "tackle #<N>", "ship task #<N>", or points at a `size:task` issue labeled `ready-for-agent`. Use `/decompose` instead for larger sizes (`size:slice`, `size:feature`, `size:initiative`).
 ---
 
+*Batch-mode agents: read [BATCH.md](BATCH.md) instead of this file — it is the /batch-facing subset of Steps 1–6 and 7–9. Keep the two in sync when editing either.*
+
 # Execute
 
 Ship a task: read the brief, branch off the right base, implement, commit per cohesive unit, open a PR.
