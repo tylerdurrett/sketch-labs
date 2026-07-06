@@ -113,7 +113,6 @@ The user-visible-vs-intermediate signal lives in the outcome line of the end-of-
 | ------------- | ------------------------------------------------------------------------------------------------------------ |
 | `/status`     | Read-only survey of where work stands. Walks the tracker, picks one recommended next-step skill. The "where am I" answer. |
 | `/defer`      | Captures cleanup / dedup / refactor findings as `cleanup`-labeled issues so they don't pollute the current PR. Companion to `/simplify`. |
-| `/how-to-use` | Verbatim user manual. Same content every invocation. Static reference.                                       |
 
 ## The labels
 
@@ -144,7 +143,7 @@ The recursion is captured in [ADR-0001](../adr/0001-issues-branch-from-parent-in
 
 ## End-of-run output
 
-Every workflow skill that produces a durable artifact ends with the same three-block template (outcome, links, next step). Skills whose output IS the report (`/status`, `/how-to-use`, `/triage` in conversational mode, `/grill-with-docs`, `/check`, `/audit`) are explicit exceptions. Full detail in [output-format.md](output-format.md).
+Every workflow skill that produces a durable artifact ends with the same three-block template (outcome, links, next step). Skills whose output IS the report (`/status`, `/triage` in conversational mode, `/grill-with-docs`, `/check`, `/audit`) are explicit exceptions. Full detail in [output-format.md](output-format.md).
 
 ## Where to start
 
@@ -152,7 +151,6 @@ Every workflow skill that produces a durable artifact ends with the same three-b
 - **You have an alignment session ready to capture**: run `/to-spec`.
 - **You have a freshly captured spec on the tracker**: run `/triage <N>` to verify size, seed bookkeeping, and route it.
 - **You're not sure where you are**: run `/status`.
-- **You want this overview inline**: run `/how-to-use`.
 
 ## Why this shape
 
