@@ -349,20 +349,38 @@ describe('leaf-field per-leaf variation (#127)', () => {
     expect(new Set(hashes).size).toBe(hashes.length)
   })
 
-  it('a higher variation yields strictly more size spread than a lower one at the same seed', () => {
+  it('a wider leafSize range yields strictly more size spread than a narrow one at the same seed', () => {
     const seed = 'spread'
-    const low = leafField.generate({ density: 6, variation: 0.2 }, seed, 0)
-    const high = leafField.generate({ density: 6, variation: 0.8 }, seed, 0)
-    expect(spineLengthSpread(leavesOf(high))).toBeGreaterThan(
-      spineLengthSpread(leavesOf(low)),
+    // Size spread is owned by the [leafSizeMin, leafSizeMax] range now, not by
+    // `variation` (which governs only curl/wobble). A wider range ⇒ leaves drawn
+    // farther apart in length ⇒ larger spine-length spread.
+    const narrow = leafField.generate({ density: 6, leafSizeMin: 90, leafSizeMax: 110 }, seed, 0)
+    const wide = leafField.generate({ density: 6, leafSizeMin: 20, leafSizeMax: 200 }, seed, 0)
+    expect(spineLengthSpread(leavesOf(wide))).toBeGreaterThan(
+      spineLengthSpread(leavesOf(narrow)),
     )
   })
 
-  it('at variation 0 every leaf shares the same base size (spread ~0), confirming the knob is live', () => {
-    const scene = leafField.generate({ density: 6, variation: 0 }, 'flat', 0)
-    // Leaves are all the fixed base shape (only rotated), so spine lengths — a
-    // rotation-invariant diagonal measure — match to within float noise. (The
-    // occluder disc is filtered out; its diameter is unrelated to leaf size.)
+  it('leaves vary in size at variation 0 — size is decoupled from the shape-variation knob', () => {
+    // At variation 0 curl/wobble collapse to the base, but length still draws
+    // across the range, so the field is NOT uniform in size.
+    const scene = leafField.generate(
+      { density: 6, variation: 0, leafSizeMin: 30, leafSizeMax: 200 },
+      'flat',
+      0,
+    )
+    expect(spineLengthSpread(leavesOf(scene))).toBeGreaterThan(1)
+  })
+
+  it('leafSizeMin == leafSizeMax yields a uniform-size field (spread ~0)', () => {
+    const scene = leafField.generate(
+      { density: 6, leafSizeMin: 120, leafSizeMax: 120 },
+      'uniform',
+      0,
+    )
+    // Every leaf draws the same length, so spine lengths — a rotation-invariant
+    // diagonal measure — match to within float noise. (The occluder disc is
+    // filtered out; its diameter is unrelated to leaf size.)
     expect(spineLengthSpread(leavesOf(scene))).toBeLessThan(1e-6)
   })
 })

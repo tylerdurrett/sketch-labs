@@ -23,10 +23,11 @@
  * `octaves` (how many noise layers stack) and `turbulence` (curl octave falloff
  * → fbm `gain`) shape the flow each leaf bends into; `leafSizeMin`/`leafSizeMax`
  * bound the seeded length, `leafWidth` sets width as a fraction of that length
- * (slenderness) and `pointiness` sets the tip sharpness; `variation` scales how
- * far each leaf's length/curl/wobble strays from the fixed base. At `variation`
- * 0 every leaf collapses back to the midpoint base shape (matching the
- * pre-variation field), so the knob is live.
+ * (slenderness) and `pointiness` sets the tip sharpness; each leaf's length
+ * draws uniformly across [leafSizeMin, leafSizeMax] (set them equal for a
+ * uniform-size field), while `variation` scales how far each leaf's curl/wobble
+ * strays from the fixed base — at `variation` 0 the curl/wobble collapse back to
+ * that base, so the knob is live.
  *
  * FLOW COHERENCE (2026-07-02): `fieldScale` samples the curl field over
  * CANVAS-NORMALIZED coordinates (x/WIDTH, y/HEIGHT), so the knob reads directly
@@ -141,15 +142,15 @@ const schema = {
   octaves: { kind: 'number', min: 1, max: 6, default: 2, step: 1, integer: true },
   /** Drives the Poisson spacing radius (radius = REFERENCE_SPACING / density). Consumed NOW. */
   density: { kind: 'number', min: 1, max: 80, default: 12.9 },
-  /** Leaf length range low (length = the min/max midpoint at variation 0). Consumed NOW. */
+  /** Leaf length range low — each leaf's length draws uniformly in [min, max]. Set equal to max for a uniform-size field. Consumed NOW. */
   leafSizeMin: { kind: 'number', min: 10, max: 300, default: 50 },
-  /** Leaf length range high (length = the min/max midpoint at variation 0). Consumed NOW. */
+  /** Leaf length range high — each leaf's length draws uniformly in [min, max]. Consumed NOW. */
   leafSizeMax: { kind: 'number', min: 10, max: 400, default: 155.5 },
   /** Leaf width as a fraction of its length — lower = long & slender, higher = short & fat. Consumed NOW. */
   leafWidth: { kind: 'number', min: 0.15, max: 1, default: 0.9, step: 0.05 },
   /** Tip pointiness (leaf `tipSharpness`) — 0 = round, blunt apex; 1 = sharp, pointed. Consumed NOW. */
   pointiness: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
-  /** Per-leaf variation amount — scales how far each leaf strays from the base shape. Consumed NOW. */
+  /** Per-leaf shape variation — scales how far each leaf's curl/wobble strays from the base shape (size is its own [leafSizeMin, leafSizeMax] range, independent of this). Consumed NOW. */
   variation: { kind: 'number', min: 0, max: 1, default: 0 },
   /**
    * How many implied-sphere occluder discs to scatter into the field. Each disc
@@ -187,12 +188,12 @@ const schema = {
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
 const REFERENCE_SPACING = 400
 
-// Base shape constants. Each leaf's shape is rolled from these: size lerps from
-// the range midpoint toward a seeded in-range draw by `variation`; curl and
-// wobble stray from their base by seeded amounts scaled by `variation`. At
-// `variation` 0 every leaf collapses to the fixed base (midpoint size, base
-// curl, zero wobble) — the pre-variation field. (Width ratio and tip pointiness
-// are their own live knobs — `leafWidth` / `pointiness` — applied uniformly.)
+// Base shape constants. Each leaf's length draws uniformly in its own
+// [leafSizeMin, leafSizeMax] range (independent of `variation` — that knob owns
+// curl/wobble only). Curl and wobble stray from these bases by seeded amounts
+// scaled by `variation`; at `variation` 0 they collapse to the fixed base (base
+// curl, zero wobble). (Width ratio and tip pointiness are their own live knobs —
+// `leafWidth` / `pointiness` — applied uniformly.)
 const FIXED_CURL = 0.12
 
 /** Std-dev of the seeded per-leaf curl jitter (radians of bend), scaled by `variation`. */
@@ -350,11 +351,6 @@ export const leafField: StatelessSketch = {
     // seam holds (a copy is sorted — the sampler output is not mutated).
     const points = [...sampled].sort(([ax, ay], [bx, by]) => ay - by || ax - bx)
 
-    // Size base: the range midpoint. At `variation` 0 each leaf's length is
-    // exactly this midpoint (the pre-variation field); as variation → 1 it lerps
-    // toward a seeded in-range draw.
-    const sizeMidpoint = (leafSizeMin + leafSizeMax) / 2
-
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
     // Splice the opaque occluder discs into the painter's order at the GLOBAL
@@ -398,14 +394,16 @@ export const leafField: StatelessSketch = {
       })
       const angle = Math.atan2(flow[1], flow[0])
 
-      // Roll this leaf's shape from `rng`, scaled by `variation`. CRUCIAL: roll
-      // all three (length, curl, wobble) UNCONDITIONALLY and in a fixed order,
-      // even when variation is 0 — the rng-consumption COUNT per leaf must stay
-      // constant regardless of knob values so the deterministic seam holds and
-      // changing `variation` reshapes the field without desyncing the sequence.
-      // At variation 0 the rolls collapse to the fixed base (midpoint / FIXED
-      // curl / zero wobble) while still consuming their draws.
-      const length = lerp(sizeMidpoint, rng.range(leafSizeMin, leafSizeMax), variation)
+      // Roll this leaf's shape from `rng`. CRUCIAL: roll all three (length, curl,
+      // wobble) UNCONDITIONALLY and in a fixed order — the rng-consumption COUNT
+      // per leaf must stay constant regardless of knob values so the deterministic
+      // seam holds and changing a knob reshapes the field without desyncing the
+      // sequence. Length draws uniformly across the full [leafSizeMin, leafSizeMax]
+      // range so leaves genuinely differ in size (set the two equal for a uniform
+      // field); `variation` governs only the curl/wobble shape strays, which
+      // collapse to the fixed base (FIXED curl / zero wobble) at variation 0 while
+      // still consuming their draws.
+      const length = rng.range(leafSizeMin, leafSizeMax)
       const curlAmount = FIXED_CURL + rng.gaussian(0, CURL_JITTER_STD) * variation
       const wobble = MAX_WOBBLE * variation * rng.value()
       const shape: LeafShape = {
