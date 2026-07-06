@@ -49,7 +49,7 @@ If the merge fails (race, protected-branch policy), report the error and stop.
 
 ## T5. Close the task issue
 
-The solo flow syncs a local base branch here (`git checkout <base-branch>` + `git pull --ff-only`); under /batch skip it — the workflow prompt governs branch mechanics and the worktree is torn down.
+The solo flow syncs a local base branch here (`git checkout <base-branch>` + `git pull --ff-only`); under /batch skip it — the workflow prompt governs branch mechanics and the task worktree is pruned at Settle.
 
 ```bash
 gh issue view <N> --json state -q .state

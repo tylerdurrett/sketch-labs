@@ -38,7 +38,6 @@ Shipped task #143 via PR #144. The export-pipeline slice now has 3 of 4 tasks la
 These skills' entire output IS the report:
 
 - **`/status`**: multi-section warm-prose report reading like a stakeholder status update — the lead paragraph names active work by title, and "What to do next" gives one recommendation. Voice rules below still apply.
-- **`/how-to-use`**: verbatim user manual. No closing remark.
 - **`/triage`** in conversational mode: prose survey, recommendation embedded in the body.
 - **`/grill-with-docs`**: interview format; no canonical wrap-up line.
 - **`/check`**: the terminal `## Findings` block is the structured artifact `/audit` parses.
