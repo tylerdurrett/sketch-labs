@@ -98,6 +98,8 @@ The full skill set, organized by phase of the loop.
 | Skill            | What it does                                                                                                |
 | ---------------- | ----------------------------------------------------------------------------------------------------------- |
 | `/execute`       | Implements a `size:task` end-to-end on a branch off the parent's integration branch. One commit per cohesive sub-section. Opens a PR with `Closes #<N>`. |
+| `/batch`         | Batch-executes the ready `size:task` children of one parent slice via a worktree-isolated workflow. Infers a dependency DAG, runs independent tasks in parallel and dependent ones in order, squash-merges every code-review-clean task into the slice branch, then opens one slice promotion PR for review. |
+| `/autopilot`     | Takes an already-triaged `size:slice` from decomposition to a batched slice promotion PR, autonomously. Composes `/decompose`, `/audit` (auto-approving routine findings, halting on blocking ones), and `/triage` across the task children, then `/batch`, plus a final sweep of the deferred cleanup findings onto the same slice PR. |
 
 ### Ship (one tier-aware skill)
 
@@ -113,6 +115,7 @@ The user-visible-vs-intermediate signal lives in the outcome line of the end-of-
 | ------------- | ------------------------------------------------------------------------------------------------------------ |
 | `/status`     | Read-only survey of where work stands. Walks the tracker, picks one recommended next-step skill. The "where am I" answer. |
 | `/defer`      | Captures cleanup / dedup / refactor findings as `cleanup`-labeled issues so they don't pollute the current PR. Companion to `/simplify`. |
+| `/dag`        | Writes (or refreshes) a Mermaid dependency DAG of an issue's direct sub-issues into the issue body. Tier-agnostic. Color-codes each node by status (done / in progress / not started). Idempotent. |
 | `/how-to-use` | Verbatim user manual. Same content every invocation. Static reference.                                       |
 
 ## The labels
