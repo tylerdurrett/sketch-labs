@@ -78,7 +78,7 @@ Children without `needs-triage` are already triaged — skip them. If none carry
 
 1. Run `/batch #<S>` per the batch skill. At batch's **Step 4 approval gate**, the autopilot invocation *is* the plan approval — do not stop for a human; record the inferred DAG (waves) so it lands in the end-of-run output, then proceed.
 2. Invoke the `Workflow` tool (batch's Step 5) from the orchestrator's own loop. It runs in the background; let its completion notification return to this loop, and let batch's Settle phase finish (auto-defer, reconcile, slice promotion PR, cleanup).
-3. Read batch's structured `{ results, summary }` and its end-of-run report — tasks squash-merged, tasks held by code review (finding counts + PR URLs), failed/skipped tasks with reasons, deferred issues filed, and the slice promotion PR URL (or exactly why it was not opened).
+3. Read batch's structured `{ results, summary }` **from the completion notification's result payload** — tasks squash-merged, tasks held by code review (finding counts + PR URLs), failed/skipped tasks with reasons, deferred issues filed, and the slice promotion PR URL (or exactly why it was not opened). Do NOT `Read` the workflow's full output file into context: it duplicates the notification payload and was measured costing the orchestrator ~25K context tokens for zero new information. Open it only if the notification payload is truncated or missing a field you need.
 
 **Report to relay:** the approved DAG plus batch's own end-of-run report content, folded into autopilot's end-of-run output.
 
@@ -86,15 +86,15 @@ Children without `needs-triage` are already triaged — skip them. If none carry
 
 ## Stage 6: Cleanup sweep (runs inline in the orchestrator)
 
-Stage 5's batch Settle phase auto-defers each non-blocking code-review finding on a merged task as a `needs-triage`+`cleanup` sub-issue of the slice. This stage triages and batches those onto the *same* slice PR, draining the queue so the reviewer sees the slice and its own cleanup in one diff instead of rubber-stamping a pile of `cleanup` issues later.
+Stage 5's batch Settle phase auto-defers the non-blocking code-review findings on merged tasks as `cleanup` sub-issues of the slice — task-sized bundles arrive **pre-triaged** (`size:task` + `ready-for-agent`; the deferrer just verified every finding against the merged code, so triage would only rubber-stamp), while bigger or murkier bundles arrive as `needs-triage`. This stage batches the ready ones (triaging only the rare `needs-triage` stragglers) onto the *same* slice PR, draining the queue so the reviewer sees the slice and its own cleanup in one diff instead of rubber-stamping a pile of `cleanup` issues later.
 
 **Precondition:** only run this stage if stage 5 actually opened (or found already-open) the slice promotion PR. If the slice PR was withheld, skip stage 6 entirely — there is nothing to fold cleanup into.
 
-**Skip check** — no open `needs-triage`+`cleanup` child of the slice remains:
+**Skip check** — no open `cleanup` child of the slice remains in a sweepable state (`ready-for-agent` or `needs-triage`):
 
 ```bash
 gh api "repos/{owner}/{repo}/issues/<S>/sub_issues" \
-  --jq '[.[] | select(.state == "open") | select([.labels[].name] | index("cleanup")) | select([.labels[].name] | index("needs-triage"))] | length'
+  --jq '[.[] | select(.state == "open") | select([.labels[].name] | index("cleanup")) | select([.labels[].name] | (index("needs-triage") or index("ready-for-agent")))] | length'
 ```
 
 Zero → skip the whole stage (record `cleanup-sweep: nothing deferred`). Non-zero → run the drain loop. (Read the work-list from this live query, **not** from batch's in-memory `deferred` list — that keeps the sweep resumable across re-runs.)
@@ -103,17 +103,19 @@ Zero → skip the whole stage (record `cleanup-sweep: nothing deferred`). Non-ze
 
 ```
 for round in 1..3:
-  1. Query the open `needs-triage`+`cleanup` children of <S> (the skip-check query above).
+  1. Query the open sweepable `cleanup` children of <S> (the skip-check query above).
      If none remain → the queue is drained; STOP the loop (success).
-  2. TRIAGE them: dispatch one `/triage #<C>` sub-agent per child, all in parallel — identical
-     brief to Stage 4's per-task brief. A cleanup issue lands with no `size:*` label, so triage
-     assigns size + state. Happy path is `size:task` + `ready-for-agent`; honor an honest
-     non-happy state (a cleanup that's actually slice-sized, or needs-info) without forcing it.
+  2. TRIAGE only the children still carrying `needs-triage` (usually none — the deferrer
+     pre-triages task-sized bundles): one `/triage #<C>` sub-agent per such child, in
+     parallel — identical brief to Stage 4's per-task brief. Happy path is `size:task` +
+     `ready-for-agent`; honor an honest non-happy state (a cleanup that's actually
+     slice-sized, or needs-info) without forcing it. Children already `ready-for-agent`
+     skip straight to step 3 — do NOT spawn triage sub-agents for them.
   3. BATCH: run `/batch #<S>` inline, exactly as Stage 5 (its own Step 5 inline procedure).
-     Batch's pre-flight now finds ONLY the newly-ready cleanup tasks (every prior task is
-     closed → ineligible), merges the clean ones into the slice branch (updating the open PR),
-     and its Settle auto-defers any NEW cleanup-of-cleanup findings as fresh `needs-triage`
-     `cleanup` children — which the next round's step-1 query will pick up.
+     Batch's pre-flight now finds ONLY the ready cleanup tasks (every prior task is
+     closed → ineligible), merges the clean ones into the slice branch (updating the open
+     PR), and its Settle auto-defers any NEW cleanup-of-cleanup findings as fresh `cleanup`
+     children — which the next round's step-1 query will pick up.
   4. Next round.
 after the loop (drained or cap hit): gather what was swept and what remains.
 ```

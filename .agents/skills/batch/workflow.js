@@ -104,6 +104,11 @@ const PREP_SCHEMA = {
         },
       },
     },
+    trivial: {
+      type: ['boolean', 'null'],
+      description:
+        'true ONLY iff the whole task is one sub-section touching ≤2 files with an expected diff ≲30 lines, no new dependencies, and no test-suite additions — eligible for the express (single-agent) path. When in doubt, false.',
+    },
     blocker: { type: ['string', 'null'], description: 'if not ready: not OPEN/ready-for-agent/size:task, size escape-hatch, or other' },
   },
 }
@@ -178,17 +183,39 @@ const WORKTREE_PROTOCOL = (branch) =>
 
 // Supply-chain lockdown is intentional on this machine (docs/agents/locked-down-npm.md). A stage must
 // NEVER weaken it to get unblocked — that turns a one-task hiccup into a machine-wide security hole.
-const SECURITY_NOTE =
-  `SUPPLY-CHAIN LOCKDOWN (do not circumvent): this machine deliberately blocks dependency build/install scripts and packages published <7 days ago. In a fresh worktree, \`pnpm install\` prints \`ERR_PNPM_IGNORED_BUILDS\` (e.g. esbuild) and EXITS 1 — this is EXPECTED AND BENIGN, not a broken environment: the deps install fine and esbuild/vitest ship prebuilt binaries that work without their postinstall. Do not chase that exit code. Just run the package-local binaries directly — \`./node_modules/.bin/tsc --noEmit\` to typecheck, \`./node_modules/.bin/vitest run\` to test — instead of \`pnpm run <script>\` (whose pre-flight rejects the ignored-builds state). NEVER run \`pnpm config set dangerouslyAllowAllBuilds ...\`, never lower \`min-release-age\`/\`minimumReleaseAge\`, never edit \`~/.npmrc\` or the global pnpm config — a flailing agent once did this globally and silently defeated the whole lockdown. If a package TRULY needs its build script and has no prebuilt fallback, set the blocker and surface it; a human allows it per-repo (pnpm-workspace.yaml). See docs/agents/locked-down-npm.md.`
+// Kept tight: this block is re-ingested by every stage of every task, so it carries only the
+// operative facts (rationale lives in docs/agents/locked-down-npm.md).
+const TOOLING_NOTE =
+  `TOOLING (locked-down npm — do not circumvent; see docs/agents/locked-down-npm.md): your fresh worktree has no node_modules. Run \`pnpm install\` ONCE, first — expect it to EXIT 1 with \`ERR_PNPM_IGNORED_BUILDS\`; that is deliberate and benign (deps install fine; the toolchain runs on prebuilt binaries). Then use the package-local binaries — \`./node_modules/.bin/tsc --noEmit\` to typecheck, \`./node_modules/.bin/vitest run\` to test — never \`pnpm run <script>\` (its pre-flight rejects the ignored-builds state), and never hunt for tooling the repo doesn't define (no prettier config = no prettier gate; check before assuming). NEVER weaken the lockdown: no \`dangerouslyAllowAllBuilds\`, no \`min-release-age\` change, no \`~/.npmrc\` / global pnpm edits; if a package truly needs its build script, set your blocker and stop — a human allows it per-repo (pnpm-workspace.yaml). Shell note: this machine's shell is zsh — never read an exit code through a pipe (\`\${PIPESTATUS[0]}\` is bash-only and expands EMPTY here, so a silently failing test reads as success); run the command bare and check \`$?\` directly.`
+
+// The parent-chain walk trips agents up the same way every run; state the one correct mechanism.
+const PARENT_CHAIN_NOTE = `parent links live in \`**Part of:** #<P>\` lines in issue BODIES, read via \`gh issue view <N> --json body\` — there is no \`--json parent\` field, don't try it`
+
+// Where the batch-facing skill subsets live. Resolved via the git COMMON dir so it works from any
+// linked worktree regardless of which (possibly older) branch that worktree has checked out.
+const EXECUTE_BATCH_DOC = `"$(git rev-parse --git-common-dir)/../.agents/skills/execute/BATCH.md"`
+const SHIP_TASK_DOC = `"$(git rev-parse --git-common-dir)/../.agents/skills/ship/TASK.md"`
+
+// A sibling that squash-merged into the base after this task's branch was cut makes the branch
+// stale — the single biggest observed source of wasted land-stage work (parallel agents each
+// re-deriving the same merge-base archaeology, or worse, rebasing). Tell the stage exactly what
+// happened and how to integrate.
+function stalenessNote(baseBranch, landedSince, { forReview } = {}) {
+  if (!landedSince.length) return ''
+  const who = landedSince.map((s) => `#${s.number} ("${s.title}"${s.files && s.files.length ? ` — ${s.files.join(', ')}` : ''})`).join(', ')
+  return forReview
+    ? `\nBASE ADVANCED: sibling task(s) ${who} squash-merged into \`${baseBranch}\` AFTER this branch was cut. Diff against the MERGE BASE (\`git merge-base\` / three-dot \`git diff origin/${baseBranch}...HEAD\`), never two-dot against the base tip — otherwise the siblings' code pollutes the diff and reads as spurious reverts.\n`
+    : `\nBASE ADVANCED: sibling task(s) ${who} squash-merged into \`${baseBranch}\` AFTER this branch was cut, so expect the branch to be stale there — this is normal, not an anomaly to investigate. Integrate by MERGE ONLY: \`git fetch origin ${baseBranch} && git merge FETCH_HEAD\` (you are detached; commit the merge and push via refspec). NEVER rebase (this PR is squash-merged, so merge commits vanish anyway — and a rebase forces a force-push, which is blocked) and NEVER force-push. If conflicts touch the files listed above, resolve by combining both sides' intent, then re-run typecheck once.\n`
+}
 
 function prepPrompt(task) {
   const deps = (task.dependsOn || []).filter((d) => byNum.has(d))
   return [
     `You are the PREP stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree.`,
     ``,
-    SECURITY_NOTE,
+    TOOLING_NOTE,
     ``,
-    `Follow the /execute skill, Steps 1–6, per its "Running under /batch" section (Prep row): validate labels, walk the parent chain to resolve the base branch — and if that integration branch (or any ancestor up to main) does not yet exist on origin, seed the whole missing chain via /execute Step 2's recursive \`ensure_integration_branch\` rather than forking the base off main (forking off main flattens the hierarchy and corrupts the later slice/feature promotion diff) — read the brief and any contract-updating parent comments, explore the codebase, and form the numbered sub-section plan. Do NOT halt for approval (skip the Step 5 halt).`,
+    `Read ${EXECUTE_BATCH_DOC} and follow its "Prep" section (the /batch-facing subset of /execute Steps 1–6 — do NOT load the full /execute skill): validate labels, walk the parent chain to resolve the base branch (${PARENT_CHAIN_NOTE}) — and if that integration branch (or any ancestor up to main) does not yet exist on origin, seed the whole missing chain per that doc rather than forking the base off main (forking off main flattens the hierarchy and corrupts the later slice/feature promotion diff) — read the brief and any contract-updating parent comments, explore the codebase, and form the numbered sub-section plan. Do NOT halt for approval.`,
     `\nCreate the feature branch (Step 6), but do NOT let your worktree hold it by name — sibling stages run in separate worktrees and git forbids the same branch being checked out twice. So instead of \`git checkout -b <branch>\`, resolve the base, detach onto it (\`git fetch origin <resolved-base> && git checkout --detach FETCH_HEAD\`), and create the branch ON ORIGIN ONLY with \`git push origin HEAD:refs/heads/<branch>\`. Do NOT create a local branch ref of any kind.`,
     deps.length
       ? `\nThis task depends on #${deps.join(', #')}, already squash-merged into the integration branch. Fetch the base branch fresh before branching so it includes their code.`
@@ -197,7 +224,7 @@ function prepPrompt(task) {
     parentIssue
       ? `\nLIVE DAG (amber-on-start): once the branch is pushed and you are about to return ready:true — and ONLY then (a not-ready task keeps its labels untouched) — mark the task active so the parent's Sub-issue DAG lights its node amber. Run \`gh issue edit ${task.number} --remove-label ready-for-agent --add-label in-progress\` (active work has genuinely begun), then recolor the parent: \`node "$(git rev-parse --show-toplevel)/.agents/skills/dag/recolor.mjs" ${parentIssue}\`. Both are best-effort: if either errors (e.g. the parent has no DAG section — the recolor is a clean no-op then), log it and still return ready:true. Never let this block prep.`
       : ``,
-    `\nReturn: ready, baseBranch, branch, brief (distilled for the implementer — the agent brief plus any contract updates from parent comments), plan (ordered sub-sections), blocker.`,
+    `\nReturn: ready, baseBranch, branch, brief (distilled for the implementer — the agent brief plus any contract updates from parent comments; downstream stages get ONLY this, so make it self-sufficient: include the acceptance criteria), plan (ordered sub-sections; list the files each touches — the scheduler uses them to serialize overlapping siblings), trivial (per the schema — single sub-section, ≤2 files, ≲30-line diff, no new deps/tests), blocker.`,
   ]
     .filter(Boolean)
     .join('\n')
@@ -211,7 +238,7 @@ function implPrompt(task, prep, attempt = 1) {
       : ``,
     `Branch: \`${prep.branch}\` (already on origin, based on \`${prep.baseBranch}\`). ${WORKTREE_PROTOCOL(prep.branch)}`,
     ``,
-    SECURITY_NOTE,
+    TOOLING_NOTE,
     ``,
     `The contract / brief:`,
     prep.brief || '(see issue #' + task.number + ')',
@@ -219,7 +246,7 @@ function implPrompt(task, prep, attempt = 1) {
     `The plan — implement each sub-section, in order, as exactly one commit:`,
     ...(prep.plan || []).map((s, i) => `  ${i + 1}. ${s.title}${s.files && s.files.length ? ` [${s.files.join(', ')}]` : ''}${s.notes ? ` — ${s.notes}` : ''}`),
     ``,
-    `For each sub-section: implement → \`pnpm typecheck\` → run the repo's lint/format scripts *only if it defines them* (skip silently if absent — don't hunt for tooling that isn't there) → run /simplify on the changes → \`git add -A\` and commit with \`<type>(<scope>): <sub-section title>\`. One commit per sub-section — do not bundle. Then push via refspec (you are in detached HEAD): \`git push origin HEAD:${prep.branch}\`.`,
+    `For each sub-section: implement → typecheck (per TOOLING) → run the repo's lint/format scripts *only if it defines them* (skip silently if absent — don't hunt for tooling that isn't there) → \`git add -A\` and commit with \`<type>(<scope>): <sub-section title>\`. One commit per sub-section — do not bundle. Then push via refspec (you are in detached HEAD): \`git push origin HEAD:${prep.branch}\`. Do NOT run /simplify — the independent Review stage covers cleanup altitude; duplicate passes were measured pure waste.`,
     `Do NOT open a PR, touch labels, or merge. If you hit a real blocker, set done:false and return it.`,
     ``,
     `LANDING PROOF (required — skip it and your work is silently lost when this worktree is torn down): after your final push, prove the commit reached origin. Run \`git ls-remote origin ${prep.branch}\` for the landed SHA and \`git ls-remote origin ${prep.baseBranch}\` for the base SHA; they MUST differ. Report them as landedSha and baseSha.`,
@@ -228,19 +255,22 @@ function implPrompt(task, prep, attempt = 1) {
   ].join('\n')
 }
 
-function reviewPrompt(task, prep, hasDependents) {
+function reviewPrompt(task, prep, hasDependents, landedSince) {
   return [
     `You are the REVIEW stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree. You did NOT write this code — review it independently.`,
     ``,
     `Branch \`${prep.branch}\` (based on \`${prep.baseBranch}\`) carries the implementation on origin. ${WORKTREE_PROTOCOL(prep.branch)}`,
     ``,
-    SECURITY_NOTE,
+    TOOLING_NOTE,
+    stalenessNote(prep.baseBranch, landedSince, { forReview: true }),
+    `The contract / brief this diff must satisfy (from Prep — no need to re-fetch the issue):`,
+    prep.brief || '(see issue #' + task.number + ')',
     ``,
     `Run \`/code-review high\` over this branch's diff against \`${prep.baseBranch}\`. Classify each finding:`,
     `  - BLOCKING — a correctness bug, logic error, or contract violation introduced by this diff.`,
     `  - cleanup — a non-blocking simplification / efficiency / style improvement.`,
     ``,
-    `If there are any BLOCKING findings, fix them in place (you may use \`/code-review --fix\`, or edit by hand), then \`pnpm typecheck\` → \`pnpm lint:fix\` → \`pnpm format:fix\`, commit with \`fix(review): address code-review findings\`, and push via refspec (you are in detached HEAD): \`git push origin HEAD:${prep.branch}\`. Then re-run \`/code-review high\` ONCE more to recount. Do not loop further — report whatever blocking findings still survive that single fix pass.`,
+    `If there are any BLOCKING findings, fix them in place (you may use \`/code-review --fix\`, or edit by hand), then typecheck (per TOOLING; lint/format only if the repo defines them), commit with \`fix(review): address code-review findings\`, and push via refspec (you are in detached HEAD): \`git push origin HEAD:${prep.branch}\`. Then re-run \`/code-review high\` ONCE more to recount. Do not loop further — report whatever blocking findings still survive that single fix pass. If there are NO blocking findings, do not re-run the implementer's verification (typecheck/tests) — reading the diff is your job; re-proving a green baseline is not.`,
     ``,
     `Do NOT open a PR, change labels, merge, or ship.`,
     `Every code-review-clean task is squash-merged into the slice branch, so any surviving BLOCKING finding holds #${task.number} back from that merge — it stays an OPEN PR for a human to resolve, and the slice promotion PR won't open until it does. Only fixes you actually push count.${hasDependents ? ` Other batched tasks depend on #${task.number}, so holding it will also cause those dependents to be skipped.` : ``}`,
@@ -249,7 +279,7 @@ function reviewPrompt(task, prep, hasDependents) {
   ].join('\n')
 }
 
-function landPrompt(task, prep, { shipEligible, hasDependents, review }) {
+function landPrompt(task, prep, { shipEligible, hasDependents, review, landedSince }) {
   const findingsNote =
     review && review.summary
       ? `\n  - Fold this Review-stage digest into the PR body under a "Review notes" heading:\n${review.summary}`
@@ -259,16 +289,19 @@ function landPrompt(task, prep, { shipEligible, hasDependents, review }) {
     ``,
     `Branch \`${prep.branch}\` (based on \`${prep.baseBranch}\`) carries the finished, independently code-reviewed work on origin. ${WORKTREE_PROTOCOL(prep.branch)}`,
     ``,
-    SECURITY_NOTE,
+    TOOLING_NOTE,
+    stalenessNote(prep.baseBranch, landedSince || []),
+    `The brief / acceptance criteria (from Prep — do NOT re-fetch issue #${task.number} unless this looks incomplete):`,
+    prep.brief || '(brief missing — read issue #' + task.number + ')',
     ``,
-    `Then follow the /execute skill's Step 7-review, Step 8, and Step 9:`,
-    `  - Review the diff against \`${prep.baseBranch}\`: one commit per sub-section (plus an optional \`fix(review):\` commit from the Review stage), on-contract, no drift. Re-run \`pnpm typecheck\` (and \`pnpm test\` if the plan calls for it).`,
-    `  - Step 8: re-read the agent brief on #${task.number} and verify every acceptance criterion first-hand; this populates the PR test plan.`,
-    `  - Step 9: open the PR (\`Closes #${task.number}\` only when the base is main; otherwise note the integration target).${findingsNote}`,
+    `Your job (the Review stage already ran an independent \`/code-review high\` on this diff and Implement typechecked every commit — do NOT re-review the code and do NOT re-run the full test suite; that duplication was measured pure waste):`,
+    `  - Sanity-check the branch: it is on origin and its commits map to the plan's sub-sections. If the BASE-ADVANCED note above applies (or a push is rejected as non-fast-forward), integrate by merge as instructed there, then typecheck once.`,
+    `  - Verify each acceptance criterion in the brief first-hand (behavioral check, not code re-read).`,
+    `  - Open the PR (\`Closes #${task.number}\` only when the base is main; otherwise say it targets \`${prep.baseBranch}\`). Keep the body SHORT — one-paragraph summary + an AC checklist with pass/fail. This PR squash-merges into the slice branch minutes from now and is never individually human-reviewed (the slice promotion PR is the review surface); do not craft an elaborate test-plan narrative.${findingsNote}`,
   ]
   if (shipEligible) {
     lines.push(
-      `\nCode-review came back clean (no blocking findings), so #${task.number} is merged into the slice branch — the slice, not the individual task, is your review surface. After the PR is open and green, you MUST run /ship for #${task.number} (task tier) to squash-merge it into \`${prep.baseBranch}\`. If /ship refuses (failing checks, unresolved review), set ok:false with that blocker and shipped:false. Set shipped:true only if the squash-merge actually landed.${hasDependents ? ` Other batched tasks depend on #${task.number} and build on this merge.` : ``}`,
+      `\nCode-review came back clean (no blocking findings), so #${task.number} is merged into the slice branch — the slice, not the individual task, is the review surface. After the PR is open and green, squash-merge it by following the task-tier ship flow in ${SHIP_TASK_DOC} (do NOT load the full /ship skill — that doc is the task-tier subset). If the ship flow refuses (failing checks, unresolved review), set ok:false with that blocker and shipped:false. Set shipped:true only if the squash-merge actually landed.${hasDependents ? ` Other batched tasks depend on #${task.number} and build on this merge.` : ``}`,
     )
   } else {
     lines.push(
@@ -279,9 +312,71 @@ function landPrompt(task, prep, { shipEligible, hasDependents, review }) {
   return lines.join('\n')
 }
 
+// Express path for tasks Prep judged trivial (one sub-section, ≤2 files, ≲30-line diff): one agent
+// implements, self-reviews, and lands. Transcript analysis showed the full 4-stage pipeline spending
+// ~87% of its cost on scaffolding around such diffs (fresh-worktree bring-up ×3, a high-effort review
+// of a whitespace change, a land agent re-reviewing it again). The slice promotion PR remains the
+// human review gate, so the lost "independent second pair of eyes" is backstopped for nit-sized work.
+const EXPRESS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['ok', 'shipped'],
+  properties: {
+    ok: { type: 'boolean', description: 'true iff implemented, committed, pushed, and the PR was opened' },
+    shipped: { type: 'boolean', description: 'true iff squash-merged into the slice integration branch' },
+    commits: { type: 'array', items: { type: 'string' } },
+    landedSha: { type: ['string', 'null'], description: 'origin SHA of the branch after the final push (git ls-remote)' },
+    baseSha: { type: ['string', 'null'], description: 'origin SHA of the base branch — must differ from landedSha' },
+    blockingCount: { type: ['number', 'null'], description: 'blocking findings surviving the self-review fix pass (0 when clean)' },
+    findings: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['severity', 'summary'], properties: { severity: { type: 'string' }, file: { type: ['string', 'null'] }, line: { type: ['number', 'null'] }, summary: { type: 'string' } } } },
+    reviewSummary: { type: ['string', 'null'] },
+    prNumber: { type: ['number', 'null'] },
+    prUrl: { type: ['string', 'null'] },
+    blocker: { type: ['string', 'null'] },
+  },
+}
+
+function expressPrompt(task, prep, hasDependents) {
+  return [
+    `You are the EXPRESS stage of a /batch run for GitHub issue #${task.number} ("${task.title}"), in your own isolated git worktree. Prep judged this task TRIVIAL (one sub-section, ≤2 files, small diff), so you run the whole implement→review→land pipeline as one agent. If it turns out NOT to be trivial (the diff balloons, new deps needed), stop and return ok:false with blocker "not trivial — route through the full pipeline".`,
+    ``,
+    `Branch: \`${prep.branch}\` (already on origin, based on \`${prep.baseBranch}\`). ${WORKTREE_PROTOCOL(prep.branch)}`,
+    ``,
+    TOOLING_NOTE,
+    ``,
+    `The contract / brief:`,
+    prep.brief || '(see issue #' + task.number + ')',
+    ``,
+    `The plan:`,
+    ...(prep.plan || []).map((s, i) => `  ${i + 1}. ${s.title}${s.files && s.files.length ? ` [${s.files.join(', ')}]` : ''}${s.notes ? ` — ${s.notes}` : ''}`),
+    ``,
+    `Do, in order:`,
+    `  1. IMPLEMENT: one commit (\`<type>(<scope>): <title>\`), typecheck (per TOOLING), push via refspec (\`git push origin HEAD:${prep.branch}\`). LANDING PROOF: \`git ls-remote origin ${prep.branch}\` and \`git ls-remote origin ${prep.baseBranch}\` — landedSha must differ from baseSha, report both.`,
+    `  2. SELF-REVIEW: run \`/code-review medium\` on the diff against \`${prep.baseBranch}\`. Fix any BLOCKING finding, push, recount ONCE. Report blockingCount + surviving findings (cleanup ones too — they feed the slice's deferred-findings sweep).`,
+    `  3. LAND: open the PR (\`Closes #${task.number}\` only when the base is main; otherwise note it targets \`${prep.baseBranch}\`) with a 2-3 line body — this PR auto-merges and is never individually human-reviewed. Then:`,
+    `     - blockingCount 0 → squash-merge via the task-tier ship flow in ${SHIP_TASK_DOC} (do NOT load the full /ship skill); shipped:true only if the merge landed.${hasDependents ? ` Other batched tasks depend on this merge.` : ``}`,
+    `     - blockingCount > 0 → do NOT merge; post the findings as a PR comment, shipped:false.`,
+    ``,
+    `Return: ok, shipped, commits, landedSha, baseSha, blockingCount, findings, reviewSummary, prNumber, prUrl, blocker.`,
+  ].join('\n')
+}
+
 function fail(num, title, blocker, skipped = false) {
   return { number: num, title, ok: false, skipped, shipped: false, commits: [], prUrl: null, prNumber: null, blocker }
 }
+
+// Cross-task coordination state, maintained by the scheduler:
+// - landedSiblings: tasks already squash-merged into the base, with the files their plan declared.
+//   Snapshotted per task at prep time; anything that lands AFTER that snapshot is handed to the
+//   Review/Land prompts as staleness context (they'd otherwise re-derive it via merge archaeology).
+// - fileClaims: first prep to declare a file claims it; a LATER prep declaring the same file waits
+//   for the claimer's whole pipeline before implementing — over-serializing beats two agents
+//   resolving the same conflict. Waits go only to LOWER task numbers, which (with the acyclic dep
+//   graph) provably cannot deadlock: a dep edge means the dependent's prep starts only after the
+//   dependency's pipeline finished, so it can never be waited on by that dependency.
+const landedSiblings = [] // { number, title, files }
+const fileClaims = new Map() // file -> { num, done: Promise }
+const planFilesOf = (prep) => [...new Set((prep.plan || []).flatMap((s) => s.files || []))]
 
 // Promise-memoized DAG scheduler: each task fires the instant ITS specific deps resolve
 // (not when a whole "wave" finishes). The runtime's concurrency cap queues excess agents.
@@ -305,10 +400,58 @@ function run(num) {
 
     const hasDependents = (dependents.get(num) || []).length > 0
 
+    // Staleness baseline: snapshot BEFORE prep cuts the branch. A sibling in the snapshot is
+    // definitely in our base; one that lands later may not be. Overstating staleness is harmless
+    // (the instructed merge is just "already up to date"); understating hides a real conflict.
+    const landedAtStart = new Set(landedSiblings.map((s) => s.number))
+    const landedSince = () => landedSiblings.filter((s) => !landedAtStart.has(s.number) && s.number !== num)
+
     // Stage 1 — Prep (heavy: bookkeeping + plan; pushes the empty branch).
     const prep = await agent(prepPrompt(task), { label: `prep#${num}`, phase: 'Prep', isolation: 'worktree', schema: PREP_SCHEMA })
     if (!prep) return fail(num, task.title, 'Prep agent died or was skipped.')
     if (!prep.ready) return fail(num, task.title, prep.blocker || 'Prep reported not ready.')
+
+    // Overlap guard: wait for any lower-numbered sibling that already claimed one of our planned
+    // files (see fileClaims above) before implementing on top of a base it is about to change.
+    const myDone = memo.get(num)
+    const overlapping = new Map()
+    for (const f of planFilesOf(prep)) {
+      const holder = fileClaims.get(f)
+      if (holder && holder.num !== num && holder.num < num) overlapping.set(holder.num, holder)
+      if (!holder) fileClaims.set(f, { num, done: myDone })
+    }
+    if (overlapping.size) {
+      log(`#${num} waits for #${[...overlapping.keys()].join(', #')} — overlapping planned files; serializing to avoid a conflicting parallel merge.`)
+      await Promise.all([...overlapping.values()].map((h) => h.done.catch(() => {})))
+    }
+
+    // Express path — Prep judged the task trivial: one agent implements, self-reviews, lands.
+    if (prep.trivial) {
+      const x = await agent(expressPrompt(task, prep, hasDependents), { label: `express#${num}`, phase: 'Implement', isolation: 'worktree', schema: EXPRESS_SCHEMA })
+      if (!x) return fail(num, task.title, 'Express agent died or was skipped.')
+      if (x.ok && !(x.landedSha && x.baseSha && x.landedSha !== x.baseSha)) {
+        return fail(num, task.title, `Express reported ok but its branch never advanced past \`${prep.baseBranch}\` — no commit landed.`)
+      }
+      const xBlocked = (x.blockingCount ?? 0) > 0
+      if (x.shipped) landedSiblings.push({ number: num, title: task.title, files: planFilesOf(prep) })
+      return {
+        number: num,
+        title: task.title,
+        ok: x.ok,
+        skipped: false,
+        shipped: x.shipped,
+        reviewBlocked: xBlocked,
+        blockingCount: x.blockingCount ?? 0,
+        reviewSummary: x.reviewSummary ?? null,
+        reviewFindings: x.findings || [],
+        commits: x.commits || [],
+        prNumber: x.prNumber ?? null,
+        prUrl: x.prUrl ?? null,
+        branch: prep.branch ?? null,
+        express: true,
+        blocker: x.ok ? (xBlocked ? `Held from auto-ship: ${x.blockingCount} blocking self-review finding(s); PR open for human review.` : null) : x.blocker,
+      }
+    }
 
     // Stage 2 — Implement (CLEAN: only the plan + brief + branch). We do NOT trust impl.done alone: a
     // faulty agent can write code, skip `git add/commit/push`, misread an empty `git diff HEAD`
@@ -327,7 +470,7 @@ function run(num) {
     }
 
     // Stage 3 — Review (independent /code-review; auto-fixes blocking findings, then GATES the ship).
-    const review = await agent(reviewPrompt(task, prep, hasDependents), { label: `review#${num}`, phase: 'Review', isolation: 'worktree', schema: REVIEW_SCHEMA })
+    const review = await agent(reviewPrompt(task, prep, hasDependents, landedSince()), { label: `review#${num}`, phase: 'Review', isolation: 'worktree', schema: REVIEW_SCHEMA })
     if (!review) return fail(num, task.title, 'Review agent died or was skipped.')
     if (!review.reviewed) return fail(num, task.title, review.blocker || 'Review stage did not complete.')
     const reviewClean = review.blockingCount === 0
@@ -338,8 +481,9 @@ function run(num) {
     const reviewBlocked = !reviewClean
 
     // Stage 4 — Land (verify ACs, open PR, post findings, squash-merge iff review is clean).
-    const land = await agent(landPrompt(task, prep, { shipEligible, hasDependents, review }), { label: `land#${num}`, phase: 'Land', isolation: 'worktree', schema: LAND_SCHEMA })
+    const land = await agent(landPrompt(task, prep, { shipEligible, hasDependents, review, landedSince: landedSince() }), { label: `land#${num}`, phase: 'Land', isolation: 'worktree', schema: LAND_SCHEMA })
     if (!land) return fail(num, task.title, 'Land agent died or was skipped.')
+    if (land.shipped) landedSiblings.push({ number: num, title: task.title, files: planFilesOf(prep) })
 
     return {
       number: num,
@@ -396,9 +540,13 @@ phase('Settle')
 
 // ② Auto-defer. Non-blocking code-review findings on a SHIPPED task would vanish
 //    with its squash-merged, now-closed PR — exactly the "auto-merge buries flagged
-//    work" gap. File them as tracked `needs-triage` + `cleanup` sub-issues of the
-//    slice instead. Held + open-PR tasks keep their findings on a still-open PR, so
-//    they're left alone.
+//    work" gap. File them as tracked `cleanup` sub-issues of the slice. Task-sized
+//    bundles are filed PRE-TRIAGED (`size:task` + `ready-for-agent`): autopilot's
+//    cleanup sweep was observed spending a whole triage sub-agent per issue only to
+//    rubber-stamp exactly those two labels, so the deferrer — which just verified
+//    every finding against the merged code — applies them itself. Anything bigger
+//    or murkier still goes to `needs-triage` for a real triage pass. Held/open-PR
+//    tasks keep their findings on the still-open PR, so they're left alone.
 const DEFER_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -436,9 +584,9 @@ if (parentIssue && shippedWithFindings.length > 0) {
       `Steps:`,
       `  1. VERIFY each finding before filing (/defer step 2). Read slice #${parentIssue}'s body for its \`**Integration Branch:**\`, \`git fetch origin <that-branch>\`, then confirm each cited file:line at that ref WITHOUT checking it out — use \`git show origin/<branch>:<path>\` or \`git grep <pattern> origin/<branch>\` (never \`git checkout\`, which would detach the main worktree). DROP any finding that no longer matches; if all of a task's findings fail, skip that task.`,
       `  2. BUNDLE surviving findings by the seam/file they touch (/defer step 3). Findings in the same file across different tasks (a repeated footgun) belong in ONE issue. Target "one focused PR could land all of this".`,
-      `  3. CREATE each issue: \`gh issue create --label needs-triage --label cleanup\`. The body MUST begin with \`**Part of:** #${parentIssue}\` (the slice — a task can't parent a task) and a \`**Surfaced by:**\` line naming the task(s) + merged PR(s). Use the /defer body template (one section per finding with clickable file:line links, a Scope, an Out of scope).`,
+      `  3. CREATE each issue. You just verified every finding against the merged code, so triage-grade judgment is already done — file PRE-TRIAGED when the bundle is genuinely task-sized (one focused PR lands all of it, no open design questions): \`gh issue create --label cleanup --label size:task --label ready-for-agent\`. If a bundle is bigger or murkier than task-sized (needs a human/design call, or could be slice-sized), file THAT one as \`gh issue create --label cleanup --label needs-triage\` instead — never force-fit. The body MUST begin with \`**Part of:** #${parentIssue}\` (the slice — a task can't parent a task) and a \`**Surfaced by:**\` line naming the task(s) + merged PR(s). Use the /defer body template (one section per finding with clickable file:line links, a Scope, an Out of scope) — for pre-triaged issues the body IS the agent brief, so make the Scope precise.`,
       `  4. LINK each new issue as a native sub-issue of #${parentIssue}: \`owner_repo=$(gh repo view --json nameWithOwner -q .nameWithOwner); cid=$(gh api repos/$owner_repo/issues/<new#> --jq .id); gh api --method POST repos/$owner_repo/issues/${parentIssue}/sub_issues -F sub_issue_id=$cid\`.`,
-      `  5. Do NOT add \`size:task\` or \`ready-for-agent\` — those are deliberately left for /triage. Do NOT start any work.`,
+      `  5. Do NOT start any work on the findings themselves.`,
       ``,
       `Return: issues (each {number, title, url, covers}), dropped.`,
     ].join('\n'),

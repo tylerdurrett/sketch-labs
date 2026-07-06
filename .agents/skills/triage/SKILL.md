@@ -58,6 +58,11 @@ Clear `needs-triage` and apply one of the seven canonical state labels (or, for 
 
 `size:feature` and `size:initiative` skip `ready-for-agent` because they decompose, not execute (see [triage-labels.md §Size axis](../../../docs/agents/triage-labels.md#size-axis)). For `ready-for-agent` outcomes, post an agent brief comment (see [AGENT-BRIEF.md](AGENT-BRIEF.md)) **only if the spec body is thin**; `/to-spec`-published specs usually make a separate brief redundant.
 
+Two hygiene rules for anything you write into a spec or brief — triage notes are load-bearing for the executing agent, and a false claim sends it hunting:
+
+- **Only assert gates that are actually wired.** Before noting "prettier/lint/CI flags this", check the repo defines that gate (a config file, a package.json script). An ad-hoc `npx prettier --check` against a repo with no prettier config produces noise, not a gate — a downstream agent was measured burning minutes chasing exactly that.
+- **Exclude vendored/build dirs from exploratory greps** — `grep -rn --exclude-dir={node_modules,dist,.vite,build}` (or use `rg`, which honors .gitignore). A bare recursive grep over `apps/` once returned 614KB of bundler output for one probe.
+
 **Non-happy path** (any size):
 
 | Outcome | When | Side effect | Next step |
