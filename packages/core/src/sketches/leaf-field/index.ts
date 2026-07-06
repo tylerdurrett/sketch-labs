@@ -140,11 +140,11 @@ const schema = {
   /** Number of noise layers stacked into the flow field (fbm `octaves`); fewer = broader, less turbulent. Consumed NOW. */
   octaves: { kind: 'number', min: 1, max: 6, default: 2, step: 1, integer: true },
   /** Drives the Poisson spacing radius (radius = REFERENCE_SPACING / density). Consumed NOW. */
-  density: { kind: 'number', min: 1, max: 16, default: 12.9 },
+  density: { kind: 'number', min: 1, max: 80, default: 12.9 },
   /** Leaf length range low (length = the min/max midpoint at variation 0). Consumed NOW. */
-  leafSizeMin: { kind: 'number', min: 40, max: 300, default: 50 },
+  leafSizeMin: { kind: 'number', min: 10, max: 300, default: 50 },
   /** Leaf length range high (length = the min/max midpoint at variation 0). Consumed NOW. */
-  leafSizeMax: { kind: 'number', min: 40, max: 400, default: 155.5 },
+  leafSizeMax: { kind: 'number', min: 10, max: 400, default: 155.5 },
   /** Leaf width as a fraction of its length — lower = long & slender, higher = short & fat. Consumed NOW. */
   leafWidth: { kind: 'number', min: 0.15, max: 1, default: 0.9, step: 0.05 },
   /** Tip pointiness (leaf `tipSharpness`) — 0 = round, blunt apex; 1 = sharp, pointed. Consumed NOW. */
