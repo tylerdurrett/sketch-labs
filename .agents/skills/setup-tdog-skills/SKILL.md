@@ -189,11 +189,40 @@ grep -rn "<owner>/<repo>" docs/agents docs/adr 2>/dev/null
 
 Should return zero hits. If anything remains, the substitution missed it; fix and re-run.
 
+#### 4f. Install the pr-merge-gate hook (recommended for `/batch` + `/autopilot`)
+
+`/batch` and `/autopilot` squash-merge each code-review-clean task PR into a slice/feature *staging* branch. In auto permission mode the harness safety classifier ("[Merge Without Review]") blocks an agent from merging a PR it created — which also blocks that legitimate task→staging merge and fails the run. The `pr-merge-gate` PreToolUse hook narrows the capability instead of granting a blanket `gh pr merge` allow-rule: it **denies any merge into main/master, always**, allows only an OPEN, non-conflicting task PR (`<type>/issue-N`) into a `slice/*`|`feature/*` staging branch, and defers on everything else. Because the sanctioned capability is "a clean task PR into a staging branch," `main` stays protected regardless of who runs the command.
+
+Skip this only if the user never intends to run `/batch` or `/autopilot` in auto mode. Otherwise:
+
+1. Copy `templates/hooks/pr-merge-gate.sh` verbatim to `.claude/hooks/pr-merge-gate.sh` in the user's repo (no `<owner>/<repo>` substitution — the hook is generic) and `chmod +x` it.
+2. Wire it into `.claude/settings.json` as a PreToolUse hook on the `Bash` matcher. **Merge, don't overwrite** — if `settings.json` already exists, add the entry into the existing `hooks.PreToolUse` array (creating `hooks`/`PreToolUse` only if absent); never clobber unrelated settings. The entry:
+
+   ```json
+   {
+     "hooks": {
+       "PreToolUse": [
+         {
+           "matcher": "Bash",
+           "hooks": [
+             { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/pr-merge-gate.sh" }
+           ]
+         }
+       ]
+     }
+   }
+   ```
+
+3. The hook requires `jq` and `gh` on PATH (already assumed by the workflow skills). Optionally set `PR_MERGE_GATE_LOG=/path/to/log` in `settings.json` `env` to append decisions for debugging; unset means no logging.
+
+Idempotency: if the hook file and a matching `settings.json` entry already exist, this is a no-op. The hook is a project-approved artifact the user must approve once on first run.
+
 ### 5. Done
 
 Tell the user the setup is complete. List the files that were written (or updated). Mention:
 
 - They can edit `docs/agents/*.md` directly later — the workflow skills read those files at runtime; changes take effect immediately.
+- If the `pr-merge-gate` hook was installed (step 4f), note it must be approved once on first run, and that it denies all automation merges into main/master by design — the slice/feature promotion PR is where a human reviews and merges.
 - Re-running `/setup-tdog-skills` is only necessary if they want to restart from scratch or pick up a future revision of the templates.
 - The natural next move is `/triage` (no args) for a survey, or `/to-spec` to capture the first idea.
 
@@ -205,6 +234,7 @@ Scaffolded tdog skills under <owner>/<repo>.
 - docs/agents/{README,issue-tracker,triage-labels,output-format,lifecycle-initiative,domain}.md
 - docs/adr/NNNN-issues-branch-from-parent-integration-branch.md  (NNNN = the slot chosen at write time)
 - ## Agent skills block in <CLAUDE.md|AGENTS.md>
+- .claude/hooks/pr-merge-gate.sh + .claude/settings.json PreToolUse wiring  (only if step 4f ran)
 
 > Next step: `/triage`. Survey the tracker (will be quiet on a fresh repo) and confirm the labels resolve.
 ```
