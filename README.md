@@ -1,4 +1,4 @@
-# Experiments Harness
+# Sketch Labs
 
 A browser studio for generative-graphics **Sketches** — parametric, seedable scenes
 previewed live and exported through multiple backends. See [CONTEXT.md](CONTEXT.md).

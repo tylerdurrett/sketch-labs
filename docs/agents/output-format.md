@@ -26,7 +26,7 @@ Example — a `/ship` run at the task tier:
 ```
 Shipped task #143 via PR #144. The export-pipeline slice now has 3 of 4 tasks landed.
 
-- https://github.com/tylerdurrett/experiment-harness/pull/144
+- https://github.com/tylerdurrett/sketch-labs/pull/144
 - on branch: slice/issue-83-export-pipeline
 - task issue closed: #143
 

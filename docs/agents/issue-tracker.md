@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Specs (initiatives, features, slices, tasks) for this repo all live as GitHub issues on `tylerdurrett/experiment-harness`. Use the `gh` CLI for all operations. `gh` resolves the repo automatically from `git remote -v` (the `origin` remote points at `tylerdurrett/experiment-harness`).
+Specs (initiatives, features, slices, tasks) for this repo all live as GitHub issues on `tylerdurrett/sketch-labs`. Use the `gh` CLI for all operations. `gh` resolves the repo automatically from `git remote -v` (the `origin` remote points at `tylerdurrett/sketch-labs`).
 
 For the canonical hierarchy and label vocabulary, see [triage-labels.md](triage-labels.md). At a glance: initiative → feature → slice → task → PR. Every issue is a "spec" of some size; size determines which decomposition step applies next.
 
@@ -40,7 +40,7 @@ The REST endpoint expects the child's database `id` (numeric), not its human-fac
 GitHub indexes the parent relationship as a search qualifier:
 
 ```bash
-gh issue list --search "parent-issue:tylerdurrett/experiment-harness#59"
+gh issue list --search "parent-issue:tylerdurrett/sketch-labs#59"
 ```
 
 This returns every child issue attached as a sub-issue of #59. Combine with `--state` filters as usual.

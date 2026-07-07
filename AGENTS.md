@@ -2,7 +2,7 @@ Any instructions in this file must be VERY concise since this loads in every age
 
 ## Agent skills
 
-This repo uses the tdog engineering skill set; its conventions live under [docs/agents/](docs/agents/) — read [docs/agents/README.md](docs/agents/README.md) first. Specs are GitHub issues on `tylerdurrett/experiment-harness`.
+This repo uses the tdog engineering skill set; its conventions live under [docs/agents/](docs/agents/) — read [docs/agents/README.md](docs/agents/README.md) first. Specs are GitHub issues on `tylerdurrett/sketch-labs`.
 
 Skill sources live in `.agents/skills/<name>/`; each `.claude/skills/<name>` is a symlink to it. Author and edit the `.agents/skills/` copy, and symlink any new skill the same way (`ln -s ../../.agents/skills/<name> .claude/skills/<name>`).
 
