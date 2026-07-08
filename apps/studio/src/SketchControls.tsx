@@ -18,7 +18,11 @@ import {
 import { ControlPanel } from "./ControlPanel";
 import { Button } from "./components/ui/button";
 import { downloadBlob } from "./downloadBlob";
-import { LiveCanvas, type LiveCanvasHandle } from "./LiveCanvas";
+import {
+  LiveCanvas,
+  type LiveCanvasHandle,
+  type RenderMode,
+} from "./LiveCanvas";
 import { PresetControls } from "./PresetControls";
 
 /**
@@ -84,6 +88,14 @@ export function SketchControls({
   const [seed, setSeed] = useState(() => newSeed(Math.random));
   const [locks, setLocks] = useState<ReadonlySet<string>>(() => new Set());
 
+  // The preview's render mode (issue #219): `fill` (default) shows the live fill
+  // preview; `outline` swaps in the Hidden-line pass's stroke-only, occlusion-
+  // clipped result — the same processed Scene the hidden-line SVG export emits —
+  // recomputed on demand by LiveCanvas, never in its live fill loop. Like params/
+  // seed/locks this lives in keyed-remount state, so a Sketch switch resets it to
+  // `fill` for free (no manual reset effect).
+  const [renderMode, setRenderMode] = useState<RenderMode>("fill");
+
   // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
   // export snapshots. It is a ref, not state — export reads it imperatively on a
   // button click, never during render.
@@ -106,6 +118,13 @@ export function SketchControls({
       return next;
     });
   };
+
+  // Flip the preview between fill and outline (issue #219). A view-only toggle:
+  // it swaps which processed Scene LiveCanvas draws and touches no param/seed/lock
+  // axis. The heavy Hidden-line pass runs inside LiveCanvas on demand (on this
+  // toggle / a param settle), never in its live fill loop.
+  const toggleRenderMode = () =>
+    setRenderMode((prev) => (prev === "outline" ? "fill" : "outline"));
 
   // New seed: roll a fresh arrangement, leaving every param value untouched —
   // the seed axis is independent of the param (Randomize) axis.
@@ -283,6 +302,7 @@ export function SketchControls({
             sketch={sketch}
             params={params}
             seed={seed}
+            renderMode={renderMode}
           />
         </div>
       </section>
@@ -358,14 +378,36 @@ export function SketchControls({
           />
         </div>
         {/*
+         * Render-mode toggle (#219) — swaps the whole preview between the live
+         * fill render and the on-demand Hidden-line (outline) render. `mt-auto`
+         * pins this to the bottom of the flex-column sidebar so it sits just above
+         * the export group (the two anchor together as the sidebar's footer). It
+         * is a view-only toggle: `aria-pressed` reflects outline, and flipping it
+         * changes nothing about params/seed/locks.
+         */}
+        <div className="mt-auto flex items-center gap-2">
+          <span className="flex-none min-w-16 text-sm text-muted-foreground">
+            render
+          </span>
+          <Button
+            type="button"
+            variant={renderMode === "outline" ? "default" : "outline"}
+            size="sm"
+            className="flex-1"
+            aria-pressed={renderMode === "outline"}
+            aria-label="Toggle outline render mode"
+            onClick={toggleRenderMode}
+          >
+            {renderMode === "outline" ? "Outline" : "Fill"}
+          </Button>
+        </div>
+        {/*
          * Export controls — the shared home for every export path (PNG snapshots
          * the live canvas frame; SVG re-bakes the displayed Scene; Hidden-line SVG
-         * re-bakes then occlusion-clips it for plotting). `mt-auto` pins this
-         * group to the BOTTOM of the flex-column sidebar (#158) so it stays
-         * anchored while everything above stacks from the top; the buttons split
-         * the row (`flex-1`) and wrap as the group grows.
+         * re-bakes then occlusion-clips it for plotting). The buttons split the row
+         * (`flex-1`) and wrap as the group grows.
          */}
-        <div className="mt-auto flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             variant="outline"
