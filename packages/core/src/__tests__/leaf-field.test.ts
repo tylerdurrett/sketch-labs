@@ -45,8 +45,8 @@ const PAPER_STROKE = '#f4f1ea'
  * The occluder discs' DEFAULT fill — the `discColor` knob's default. NOT equal
  * to `backgroundColor`'s default (`#878787`, mid gray): at the defaults the
  * discs read as visible white orbs; disc == background (implied-sphere
- * figure-ground) is the "Nice One" preset's pinned special case (see the sketch
- * header's occluder rationale).
+ * figure-ground) is an opt-in param choice (see the sketch header's occluder
+ * rationale).
  */
 const DISC_FILL = '#ffffff'
 
@@ -564,7 +564,7 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
     // A pure fill, never stroked, and NOT the paper rim color: the disc's edge
     // must come from its silhouette alone. At the defaults it is a VISIBLE white
     // orb on the mid-gray background (disc == background — the implied-sphere
-    // figure-ground — is the preset-pinned special case, not the default).
+    // figure-ground — is an opt-in param choice, not the default).
     expect(disc.stroke).toBeUndefined()
     expect(disc.fill?.color).toBe(DISC_FILL)
     expect(disc.fill?.color).not.toBe(scene.background?.color)
@@ -839,10 +839,10 @@ describe('leaf-field sphereDepth — front/behind split (#142)', () => {
  * The two appended color knobs (ADR-0010): `backgroundColor` feeds the Scene's
  * declared background (ADR-0009) and `discColor` the occluder discs' fill. The
  * defaults DIFFER deliberately — white discs (`#ffffff`) on a mid-gray ground
- * (`#878787`) — so the discs read as visible orbs out of the box; the original
- * white-on-white implied-sphere image is pinned explicitly by the "Nice One"
- * preset. Neither knob consumes an rng draw, so geometry is byte-identical
- * across any color value.
+ * (`#878787`) — so the discs read as visible orbs out of the box (the look the
+ * "Nice One" preset also pins); the original white-on-white implied-sphere
+ * image is an opt-in param choice (set both knobs white). Neither knob consumes
+ * an rng draw, so geometry is byte-identical across any color value.
  */
 describe('leaf-field color knobs — backgroundColor & discColor (ADR-0010)', () => {
   /** All occluder discs of a scene, keyed by the given disc fill color. */
@@ -879,7 +879,7 @@ describe('leaf-field color knobs — backgroundColor & discColor (ADR-0010)', ()
     const discs = discsFilled(scene, '#ffffff')
     expect(discs).toHaveLength(3)
     // The defaults deliberately differ: disc == background (the implied-sphere
-    // special case) is opt-in via params / the "Nice One" preset.
+    // special case) is opt-in via params.
     expect(scene.background?.color).toBe('#878787')
   })
 

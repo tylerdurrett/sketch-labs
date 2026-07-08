@@ -61,9 +61,9 @@
  * orb the leaves lap over — and that is the SHIPPED DEFAULT (2026-07-07): white
  * discs (`discColor` `'#ffffff'`) on a mid-gray ground (`backgroundColor`
  * `'#878787'`), so a bare generate reads as white orbs in the field. The
- * original implied-sphere figure-ground survives as the SPECIAL CASE
- * `discColor === backgroundColor` (what the "Nice One" preset pins, both
- * white). Each disc is spliced into the painter's
+ * original implied-sphere figure-ground survives as the OPT-IN SPECIAL CASE
+ * `discColor === backgroundColor` (set both knobs to the same color; no
+ * shipped preset pins it). Each disc is spliced into the painter's
  * order at a DEPTH index driven by the global `sphereDepth` knob. Leaves drawn
  * BEFORE it (top/back of the field) are painted over where they cross it, so the
  * disc's TRUE circular silhouette cuts a hard, genuinely round edge on the
@@ -107,10 +107,11 @@
  * Re-seeding reshuffles the whole field while the params hold. The two color
  * knobs consume NO rng draws from either stream — they touch only fill colors
  * and the Scene's `background` — so every leaf outline and disc silhouette stays
- * byte-identical to the pre-color field at any color value. The pre-color image
- * itself is preserved by the "Nice One" preset, which pins BOTH colors to white
- * explicitly (its stored params predate the knobs, and the gray-background
- * default would otherwise silently repaint it on reconciliation).
+ * byte-identical to the pre-color field at any color value. The "Nice One"
+ * preset pins both color knobs EXPLICITLY (the shipped gray/white pair,
+ * 2026-07-07) so its image stays stable against future default changes instead
+ * of silently tracking them; the original white-on-white capture is recoverable
+ * by setting both knobs white.
  *
  * SPHERE STREAM OFF THE LEAF SEQUENCE (2026-07-03 audit): every sphere's
  * center/radius is drawn from a SEPARATE, dedicated rng stream
@@ -229,7 +230,7 @@ const schema = {
    * and round-trips through Presets (ADR-0009). Defaults to a mid gray
    * (2026-07-07), deliberately DIFFERENT from `discColor`'s white so the discs
    * read as visible orbs out of the box; the pre-color white-on-white image is
-   * pinned by the "Nice One" preset, not by these defaults. Consumed NOW.
+   * an opt-in param choice now (set both color knobs white). Consumed NOW.
    * Appended last with `discColor` (ADR-0010).
    */
   backgroundColor: { kind: 'color', default: '#878787' },
