@@ -396,10 +396,11 @@ export function LiveCanvas({
   }, [renderMode]);
 
   // The clock-bearing loop — the PLAYING half of the transport (ADR-0005). Keyed
-  // on `[sketch, playing]`: switching Sketch re-runs this and recaptures `start`
-  // (the desired restart); toggling `playing` starts the loop on resume or, via
-  // the cleanup, cancels the pending frame on pause so `t` is held at the
-  // scrubbed frame. A params/seed change does NOT re-run it (read through refs),
+  // on `[sketch, playing, renderMode]`: switching Sketch re-runs this and
+  // recaptures `start` (the desired restart); toggling `playing` starts the loop
+  // on resume or, via the cleanup, cancels the pending frame on pause so `t` is
+  // held at the scrubbed frame; flipping `renderMode` suspends the loop for
+  // outline and restarts it for fill (#219). A params/seed change does NOT re-run it (read through refs),
   // so the animation continues from where it was. This effect owns ANIMATED
   // sketches ONLY: the `sketch.time === undefined` early-return is FIRST, before
   // any sizing or drawing, so a static Sketch makes it a complete no-op (the
