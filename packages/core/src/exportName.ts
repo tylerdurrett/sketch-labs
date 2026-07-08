@@ -10,7 +10,7 @@
  * exactly why it lives in `core`: both the Studio and any future export consumer
  * derive the same name from the same `(sketchId, seed, t)` spine.
  *
- * One idea is load-bearing here:
+ * Two ideas are load-bearing here:
  *
  * - The `-t{t}` segment is TIME-GATED. A static Sketch (no `time` metadata)
  *   produces a single frame with no meaningful `t`, so its name omits the
@@ -19,6 +19,13 @@
  *   (`{sketchId}-seed{seed}-t{t}.{ext}`). The caller expresses that gate by
  *   supplying `t` only when `sketch.time` is present — an omitted `t` is the
  *   static case, not "t = 0".
+ *
+ * - The `-{variant}` segment is OPTIONAL and distinguishes sibling export
+ *   pipelines that share the same `(sketchId, seed, t)` frame but differ in how
+ *   the Scene was transformed before serialization (e.g. the Hidden-line SVG
+ *   export tags its file `-hidden-line`). It appears IFF supplied, positioned
+ *   AFTER the time segment; an omitted variant leaves the name byte-for-byte the
+ *   plain-export name.
  */
 
 import type { Seed } from './sketch'
@@ -40,18 +47,29 @@ export interface ExportNameParts {
    * `time === undefined ? undefined : t` directly under `exactOptionalPropertyTypes`.
    */
   t?: number | undefined
+  /**
+   * An OPTIONAL variant tag distinguishing a sibling export pipeline over the
+   * same frame (e.g. `'hidden-line'` for the occlusion-clipped SVG export). When
+   * supplied it appends a `-{variant}` segment AFTER the time segment; when
+   * omitted (or `undefined`) the name is byte-for-byte the plain-export name.
+   * Explicit `undefined` is accepted under `exactOptionalPropertyTypes`.
+   */
+  variant?: string | undefined
 }
 
 /**
  * Build an export filename from a frame's reproduction coordinates.
  *
- * Shape: `{sketchId}-seed{seed}[-t{t}].{ext}`. The `-t{t}` segment is present
- * IFF `parts.t` is supplied (the time-driven case); a static Sketch omits it.
- * `ext` is a parameter so a single helper serves every export path — `'png'`
- * here, `'svg'` for the sibling export task — and is appended verbatim (callers
- * pass the bare extension, no leading dot).
+ * Shape: `{sketchId}-seed{seed}[-t{t}][-{variant}].{ext}`. The `-t{t}` segment
+ * is present IFF `parts.t` is supplied (the time-driven case); a static Sketch
+ * omits it. The `-{variant}` segment is present IFF `parts.variant` is supplied,
+ * positioned AFTER the time segment; omitting it leaves the plain-export name
+ * byte-for-byte unchanged. `ext` is a parameter so a single helper serves every
+ * export path — `'png'` here, `'svg'` for the sibling export task — and is
+ * appended verbatim (callers pass the bare extension, no leading dot).
  *
- * @param parts - The frame's `sketchId`, `seed`, and optional captured `t`.
+ * @param parts - The frame's `sketchId`, `seed`, optional captured `t`, and
+ *   optional `variant` tag.
  * @param ext - The file extension WITHOUT a leading dot (e.g. `'png'`).
  * @returns The filename string.
  */
@@ -62,5 +80,9 @@ export function exportFilename(parts: ExportNameParts, ext: string): string {
   // `1.5` byte-for-byte identical to the un-rounded values.
   const timeSegment =
     parts.t === undefined ? '' : `-t${Number(parts.t.toFixed(3))}`
-  return `${parts.sketchId}-seed${parts.seed}${timeSegment}.${ext}`
+  // The variant segment follows the time segment IFF supplied; an omitted
+  // variant contributes nothing, so plain-export names stay unchanged.
+  const variantSegment =
+    parts.variant === undefined ? '' : `-${parts.variant}`
+  return `${parts.sketchId}-seed${parts.seed}${timeSegment}${variantSegment}.${ext}`
 }
