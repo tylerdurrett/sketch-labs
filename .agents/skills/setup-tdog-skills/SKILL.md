@@ -189,40 +189,39 @@ grep -rn "<owner>/<repo>" docs/agents docs/adr 2>/dev/null
 
 Should return zero hits. If anything remains, the substitution missed it; fix and re-run.
 
-#### 4f. Install the pr-merge-gate hook (recommended for `/batch` + `/autopilot`)
+#### 4f. Add the batch/autopilot land-step autoMode rule (recommended for `/batch` + `/autopilot`)
 
-`/batch` and `/autopilot` squash-merge each code-review-clean task PR into a slice/feature *staging* branch. In auto permission mode the harness safety classifier ("[Merge Without Review]") blocks an agent from merging a PR it created — which also blocks that legitimate task→staging merge and fails the run. The `pr-merge-gate` PreToolUse hook narrows the capability instead of granting a blanket `gh pr merge` allow-rule: it **denies any merge into main/master, always**, allows only an OPEN, non-conflicting task PR (`<type>/issue-N`) into a `slice/*`|`feature/*` staging branch, and defers on everything else. Because the sanctioned capability is "a clean task PR into a staging branch," `main` stays protected regardless of who runs the command.
+`/batch` and `/autopilot` squash-merge each code-review-clean task PR into a slice/feature *staging* branch. In auto permission mode the harness safety classifier ("[Merge Without Review]") blocks an agent from merging a PR it created — which also blocks that legitimate task→staging merge and fails the run. The correct fix is an `autoMode.allow` rule that authorizes exactly that one merge shape.
+
+**Why an `autoMode.allow` rule and not a hook.** A PreToolUse hook returning `permissionDecision: "allow"` does **not** override the safety classifier — per the Claude Code docs the classifier is a second gate that runs *after* the permissions system, so a hook `allow` never reaches it. Worse, the classifier can block a delegated sub-agent at the *intent* level, before any `gh pr merge` command string exists for a Bash-matcher hook to inspect. Only an `autoMode.allow` rule speaks to the classifier directly.
+
+**Where the rule must live.** The classifier does **not** read `autoMode` from a checked-in project `.claude/settings.json`. The rule must go in the user's `~/.claude/settings.json` (user scope) or the repo's `.claude/settings.local.json` (project-local, git-ignored). Prefer `.claude/settings.local.json` so the authorization is scoped to this repo.
 
 Skip this only if the user never intends to run `/batch` or `/autopilot` in auto mode. Otherwise:
 
-1. Copy `templates/hooks/pr-merge-gate.sh` verbatim to `.claude/hooks/pr-merge-gate.sh` in the user's repo (no `<owner>/<repo>` substitution — the hook is generic) and `chmod +x` it.
-2. Wire it into `.claude/settings.json` as a PreToolUse hook on the `Bash` matcher. **Merge, don't overwrite** — if `settings.json` already exists, add the entry into the existing `hooks.PreToolUse` array (creating `hooks`/`PreToolUse` only if absent); never clobber unrelated settings. The entry:
+1. Ensure `.claude/settings.local.json` exists in the user's repo (create it if absent) and that `.claude/settings.local.json` is git-ignored (it holds machine-local, un-checked-in settings — add it to `.gitignore` if it isn't already).
+2. **Merge, don't overwrite** — if the file already exists, add the string into the existing `autoMode.allow` array (creating `autoMode`/`allow` only if absent); never clobber unrelated settings. Add this rule verbatim to `autoMode.allow`:
 
    ```json
    {
-     "hooks": {
-       "PreToolUse": [
-         {
-           "matcher": "Bash",
-           "hooks": [
-             { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/pr-merge-gate.sh" }
-           ]
-         }
+     "autoMode": {
+       "allow": [
+         "Squash-merging a code-review-clean task PR (head branch shaped like <type>/issue-N) into a slice/* or feature/* staging integration branch is authorized, including deleting that same merged task's own head branch as part of the squash-merge (e.g. `gh pr merge --squash --delete-branch`). This is the /batch and /autopilot land step: an independent /code-review high already passed the diff, and the real two-party human review gate is the downstream slice/feature promotion PR — which automation opens review-first and never auto-merges. This authorization does NOT extend to merging into main, master, or any default/protected branch, and does NOT authorize deleting any branch other than the just-merged task's own head branch; those remain blocked."
        ]
      }
    }
    ```
 
-3. The hook requires `jq` and `gh` on PATH (already assumed by the workflow skills). Optionally set `PR_MERGE_GATE_LOG=/path/to/log` in `settings.json` `env` to append decisions for debugging; unset means no logging.
+The rule keeps `main`/`master` and any other branch deletion out of scope, so the authorization is narrow no matter who runs the command. If the user prefers user-scope instead of project-local, add the same string to `autoMode.allow` in `~/.claude/settings.json`.
 
-Idempotency: if the hook file and a matching `settings.json` entry already exist, this is a no-op. The hook is a project-approved artifact the user must approve once on first run.
+Idempotency: if a matching `autoMode.allow` entry already exists, this is a no-op.
 
 ### 5. Done
 
 Tell the user the setup is complete. List the files that were written (or updated). Mention:
 
 - They can edit `docs/agents/*.md` directly later — the workflow skills read those files at runtime; changes take effect immediately.
-- If the `pr-merge-gate` hook was installed (step 4f), note it must be approved once on first run, and that it denies all automation merges into main/master by design — the slice/feature promotion PR is where a human reviews and merges.
+- If the batch/autopilot `autoMode.allow` rule was added (step 4f), note it lives in `.claude/settings.local.json` (or user settings) — not the checked-in `.claude/settings.json`, which the safety classifier does not read for `autoMode` — and that it authorizes only a clean task PR into a `slice/*`|`feature/*` staging branch; merges into main/master stay blocked, so the slice/feature promotion PR is still where a human reviews and merges.
 - Re-running `/setup-tdog-skills` is only necessary if they want to restart from scratch or pick up a future revision of the templates.
 - The natural next move is `/triage` (no args) for a survey, or `/to-spec` to capture the first idea.
 
@@ -234,7 +233,7 @@ Scaffolded tdog skills under <owner>/<repo>.
 - docs/agents/{README,issue-tracker,triage-labels,output-format,lifecycle-initiative,domain}.md
 - docs/adr/NNNN-issues-branch-from-parent-integration-branch.md  (NNNN = the slot chosen at write time)
 - ## Agent skills block in <CLAUDE.md|AGENTS.md>
-- .claude/hooks/pr-merge-gate.sh + .claude/settings.json PreToolUse wiring  (only if step 4f ran)
+- .claude/settings.local.json autoMode.allow rule for the batch/autopilot land step  (only if step 4f ran)
 
 > Next step: `/triage`. Survey the tracker (will be quiet on a fresh repo) and confirm the labels resolve.
 ```

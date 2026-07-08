@@ -68,5 +68,8 @@ coverage/
 # Agent harness — transient worktrees created by /batch's worktree-isolated agents
 .claude/worktrees/
 
+# Machine-local Claude settings (holds the batch/autopilot autoMode.allow rule) — never checked in
+.claude/settings.local.json
+
 # per-machine pointer to the tdog skills library (backport-skill)
 .tdog-skills-path
