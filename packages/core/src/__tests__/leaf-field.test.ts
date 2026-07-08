@@ -11,10 +11,11 @@ import type { Point } from '../types'
 import type { Primitive } from '../scene'
 
 /**
- * The fifteen leaf-field knobs, in declaration order. The sphere knobs are
- * APPENDED last (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then
- * `sphereDepth` #142) — the first eleven keep their positions (order is part of
- * the contract).
+ * The seventeen leaf-field knobs, in declaration order. Each widening APPENDS
+ * so earlier knobs keep their positions (order is part of the contract): the
+ * sphere knobs (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then
+ * `sphereDepth` #142) after the original eleven, then the two color knobs
+ * (`backgroundColor`, `discColor` — ADR-0010) last.
  */
 const KNOBS = [
   'fieldScale',
@@ -32,14 +33,22 @@ const KNOBS = [
   'sphereRadiusMin',
   'sphereRadiusMax',
   'sphereDepth',
+  'backgroundColor',
+  'discColor',
 ] as const
 
 /** The bold dark fill and paper-colored rim the audit pinned (see the sketch header). */
 const LEAF_FILL = '#1a1a1a'
 const PAPER_STROKE = '#f4f1ea'
 
-/** The occluder disc's fill — the render BACKGROUND color (see the sketch header). */
-const DISC_FILL = 'white'
+/**
+ * The occluder discs' DEFAULT fill — the `discColor` knob's default. NOT equal
+ * to `backgroundColor`'s default (`#878787`, mid gray): at the defaults the
+ * discs read as visible white orbs; disc == background (implied-sphere
+ * figure-ground) is the "Nice One" preset's pinned special case (see the sketch
+ * header's occluder rationale).
+ */
+const DISC_FILL = '#ffffff'
 
 /** A leaf Primitive (the dark-filled polygons) as opposed to the occluder disc. */
 function isLeaf(primitive: Primitive): boolean {
@@ -196,7 +205,7 @@ function meanLeafArea(primitives: Primitive[]): number {
 }
 
 describe('leaf-field Sketch contract', () => {
-  it('declares exactly the fifteen knobs in order and NO time metadata (static)', () => {
+  it('declares exactly the seventeen knobs in order and NO time metadata (static)', () => {
     expect(Object.keys(leafField.schema)).toEqual([...KNOBS])
     // Static Sketch: absence of `time` is what makes the Harness hide the scrubber.
     expect(leafField.time).toBeUndefined()
@@ -497,8 +506,9 @@ describe('leaf-field shape knobs — width & pointiness (#127)', () => {
 describe('leaf-field draw boundary', () => {
   it('emits only generic Primitive records — no leaf-typed field crosses the boundary', () => {
     const scene = leafField.generate({}, 'seed', 0)
-    // The Scene container carries only `space` and `primitives`.
-    expect(Object.keys(scene).sort()).toEqual(['primitives', 'space'])
+    // The Scene container carries only the generic IR fields: `space`,
+    // `primitives`, and the declared `background` (ADR-0009) — no domain field.
+    expect(Object.keys(scene).sort()).toEqual(['background', 'primitives', 'space'])
     const allowed = new Set(['points', 'closed', 'fill', 'stroke'])
     for (const primitive of scene.primitives) {
       // Each Primitive is a plain record: only points/closed/fill/stroke keys.
@@ -547,14 +557,17 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
     return (maxX - minX) / 2
   }
 
-  it('bakes exactly one opaque background-colored disc — fill only, closed, no stroke (figure-ground)', () => {
+  it('bakes exactly one opaque discColor-filled disc — fill only, closed, no stroke', () => {
     const scene = leafField.generate({ sphereCount: 1 }, 'orient', 0)
     const disc = discOf(scene)
     expect(disc.closed).toBe(true)
-    // Invisible AS AN OBJECT: filled with the render background, never stroked,
-    // and NOT the paper rim color (which would read as a faint tinted circle).
+    // A pure fill, never stroked, and NOT the paper rim color: the disc's edge
+    // must come from its silhouette alone. At the defaults it is a VISIBLE white
+    // orb on the mid-gray background (disc == background — the implied-sphere
+    // figure-ground — is the preset-pinned special case, not the default).
     expect(disc.stroke).toBeUndefined()
-    expect(disc.fill?.color).toBe('white')
+    expect(disc.fill?.color).toBe(DISC_FILL)
+    expect(disc.fill?.color).not.toBe(scene.background?.color)
     expect(disc.fill?.color).not.toBe(PAPER_STROKE)
   })
 
@@ -818,6 +831,85 @@ describe('leaf-field sphereDepth — front/behind split (#142)', () => {
     const params: Params = { sphereCount: 3, sphereDepth: 0.7, density: 6 }
     const a = leafField.generate(params, 'depth-det', 0)
     const b = leafField.generate(params, 'depth-det', 0)
+    expect(a).toEqual(b)
+  })
+})
+
+/**
+ * The two appended color knobs (ADR-0010): `backgroundColor` feeds the Scene's
+ * declared background (ADR-0009) and `discColor` the occluder discs' fill. The
+ * defaults DIFFER deliberately — white discs (`#ffffff`) on a mid-gray ground
+ * (`#878787`) — so the discs read as visible orbs out of the box; the original
+ * white-on-white implied-sphere image is pinned explicitly by the "Nice One"
+ * preset. Neither knob consumes an rng draw, so geometry is byte-identical
+ * across any color value.
+ */
+describe('leaf-field color knobs — backgroundColor & discColor (ADR-0010)', () => {
+  /** All occluder discs of a scene, keyed by the given disc fill color. */
+  function discsFilled(scene: { primitives: Primitive[] }, color: string): Primitive[] {
+    return scene.primitives.filter((p) => p.fill?.color === color)
+  }
+
+  it('carries the backgroundColor param as the Scene-declared background', () => {
+    const scene = leafField.generate({ backgroundColor: '#112233' }, 'color', 0)
+    expect(scene.background).toEqual({ color: '#112233' })
+  })
+
+  it('defaults the background to mid gray (#878787)', () => {
+    const scene = leafField.generate({}, 'color', 0)
+    expect(scene.background).toEqual({ color: '#878787' })
+  })
+
+  it('fills every occluder disc with the discColor param', () => {
+    const scene = leafField.generate(
+      { sphereCount: 4, discColor: '#aa3366' },
+      'color',
+      0,
+    )
+    const discs = discsFilled(scene, '#aa3366')
+    expect(discs).toHaveLength(4)
+    for (const disc of discs) {
+      expect(disc.stroke).toBeUndefined()
+      expect(disc.closed).toBe(true)
+    }
+  })
+
+  it('defaults discColor to white — visible orbs on the gray ground, NOT figure-ground', () => {
+    const scene = leafField.generate({ sphereCount: 3 }, 'color', 0)
+    const discs = discsFilled(scene, '#ffffff')
+    expect(discs).toHaveLength(3)
+    // The defaults deliberately differ: disc == background (the implied-sphere
+    // special case) is opt-in via params / the "Nice One" preset.
+    expect(scene.background?.color).toBe('#878787')
+  })
+
+  it('consumes NO rng draws — geometry is byte-identical across color values', () => {
+    // Changing both colors must touch ONLY fill colors and the background:
+    // every leaf primitive stays byte-identical (fill/stroke included — leaf
+    // colors are not param-driven), and every disc keeps its exact outline.
+    const seed = 'color-seam'
+    const base: Params = { density: 6, variation: 0.6, sphereCount: 3 }
+    const plain = leafField.generate(base, seed, 0)
+    const tinted = leafField.generate(
+      { ...base, backgroundColor: '#0a141e', discColor: '#c2b280' },
+      seed,
+      0,
+    )
+    expect(leavesOf(tinted)).toEqual(leavesOf(plain))
+    const outlines = (scene: typeof plain, color: string): unknown[] =>
+      discsFilled(scene, color).map((p) => p.points)
+    expect(outlines(tinted, '#c2b280')).toEqual(outlines(plain, '#ffffff'))
+  })
+
+  it('is deterministic including the colors for identical (params, seed, t) (ADR-0002)', () => {
+    const params: Params = {
+      density: 6,
+      sphereCount: 2,
+      backgroundColor: '#123123',
+      discColor: '#456456',
+    }
+    const a = leafField.generate(params, 'color-det', 0)
+    const b = leafField.generate(params, 'color-det', 0)
     expect(a).toEqual(b)
   })
 })

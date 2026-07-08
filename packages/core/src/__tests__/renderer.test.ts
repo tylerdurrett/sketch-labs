@@ -357,4 +357,54 @@ describe('drawSceneFitted', () => {
       { method: 'fillRect', args: [0, 0, 1000, 1000] },
     ])
   })
+
+  describe('Scene-declared background precedence (ADR-0009)', () => {
+    it('a Scene WITH a background paints it, winning over the caller fallback', () => {
+      const ctx = createRecordingContext()
+      const scene: Scene = { ...fitScene, background: { color: '#123456' } }
+
+      // The caller's fallback ('#0a0a0a') loses: the Scene-declared background is
+      // part of the image, so it is what gets painted over the full surface.
+      drawSceneFitted(ctx, scene, 1000, 1000, '#0a0a0a')
+
+      expect(ctx.events.slice(0, 3)).toEqual([
+        { method: 'setTransform', args: [1, 0, 0, 1, 0, 0] },
+        { prop: 'fillStyle', value: '#123456' },
+        { method: 'fillRect', args: [0, 0, 1000, 1000] },
+      ])
+      expect(ctx.events).not.toContainEqual({ prop: 'fillStyle', value: '#0a0a0a' })
+    })
+
+    it('a Scene WITHOUT a background keeps the caller fallback (unchanged behavior)', () => {
+      const ctx = createRecordingContext()
+
+      drawSceneFitted(ctx, fitScene, 1000, 1000, '#0a0a0a')
+
+      expect(ctx.events).toContainEqual({ prop: 'fillStyle', value: '#0a0a0a' })
+    })
+
+    it("a Scene-declared 'transparent' background clears, exactly like the param form", () => {
+      const ctx = createRecordingContext()
+      const scene: Scene = { ...fitScene, background: { color: 'transparent' } }
+
+      drawSceneFitted(ctx, scene, 1000, 1000, 'white')
+
+      expect(ctx.events.slice(0, 2)).toEqual([
+        { method: 'setTransform', args: [1, 0, 0, 1, 0, 0] },
+        { method: 'clearRect', args: [0, 0, 1000, 1000] },
+      ])
+      expect(methodNames(ctx.events)).not.toContain('fillRect')
+    })
+
+    it("the 'transparent' FALLBACK still clears when the Scene declares nothing", () => {
+      const ctx = createRecordingContext()
+
+      drawSceneFitted(ctx, fitScene, 1000, 1000, 'transparent')
+
+      expect(ctx.events.slice(0, 2)).toEqual([
+        { method: 'setTransform', args: [1, 0, 0, 1, 0, 0] },
+        { method: 'clearRect', args: [0, 0, 1000, 1000] },
+      ])
+    })
+  })
 })

@@ -46,6 +46,14 @@ describe('defaultParams', () => {
     }
     expect(defaultParams(schema)).toEqual({ sides: 6 })
   })
+
+  it('seeds a color param with its hex default — defaultParams is kind-generic', () => {
+    const schema: ParamSchema = {
+      count: { kind: 'number', min: 1, max: 80, default: 24 },
+      ink: { kind: 'color', default: '#1a2b3c' },
+    }
+    expect(defaultParams(schema)).toEqual({ count: 24, ink: '#1a2b3c' })
+  })
 })
 
 describe('randomize', () => {
@@ -90,6 +98,31 @@ describe('randomize', () => {
     const next = randomize(schema, params, new Set(), scriptedRand([1]))
     expect(params).toEqual({ count: 24 })
     expect(next).not.toBe(params)
+  })
+
+  it('passes a color param through UNTOUCHED — Randomize is numeric-only (ADR-0010)', () => {
+    // The pass-through is a stated contract, not an implementation accident: a
+    // color is a deliberate aesthetic choice, never rolled. Only the numeric
+    // sibling consumes a rand() sample — the scripted stub has exactly one value,
+    // so a color roll would throw `scriptedRand exhausted`.
+    const schema: ParamSchema = {
+      ink: { kind: 'color', default: '#1a2b3c' },
+      count: { kind: 'number', min: 0, max: 10, default: 5 },
+    }
+    const params: Params = { ink: '#c0ffee', count: 5 }
+    const next = randomize(schema, params, new Set(), scriptedRand([0.5]))
+    expect(next.ink).toBe('#c0ffee')
+    expect(next.count).toBe(5) // rolled: 0 + 0.5*10
+  })
+
+  it('passes a LOCKED color param through untouched too (lock adds nothing to skip)', () => {
+    // Locked or not, a color never rolls — the lock is redundant for colors but
+    // harmless, and the value survives either way.
+    const schema: ParamSchema = {
+      ink: { kind: 'color', default: '#1a2b3c' },
+    }
+    const next = randomize(schema, { ink: '#c0ffee' }, new Set(['ink']), scriptedRand([]))
+    expect(next.ink).toBe('#c0ffee')
   })
 
   it('passes non-rolled keys present in params but absent from schema through unchanged', () => {

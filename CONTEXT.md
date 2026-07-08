@@ -13,7 +13,7 @@ The shared studio shell and core libraries that host Sketches — navigation, pa
 _Avoid_: framework, app
 
 **Scene**:
-The generic, renderer-agnostic intermediate representation a vector **Sketch** bakes itself into: a coordinate space plus a draw-ordered collection of **Primitives**. Renderers consume Scenes and never know which domain produced them (a Scene is not leaf-aware).
+The generic, renderer-agnostic intermediate representation a vector **Sketch** bakes itself into: a coordinate space plus a draw-ordered collection of **Primitives**, plus an optional Sketch-declared background (a fill for the whole output surface, letterbox included, that wins over the caller's fallback backdrop — ADR-0009). Renderers consume Scenes and never know which domain produced them (a Scene is not leaf-aware).
 _Avoid_: scene graph (no nesting/transforms implied), model
 
 **Primitive**:
@@ -93,7 +93,7 @@ These are intentionally **not** pinned here — they are implementation specific
 
 - The exact record shape of a **Primitive** (how fill vs stroke is modeled — a tagged union vs an SVG-path-style record carrying optional fill and stroke; how layering and source-tagging are represented).
 - The exact shape of the **Scene** container beyond "coordinate space + draw-ordered Primitives."
-- The concrete field format of the **Parameter Schema**'s _non-numeric_ specs (boolean / color / enum / … members of the open `ParamSpec` union). The numeric spec is now frozen: `NumberParamSpec = { kind: 'number'; min; max; default; step?; integer? }`, the sole inhabited member of the open `kind`-discriminated union (issue #47). The serialized **Preset** object is no longer deferred — its shape and read-reconciliation policy are pinned in the **Preset** glossary entry above (issue #8).
+- The concrete field format of the **Parameter Schema**'s remaining _non-numeric_ specs (boolean / enum / … members of the open `ParamSpec` union). The numeric spec is frozen: `NumberParamSpec = { kind: 'number'; min; max; default; step?; integer? }` (issue #47). The color spec is now frozen too: `ColorParamSpec = { kind: 'color'; default }` with a hex-string value domain, never rolled by **Randomize** (ADR-0010). The serialized **Preset** object is no longer deferred — its shape and read-reconciliation policy are pinned in the **Preset** glossary entry above (issue #8).
 - Any GPU / instance-model data structures (the realtime GPU path is deferred entirely).
 - A **cross-param constraint** model — inter-param relationships the single-param **Parameter Schema** cannot express (e.g. `minRadius ≤ maxRadius`, params that only apply when another is enabled, sum-to-one groups). v1 **Randomize** rolls each unlocked numeric param independently within *its own* bounds, so it can hand a Sketch any in-bounds combination; a Sketch owns its own inter-param coherence inside `generate` (e.g. circles taking `Math.min`/`Math.max` of its two radii). A real constraint language is future work and deserves its own grilling before it is built.
 

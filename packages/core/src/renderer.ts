@@ -135,7 +135,7 @@ export function renderToCanvas(ctx: Canvas2DContext, scene: Scene): void {
  * its own coordinate space (aspect ratio preserved, `Stroke.width` scaled with the
  * geometry) letterboxed into the surface.
  *
- * The `background` is painted FIRST — under identity, over the FULL pixel surface
+ * The background is painted FIRST — under identity, over the FULL pixel surface
  * (letterbox included) — before the fit transform, so it is the bottom of the
  * z-order and every caller inherits a safe opaque backdrop with zero author
  * discipline (issue #92). The default is `'white'`, so a black-stroked Sketch is
@@ -143,6 +143,17 @@ export function renderToCanvas(ctx: Canvas2DContext, scene: Scene): void {
  * → black); `'transparent'` clears instead of fills. The paint/clear is
  * UNCONDITIONAL, so it doubles as the per-frame surface clear — no cross-frame
  * ghosting in the Remotion loop, and callers no longer clear themselves.
+ *
+ * PRECEDENCE (ADR-0009): the painted color is
+ * `scene.background?.color ?? background`. A Scene-declared background is PART OF
+ * THE IMAGE — produced by `generate` from a param, on the ADR-0002 determinism
+ * spine — so when present it WINS unconditionally over the `background`
+ * parameter. The parameter remains the caller-side Render Setting SAFETY NET
+ * (issue #92) for the common Scene that declares none: it is a fallback backdrop,
+ * never an override — a caller cannot repaint a Scene-authored background from
+ * outside, for the same reason it cannot recolor a Primitive. The resolved color
+ * feeds the SAME paint/clear logic, so a Scene declaring
+ * `{ color: 'transparent' }` clears exactly as the parameter form does.
  *
  * It reads NEITHER `devicePixelRatio` NOR the surface's CSS box — DPR and
  * backing-store sizing stay a CALLER concern (the caller passes the already-sized
@@ -153,8 +164,10 @@ export function renderToCanvas(ctx: Canvas2DContext, scene: Scene): void {
  * @param scene - The Scene to fit and draw, in painter's order.
  * @param pixelW - Surface width in pixels (backing-store width, DPR already applied).
  * @param pixelH - Surface height in pixels (backing-store height, DPR already applied).
- * @param background - Opaque backdrop CSS color painted over the full surface
- *   before the scene; `'transparent'` clears instead of fills. Defaults to `'white'`.
+ * @param background - FALLBACK backdrop CSS color painted over the full surface
+ *   before the scene when the Scene declares no `background` of its own (a
+ *   Scene-declared background wins — see the precedence doc above);
+ *   `'transparent'` clears instead of fills. Defaults to `'white'`.
  */
 export function drawSceneFitted(
   ctx: Canvas2DContext,
@@ -163,14 +176,18 @@ export function drawSceneFitted(
   pixelH: number,
   background = 'white',
 ): void {
+  // Resolve the backdrop: the Scene-declared background (part of the image,
+  // ADR-0009) wins over the caller's fallback Render Setting (issue #92).
+  const bg = scene.background?.color ?? background
+
   // Paint (or clear) the FULL pixel surface under identity, before the fit
   // transform — the background sits at the bottom of the z-order and the
   // unconditional clear/fill subsumes the per-frame surface clear.
   ctx.setTransform(1, 0, 0, 1, 0, 0)
-  if (background === 'transparent') {
+  if (bg === 'transparent') {
     ctx.clearRect(0, 0, pixelW, pixelH)
   } else {
-    ctx.fillStyle = background
+    ctx.fillStyle = bg
     ctx.fillRect(0, 0, pixelW, pixelH)
   }
 
@@ -227,10 +244,14 @@ function escapeText(s: string): string {
  * has no geometry to draw — the same guard spirit as the renderer and
  * `svg.ts`).
  *
- * The `background` is emitted as a full-`viewBox` `<rect>` FIRST (before metadata
+ * The background is emitted as a full-`viewBox` `<rect>` FIRST (before metadata
  * and paths), so it sits at the bottom of the z-order — the SVG mirror of the
- * canvas's opaque backdrop (issue #92), keeping SVG == raster. It defaults to
- * `'white'`; `'transparent'` emits NO rect (matching the canvas's `clearRect`).
+ * canvas's opaque backdrop (issue #92), keeping SVG == raster. The emitted color
+ * follows the SAME precedence as {@link drawSceneFitted} (ADR-0009):
+ * `scene.background?.color ?? background` — a Scene-declared background is part
+ * of the image and WINS over the `background` parameter, which stays the
+ * caller-side fallback for Scenes that declare none. It defaults to `'white'`; a
+ * resolved `'transparent'` emits NO rect (matching the canvas's `clearRect`).
  *
  * When `metadata` is supplied, it is embedded as a `<metadata>` element (the SVG
  * leg of issue #76, "self-describing exports") so the file traces back to the
@@ -243,17 +264,23 @@ function escapeText(s: string): string {
  * @param scene - The Scene whose Primitives to serialize, in painter's order.
  * @param metadata - Optional metadata string (e.g. the reproduction JSON from
  *   `buildReproMetadata`) embedded as a `<metadata>` element.
- * @param background - Opaque backdrop CSS color emitted as a full-viewBox `<rect>`
- *   below everything; `'transparent'` emits no rect. Defaults to `'white'`.
+ * @param background - FALLBACK backdrop CSS color emitted as a full-viewBox
+ *   `<rect>` below everything when the Scene declares no `background` of its own
+ *   (a Scene-declared background wins); a resolved `'transparent'` emits no rect.
+ *   Defaults to `'white'`.
  * @returns A complete, standalone SVG document string.
  */
 export function renderToSVG(scene: Scene, metadata?: string, background = 'white'): string {
   const { width, height } = scene.space
 
+  // Same resolution as drawSceneFitted (ADR-0009): the Scene-declared background
+  // (part of the image) wins over the caller's fallback Render Setting.
+  const bg = scene.background?.color ?? background
+
   const backgroundEl =
-    background === 'transparent'
+    bg === 'transparent'
       ? undefined
-      : `  <rect x="0" y="0" width="${width}" height="${height}" fill="${escapeAttr(background)}" />`
+      : `  <rect x="0" y="0" width="${width}" height="${height}" fill="${escapeAttr(bg)}" />`
 
   const paths = scene.primitives
     .filter((primitive) => primitive.points.length >= 1)

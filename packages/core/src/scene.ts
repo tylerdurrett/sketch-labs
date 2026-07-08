@@ -11,7 +11,9 @@
  *
  * ADR-0002/0003: a stateless Sketch's `generate(params, seed, t)` and a future
  * stateful Sketch's `draw(state)` both return a Scene. This IR must not foreclose
- * either path, so it stays purely about geometry + style + draw order.
+ * either path, so it stays purely about geometry + style + draw order (plus one
+ * optional whole-surface style: the Sketch-declared {@link Scene.background},
+ * ADR-0009).
  *
  * Record-shape choice (CONTEXT.md "Deliberately deferred" lists the Primitive
  * record shape as intentionally unfrozen): a {@link Primitive} is modeled as a
@@ -107,6 +109,19 @@ export interface Scene {
   space: CoordinateSpace
   /** Primitives in painter's draw order (first = bottom, last = top). */
   primitives: Primitive[]
+  /**
+   * The Sketch-declared background for the WHOLE output surface — letterbox
+   * included — painted below every Primitive (ADR-0009).
+   *
+   * Optional and usually absent: for most Scenes the backdrop is a caller-side
+   * Render Setting (the `background` param on `drawSceneFitted` / `renderToSVG`,
+   * issue #92) and no field is carried here. A Sketch declares one when the
+   * background is PART OF THE IMAGE — produced by `generate` from a param, so it
+   * rides the ADR-0002 determinism spine and round-trips through Presets via the
+   * params that feed it. When present it WINS over the caller's fallback (see
+   * the renderers' precedence docs); it never affects geometry or draw order.
+   */
+  background?: Fill
 }
 
 /**
@@ -150,8 +165,15 @@ export interface SceneBuilder {
  * {@link SceneBuilder.build}.
  *
  * @param space - The coordinate space the Scene's geometry is expressed in.
+ * @param background - Optional Sketch-declared background for the whole output
+ *   surface (see {@link Scene.background}). Absent ⇒ the built Scene carries NO
+ *   `background` field (not an explicit `undefined`), so a background-less Scene
+ *   stays byte-identical to one built before the field existed.
  */
-export function createScene(space: CoordinateSpace): SceneBuilder {
+export function createScene(
+  space: CoordinateSpace,
+  background?: Fill,
+): SceneBuilder {
   const primitives: Primitive[] = []
 
   const builder: SceneBuilder = {
@@ -168,7 +190,9 @@ export function createScene(space: CoordinateSpace): SceneBuilder {
       return builder
     },
     build() {
-      return { space, primitives }
+      return background === undefined
+        ? { space, primitives }
+        : { space, primitives, background }
     },
   }
 

@@ -299,6 +299,49 @@ describe('renderToSVG', () => {
     })
   })
 
+  describe('Scene-declared background precedence (ADR-0009)', () => {
+    /** The first `<rect>` line from the emitted SVG, if any. */
+    const bgRect = (svg: string): string | undefined =>
+      svg.match(/<rect\b[^>]*>/)?.[0]
+
+    it('a Scene WITH a background emits its color, winning over the param fallback', () => {
+      const scene: Scene = {
+        space,
+        primitives: [],
+        background: { color: '#123456' },
+      }
+      // The param fallback ('#0a0a0a') loses: the Scene-declared background is
+      // part of the image, mirrored here exactly as the canvas paints it.
+      const svg = renderToSVG(scene, undefined, '#0a0a0a')
+
+      expect(bgRect(svg)).toMatch(/fill="#123456"/)
+      expect(svg).not.toContain('#0a0a0a')
+    })
+
+    it('a Scene WITHOUT a background keeps the param fallback (unchanged behavior)', () => {
+      const svg = renderToSVG({ space, primitives: [] }, undefined, '#0a0a0a')
+      expect(bgRect(svg)).toMatch(/fill="#0a0a0a"/)
+    })
+
+    it("a Scene-declared 'transparent' background emits no rect, like the param form", () => {
+      const scene: Scene = {
+        space,
+        primitives: [],
+        background: { color: 'transparent' },
+      }
+      expect(renderToSVG(scene, undefined, 'white')).not.toMatch(/<rect\b/)
+    })
+
+    it('XML-escapes a Scene-declared background color too', () => {
+      const scene: Scene = {
+        space,
+        primitives: [],
+        background: { color: 'a"b&c' },
+      }
+      expect(bgRect(renderToSVG(scene))).toContain('fill="a&quot;b&amp;c"')
+    })
+  })
+
   describe('embedded <metadata> (issue #76)', () => {
     /** The text inside the first <metadata>…</metadata> element, if present. */
     const metaText = (svg: string): string | undefined =>

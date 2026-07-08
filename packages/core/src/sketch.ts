@@ -31,7 +31,8 @@ export type Seed = string | number
 
 /**
  * A numeric knob's declaration — a continuous (or whole-number) range with a
- * default. The only inhabited {@link ParamSpec} member today.
+ * default. The founding {@link ParamSpec} member (issue #47), joined by
+ * {@link ColorParamSpec}.
  *
  * `integer` and `step` are ORTHOGONAL and answer different questions:
  *
@@ -69,16 +70,44 @@ export interface NumberParamSpec {
 }
 
 /**
+ * A color knob's declaration — a CSS hex color string with a default.
+ *
+ * VALUE DOMAIN: the value (and the `default`) is a hex CSS color string like
+ * `'#1a2b3c'`. Hex is chosen deliberately over the full CSS color grammar
+ * (`'white'`, `rgb(…)`, `oklch(…)`) because the native `<input type="color">`
+ * the control panel binds this to speaks ONLY the 7-character `#rrggbb` form —
+ * it both emits hex and refuses to display anything else — so pinning the domain
+ * to hex keeps the stored param, the control, and the Preset round-trip all in
+ * one representation with no normalization layer. Any downstream consumer
+ * (Canvas2D `fillStyle`, SVG `fill`) accepts hex natively.
+ *
+ * Randomize NEVER rolls a color (see {@link randomize}): a color is a deliberate
+ * aesthetic choice, not a bounded numeric range to explore, so it passes through
+ * every roll unchanged — locked or not (ADR-0010).
+ */
+export interface ColorParamSpec {
+  /** Discriminant. The open {@link ParamSpec} union is keyed on this. */
+  kind: 'color'
+  /**
+   * The hex color string {@link defaultParams} seeds this knob with, e.g.
+   * `'#1a2b3c'` (see the type doc for why the domain is hex).
+   */
+  default: string
+}
+
+/**
  * One tweakable knob's declaration within a {@link ParamSchema}.
  *
  * An OPEN union discriminated on `kind`, mirroring the open {@link Sketch} union
- * in this same file: today {@link NumberParamSpec} (`kind: 'number'`) is the
- * ONLY inhabited member, and future control kinds (boolean, color, enum, …) join
- * as new `kind`-tagged members WITHOUT reworking this one — purely additive. The
- * control panel, Lock, Randomize, and Preset shape are all derived views that
- * widen alongside the union, never against it.
+ * in this same file: {@link NumberParamSpec} (`kind: 'number'`, the founding
+ * member, issue #47) and {@link ColorParamSpec} (`kind: 'color'`, the first
+ * non-numeric widening, ADR-0010) are the inhabited members today, and future
+ * control kinds (boolean, enum, …) join as new `kind`-tagged members WITHOUT
+ * reworking these — purely additive. The control panel, Lock, Randomize, and
+ * Preset shape are all derived views that widen alongside the union, never
+ * against it.
  */
-export type ParamSpec = NumberParamSpec
+export type ParamSpec = NumberParamSpec | ColorParamSpec
 
 /**
  * The single declaration a Sketch makes of its tweakable knobs — the spine of
@@ -129,10 +158,16 @@ export function defaultParams(schema: ParamSchema): Params {
  * a value-domain constraint (see {@link NumberParamSpec}).
  *
  * Everything else passes through from `params` UNCHANGED: locked params (Lock is
- * Randomize-exclusion only), and any non-numeric / future-kind specs the `kind`
- * switch doesn't roll. This is PER-PARAM only — there are deliberately NO
- * cross-param constraints (CONTEXT.md "Deliberately deferred"); a Sketch owns its
- * own inter-param coherence inside `generate`.
+ * Randomize-exclusion only), and any non-numeric spec the `kind` check doesn't
+ * roll. For `kind: 'color'` this pass-through is a STATED CONTRACT, not an
+ * accident of the implementation (ADR-0010): a color is a deliberate aesthetic
+ * choice — there is no meaningful "uniform roll" over a hex color the way there
+ * is over a numeric `[min, max]` — so Randomize is numeric-only for now and a
+ * color param survives every roll untouched, locked or not. (A future palette
+ * mechanism, if colors ever should roll, would be its own decision.) This is
+ * PER-PARAM only — there are deliberately NO cross-param constraints (CONTEXT.md
+ * "Deliberately deferred"); a Sketch owns its own inter-param coherence inside
+ * `generate`.
  *
  * @param schema - The Sketch's Parameter Schema.
  * @param params - The current inhabited param values; NOT mutated.

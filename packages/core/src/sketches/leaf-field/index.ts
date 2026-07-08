@@ -2,9 +2,11 @@
  * The "leaf-field" Sketch — a dense, tunable field of leaves scattered across
  * the coordinate space at blue-noise (Poisson-disk) points, ORIENTED along a
  * seeded curl-noise flow field, carrying seeded per-leaf shape variation,
- * composited in painter's order, and — with a SEEDED SET of opaque occluder
- * discs spliced into that order — reading as IMPLIED SPHERES in the field's
- * negative space.
+ * composited in painter's order over a param-colored background, and — with a
+ * SEEDED SET of opaque occluder discs spliced into that order — carrying round
+ * volumes in the field: colored orbs the leaves lap over (white on mid gray at
+ * the defaults), which when disc color == background color read as IMPLIED
+ * SPHERES in the field's negative space.
  *
  * It samples the seeded variable-radius Poisson-disk sampler under a CONSTANT
  * radius field (the field's spacing is driven by the `density` knob), rolls a
@@ -14,10 +16,12 @@
  * under later ones, so the overlap reads as a real composited field, not a flat
  * stamp sheet.
  *
- * ALL FIFTEEN KNOBS LIVE: the first eleven complete the scatter + placement +
- * flow-field orientation + per-leaf variation + compositing, and the four
- * appended sphere knobs (`sphereCount`, `sphereRadiusMin`, `sphereRadiusMax`,
- * `sphereDepth`) drive the implied-sphere occluders (below). `density`
+ * ALL SEVENTEEN KNOBS LIVE: the first eleven complete the scatter + placement +
+ * flow-field orientation + per-leaf variation + compositing, the four appended
+ * sphere knobs (`sphereCount`, `sphereRadiusMin`, `sphereRadiusMax`,
+ * `sphereDepth`) drive the occluder discs (below), and the two appended color
+ * knobs (`backgroundColor`, `discColor` — the first `kind: 'color'` params,
+ * ADR-0010) own the scene background and the disc fill. `density`
  * drives spacing;
  * `fieldScale` (curl base frequency, in features across the canvas),
  * `octaves` (how many noise layers stack) and `turbulence` (curl octave falloff
@@ -46,11 +50,20 @@
  * rather than an arbitrary stack. That ascending-y draw sequence IS the seam the
  * occluder exploits (below).
  *
- * IMPLIED-SPHERE OCCLUDERS (2026-07-03, slice #139 / tasks #140, #141, #142): the
- * field's negative space is made to read as round volumes NOT by thinning the
- * scatter but by OCCLUSION. Each opaque disc — filled with the render BACKGROUND
- * color ({@link DISC_FILL} = 'white'), so it is invisible AS AN OBJECT and reads
- * as pure figure-ground, never a drawn circle — is spliced into the painter's
+ * OCCLUDER DISCS (2026-07-03, slice #139 / tasks #140, #141, #142; recolorable
+ * 2026-07-07): the field's round volumes come NOT from thinning the scatter but
+ * from OCCLUSION. Each opaque disc is filled with the `discColor` knob. The disc
+ * was ORIGINALLY hardwired white-on-white — the render background's color —
+ * specifically to be INVISIBLE AS AN OBJECT: only the occlusion of the leaves it
+ * covers read, a pure figure-ground implied sphere (a tinted fill would have
+ * shown up as a faint drawn circle, 2026-07-03 audit). `discColor` DECOUPLES
+ * that: the disc is now a VISIBLE colored occluder in its own right — a colored
+ * orb the leaves lap over — and that is the SHIPPED DEFAULT (2026-07-07): white
+ * discs (`discColor` `'#ffffff'`) on a mid-gray ground (`backgroundColor`
+ * `'#878787'`), so a bare generate reads as white orbs in the field. The
+ * original implied-sphere figure-ground survives as the SPECIAL CASE
+ * `discColor === backgroundColor` (what the "Nice One" preset pins, both
+ * white). Each disc is spliced into the painter's
  * order at a DEPTH index driven by the global `sphereDepth` knob. Leaves drawn
  * BEFORE it (top/back of the field) are painted over where they cross it, so the
  * disc's TRUE circular silhouette cuts a hard, genuinely round edge on the
@@ -91,7 +104,13 @@
  * is 0 in practice, so the field is a static slice today. Everything random
  * flows from the explicit Seed via `createRandom` / the sampler's seed: NO
  * `Math.random`, no clock read, and no state carried across `generate` calls.
- * Re-seeding reshuffles the whole field while the params hold.
+ * Re-seeding reshuffles the whole field while the params hold. The two color
+ * knobs consume NO rng draws from either stream — they touch only fill colors
+ * and the Scene's `background` — so every leaf outline and disc silhouette stays
+ * byte-identical to the pre-color field at any color value. The pre-color image
+ * itself is preserved by the "Nice One" preset, which pins BOTH colors to white
+ * explicitly (its stored params predate the knobs, and the gray-background
+ * default would otherwise silently repaint it on reconciliation).
  *
  * SPHERE STREAM OFF THE LEAF SEQUENCE (2026-07-03 audit): every sphere's
  * center/radius is drawn from a SEPARATE, dedicated rng stream
@@ -123,23 +142,26 @@ import { createRandom } from '../../random'
 import { createScene } from '../../scene'
 import type { Scene } from '../../scene'
 import type {
-  NumberParamSpec,
   Params,
+  ParamSpec,
   Seed,
   StatelessSketch,
 } from '../../sketch'
 import type { Point, Polyline } from '../../types'
-import { bbox, HEIGHT, numberParam, WIDTH } from '../sketch-util'
+import { bbox, colorParam, HEIGHT, numberParam, WIDTH } from '../sketch-util'
 import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
 /**
- * The leaf-field Parameter Schema — fifteen {@link NumberParamSpec} knobs, all
- * consumed NOW. Order is fixed and part of the contract; the sphere knobs are
- * APPENDED last (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then
- * `sphereDepth` #142) so the existing eleven keep their positions. `satisfies`
- * keeps the literal key set (so `numberParam` can index by `keyof typeof schema`)
- * while enforcing the spec type.
+ * The leaf-field Parameter Schema — seventeen knobs (fifteen numeric, two
+ * color), all consumed NOW. Order is fixed and part of the contract; each
+ * widening APPENDS so earlier knobs keep their positions: the sphere knobs
+ * (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then `sphereDepth`
+ * #142) after the original eleven, then the color knobs (`backgroundColor`,
+ * `discColor` — the first `kind: 'color'` specs, ADR-0010) last. `satisfies`
+ * keeps the literal key set (so `numberParam`/`colorParam` can filter
+ * `keyof typeof schema` by each spec's literal `kind`) while enforcing the spec
+ * type — the target is the full `ParamSpec` union now that the kinds mix.
  */
 const schema = {
   /**
@@ -201,7 +223,26 @@ const schema = {
    * at the disc's center. Consumed NOW. Appended last (#142).
    */
   sphereDepth: { kind: 'number', min: 0, max: 1, default: 0.5 },
-} satisfies Record<string, NumberParamSpec>
+  /**
+   * The Scene's background color (hex) — the whole output surface, letterbox
+   * included, carried as `Scene.background` so it rides the determinism spine
+   * and round-trips through Presets (ADR-0009). Defaults to a mid gray
+   * (2026-07-07), deliberately DIFFERENT from `discColor`'s white so the discs
+   * read as visible orbs out of the box; the pre-color white-on-white image is
+   * pinned by the "Nice One" preset, not by these defaults. Consumed NOW.
+   * Appended last with `discColor` (ADR-0010).
+   */
+  backgroundColor: { kind: 'color', default: '#878787' },
+  /**
+   * The occluder discs' fill color (hex). DIFFERENT from `backgroundColor` at
+   * the defaults (white orbs on mid gray), so each disc reads as a visible
+   * colored orb the leaves lap over; set it EQUAL to `backgroundColor` to make
+   * the disc invisible as an object and recover the original implied-sphere
+   * figure-ground (see the header's occluder rationale). Consumed NOW. Appended
+   * last (ADR-0010).
+   */
+  discColor: { kind: 'color', default: '#ffffff' },
+} satisfies Record<string, ParamSpec>
 
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
 const REFERENCE_SPACING = 400
@@ -230,15 +271,11 @@ const PAPER_STROKE = '#f4f1ea'
 /** Stroke width of each leaf's paper rim, in coordinate-space units. */
 const LEAF_STROKE_WIDTH = 2
 
-/**
- * The opaque occluder disc's fill — the render BACKGROUND color (see
- * `renderPreview`'s `background = 'white'` default), NOT {@link PAPER_STROKE}.
- * The disc must be invisible AS AN OBJECT (pure figure-ground) so that only the
- * OCCLUSION of the leaves it covers reads as an implied round volume; a tinted
- * fill (e.g. the leaf rim's `#f4f1ea`) would show up as a faint disc instead
- * (2026-07-03 audit). See the file header's occluder rationale.
- */
-const DISC_FILL = 'white'
+// The disc fill is the `discColor` knob (read in `generate`), which superseded
+// the old hardwired DISC_FILL = 'white' constant. See the file header's occluder
+// rationale: at the defaults (white on mid gray) the disc is a visible colored
+// orb; setting discColor === backgroundColor makes it invisible as an object —
+// the original implied-sphere figure-ground.
 
 /**
  * Translate a leaf outline by a fixed `(dx, dy)` offset, returning a NEW Polyline
@@ -273,16 +310,20 @@ function rotate(outline: Polyline, angle: number): Polyline {
 
 /**
  * The leaf-field Sketch: a static, stateless field of seeded-variant leaves,
- * oriented along a seeded curl-noise flow field, with a seeded set of opaque
- * occluder discs implying spheres in the negative space.
+ * oriented along a seeded curl-noise flow field, over a param-colored
+ * background, with a seeded set of opaque `discColor`-filled occluder discs —
+ * visible colored orbs at the defaults (white on mid gray), implied spheres
+ * when disc and background colors match.
  *
- * `generate` reads the spacing/size/field/variation knobs, blue-noise-samples
- * the coordinate space, rolls a seeded {@link LeafShape} at every sampled point
- * (in sorted ascending-y order — that IS painter's order), rotates each so its
- * spine tracks the local flow direction, emits each as a dark-filled,
- * paper-rimmed closed polygon, and splices a seeded set of background-colored
- * occluder discs into the draw order at their own seeded depths (see the file
- * header's occluder rationale). No accumulated state — re-calling with the same `(params, seed, t)`
+ * `generate` reads the spacing/size/field/variation knobs plus the two color
+ * knobs, blue-noise-samples the coordinate space, rolls a seeded
+ * {@link LeafShape} at every sampled point (in sorted ascending-y order — that
+ * IS painter's order), rotates each so its spine tracks the local flow
+ * direction, emits each as a dark-filled, paper-rimmed closed polygon, and
+ * splices a seeded set of `discColor`-filled occluder discs into the draw order
+ * at their own seeded depths (see the file header's occluder rationale); the
+ * built Scene carries `backgroundColor` as its declared background (ADR-0009).
+ * No accumulated state — re-calling with the same `(params, seed, t)`
  * reproduces the same Scene exactly.
  */
 export const leafField: StatelessSketch = {
@@ -310,6 +351,13 @@ export const leafField: StatelessSketch = {
     const octaves = numberParam(params, schema, 'octaves')
     const variation = numberParam(params, schema, 'variation')
     const sphereCount = numberParam(params, schema, 'sphereCount')
+
+    // The two color knobs (ADR-0010). They consume NO rng draws — backgroundColor
+    // feeds only the Scene's `background` (ADR-0009) and discColor only the disc
+    // fills — so every leaf and disc outline stays byte-identical across any
+    // color value (the determinism seam holds untouched).
+    const backgroundColor = colorParam(params, schema, 'backgroundColor')
+    const discColor = colorParam(params, schema, 'discColor')
 
     // Sphere-set radius bounds. The Sketch owns its own inter-param coherence
     // (CONTEXT.md), so guarantee a valid draw range by swapping if a user sets
@@ -372,7 +420,14 @@ export const leafField: StatelessSketch = {
     // seam holds (a copy is sorted — the sampler output is not mutated).
     const points = [...sampled].sort(([ax, ay], [bx, by]) => ay - by || ax - bx)
 
-    const builder = createScene({ width: WIDTH, height: HEIGHT })
+    // The Sketch-declared background (ADR-0009): the whole output surface,
+    // letterbox included, painted from the `backgroundColor` knob — part of the
+    // image, so it rides the (params, seed) determinism spine rather than being
+    // a caller-side Render Setting.
+    const builder = createScene(
+      { width: WIDTH, height: HEIGHT },
+      { color: backgroundColor },
+    )
 
     // Splice the opaque occluder discs into the painter's order at the GLOBAL
     // depth index: the top/back leaves (drawn first) fall UNDER them and are
@@ -381,11 +436,13 @@ export const leafField: StatelessSketch = {
     // bottom/front leaves (drawn after) lap OVER the near side for organic tip
     // breakup. `Math.round(sphereDepth · N)` maps depth 0 → behind all leaves
     // (max front overlap) and depth 1 → in front of all (clean round edge); every
-    // disc shares this one index. Fill only, no stroke: pure figure-ground.
+    // disc shares this one index. Fill only (the `discColor` knob), no stroke: a
+    // visible colored orb at the defaults (white on mid gray), pure figure-ground
+    // when discColor == backgroundColor.
     const drawDisc = (sphere: { cx: number; cy: number; r: number }): void => {
       builder.addPath(circle(sphere.cx, sphere.cy, sphere.r), {
         closed: true,
-        fill: { color: DISC_FILL },
+        fill: { color: discColor },
       })
     }
 

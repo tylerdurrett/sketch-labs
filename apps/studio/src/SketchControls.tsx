@@ -88,7 +88,10 @@ export function SketchControls({
   // button click, never during render.
   const canvasHandle = useRef<LiveCanvasHandle>(null);
 
-  const setParam = (key: string, value: number) => {
+  // Value type mirrors ControlPanel's onChange seam: `number` from a
+  // NumberControl, a hex color `string` from a ColorControl. The params state
+  // itself is `Record<string, unknown>`, so only this handler widens.
+  const setParam = (key: string, value: number | string) => {
     setParams((prev) => ({ ...prev, [key]: value }));
   };
 

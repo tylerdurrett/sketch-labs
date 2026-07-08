@@ -1,5 +1,6 @@
 import type { ParamSchema, Params, ParamSpec } from "@harness/core";
 
+import { ColorControl } from "./ColorControl";
 import { NumberControl } from "./NumberControl";
 
 /**
@@ -21,8 +22,13 @@ export interface ControlPanelProps {
    * NEVER gates a control's input.
    */
   locks: ReadonlySet<string>;
-  /** Update a single param by key. */
-  onChange: (key: string, value: number) => void;
+  /**
+   * Update a single param by key. The value type widens with the `ParamSpec`
+   * union: `number` from a NumberControl, a hex color `string` from a
+   * ColorControl. The owner's params state is already `Record<string, unknown>`,
+   * so this widening is purely at the handler seam.
+   */
+  onChange: (key: string, value: number | string) => void;
   /** Toggle a single param's lock membership. */
   onToggleLock: (key: string) => void;
 }
@@ -30,18 +36,19 @@ export interface ControlPanelProps {
 /**
  * Render one control for a single schema entry, switching on `spec.kind`.
  *
- * `kind: 'number'` → a {@link NumberControl}. An UNKNOWN kind renders a LOUD,
- * visible fallback (never a silent skip) so an unsupported control surfaces in
- * the UI as a defect to fix rather than vanishing. As the open `ParamSpec`
- * union widens (boolean, color, enum, …) this switch grows a case per kind; the
- * `default` branch is the safety net for any kind not yet handled.
+ * `kind: 'number'` → a {@link NumberControl}; `kind: 'color'` → a
+ * {@link ColorControl}. An UNKNOWN kind renders a LOUD, visible fallback (never
+ * a silent skip) so an unsupported control surfaces in the UI as a defect to
+ * fix rather than vanishing. As the open `ParamSpec` union widens further
+ * (boolean, enum, …) this switch grows a case per kind; the `default` branch is
+ * the safety net for any kind not yet handled.
  */
 function renderControl(
   key: string,
   spec: ParamSpec,
   value: unknown,
   locked: boolean,
-  onChange: (key: string, value: number) => void,
+  onChange: (key: string, value: number | string) => void,
   onToggleLock: (key: string) => void,
 ) {
   switch (spec.kind) {
@@ -52,6 +59,18 @@ function renderControl(
           paramKey={key}
           spec={spec}
           value={typeof value === "number" ? value : spec.default}
+          locked={locked}
+          onChange={(next) => onChange(key, next)}
+          onToggleLock={() => onToggleLock(key)}
+        />
+      );
+    case "color":
+      return (
+        <ColorControl
+          key={key}
+          paramKey={key}
+          spec={spec}
+          value={typeof value === "string" ? value : spec.default}
           locked={locked}
           onChange={(next) => onChange(key, next)}
           onToggleLock={() => onToggleLock(key)}
