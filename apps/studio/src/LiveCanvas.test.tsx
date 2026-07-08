@@ -70,6 +70,94 @@ function lastDrawnT(generate: { mock: { calls: unknown[][] } }): number {
   return calls[calls.length - 1]![2] as number;
 }
 
+// --- render-mode fixtures (#219) --------------------------------------------
+// TWO overlapping FILLED squares in painter's order (the same shape the
+// SketchControls hidden-line export test uses): the nearer square covers part of
+// the farther one, so `hiddenLinePass` MUST clip part of the farther outline. The
+// two are FILL-ONLY, so the real @harness/core renderer paints them via `fill()`
+// in fill mode; the pass rewrites them to STROKE-ONLY primitives, so outline mode
+// paints via `stroke()` and never `fill()`. That fill-vs-stroke split is the
+// observable that proves — through the REAL pass and REAL renderer, no mock —
+// whether the export-only pass ran for a given draw.
+const OVERLAP_SCENE = {
+  space: { width: 100, height: 100 },
+  primitives: [
+    {
+      points: [
+        [0, 0],
+        [40, 0],
+        [40, 40],
+        [0, 40],
+      ],
+      closed: true,
+      fill: { color: "tomato" },
+    },
+    {
+      points: [
+        [20, 0],
+        [60, 0],
+        [60, 40],
+        [20, 40],
+      ],
+      closed: true,
+      fill: { color: "steelblue" },
+    },
+  ],
+} as unknown as Scene;
+
+/** A Sketch (static or animated) whose `generate` yields {@link OVERLAP_SCENE}. */
+function overlapSketch(time: TimeMetadata | undefined) {
+  const generate = vi.fn(
+    (_p: unknown, _s: unknown, _t: number): Scene => OVERLAP_SCENE,
+  );
+  const sketch = {
+    id: "overlap",
+    name: "Overlap",
+    schema: {},
+    time,
+    generate,
+  } as unknown as Sketch;
+  return { sketch, generate };
+}
+
+/**
+ * An inert 2D-context stub that COUNTS each method call by name (so `fill` and
+ * `stroke` invocation counts are observable) and stores property writes. It
+ * stands in for the real `CanvasRenderingContext2D` jsdom does not implement, and
+ * lets a draw be classified: a fill-mode draw of {@link OVERLAP_SCENE} calls
+ * `fill()` (never `stroke()`), an outline-mode draw calls `stroke()` (never
+ * primitive `fill()`). `reset()` zeroes the counts between draw phases. Note the
+ * background paint uses `fillRect` — a separate key from primitive `fill`.
+ */
+function recordingContext(): {
+  ctx: CanvasRenderingContext2D;
+  counts: Record<string, number>;
+  reset: () => void;
+} {
+  const counts: Record<string, number> = {};
+  const ctx = new Proxy({} as Record<string, unknown>, {
+    get: (target, prop) => {
+      if (prop in target) return target[prop as string];
+      return (..._args: unknown[]) => {
+        counts[prop as string] = (counts[prop as string] ?? 0) + 1;
+      };
+    },
+    set: (target, prop, value) => {
+      target[prop as string] = value;
+      return true;
+    },
+  });
+  const reset = () => {
+    for (const key of Object.keys(counts)) delete counts[key];
+  };
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, counts, reset };
+}
+
+/** Point `getContext('2d')` at the given recording context for this test. */
+function useRecordingContext(ctx: CanvasRenderingContext2D): void {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx);
+}
+
 // --- the hand-driven rAF clock ----------------------------------------------
 let now = 0;
 let rafCallbacks: Array<(t: number) => void> = [];
@@ -353,5 +441,81 @@ describe("LiveCanvas transport — one-shot range/clamp via synthetic fixture (A
     // Past duration: clamped at 3 (one-shot holds), never wrapping back toward 0.
     tick(5000);
     expect(lastDrawnT(generate)).toBeCloseTo(3, 5);
+  });
+});
+
+describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand (#219)", () => {
+  it("fill draws fills; outline draws the stroke-only result; toggling recomputes on demand (AC1)", () => {
+    const { ctx, counts, reset } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch } = overlapSketch(undefined); // static
+
+    // Fill mode: the two FILLED squares are painted as FILLS, never stroked (the
+    // export-only pass did NOT run). The `fillRect` background is a separate key.
+    mount(<LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />);
+    expect(counts.fill ?? 0).toBeGreaterThan(0);
+    expect(counts.stroke ?? 0).toBe(0);
+
+    // Toggle to outline: the pass runs ON DEMAND for this redraw — the fills are
+    // rewritten to stroke-only geometry, so the draw strokes and never fills.
+    reset();
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="outline" />,
+      );
+    });
+    expect(counts.stroke ?? 0).toBeGreaterThan(0);
+    expect(counts.fill ?? 0).toBe(0);
+
+    // Toggle back to fill: fills again, the pass no longer runs.
+    reset();
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />,
+      );
+    });
+    expect(counts.fill ?? 0).toBeGreaterThan(0);
+    expect(counts.stroke ?? 0).toBe(0);
+  });
+
+  it("the rAF fill loop NEVER runs the pass — every animated frame stays a fill (AC2/AC3)", () => {
+    const { ctx, counts, reset } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch, generate } = overlapSketch({ duration: 4, mode: "loop" });
+
+    mount(<LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />);
+
+    // Drive many rAF frames; every one must draw FILLS and never the stroke-only
+    // pass output. A single `stroke()` here would mean the pass leaked into the
+    // live loop — the invariant this asserts it never does.
+    reset();
+    for (const ms of [500, 1000, 1500, 2000, 2500]) tick(ms);
+    // The loop advanced (frames were drawn) and stayed fill throughout.
+    expect(lastDrawnT(generate)).toBeCloseTo(2.5, 5);
+    expect(counts.fill ?? 0).toBeGreaterThan(0);
+    expect(counts.stroke ?? 0).toBe(0);
+  });
+
+  it("outline mode SUSPENDS the live loop and draws the stroke-only outline once, on demand (AC2)", () => {
+    const { ctx, counts, reset } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch } = overlapSketch({ duration: 4, mode: "loop" });
+
+    // An ANIMATED Sketch mounted in outline mode: the on-demand redraw path runs
+    // the pass (stroke-only, no fills)...
+    mount(
+      <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="outline" />,
+    );
+    expect(counts.stroke ?? 0).toBeGreaterThan(0);
+    expect(counts.fill ?? 0).toBe(0);
+
+    // ...and the rAF loop is SUSPENDED — no frame was scheduled, so advancing the
+    // clock draws nothing at all (the pass cannot run per frame because the loop
+    // that would call `drawFrame` never starts).
+    reset();
+    tick(1000);
+    tick(2000);
+    expect(counts.stroke ?? 0).toBe(0);
+    expect(counts.fill ?? 0).toBe(0);
   });
 });

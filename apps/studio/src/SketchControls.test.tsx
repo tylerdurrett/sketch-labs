@@ -23,9 +23,11 @@ let fakeCurrentT = 0;
 vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
     seed,
+    renderMode,
     handleRef,
   }: {
     seed: Seed;
+    renderMode?: string;
     handleRef?: Ref<LiveCanvasHandle>;
   }) => {
     useImperativeHandle(handleRef, () => ({
@@ -33,7 +35,11 @@ vi.mock("./LiveCanvas", () => ({
         ({ toBlob: fakeCanvasToBlob }) as unknown as HTMLCanvasElement,
       getCurrentT: () => fakeCurrentT,
     }));
-    return <div data-testid="canvas-seed">{String(seed)}</div>;
+    return (
+      <div data-testid="canvas-seed" data-render-mode={String(renderMode)}>
+        {String(seed)}
+      </div>
+    );
   },
 }));
 
@@ -796,5 +802,73 @@ describe("SketchControls — PNG export wiring", () => {
     await flush();
 
     expect(downloadBlob).not.toHaveBeenCalled();
+  });
+});
+
+describe("SketchControls — render-mode toggle wiring (#219)", () => {
+  /** The render mode SketchControls fed the (mocked) LiveCanvas this render. */
+  const canvasRenderMode = (el: HTMLElement): string | null =>
+    el
+      .querySelector('[data-testid="canvas-seed"]')
+      ?.getAttribute("data-render-mode") ?? null;
+
+  const toggleEl = (el: HTMLElement): HTMLButtonElement => {
+    const btn = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    );
+    if (btn === null) throw new Error("no render-mode toggle");
+    return btn;
+  };
+
+  it("defaults to fill and flips the renderMode it passes into LiveCanvas on toggle", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const toggle = toggleEl(el);
+
+    // Default: LiveCanvas receives renderMode="fill", the toggle reads unpressed.
+    expect(canvasRenderMode(el)).toBe("fill");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.textContent).toBe("Fill");
+
+    // Toggle → the outline mode propagates straight into the LiveCanvas prop.
+    act(() => {
+      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(canvasRenderMode(el)).toBe("outline");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.textContent).toBe("Outline");
+
+    // Toggle again → back to fill (a plain view-only flip, both directions).
+    act(() => {
+      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(canvasRenderMode(el)).toBe("fill");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("flipping render mode touches no param/seed/lock axis", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const seedBefore = (el.querySelector("#sketch-seed") as HTMLInputElement)
+      .value;
+    const radiusBefore = paramInput(el, "radius").value;
+
+    act(() => {
+      toggleEl(el).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    // The toggle is view-only: it swapped the canvas render mode but left the
+    // param and seed axes exactly as they were.
+    expect(canvasRenderMode(el)).toBe("outline");
+    expect((el.querySelector("#sketch-seed") as HTMLInputElement).value).toBe(
+      seedBefore,
+    );
+    expect(paramInput(el, "radius").value).toBe(radiusBefore);
   });
 });
