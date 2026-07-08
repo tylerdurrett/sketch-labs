@@ -6,6 +6,7 @@ import {
   buildReproMetadata,
   defaultParams,
   exportFilename,
+  hiddenLinePass,
   insertPngMetadata,
   newSeed,
   randomize,
@@ -205,6 +206,44 @@ export function SketchControls({
     downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "svg"));
   };
 
+  // Export the CURRENTLY DISPLAYED frame as a HIDDEN-LINE SVG — a plotter-ready
+  // variant of {@link exportSvg} that pipes the regenerated Scene through core's
+  // `hiddenLinePass` (occlusion clipping: drop the outline geometry hidden behind
+  // nearer fills, emit a stroke-only Scene) BEFORE serialization. It is the same
+  // one-shot click OUTSIDE the per-frame loop; the pass is heavy and on-demand
+  // only, so it runs HERE inside the handler — never in render or the live loop.
+  //
+  // Everything else mirrors `exportSvg` exactly (same handle guard, same
+  // `sketch.time` time-gating of `t`, same `sketch.generate` re-bake, same
+  // reproduction envelope), so both SVG exports reflect the identical displayed
+  // moment. The file is tagged with a `-hidden-line` variant segment so it never
+  // collides with the plain SVG export's name.
+  const exportHiddenLineSvg = () => {
+    const handle = canvasHandle.current;
+    if (handle == null) return;
+    const t = sketch.time === undefined ? undefined : handle.getCurrentT();
+    const scene = sketch.generate(params, seed, t ?? 0);
+    // The occlusion-clipping transform: on-demand only, strictly inside this
+    // click handler. `renderToSVG` then serializes the stroke-only result.
+    const hiddenLineScene = hiddenLinePass(scene);
+    const metadata = buildReproMetadata({
+      sketchId: sketch.id,
+      seed,
+      params,
+      locks,
+      t,
+    });
+    const svg = renderToSVG(hiddenLineScene, metadata);
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    downloadBlob(
+      blob,
+      exportFilename(
+        { sketchId: sketch.id, seed, t, variant: "hidden-line" },
+        "svg",
+      ),
+    );
+  };
+
   // TWO-REGION SHELL (#154): the canvas region (left) fills the remaining space
   // and centers the live canvas; the fixed-width inspector sidebar (right,
   // vertically scrollable) houses EVERY per-sketch control. This is a re-housing
@@ -319,13 +358,14 @@ export function SketchControls({
           />
         </div>
         {/*
-         * Export controls — the shared home for both export paths (PNG snapshots
-         * the live canvas frame; SVG re-bakes the displayed Scene). `mt-auto`
-         * pins this group to the BOTTOM of the flex-column sidebar (#158) so it
-         * stays anchored while everything above stacks from the top; the two
-         * buttons split the row evenly (`flex-1`).
+         * Export controls — the shared home for every export path (PNG snapshots
+         * the live canvas frame; SVG re-bakes the displayed Scene; Hidden-line SVG
+         * re-bakes then occlusion-clips it for plotting). `mt-auto` pins this
+         * group to the BOTTOM of the flex-column sidebar (#158) so it stays
+         * anchored while everything above stacks from the top; the buttons split
+         * the row (`flex-1`) and wrap as the group grows.
          */}
-        <div className="mt-auto flex gap-2">
+        <div className="mt-auto flex flex-wrap gap-2">
           <Button
             type="button"
             variant="outline"
@@ -343,6 +383,15 @@ export function SketchControls({
             onClick={exportSvg}
           >
             Export SVG
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            onClick={exportHiddenLineSvg}
+          >
+            Export Hidden-line SVG
           </Button>
         </div>
       </aside>
