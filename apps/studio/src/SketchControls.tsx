@@ -6,7 +6,6 @@ import {
   buildReproMetadata,
   defaultParams,
   exportFilename,
-  hiddenLinePass,
   insertPngMetadata,
   newSeed,
   randomize,
@@ -23,6 +22,7 @@ import {
   type LiveCanvasHandle,
   type RenderMode,
 } from "./LiveCanvas";
+import { outlineScene } from "./outlineScene";
 import { PresetControls } from "./PresetControls";
 
 /**
@@ -226,25 +226,28 @@ export function SketchControls({
   };
 
   // Export the CURRENTLY DISPLAYED frame as a HIDDEN-LINE SVG — a plotter-ready
-  // variant of {@link exportSvg} that pipes the regenerated Scene through core's
-  // `hiddenLinePass` (occlusion clipping: drop the outline geometry hidden behind
-  // nearer fills, emit a stroke-only Scene) BEFORE serialization. It is the same
+  // variant of {@link exportSvg} that derives its stroke-only, occlusion-clipped
+  // Scene from the shared {@link outlineScene} seam (`generate` → Hidden-line
+  // pass) BEFORE serialization. Routing through that ONE seam — the same
+  // derivation LiveCanvas's outline preview consumes — is what makes preview ==
+  // export true by construction (issue #220): the two paths cannot drift because
+  // there is only one place the processed Scene is derived. It is the same
   // one-shot click OUTSIDE the per-frame loop; the pass is heavy and on-demand
   // only, so it runs HERE inside the handler — never in render or the live loop.
   //
   // Everything else mirrors `exportSvg` exactly (same handle guard, same
-  // `sketch.time` time-gating of `t`, same `sketch.generate` re-bake, same
-  // reproduction envelope), so both SVG exports reflect the identical displayed
-  // moment. The file is tagged with a `-hidden-line` variant segment so it never
-  // collides with the plain SVG export's name.
+  // `sketch.time` time-gating of `t`, same displayed `(params, seed, t)` spine,
+  // same reproduction envelope), so both SVG exports reflect the identical
+  // displayed moment. The file is tagged with a `-hidden-line` variant segment so
+  // it never collides with the plain SVG export's name.
   const exportHiddenLineSvg = () => {
     const handle = canvasHandle.current;
     if (handle == null) return;
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
-    const scene = sketch.generate(params, seed, t ?? 0);
-    // The occlusion-clipping transform: on-demand only, strictly inside this
-    // click handler. `renderToSVG` then serializes the stroke-only result.
-    const hiddenLineScene = hiddenLinePass(scene);
+    // The shared preview == export seam: `generate` then the occlusion-clipping
+    // Hidden-line pass, on-demand only, strictly inside this click handler.
+    // `renderToSVG` then serializes the stroke-only result.
+    const hiddenLineScene = outlineScene(sketch, params, seed, t ?? 0);
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
       seed,

@@ -6,7 +6,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { crc32, type ParamSchema, type Preset, type Seed } from "@harness/core";
 
 import type { LiveCanvasHandle } from "./LiveCanvas";
+import { outlineScene } from "./outlineScene";
 import { SketchControls } from "./SketchControls";
+
+// Preview == export seam probe (issue #220): capture the Scene the export path
+// hands `renderToSVG`, so a test can prove it is the SAME processed Scene the
+// shared {@link outlineScene} seam produces (the exact expression the outline
+// preview also consumes). `vi.hoisted` lifts the holder above the hoisted
+// `vi.mock` factory below so the factory can close over it.
+const exportSceneCapture = vi.hoisted(() => ({
+  current: null as unknown,
+}));
+
+// Mock ONLY `renderToSVG`, delegating to the real implementation so every
+// existing SVG-export assertion (which checks the serialized string) stays
+// green — we merely tee off the Scene argument on the way through. Everything
+// else in `@harness/core` (buildReproMetadata, hiddenLinePass, insertPngMetadata,
+// exportFilename, crc32, …) is the genuine module via `importActual`.
+vi.mock("@harness/core", async (importActual) => {
+  const actual = await importActual<typeof import("@harness/core")>();
+  return {
+    ...actual,
+    renderToSVG: (
+      ...args: Parameters<typeof actual.renderToSVG>
+    ): ReturnType<typeof actual.renderToSVG> => {
+      exportSceneCapture.current = args[0];
+      return actual.renderToSVG(...args);
+    },
+  };
+});
 
 // The fake canvas node the mocked LiveCanvas hands back through its handle, with
 // a `toBlob` the export test drives. Reassigned per-test so each case controls
@@ -149,6 +177,9 @@ beforeEach(() => {
     cb(new Blob([MINIMAL_PNG], { type: "image/png" }));
   }) as HTMLCanvasElement["toBlob"];
   downloadBlob.mockReset();
+  // Clear the preview == export seam probe so each test observes only its own
+  // `renderToSVG` call (#220).
+  exportSceneCapture.current = null;
 });
 
 afterEach(() => {
@@ -699,6 +730,36 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     expect(downloadBlob).toHaveBeenCalledTimes(1);
     const [, filename] = downloadBlob.mock.calls[0]!;
     expect(filename).toBe(`waves-seed${seed}-t2.5-hidden-line.svg`);
+  });
+
+  // AC (#220): the outline-mode canvas input and the hidden-line SVG export input
+  // must be the IDENTICAL processed Scene for the same (params, seed, t). Both
+  // call sites now delegate to the ONE shared `outlineScene` seam, so this holds
+  // by construction. jsdom's `canvas.getContext('2d')` is null, so LiveCanvas's
+  // `drawFrame` early-returns before it would feed the canvas — the preview's
+  // Scene isn't directly observable through a live render. The faithful check is
+  // therefore: drive the REAL `exportHiddenLineSvg` and assert the Scene it hands
+  // `renderToSVG` (captured above) deep-equals `outlineScene(sketch, params, seed,
+  // t)` — the exact seam expression LiveCanvas's outline branch evaluates — for
+  // one fixed frame. Locking the export path to the shared seam is what removes
+  // the drift risk between preview and export.
+  it("export input Scene equals the shared outlineScene seam the preview consumes (#220)", () => {
+    const sketch = hlStaticSketch("circles");
+    const el = mount(<SketchControls sketch={sketch} />);
+    const seed = Number(
+      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
+    );
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    // The export handed `renderToSVG` a Scene.
+    expect(exportSceneCapture.current).not.toBeNull();
+    // A static sketch's export passes `t ?? 0` (t is undefined ⇒ 0); params are
+    // the schema defaults ({ radius: 10 }); seed is the displayed seed. The
+    // outline preview evaluates this SAME expression, so the two inputs match.
+    expect(exportSceneCapture.current).toEqual(
+      outlineScene(sketch, { radius: 10 }, seed, 0),
+    );
   });
 });
 

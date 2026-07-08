@@ -11,13 +11,14 @@ import {
 
 import {
   drawSceneFitted,
-  hiddenLinePass,
   type Canvas2DContext,
   type Params,
   type Seed,
   type Sketch,
   type TimeMetadata,
 } from "@harness/core";
+
+import { outlineScene } from "./outlineScene";
 
 /**
  * Which processed Scene the live preview renders (issue #219, feature #4).
@@ -89,8 +90,10 @@ export interface LiveCanvasProps {
   /**
    * Which processed Scene the preview draws (issue #219). Optional, defaulting to
    * `fill` so the live path is unchanged when a caller omits it: `fill` renders
-   * `generate`'s Scene as-is; `outline` runs {@link hiddenLinePass} on it first,
-   * showing the stroke-only occlusion-clipped result. The outline pass is
+   * `generate`'s Scene as-is; `outline` derives its Scene from the shared
+   * {@link outlineScene} seam (`generate` → Hidden-line pass — the SAME
+   * derivation the hidden-line SVG export consumes, issue #220), showing the
+   * stroke-only occlusion-clipped result. The outline pass is
    * on-demand only (feature #4 invariant) — it never runs inside the live rAF
    * fill loop; toggling to `outline` suspends that loop and draws once on the
    * static/on-demand redraw path, recomputing on toggle and param-settle.
@@ -145,17 +148,20 @@ function drawFrame(
   // ever writes color strings to those properties.
   const portCtx = ctx as Canvas2DContext;
 
-  const scene = sketch.generate(params, seed, t);
-
-  // Outline mode (issue #219): swap the fill Scene for the Hidden-line pass's
-  // stroke-only, occlusion-clipped result BEFORE the shared draw, so the preview
-  // shows the same processed Scene the hidden-line SVG export emits, through the
-  // identical Canvas2D pipeline. This is the ONLY place the pass touches the live
-  // preview, and drawFrame is called with `outline` ONLY from the on-demand /
-  // static-redraw path — never from the rAF fill loop's `tick`, which hardcodes
-  // `fill` — so the export-only pass never runs per animated frame (feature #4's
-  // core invariant, this task's AC2/AC3).
-  const rendered = renderMode === "outline" ? hiddenLinePass(scene) : scene;
+  // Outline mode (issue #219/#220): swap the fill Scene for the shared
+  // preview == export seam's stroke-only, occlusion-clipped result BEFORE the
+  // shared draw, so the preview shows the SAME processed Scene the hidden-line
+  // SVG export emits — by construction, since both call sites derive it from the
+  // one {@link outlineScene} function (feature #4's "what you see is what you
+  // plot"). The `fill` branch renders `generate`'s Scene as-is. This is the ONLY
+  // place the pass touches the live preview, and drawFrame is called with
+  // `outline` ONLY from the on-demand / static-redraw path — never from the rAF
+  // fill loop's `tick`, which hardcodes `fill` — so the export-only pass never
+  // runs per animated frame (feature #4's core invariant, this task's AC2/AC3).
+  const rendered =
+    renderMode === "outline"
+      ? outlineScene(sketch, params, seed, t)
+      : sketch.generate(params, seed, t);
 
   // Hand the background-fit-and-draw to core's shared pipeline: `drawSceneFitted`
   // resets to identity, paints the full surface (opaque white by default — the
