@@ -173,4 +173,44 @@ describe('subtractPolygonsFromPolyline', () => {
     const result = subtractPolygonsFromPolyline([[5, 5]], [square])
     expect(result).toEqual([])
   })
+
+  it('does not emit a degenerate polyline from a zero-length outside segment', () => {
+    // Two coincident points, fully outside the square: the zero-length segment
+    // must not produce a degenerate [a, a] open polyline.
+    const line: Polyline = [
+      [20, 20],
+      [20, 20],
+    ]
+    const result = subtractPolygonsFromPolyline(line, [square])
+    // No output at all here: there is no real (non-zero-length) span to keep.
+    expect(result).toEqual([])
+    for (const pl of result) {
+      expect(isDegenerate(pl)).toBe(false)
+    }
+  })
+
+  it('keeps the valid span but drops the coincident stub around a duplicate point', () => {
+    // A duplicate consecutive point followed by a real segment, all outside the
+    // square. The genuine [20,20]->[30,30] span must survive; the leading
+    // zero-length [20,20]->[20,20] must not spawn a degenerate polyline.
+    const line: Polyline = [
+      [20, 20],
+      [20, 20],
+      [30, 30],
+    ]
+    const result = subtractPolygonsFromPolyline(line, [square])
+    expect(result).toHaveLength(1)
+    expect(result[0]).toEqual([
+      [20, 20],
+      [30, 30],
+    ])
+    expect(isDegenerate(result[0]!)).toBe(false)
+  })
 })
+
+/** True when every point of the polyline is coincident (a collapsed line). */
+function isDegenerate(pl: Polyline): boolean {
+  if (pl.length < 2) return true
+  const [x0, y0] = pl[0]!
+  return pl.every(([x, y]) => Math.abs(x - x0) < 1e-9 && Math.abs(y - y0) < 1e-9)
+}

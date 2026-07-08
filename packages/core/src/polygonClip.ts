@@ -130,6 +130,14 @@ export function subtractPolygonsFromPolyline(
     const a = polyline[i]!
     const b = polyline[i + 1]!
 
+    // Skip zero-length input segments (coincident consecutive points). Otherwise
+    // the split params degenerate to [0, 1] with no crossings, and the loop below
+    // would build `[lerp(a,b,0), lerp(a,b,1)] = [a, a]` — a zero-length open
+    // polyline — and, mid-`current`, push a duplicate coincident point. `current`
+    // is intentionally left untouched so a contiguous run stays stitched across
+    // the duplicate rather than being split by it.
+    if (vec.dist(a, b) <= EPS) continue
+
     // Collect split parameters along this segment: endpoints + every crossing.
     const ts: number[] = [0, 1]
     for (const poly of polygons) {
