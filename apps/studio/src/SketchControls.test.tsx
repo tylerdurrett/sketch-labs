@@ -1,12 +1,40 @@
 // @vitest-environment jsdom
-import { act, useImperativeHandle, type Ref } from "react";
+import { act, useEffect, useImperativeHandle, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { crc32, type ParamSchema, type Preset, type Seed } from "@harness/core";
 
 import type { LiveCanvasHandle } from "./LiveCanvas";
+import { outlineScene } from "./outlineScene";
 import { SketchControls } from "./SketchControls";
+
+// Preview == export seam probe (issue #220): capture the Scene the export path
+// hands `renderToSVG`, so a test can prove it is the SAME processed Scene the
+// shared {@link outlineScene} seam produces (the exact expression the outline
+// preview also consumes). `vi.hoisted` lifts the holder above the hoisted
+// `vi.mock` factory below so the factory can close over it.
+const exportSceneCapture = vi.hoisted(() => ({
+  current: null as unknown,
+}));
+
+// Mock ONLY `renderToSVG`, delegating to the real implementation so every
+// existing SVG-export assertion (which checks the serialized string) stays
+// green — we merely tee off the Scene argument on the way through. Everything
+// else in `@harness/core` (buildReproMetadata, hiddenLinePass, insertPngMetadata,
+// exportFilename, crc32, …) is the genuine module via `importActual`.
+vi.mock("@harness/core", async (importActual) => {
+  const actual = await importActual<typeof import("@harness/core")>();
+  return {
+    ...actual,
+    renderToSVG: (
+      ...args: Parameters<typeof actual.renderToSVG>
+    ): ReturnType<typeof actual.renderToSVG> => {
+      exportSceneCapture.current = args[0];
+      return actual.renderToSVG(...args);
+    },
+  };
+});
 
 // The fake canvas node the mocked LiveCanvas hands back through its handle, with
 // a `toBlob` the export test drives. Reassigned per-test so each case controls
@@ -14,6 +42,14 @@ import { SketchControls } from "./SketchControls";
 let fakeCanvasToBlob: HTMLCanvasElement["toBlob"];
 // The current-t the mocked handle reports — the export's `-t{t}` source.
 let fakeCurrentT = 0;
+// #228: the real LiveCanvas signals `onOutlineComputed` when an outline pass has
+// drawn, which the owner uses to clear its "Computing…" affordance. The mock
+// records the latest callback so a test can drive that signal BY HAND (to observe
+// the intermediate "Computing…" state), and — when `autoFireOutlineComputed` is
+// true (the default) — fires it in an effect to model the pass completing, so the
+// busy label clears exactly as the real component clears it.
+let lastOnOutlineComputed: (() => void) | null = null;
+let autoFireOutlineComputed = true;
 
 // LiveCanvas is a browser-only sink (canvas2d, ResizeObserver, matchMedia) and
 // is NOT under test here — these are wiring tests for the control state. Replace
@@ -23,17 +59,34 @@ let fakeCurrentT = 0;
 vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
     seed,
+    renderMode,
     handleRef,
+    onOutlineComputed,
   }: {
     seed: Seed;
+    renderMode?: string;
     handleRef?: Ref<LiveCanvasHandle>;
+    onOutlineComputed?: () => void;
   }) => {
     useImperativeHandle(handleRef, () => ({
       getCanvas: () =>
         ({ toBlob: fakeCanvasToBlob }) as unknown as HTMLCanvasElement,
       getCurrentT: () => fakeCurrentT,
     }));
-    return <div data-testid="canvas-seed">{String(seed)}</div>;
+    lastOnOutlineComputed = onOutlineComputed ?? null;
+    // Model the outline pass finishing: fire the "computed" signal after each
+    // outline render so the owner's busy label clears (unless a test opts out to
+    // observe the intermediate "Computing…" state itself).
+    useEffect(() => {
+      if (renderMode === "outline" && autoFireOutlineComputed) {
+        onOutlineComputed?.();
+      }
+    });
+    return (
+      <div data-testid="canvas-seed" data-render-mode={String(renderMode)}>
+        {String(seed)}
+      </div>
+    );
   },
 }));
 
@@ -139,10 +192,17 @@ beforeEach(() => {
   // a fresh downloadBlob spy. Per-test overrides drive the time-gated / guard
   // cases. The blob is a real minimal PNG so the metadata byte-splice succeeds.
   fakeCurrentT = 0;
+  // #228: default to auto-firing the outline "computed" signal so the busy label
+  // clears on its own; the label test opts out to observe "Computing…".
+  lastOnOutlineComputed = null;
+  autoFireOutlineComputed = true;
   fakeCanvasToBlob = ((cb: BlobCallback) => {
     cb(new Blob([MINIMAL_PNG], { type: "image/png" }));
   }) as HTMLCanvasElement["toBlob"];
   downloadBlob.mockReset();
+  // Clear the preview == export seam probe so each test observes only its own
+  // `renderToSVG` call (#220).
+  exportSceneCapture.current = null;
 });
 
 afterEach(() => {
@@ -694,6 +754,36 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     const [, filename] = downloadBlob.mock.calls[0]!;
     expect(filename).toBe(`waves-seed${seed}-t2.5-hidden-line.svg`);
   });
+
+  // AC (#220): the outline-mode canvas input and the hidden-line SVG export input
+  // must be the IDENTICAL processed Scene for the same (params, seed, t). Both
+  // call sites now delegate to the ONE shared `outlineScene` seam, so this holds
+  // by construction. jsdom's `canvas.getContext('2d')` is null, so LiveCanvas's
+  // `drawFrame` early-returns before it would feed the canvas — the preview's
+  // Scene isn't directly observable through a live render. The faithful check is
+  // therefore: drive the REAL `exportHiddenLineSvg` and assert the Scene it hands
+  // `renderToSVG` (captured above) deep-equals `outlineScene(sketch, params, seed,
+  // t)` — the exact seam expression LiveCanvas's outline branch evaluates — for
+  // one fixed frame. Locking the export path to the shared seam is what removes
+  // the drift risk between preview and export.
+  it("export input Scene equals the shared outlineScene seam the preview consumes (#220)", () => {
+    const sketch = hlStaticSketch("circles");
+    const el = mount(<SketchControls sketch={sketch} />);
+    const seed = Number(
+      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
+    );
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    // The export handed `renderToSVG` a Scene.
+    expect(exportSceneCapture.current).not.toBeNull();
+    // A static sketch's export passes `t ?? 0` (t is undefined ⇒ 0); params are
+    // the schema defaults ({ radius: 10 }); seed is the displayed seed. The
+    // outline preview evaluates this SAME expression, so the two inputs match.
+    expect(exportSceneCapture.current).toEqual(
+      outlineScene(sketch, { radius: 10 }, seed, 0),
+    );
+  });
 });
 
 describe("SketchControls — PNG export wiring", () => {
@@ -796,5 +886,107 @@ describe("SketchControls — PNG export wiring", () => {
     await flush();
 
     expect(downloadBlob).not.toHaveBeenCalled();
+  });
+});
+
+describe("SketchControls — render-mode toggle wiring (#219)", () => {
+  /** The render mode SketchControls fed the (mocked) LiveCanvas this render. */
+  const canvasRenderMode = (el: HTMLElement): string | null =>
+    el
+      .querySelector('[data-testid="canvas-seed"]')
+      ?.getAttribute("data-render-mode") ?? null;
+
+  const toggleEl = (el: HTMLElement): HTMLButtonElement => {
+    const btn = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    );
+    if (btn === null) throw new Error("no render-mode toggle");
+    return btn;
+  };
+
+  it("defaults to fill and flips the renderMode it passes into LiveCanvas on toggle", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const toggle = toggleEl(el);
+
+    // Default: LiveCanvas receives renderMode="fill", the toggle reads unpressed.
+    expect(canvasRenderMode(el)).toBe("fill");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.textContent).toBe("Fill");
+
+    // Toggle → the outline mode propagates straight into the LiveCanvas prop.
+    act(() => {
+      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(canvasRenderMode(el)).toBe("outline");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.textContent).toBe("Outline");
+
+    // Toggle again → back to fill (a plain view-only flip, both directions).
+    act(() => {
+      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(canvasRenderMode(el)).toBe("fill");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("shows 'Computing…' (disabled) the instant Fill→Outline is clicked, until the pass signals done (#228)", () => {
+    // Opt out of the auto-clear so the intermediate busy state is observable: the
+    // real pass runs asynchronously, so the label must read "Computing…" from the
+    // click's own commit until LiveCanvas signals `onOutlineComputed`.
+    autoFireOutlineComputed = false;
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const toggle = toggleEl(el);
+    expect(toggle.textContent).toBe("Fill");
+    expect(toggle.disabled).toBe(false);
+
+    // Click to outline: the busy label is set SYNCHRONOUSLY with the flip (so it
+    // paints with the click's commit, before the blocking pass), and the button
+    // is disabled + aria-busy. renderMode still propagates to LiveCanvas at once.
+    act(() => {
+      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("aria-busy")).toBe("true");
+    expect(canvasRenderMode(el)).toBe("outline");
+
+    // The pass finishes → LiveCanvas signals done → the label settles on "Outline"
+    // and the control re-enables.
+    act(() => {
+      lastOnOutlineComputed?.();
+    });
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
+  });
+
+  it("flipping render mode touches no param/seed/lock axis", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const seedBefore = (el.querySelector("#sketch-seed") as HTMLInputElement)
+      .value;
+    const radiusBefore = paramInput(el, "radius").value;
+
+    act(() => {
+      toggleEl(el).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    // The toggle is view-only: it swapped the canvas render mode but left the
+    // param and seed axes exactly as they were.
+    expect(canvasRenderMode(el)).toBe("outline");
+    expect((el.querySelector("#sketch-seed") as HTMLInputElement).value).toBe(
+      seedBefore,
+    );
+    expect(paramInput(el, "radius").value).toBe(radiusBefore);
   });
 });

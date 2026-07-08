@@ -18,6 +18,20 @@ import {
   type TimeMetadata,
 } from "@harness/core";
 
+import { outlineScene } from "./outlineScene";
+
+/**
+ * Which processed Scene the live preview renders (issue #219, feature #4).
+ *
+ * `fill` is the default, unchanged live path — `generate` → `drawSceneFitted`.
+ * `outline` swaps the fill preview for the Hidden-line pass's stroke-only,
+ * occlusion-clipped result (the same processed Scene the hidden-line SVG export
+ * emits), drawn through the identical Canvas2D pipeline. The pass is expensive
+ * and export-only/on-demand (feature #4's core invariant), so it runs strictly
+ * on the static/on-demand redraw path — never inside the live rAF fill loop.
+ */
+export type RenderMode = "fill" | "outline";
+
 /**
  * Map a wall-clock elapsed time onto the Sketch's timeline per its `mode`
  * (ADR-0002 time semantics): `loop` wraps `elapsed → [0, duration)` for a
@@ -74,6 +88,18 @@ export interface LiveCanvasProps {
   /** The explicit Seed all of the Sketch's randomness derives from. */
   seed: Seed;
   /**
+   * Which processed Scene the preview draws (issue #219). Optional, defaulting to
+   * `fill` so the live path is unchanged when a caller omits it: `fill` renders
+   * `generate`'s Scene as-is; `outline` derives its Scene from the shared
+   * {@link outlineScene} seam (`generate` → Hidden-line pass — the SAME
+   * derivation the hidden-line SVG export consumes, issue #220), showing the
+   * stroke-only occlusion-clipped result. The outline pass is
+   * on-demand only (feature #4 invariant) — it never runs inside the live rAF
+   * fill loop; toggling to `outline` suspends that loop and draws once on the
+   * static/on-demand redraw path, recomputing on toggle and param-settle.
+   */
+  renderMode?: RenderMode;
+  /**
    * Optional ref the owner passes to obtain the read-only {@link LiveCanvasHandle}
    * — the live canvas node + current `t` — so the studio chrome can snapshot the
    * displayed frame for export WITHOUT reaching into the draw model. A plain prop
@@ -81,6 +107,15 @@ export interface LiveCanvasProps {
    * explicit, documented part of the contract.
    */
   handleRef?: Ref<LiveCanvasHandle>;
+  /**
+   * Called once an OUTLINE draw has finished (the Hidden-line pass ran and the
+   * result is on the canvas). The owner uses it to clear the "Computing…" busy
+   * affordance it surfaces on the render toggle (issue #228). The busy state is
+   * SET synchronously by the owner at the trigger (the toggle click / a param
+   * edit) so it paints with that commit — before this blocking pass runs; this
+   * callback is only the CLEAR half. Never fires for fill draws.
+   */
+  onOutlineComputed?: () => void;
 }
 
 /**
@@ -109,6 +144,7 @@ function drawFrame(
   params: Params,
   seed: Seed,
   t: number,
+  renderMode: RenderMode,
 ): void {
   const ctx = canvas.getContext("2d");
   if (ctx === null) return;
@@ -121,14 +157,27 @@ function drawFrame(
   // ever writes color strings to those properties.
   const portCtx = ctx as Canvas2DContext;
 
-  const scene = sketch.generate(params, seed, t);
+  // Outline mode (issue #219/#220): swap the fill Scene for the shared
+  // preview == export seam's stroke-only, occlusion-clipped result BEFORE the
+  // shared draw, so the preview shows the SAME processed Scene the hidden-line
+  // SVG export emits — by construction, since both call sites derive it from the
+  // one {@link outlineScene} function (feature #4's "what you see is what you
+  // plot"). The `fill` branch renders `generate`'s Scene as-is. This is the ONLY
+  // place the pass touches the live preview, and drawFrame is called with
+  // `outline` ONLY from the on-demand / static-redraw path — never from the rAF
+  // fill loop's `tick`, which hardcodes `fill` — so the export-only pass never
+  // runs per animated frame (feature #4's core invariant, this task's AC2/AC3).
+  const rendered =
+    renderMode === "outline"
+      ? outlineScene(sketch, params, seed, t)
+      : sketch.generate(params, seed, t);
 
   // Hand the background-fit-and-draw to core's shared pipeline: `drawSceneFitted`
   // resets to identity, paints the full surface (opaque white by default — the
   // per-frame clear graduated in with it), computes the contain-fit, and draws.
   // The studio and the Remotion renderer thus run one identical mapping AND one
   // identical backdrop — structural parity, not coincidence (ADR-0004 / #85 / #92).
-  drawSceneFitted(portCtx, scene, canvas.width, canvas.height);
+  drawSceneFitted(portCtx, rendered, canvas.width, canvas.height);
 }
 
 /**
@@ -181,17 +230,22 @@ export function sizeToBox(canvas: HTMLCanvasElement, dpr: number): boolean {
  *
  * Single-owner draw model — each draw concern has exactly ONE effect that owns it,
  * so a static frame reaches the canvas exactly once per relevant change:
- *   - The LOOP effect (keyed `[sketch]`) owns ANIMATED sketches only. Its
- *     `sketch.time === undefined` early-return is at the very top, so a static
- *     Sketch makes it do nothing at all (no size, no draw, no loop). An animated
+ *   - The LOOP effect (keyed `[sketch, playing, renderMode]`) owns ANIMATED
+ *     sketches in FILL mode only. Its `sketch.time === undefined` early-return is
+ *     at the very top, so a static Sketch makes it do nothing at all (no size, no
+ *     draw, no loop); an `outline` early-return (issue #219) likewise suspends it
+ *     so the export-only Hidden-line pass never runs per frame. An animated fill
  *     Sketch sizes once and runs the rAF loop, reading `params`/`seed` through
  *     refs so an input change feeds the next frame without tearing down the loop
  *     and snapping the clock back to `t = 0` (issue #40). Only a Sketch switch
  *     (the desired restart) recaptures the `performance.now()` baseline.
- *   - The STATIC-REDRAW effect (keyed `[sketch, params, seed, refitAndRedraw]`)
- *     owns STATIC sketches only. It is the SOLE path that sizes+draws a static
- *     frame: on mount, on a switch to a static Sketch, and on a params/seed change
- *     (it always draws, since a params/seed change has no size change).
+ *   - The STATIC-REDRAW effect (keyed `[sketch, params, seed, renderMode,
+ *     refitAndRedraw]`) owns STATIC sketches always, PLUS animated sketches while
+ *     in OUTLINE mode (issue #219) — there the rAF loop is suspended, so this
+ *     on-demand path is the sole draw owner. It is the SOLE path that sizes+draws
+ *     those frames: on mount, on a switch, on a params/seed change, and on a
+ *     render-mode toggle (it always draws, since none of those carry a size
+ *     change) — recomputing the outline on demand, never per animated frame.
  *   - The GEOMETRY effect (keyed on stable callbacks, NEVER `sketch`) owns
  *     draw-on-actual-resize. It re-sizes on box/DPR change and only redraws when
  *     `sizeToBox` reports a real change — so the `ResizeObserver`'s initial
@@ -200,7 +254,14 @@ export function sizeToBox(canvas: HTMLCanvasElement, dpr: number): boolean {
  *     on stable callbacks means a resize never re-runs the loop effect or resets
  *     the clock baseline (issue #40 / the #41 resize contract).
  */
-export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps) {
+export function LiveCanvas({
+  sketch,
+  params,
+  seed,
+  renderMode = "fill",
+  handleRef,
+  onOutlineComputed,
+}: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // The paper's CSS-box aspect (#155): the `<canvas>` box is sized to the
@@ -238,11 +299,23 @@ export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps)
   // sync by the same effect — assigned post-commit, not during render, so a
   // StrictMode double-render can't desync it.
   const sketchRef = useRef(sketch);
+  // `renderModeRef` lets the `[]`-dep on-demand draw callbacks (drawCurrentFrame,
+  // scrubTo) read the current mode without a `renderMode` dependency, so a mode
+  // flip never re-runs the clock effect or resets the rAF baseline. Kept in sync
+  // by the same post-commit effect so a StrictMode double-render can't desync it.
+  const renderModeRef = useRef(renderMode);
+  // `onOutlineComputedRef` lets the outline draw fire the owner's "compute done"
+  // callback WITHOUT listing it in the draw effect's deps — otherwise an inline
+  // arrow from the parent (new identity each render) would re-run the effect and
+  // re-trigger the pass every render. Kept in sync post-commit like the others.
+  const onOutlineComputedRef = useRef(onOutlineComputed);
   useEffect(() => {
     paramsRef.current = params;
     seedRef.current = seed;
     sketchRef.current = sketch;
-  }, [params, seed, sketch]);
+    renderModeRef.current = renderMode;
+    onOutlineComputedRef.current = onOutlineComputed;
+  }, [params, seed, sketch, renderMode, onOutlineComputed]);
 
   // The latest `t` the loop has drawn (0 for a static Sketch). The resize re-fit
   // redraws THIS frame so a box change repaints the current moment, not t = 0 —
@@ -306,6 +379,7 @@ export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps)
       paramsRef.current,
       seedRef.current,
       tRef.current,
+      renderModeRef.current,
     );
   }, []);
 
@@ -320,18 +394,44 @@ export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps)
     drawCurrentFrame();
   }, [drawCurrentFrame]);
 
+  // Issue #223: preserve playback position across an outline↔fill flip. The loop
+  // effect below re-keys on `renderMode` (#219), so a flip back to `fill` re-runs
+  // it and recaptures its `start` baseline from `resumeTRef`. But `resumeTRef` is
+  // synced to the live `tRef` only on resume/scrub — never on a mode flip — so
+  // without this it still holds the last pause/resume/scrub value and snaps an
+  // animated clock back toward 0 on the flip. Mirror togglePlay's resume path:
+  // sync `resumeTRef` to the live `tRef` on every render-mode change so the
+  // baseline continues from the frame the outline round-trip froze. It sits ABOVE
+  // the loop effect on purpose — React runs effects top-to-bottom, so this sync
+  // lands before the loop reads `resumeTRef` on the flip back to fill. This does
+  // NOT touch the Sketch-switch restart (that keys on `sketch`, not `renderMode`).
+  // The fill→outline direction is unaffected: the loop still early-returns for
+  // outline and schedules no frame; this only refreshes the resume anchor.
+  useEffect(() => {
+    resumeTRef.current = tRef.current;
+  }, [renderMode]);
+
   // The clock-bearing loop — the PLAYING half of the transport (ADR-0005). Keyed
-  // on `[sketch, playing]`: switching Sketch re-runs this and recaptures `start`
-  // (the desired restart); toggling `playing` starts the loop on resume or, via
-  // the cleanup, cancels the pending frame on pause so `t` is held at the
-  // scrubbed frame. A params/seed change does NOT re-run it (read through refs),
-  // so the animation continues from where it was. This effect owns ANIMATED
+  // on `[sketch, playing, renderMode]`: switching Sketch re-runs this and
+  // recaptures `start` (the desired restart); toggling `playing` starts the loop
+  // on resume or, via the cleanup, cancels the pending frame on pause so `t` is
+  // held at the scrubbed frame; flipping `renderMode` suspends the loop for
+  // outline and restarts it for fill (#219). A params/seed change does NOT
+  // re-run it (read through refs), so the animation continues from where it
+  // was. This effect owns ANIMATED
   // sketches ONLY: the `sketch.time === undefined` early-return is FIRST, before
   // any sizing or drawing, so a static Sketch makes it a complete no-op (the
   // static-redraw effect is the sole owner of static frames — no triple draw).
   useEffect(() => {
     const time = sketch.time;
     if (time === undefined) return;
+    // Outline mode (issue #219) SUSPENDS the live loop: the Hidden-line pass is
+    // export-only/on-demand (feature #4 invariant), so it must never run per
+    // animated frame. Gating the whole loop off here — with `renderMode` in the
+    // deps — makes the pass provably unreachable from `tick`; the on-demand
+    // static-redraw effect draws the outline of the current frame instead, and a
+    // flip back to `fill` re-runs this effect to restart the loop.
+    if (renderMode === "outline") return;
     // Paused: the scrubber owns `t` (held at `resumeTRef`/`tRef`); run no loop.
     if (!playing) return;
 
@@ -361,7 +461,12 @@ export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps)
       // property). The scrubber is uncontrolled while playing; React owns it
       // again only when the user grabs it (paused).
       if (scrubberRef.current !== null) scrubberRef.current.value = String(t);
-      drawFrame(canvas, sketch, paramsRef.current, seedRef.current, t);
+      // `fill` is HARDCODED here (never `renderMode`/`renderModeRef`): this is the
+      // live rAF loop, and the Hidden-line pass must never run per frame (feature
+      // #4 invariant / AC2). The effect already early-returns in outline mode, so
+      // this is doubly unreachable in outline — but hardcoding makes it a static
+      // guarantee that `tick` can only ever draw fill.
+      drawFrame(canvas, sketch, paramsRef.current, seedRef.current, t, "fill");
       frameId = requestAnimationFrame(tick);
     };
 
@@ -370,7 +475,7 @@ export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps)
     return () => {
       cancelAnimationFrame(frameId);
     };
-  }, [sketch, playing]);
+  }, [sketch, playing, renderMode]);
 
   // The SOLE owner of static frames: the loop effect now early-returns for a
   // static Sketch, so this is the only path that sizes+draws one — on mount, on a
@@ -379,10 +484,62 @@ export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps)
   // (the rAF loop owns its frames). `refitAndRedraw` re-fits the box (tRef is 0
   // for a static Sketch) and ALWAYS redraws through the refs, since a params/seed
   // change carries no size change for the geometry effect to react to.
+  //
+  // Issue #219 generalizes it to also own ANIMATED sketches WHILE in outline
+  // mode: there the rAF loop is suspended (it early-returns for outline), so this
+  // on-demand path is the sole draw owner then too — it recomputes the Hidden-line
+  // outline on a mode toggle and on a param/seed settle (its deps), but NOT per
+  // animated frame. The guard therefore skips only the case the live loop owns:
+  // an animated Sketch in fill mode.
+  //
+  // Issue #228: the outline Hidden-line pass runs synchronously on the main
+  // thread and freezes the page for seconds. The owner surfaces a "Computing…"
+  // affordance on the render toggle — and it SETS that busy flag synchronously at
+  // the trigger (the toggle click / a param edit), so it paints with that commit,
+  // BEFORE this effect runs. That placement is load-bearing: a flag set from
+  // inside this effect paints too late (the pass blocks the very frame the flag
+  // would paint on — the original bug). Here we only need to (a) yield one frame
+  // so the browser paints that already-committed busy state before the pass
+  // blocks, and (b) CLEAR it via `onOutlineComputed` once the outline is drawn.
   useEffect(() => {
-    if (sketch.time !== undefined) return;
-    refitAndRedraw();
-  }, [sketch, params, seed, refitAndRedraw]);
+    if (sketch.time !== undefined && renderMode !== "outline") return;
+
+    // FILL draws (a static Sketch in fill mode) stay on the cheap synchronous
+    // path — no Hidden-line pass runs, so there is nothing to wait on.
+    if (renderMode !== "outline") {
+      refitAndRedraw();
+      return;
+    }
+
+    // OUTLINE draw: let the owner's already-committed "Computing…" state paint
+    // before refitAndRedraw runs the blocking Hidden-line pass, then fire
+    // `onOutlineComputed` so the owner clears it. A DOUBLE rAF guarantees a full
+    // painted frame elapses first: this effect runs in a post-commit macrotask,
+    // and a single rAF scheduled from there can still fire in the SAME frame's
+    // rendering steps — before that frame paints. The inner rAF runs on the NEXT
+    // frame, after the busy state has provably painted, so the freeze never eats
+    // its first paint (the ~16ms is nothing against a multi-second pass).
+    //
+    // Honest limitation (Option A): the page STILL freezes during the pass; the
+    // affordance is STATIC feedback that the action registered, not a
+    // responsiveness fix, and it does not animate. Moving the pass off the main
+    // thread (Web Worker) is the deferred Option B follow-up.
+    let innerFrame = 0;
+    const outerFrame = requestAnimationFrame(() => {
+      innerFrame = requestAnimationFrame(() => {
+        refitAndRedraw();
+        onOutlineComputedRef.current?.();
+      });
+    });
+    // Supersede pending work: a rapid re-trigger (slider drag in outline, or a
+    // flip away before the frames fire) re-runs this effect; cancel whichever
+    // frame is pending so passes never stack. Also runs on unmount.
+    // `cancelAnimationFrame(0)` is a no-op, so cancelling an unset innerFrame is safe.
+    return () => {
+      cancelAnimationFrame(outerFrame);
+      cancelAnimationFrame(innerFrame);
+    };
+  }, [sketch, params, seed, renderMode, refitAndRedraw]);
 
   // Re-fit on box-size AND devicePixelRatio change (the #41 contract). DECOUPLED
   // from the clock effect on purpose: it depends on stable callbacks alone, never
@@ -472,6 +629,7 @@ export function LiveCanvas({ sketch, params, seed, handleRef }: LiveCanvasProps)
         paramsRef.current,
         seedRef.current,
         value,
+        renderModeRef.current,
       );
     }
   }, []);

@@ -6,7 +6,6 @@ import {
   buildReproMetadata,
   defaultParams,
   exportFilename,
-  hiddenLinePass,
   insertPngMetadata,
   newSeed,
   randomize,
@@ -18,7 +17,12 @@ import {
 import { ControlPanel } from "./ControlPanel";
 import { Button } from "./components/ui/button";
 import { downloadBlob } from "./downloadBlob";
-import { LiveCanvas, type LiveCanvasHandle } from "./LiveCanvas";
+import {
+  LiveCanvas,
+  type LiveCanvasHandle,
+  type RenderMode,
+} from "./LiveCanvas";
+import { outlineScene } from "./outlineScene";
 import { PresetControls } from "./PresetControls";
 
 /**
@@ -84,6 +88,33 @@ export function SketchControls({
   const [seed, setSeed] = useState(() => newSeed(Math.random));
   const [locks, setLocks] = useState<ReadonlySet<string>>(() => new Set());
 
+  // The preview's render mode (issue #219): `fill` (default) shows the live fill
+  // preview; `outline` swaps in the Hidden-line pass's stroke-only, occlusion-
+  // clipped result — the same processed Scene the hidden-line SVG export emits —
+  // recomputed on demand by LiveCanvas, never in its live fill loop. Like params/
+  // seed/locks this lives in keyed-remount state, so a Sketch switch resets it to
+  // `fill` for free (no manual reset effect).
+  const [renderMode, setRenderMode] = useState<RenderMode>("fill");
+
+  // Issue #228: while an outline draw's Hidden-line pass runs, LiveCanvas freezes
+  // the main thread for seconds. This flag drives a "Computing…" label on the
+  // render toggle so the action registers visibly. It MUST be set synchronously
+  // at the trigger (the toggle click / any param-or-seed edit while in outline)
+  // so React paints the "Computing…" button with that same commit — before the
+  // blocking pass runs. A flag set from inside LiveCanvas's draw effect paints
+  // too late (the pass blocks the very frame it would paint on). LiveCanvas CLEARS
+  // it via `onOutlineComputed` once the outline is drawn. Lives in keyed-remount
+  // state alongside renderMode, so a Sketch switch resets it to `false` for free.
+  const [computingOutline, setComputingOutline] = useState(false);
+
+  // Any params/seed edit WHILE in outline mode re-runs LiveCanvas's on-demand
+  // Hidden-line pass. Mark computing here at the trigger (a slider drag, New seed,
+  // Randomize, preset reload, seed field) so the "Computing…" label paints with
+  // that edit's commit. A no-op in fill mode (no pass runs). See the flag above.
+  const markOutlineRecomputing = () => {
+    if (renderMode === "outline") setComputingOutline(true);
+  };
+
   // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
   // export snapshots. It is a ref, not state — export reads it imperatively on a
   // button click, never during render.
@@ -93,6 +124,7 @@ export function SketchControls({
   // NumberControl, a hex color `string` from a ColorControl. The params state
   // itself is `Record<string, unknown>`, so only this handler widens.
   const setParam = (key: string, value: number | string) => {
+    markOutlineRecomputing();
     setParams((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -107,14 +139,31 @@ export function SketchControls({
     });
   };
 
+  // Flip the preview between fill and outline (issue #219). A view-only toggle:
+  // it swaps which processed Scene LiveCanvas draws and touches no param/seed/lock
+  // axis. The heavy Hidden-line pass runs inside LiveCanvas on demand (on this
+  // toggle / a param settle), never in its live fill loop.
+  const toggleRenderMode = () => {
+    const next = renderMode === "outline" ? "fill" : "outline";
+    // Set/clear the busy flag SYNCHRONOUSLY with the flip so the button paints its
+    // "Computing…" state in this same commit — before LiveCanvas's effect runs the
+    // blocking pass (#228). Flipping to fill clears it: no pass runs there.
+    setComputingOutline(next === "outline");
+    setRenderMode(next);
+  };
+
   // New seed: roll a fresh arrangement, leaving every param value untouched —
   // the seed axis is independent of the param (Randomize) axis.
-  const rollSeed = () => setSeed(newSeed(Math.random));
+  const rollSeed = () => {
+    markOutlineRecomputing();
+    setSeed(newSeed(Math.random));
+  };
 
   // Randomize: re-roll the unlocked numeric params. The engine reads the current
   // `locks` set (locked keys pass through unchanged) and a `Math.random`-backed
   // source — no roll logic lives here.
   const rollParams = () => {
+    markOutlineRecomputing();
     setParams((prev) => randomize(sketch.schema, prev, locks, Math.random));
   };
 
@@ -124,6 +173,7 @@ export function SketchControls({
   // job — `applyPreset` returns a sorted string[], the studio's live lock state
   // is a Set<string>.
   const reloadPreset = (preset: Preset) => {
+    markOutlineRecomputing();
     const state = applyPreset(sketch.schema, preset);
     setParams(state.params);
     setSeed(state.seed);
@@ -207,25 +257,28 @@ export function SketchControls({
   };
 
   // Export the CURRENTLY DISPLAYED frame as a HIDDEN-LINE SVG — a plotter-ready
-  // variant of {@link exportSvg} that pipes the regenerated Scene through core's
-  // `hiddenLinePass` (occlusion clipping: drop the outline geometry hidden behind
-  // nearer fills, emit a stroke-only Scene) BEFORE serialization. It is the same
+  // variant of {@link exportSvg} that derives its stroke-only, occlusion-clipped
+  // Scene from the shared {@link outlineScene} seam (`generate` → Hidden-line
+  // pass) BEFORE serialization. Routing through that ONE seam — the same
+  // derivation LiveCanvas's outline preview consumes — is what makes preview ==
+  // export true by construction (issue #220): the two paths cannot drift because
+  // there is only one place the processed Scene is derived. It is the same
   // one-shot click OUTSIDE the per-frame loop; the pass is heavy and on-demand
   // only, so it runs HERE inside the handler — never in render or the live loop.
   //
   // Everything else mirrors `exportSvg` exactly (same handle guard, same
-  // `sketch.time` time-gating of `t`, same `sketch.generate` re-bake, same
-  // reproduction envelope), so both SVG exports reflect the identical displayed
-  // moment. The file is tagged with a `-hidden-line` variant segment so it never
-  // collides with the plain SVG export's name.
+  // `sketch.time` time-gating of `t`, same displayed `(params, seed, t)` spine,
+  // same reproduction envelope), so both SVG exports reflect the identical
+  // displayed moment. The file is tagged with a `-hidden-line` variant segment so
+  // it never collides with the plain SVG export's name.
   const exportHiddenLineSvg = () => {
     const handle = canvasHandle.current;
     if (handle == null) return;
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
-    const scene = sketch.generate(params, seed, t ?? 0);
-    // The occlusion-clipping transform: on-demand only, strictly inside this
-    // click handler. `renderToSVG` then serializes the stroke-only result.
-    const hiddenLineScene = hiddenLinePass(scene);
+    // The shared preview == export seam: `generate` then the occlusion-clipping
+    // Hidden-line pass, on-demand only, strictly inside this click handler.
+    // `renderToSVG` then serializes the stroke-only result.
+    const hiddenLineScene = outlineScene(sketch, params, seed, t ?? 0);
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
       seed,
@@ -283,6 +336,8 @@ export function SketchControls({
             sketch={sketch}
             params={params}
             seed={seed}
+            renderMode={renderMode}
+            onOutlineComputed={() => setComputingOutline(false)}
           />
         </div>
       </section>
@@ -353,19 +408,53 @@ export function SketchControls({
               if (event.target.value.trim() === "") return;
               const parsed = Number(event.target.value);
               if (Number.isNaN(parsed)) return;
+              markOutlineRecomputing();
               setSeed(parsed);
             }}
           />
         </div>
         {/*
+         * Render-mode toggle (#219) — swaps the whole preview between the live
+         * fill render and the on-demand Hidden-line (outline) render. `mt-auto`
+         * pins this to the bottom of the flex-column sidebar so it sits just above
+         * the export group (the two anchor together as the sidebar's footer). It
+         * is a view-only toggle: `aria-pressed` reflects outline, and flipping it
+         * changes nothing about params/seed/locks.
+         *
+         * While an outline pass is running (#228) the label reads "Computing…" and
+         * the button is disabled + `aria-busy` — static feedback that the (page-
+         * freezing) Hidden-line pass is underway. `computingOutline` is set at the
+         * trigger and cleared by LiveCanvas's `onOutlineComputed`.
+         */}
+        <div className="mt-auto flex items-center gap-2">
+          <span className="flex-none min-w-16 text-sm text-muted-foreground">
+            render
+          </span>
+          <Button
+            type="button"
+            variant={renderMode === "outline" ? "default" : "outline"}
+            size="sm"
+            className="flex-1"
+            aria-pressed={renderMode === "outline"}
+            aria-busy={computingOutline}
+            disabled={computingOutline}
+            aria-label="Toggle outline render mode"
+            onClick={toggleRenderMode}
+          >
+            {computingOutline
+              ? "Computing…"
+              : renderMode === "outline"
+                ? "Outline"
+                : "Fill"}
+          </Button>
+        </div>
+        {/*
          * Export controls — the shared home for every export path (PNG snapshots
          * the live canvas frame; SVG re-bakes the displayed Scene; Hidden-line SVG
-         * re-bakes then occlusion-clips it for plotting). `mt-auto` pins this
-         * group to the BOTTOM of the flex-column sidebar (#158) so it stays
-         * anchored while everything above stacks from the top; the buttons split
-         * the row (`flex-1`) and wrap as the group grows.
+         * re-bakes then occlusion-clips it for plotting). The buttons split the row
+         * (`flex-1`) and wrap as the group grows.
          */}
-        <div className="mt-auto flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             variant="outline"
