@@ -518,4 +518,36 @@ describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand
     expect(counts.stroke ?? 0).toBe(0);
     expect(counts.fill ?? 0).toBe(0);
   });
+
+  it("an outline→fill round-trip while playing PRESERVES t — the clock continues, never snapping to 0 (#223)", () => {
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    mount(<LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />);
+
+    // Playing in fill: advance the live loop to t = 2.
+    tick(2000);
+    expect(lastDrawnT(generate)).toBeCloseTo(2, 5);
+
+    // Flip to outline (which SUSPENDS the loop) and straight back to fill, WITHOUT
+    // advancing the wall clock. The render-mode-change sync must carry the frozen
+    // t = 2 into resumeTRef so the loop effect's baseline recapture continues from
+    // there when it re-runs on the flip back to fill.
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="outline" />,
+      );
+    });
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />,
+      );
+    });
+
+    // Advance 0.5s past the flip. Continuous playback ⇒ t = 2 + 0.5 = 2.5. The
+    // pre-fix bug left resumeTRef at 0 (never synced on a mode flip), so the
+    // baseline restarted from the flip moment and this tick would read ~0.5 — a
+    // snap back toward 0. Asserting t ≈ 2.5 (and > 2) pins the continuation.
+    tick(2500);
+    expect(lastDrawnT(generate)).toBeCloseTo(2.5, 5);
+    expect(lastDrawnT(generate)).toBeGreaterThan(2);
+  });
 });
