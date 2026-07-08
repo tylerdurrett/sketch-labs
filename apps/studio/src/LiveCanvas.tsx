@@ -331,6 +331,12 @@ export function LiveCanvas({
   // Sketches never start the loop, so the value is inert for them.
   const [playing, setPlaying] = useState(true);
 
+  // Issue #228: the outline Hidden-line pass runs synchronously on the main
+  // thread (freezing the page); this flag surfaces a "Computing outline…"
+  // affordance the browser can paint BEFORE the pass blocks. It is set/cleared
+  // only by the static-redraw effect below, around the deferred outline draw.
+  const [computingOutline, setComputingOutline] = useState(false);
+
   // The baseline-recapture offset (ADR-0005): when play RESUMES from a scrubbed
   // frame, the loop must continue from that `t`, not snap back to 0. We carry the
   // resume point as a ref the loop reads on (re)start to set
@@ -475,9 +481,47 @@ export function LiveCanvas({
   // outline on a mode toggle and on a param/seed settle (its deps), but NOT per
   // animated frame. The guard therefore skips only the case the live loop owns:
   // an animated Sketch in fill mode.
+  //
+  // Issue #228 DEFERS the outline draw one rAF frame behind a "Computing outline…"
+  // affordance: the Hidden-line pass blocks the main thread, so surfacing a busy
+  // flag and yielding one frame lets the browser paint that feedback BEFORE the
+  // pass freezes the page (fill draws stay on the immediate synchronous path).
   useEffect(() => {
     if (sketch.time !== undefined && renderMode !== "outline") return;
-    refitAndRedraw();
+
+    // FILL draws (a static Sketch in fill mode) stay on the cheap synchronous
+    // path — no Hidden-line pass runs, so there is nothing to wait on. Clear any
+    // busy flag a superseded/aborted outline draw may have left set (e.g. an
+    // outline→fill flip cancels the pending pass below), then draw immediately.
+    if (renderMode !== "outline") {
+      setComputingOutline(false);
+      refitAndRedraw();
+      return;
+    }
+
+    // OUTLINE draw (issue #228): refitAndRedraw runs the expensive Hidden-line
+    // pass synchronously on the main thread, freezing the page. A React effect
+    // cannot paint between a setState and a synchronous call in the SAME task, so
+    // surface the busy state, then DEFER the pass one frame with rAF: the browser
+    // paints the "Computing outline…" affordance FIRST, THEN the pass blocks,
+    // THEN we clear busy and the drawn outline replaces the overlay. The deferral
+    // is load-bearing — without it the affordance never becomes visible.
+    //
+    // Honest limitation (Option A): the page STILL freezes during the pass; the
+    // indicator is STATIC feedback that the action registered, not a
+    // responsiveness fix, and it does not animate. Moving the pass off the main
+    // thread (Web Worker) is the deferred Option B follow-up.
+    setComputingOutline(true);
+    const passFrame = requestAnimationFrame(() => {
+      refitAndRedraw();
+      setComputingOutline(false);
+    });
+    // Supersede pending work: a rapid re-trigger (slider drag in outline, or a
+    // flip away before the frame fires) re-runs this effect; cancel the
+    // not-yet-fired pass so passes never stack. Also runs on unmount.
+    return () => {
+      cancelAnimationFrame(passFrame);
+    };
   }, [sketch, params, seed, renderMode, refitAndRedraw]);
 
   // Re-fit on box-size AND devicePixelRatio change (the #41 contract). DECOUPLED
@@ -591,6 +635,21 @@ export function LiveCanvas({
          * container). Relocated into #156's fill-the-region layout unchanged.
          */}
         <canvas ref={canvasRef} className="live-canvas" style={paperStyle} />
+        {/*
+         * The "Computing outline…" affordance (#228): shown while the deferred
+         * Hidden-line pass is about to block the main thread. `role="status"` +
+         * `aria-live="polite"` announces it to assistive tech. It is absolutely
+         * centered over the stage (see App.css) so it never reflows the paper.
+         */}
+        {computingOutline && (
+          <div
+            className="live-canvas-computing"
+            role="status"
+            aria-live="polite"
+          >
+            Computing outline…
+          </div>
+        )}
       </div>
       {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
       {time !== undefined && (

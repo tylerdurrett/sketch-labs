@@ -63,6 +63,11 @@ function canvasEl(el: HTMLElement): HTMLCanvasElement {
   return canvas;
 }
 
+/** The #228 "Computing outline…" overlay, or null when absent. */
+function computingIndicator(el: HTMLElement): HTMLElement | null {
+  return el.querySelector<HTMLElement>(".live-canvas-computing");
+}
+
 /** The most recent `t` the Sketch was asked to render (the drawn frame). */
 function lastDrawnT(generate: { mock: { calls: unknown[][] } }): number {
   const calls = generate.mock.calls;
@@ -166,6 +171,15 @@ let nextRafId = 1;
 /** Advance the fake wall clock to `ms` and flush exactly one rAF generation. */
 function tick(ms: number): void {
   now = ms;
+  const due = rafCallbacks;
+  rafCallbacks = [];
+  act(() => {
+    for (const cb of due) cb(now);
+  });
+}
+
+/** Flush pending rAF callbacks WITHOUT advancing the clock — drives the #228 deferred outline pass. */
+function flushRaf(): void {
   const due = rafCallbacks;
   rafCallbacks = [];
   act(() => {
@@ -464,6 +478,8 @@ describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand
         <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="outline" />,
       );
     });
+    // #228: the outline pass is deferred one frame; flush it before asserting.
+    flushRaf();
     expect(counts.stroke ?? 0).toBeGreaterThan(0);
     expect(counts.fill ?? 0).toBe(0);
 
@@ -506,6 +522,8 @@ describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand
     mount(
       <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="outline" />,
     );
+    // #228: the outline pass is deferred one frame; flush it before asserting.
+    flushRaf();
     expect(counts.stroke ?? 0).toBeGreaterThan(0);
     expect(counts.fill ?? 0).toBe(0);
 
@@ -549,5 +567,88 @@ describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand
     tick(2500);
     expect(lastDrawnT(generate)).toBeCloseTo(2.5, 5);
     expect(lastDrawnT(generate)).toBeGreaterThan(2);
+  });
+
+  it("outline draws show a 'Computing…' indicator BEFORE the deferred pass, then clear it (AC1/AC3, #228)", () => {
+    const { ctx, counts } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch } = overlapSketch(undefined); // static
+
+    const el = mount(
+      <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />,
+    );
+    // Fill mode: no indicator — the cheap synchronous path has nothing to wait on.
+    expect(computingIndicator(el)).toBeNull();
+
+    // Flip to outline: the indicator is present in the very render, and the pass
+    // has NOT run yet (it's deferred a frame so the browser can paint this first).
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="outline" />,
+      );
+    });
+    expect(computingIndicator(el)).not.toBeNull();
+    expect(counts.stroke ?? 0).toBe(0);
+
+    // The deferred frame fires: the pass strokes and the indicator clears.
+    flushRaf();
+    expect(counts.stroke ?? 0).toBeGreaterThan(0);
+    expect(computingIndicator(el)).toBeNull();
+  });
+
+  it("a param settle WHILE in outline re-shows the indicator, then clears (AC2, #228)", () => {
+    const { ctx, counts } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch } = overlapSketch(undefined);
+
+    const el = mount(
+      <LiveCanvas sketch={sketch} params={{ a: 1 }} seed={1} renderMode="outline" />,
+    );
+    flushRaf(); // settle the initial outline draw
+    expect(computingIndicator(el)).toBeNull();
+
+    // A param change while STILL in outline mode re-triggers the effect: indicator
+    // back, pass deferred (not yet run for the new params).
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={sketch} params={{ a: 2 }} seed={1} renderMode="outline" />,
+      );
+    });
+    expect(computingIndicator(el)).not.toBeNull();
+
+    flushRaf();
+    expect(computingIndicator(el)).toBeNull();
+    expect(counts.stroke ?? 0).toBeGreaterThan(0);
+  });
+
+  it("rapid successive outline triggers supersede the pending pass — passes never stack (AC5, #228)", () => {
+    const { ctx } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch } = overlapSketch(undefined);
+
+    mount(<LiveCanvas sketch={sketch} params={{ v: 1 }} seed={1} renderMode="fill" />);
+    // Fill mount schedules no rAF (static fill is synchronous).
+    expect(rafCallbacks.length).toBe(0);
+
+    // First outline trigger schedules exactly one deferred pass.
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={sketch} params={{ v: 1 }} seed={1} renderMode="outline" />,
+      );
+    });
+    expect(rafCallbacks.length).toBe(1);
+
+    // A second trigger before the frame fires cancels the first and schedules a
+    // fresh one — still exactly one pending pass, not two (no stacking).
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={sketch} params={{ v: 2 }} seed={1} renderMode="outline" />,
+      );
+    });
+    expect(rafCallbacks.length).toBe(1);
+
+    // Flushing runs that single pass and leaves nothing pending.
+    flushRaf();
+    expect(rafCallbacks.length).toBe(0);
   });
 });
