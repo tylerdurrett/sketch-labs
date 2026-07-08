@@ -101,8 +101,6 @@
   overflow: auto;
   background: var(--background);
   container-type: size;
-  /* Anchor the absolutely-positioned #228 computing overlay to the stage. */
-  position: relative;
 }
 
 /*
@@ -157,29 +155,6 @@
   width: min(100cqw, 100cqh * var(--paper-aspect));
   border: 1px solid var(--border);
   box-shadow: 0 8px 30px rgb(0 0 0 / 60%);
-}
-
-/*
- * The "Computing outline…" affordance (#228). Outline mode's Hidden-line pass
- * runs synchronously on the main thread and freezes the page while it computes;
- * LiveCanvas defers it one frame so this STATIC chip paints first, giving the
- * click immediate feedback. It does NOT animate — the page is blocked during the
- * pass (a true non-blocking fix is the deferred Option B). Absolutely centered
- * over the stage so it never reflows the framed paper; `pointer-events: none`
- * keeps it inert.
- */
-.live-canvas-computing {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  border: 1px solid var(--border);
-  font-size: 0.875rem;
-  pointer-events: none;
 }
 
 /*

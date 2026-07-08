@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, useImperativeHandle, type Ref } from "react";
+import { act, useEffect, useImperativeHandle, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -42,6 +42,14 @@ vi.mock("@harness/core", async (importActual) => {
 let fakeCanvasToBlob: HTMLCanvasElement["toBlob"];
 // The current-t the mocked handle reports — the export's `-t{t}` source.
 let fakeCurrentT = 0;
+// #228: the real LiveCanvas signals `onOutlineComputed` when an outline pass has
+// drawn, which the owner uses to clear its "Computing…" affordance. The mock
+// records the latest callback so a test can drive that signal BY HAND (to observe
+// the intermediate "Computing…" state), and — when `autoFireOutlineComputed` is
+// true (the default) — fires it in an effect to model the pass completing, so the
+// busy label clears exactly as the real component clears it.
+let lastOnOutlineComputed: (() => void) | null = null;
+let autoFireOutlineComputed = true;
 
 // LiveCanvas is a browser-only sink (canvas2d, ResizeObserver, matchMedia) and
 // is NOT under test here — these are wiring tests for the control state. Replace
@@ -53,16 +61,27 @@ vi.mock("./LiveCanvas", () => ({
     seed,
     renderMode,
     handleRef,
+    onOutlineComputed,
   }: {
     seed: Seed;
     renderMode?: string;
     handleRef?: Ref<LiveCanvasHandle>;
+    onOutlineComputed?: () => void;
   }) => {
     useImperativeHandle(handleRef, () => ({
       getCanvas: () =>
         ({ toBlob: fakeCanvasToBlob }) as unknown as HTMLCanvasElement,
       getCurrentT: () => fakeCurrentT,
     }));
+    lastOnOutlineComputed = onOutlineComputed ?? null;
+    // Model the outline pass finishing: fire the "computed" signal after each
+    // outline render so the owner's busy label clears (unless a test opts out to
+    // observe the intermediate "Computing…" state itself).
+    useEffect(() => {
+      if (renderMode === "outline" && autoFireOutlineComputed) {
+        onOutlineComputed?.();
+      }
+    });
     return (
       <div data-testid="canvas-seed" data-render-mode={String(renderMode)}>
         {String(seed)}
@@ -173,6 +192,10 @@ beforeEach(() => {
   // a fresh downloadBlob spy. Per-test overrides drive the time-gated / guard
   // cases. The blob is a real minimal PNG so the metadata byte-splice succeeds.
   fakeCurrentT = 0;
+  // #228: default to auto-firing the outline "computed" signal so the busy label
+  // clears on its own; the label test opts out to observe "Computing…".
+  lastOnOutlineComputed = null;
+  autoFireOutlineComputed = true;
   fakeCanvasToBlob = ((cb: BlobCallback) => {
     cb(new Blob([MINIMAL_PNG], { type: "image/png" }));
   }) as HTMLCanvasElement["toBlob"];
@@ -908,6 +931,40 @@ describe("SketchControls — render-mode toggle wiring (#219)", () => {
     });
     expect(canvasRenderMode(el)).toBe("fill");
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("shows 'Computing…' (disabled) the instant Fill→Outline is clicked, until the pass signals done (#228)", () => {
+    // Opt out of the auto-clear so the intermediate busy state is observable: the
+    // real pass runs asynchronously, so the label must read "Computing…" from the
+    // click's own commit until LiveCanvas signals `onOutlineComputed`.
+    autoFireOutlineComputed = false;
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const toggle = toggleEl(el);
+    expect(toggle.textContent).toBe("Fill");
+    expect(toggle.disabled).toBe(false);
+
+    // Click to outline: the busy label is set SYNCHRONOUSLY with the flip (so it
+    // paints with the click's commit, before the blocking pass), and the button
+    // is disabled + aria-busy. renderMode still propagates to LiveCanvas at once.
+    act(() => {
+      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("aria-busy")).toBe("true");
+    expect(canvasRenderMode(el)).toBe("outline");
+
+    // The pass finishes → LiveCanvas signals done → the label settles on "Outline"
+    // and the control re-enables.
+    act(() => {
+      lastOnOutlineComputed?.();
+    });
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
   });
 
   it("flipping render mode touches no param/seed/lock axis", () => {

@@ -63,11 +63,6 @@ function canvasEl(el: HTMLElement): HTMLCanvasElement {
   return canvas;
 }
 
-/** The #228 "Computing outline…" overlay, or null when absent. */
-function computingIndicator(el: HTMLElement): HTMLElement | null {
-  return el.querySelector<HTMLElement>(".live-canvas-computing");
-}
-
 /** The most recent `t` the Sketch was asked to render (the drawn frame). */
 function lastDrawnT(generate: { mock: { calls: unknown[][] } }): number {
   const calls = generate.mock.calls;
@@ -178,12 +173,24 @@ function tick(ms: number): void {
   });
 }
 
-/** Flush pending rAF callbacks WITHOUT advancing the clock — drives the #228 deferred outline pass. */
+/**
+ * Flush pending rAF callbacks WITHOUT advancing the clock, draining nested
+ * generations — the #228 outline pass is deferred behind a DOUBLE rAF (the outer
+ * frame only schedules the inner one; the pass runs in the inner). Bounded so a
+ * self-rescheduling loop can't spin forever: outline-mode tests suspend the live
+ * rAF loop, so a couple of generations always drains to empty.
+ */
 function flushRaf(): void {
-  const due = rafCallbacks;
-  rafCallbacks = [];
   act(() => {
-    for (const cb of due) cb(now);
+    for (
+      let generation = 0;
+      generation < 5 && rafCallbacks.length > 0;
+      generation++
+    ) {
+      const due = rafCallbacks;
+      rafCallbacks = [];
+      for (const cb of due) cb(now);
+    }
   });
 }
 
@@ -569,56 +576,83 @@ describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand
     expect(lastDrawnT(generate)).toBeGreaterThan(2);
   });
 
-  it("outline draws show a 'Computing…' indicator BEFORE the deferred pass, then clear it (AC1/AC3, #228)", () => {
+  it("fires onOutlineComputed AFTER the deferred outline pass, never for a fill draw (AC1/AC3, #228)", () => {
     const { ctx, counts } = recordingContext();
     useRecordingContext(ctx);
     const { sketch } = overlapSketch(undefined); // static
+    const onOutlineComputed = vi.fn();
 
-    const el = mount(
-      <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />,
+    // Fill mount: the synchronous fill path draws and never signals a compute —
+    // the owner keeps its render toggle in the idle (not "Computing…") state.
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        renderMode="fill"
+        onOutlineComputed={onOutlineComputed}
+      />,
     );
-    // Fill mode: no indicator — the cheap synchronous path has nothing to wait on.
-    expect(computingIndicator(el)).toBeNull();
+    expect(onOutlineComputed).not.toHaveBeenCalled();
 
-    // Flip to outline: the indicator is present in the very render, and the pass
-    // has NOT run yet (it's deferred a frame so the browser can paint this first).
+    // Flip to outline: the pass is deferred, so nothing has drawn or signalled
+    // yet. The owner's "Computing…" affordance (set synchronously at the trigger)
+    // is what covers this gap — LiveCanvas only signals when the draw lands.
     act(() => {
       root!.render(
-        <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="outline" />,
+        <LiveCanvas
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          renderMode="outline"
+          onOutlineComputed={onOutlineComputed}
+        />,
       );
     });
-    expect(computingIndicator(el)).not.toBeNull();
     expect(counts.stroke ?? 0).toBe(0);
+    expect(onOutlineComputed).not.toHaveBeenCalled();
 
-    // The deferred frame fires: the pass strokes and the indicator clears.
+    // The deferred frames fire: the pass strokes, THEN the "computed" signal lands
+    // so the owner can clear its "Computing…" affordance.
     flushRaf();
     expect(counts.stroke ?? 0).toBeGreaterThan(0);
-    expect(computingIndicator(el)).toBeNull();
+    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
   });
 
-  it("a param settle WHILE in outline re-shows the indicator, then clears (AC2, #228)", () => {
-    const { ctx, counts } = recordingContext();
+  it("signals onOutlineComputed again after a param settle WHILE in outline (AC2, #228)", () => {
+    const { ctx } = recordingContext();
     useRecordingContext(ctx);
     const { sketch } = overlapSketch(undefined);
+    const onOutlineComputed = vi.fn();
 
-    const el = mount(
-      <LiveCanvas sketch={sketch} params={{ a: 1 }} seed={1} renderMode="outline" />,
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{ a: 1 }}
+        seed={1}
+        renderMode="outline"
+        onOutlineComputed={onOutlineComputed}
+      />,
     );
     flushRaf(); // settle the initial outline draw
-    expect(computingIndicator(el)).toBeNull();
+    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
 
-    // A param change while STILL in outline mode re-triggers the effect: indicator
-    // back, pass deferred (not yet run for the new params).
+    // A param change while STILL in outline re-triggers a deferred pass...
     act(() => {
       root!.render(
-        <LiveCanvas sketch={sketch} params={{ a: 2 }} seed={1} renderMode="outline" />,
+        <LiveCanvas
+          sketch={sketch}
+          params={{ a: 2 }}
+          seed={1}
+          renderMode="outline"
+          onOutlineComputed={onOutlineComputed}
+        />,
       );
     });
-    expect(computingIndicator(el)).not.toBeNull();
-
+    // ...not signalled until it actually draws.
+    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
     flushRaf();
-    expect(computingIndicator(el)).toBeNull();
-    expect(counts.stroke ?? 0).toBeGreaterThan(0);
+    expect(onOutlineComputed).toHaveBeenCalledTimes(2);
   });
 
   it("rapid successive outline triggers supersede the pending pass — passes never stack (AC5, #228)", () => {

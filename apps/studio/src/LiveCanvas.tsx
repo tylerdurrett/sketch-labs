@@ -107,6 +107,15 @@ export interface LiveCanvasProps {
    * explicit, documented part of the contract.
    */
   handleRef?: Ref<LiveCanvasHandle>;
+  /**
+   * Called once an OUTLINE draw has finished (the Hidden-line pass ran and the
+   * result is on the canvas). The owner uses it to clear the "Computing…" busy
+   * affordance it surfaces on the render toggle (issue #228). The busy state is
+   * SET synchronously by the owner at the trigger (the toggle click / a param
+   * edit) so it paints with that commit — before this blocking pass runs; this
+   * callback is only the CLEAR half. Never fires for fill draws.
+   */
+  onOutlineComputed?: () => void;
 }
 
 /**
@@ -251,6 +260,7 @@ export function LiveCanvas({
   seed,
   renderMode = "fill",
   handleRef,
+  onOutlineComputed,
 }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -294,12 +304,18 @@ export function LiveCanvas({
   // flip never re-runs the clock effect or resets the rAF baseline. Kept in sync
   // by the same post-commit effect so a StrictMode double-render can't desync it.
   const renderModeRef = useRef(renderMode);
+  // `onOutlineComputedRef` lets the outline draw fire the owner's "compute done"
+  // callback WITHOUT listing it in the draw effect's deps — otherwise an inline
+  // arrow from the parent (new identity each render) would re-run the effect and
+  // re-trigger the pass every render. Kept in sync post-commit like the others.
+  const onOutlineComputedRef = useRef(onOutlineComputed);
   useEffect(() => {
     paramsRef.current = params;
     seedRef.current = seed;
     sketchRef.current = sketch;
     renderModeRef.current = renderMode;
-  }, [params, seed, sketch, renderMode]);
+    onOutlineComputedRef.current = onOutlineComputed;
+  }, [params, seed, sketch, renderMode, onOutlineComputed]);
 
   // The latest `t` the loop has drawn (0 for a static Sketch). The resize re-fit
   // redraws THIS frame so a box change repaints the current moment, not t = 0 —
@@ -330,12 +346,6 @@ export function LiveCanvas({
   // effect both react to it — flipping it is what starts/stops the loop. Static
   // Sketches never start the loop, so the value is inert for them.
   const [playing, setPlaying] = useState(true);
-
-  // Issue #228: the outline Hidden-line pass runs synchronously on the main
-  // thread (freezing the page); this flag surfaces a "Computing outline…"
-  // affordance the browser can paint BEFORE the pass blocks. It is set/cleared
-  // only by the static-redraw effect below, around the deferred outline draw.
-  const [computingOutline, setComputingOutline] = useState(false);
 
   // The baseline-recapture offset (ADR-0005): when play RESUMES from a scrubbed
   // frame, the loop must continue from that `t`, not snap back to 0. We carry the
@@ -482,45 +492,52 @@ export function LiveCanvas({
   // animated frame. The guard therefore skips only the case the live loop owns:
   // an animated Sketch in fill mode.
   //
-  // Issue #228 DEFERS the outline draw one rAF frame behind a "Computing outline…"
-  // affordance: the Hidden-line pass blocks the main thread, so surfacing a busy
-  // flag and yielding one frame lets the browser paint that feedback BEFORE the
-  // pass freezes the page (fill draws stay on the immediate synchronous path).
+  // Issue #228: the outline Hidden-line pass runs synchronously on the main
+  // thread and freezes the page for seconds. The owner surfaces a "Computing…"
+  // affordance on the render toggle — and it SETS that busy flag synchronously at
+  // the trigger (the toggle click / a param edit), so it paints with that commit,
+  // BEFORE this effect runs. That placement is load-bearing: a flag set from
+  // inside this effect paints too late (the pass blocks the very frame the flag
+  // would paint on — the original bug). Here we only need to (a) yield one frame
+  // so the browser paints that already-committed busy state before the pass
+  // blocks, and (b) CLEAR it via `onOutlineComputed` once the outline is drawn.
   useEffect(() => {
     if (sketch.time !== undefined && renderMode !== "outline") return;
 
     // FILL draws (a static Sketch in fill mode) stay on the cheap synchronous
-    // path — no Hidden-line pass runs, so there is nothing to wait on. Clear any
-    // busy flag a superseded/aborted outline draw may have left set (e.g. an
-    // outline→fill flip cancels the pending pass below), then draw immediately.
+    // path — no Hidden-line pass runs, so there is nothing to wait on.
     if (renderMode !== "outline") {
-      setComputingOutline(false);
       refitAndRedraw();
       return;
     }
 
-    // OUTLINE draw (issue #228): refitAndRedraw runs the expensive Hidden-line
-    // pass synchronously on the main thread, freezing the page. A React effect
-    // cannot paint between a setState and a synchronous call in the SAME task, so
-    // surface the busy state, then DEFER the pass one frame with rAF: the browser
-    // paints the "Computing outline…" affordance FIRST, THEN the pass blocks,
-    // THEN we clear busy and the drawn outline replaces the overlay. The deferral
-    // is load-bearing — without it the affordance never becomes visible.
+    // OUTLINE draw: let the owner's already-committed "Computing…" state paint
+    // before refitAndRedraw runs the blocking Hidden-line pass, then fire
+    // `onOutlineComputed` so the owner clears it. A DOUBLE rAF guarantees a full
+    // painted frame elapses first: this effect runs in a post-commit macrotask,
+    // and a single rAF scheduled from there can still fire in the SAME frame's
+    // rendering steps — before that frame paints. The inner rAF runs on the NEXT
+    // frame, after the busy state has provably painted, so the freeze never eats
+    // its first paint (the ~16ms is nothing against a multi-second pass).
     //
     // Honest limitation (Option A): the page STILL freezes during the pass; the
-    // indicator is STATIC feedback that the action registered, not a
+    // affordance is STATIC feedback that the action registered, not a
     // responsiveness fix, and it does not animate. Moving the pass off the main
     // thread (Web Worker) is the deferred Option B follow-up.
-    setComputingOutline(true);
-    const passFrame = requestAnimationFrame(() => {
-      refitAndRedraw();
-      setComputingOutline(false);
+    let innerFrame = 0;
+    const outerFrame = requestAnimationFrame(() => {
+      innerFrame = requestAnimationFrame(() => {
+        refitAndRedraw();
+        onOutlineComputedRef.current?.();
+      });
     });
     // Supersede pending work: a rapid re-trigger (slider drag in outline, or a
-    // flip away before the frame fires) re-runs this effect; cancel the
-    // not-yet-fired pass so passes never stack. Also runs on unmount.
+    // flip away before the frames fire) re-runs this effect; cancel whichever
+    // frame is pending so passes never stack. Also runs on unmount.
+    // `cancelAnimationFrame(0)` is a no-op, so cancelling an unset innerFrame is safe.
     return () => {
-      cancelAnimationFrame(passFrame);
+      cancelAnimationFrame(outerFrame);
+      cancelAnimationFrame(innerFrame);
     };
   }, [sketch, params, seed, renderMode, refitAndRedraw]);
 
@@ -635,21 +652,6 @@ export function LiveCanvas({
          * container). Relocated into #156's fill-the-region layout unchanged.
          */}
         <canvas ref={canvasRef} className="live-canvas" style={paperStyle} />
-        {/*
-         * The "Computing outline…" affordance (#228): shown while the deferred
-         * Hidden-line pass is about to block the main thread. `role="status"` +
-         * `aria-live="polite"` announces it to assistive tech. It is absolutely
-         * centered over the stage (see App.css) so it never reflows the paper.
-         */}
-        {computingOutline && (
-          <div
-            className="live-canvas-computing"
-            role="status"
-            aria-live="polite"
-          >
-            Computing outline…
-          </div>
-        )}
       </div>
       {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
       {time !== undefined && (
