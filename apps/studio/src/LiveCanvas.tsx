@@ -378,6 +378,23 @@ export function LiveCanvas({
     drawCurrentFrame();
   }, [drawCurrentFrame]);
 
+  // Issue #223: preserve playback position across an outline↔fill flip. The loop
+  // effect below re-keys on `renderMode` (#219), so a flip back to `fill` re-runs
+  // it and recaptures its `start` baseline from `resumeTRef`. But `resumeTRef` is
+  // synced to the live `tRef` only on resume/scrub — never on a mode flip — so
+  // without this it still holds the last pause/resume/scrub value and snaps an
+  // animated clock back toward 0 on the flip. Mirror togglePlay's resume path:
+  // sync `resumeTRef` to the live `tRef` on every render-mode change so the
+  // baseline continues from the frame the outline round-trip froze. It sits ABOVE
+  // the loop effect on purpose — React runs effects top-to-bottom, so this sync
+  // lands before the loop reads `resumeTRef` on the flip back to fill. This does
+  // NOT touch the Sketch-switch restart (that keys on `sketch`, not `renderMode`).
+  // The fill→outline direction is unaffected: the loop still early-returns for
+  // outline and schedules no frame; this only refreshes the resume anchor.
+  useEffect(() => {
+    resumeTRef.current = tRef.current;
+  }, [renderMode]);
+
   // The clock-bearing loop — the PLAYING half of the transport (ADR-0005). Keyed
   // on `[sketch, playing]`: switching Sketch re-runs this and recaptures `start`
   // (the desired restart); toggling `playing` starts the loop on resume or, via
