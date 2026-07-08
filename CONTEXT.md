@@ -21,10 +21,17 @@ The atomic drawable unit of a **Scene** — one styled piece of vector geometry 
 _Avoid_: shape, mark, path, glyph, drawable, item
 
 **Scene Renderer**:
-A reusable Harness backend that consumes a **Scene** and emits output — e.g. Canvas2D preview, SVG, or plotter/hidden-line SVG. Because its input is the generic Scene, one Scene Renderer serves every vector Sketch.
+A reusable Harness backend that consumes a **Scene** and emits output — e.g. Canvas2D preview or SVG. Because its input is the generic Scene, one Scene Renderer serves every vector Sketch. Plotter/hidden-line output is _not_ a distinct renderer: it is the ordinary SVG renderer fed a Scene that the **Hidden-line pass** has already reduced to occlusion-clipped strokes.
 
 **Direct Renderer**:
 A Harness backend handed a raw drawing surface + clock that draws whatever it wants (raw Three.js, fullscreen fragment shader). Used by **Sketches** that cannot bake into a **Scene** (e.g. a raymarcher). A one-off render technique is just an unshared Direct Renderer. A future realtime GPU renderer would also be a Direct Renderer, since it consumes a Sketch's own parametric data rather than a Scene.
+
+**Hidden-line pass**:
+A pure `Scene → Scene` transform (_not_ a **Scene Renderer**) that removes outline geometry occluded by nearer **Primitive** fills in painter's order and returns a stroke-only Scene of occlusion-clipped outlines. Every filled Primitive plays two roles: an _occluder_ (its fill polygon) and a _line to draw_ (its boundary). Because the output is an ordinary Scene, the existing Canvas2D and SVG renderers consume it unchanged — the same pass feeds both **Outline mode** preview and plotter SVG export, so preview == export. Expensive and export-only: it runs on demand, never in the live `generate → draw → painter's render` exploration loop (core invariant). An optional final path-simplification stage (per-path vertex reduction with a tolerance knob) rides _inside_ the pass so it is previewed too. A separate pen-travel-order optimization (TSP-like reordering of whole paths, no visual impact) is a deferred export-only follow-up and would never be previewed.
+_Avoid_: hidden-line renderer (it is a pass, not a renderer), HLR-as-renderer.
+
+**Outline mode**:
+The studio preview render-mode toggle that swaps the live painter's-order fill preview for the **Hidden-line pass**'s stroke-only output, rendered through the ordinary Canvas2D renderer. What you see in Outline mode is exactly what plotter SVG export emits.
 
 **Parameter Schema**:
 The single declaration a **Sketch** makes of its tweakable knobs. It is the *spine* of the Harness: the control panel, **Lock** toggles, **Randomize**, and **Preset** shape are all derived views over this one schema.
