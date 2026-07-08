@@ -589,6 +589,113 @@ describe("SketchControls — SVG export wiring", () => {
   });
 });
 
+describe("SketchControls — Hidden-line SVG export wiring", () => {
+  // A Scene with TWO overlapping filled squares in painter's order: the nearer
+  // (second) square covers the far-left region of the farther (first) one, so
+  // the Hidden-line pass MUST clip part of the farther square's outline away —
+  // the surviving stroke geometry is strictly less than the raw outline, which
+  // proves the export ran the pass rather than serializing the raw Scene.
+  const hlScene = {
+    space: { width: 100, height: 100 },
+    primitives: [
+      {
+        points: [
+          [0, 0],
+          [40, 0],
+          [40, 40],
+          [0, 40],
+        ],
+        closed: true,
+        fill: { color: "tomato" },
+      },
+      {
+        points: [
+          [20, 0],
+          [60, 0],
+          [60, 40],
+          [20, 40],
+        ],
+        closed: true,
+        fill: { color: "steelblue" },
+      },
+    ],
+  };
+
+  const hlStaticSketch = (id: string) => {
+    const base = sketchWith(id, {
+      radius: numberSpec({ default: 10 }),
+    }) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      generate: () => hlScene,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  const hlTimedSketch = (id: string) => {
+    const base = hlStaticSketch(id) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      time: { duration: 4, mode: "loop" },
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  function blobText(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+  }
+
+  it("downloads a stroke-only hidden-line SVG named -hidden-line for a STATIC sketch", async () => {
+    const el = mount(<SketchControls sketch={hlStaticSketch("circles")} />);
+    const seed = (el.querySelector("#sketch-seed") as HTMLInputElement).value;
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    const [blob, filename] = downloadBlob.mock.calls[0]!;
+    expect(blob).toBeInstanceOf(Blob);
+    expect(blob.type).toBe("image/svg+xml");
+
+    const svg = await blobText(blob);
+    expect(svg).toMatch(/<svg\b[^>]*viewBox="0 0 100 100"/);
+    // The pass ran: its output is STROKE-ONLY (fill-free primitives), so the raw
+    // fill colors never reach the serialized SVG and every path is stroked.
+    expect(svg).not.toContain('fill="tomato"');
+    expect(svg).not.toContain('fill="steelblue"');
+    expect(svg).toMatch(/<path\b[^>]*stroke="black"/);
+
+    // Static sketch ⇒ the variant segment sits right after the seed, no -t.
+    expect(filename).toBe(`circles-seed${seed}-hidden-line.svg`);
+
+    // The reproduction envelope still round-trips to the displayed frame.
+    const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
+    expect(meta).toBeDefined();
+    expect(JSON.parse(meta!)).toMatchObject({
+      version: 1,
+      sketch: "circles",
+      name: `circles-seed${seed}`,
+      seed: Number(seed),
+      params: { radius: 10 },
+      locks: [],
+    });
+  });
+
+  it("carries the -t{t} segment before -hidden-line for a time-driven sketch", () => {
+    fakeCurrentT = 2.5;
+    const el = mount(<SketchControls sketch={hlTimedSketch("waves")} />);
+    const seed = (el.querySelector("#sketch-seed") as HTMLInputElement).value;
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    const [, filename] = downloadBlob.mock.calls[0]!;
+    expect(filename).toBe(`waves-seed${seed}-t2.5-hidden-line.svg`);
+  });
+});
+
 describe("SketchControls — PNG export wiring", () => {
   // A static sketch (no time) for the no-`-t` filename case.
   const staticSketch = (id: string) =>

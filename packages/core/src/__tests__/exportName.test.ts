@@ -45,4 +45,39 @@ describe('exportFilename', () => {
       'circles-seed1.svg',
     )
   })
+
+  it('appends the -{variant} segment after the seed for a static Sketch', () => {
+    expect(
+      exportFilename(
+        { sketchId: 'circles', seed: 42, variant: 'hidden-line' },
+        'svg',
+      ),
+    ).toBe('circles-seed42-hidden-line.svg')
+  })
+
+  it('appends the -{variant} segment AFTER the -t{t} segment', () => {
+    expect(
+      exportFilename(
+        { sketchId: 'waves', seed: 7, t: 2.5, variant: 'hidden-line' },
+        'svg',
+      ),
+    ).toBe('waves-seed7-t2.5-hidden-line.svg')
+  })
+
+  it('leaves the name byte-for-byte unchanged when no variant is supplied', () => {
+    // The no-variant path (explicit undefined or omitted) must match the plain
+    // name exactly — the variant segment is purely additive.
+    expect(
+      exportFilename(
+        { sketchId: 'circles', seed: 42, variant: undefined },
+        'svg',
+      ),
+    ).toBe('circles-seed42.svg')
+    expect(
+      exportFilename(
+        { sketchId: 'waves', seed: 7, t: 2.5, variant: undefined },
+        'svg',
+      ),
+    ).toBe('waves-seed7-t2.5.svg')
+  })
 })
