@@ -133,7 +133,23 @@ For each item in `## Out of scope`, flag any task child whose body appears to sc
 
 The highest-value check. Every concrete claim about existing code in the slice body or any child body is a potential hallucination. Read the cited code and verify the claim holds.
 
-For every concrete assertion the slice or a child makes about existing code ("the API client at `packages/.../stripe-client.ts` exposes a rate-limited fetch", "`resolveCheckoutUrl` returns `{ url, expiresAt }`", "`orders.primary_payment_method_id` already exists with `ON DELETE SET NULL`"), open the cited file and confirm. Don't just check the file exists; check the **claim** about the file.
+#### Establish the baseline ref first
+
+Before grounding any code assertion, establish WHICH branch's code the spec builds on and inspect FILE CONTENTS AT THAT REF — not the ambient working tree. The working tree's current branch is NOT a safe proxy for the spec's baseline: it is often on `main`, which lacks in-flight feature code, so a file or symbol that is absent there may be fully present on the branch the slice actually builds on.
+
+Pick the baseline ref in this order:
+
+1. The spec body's `**Integration Branch:**` line (e.g. `slice/issue-207-path-simplification`) — use it IF it exists on origin.
+2. If the spec's own integration branch does NOT exist yet (slice not started — common when auditing right after `/decompose`), fall back to the PARENT's: read the `**Part of:** #<P>` line, `gh issue view <P>` for the parent body, and use ITS `**Integration Branch:**`. Walk up the parent chain until you find a branch that exists on origin.
+3. Ultimate fallback, only if nothing in the chain exists on origin: the repo default branch (`main`).
+
+`git fetch` the chosen ref, then read contents at it — `git show <ref>:path/to/file.ts` — for every grounding check below. Absence of a file or symbol in the working tree must NEVER be reported as "doesn't exist / hallucinated" without first confirming absence against the established baseline ref.
+
+> Cautionary example (the #207 false halt): a check ran against the ambient working tree, which was on `main`. `main` lacked the in-flight feature's `outlineScene.ts`, so the check reported the file and a dependency as hallucinated — both were real on the feature's integration branch, which was never fetched. Establishing the baseline ref first is what prevents this.
+
+For every concrete assertion the slice or a child makes about existing code ("the API client at `packages/.../stripe-client.ts` exposes a rate-limited fetch", "`resolveCheckoutUrl` returns `{ url, expiresAt }`", "`orders.primary_payment_method_id` already exists with `ON DELETE SET NULL`"), open the cited file at the baseline ref and confirm. Don't just check the file exists; check the **claim** about the file.
+
+**Citations must be grounded in content actually read.** Do not emit a `file:line → <specific claim>` (or a claim about a specific call or symbol) unless you opened that path at the established baseline ref and the cited line or symbol is really there — quote or paraphrase the line you actually read. A finding asserting a symbol or call is ABSENT must state which ref was inspected to conclude absence. Reconstructed, inferred, or merely plausible citations are banned; a precise `file:line` claim that was never read is a fabrication, not a finding.
 
 Watch especially for:
 
