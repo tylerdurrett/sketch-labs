@@ -19,9 +19,12 @@ import {
  * function makes preview == export true BY CONSTRUCTION: there is exactly one
  * place the processed Scene is derived, so the two paths cannot diverge.
  *
- * It is a pure `(params, seed, t) → Scene` function — `generate` then the
- * Hidden-line pass, nothing else — so it is trivially unit-testable and lets a
- * test lock the export path to the same expression the preview evaluates.
+ * It is a pure `(params, seed, t, tolerance) → Scene` function — `generate` then
+ * the Hidden-line pass, nothing else — so it is trivially unit-testable and lets
+ * a test lock the export path to the same expression the preview evaluates. The
+ * `tolerance` (default 0, i.e. no simplification) is the studio's single knob
+ * value forwarded into the pass's final Douglas–Peucker stage; routing it
+ * through this one seam keeps preview and export simplified IDENTICALLY.
  *
  * On-demand only (feature #4 / issue #219 invariant): the Hidden-line pass is
  * expensive, so this seam is invoked ONLY from the static/on-demand redraw path
@@ -35,6 +38,7 @@ export function outlineScene(
   params: Params,
   seed: Seed,
   t: number,
+  tolerance = 0,
 ): Scene {
-  return hiddenLinePass(sketch.generate(params, seed, t));
+  return hiddenLinePass(sketch.generate(params, seed, t), { tolerance });
 }

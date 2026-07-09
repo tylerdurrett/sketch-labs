@@ -4,6 +4,7 @@ import { useRef, useState, type ReactNode } from "react";
 import {
   applyPreset,
   buildReproMetadata,
+  clamp,
   defaultParams,
   exportFilename,
   insertPngMetadata,
@@ -16,6 +17,7 @@ import {
 
 import { ControlPanel } from "./ControlPanel";
 import { Button } from "./components/ui/button";
+import { Slider } from "./components/ui/slider";
 import { downloadBlob } from "./downloadBlob";
 import {
   LiveCanvas,
@@ -24,6 +26,17 @@ import {
 } from "./LiveCanvas";
 import { outlineScene } from "./outlineScene";
 import { PresetControls } from "./PresetControls";
+
+/**
+ * Upper bound of the studio simplification-tolerance knob (issue #232), in the
+ * Scene's coordinate-space units. The Hidden-line pass runs in Scene space, and
+ * the studio's sketches use spaces on the order of ~100 units, so a max of 20 is
+ * a generous ceiling: it spans from 0 (identity — no simplification) through
+ * aggressive vertex reduction while keeping the slider's useful range on the low
+ * end where plotter-relevant reductions live. Non-integer (continuous) so fine
+ * tolerances are reachable.
+ */
+const TOLERANCE_MAX = 20;
 
 /**
  * Props for {@link SketchControls}.
@@ -106,6 +119,27 @@ export function SketchControls({
   // it via `onOutlineComputed` once the outline is drawn. Lives in keyed-remount
   // state alongside renderMode, so a Sketch switch resets it to `false` for free.
   const [computingOutline, setComputingOutline] = useState(false);
+
+  // The Douglas–Peucker tolerance (issue #232) for the Hidden-line pass's FINAL
+  // simplification stage. It is a STUDIO-level knob (NOT a per-sketch schema
+  // param): the pass runs AFTER `sketch.generate`, so simplification is a
+  // post-generation studio concern, not part of any Sketch's declared inputs.
+  // This ONE state feeds BOTH the outline preview (via LiveCanvas's `tolerance`
+  // prop) and the hidden-line SVG export (the 5th arg to `outlineScene` in
+  // `exportHiddenLineSvg`), so preview and export simplify identically (AC2/AC3).
+  // Like the other axes it lives in keyed-remount state, so a Sketch switch
+  // resets it to 0 (no simplification) for free. 0 is an identity no-op.
+  const [tolerance, setTolerance] = useState(0);
+
+  // Commit a tolerance change from the knob: clamp into [0, TOLERANCE_MAX] and,
+  // while in outline mode, mark the outline recomputing so the "Computing…"
+  // affordance paints with this commit — mirroring the param-edit path — before
+  // LiveCanvas re-runs the (blocking) pass at the new tolerance. A NaN raw is
+  // dropped by the input's own guard, so this only receives finite numbers.
+  const setToleranceValue = (next: number) => {
+    markOutlineRecomputing();
+    setTolerance(clamp(next, 0, TOLERANCE_MAX));
+  };
 
   // Any params/seed edit WHILE in outline mode re-runs LiveCanvas's on-demand
   // Hidden-line pass. Mark computing here at the trigger (a slider drag, New seed,
@@ -276,9 +310,12 @@ export function SketchControls({
     if (handle == null) return;
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
     // The shared preview == export seam: `generate` then the occlusion-clipping
-    // Hidden-line pass, on-demand only, strictly inside this click handler.
+    // Hidden-line pass, on-demand only, strictly inside this click handler. The
+    // studio `tolerance` knob is forwarded as the 5th arg so the exported paths
+    // carry the SAME final Douglas–Peucker simplification the outline preview
+    // shows (issue #232) — both read this one state through this one seam.
     // `renderToSVG` then serializes the stroke-only result.
-    const hiddenLineScene = outlineScene(sketch, params, seed, t ?? 0);
+    const hiddenLineScene = outlineScene(sketch, params, seed, t ?? 0, tolerance);
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
       seed,
@@ -337,6 +374,7 @@ export function SketchControls({
             params={params}
             seed={seed}
             renderMode={renderMode}
+            tolerance={tolerance}
             onOutlineComputed={() => setComputingOutline(false)}
           />
         </div>
@@ -447,6 +485,52 @@ export function SketchControls({
                 ? "Outline"
                 : "Fill"}
           </Button>
+        </div>
+        {/*
+         * Simplification tolerance knob (#232) — a STUDIO-level control (not a
+         * per-sketch schema param) driving the Hidden-line pass's final
+         * Douglas–Peucker stage. Its single `tolerance` state feeds BOTH the
+         * outline preview (LiveCanvas `tolerance` prop) and the hidden-line SVG
+         * export (`outlineScene`'s 5th arg), so simplification is identical in
+         * preview and export by construction. Slider + number input are two-way
+         * bound to the same value through `setToleranceValue` (continuous, in
+         * [0, TOLERANCE_MAX]; 0 = identity, no simplification). It sits between
+         * the render toggle and the export group since it only affects the
+         * outline preview and the hidden-line export.
+         */}
+        <div className="flex items-center gap-2">
+          <label
+            className="flex-none min-w-16 text-sm text-muted-foreground"
+            htmlFor="sketch-tolerance"
+          >
+            simplify
+          </label>
+          <Slider
+            aria-label="Simplification tolerance"
+            className="flex-1"
+            min={0}
+            max={TOLERANCE_MAX}
+            step={TOLERANCE_MAX / 1000}
+            value={tolerance}
+            onValueChange={setToleranceValue}
+          />
+          <input
+            id="sketch-tolerance"
+            className="w-16 rounded-md border border-input bg-transparent px-3 py-1 text-right text-sm tabular-nums shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            type="number"
+            min={0}
+            max={TOLERANCE_MAX}
+            step="any"
+            value={tolerance}
+            onChange={(event) => {
+              // A blank field is a no-op (don't commit `Number("") === 0`); a
+              // NaN is dropped so only finite values reach the clamp.
+              if (event.target.value.trim() === "") return;
+              const parsed = Number(event.target.value);
+              if (Number.isNaN(parsed)) return;
+              setToleranceValue(parsed);
+            }}
+          />
         </div>
         {/*
          * Export controls — the shared home for every export path (PNG snapshots
