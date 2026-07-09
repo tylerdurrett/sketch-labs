@@ -1,3 +1,4 @@
+import { simplifyPath } from './simplifyPath'
 import { subtractPolygonsFromPolyline } from './polygonClip'
 import type { Scene, Primitive, Stroke } from './scene'
 import type { Point, Polyline } from './types'
@@ -136,11 +137,22 @@ function outlineRing(primitive: Primitive): Polyline {
  *
  * @param scene - The Scene to reduce. Its `primitives` are read in painter's
  *   order (index 0 = farthest, last = nearest). Inputs are never mutated.
+ * @param opts - Optional pass options. `tolerance` (default 0) is the
+ *   Douglas–Peucker distance passed to {@link simplifyPath} on each surviving
+ *   stroke as the FINAL stage — the studio's tolerance knob feeds this so
+ *   Outline-mode preview and hidden-line SVG export simplify identically. A
+ *   tolerance of 0 is an identity no-op (survivors pass through unchanged), so
+ *   output stays byte-identical to an un-simplified pass.
  * @returns A NEW stroke-only Scene sharing `scene.space` (and carrying
  *   `scene.background` when present): the occlusion-clipped outlines of the
- *   input's filled Primitives, emitted as fill-free OPEN Primitives.
+ *   input's filled Primitives, emitted as fill-free OPEN Primitives, each
+ *   simplified at `opts.tolerance`.
  */
-export function hiddenLinePass(scene: Scene): Scene {
+export function hiddenLinePass(
+  scene: Scene,
+  opts?: { tolerance?: number },
+): Scene {
+  const tolerance = opts?.tolerance ?? 0
   const { primitives } = scene
 
   // Precompute each filled Primitive's index and AABB for the broad-phase.
@@ -172,7 +184,10 @@ export function hiddenLinePass(scene: Scene): Scene {
     const survivors = subtractPolygonsFromPolyline(outline, occluders)
     const stroke = self.primitive.stroke ?? DEFAULT_STROKE
     for (const survivor of survivors) {
-      out.push({ points: survivor, stroke })
+      // FINAL stage: Douglas–Peucker simplification at the requested tolerance.
+      // At tolerance 0 this is an identity no-op (same array reference), so the
+      // pass output stays byte-identical to an un-simplified run.
+      out.push({ points: simplifyPath(survivor, tolerance), stroke })
     }
   }
 

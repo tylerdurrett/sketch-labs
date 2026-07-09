@@ -293,3 +293,62 @@ describe('hiddenLinePass — output is consumable unchanged by the renderers', (
     expect(ctx.calls).not.toContain('fill')
   })
 })
+
+describe('hiddenLinePass — final-stage Douglas–Peucker simplification (issue #232)', () => {
+  // A single filled Primitive with no occluder: its outline ring survives whole
+  // as one open stroke. The interior vertices [30,0] and [30,40] sit dead on the
+  // top and bottom edges (perpendicular distance 0 from their neighbours), so a
+  // positive tolerance drops them while tolerance 0 keeps every vertex.
+  function redundantVertexScene(): Scene {
+    const points: Polyline = [
+      [0, 0],
+      [30, 0], // redundant: collinear on the top edge
+      [60, 0],
+      [60, 40],
+      [30, 40], // redundant: collinear on the bottom edge
+      [0, 40],
+    ]
+    return {
+      space,
+      primitives: [{ points, closed: true, fill, stroke }],
+    }
+  }
+
+  it('tolerance > 0 drops redundant near-collinear vertices from a survivor stroke', () => {
+    const scene = redundantVertexScene()
+    const baseline = hiddenLinePass(scene)
+    const simplified = hiddenLinePass(scene, { tolerance: 1 })
+
+    expect(simplified.primitives).toHaveLength(baseline.primitives.length)
+    const before = baseline.primitives[0]!.points
+    const after = simplified.primitives[0]!.points
+    // Simplification removed vertices…
+    expect(after.length).toBeLessThan(before.length)
+    // …specifically the two exactly-collinear interior points.
+    expect(after).not.toContainEqual([30, 0])
+    expect(after).not.toContainEqual([30, 40])
+    // Corners survive.
+    expect(after).toContainEqual([0, 0])
+    expect(after).toContainEqual([60, 0])
+    expect(after).toContainEqual([60, 40])
+    expect(after).toContainEqual([0, 40])
+  })
+
+  it('tolerance 0 (and omitted opts) leave the pass output unchanged', () => {
+    const scene = redundantVertexScene()
+    const omitted = hiddenLinePass(scene)
+    const zero = hiddenLinePass(scene, { tolerance: 0 })
+    const emptyOpts = hiddenLinePass(scene, {})
+
+    // Byte-identical geometry to today's un-simplified pass in all three forms.
+    expect(zero.primitives.map((p) => p.points)).toEqual(
+      omitted.primitives.map((p) => p.points),
+    )
+    expect(emptyOpts.primitives.map((p) => p.points)).toEqual(
+      omitted.primitives.map((p) => p.points),
+    )
+    // The redundant interior vertices are still present at tolerance 0.
+    expect(zero.primitives[0]!.points).toContainEqual([30, 0])
+    expect(zero.primitives[0]!.points).toContainEqual([30, 40])
+  })
+})
