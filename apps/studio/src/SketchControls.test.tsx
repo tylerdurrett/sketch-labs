@@ -60,11 +60,13 @@ vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
     seed,
     renderMode,
+    tolerance,
     handleRef,
     onOutlineComputed,
   }: {
     seed: Seed;
     renderMode?: string;
+    tolerance?: number;
     handleRef?: Ref<LiveCanvasHandle>;
     onOutlineComputed?: () => void;
   }) => {
@@ -83,7 +85,11 @@ vi.mock("./LiveCanvas", () => ({
       }
     });
     return (
-      <div data-testid="canvas-seed" data-render-mode={String(renderMode)}>
+      <div
+        data-testid="canvas-seed"
+        data-render-mode={String(renderMode)}
+        data-tolerance={String(tolerance)}
+      >
         {String(seed)}
       </div>
     );
@@ -783,6 +789,88 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     expect(exportSceneCapture.current).toEqual(
       outlineScene(sketch, { radius: 10 }, seed, 0),
     );
+  });
+
+  // AC3 (#232): the studio tolerance knob drives the hidden-line EXPORT's final
+  // simplification. A scene whose surviving stroke has exactly-collinear interior
+  // vertices lets a positive tolerance visibly drop them. Driving the knob then
+  // re-exporting must (a) hand `renderToSVG` the SAME seam expression at the new
+  // tolerance (preview == export by construction) and (b) actually reduce the
+  // exported vertex count versus tolerance 0.
+  const redundantScene = {
+    space: { width: 100, height: 100 },
+    // A single filled Primitive, no occluder ⇒ its whole ring survives as one
+    // stroke. [30,0] and [30,40] are collinear on the top/bottom edges, so a
+    // positive Douglas–Peucker tolerance removes them.
+    primitives: [
+      {
+        points: [
+          [0, 0],
+          [30, 0],
+          [60, 0],
+          [60, 40],
+          [30, 40],
+          [0, 40],
+        ],
+        closed: true,
+        fill: { color: "tomato" },
+      },
+    ],
+  };
+
+  const redundantSketch = (id: string) => {
+    const base = sketchWith(id, {
+      radius: numberSpec({ default: 10 }),
+    }) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      generate: () => redundantScene,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  const totalVerts = (scene: unknown): number =>
+    (scene as { primitives: { points: unknown[] }[] }).primitives.reduce(
+      (sum, p) => sum + p.points.length,
+      0,
+    );
+
+  it("the tolerance knob drives the hidden-line export's simplification (#232, AC3)", () => {
+    const sketch = redundantSketch("circles");
+    const el = mount(<SketchControls sketch={sketch} />);
+    const seed = Number(
+      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
+    );
+
+    // Baseline export at the default tolerance 0 — no simplification.
+    clickButton(el, "Export Hidden-line SVG");
+    const atZero = exportSceneCapture.current;
+    expect(atZero).toEqual(outlineScene(sketch, { radius: 10 }, seed, 0, 0));
+    const vertsAtZero = totalVerts(atZero);
+
+    // Drive the studio knob, then re-export.
+    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "5");
+    clickButton(el, "Export Hidden-line SVG");
+    const atFive = exportSceneCapture.current;
+
+    // preview == export: the export is the SAME seam expression at tolerance 5
+    // (the value LiveCanvas's outline preview also receives — asserted below).
+    expect(atFive).toEqual(outlineScene(sketch, { radius: 10 }, seed, 0, 5));
+    // ...and simplification actually reduced the exported vertex count.
+    expect(totalVerts(atFive)).toBeLessThan(vertsAtZero);
+  });
+
+  it("the tolerance knob value is the one fed to the outline preview (#232, AC3)", () => {
+    const el = mount(<SketchControls sketch={redundantSketch("circles")} />);
+
+    // The mocked LiveCanvas surfaces the tolerance prop it was fed. Default 0.
+    const canvas = () =>
+      el.querySelector('[data-testid="canvas-seed"]') as HTMLElement;
+    expect(canvas().dataset.tolerance).toBe("0");
+
+    // Driving the knob updates the SAME value the preview consumes — the single
+    // state that also drives the export, so the two cannot diverge.
+    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "5");
+    expect(canvas().dataset.tolerance).toBe("5");
   });
 });
 

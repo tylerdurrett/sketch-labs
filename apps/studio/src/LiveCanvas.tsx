@@ -100,6 +100,16 @@ export interface LiveCanvasProps {
    */
   renderMode?: RenderMode;
   /**
+   * Douglas–Peucker tolerance (issue #232) fed into the Hidden-line pass's final
+   * simplification stage via the shared {@link outlineScene} seam. Optional,
+   * defaulting to 0 (identity — no simplification), so an omitting caller and the
+   * fill path are unchanged. It applies ONLY in `outline` render mode (the fill
+   * path never simplifies); a change RE-RUNS the on-demand outline redraw. The
+   * owner (SketchControls) drives this AND the export from the SAME state, so
+   * preview and export simplify identically (AC2/AC3).
+   */
+  tolerance?: number;
+  /**
    * Optional ref the owner passes to obtain the read-only {@link LiveCanvasHandle}
    * — the live canvas node + current `t` — so the studio chrome can snapshot the
    * displayed frame for export WITHOUT reaching into the draw model. A plain prop
@@ -145,6 +155,7 @@ function drawFrame(
   seed: Seed,
   t: number,
   renderMode: RenderMode,
+  tolerance: number,
 ): void {
   const ctx = canvas.getContext("2d");
   if (ctx === null) return;
@@ -162,14 +173,17 @@ function drawFrame(
   // shared draw, so the preview shows the SAME processed Scene the hidden-line
   // SVG export emits — by construction, since both call sites derive it from the
   // one {@link outlineScene} function (feature #4's "what you see is what you
-  // plot"). The `fill` branch renders `generate`'s Scene as-is. This is the ONLY
+  // plot"). `tolerance` (issue #232) is forwarded into that seam so the preview's
+  // final Douglas–Peucker simplification matches the export's exactly; it applies
+  // ONLY on this outline branch — the `fill` branch renders `generate`'s Scene
+  // as-is and never simplifies. This is the ONLY
   // place the pass touches the live preview, and drawFrame is called with
   // `outline` ONLY from the on-demand / static-redraw path — never from the rAF
   // fill loop's `tick`, which hardcodes `fill` — so the export-only pass never
   // runs per animated frame (feature #4's core invariant, this task's AC2/AC3).
   const rendered =
     renderMode === "outline"
-      ? outlineScene(sketch, params, seed, t)
+      ? outlineScene(sketch, params, seed, t, tolerance)
       : sketch.generate(params, seed, t);
 
   // Hand the background-fit-and-draw to core's shared pipeline: `drawSceneFitted`
@@ -259,6 +273,7 @@ export function LiveCanvas({
   params,
   seed,
   renderMode = "fill",
+  tolerance = 0,
   handleRef,
   onOutlineComputed,
 }: LiveCanvasProps) {
@@ -304,6 +319,13 @@ export function LiveCanvas({
   // flip never re-runs the clock effect or resets the rAF baseline. Kept in sync
   // by the same post-commit effect so a StrictMode double-render can't desync it.
   const renderModeRef = useRef(renderMode);
+  // `toleranceRef` lets the `[]`-dep on-demand draw callbacks (drawCurrentFrame,
+  // scrubTo) read the current tolerance without a `tolerance` dependency, so the
+  // clock effect and rAF baseline stay untouched by a knob change (issue #232).
+  // Kept in sync by the same post-commit effect so a StrictMode double-render
+  // can't desync it. The static outline-redraw effect lists `tolerance` directly
+  // in its deps so a change RE-RUNS the pass.
+  const toleranceRef = useRef(tolerance);
   // `onOutlineComputedRef` lets the outline draw fire the owner's "compute done"
   // callback WITHOUT listing it in the draw effect's deps — otherwise an inline
   // arrow from the parent (new identity each render) would re-run the effect and
@@ -314,8 +336,9 @@ export function LiveCanvas({
     seedRef.current = seed;
     sketchRef.current = sketch;
     renderModeRef.current = renderMode;
+    toleranceRef.current = tolerance;
     onOutlineComputedRef.current = onOutlineComputed;
-  }, [params, seed, sketch, renderMode, onOutlineComputed]);
+  }, [params, seed, sketch, renderMode, tolerance, onOutlineComputed]);
 
   // The latest `t` the loop has drawn (0 for a static Sketch). The resize re-fit
   // redraws THIS frame so a box change repaints the current moment, not t = 0 —
@@ -380,6 +403,7 @@ export function LiveCanvas({
       seedRef.current,
       tRef.current,
       renderModeRef.current,
+      toleranceRef.current,
     );
   }, []);
 
@@ -465,8 +489,10 @@ export function LiveCanvas({
       // live rAF loop, and the Hidden-line pass must never run per frame (feature
       // #4 invariant / AC2). The effect already early-returns in outline mode, so
       // this is doubly unreachable in outline — but hardcoding makes it a static
-      // guarantee that `tick` can only ever draw fill.
-      drawFrame(canvas, sketch, paramsRef.current, seedRef.current, t, "fill");
+      // guarantee that `tick` can only ever draw fill. Tolerance is hardcoded 0
+      // to match: the fill branch never simplifies, so the live loop stays
+      // provably simplify-free (issue #232's on-demand-only invariant).
+      drawFrame(canvas, sketch, paramsRef.current, seedRef.current, t, "fill", 0);
       frameId = requestAnimationFrame(tick);
     };
 
@@ -539,7 +565,11 @@ export function LiveCanvas({
       cancelAnimationFrame(outerFrame);
       cancelAnimationFrame(innerFrame);
     };
-  }, [sketch, params, seed, renderMode, refitAndRedraw]);
+    // `tolerance` (issue #232) is a dep so a knob change in outline mode RE-RUNS
+    // the on-demand pass at the new tolerance; `refitAndRedraw` reads the current
+    // value through `toleranceRef`. Harmless for a static fill Sketch (it takes
+    // the cheap fill early-return, no pass).
+  }, [sketch, params, seed, renderMode, tolerance, refitAndRedraw]);
 
   // Re-fit on box-size AND devicePixelRatio change (the #41 contract). DECOUPLED
   // from the clock effect on purpose: it depends on stable callbacks alone, never
@@ -630,6 +660,7 @@ export function LiveCanvas({
         seedRef.current,
         value,
         renderModeRef.current,
+        toleranceRef.current,
       );
     }
   }, []);

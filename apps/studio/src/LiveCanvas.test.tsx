@@ -655,6 +655,45 @@ describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand
     expect(onOutlineComputed).toHaveBeenCalledTimes(2);
   });
 
+  it("a tolerance change WHILE in outline re-runs the on-demand pass (#232)", () => {
+    const { ctx } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch } = overlapSketch(undefined);
+    const onOutlineComputed = vi.fn();
+
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{ a: 1 }}
+        seed={1}
+        renderMode="outline"
+        tolerance={0}
+        onOutlineComputed={onOutlineComputed}
+      />,
+    );
+    flushRaf(); // settle the initial outline draw
+    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
+
+    // Bumping the studio tolerance knob (nothing else changed) must re-trigger a
+    // deferred pass so the simplification is recomputed and repainted...
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={{ a: 1 }}
+          seed={1}
+          renderMode="outline"
+          tolerance={5}
+          onOutlineComputed={onOutlineComputed}
+        />,
+      );
+    });
+    // ...not signalled until it actually draws.
+    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
+    flushRaf();
+    expect(onOutlineComputed).toHaveBeenCalledTimes(2);
+  });
+
   it("rapid successive outline triggers supersede the pending pass — passes never stack (AC5, #228)", () => {
     const { ctx } = recordingContext();
     useRecordingContext(ctx);
