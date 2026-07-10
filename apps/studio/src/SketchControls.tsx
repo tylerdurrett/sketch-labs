@@ -5,6 +5,7 @@ import {
   applyPreset,
   buildReproMetadata,
   clamp,
+  clipSceneToBounds,
   defaultParams,
   exportFilename,
   insertPngMetadata,
@@ -275,6 +276,10 @@ export function SketchControls({
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
     const scene = sketch.generate(params, seed, t ?? 0);
+    // Clip the generated geometry to the canvas rectangle so the exported plot
+    // contains nothing beyond the Scene's own `space` (issue #237). Export-time
+    // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
+    const clipped = clipSceneToBounds(scene);
     // Embed the same reproduction envelope as a <metadata> element (issue #76),
     // built from the displayed `(params, seed, locks, t)` spine — core's
     // `renderToSVG` does the injection (ADR-0004: serialization lives in core).
@@ -285,7 +290,7 @@ export function SketchControls({
       locks,
       t,
     });
-    const svg = renderToSVG(scene, metadata);
+    const svg = renderToSVG(clipped, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "svg"));
   };
@@ -316,6 +321,12 @@ export function SketchControls({
     // shows (issue #232) — both read this one state through this one seam.
     // `renderToSVG` then serializes the stroke-only result.
     const hiddenLineScene = outlineScene(sketch, params, seed, t ?? 0, tolerance);
+    // Clip AFTER the hidden-line pass and BEFORE serialization (issue #237): the
+    // pass can emit stroke geometry beyond the canvas, so the clip is the last
+    // export-only stage that guarantees no plotted line escapes `space`. The clip
+    // stays out of `outlineScene` itself — that seam also feeds the live outline
+    // preview (LiveCanvas), and clipping must remain export-only.
+    const clipped = clipSceneToBounds(hiddenLineScene);
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
       seed,
@@ -323,7 +334,7 @@ export function SketchControls({
       locks,
       t,
     });
-    const svg = renderToSVG(hiddenLineScene, metadata);
+    const svg = renderToSVG(clipped, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     downloadBlob(
       blob,
