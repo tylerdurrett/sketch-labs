@@ -21,7 +21,10 @@
     "sphereDepth": 0.556,
     "backgroundColor": "#878787",
     "discColor": "#ffffff",
-    "fieldPhase": 0.449
+    "fieldPhase": 0.449,
+    "leafColor": "#1a1a1a",
+    "leafStrokeColor": "#f4f1ea",
+    "discStrokeColor": "#ffffff"
   },
   "locks": []
 }

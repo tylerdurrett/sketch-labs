@@ -11,11 +11,12 @@ import type { Point } from '../types'
 import type { Primitive } from '../scene'
 
 /**
- * The eighteen leaf-field knobs, in declaration order. Each widening APPENDS
+ * The twenty-one leaf-field knobs, in declaration order. Each widening APPENDS
  * so earlier knobs keep their positions (order is part of the contract): the
  * sphere knobs (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then
  * `sphereDepth` #142) after the original eleven, then the two color knobs
- * (`backgroundColor`, `discColor` — ADR-0010), then `fieldPhase` last.
+ * (`backgroundColor`, `discColor` — ADR-0010), `fieldPhase`, then the leaf
+ * styling knobs (`leafColor`, `leafStrokeColor`, `discStrokeColor`) last.
  */
 const KNOBS = [
   'fieldScale',
@@ -36,6 +37,9 @@ const KNOBS = [
   'backgroundColor',
   'discColor',
   'fieldPhase',
+  'leafColor',
+  'leafStrokeColor',
+  'discStrokeColor',
 ] as const
 
 /** The bold dark fill and paper-colored rim the audit pinned (see the sketch header). */
@@ -209,7 +213,7 @@ function meanLeafArea(primitives: Primitive[]): number {
 }
 
 describe('leaf-field Sketch contract', () => {
-  it('declares exactly the eighteen knobs in order and NO time metadata (static)', () => {
+  it('declares exactly the twenty-one knobs in order and NO time metadata (static)', () => {
     expect(Object.keys(leafField.schema)).toEqual([...KNOBS])
     expect(leafField.schema.sphereCount.max).toBe(25)
     expect(leafField.schema.fieldPhase).toEqual({
@@ -682,15 +686,14 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
     return (maxX - minX) / 2
   }
 
-  it('bakes exactly one opaque discColor-filled disc — fill only, closed, no stroke', () => {
+  it('bakes exactly one opaque discColor-filled, discStrokeColor-outlined disc', () => {
     const scene = leafField.generate({ sphereCount: 1 }, 'orient', 0)
     const disc = discOf(scene)
     expect(disc.closed).toBe(true)
-    // A pure fill, never stroked, and NOT the paper rim color: the disc's edge
-    // must come from its silhouette alone. At the defaults it is a VISIBLE white
-    // orb on the mid-gray background (disc == background — the implied-sphere
-    // figure-ground — is an opt-in param choice, not the default).
-    expect(disc.stroke).toBeUndefined()
+    // Fill and stroke match at the defaults, preserving a single white silhouette
+    // on the mid-gray background. Matching both to the background recovers the
+    // implied-sphere figure-ground as an opt-in choice.
+    expect(disc.stroke).toEqual({ color: '#ffffff', width: 2 })
     expect(disc.fill?.color).toBe(DISC_FILL)
     expect(disc.fill?.color).not.toBe(scene.background?.color)
     expect(disc.fill?.color).not.toBe(PAPER_STROKE)
@@ -1085,7 +1088,7 @@ describe('leaf-field color knobs — backgroundColor & discColor (ADR-0010)', ()
     const discs = discsFilled(scene, '#aa3366')
     expect(discs).toHaveLength(4)
     for (const disc of discs) {
-      expect(disc.stroke).toBeUndefined()
+      expect(disc.stroke).toEqual({ color: '#ffffff', width: 2 })
       expect(disc.closed).toBe(true)
     }
   })
@@ -1094,8 +1097,8 @@ describe('leaf-field color knobs — backgroundColor & discColor (ADR-0010)', ()
     const scene = leafField.generate({ sphereCount: 3 }, 'color', 0)
     const discs = discsFilled(scene, '#ffffff')
     expect(discs).toHaveLength(3)
-    // The defaults deliberately differ: disc == background (the implied-sphere
-    // special case) is opt-in via params.
+    // The defaults deliberately differ: disc fill + stroke == background (the
+    // implied-sphere special case) is opt-in via params.
     expect(scene.background?.color).toBe('#878787')
   })
 
@@ -1127,5 +1130,62 @@ describe('leaf-field color knobs — backgroundColor & discColor (ADR-0010)', ()
     const a = leafField.generate(params, 'color-det', 0)
     const b = leafField.generate(params, 'color-det', 0)
     expect(a).toEqual(b)
+  })
+})
+
+describe('leaf-field disc stroke color knob', () => {
+  it('applies discStrokeColor to every disc without changing its fill', () => {
+    const scene = leafField.generate(
+      {
+        sphereCount: 3,
+        discColor: '#ccddee',
+        discStrokeColor: '#663399',
+      },
+      'disc-stroke-color',
+      0,
+    )
+    const discs = scene.primitives.filter(
+      (primitive) => primitive.fill?.color === '#ccddee',
+    )
+
+    expect(discs).toHaveLength(3)
+    for (const disc of discs) {
+      expect(disc.stroke).toEqual({ color: '#663399', width: 2 })
+    }
+  })
+})
+
+describe('leaf-field leaf color knobs', () => {
+  it('applies leafColor and leafStrokeColor to every leaf', () => {
+    const scene = leafField.generate(
+      {
+        sphereCount: 0,
+        leafColor: '#2f7d32',
+        leafStrokeColor: '#f6c453',
+      },
+      'leaf-colors',
+      0,
+    )
+
+    expect(scene.primitives.length).toBeGreaterThan(1)
+    for (const primitive of scene.primitives) {
+      expect(primitive.fill?.color).toBe('#2f7d32')
+      expect(primitive.stroke?.color).toBe('#f6c453')
+      expect(primitive.stroke?.width).toBe(2)
+    }
+  })
+
+  it('changes only leaf styling, not geometry or draw order', () => {
+    const params: Params = { density: 6, sphereCount: 0 }
+    const plain = leafField.generate(params, 'leaf-color-seam', 0)
+    const tinted = leafField.generate(
+      { ...params, leafColor: '#335577', leafStrokeColor: '#ddeeff' },
+      'leaf-color-seam',
+      0,
+    )
+
+    expect(
+      tinted.primitives.map(({ points, closed }) => ({ points, closed })),
+    ).toEqual(plain.primitives.map(({ points, closed }) => ({ points, closed })))
   })
 })

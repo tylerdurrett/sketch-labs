@@ -16,13 +16,15 @@
  * under later ones, so the overlap reads as a real composited field, not a flat
  * stamp sheet.
  *
- * ALL EIGHTEEN KNOBS LIVE: the first eleven complete the scatter + placement +
+ * ALL TWENTY-ONE KNOBS LIVE: the first eleven complete the scatter + placement +
  * flow-field orientation + per-leaf variation + compositing, the four appended
  * sphere knobs (`sphereCount`, `sphereRadiusMin`, `sphereRadiusMax`,
  * `sphereDepth`) drive the occluder discs (below), and the two appended color
  * knobs (`backgroundColor`, `discColor` — the first `kind: 'color'` params,
- * ADR-0010) own the scene background and the disc fill, and the final
- * `fieldPhase` knob scrubs around the seamless 4D flow loop. `density`
+ * ADR-0010) own the scene background and the disc fill, `fieldPhase` scrubs
+ * around the seamless 4D flow loop, and the final three color knobs
+ * (`leafColor`, `leafStrokeColor`, `discStrokeColor`) own the leaf fill/rim and
+ * disc outline. `density`
  * drives spacing;
  * `fieldScale` (curl base frequency, in features across the canvas),
  * `octaves` (how many noise layers stack) and `turbulence` (curl octave falloff
@@ -71,17 +73,17 @@
  * discs (`discColor` `'#ffffff'`) on a mid-gray ground (`backgroundColor`
  * `'#878787'`), so a bare generate reads as white orbs in the field. The
  * original implied-sphere figure-ground survives as the OPT-IN SPECIAL CASE
- * `discColor === backgroundColor` (set both knobs to the same color; no
- * shipped preset pins it). Each disc is spliced into the painter's
- * order at a DEPTH index driven by the global `sphereDepth` knob. Leaves drawn
+ * `discColor === discStrokeColor === backgroundColor` (set all three knobs to
+ * the same color; no shipped preset pins it). Each disc is spliced into the
+ * painter's order at a DEPTH index driven by the global `sphereDepth` knob. Leaves drawn
  * BEFORE it (top/back of the field) are painted over where they cross it, so the
  * disc's TRUE circular silhouette cuts a hard, genuinely round edge on the
  * sphere's FAR side; leaves drawn AFTER it (bottom/front) lap OVER its near side,
  * breaking that edge into organic leaf tips. Roundness comes from the real
  * circle; organic-ness comes from the front leaves; the eye fuses the two into an
  * implied sphere. Each disc is a closed polyline from the shared {@link circle}
- * helper (fill only, no stroke). #141 turns the single hardcoded disc into a
- * SEEDED SET of N discs driven by three knobs: `sphereCount` (how many — default
+ * helper with a `discStrokeColor` outline. #141 turns the single hardcoded disc
+ * into a SEEDED SET of N discs driven by three knobs: `sphereCount` (how many — default
  * 6, from the "Nice One" preset, so the field ships with the full implied-sphere
  * set; drop to 0 for a plain field),
  * `sphereRadiusMin`/`sphereRadiusMax` (per-disc radius bounds, in coordinate
@@ -130,11 +132,11 @@
  * t is 0 in practice, so the field is a static phase today. Everything random
  * flows from the explicit Seed via `createRandom` / the sampler's seed: NO
  * `Math.random`, no clock read, and no state carried across `generate` calls.
- * Re-seeding reshuffles the whole field while the params hold. The two color
- * knobs consume NO rng draws from either stream — they touch only fill colors
- * and the Scene's `background` — so every leaf outline and disc silhouette stays
- * byte-identical to the pre-color field at any color value. The "Nice One"
- * preset pins both color knobs EXPLICITLY (the shipped gray/white pair,
+ * Re-seeding reshuffles the whole field while the params hold. The five color
+ * knobs consume NO rng draws from either stream — they touch only fill/stroke
+ * colors and the Scene's `background` — so every leaf outline and disc
+ * silhouette stays byte-identical at any color value. The "Nice One" preset
+ * pins all five color knobs EXPLICITLY (the shipped gray/white/dark/paper palette,
  * 2026-07-07) and pins `fieldPhase` at 0 so its image stays stable against future
  * default changes instead of silently tracking them; the original white-on-white
  * capture is recoverable by setting both color knobs white.
@@ -158,12 +160,13 @@
  * is still derived solely from `sphereDepth` and each selected cy/r; changing
  * depth leaves every disc geometry and leaf byte-identical.
  *
- * PAPER-RIM RATIONALE (2026-07-01 audit): a matching dark stroke would make the
- * painter's-order overlap visually unobservable — adjacent dark leaves merge
- * into one shape and the layering is invisible. So each leaf keeps the bold dark
- * FILL (linocut idiom, initiative #3) but carries a paper-colored (light)
- * STROKE, giving every overlap a light separating rim so the draw order reads
- * live.
+ * PAPER-RIM DEFAULT RATIONALE (2026-07-01 audit): a matching dark stroke would
+ * make the painter's-order overlap visually unobservable — adjacent dark leaves
+ * merge into one shape and the layering is invisible. So each leaf keeps the
+ * bold dark FILL (linocut idiom, initiative #3) but carries a paper-colored
+ * (light) STROKE, giving every overlap a light separating rim so the draw order
+ * reads live. `leafColor` and `leafStrokeColor` now make both choices tunable
+ * while preserving that palette as the default.
  */
 
 import { prepareCurlAngle4D } from '../../curl'
@@ -187,13 +190,14 @@ import type { LeafShape } from '../single-leaf/leaf'
 import { placeSpheresAtVortices } from './vortex-placement'
 
 /**
- * The leaf-field Parameter Schema — eighteen knobs (sixteen numeric, two
+ * The leaf-field Parameter Schema — twenty-one knobs (sixteen numeric, five
  * color), all consumed NOW. Order is fixed and part of the contract; each
  * widening APPENDS so earlier knobs keep their positions: the sphere knobs
  * (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then `sphereDepth`
  * #142) after the original eleven, then the color knobs (`backgroundColor`,
  * `discColor` — the first `kind: 'color'` specs, ADR-0010), then the normalized
- * `fieldPhase` loop scrubber last. `satisfies`
+ * `fieldPhase` loop scrubber, then the styling knobs (`leafColor`,
+ * `leafStrokeColor`, `discStrokeColor`) last. `satisfies`
  * keeps the literal key set (so `numberParam`/`colorParam` can filter
  * `keyof typeof schema` by each spec's literal `kind`) while enforcing the spec
  * type — the target is the full `ParamSpec` union now that the kinds mix.
@@ -264,7 +268,8 @@ const schema = {
    * and round-trips through Presets (ADR-0009). Defaults to a mid gray
    * (2026-07-07), deliberately DIFFERENT from `discColor`'s white so the discs
    * read as visible orbs out of the box; the pre-color white-on-white image is
-   * an opt-in param choice now (set both color knobs white). Consumed NOW.
+   * an opt-in param choice now (set the background, disc fill, and disc stroke
+   * to the same color). Consumed NOW.
    * Appended last with `discColor` (ADR-0010).
    */
   backgroundColor: { kind: 'color', default: '#878787' },
@@ -283,9 +288,21 @@ const schema = {
    * sphere centers against that field slice. Prepared-frame time advances only
    * orientation from this phase while its spheres remain anchored, and the Sketch
    * stays static until time metadata is deliberately added. Consumed NOW.
-   * Appended last (2026-07-10).
+   * Appended after the original color knobs (2026-07-10).
    */
   fieldPhase: { kind: 'number', min: 0, max: 1, default: 0, step: 0.001 },
+  /** Leaf fill color. Defaults to the original bold dark linocut fill. Consumed NOW. */
+  leafColor: { kind: 'color', default: '#1a1a1a' },
+  /**
+   * Leaf outline color. Defaults to the original paper-colored separating rim.
+   * Consumed NOW.
+   */
+  leafStrokeColor: { kind: 'color', default: '#f4f1ea' },
+  /**
+   * Disc outline color. Defaults to white to blend into the white disc fill.
+   * Consumed NOW.
+   */
+  discStrokeColor: { kind: 'color', default: '#ffffff' },
 } satisfies Record<string, ParamSpec>
 
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
@@ -330,20 +347,17 @@ const CURL_JITTER_STD = 0.15
 /** Max seeded per-leaf wobble amplitude at `variation` 1; the base (variation 0) is 0. */
 const MAX_WOBBLE = 2
 
-/** Bold dark leaf fill (linocut idiom, initiative #3). */
-const LEAF_FILL = '#1a1a1a'
-
-/** Paper-colored light rim (see the file header's paper-rim rationale). */
-const PAPER_STROKE = '#f4f1ea'
-
 /** Stroke width of each leaf's paper rim, in coordinate-space units. */
 const LEAF_STROKE_WIDTH = 2
+
+/** Stroke width of each disc outline, in coordinate-space units. */
+const DISC_STROKE_WIDTH = 2
 
 // The disc fill is the `discColor` knob (read in `generate`), which superseded
 // the old hardwired DISC_FILL = 'white' constant. See the file header's occluder
 // rationale: at the defaults (white on mid gray) the disc is a visible colored
-// orb; setting discColor === backgroundColor makes it invisible as an object —
-// the original implied-sphere figure-ground.
+// orb; setting discColor === discStrokeColor === backgroundColor makes it
+// invisible as an object — the original implied-sphere figure-ground.
 
 /**
  * Translate a newly-created leaf outline by a fixed `(dx, dy)` offset in place.
@@ -410,11 +424,11 @@ function copyRotateAndMeasure(
  * visible colored orbs at the defaults (white on mid gray), implied spheres
  * when disc and background colors match.
  *
- * `generate` reads the spacing/size/field/variation knobs plus the two color
+ * `generate` reads the spacing/size/field/variation knobs plus the five color
  * knobs, blue-noise-samples the coordinate space, rolls a seeded
  * {@link LeafShape} at every sampled point (in sorted ascending-y order — that
  * IS painter's order), rotates each so its spine tracks the local flow
- * direction, emits each as a dark-filled, paper-rimmed closed polygon, and
+ * direction, emits each as a param-colored, param-rimmed closed polygon, and
  * splices a seeded set of `discColor`-filled occluder discs into the draw order
  * at their own seeded depths (see the file header's occluder rationale); the
  * built Scene carries `backgroundColor` as its declared background (ADR-0009).
@@ -448,13 +462,14 @@ export const leafField = definePreparedSketch({
     const variation = numberParam(params, schema, 'variation')
     const sphereCount = numberParam(params, schema, 'sphereCount')
 
-    // The two color knobs (ADR-0010). They consume NO rng draws — backgroundColor
-    // feeds only the Scene's `background` (ADR-0009) and discColor only the disc
-    // fills — so every leaf and disc outline stays byte-identical across any
-    // color value (the determinism seam holds untouched).
+    // Color knobs consume NO rng draws: they affect only Scene styling, so every
+    // leaf and disc outline stays byte-identical across any color value.
     const backgroundColor = colorParam(params, schema, 'backgroundColor')
     const discColor = colorParam(params, schema, 'discColor')
     const fieldPhase = numberParam(params, schema, 'fieldPhase')
+    const leafColor = colorParam(params, schema, 'leafColor')
+    const leafStrokeColor = colorParam(params, schema, 'leafStrokeColor')
+    const discStrokeColor = colorParam(params, schema, 'discStrokeColor')
 
     // Sphere-set radius bounds. The Sketch owns its own inter-param coherence
     // (CONTEXT.md), so guarantee a valid draw range by swapping if a user sets
@@ -632,6 +647,7 @@ export const leafField = definePreparedSketch({
         builder.addPath(circle(sphere.cx, sphere.cy, sphere.r), {
           closed: true,
           fill: { color: discColor },
+          stroke: { color: discStrokeColor, width: DISC_STROKE_WIDTH },
         })
       }
 
@@ -663,8 +679,8 @@ export const leafField = definePreparedSketch({
 
         builder.addPath(rotated, {
           closed: true,
-          fill: { color: LEAF_FILL },
-          stroke: { color: PAPER_STROKE, width: LEAF_STROKE_WIDTH },
+          fill: { color: leafColor },
+          stroke: { color: leafStrokeColor, width: LEAF_STROKE_WIDTH },
         })
       })
 
