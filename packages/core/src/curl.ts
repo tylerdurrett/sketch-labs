@@ -1,4 +1,10 @@
-import { fbm, type FbmOptions, type Noise2DFn, type Noise3DFn } from './fbm'
+import {
+  fbm,
+  prepareFbm3D,
+  type FbmOptions,
+  type Noise2DFn,
+  type Noise3DFn,
+} from './fbm'
 import type { Random, Vec2 } from './types'
 
 /** Tunables for {@link curl}. Extends {@link FbmOptions} with the finite-difference step. */
@@ -27,6 +33,32 @@ function resolveEpsilon({ epsilon, scale = 1 }: CurlOptions): number {
   if (epsilon !== undefined && Number.isFinite(epsilon) && epsilon !== 0) return epsilon
   // Guard against a zero/degenerate scale collapsing the step to Infinity.
   return scale === 0 ? 1e-4 : 1e-4 / Math.abs(scale)
+}
+
+/** A prepared 3D curl field sampled directly as its in-plane angle. */
+export type CurlAngle3DFn = (x: number, y: number, z: number) => number
+
+/**
+ * Prepare the fixed source/options of a 3D curl field for repeated angle samples.
+ *
+ * Leaf-like callers usually consume `curl(...)` only through
+ * `atan2(flow[1], flow[0])`. Returning that angle directly avoids a Vec2 allocation
+ * per sample, while the prepared fBm scalar retains the exact frequency,
+ * amplitude, normalization, finite-difference, and `atan2` operation order of the
+ * generic public path.
+ */
+export function prepareCurlAngle3D(
+  source: Random | Noise3DFn,
+  options: CurlOptions = {},
+): CurlAngle3DFn {
+  const psi = prepareFbm3D(source, options)
+  const eps = resolveEpsilon(options)
+
+  return (x, y, z) => {
+    const dPsiDx = (psi(x + eps, y, z) - psi(x - eps, y, z)) / (2 * eps)
+    const dPsiDy = (psi(x, y + eps, z) - psi(x, y - eps, z)) / (2 * eps)
+    return Math.atan2(-dPsiDx, dPsiDy)
+  }
 }
 
 /**

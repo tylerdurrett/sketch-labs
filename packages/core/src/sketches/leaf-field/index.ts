@@ -113,6 +113,15 @@
  * of silently tracking them; the original white-on-white capture is recoverable
  * by setting both knobs white.
  *
+ * CALLER-OWNED PREPARATION (2026-07-09): this Sketch splits its stateless frame
+ * logic at the real time boundary. `prepare(params, seed)` derives one immutable
+ * layout — Poisson scatter, painter order, sphere placement, seeded leaf shapes,
+ * and unrotated silhouettes — then returns a pure `(t) → Scene` sampler that only
+ * evaluates curl orientation and transforms fresh Scene-owned point arrays. The
+ * Harness may retain that sampler while `(params, seed)` hold; the Sketch retains
+ * no hidden cache. `definePreparedSketch` derives the public cold `generate` from
+ * the same implementation, so exploration, Remotion, and export cannot drift.
+ *
  * SPHERE STREAM OFF THE LEAF SEQUENCE (2026-07-03 audit): every sphere's
  * center/radius is drawn from a SEPARATE, dedicated rng stream
  * (`createRandom(`${seed}-sphere`)`), never interleaved before or inside the
@@ -135,21 +144,21 @@
  * live.
  */
 
-import { curl } from '../../curl'
+import { prepareCurlAngle3D } from '../../curl'
 import { circle } from '../../geometry'
 import { lerp } from '../../math'
 import { samplePoissonDisk } from '../../poisson'
 import { createRandom } from '../../random'
 import { createScene } from '../../scene'
 import type { Scene } from '../../scene'
-import type {
-  Params,
-  ParamSpec,
-  Seed,
-  StatelessSketch,
+import {
+  definePreparedSketch,
+  type Params,
+  type ParamSpec,
+  type Seed,
 } from '../../sketch'
-import type { Point, Polyline } from '../../types'
-import { bbox, colorParam, HEIGHT, numberParam, WIDTH } from '../sketch-util'
+import type { Polyline } from '../../types'
+import { colorParam, HEIGHT, numberParam, WIDTH } from '../sketch-util'
 import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
@@ -279,8 +288,7 @@ const LEAF_STROKE_WIDTH = 2
 // the original implied-sphere figure-ground.
 
 /**
- * Translate a leaf outline by a fixed `(dx, dy)` offset, returning a NEW Polyline
- * (the input is not mutated).
+ * Translate a newly-created leaf outline by a fixed `(dx, dy)` offset in place.
  *
  * The {@link leaf} generator grows from the origin (0, 0) along +y with signed
  * ±x spread, so a raw outline is anchored at the origin, not at the sampled
@@ -288,25 +296,53 @@ const LEAF_STROKE_WIDTH = 2
  * translating the (already-rotated) outline so its center lands on the sampled
  * point.
  */
-function translate(outline: Polyline, dx: number, dy: number): Polyline {
-  return outline.map(([x, y]): Point => [x + dx, y + dy])
+function translateInPlace(outline: Polyline, dx: number, dy: number): void {
+  for (const point of outline) {
+    point[0] += dx
+    point[1] += dy
+  }
 }
 
 /**
- * Rotate a leaf outline by `angle` radians about the origin (0, 0), returning a
- * NEW Polyline (the input is not mutated).
+ * Copy and rotate a prepared leaf outline by `angle` radians about the origin
+ * while measuring the rotated bounds in the same pass.
  *
- * Applied to a raw, origin-anchored {@link leaf} outline BEFORE {@link translate}
- * so the leaf's spine (which grows along +y) can be turned to face the local
- * flow direction. Rotating about the origin — the leaf's own base anchor —
- * keeps the pivot at the shape's root; the subsequent bbox-center translation
- * then places the rotated silhouette onto the sampled point. Standard 2D
- * rotation: `x' = x·cosθ − y·sinθ`, `y' = x·sinθ + y·cosθ`.
+ * The prepared outline remains immutable and private to its caller-owned sampler;
+ * the returned copy belongs to one Scene and may be translated in place. Combining
+ * copying, rotation, and bounds measurement avoids the old rotate-array + bbox
+ * passes while preserving their arithmetic and point order exactly.
  */
-function rotate(outline: Polyline, angle: number): Polyline {
+function copyRotateAndMeasure(
+  outline: Polyline,
+  angle: number,
+): {
+  rotated: Polyline
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+} {
   const cos = Math.cos(angle)
   const sin = Math.sin(angle)
-  return outline.map(([x, y]): Point => [x * cos - y * sin, x * sin + y * cos])
+  const rotated: Polyline = new Array(outline.length)
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+
+  for (let i = 0; i < outline.length; i++) {
+    const [x, y] = outline[i]!
+    const rotatedX = x * cos - y * sin
+    const rotatedY = x * sin + y * cos
+    rotated[i] = [rotatedX, rotatedY]
+
+    if (rotatedX < minX) minX = rotatedX
+    if (rotatedX > maxX) maxX = rotatedX
+    if (rotatedY < minY) minY = rotatedY
+    if (rotatedY > maxY) maxY = rotatedY
+  }
+
+  return { rotated, minX, minY, maxX, maxY }
 }
 
 /**
@@ -327,12 +363,13 @@ function rotate(outline: Polyline, angle: number): Polyline {
  * No accumulated state — re-calling with the same `(params, seed, t)`
  * reproduces the same Scene exactly.
  */
-export const leafField: StatelessSketch = {
+export const leafField = definePreparedSketch({
   id: 'leaf-field',
   name: 'Leaf Field',
   schema,
+  space: { width: WIDTH, height: HEIGHT },
   // NO `time` metadata ⇒ ships static (single frame, scrubber hidden).
-  generate(params: Params, seed: Seed, t: number): Scene {
+  prepare(params: Params, seed: Seed) {
     // Shared seeded Random. It drives the per-leaf shape rolls (size, curl,
     // wobble) AND is threaded into `leaf()` for its per-vertex wobble jitter. It
     // ALSO seeds the curl field via its (separate, non-advancing) noise
@@ -421,32 +458,6 @@ export const leafField: StatelessSketch = {
     // seam holds (a copy is sorted — the sampler output is not mutated).
     const points = [...sampled].sort(([ax, ay], [bx, by]) => ay - by || ax - bx)
 
-    // The Sketch-declared background (ADR-0009): the whole output surface,
-    // letterbox included, painted from the `backgroundColor` knob — part of the
-    // image, so it rides the (params, seed) determinism spine rather than being
-    // a caller-side Render Setting.
-    const builder = createScene(
-      { width: WIDTH, height: HEIGHT },
-      { color: backgroundColor },
-    )
-
-    // Splice the opaque occluder discs into the painter's order at the GLOBAL
-    // depth index: the top/back leaves (drawn first) fall UNDER them and are
-    // occluded where they cross a disc — the disc's true circular silhouette reads
-    // as a hard, genuinely round edge on the sphere's far side — while the
-    // bottom/front leaves (drawn after) lap OVER the near side for organic tip
-    // breakup. `Math.round(sphereDepth · N)` maps depth 0 → behind all leaves
-    // (max front overlap) and depth 1 → in front of all (clean round edge); every
-    // disc shares this one index. Fill only (the `discColor` knob), no stroke: a
-    // visible colored orb at the defaults (white on mid gray), pure figure-ground
-    // when discColor == backgroundColor.
-    const drawDisc = (sphere: { cx: number; cy: number; r: number }): void => {
-      builder.addPath(circle(sphere.cx, sphere.cy, sphere.r), {
-        closed: true,
-        fill: { color: discColor },
-      })
-    }
-
     // PER-DISC, POSITION-RELATIVE DEPTH (2026-07-06): a single global splice index
     // made `sphereDepth` mean DIFFERENT things at different canvas heights. The
     // field draws top-of-canvas first (ascending y), so one index is one y
@@ -481,26 +492,11 @@ export const leafField: StatelessSketch = {
       return { ...sphere, spliceIdx }
     })
 
-    // Sampler order IS painter's order: index 0 is drawn first (bottom). Each
-    // leaf is rotated by its own flow angle, so the bbox center is no longer a
-    // loop invariant (the #126 hoist is superseded) — compute it per-leaf after
-    // rotation.
-    points.forEach(([x, y], i) => {
-      for (const sphere of placedSpheres) if (sphere.spliceIdx === i) drawDisc(sphere)
-      // Sample the divergence-free flow at this point via the 3D curl overload
-      // (z = t) so animating later is a metadata swap, not a rewrite (ADR-0002).
-      // Coords are CANVAS-NORMALIZED (x/WIDTH, y/HEIGHT) so `fieldScale` reads as
-      // features across the canvas — a low value keeps the sweep coherent instead
-      // of dissolving into per-leaf randomness. `octaves` sets how many noise
-      // layers stack and `turbulence` maps to fbm's per-octave amplitude falloff
-      // (`gain`). curl reads the rng's separate noise instances, so it does NOT
-      // advance the leaf() sequence — placement and shape rolls stay independent.
-      const flow = curl(rng, (x / WIDTH) * fieldScale, (y / HEIGHT) * fieldScale, t, {
-        gain: turbulence,
-        octaves,
-      })
-      const angle = Math.atan2(flow[1], flow[0])
-
+    // Prepare the time-invariant leaf layout once for this `(params, seed)` pair.
+    // Sampler order IS painter's order: index 0 is drawn first (bottom). Curl
+    // sampling never advances the main PRNG, so moving these shape rolls ahead of
+    // the per-`t` flow sampling preserves the exact historical draw sequence.
+    const leaves = points.map(([x, y]) => {
       // Roll this leaf's shape from `rng`. CRUCIAL: roll all five (length, curl,
       // wobble, tipSharpness, widthRatio) UNCONDITIONALLY and in a fixed order —
       // the rng-consumption COUNT per leaf must stay constant regardless of knob
@@ -530,28 +526,76 @@ export const leafField: StatelessSketch = {
         tipSharpness,
       }
 
-      // The leaf spine grows along +y; rotate by `angle - π/2` so that +y axis
-      // aligns with the flow direction, then translate the rotated bbox-center
-      // onto the sampled point.
-      const rotated = rotate(leaf(shape, rng), angle - Math.PI / 2)
-      const { minX, minY, maxX, maxY } = bbox(rotated)
-      const centerX = (minX + maxX) / 2
-      const centerY = (minY + maxY) / 2
-
-      builder.addPath(translate(rotated, x - centerX, y - centerY), {
-        closed: true,
-        fill: { color: LEAF_FILL },
-        stroke: { color: PAPER_STROKE, width: LEAF_STROKE_WIDTH },
-      })
+      // The unrotated silhouette depends only on params/seed. It stays private to
+      // this caller-owned prepared sampler; every sampled Scene receives newly
+      // transformed point arrays, so mutating one returned Scene cannot corrupt a
+      // later frame.
+      return { x, y, outline: leaf(shape, rng) }
+    })
+    // Retain only the pure noise sampler for warm frames, not the Random whose
+    // value()/gaussian() stream was advanced during preparation. This makes the
+    // prepared layout's no-accumulated-state boundary explicit.
+    const noise3D = rng.noise3D
+    const flowAngleAt = prepareCurlAngle3D(noise3D, {
+      gain: turbulence,
+      octaves,
     })
 
-    // A disc whose threshold cleared the last leaf (spliceIdx === N — its whole
-    // padded band sits at/above the bottom of the field) never fired in the loop,
-    // so draw it on top of all leaves here.
-    for (const sphere of placedSpheres) {
-      if (sphere.spliceIdx >= points.length) drawDisc(sphere)
-    }
+    return (t: number): Scene => {
+      // The Sketch-declared background (ADR-0009): the whole output surface,
+      // letterbox included, painted from the `backgroundColor` knob — part of the
+      // image, so it rides the (params, seed) determinism spine.
+      const builder = createScene(
+        { width: WIDTH, height: HEIGHT },
+        { color: backgroundColor },
+      )
 
-    return builder.build()
+      // Discs are rebuilt into fresh Scene-owned point arrays on every sample.
+      const drawDisc = (sphere: { cx: number; cy: number; r: number }): void => {
+        builder.addPath(circle(sphere.cx, sphere.cy, sphere.r), {
+          closed: true,
+          fill: { color: discColor },
+        })
+      }
+
+      // Each leaf samples only the time-dependent curl direction here. Shape,
+      // scatter, painter order, and sphere placement were prepared above.
+      leaves.forEach(({ x, y, outline }, i) => {
+        for (const sphere of placedSpheres) if (sphere.spliceIdx === i) drawDisc(sphere)
+
+        // Sample the divergence-free flow at this point via the 3D curl overload
+        // (z = t). Canvas-normalized coordinates make fieldScale read as features
+        // across the canvas; octaves/turbulence shape the fBm stack.
+        const angle = flowAngleAt(
+          (x / WIDTH) * fieldScale,
+          (y / HEIGHT) * fieldScale,
+          t,
+        )
+
+        // Copy the immutable prepared outline into Scene-owned points while
+        // rotating and measuring it in one pass, then center it in place.
+        const { rotated, minX, minY, maxX, maxY } = copyRotateAndMeasure(
+          outline,
+          angle - Math.PI / 2,
+        )
+        const centerX = (minX + maxX) / 2
+        const centerY = (minY + maxY) / 2
+        translateInPlace(rotated, x - centerX, y - centerY)
+
+        builder.addPath(rotated, {
+          closed: true,
+          fill: { color: LEAF_FILL },
+          stroke: { color: PAPER_STROKE, width: LEAF_STROKE_WIDTH },
+        })
+      })
+
+      // A disc whose threshold cleared the last leaf never fired in the loop, so
+      // draw it on top of all leaves here.
+      for (const sphere of placedSpheres) {
+        if (sphere.spliceIdx >= leaves.length) drawDisc(sphere)
+      }
+
+      return builder.build()
+    }
   },
-}
+})

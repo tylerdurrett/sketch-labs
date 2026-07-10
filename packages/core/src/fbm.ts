@@ -72,6 +72,38 @@ function toNoise3D(source: Random | Noise3DFn): Noise3DFn {
 }
 
 /**
+ * Prepare a 3D fBm sampler whose source and options stay fixed across samples.
+ *
+ * This is the scalar counterpart to caller-owned Sketch frame preparation: it
+ * resolves the generic overload and option merge once, then preserves
+ * {@link fbm}'s exact octave-loop operation order for every `(x, y, z)` sample.
+ * The public one-shot {@link fbm} path remains unchanged.
+ */
+export function prepareFbm3D(
+  source: Random | Noise3DFn,
+  options: FbmOptions = {},
+): Noise3DFn {
+  const noise3D = toNoise3D(source)
+  const { octaves, lacunarity, gain, scale } = { ...DEFAULTS, ...options }
+
+  return (x, y, z) => {
+    let frequency = scale
+    let amplitude = 1
+    let sum = 0
+    let totalAmplitude = 0
+
+    for (let i = 0; i < octaves; i++) {
+      sum += noise3D(x * frequency, y * frequency, z * frequency) * amplitude
+      totalAmplitude += amplitude
+      frequency *= lacunarity
+      amplitude *= gain
+    }
+
+    return totalAmplitude === 0 ? 0 : sum / totalAmplitude
+  }
+}
+
+/**
  * Seeded 2D fractal Brownian motion: octave-summed simplex noise.
  *
  * @param source A {@link Random} instance or a bare 2D noise function. All

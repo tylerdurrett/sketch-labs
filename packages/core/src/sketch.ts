@@ -16,7 +16,7 @@
  *   stateful variant can join WITHOUT reworking the stateless path.
  */
 
-import type { Scene } from './scene'
+import type { CoordinateSpace, Scene } from './scene'
 
 /**
  * The single value feeding all of a Sketch's internal randomness.
@@ -247,6 +247,12 @@ export interface SketchBase {
   /** The Sketch's tweakable knobs — the spine of the Harness. */
   schema: ParamSchema
   /**
+   * Optional coordinate space when it is invariant across every param, seed,
+   * and time value. Harness callers may use it for layout without generating a
+   * throwaway Scene. Omit it when frame generation determines the space.
+   */
+  space?: CoordinateSpace
+  /**
    * Optional time metadata. Absent ⇒ a static Sketch (ADR-0002); present ⇒ the
    * Harness drives `t` over `duration` with the given `mode`.
    */
@@ -269,6 +275,61 @@ export interface StatelessSketch extends SketchBase {
    * @param t - Time in seconds; for a static Sketch (no `time`) callers pass 0.
    */
   generate(params: Params, seed: Seed, t: number): Scene
+
+  /**
+   * Optionally split time-invariant preparation from repeated sampling in `t`.
+   *
+   * The returned sampler is owned by the caller that requested it. It must remain
+   * a pure function of `t`: preparation may retain immutable data derived from
+   * `(params, seed)`, but it may not accumulate frame-to-frame state. Callers that
+   * sample sequentially can retain one sampler until params or seed change;
+   * random-access callers can continue using {@link generate} unchanged.
+   */
+  prepare?(params: Params, seed: Seed): PreparedFrame
+}
+
+/** A caller-owned, deterministic sampler for one fixed `(params, seed)` pair. */
+export type PreparedFrame = (t: number) => Scene
+
+/** A stateless Sketch that provides the optional prepared-frame fast path. */
+export interface PreparedStatelessSketch extends StatelessSketch {
+  prepare(params: Params, seed: Seed): PreparedFrame
+}
+
+/**
+ * Define a prepared stateless Sketch without duplicating cold and warm frame logic.
+ *
+ * `generate(params, seed, t)` is derived mechanically as
+ * `prepare(params, seed)(t)`. The public ADR-0002 contract therefore remains the
+ * source of truth for every random-access caller, while sequential Harness callers
+ * can explicitly retain the prepared sampler. No cache lives in the Sketch.
+ */
+export function definePreparedSketch(
+  definition: SketchBase & {
+    prepare(params: Params, seed: Seed): PreparedFrame
+  },
+): PreparedStatelessSketch {
+  return {
+    ...definition,
+    generate(params, seed, t) {
+      return definition.prepare(params, seed)(t)
+    },
+  }
+}
+
+/**
+ * Prepare any current stateless Sketch for repeated sampling.
+ *
+ * Sketches without a specialized preparation seam receive a zero-state adapter
+ * over their existing `generate`; prepared Sketches hand back their optimized,
+ * caller-owned sampler. Either path has identical observable frame semantics.
+ */
+export function prepareSketch(
+  sketch: StatelessSketch,
+  params: Params,
+  seed: Seed,
+): PreparedFrame {
+  return sketch.prepare?.(params, seed) ?? ((t) => sketch.generate(params, seed, t))
 }
 
 /**

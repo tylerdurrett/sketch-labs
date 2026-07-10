@@ -296,6 +296,54 @@ describe('leaf-field determinism (ADR-0002)', () => {
   })
 })
 
+describe('leaf-field caller-owned preparation', () => {
+  it('samples byte-exact Scenes through cold generate and a retained warm sampler', () => {
+    const fixtures: Array<{ params: Params; seed: string; times: number[] }> = [
+      { params: {}, seed: 'prepared-default', times: [0, 1 / 60, 3.75] },
+      {
+        params: {
+          density: 6,
+          variation: 0.7,
+          sphereCount: 3,
+          sphereDepth: 0.2,
+        },
+        seed: 'prepared-varied',
+        times: [0, 0.125, 42],
+      },
+    ]
+
+    for (const { params, seed, times } of fixtures) {
+      const prepared = leafField.prepare(params, seed)
+      for (const t of times) {
+        expect(prepared(t)).toEqual(leafField.generate(params, seed, t))
+      }
+    }
+  })
+
+  it('retains only immutable private layout — mutating one Scene cannot poison another', () => {
+    const params: Params = { density: 5, variation: 0.4, sphereCount: 2 }
+    const prepared = leafField.prepare(params, 'prepared-immutable')
+    const first = prepared(0.5)
+    const firstPoint = first.primitives[0]?.points[0]
+    expect(firstPoint).toBeDefined()
+    firstPoint![0] = Number.NaN
+
+    expect(prepared(0.5)).toEqual(leafField.generate(params, 'prepared-immutable', 0.5))
+  })
+
+  it('carries no shared state across prepared callers or interleaved times', () => {
+    const params: Params = { density: 5, variation: 0.6 }
+    const a = leafField.prepare(params, 'prepared-interleave')
+    const b = leafField.prepare(params, 'prepared-interleave')
+    const expected = a(1.25)
+
+    a(9)
+    b(3)
+    expect(a(1.25)).toEqual(expected)
+    expect(b(1.25)).toEqual(expected)
+  })
+})
+
 describe('leaf-field seed independence', () => {
   it('a different seed rearranges the field while params hold', () => {
     const params: Params = { density: 6 }

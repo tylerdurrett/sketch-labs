@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { curl } from '../curl'
+import { curl, prepareCurlAngle3D, type CurlOptions } from '../curl'
 import { createRandom } from '../random'
 import type { Vec2 } from '../types'
 
@@ -114,6 +114,35 @@ describe('curl — determinism', () => {
       scale: 1,
     })
     expect(curl(rng, 1.4, 2.6, 3.8)).toEqual(explicit3D)
+  })
+})
+
+describe('prepareCurlAngle3D — exact generic equivalence', () => {
+  const optionSets: CurlOptions[] = [
+    {},
+    { octaves: 1 },
+    { octaves: 0, epsilon: 0 },
+    { octaves: 3, lacunarity: 2.1, gain: 0.37, scale: 1.3, epsilon: 1e-3 },
+    { octaves: 6, gain: 0, scale: 0, epsilon: -1e-4 },
+    { octaves: 2, gain: 0.1536, epsilon: Number.NaN },
+  ]
+
+  it('matches atan2 of the generic Vec2 bit-for-bit across inputs', () => {
+    for (const seed of ['prepared-angle-a', 'prepared-angle-b', 42] as const) {
+      const rng = createRandom(seed)
+      for (const source of [rng, rng.noise3D] as const) {
+        for (const options of optionSets) {
+          const angleAt = prepareCurlAngle3D(source, options)
+          for (let i = 0; i < 12; i++) {
+            const x = i * 0.173 - 0.4
+            const y = i * -0.219 + 0.7
+            const z = i * 0.127
+            const [vx, vy] = curl(source, x, y, z, options)
+            expect(angleAt(x, y, z)).toBe(Math.atan2(vy, vx))
+          }
+        }
+      }
+    }
   })
 })
 

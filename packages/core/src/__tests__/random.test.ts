@@ -83,6 +83,17 @@ describe('rangeFloor', () => {
 })
 
 describe('gaussian', () => {
+  it('returns the mean at std 0 without shifting the seeded sequence', () => {
+    const fast = createRandom('gaussian-zero-std')
+    const control = createRandom('gaussian-zero-std')
+
+    expect(fast.gaussian(7, 0)).toBe(7)
+    control.value()
+    control.value()
+
+    expect(fast.value()).toBe(control.value())
+  })
+
   it('approximates expected mean and std over many samples', () => {
     const rng = createRandom('gaussian-test')
     const n = 10_000

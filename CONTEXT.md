@@ -86,6 +86,8 @@ A Sketch's output is deterministic in `(params, seed, t)` — same inputs, same 
 
 There is no separate "realtime mode" vs "render mode" — one function, sampled at different `t`. Expensive, export-only work (hidden-line removal, path simplification, pen ordering) lives *outside* the exploration loop, which is only `generate → draw → painter's-order render`. True 60fps GPU output is explicitly the lowest priority, so the early system keeps a single vector representation rather than a parallel GPU-parametric one.
 
+A stateless Sketch may optionally expose caller-owned **frame preparation** as an optimization of that same function: `prepare(params, seed) → (t) → Scene`. The returned sampler may retain immutable data derived from `(params, seed)`, but it remains pure in `t` and carries no accumulated frame state. `generate` stays the public random-access contract and is derived from the same preparation implementation; sequential Harness callers may retain one sampler only until params, seed, or Sketch identity changes. This is not a second realtime mode and not a hidden Sketch cache. See ADR-0012.
+
 ### Time semantics
 
 `generate` is always `(params, seed, t)`, where **`t` is in seconds** uniformly across every mode; only *how the Harness drives `t`* varies, declared by optional time metadata (a duration, and whether it loops) alongside the **Parameter Schema**. No time metadata ⇒ static. A Sketch that wants normalized progress derives it itself as `t / duration` (e.g. circles computes its loop phase this way) — the contract never hands the Sketch a normalized `t`.
