@@ -35,7 +35,7 @@ const DEFAULT_WARMUPS = 5
 const MIN_SAMPLES = 20
 const EXPECTED_PRIMITIVES = 1405
 const EXPECTED_POINTS = 136093
-const EXPECTED_CHECKSUM = '9433294ccb73c27b'
+const EXPECTED_CHECKSUM = 'a094921b8280299c'
 
 function readPositiveInteger(name, fallback, minimum) {
   const raw = process.env[name]

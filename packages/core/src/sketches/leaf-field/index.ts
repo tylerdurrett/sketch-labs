@@ -85,8 +85,9 @@
  * 6, from the "Nice One" preset, so the field ships with the full implied-sphere
  * set; drop to 0 for a plain field),
  * `sphereRadiusMin`/`sphereRadiusMax` (per-disc radius bounds, in coordinate
- * units — superseding the old radius-fraction constants). Each disc's center and
- * radius are seeded (per-sphere, off the leaf stream — see below). #142 makes the
+ * units — superseding the old radius-fraction constants). Each disc's radius is
+ * seeded per sphere; its center is derived from the seeded curl field
+ * (with the sphere stream breaking equal scores — see below). #142 makes the
  * front/behind split its own knob `sphereDepth` (0 ⇒ behind every overlapping
  * leaf, max front overlap / most embedded; 1 ⇒ in front of every overlapping leaf,
  * clean round edge / most spherical). Because the field draws top-of-canvas first
@@ -100,6 +101,22 @@
  * CONSISTENT depth wherever the disc sits. A disc whose threshold clears the last
  * leaf paints on top after the loop. No shading, highlight, cast-shadow, or
  * per-leaf clipping against the discs (styling / clipping slices).
+ *
+ * VORTEX-AWARE PLACEMENT (2026-07-10): sphere centers are landmarks of the flow,
+ * not an independent uniform scatter. The curl vector is the scalar fBm
+ * potential's gradient rotated 90°, so it follows that potential's contour
+ * lines. A round local hill or basin therefore produces the visible circulation
+ * around a center. For each seeded radius, the private placement helper searches
+ * radius-inset canvas candidates and scores high center-to-rim contrast, a
+ * low-variance rim, and a rim consistently above or below the center. Those
+ * terms penalize slopes, stretched turbulence, and saddles without requiring
+ * every exact-count fallback to be a mathematical critical point. It refines
+ * the best candidates below grid resolution, prefers separated centers with
+ * deterministic relaxation, and always returns exactly `sphereCount`.
+ * `fieldPhase` re-prepares those centers against its own field slice. Within one
+ * prepared `(t) => Scene` sampler they stay anchored at its t=0 phase so future
+ * animation cannot pop as best-candidate rankings change; only leaf orientation
+ * advances with `t`.
  *
  * DRAW BOUNDARY (load-bearing): only generic {@link Primitive}s cross into the
  * Scene. The leaf domain type ({@link LeafShape}) is reached ONLY through the
@@ -131,19 +148,15 @@
  * no hidden cache. `definePreparedSketch` derives the public cold `generate` from
  * the same implementation, so exploration, Remotion, and export cannot drift.
  *
- * SPHERE STREAM OFF THE LEAF SEQUENCE (2026-07-03 audit): every sphere's
- * center/radius is drawn from a SEPARATE, dedicated rng stream
- * (`createRandom(`${seed}-sphere`)`), never interleaved before or inside the
- * per-leaf loop, and each sphere consumes that stream in a FIXED order (cx, cy,
- * r). Each leaf still consumes exactly its three `rng` draws, so raising
- * `sphereCount` consumes MORE draws from the sphere stream WITHOUT shifting a
- * single per-leaf roll and desyncing the field (#141). The sphere state is never
- * drawn up-front from the main `rng` (explicitly rejected by the audit). The
- * splice depth is NOT rolled — it derives from the `sphereDepth` knob and each
- * disc's own (already-seeded) cy/r (#142, position-relative 2026-07-06), so it
- * touches only the per-disc insert indices and never consumes an rng draw from
- * either stream: changing it leaves every disc's cx/cy/r AND every leaf
- * byte-identical.
+ * SPHERE STREAM OFF THE LEAF SEQUENCE (2026-07-03 audit, placement widened
+ * 2026-07-10): every sphere consumes a FIXED three draws from the separate
+ * `createRandom(`${seed}-sphere`)` stream: two candidate tie-break coordinates,
+ * then its radius. Actual centers come from the seeded field search above; the
+ * first two draws preserve deterministic entropy and the historical three-draw
+ * prefix without pretending to be positions. No sphere roll is interleaved with
+ * the per-leaf loop, so raising `sphereCount` cannot shift a leaf. Splice depth
+ * is still derived solely from `sphereDepth` and each selected cy/r; changing
+ * depth leaves every disc geometry and leaf byte-identical.
  *
  * PAPER-RIM RATIONALE (2026-07-01 audit): a matching dark stroke would make the
  * painter's-order overlap visually unobservable — adjacent dark leaves merge
@@ -154,6 +167,7 @@
  */
 
 import { prepareCurlAngle4D } from '../../curl'
+import { prepareFbm4D } from '../../fbm'
 import { circle } from '../../geometry'
 import { lerp } from '../../math'
 import { samplePoissonDisk } from '../../poisson'
@@ -170,6 +184,7 @@ import type { Polyline } from '../../types'
 import { colorParam, HEIGHT, numberParam, WIDTH } from '../sketch-util'
 import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
+import { placeSpheresAtVortices } from './vortex-placement'
 
 /**
  * The leaf-field Parameter Schema — eighteen knobs (sixteen numeric, two
@@ -212,12 +227,12 @@ const schema = {
   /** Per-leaf shape variation — scales how far each leaf's curl/wobble strays from the base shape (size is its own [leafSizeMin, leafSizeMax] range, independent of this). Consumed NOW. */
   variation: { kind: 'number', min: 0, max: 1, default: 0 },
   /**
-   * How many implied-sphere occluder discs to scatter into the field. Each disc
-   * is placed/sized/depth-sorted from the dedicated sphere rng stream (OFF the
-   * per-leaf rolls), so raising this consumes more sphere draws without shifting
-   * a single leaf. The min is 0 (a plain leaf field with no implied spheres); the
-   * default is 6 (the "Nice One" preset), so the field ships with the full
-   * implied-sphere set. Consumed NOW (sphere-set count). Appended last (#141).
+   * How many implied-sphere occluder discs to place at the field's strongest
+   * round vortex centers. Each radius and equal-score tie-break comes from the
+   * dedicated sphere rng stream (OFF the per-leaf rolls), so raising this cannot
+   * shift a leaf. The min is 0 (a plain leaf field with no implied spheres); the
+   * default is 6 (the "Nice One" preset), so the field ships with the full set.
+   * Consumed NOW (sphere-set count). Appended last (#141).
    */
   sphereCount: { kind: 'number', min: 0, max: 6, default: 6, step: 1, integer: true },
   /**
@@ -264,10 +279,11 @@ const schema = {
   discColor: { kind: 'color', default: '#ffffff' },
   /**
    * Normalized position around the seamless 4D flow-field loop. 0 and 1 sample
-   * the same point; intermediate values smoothly evolve only leaf orientation.
-   * Prepared-frame time advances from this phase, while the Sketch remains
-   * static until time metadata is deliberately added. Consumed NOW. Appended
-   * last (2026-07-10).
+   * the same point; changing this param evolves leaf orientation and re-prepares
+   * sphere centers against that field slice. Prepared-frame time advances only
+   * orientation from this phase while its spheres remain anchored, and the Sketch
+   * stays static until time metadata is deliberately added. Consumed NOW.
+   * Appended last (2026-07-10).
    */
   fieldPhase: { kind: 'number', min: 0, max: 1, default: 0, step: 0.001 },
 } satisfies Record<string, ParamSpec>
@@ -288,6 +304,15 @@ const FIELD_LOOP_RADIUS = 1
 /** Wrap any finite phase into [0, 1); degrade invalid caller time/params safely. */
 function wrapUnitPhase(phase: number): number {
   return Number.isFinite(phase) ? phase - Math.floor(phase) : 0
+}
+
+/** Map a normalized loop phase to the final two coordinates of 4D noise. */
+function loopCoordinatesAt(phase: number): readonly [number, number] {
+  const angle = wrapUnitPhase(phase) * 2 * Math.PI
+  return [
+    FIELD_LOOP_RADIUS * Math.cos(angle),
+    FIELD_LOOP_RADIUS * Math.sin(angle),
+  ]
 }
 
 // Base shape constants. Each leaf's length draws uniformly in its own
@@ -446,31 +471,42 @@ export const leafField = definePreparedSketch({
     // either stream, leaving cx/cy/r and every leaf byte-identical.
     const sphereDepth = numberParam(params, schema, 'sphereDepth')
 
-    // The sphere set is drawn from a SEPARATE, dedicated rng stream (keyed off
-    // the seed) so it stays OFF the per-leaf roll sequence (2026-07-03 audit,
-    // finding 2): raising `sphereCount` consumes MORE draws here without shifting
-    // a single per-leaf roll and desyncing the field. Each leaf still consumes
-    // exactly its three `rng` draws below. Every sphere draws center/radius from
-    // this stream in a FIXED per-sphere order (cx, cy, r) so the set is fully
-    // reproducible from (params, seed). Depth is the global `sphereDepth` knob
-    // above, NOT a per-sphere roll — dropping that draw leaves cx/cy/r identical.
+    // The sphere set keeps its SEPARATE, dedicated rng stream (keyed off the
+    // seed), so its radius and tie-break rolls stay OFF the per-leaf sequence.
+    // Center rolls now act only as deterministic tie-break anchors: the actual
+    // centers are selected from the strongest circular-coherence candidates in
+    // the same scalar potential whose rotated gradient orients the leaves.
     const sphereRng = createRandom(`${seed}-sphere`)
-    const spheres = Array.from({ length: sphereCount }, () => {
-      // Draw center fractions first, radius last — this PRESERVES the documented
-      // per-sphere draw order (center-x, center-y, radius = three draws) and the
-      // separate-stream seam, so no per-leaf roll shifts. Each center is then inset
-      // by the disc's OWN radius (not a fixed fraction) so the full circular
-      // silhouette always lands on-canvas for ANY radius: radius ≤ 400 < WIDTH/2,
-      // so [r, WIDTH − r] is always a valid range and reads as a complete round
-      // edge. (Radius bounds are the live `sphereRadiusMin`/`sphereRadiusMax`
-      // knobs, #141.)
-      const cxFrac = sphereRng.value()
-      const cyFrac = sphereRng.value()
-      const r = sphereRng.range(sphereRadiusMin, sphereRadiusMax)
-      const cx = lerp(r, WIDTH - r, cxFrac)
-      const cy = lerp(r, HEIGHT - r, cyFrac)
-      return { cx, cy, r }
+    const sphereRequests = Array.from({ length: sphereCount }, () => {
+      const tieBreaker = [sphereRng.value(), sphereRng.value()] as const
+      const radius = sphereRng.range(sphereRadiusMin, sphereRadiusMax)
+      return { radius, tieBreaker }
     })
+
+    // Sphere placement is prepared at the public fieldPhase (the returned time
+    // sampler's t=0 field). Curl follows level contours of this scalar potential,
+    // so round hills/basins strongly identify the visible vortex centers.
+    // The chosen centers remain fixed inside this prepared sampler: fieldPhase
+    // changes deliberately re-place them, while future per-frame time cannot
+    // trigger best-candidate switching or visual popping.
+    const noise4D = rng.noise4D
+    const potential4D = prepareFbm4D(noise4D, {
+      gain: turbulence,
+      octaves,
+    })
+    const [placementZ, placementW] = loopCoordinatesAt(fieldPhase)
+    const spheres = placeSpheresAtVortices(
+      (x, y) =>
+        potential4D(
+          (x / WIDTH) * fieldScale,
+          (y / HEIGHT) * fieldScale,
+          placementZ,
+          placementW,
+        ),
+      WIDTH,
+      HEIGHT,
+      sphereRequests,
+    )
 
     // Constant radius field ⇒ uniform blue-noise spacing driven by `density`.
     // `minRadius` equals the constant so the accel grid is sized accurately
@@ -569,7 +605,6 @@ export const leafField = definePreparedSketch({
     // Retain only the pure noise sampler for warm frames, not the Random whose
     // value()/gaussian() stream was advanced during preparation. This makes the
     // prepared layout's no-accumulated-state boundary explicit.
-    const noise4D = rng.noise4D
     const flowAngleAt = prepareCurlAngle4D(noise4D, {
       gain: turbulence,
       octaves,
@@ -582,9 +617,7 @@ export const leafField = definePreparedSketch({
       const phase = wrapUnitPhase(
         wrapUnitPhase(fieldPhase) + wrapUnitPhase(t / FIELD_LOOP_DURATION_SECONDS),
       )
-      const phaseAngle = phase * 2 * Math.PI
-      const loopZ = FIELD_LOOP_RADIUS * Math.cos(phaseAngle)
-      const loopW = FIELD_LOOP_RADIUS * Math.sin(phaseAngle)
+      const [loopZ, loopW] = loopCoordinatesAt(phase)
 
       // The Sketch-declared background (ADR-0009): the whole output surface,
       // letterbox included, painted from the `backgroundColor` knob — part of the

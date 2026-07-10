@@ -416,7 +416,7 @@ describe('leaf-field flow-field orientation (#127)', () => {
 })
 
 describe('leaf-field 4D flow phase', () => {
-  it('changes orientation while layout, leaf shape, and sphere geometry stay invariant', () => {
+  it('changes orientation and vortex-aware sphere placement while leaf layout/shape stay invariant', () => {
     const params: Params = {
       density: 5,
       variation: 0.7,
@@ -449,7 +449,21 @@ describe('leaf-field 4D flow phase', () => {
 
     const spheresOf = (scene: typeof start): Primitive[] =>
       scene.primitives.filter((primitive) => !isLeaf(primitive))
-    expect(spheresOf(evolved)).toEqual(spheresOf(start))
+    expect(spheresOf(evolved)).not.toEqual(spheresOf(start))
+  })
+
+  it('anchors sphere geometry at fieldPhase inside one prepared time sampler', () => {
+    const prepared = leafField.prepare(
+      { density: 4, sphereCount: 3, fieldPhase: 0.17 },
+      'phase-time-anchor',
+    )
+    const atStart = prepared(0)
+    const atLaterTime = prepared(3)
+    const spheresOf = (scene: typeof atStart): Primitive[] =>
+      scene.primitives.filter((primitive) => !isLeaf(primitive))
+
+    expect(spheresOf(atLaterTime)).toEqual(spheresOf(atStart))
+    expect(leavesOf(atLaterTime)).not.toEqual(leavesOf(atStart))
   })
 
   it('is seamless at the normalized phase boundary and after one future loop duration', () => {
@@ -783,6 +797,34 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     return (maxX - minX) / 2
   }
 
+  /** Mean signed tangency around a circle, folded so either circulation wins. */
+  function rimTangency(
+    seed: string,
+    cx: number,
+    cy: number,
+    radius: number,
+    fieldScale: number,
+    turbulence: number,
+    octaves: number,
+  ): number {
+    const angleAt = prepareCurlAngle4D(createRandom(seed), { gain: turbulence, octaves })
+    const samples = 24
+    let tangentProjection = 0
+    for (let i = 0; i < samples; i++) {
+      const rimAngle = (i / samples) * Math.PI * 2
+      const x = cx + Math.cos(rimAngle) * radius
+      const y = cy + Math.sin(rimAngle) * radius
+      const flowAngle = angleAt(
+        (x / WIDTH) * fieldScale,
+        (y / HEIGHT) * fieldScale,
+        1,
+        0,
+      )
+      tangentProjection += Math.cos(flowAngle - (rimAngle + Math.PI / 2))
+    }
+    return Math.abs(tangentProjection / samples)
+  }
+
   it('emits exactly `sphereCount` discs, so raising it yields strictly more', () => {
     const seed = 'set-count'
     const few = leafField.generate({ sphereCount: 1 }, seed, 0)
@@ -851,6 +893,66 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     expect(discsOf(b)).not.toEqual(discsOf(a))
   })
 
+  it('places sphere rims more tangent to the curl field than the former seeded-random centers', () => {
+    const fieldScale = 2
+    const turbulence = 0.2
+    const octaves = 2
+    const radius = 80
+    const seeds = [
+      'vortex-quality-a',
+      'vortex-quality-b',
+      'vortex-quality-c',
+      'vortex-quality-d',
+    ]
+    let selectedTotal = 0
+    let randomTotal = 0
+
+    for (const seed of seeds) {
+      const scene = leafField.generate(
+        {
+          fieldScale,
+          turbulence,
+          octaves,
+          sphereCount: 1,
+          sphereRadiusMin: radius,
+          sphereRadiusMax: radius,
+        },
+        seed,
+        0,
+      )
+      const [selectedX, selectedY] = primitiveCentroid(discsOf(scene)[0]!)
+      selectedTotal += rimTangency(
+        seed,
+        selectedX,
+        selectedY,
+        radius,
+        fieldScale,
+        turbulence,
+        octaves,
+      )
+
+      // Reconstruct the former placement policy: the same first two dedicated
+      // sphere-stream draws mapped uniformly into the radius-inset canvas.
+      const sphereRng = createRandom(`${seed}-sphere`)
+      const randomX = radius + sphereRng.value() * (WIDTH - radius * 2)
+      const randomY = radius + sphereRng.value() * (HEIGHT - radius * 2)
+      randomTotal += rimTangency(
+        seed,
+        randomX,
+        randomY,
+        radius,
+        fieldScale,
+        turbulence,
+        octaves,
+      )
+    }
+
+    const selectedMean = selectedTotal / seeds.length
+    const randomMean = randomTotal / seeds.length
+    expect(selectedMean).toBeGreaterThan(randomMean)
+    expect(selectedMean - randomMean).toBeGreaterThan(0.1)
+  })
+
   it('changing a sphere knob leaves the leaf primitives untouched (per-leaf rng seam intact)', () => {
     // The sphere set draws from a SEPARATE rng stream, so raising sphereCount
     // must consume more sphere draws WITHOUT shifting a single per-leaf roll.
@@ -882,13 +984,16 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     )
     const discs = discsOf(scene)
     expect(discs).toHaveLength(6)
+    const centers = new Set<string>()
     for (const disc of discs) {
       const { minX, minY, maxX, maxY } = primitiveBBox(disc)
       expect(minX).toBeGreaterThanOrEqual(-eps)
       expect(minY).toBeGreaterThanOrEqual(-eps)
       expect(maxX).toBeLessThanOrEqual(WIDTH + eps)
       expect(maxY).toBeLessThanOrEqual(HEIGHT + eps)
+      centers.add(primitiveCentroid(disc).join(','))
     }
+    expect(centers.size).toBe(discs.length)
   })
 
   it('re-seeding still moves discs at a smaller radius (placement stays seeded)', () => {
