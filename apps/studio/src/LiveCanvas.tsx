@@ -11,8 +11,10 @@ import {
 
 import {
   drawSceneFitted,
+  prepareSketch,
   type Canvas2DContext,
   type Params,
+  type PreparedFrame,
   type Seed,
   type Sketch,
   type TimeMetadata,
@@ -153,6 +155,7 @@ function drawFrame(
   sketch: Sketch,
   params: Params,
   seed: Seed,
+  preparedFrame: PreparedFrame,
   t: number,
   renderMode: RenderMode,
   tolerance: number,
@@ -184,7 +187,7 @@ function drawFrame(
   const rendered =
     renderMode === "outline"
       ? outlineScene(sketch, params, seed, t, tolerance)
-      : sketch.generate(params, seed, t);
+      : preparedFrame(t);
 
   // Hand the background-fit-and-draw to core's shared pipeline: `drawSceneFitted`
   // resets to identity, paints the full surface (opaque white by default — the
@@ -279,6 +282,16 @@ export function LiveCanvas({
 }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Caller-owned preparation is keyed by the two time-invariant determinism
+  // inputs. A prepared Sketch can retain immutable layout derived from
+  // `(params, seed)`; an ordinary Sketch receives a zero-state adapter over its
+  // existing `generate`. Changing Sketch, params, or seed invalidates exactly this
+  // sampler without touching the single wall-clock `t` (ADR-0002/0005).
+  const preparedFrame = useMemo(
+    () => prepareSketch(sketch, params, seed),
+    [sketch, params, seed],
+  );
+
   // The paper's CSS-box aspect (#155): the `<canvas>` box is sized to the
   // SKETCH's OWN aspect, not a fixed square. The `Sketch` type does not
   // statically expose its coordinate space — only a generated `Scene` carries
@@ -291,10 +304,10 @@ export function LiveCanvas({
   // untouched, so PNG/SVG export still snapshots the displayed frame. A
   // degenerate space (zero/non-finite extent) falls back to a square.
   const paperAspect = useMemo(() => {
-    const { space } = sketch.generate(params, seed, 0);
+    const { space } = preparedFrame(0);
     const ratio = space.width / space.height;
     return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
-  }, [sketch, params, seed]);
+  }, [preparedFrame]);
 
   // Inline the derived ratio as the `--paper-aspect` custom property the
   // `.live-canvas` rule reads for its `aspect-ratio` + contain-fit width. Cast
@@ -314,6 +327,11 @@ export function LiveCanvas({
   // sync by the same effect — assigned post-commit, not during render, so a
   // StrictMode double-render can't desync it.
   const sketchRef = useRef(sketch);
+  // The latest caller-owned sampler follows the same post-commit ref discipline
+  // as params/seed. The rAF effect does not depend on it, so invalidating
+  // preparation never resets the animation clock; the next tick samples the new
+  // immutable layout at the continuing `t`.
+  const preparedFrameRef = useRef(preparedFrame);
   // `renderModeRef` lets the `[]`-dep on-demand draw callbacks (drawCurrentFrame,
   // scrubTo) read the current mode without a `renderMode` dependency, so a mode
   // flip never re-runs the clock effect or resets the rAF baseline. Kept in sync
@@ -335,10 +353,11 @@ export function LiveCanvas({
     paramsRef.current = params;
     seedRef.current = seed;
     sketchRef.current = sketch;
+    preparedFrameRef.current = preparedFrame;
     renderModeRef.current = renderMode;
     toleranceRef.current = tolerance;
     onOutlineComputedRef.current = onOutlineComputed;
-  }, [params, seed, sketch, renderMode, tolerance, onOutlineComputed]);
+  }, [params, seed, sketch, preparedFrame, renderMode, tolerance, onOutlineComputed]);
 
   // The latest `t` the loop has drawn (0 for a static Sketch). The resize re-fit
   // redraws THIS frame so a box change repaints the current moment, not t = 0 —
@@ -401,6 +420,7 @@ export function LiveCanvas({
       sketchRef.current,
       paramsRef.current,
       seedRef.current,
+      preparedFrameRef.current,
       tRef.current,
       renderModeRef.current,
       toleranceRef.current,
@@ -492,7 +512,16 @@ export function LiveCanvas({
       // guarantee that `tick` can only ever draw fill. Tolerance is hardcoded 0
       // to match: the fill branch never simplifies, so the live loop stays
       // provably simplify-free (issue #232's on-demand-only invariant).
-      drawFrame(canvas, sketch, paramsRef.current, seedRef.current, t, "fill", 0);
+      drawFrame(
+        canvas,
+        sketch,
+        paramsRef.current,
+        seedRef.current,
+        preparedFrameRef.current,
+        t,
+        "fill",
+        0,
+      );
       frameId = requestAnimationFrame(tick);
     };
 
@@ -658,6 +687,7 @@ export function LiveCanvas({
         sketchRef.current,
         paramsRef.current,
         seedRef.current,
+        preparedFrameRef.current,
         value,
         renderModeRef.current,
         toleranceRef.current,

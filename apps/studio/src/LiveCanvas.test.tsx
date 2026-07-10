@@ -44,6 +44,34 @@ function animatedSketch(time: TimeMetadata | undefined) {
   return { sketch, generate };
 }
 
+/** A Sketch exposing the prepared-frame fast path, with each retained sampler observable. */
+function explicitlyPreparedSketch(time: TimeMetadata) {
+  const samplers: Array<(t: number) => Scene> = [];
+  const prepare = vi.fn((params: Record<string, unknown>, seed: string | number) => {
+    // Snapshot preparation inputs so a later caller mutation cannot change which
+    // layout this retained sampler represents.
+    const value = params.value as number;
+    const sampler = vi.fn((t: number): Scene => ({
+      space: { width: 100, height: 100 },
+      primitives: [{ points: [[value + Number(seed), t]] }],
+    }));
+    samplers.push(sampler);
+    return sampler;
+  });
+  const generate = vi.fn((): Scene => {
+    throw new Error("prepared Studio path unexpectedly called cold generate");
+  });
+  const sketch = {
+    id: "prepared",
+    name: "Prepared",
+    schema: {},
+    time,
+    prepare,
+    generate,
+  } as unknown as Sketch;
+  return { sketch, prepare, generate, samplers };
+}
+
 /** Build a static Sketch whose generated Scene has the given coordinate space. */
 function spacedSketch(width: number, height: number) {
   const scene: Scene = { space: { width, height }, primitives: [] };
@@ -357,6 +385,58 @@ describe("LiveCanvas transport — scrubbing pauses & sets t (AC2)", () => {
     tick(9999);
     expect(generate.mock.calls.length).toBe(drawsBefore);
     expect(lastDrawnT(generate)).toBeCloseTo(2.5, 5);
+  });
+});
+
+describe("LiveCanvas caller-owned frame preparation", () => {
+  it("prepares once per sketch/params/seed and continues the same clock after invalidation", () => {
+    const firstParams = { value: 1 };
+    const secondParams = { value: 4 };
+    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    mount(<LiveCanvas sketch={prepared.sketch} params={firstParams} seed={2} />);
+
+    expect(prepared.prepare).toHaveBeenCalledTimes(1);
+    expect(prepared.generate).not.toHaveBeenCalled();
+    expect(prepared.samplers[0]).toHaveBeenCalledWith(0); // paper-aspect probe
+
+    tick(1000);
+    expect(prepared.samplers[0]).toHaveBeenLastCalledWith(1);
+
+    // A parent rerender with the same identities reuses the retained sampler.
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={prepared.sketch} params={firstParams} seed={2} />,
+      );
+    });
+    expect(prepared.prepare).toHaveBeenCalledTimes(1);
+
+    // New params invalidate preparation, but the rAF baseline is not recaptured:
+    // the new sampler's next live frame continues at t=1.5, not t=0.5.
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={prepared.sketch} params={secondParams} seed={2} />,
+      );
+    });
+    expect(prepared.prepare).toHaveBeenCalledTimes(2);
+    tick(1500);
+    expect(prepared.samplers[1]).toHaveBeenLastCalledWith(1.5);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={prepared.sketch} params={secondParams} seed={9} />,
+      );
+    });
+    expect(prepared.prepare).toHaveBeenCalledTimes(3);
+    expect(prepared.generate).not.toHaveBeenCalled();
+
+    const replacement = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    act(() => {
+      root!.render(
+        <LiveCanvas sketch={replacement.sketch} params={secondParams} seed={9} />,
+      );
+    });
+    expect(replacement.prepare).toHaveBeenCalledTimes(1);
+    expect(replacement.generate).not.toHaveBeenCalled();
   });
 });
 

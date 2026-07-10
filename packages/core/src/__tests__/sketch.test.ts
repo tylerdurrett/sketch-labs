@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { defaultParams, newSeed, randomize } from '../sketch'
-import type { Params, ParamSchema } from '../sketch'
+import {
+  defaultParams,
+  definePreparedSketch,
+  newSeed,
+  prepareSketch,
+  randomize,
+} from '../sketch'
+import type { Params, ParamSchema, StatelessSketch } from '../sketch'
+import type { Scene } from '../scene'
 
 /**
  * A scripted `rand` stub: yields the given values in order, so a test can pin
@@ -145,5 +152,68 @@ describe('newSeed', () => {
     const params: Params = { count: 24, radius: 12 }
     newSeed(scriptedRand([0.123]))
     expect(params).toEqual({ count: 24, radius: 12 })
+  })
+})
+
+describe('caller-owned prepared frames', () => {
+  const sceneAt = (value: number): Scene => ({
+    space: { width: 10, height: 10 },
+    primitives: [{ points: [[value, value]] }],
+  })
+
+  it('derives public generate from the same prepare implementation', () => {
+    const calls: Array<[Params, string | number]> = []
+    const sketch = definePreparedSketch({
+      id: 'prepared',
+      name: 'Prepared',
+      schema: {},
+      prepare(params, seed) {
+        calls.push([params, seed])
+        const offset = params.offset as number
+        return (t) => sceneAt(offset + Number(seed) + t)
+      },
+    })
+
+    const params = { offset: 2 }
+    expect(sketch.generate(params, 3, 4)).toEqual(sceneAt(9))
+    expect(sketch.prepare(params, 3)(4)).toEqual(sceneAt(9))
+    expect(calls).toEqual([
+      [params, 3],
+      [params, 3],
+    ])
+  })
+
+  it('uses specialized preparation when present and adapts legacy generate otherwise', () => {
+    let prepared = 0
+    let generated = 0
+    const specialized = definePreparedSketch({
+      id: 'specialized',
+      name: 'Specialized',
+      schema: {},
+      prepare() {
+        prepared++
+        return sceneAt
+      },
+    })
+    const legacy: StatelessSketch = {
+      id: 'legacy',
+      name: 'Legacy',
+      schema: {},
+      generate(_params, _seed, t) {
+        generated++
+        return sceneAt(t)
+      },
+    }
+
+    const warm = prepareSketch(specialized, {}, 1)
+    expect(prepared).toBe(1)
+    expect(warm(1)).toEqual(sceneAt(1))
+    expect(warm(2)).toEqual(sceneAt(2))
+    expect(prepared).toBe(1)
+
+    const adapted = prepareSketch(legacy, {}, 1)
+    expect(adapted(1)).toEqual(sceneAt(1))
+    expect(adapted(2)).toEqual(sceneAt(2))
+    expect(generated).toBe(2)
   })
 })

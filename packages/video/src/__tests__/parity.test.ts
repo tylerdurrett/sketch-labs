@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { defaultParams, drawSceneFitted, registry, type Seed } from '@harness/core'
+import {
+  defaultParams,
+  drawSceneFitted,
+  prepareSketch,
+  registry,
+  type Seed,
+} from '@harness/core'
 
 import { frameToScene } from '../frameToScene'
 import { RecordingContext } from './recordingContext'
@@ -93,5 +99,28 @@ describe('cross-caller draw-call parity', () => {
     expect(ctx.log.length).toBeGreaterThan(10)
     expect(ctx.log).toContain('save')
     expect(ctx.log).toContain('stroke')
+  })
+})
+
+describe('prepared Studio sampling remains identical to random-access video sampling', () => {
+  it('produces the same leaf-field Scene and ordered draw stream at frame/fps time', () => {
+    const sketch = registry.get('leaf-field')
+    const params = { ...defaultParams(sketch.schema), density: 3, sphereCount: 1 }
+    const seed: Seed = 'prepared-cross-caller'
+    const frame = 9
+    const fps = 24
+    const t = frame / fps
+
+    // Studio retains this caller-owned sampler across its wall-clock frames;
+    // Remotion remains free to request the same frame cold and out of order.
+    const studioScene = prepareSketch(sketch, params, seed)(t)
+    const videoScene = frameToScene(sketch, params, seed, frame, fps)
+    expect(studioScene).toEqual(videoScene)
+
+    const studioCtx = new RecordingContext()
+    const videoCtx = new RecordingContext()
+    drawSceneFitted(studioCtx, studioScene, 1000, 1000)
+    drawSceneFitted(videoCtx, videoScene, 1000, 1000)
+    expect(studioCtx.log).toEqual(videoCtx.log)
   })
 })
