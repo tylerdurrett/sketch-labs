@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fbm } from '../fbm'
+import { fbm, prepareFbm3D, type FbmOptions } from '../fbm'
 import { createRandom } from '../random'
 
 describe('fbm — determinism', () => {
@@ -32,6 +32,33 @@ describe('fbm — determinism', () => {
     // Passing rng.noise2D directly should equal passing the whole Random.
     expect(fbm(rng.noise2D, 0.7, 1.9)).toBe(fbm(rng, 0.7, 1.9))
     expect(fbm(rng.noise3D, 0.7, 1.9, 2.4)).toBe(fbm(rng, 0.7, 1.9, 2.4))
+  })
+})
+
+describe('prepareFbm3D — exact generic equivalence', () => {
+  const optionSets: FbmOptions[] = [
+    {},
+    { octaves: 1 },
+    { octaves: 0, gain: 0.9, scale: 2 },
+    { octaves: 3, lacunarity: 2.1, gain: 0.37, scale: 1.3 },
+    { octaves: 6, lacunarity: 1.7, gain: 0, scale: 0 },
+  ]
+
+  it('matches one-shot fbm bit-for-bit across sources, options, and coordinates', () => {
+    for (const seed of ['prepared-a', 'prepared-b', 42] as const) {
+      const rng = createRandom(seed)
+      for (const source of [rng, rng.noise3D] as const) {
+        for (const options of optionSets) {
+          const prepared = prepareFbm3D(source, options)
+          for (let i = 0; i < 12; i++) {
+            const x = i * 0.173 - 0.4
+            const y = i * -0.219 + 0.7
+            const z = i * 0.127
+            expect(prepared(x, y, z)).toBe(fbm(source, x, y, z, options))
+          }
+        }
+      }
+    }
   })
 })
 

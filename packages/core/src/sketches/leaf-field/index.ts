@@ -144,7 +144,7 @@
  * live.
  */
 
-import { curl } from '../../curl'
+import { prepareCurlAngle3D } from '../../curl'
 import { circle } from '../../geometry'
 import { lerp } from '../../math'
 import { samplePoissonDisk } from '../../poisson'
@@ -535,6 +535,10 @@ export const leafField = definePreparedSketch({
     // value()/gaussian() stream was advanced during preparation. This makes the
     // prepared layout's no-accumulated-state boundary explicit.
     const noise3D = rng.noise3D
+    const flowAngleAt = prepareCurlAngle3D(noise3D, {
+      gain: turbulence,
+      octaves,
+    })
 
     return (t: number): Scene => {
       // The Sketch-declared background (ADR-0009): the whole output surface,
@@ -561,11 +565,11 @@ export const leafField = definePreparedSketch({
         // Sample the divergence-free flow at this point via the 3D curl overload
         // (z = t). Canvas-normalized coordinates make fieldScale read as features
         // across the canvas; octaves/turbulence shape the fBm stack.
-        const flow = curl(noise3D, (x / WIDTH) * fieldScale, (y / HEIGHT) * fieldScale, t, {
-          gain: turbulence,
-          octaves,
-        })
-        const angle = Math.atan2(flow[1], flow[0])
+        const angle = flowAngleAt(
+          (x / WIDTH) * fieldScale,
+          (y / HEIGHT) * fieldScale,
+          t,
+        )
 
         // Copy the immutable prepared outline into Scene-owned points while
         // rotating and measuring it in one pass, then center it in place.
