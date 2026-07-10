@@ -27,5 +27,8 @@ fast path or adapts an ordinary stateless Sketch with a zero-state closure over
 - Studio preparation is keyed on `(sketch, params, seed)` and deliberately does
   not key or reset the ADR-0005 wall clock. A changed layout is sampled at the
   continuing `t` on the next frame.
+- A Sketch whose coordinate space is invariant across params, seed, and time may
+  declare `SketchBase.space`, letting Harness layout avoid a throwaway frame
+  sample; dynamic-space Sketches omit it and keep the generated-Scene fallback.
 - Exact Scene equality across cold/warm paths is the correctness gate; performance
   benchmarks measure cold preparation separately from warm varying-`t` sampling.
