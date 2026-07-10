@@ -211,6 +211,7 @@ function meanLeafArea(primitives: Primitive[]): number {
 describe('leaf-field Sketch contract', () => {
   it('declares exactly the eighteen knobs in order and NO time metadata (static)', () => {
     expect(Object.keys(leafField.schema)).toEqual([...KNOBS])
+    expect(leafField.schema.sphereCount.max).toBe(25)
     expect(leafField.schema.fieldPhase).toEqual({
       kind: 'number',
       min: 0,

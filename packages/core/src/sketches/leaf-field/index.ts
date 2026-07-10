@@ -234,7 +234,7 @@ const schema = {
    * default is 6 (the "Nice One" preset), so the field ships with the full set.
    * Consumed NOW (sphere-set count). Appended last (#141).
    */
-  sphereCount: { kind: 'number', min: 0, max: 6, default: 6, step: 1, integer: true },
+  sphereCount: { kind: 'number', min: 0, max: 25, default: 6, step: 1, integer: true },
   /**
    * Sphere radius range low, in coordinate-space units (WIDTH=1000). Default from
    * the "Nice One" preset (40). Consumed NOW.
