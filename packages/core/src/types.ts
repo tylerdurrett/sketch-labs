@@ -43,4 +43,6 @@ export interface Random {
   noise2D(x: number, y: number): number
   /** 3D simplex noise seeded to this instance */
   noise3D(x: number, y: number, z: number): number
+  /** 4D simplex noise seeded to this instance */
+  noise4D(x: number, y: number, z: number, w: number): number
 }

@@ -1,5 +1,5 @@
 import alea from 'alea'
-import { createNoise2D, createNoise3D } from 'simplex-noise'
+import { createNoise2D, createNoise3D, createNoise4D } from 'simplex-noise'
 
 import type { Random, Vec2 } from './types'
 
@@ -14,6 +14,7 @@ export function createRandom(seed: string | number): Random {
   // doesn't advance the main PRNG sequence (and vice versa).
   const noise2D = createNoise2D(alea(`${seed}-noise2d`))
   const noise3D = createNoise3D(alea(`${seed}-noise3d`))
+  const noise4D = createNoise4D(alea(`${seed}-noise4d`))
 
   function value(): number {
     return prng()
@@ -86,5 +87,6 @@ export function createRandom(seed: string | number): Random {
     insideCircle,
     noise2D,
     noise3D,
+    noise4D,
   }
 }

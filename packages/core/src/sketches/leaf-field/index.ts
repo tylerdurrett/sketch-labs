@@ -16,12 +16,13 @@
  * under later ones, so the overlap reads as a real composited field, not a flat
  * stamp sheet.
  *
- * ALL SEVENTEEN KNOBS LIVE: the first eleven complete the scatter + placement +
+ * ALL EIGHTEEN KNOBS LIVE: the first eleven complete the scatter + placement +
  * flow-field orientation + per-leaf variation + compositing, the four appended
  * sphere knobs (`sphereCount`, `sphereRadiusMin`, `sphereRadiusMax`,
  * `sphereDepth`) drive the occluder discs (below), and the two appended color
  * knobs (`backgroundColor`, `discColor` — the first `kind: 'color'` params,
- * ADR-0010) own the scene background and the disc fill. `density`
+ * ADR-0010) own the scene background and the disc fill, and the final
+ * `fieldPhase` knob scrubs around the seamless 4D flow loop. `density`
  * drives spacing;
  * `fieldScale` (curl base frequency, in features across the canvas),
  * `octaves` (how many noise layers stack) and `turbulence` (curl octave falloff
@@ -43,6 +44,14 @@
  * smooth, current-like sweep, not the near-random per-leaf scatter you get when
  * the base frequency runs into the tens. Fewer `octaves` keeps the field's broad
  * shape from dissolving into fine turbulence.
+ *
+ * LOOP-READY FLOW (2026-07-10): rather than moving linearly through a 3D noise
+ * z-axis, the flow samples a circle in the final two coordinates of 4D simplex
+ * noise. `fieldPhase` selects the normalized position around that circle;
+ * prepared-frame time advances it over a named loop duration. Returning to
+ * phase 0 returns to identical 4D coordinates, so future time metadata can
+ * animate a seamless loop without changing the field contract. The Sketch
+ * remains static today: it still declares no `time` metadata.
  *
  * SCALES OVERLAP (2026-07-02): the scatter is drawn TOP-OF-CANVAS FIRST (points
  * sorted by ascending y), so leaves lower on the canvas paint last and overlap
@@ -99,9 +108,9 @@
  *
  * STATIC / DETERMINISTIC: there is no `time` metadata (the Harness hides the
  * scrubber), and `generate` is a pure function of `(params, seed, t)`. `t` is
- * threaded LIVE into the 3D curl overload as the field's z slice (ADR-0002) so
- * animating later is a metadata swap, not a rewrite; with no `time` metadata t
- * is 0 in practice, so the field is a static slice today. Everything random
+ * threaded LIVE into the normalized phase around the 4D flow loop (ADR-0002),
+ * so animating later is a metadata swap, not a rewrite; with no `time` metadata
+ * t is 0 in practice, so the field is a static phase today. Everything random
  * flows from the explicit Seed via `createRandom` / the sampler's seed: NO
  * `Math.random`, no clock read, and no state carried across `generate` calls.
  * Re-seeding reshuffles the whole field while the params hold. The two color
@@ -109,9 +118,9 @@
  * and the Scene's `background` — so every leaf outline and disc silhouette stays
  * byte-identical to the pre-color field at any color value. The "Nice One"
  * preset pins both color knobs EXPLICITLY (the shipped gray/white pair,
- * 2026-07-07) so its image stays stable against future default changes instead
- * of silently tracking them; the original white-on-white capture is recoverable
- * by setting both knobs white.
+ * 2026-07-07) and pins `fieldPhase` at 0 so its image stays stable against future
+ * default changes instead of silently tracking them; the original white-on-white
+ * capture is recoverable by setting both color knobs white.
  *
  * CALLER-OWNED PREPARATION (2026-07-09): this Sketch splits its stateless frame
  * logic at the real time boundary. `prepare(params, seed)` derives one immutable
@@ -144,7 +153,7 @@
  * live.
  */
 
-import { prepareCurlAngle3D } from '../../curl'
+import { prepareCurlAngle4D } from '../../curl'
 import { circle } from '../../geometry'
 import { lerp } from '../../math'
 import { samplePoissonDisk } from '../../poisson'
@@ -163,12 +172,13 @@ import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
 /**
- * The leaf-field Parameter Schema — seventeen knobs (fifteen numeric, two
+ * The leaf-field Parameter Schema — eighteen knobs (sixteen numeric, two
  * color), all consumed NOW. Order is fixed and part of the contract; each
  * widening APPENDS so earlier knobs keep their positions: the sphere knobs
  * (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then `sphereDepth`
  * #142) after the original eleven, then the color knobs (`backgroundColor`,
- * `discColor` — the first `kind: 'color'` specs, ADR-0010) last. `satisfies`
+ * `discColor` — the first `kind: 'color'` specs, ADR-0010), then the normalized
+ * `fieldPhase` loop scrubber last. `satisfies`
  * keeps the literal key set (so `numberParam`/`colorParam` can filter
  * `keyof typeof schema` by each spec's literal `kind`) while enforcing the spec
  * type — the target is the full `ParamSpec` union now that the kinds mix.
@@ -252,10 +262,33 @@ const schema = {
    * last (ADR-0010).
    */
   discColor: { kind: 'color', default: '#ffffff' },
+  /**
+   * Normalized position around the seamless 4D flow-field loop. 0 and 1 sample
+   * the same point; intermediate values smoothly evolve only leaf orientation.
+   * Prepared-frame time advances from this phase, while the Sketch remains
+   * static until time metadata is deliberately added. Consumed NOW. Appended
+   * last (2026-07-10).
+   */
+  fieldPhase: { kind: 'number', min: 0, max: 1, default: 0, step: 0.001 },
 } satisfies Record<string, ParamSpec>
 
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
 const REFERENCE_SPACING = 400
+
+/** Future animation duration for one complete traversal of the 4D loop. */
+const FIELD_LOOP_DURATION_SECONDS = 12
+
+/**
+ * Radius of the circular path through 4D noise space. One noise-space unit
+ * yields clear evolution over a revolution while remaining smooth under the
+ * fieldPhase knob's fine step.
+ */
+const FIELD_LOOP_RADIUS = 1
+
+/** Wrap any finite phase into [0, 1); degrade invalid caller time/params safely. */
+function wrapUnitPhase(phase: number): number {
+  return Number.isFinite(phase) ? phase - Math.floor(phase) : 0
+}
 
 // Base shape constants. Each leaf's length draws uniformly in its own
 // [leafSizeMin, leafSizeMax] range, its tip sharpness in its own
@@ -396,6 +429,7 @@ export const leafField = definePreparedSketch({
     // color value (the determinism seam holds untouched).
     const backgroundColor = colorParam(params, schema, 'backgroundColor')
     const discColor = colorParam(params, schema, 'discColor')
+    const fieldPhase = numberParam(params, schema, 'fieldPhase')
 
     // Sphere-set radius bounds. The Sketch owns its own inter-param coherence
     // (CONTEXT.md), so guarantee a valid draw range by swapping if a user sets
@@ -535,13 +569,23 @@ export const leafField = definePreparedSketch({
     // Retain only the pure noise sampler for warm frames, not the Random whose
     // value()/gaussian() stream was advanced during preparation. This makes the
     // prepared layout's no-accumulated-state boundary explicit.
-    const noise3D = rng.noise3D
-    const flowAngleAt = prepareCurlAngle3D(noise3D, {
+    const noise4D = rng.noise4D
+    const flowAngleAt = prepareCurlAngle4D(noise4D, {
       gain: turbulence,
       octaves,
     })
 
     return (t: number): Scene => {
+      // Trace a circle through the final two dimensions of 4D noise. Both the
+      // public phase and future time can cross either boundary; wrapping keeps
+      // negative/large values stable and makes phase 0 === phase 1 exactly.
+      const phase = wrapUnitPhase(
+        wrapUnitPhase(fieldPhase) + wrapUnitPhase(t / FIELD_LOOP_DURATION_SECONDS),
+      )
+      const phaseAngle = phase * 2 * Math.PI
+      const loopZ = FIELD_LOOP_RADIUS * Math.cos(phaseAngle)
+      const loopW = FIELD_LOOP_RADIUS * Math.sin(phaseAngle)
+
       // The Sketch-declared background (ADR-0009): the whole output surface,
       // letterbox included, painted from the `backgroundColor` knob — part of the
       // image, so it rides the (params, seed) determinism spine.
@@ -563,13 +607,15 @@ export const leafField = definePreparedSketch({
       leaves.forEach(({ x, y, outline }, i) => {
         for (const sphere of placedSpheres) if (sphere.spliceIdx === i) drawDisc(sphere)
 
-        // Sample the divergence-free flow at this point via the 3D curl overload
-        // (z = t). Canvas-normalized coordinates make fieldScale read as features
-        // across the canvas; octaves/turbulence shape the fBm stack.
+        // Sample the divergence-free x/y flow at this point while the final two
+        // 4D coordinates travel around the loop. Canvas-normalized coordinates
+        // make fieldScale read as features across the canvas; octaves/turbulence
+        // shape the fBm stack.
         const angle = flowAngleAt(
           (x / WIDTH) * fieldScale,
           (y / HEIGHT) * fieldScale,
-          t,
+          loopZ,
+          loopW,
         )
 
         // Copy the immutable prepared outline into Scene-owned points while

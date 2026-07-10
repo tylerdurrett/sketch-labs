@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import * as barrel from '../index'
-import { curl } from '../curl'
+import { prepareCurlAngle4D } from '../curl'
 import { createRandom } from '../random'
 import { circles } from '../sketches/circles'
 import { leafField } from '../sketches/leaf-field'
@@ -11,11 +11,11 @@ import type { Point } from '../types'
 import type { Primitive } from '../scene'
 
 /**
- * The seventeen leaf-field knobs, in declaration order. Each widening APPENDS
+ * The eighteen leaf-field knobs, in declaration order. Each widening APPENDS
  * so earlier knobs keep their positions (order is part of the contract): the
  * sphere knobs (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then
  * `sphereDepth` #142) after the original eleven, then the two color knobs
- * (`backgroundColor`, `discColor` — ADR-0010) last.
+ * (`backgroundColor`, `discColor` — ADR-0010), then `fieldPhase` last.
  */
 const KNOBS = [
   'fieldScale',
@@ -35,6 +35,7 @@ const KNOBS = [
   'sphereDepth',
   'backgroundColor',
   'discColor',
+  'fieldPhase',
 ] as const
 
 /** The bold dark fill and paper-colored rim the audit pinned (see the sketch header). */
@@ -150,20 +151,23 @@ function fieldAlignment(
 
 /**
  * Field axis angle at a leaf's centroid, reconstructed the same way the source
- * does: same curl overload, CANVAS-NORMALIZED coords, same fieldScale/octaves/
- * turbulence, same rng-from-seed, t=0.
+ * does: same prepared curl sampler, CANVAS-NORMALIZED coords, same
+ * fieldScale/octaves/turbulence, same rng-from-seed, and phase 0's loop
+ * coordinates.
  */
 function fieldAxisAt(primitive: Primitive, seed: string): number {
   const rng = createRandom(seed)
   const [cx, cy] = primitiveCentroid(primitive)
-  const flow = curl(
-    rng,
+  const angleAt = prepareCurlAngle4D(rng, {
+    gain: ORIENT_TURBULENCE,
+    octaves: ORIENT_OCTAVES,
+  })
+  return angleAt(
     (cx / WIDTH) * ORIENT_FIELD_SCALE,
     (cy / HEIGHT) * ORIENT_FIELD_SCALE,
+    1,
     0,
-    { gain: ORIENT_TURBULENCE, octaves: ORIENT_OCTAVES },
   )
-  return Math.atan2(flow[1], flow[0])
 }
 
 /**
@@ -205,8 +209,15 @@ function meanLeafArea(primitives: Primitive[]): number {
 }
 
 describe('leaf-field Sketch contract', () => {
-  it('declares exactly the seventeen knobs in order and NO time metadata (static)', () => {
+  it('declares exactly the eighteen knobs in order and NO time metadata (static)', () => {
     expect(Object.keys(leafField.schema)).toEqual([...KNOBS])
+    expect(leafField.schema.fieldPhase).toEqual({
+      kind: 'number',
+      min: 0,
+      max: 1,
+      default: 0,
+      step: 0.001,
+    })
     // Static Sketch: absence of `time` is what makes the Harness hide the scrubber.
     expect(leafField.time).toBeUndefined()
   })
@@ -282,12 +293,11 @@ describe('leaf-field determinism (ADR-0002)', () => {
     expect(again).toEqual(first)
   })
 
-  it('threads t LIVE into the flow field (ADR-0002 plumbing), staying static via no time metadata', () => {
-    // #127 makes t the curl field's z slice, so a different t reorients the
+  it('threads t LIVE around the 4D loop, staying static via no time metadata', () => {
+    // A different t advances the normalized circular phase and reorients the
     // field. The Sketch still ships static: it declares NO `time` metadata, so
     // the Harness pins t=0 and this live plumbing is a metadata swap away from
-    // animating rather than a rewrite. (Determinism at a fixed t is covered
-    // above; here we assert the z-slice is genuinely wired through.)
+    // animating rather than a rewrite. Determinism at a fixed t is covered above.
     const params: Params = { density: 5 }
     const atZero = leafField.generate(params, 's', 0)
     const atLater = leafField.generate(params, 's', 42)
@@ -402,6 +412,58 @@ describe('leaf-field flow-field orientation (#127)', () => {
     )
     expect(shuffled).toBeLessThan(coherent)
     expect(shuffled).toBeLessThan(0.6)
+  })
+})
+
+describe('leaf-field 4D flow phase', () => {
+  it('changes orientation while layout, leaf shape, and sphere geometry stay invariant', () => {
+    const params: Params = {
+      density: 5,
+      variation: 0.7,
+      sphereCount: 3,
+      fieldPhase: 0,
+    }
+    const seed = 'phase-isolation'
+    const start = leafField.generate(params, seed, 0)
+    const evolved = leafField.generate({ ...params, fieldPhase: 0.25 }, seed, 0)
+    const startLeaves = leavesOf(start)
+    const evolvedLeaves = leavesOf(evolved)
+
+    expect(evolvedLeaves).toHaveLength(startLeaves.length)
+    let changedOrientations = 0
+    for (let i = 0; i < startLeaves.length; i++) {
+      const before = startLeaves[i]!
+      const after = evolvedLeaves[i]!
+      const [beforeCx, beforeCy] = primitiveCentroid(before)
+      const [afterCx, afterCy] = primitiveCentroid(after)
+      expect(afterCx).toBeCloseTo(beforeCx, 10)
+      expect(afterCy).toBeCloseTo(beforeCy, 10)
+      expect(after.points).toHaveLength(before.points.length)
+      expect(spineLength(after)).toBeCloseTo(spineLength(before), 8)
+      expect(polygonArea(after)).toBeCloseTo(polygonArea(before), 7)
+      if (Math.abs(Math.sin(spineAxisAngle(after) - spineAxisAngle(before))) > 0.05) {
+        changedOrientations++
+      }
+    }
+    expect(changedOrientations).toBeGreaterThan(startLeaves.length / 2)
+
+    const spheresOf = (scene: typeof start): Primitive[] =>
+      scene.primitives.filter((primitive) => !isLeaf(primitive))
+    expect(spheresOf(evolved)).toEqual(spheresOf(start))
+  })
+
+  it('is seamless at the normalized phase boundary and after one future loop duration', () => {
+    const params: Params = { density: 4, variation: 0.5, sphereCount: 2 }
+    const seed = 'phase-loop-boundary'
+    expect(leafField.generate({ ...params, fieldPhase: 1 }, seed, 0)).toEqual(
+      leafField.generate({ ...params, fieldPhase: 0 }, seed, 0),
+    )
+
+    // A nonzero offset keeps this assertion sensitive to floating-point seams
+    // caused by composing the public phase with one wrapped time revolution.
+    const prepared = leafField.prepare({ ...params, fieldPhase: 0.37 }, seed)
+    expect(prepared(12)).toEqual(prepared(0))
+    expect(prepared(-12)).toEqual(prepared(0))
   })
 })
 

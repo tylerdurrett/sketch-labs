@@ -20,7 +20,8 @@
     "sphereRadiusMax": 190.12,
     "sphereDepth": 0.5,
     "backgroundColor": "#878787",
-    "discColor": "#ffffff"
+    "discColor": "#ffffff",
+    "fieldPhase": 0
   },
   "locks": []
 }

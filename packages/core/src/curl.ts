@@ -1,9 +1,11 @@
 import {
   fbm,
   prepareFbm3D,
+  prepareFbm4D,
   type FbmOptions,
   type Noise2DFn,
   type Noise3DFn,
+  type Noise4DFn,
 } from './fbm'
 import type { Random, Vec2 } from './types'
 
@@ -57,6 +59,30 @@ export function prepareCurlAngle3D(
   return (x, y, z) => {
     const dPsiDx = (psi(x + eps, y, z) - psi(x - eps, y, z)) / (2 * eps)
     const dPsiDy = (psi(x, y + eps, z) - psi(x, y - eps, z)) / (2 * eps)
+    return Math.atan2(-dPsiDx, dPsiDy)
+  }
+}
+
+/** A prepared 4D curl field sampled directly as its in-plane angle. */
+export type CurlAngle4DFn = (x: number, y: number, z: number, w: number) => number
+
+/**
+ * Prepare a 4D curl field for repeated in-plane angle samples.
+ *
+ * Only x and y are offset for the central differences. The z/w coordinates are
+ * held fixed, so callers can move them around a circle to obtain a seamless
+ * loop without changing the divergence-free x/y construction.
+ */
+export function prepareCurlAngle4D(
+  source: Random | Noise4DFn,
+  options: CurlOptions = {},
+): CurlAngle4DFn {
+  const psi = prepareFbm4D(source, options)
+  const eps = resolveEpsilon(options)
+
+  return (x, y, z, w) => {
+    const dPsiDx = (psi(x + eps, y, z, w) - psi(x - eps, y, z, w)) / (2 * eps)
+    const dPsiDy = (psi(x, y + eps, z, w) - psi(x, y - eps, z, w)) / (2 * eps)
     return Math.atan2(-dPsiDx, dPsiDy)
   }
 }

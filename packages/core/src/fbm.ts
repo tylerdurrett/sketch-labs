@@ -12,6 +12,12 @@ export type Noise2DFn = (x: number, y: number) => number
  */
 export type Noise3DFn = (x: number, y: number, z: number) => number
 
+/**
+ * A bare 4D simplex noise function (e.g. `Random.noise4D`).
+ * Expected to return values in roughly [-1, 1].
+ */
+export type Noise4DFn = (x: number, y: number, z: number, w: number) => number
+
 /** Tunables for {@link fbm}. All optional — see defaults below. */
 export interface FbmOptions {
   /** Number of noise layers summed together. More octaves = more fine detail. Default 4. */
@@ -71,6 +77,11 @@ function toNoise3D(source: Random | Noise3DFn): Noise3DFn {
   return typeof source === 'function' ? source : source.noise3D
 }
 
+/** Extract a 4D sampler from either a Random instance or a bare noise fn. */
+function toNoise4D(source: Random | Noise4DFn): Noise4DFn {
+  return typeof source === 'function' ? source : source.noise4D
+}
+
 /**
  * Prepare a 3D fBm sampler whose source and options stay fixed across samples.
  *
@@ -94,6 +105,43 @@ export function prepareFbm3D(
 
     for (let i = 0; i < octaves; i++) {
       sum += noise3D(x * frequency, y * frequency, z * frequency) * amplitude
+      totalAmplitude += amplitude
+      frequency *= lacunarity
+      amplitude *= gain
+    }
+
+    return totalAmplitude === 0 ? 0 : sum / totalAmplitude
+  }
+}
+
+/**
+ * Prepare a 4D fBm sampler whose source and options stay fixed across samples.
+ *
+ * This follows {@link prepareFbm3D}'s exact octave and normalization structure,
+ * adding a fourth coordinate for callers that need a periodic path through a
+ * higher-dimensional field.
+ */
+export function prepareFbm4D(
+  source: Random | Noise4DFn,
+  options: FbmOptions = {},
+): Noise4DFn {
+  const noise4D = toNoise4D(source)
+  const { octaves, lacunarity, gain, scale } = { ...DEFAULTS, ...options }
+
+  return (x, y, z, w) => {
+    let frequency = scale
+    let amplitude = 1
+    let sum = 0
+    let totalAmplitude = 0
+
+    for (let i = 0; i < octaves; i++) {
+      sum +=
+        noise4D(
+          x * frequency,
+          y * frequency,
+          z * frequency,
+          w * frequency,
+        ) * amplitude
       totalAmplitude += amplitude
       frequency *= lacunarity
       amplitude *= gain

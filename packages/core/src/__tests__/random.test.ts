@@ -16,6 +16,7 @@ describe('createRandom', () => {
     expect(typeof rng.insideCircle).toBe('function')
     expect(typeof rng.noise2D).toBe('function')
     expect(typeof rng.noise3D).toBe('function')
+    expect(typeof rng.noise4D).toBe('function')
   })
 })
 
@@ -295,6 +296,25 @@ describe('noise3D', () => {
   })
 })
 
+describe('noise4D', () => {
+  it('returns consistent values for the same seed and coordinates', () => {
+    const a = createRandom(42)
+    const b = createRandom(42)
+    expect(a.noise4D(1.5, 2.5, 3.5, 4.5)).toBe(
+      b.noise4D(1.5, 2.5, 3.5, 4.5),
+    )
+  })
+
+  it('returns values in [-1, 1]', () => {
+    const rng = createRandom('noise4d-bounds')
+    for (let i = 0; i < 100; i++) {
+      const v = rng.noise4D(i * 0.1, i * 0.2, i * 0.3, i * 0.4)
+      expect(v).toBeGreaterThanOrEqual(-1)
+      expect(v).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
 describe('independence', () => {
   it('two instances with different seeds do not interfere', () => {
     const a = createRandom(1)
@@ -317,6 +337,7 @@ describe('independence', () => {
     // Call noise on a but not b
     a.noise2D(1, 2)
     a.noise3D(3, 4, 5)
+    a.noise4D(6, 7, 8, 9)
 
     // value() sequences should still match because noise uses separate PRNGs
     const seqA = Array.from({ length: 20 }, () => a.value())

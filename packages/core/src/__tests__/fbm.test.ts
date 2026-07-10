@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fbm, prepareFbm3D, type FbmOptions } from '../fbm'
+import { fbm, prepareFbm3D, prepareFbm4D, type FbmOptions } from '../fbm'
 import { createRandom } from '../random'
 
 describe('fbm — determinism', () => {
@@ -59,6 +59,49 @@ describe('prepareFbm3D — exact generic equivalence', () => {
         }
       }
     }
+  })
+})
+
+describe('prepareFbm4D', () => {
+  it('is deterministic and accepts either Random or its bare 4D sampler', () => {
+    const a = createRandom('prepared-4d')
+    const b = createRandom('prepared-4d')
+    const options = { octaves: 5, lacunarity: 1.7, gain: 0.37, scale: 1.3 }
+    const fromRandom = prepareFbm4D(a, options)
+    const fromBare = prepareFbm4D(b.noise4D, options)
+
+    for (let i = 0; i < 20; i++) {
+      const coords = [i * 0.13, i * -0.17, i * 0.19, i * -0.23] as const
+      expect(fromRandom(...coords)).toBe(fromBare(...coords))
+    }
+  })
+
+  it('preserves the prepared fBm octave and normalization structure', () => {
+    const rng = createRandom('prepared-4d-structure')
+    const options = { octaves: 3, lacunarity: 2.1, gain: 0.4, scale: 0.7 }
+    const prepared = prepareFbm4D(rng, options)
+    const [x, y, z, w] = [0.2, -0.3, 0.5, -0.7]
+    let frequency = options.scale
+    let amplitude = 1
+    let sum = 0
+    let totalAmplitude = 0
+    for (let i = 0; i < options.octaves; i++) {
+      sum +=
+        rng.noise4D(
+          x * frequency,
+          y * frequency,
+          z * frequency,
+          w * frequency,
+        ) * amplitude
+      totalAmplitude += amplitude
+      frequency *= options.lacunarity
+      amplitude *= options.gain
+    }
+    expect(prepared(x, y, z, w)).toBe(sum / totalAmplitude)
+  })
+
+  it('returns a flat field when octaves is zero', () => {
+    expect(prepareFbm4D(createRandom('flat-4d'), { octaves: 0 })(1, 2, 3, 4)).toBe(0)
   })
 })
 

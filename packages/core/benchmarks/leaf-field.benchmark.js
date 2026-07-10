@@ -25,6 +25,7 @@ const PARAMS = Object.freeze({
   sphereDepth: 0.5,
   backgroundColor: '#878787',
   discColor: '#ffffff',
+  fieldPhase: 0,
 })
 
 const PIXEL_WIDTH = 1000
@@ -34,7 +35,7 @@ const DEFAULT_WARMUPS = 5
 const MIN_SAMPLES = 20
 const EXPECTED_PRIMITIVES = 1405
 const EXPECTED_POINTS = 136093
-const EXPECTED_CHECKSUM = '8a44b4fb25fbbb0f'
+const EXPECTED_CHECKSUM = '9433294ccb73c27b'
 
 function readPositiveInteger(name, fallback, minimum) {
   const raw = process.env[name]

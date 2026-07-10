@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { curl, prepareCurlAngle3D, type CurlOptions } from '../curl'
+import {
+  curl,
+  prepareCurlAngle3D,
+  prepareCurlAngle4D,
+  type CurlOptions,
+} from '../curl'
+import { prepareFbm4D } from '../fbm'
 import { createRandom } from '../random'
 import type { Vec2 } from '../types'
 
@@ -143,6 +149,35 @@ describe('prepareCurlAngle3D — exact generic equivalence', () => {
         }
       }
     }
+  })
+})
+
+describe('prepareCurlAngle4D', () => {
+  it('matches an independently differentiated 4D fBm potential', () => {
+    const rng = createRandom('prepared-angle-4d')
+    const options = { octaves: 4, lacunarity: 1.8, gain: 0.42, scale: 0.9, epsilon: 1e-3 }
+    const angleAt = prepareCurlAngle4D(rng, options)
+    const psi = prepareFbm4D(rng, options)
+    const eps = options.epsilon
+
+    for (let i = 0; i < 12; i++) {
+      const x = i * 0.17 - 0.4
+      const y = i * -0.21 + 0.7
+      const z = Math.cos(i * 0.3)
+      const w = Math.sin(i * 0.3)
+      const dPsiDx = (psi(x + eps, y, z, w) - psi(x - eps, y, z, w)) / (2 * eps)
+      const dPsiDy = (psi(x, y + eps, z, w) - psi(x, y - eps, z, w)) / (2 * eps)
+      expect(angleAt(x, y, z, w)).toBe(Math.atan2(-dPsiDx, dPsiDy))
+    }
+  })
+
+  it('holds both loop coordinates fixed while differentiating x/y', () => {
+    const scalar = (x: number, y: number, z: number, w: number): number =>
+      x * y + 100 * z - 200 * w
+    const angleAt = prepareCurlAngle4D(scalar, { octaves: 1, epsilon: 1e-4 })
+    const expected = Math.atan2(-3, 2)
+    expect(angleAt(2, 3, 5, 7)).toBeCloseTo(expected, 8)
+    expect(angleAt(2, 3, -11, 13)).toBeCloseTo(expected, 8)
   })
 })
 
