@@ -148,8 +148,8 @@ import type {
   Seed,
   StatelessSketch,
 } from '../../sketch'
-import type { Point, Polyline } from '../../types'
-import { bbox, colorParam, HEIGHT, numberParam, WIDTH } from '../sketch-util'
+import type { Polyline } from '../../types'
+import { colorParam, HEIGHT, numberParam, WIDTH } from '../sketch-util'
 import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 
@@ -279,8 +279,7 @@ const LEAF_STROKE_WIDTH = 2
 // the original implied-sphere figure-ground.
 
 /**
- * Translate a leaf outline by a fixed `(dx, dy)` offset, returning a NEW Polyline
- * (the input is not mutated).
+ * Translate a newly-created leaf outline by a fixed `(dx, dy)` offset in place.
  *
  * The {@link leaf} generator grows from the origin (0, 0) along +y with signed
  * ±x spread, so a raw outline is anchored at the origin, not at the sampled
@@ -288,25 +287,51 @@ const LEAF_STROKE_WIDTH = 2
  * translating the (already-rotated) outline so its center lands on the sampled
  * point.
  */
-function translate(outline: Polyline, dx: number, dy: number): Polyline {
-  return outline.map(([x, y]): Point => [x + dx, y + dy])
+function translateInPlace(outline: Polyline, dx: number, dy: number): void {
+  for (const point of outline) {
+    point[0] += dx
+    point[1] += dy
+  }
 }
 
 /**
- * Rotate a leaf outline by `angle` radians about the origin (0, 0), returning a
- * NEW Polyline (the input is not mutated).
+ * Rotate a newly-created leaf outline by `angle` radians about the origin (0, 0)
+ * in place while measuring the rotated bounds in the same pass.
  *
- * Applied to a raw, origin-anchored {@link leaf} outline BEFORE {@link translate}
- * so the leaf's spine (which grows along +y) can be turned to face the local
- * flow direction. Rotating about the origin — the leaf's own base anchor —
- * keeps the pivot at the shape's root; the subsequent bbox-center translation
- * then places the rotated silhouette onto the sampled point. Standard 2D
- * rotation: `x' = x·cosθ − y·sinθ`, `y' = x·sinθ + y·cosθ`.
+ * Applied to a raw, origin-anchored {@link leaf} outline before
+ * {@link translateInPlace} so the leaf's spine (which grows along +y) can be
+ * turned to face the local flow direction. Rotating about the origin — the
+ * leaf's own base anchor — keeps the pivot at the shape's root; the subsequent
+ * bbox-center translation then places the rotated silhouette onto the sampled
+ * point. Standard 2D rotation: `x' = x·cosθ − y·sinθ`,
+ * `y' = x·sinθ + y·cosθ`.
  */
-function rotate(outline: Polyline, angle: number): Polyline {
+function rotateAndMeasure(
+  outline: Polyline,
+  angle: number,
+): { minX: number; minY: number; maxX: number; maxY: number } {
   const cos = Math.cos(angle)
   const sin = Math.sin(angle)
-  return outline.map(([x, y]): Point => [x * cos - y * sin, x * sin + y * cos])
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+
+  for (const point of outline) {
+    const x = point[0]
+    const y = point[1]
+    const rotatedX = x * cos - y * sin
+    const rotatedY = x * sin + y * cos
+    point[0] = rotatedX
+    point[1] = rotatedY
+
+    if (rotatedX < minX) minX = rotatedX
+    if (rotatedX > maxX) maxX = rotatedX
+    if (rotatedY < minY) minY = rotatedY
+    if (rotatedY > maxY) maxY = rotatedY
+  }
+
+  return { minX, minY, maxX, maxY }
 }
 
 /**
@@ -533,12 +558,16 @@ export const leafField: StatelessSketch = {
       // The leaf spine grows along +y; rotate by `angle - π/2` so that +y axis
       // aligns with the flow direction, then translate the rotated bbox-center
       // onto the sampled point.
-      const rotated = rotate(leaf(shape, rng), angle - Math.PI / 2)
-      const { minX, minY, maxX, maxY } = bbox(rotated)
+      const outline = leaf(shape, rng)
+      const { minX, minY, maxX, maxY } = rotateAndMeasure(
+        outline,
+        angle - Math.PI / 2,
+      )
       const centerX = (minX + maxX) / 2
       const centerY = (minY + maxY) / 2
+      translateInPlace(outline, x - centerX, y - centerY)
 
-      builder.addPath(translate(rotated, x - centerX, y - centerY), {
+      builder.addPath(outline, {
         closed: true,
         fill: { color: LEAF_FILL },
         stroke: { color: PAPER_STROKE, width: LEAF_STROKE_WIDTH },

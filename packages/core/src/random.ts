@@ -29,10 +29,14 @@ export function createRandom(seed: string | number): Random {
 
   function gaussian(mean = 0, std = 1): number {
     // Box-Muller transform: convert two uniform samples to a normal sample.
-    // Guard against u1=0 which would produce log(0)=-Infinity.
+    // Always consume both samples, including when std is zero, so callers can
+    // collapse variation without shifting the seeded sequence.
     let u1 = value()
-    if (u1 === 0) u1 = Number.EPSILON
     const u2 = value()
+    if (std === 0) return mean
+
+    // Guard against u1=0 which would produce log(0)=-Infinity.
+    if (u1 === 0) u1 = Number.EPSILON
     const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
     return mean + z * std
   }
