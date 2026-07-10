@@ -3,7 +3,16 @@ import { act, useEffect, useImperativeHandle, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { crc32, type ParamSchema, type Preset, type Seed } from "@harness/core";
+import {
+  clipSceneToBounds,
+  crc32,
+  defaultParams,
+  hiddenLinePass,
+  leafField,
+  type ParamSchema,
+  type Preset,
+  type Seed,
+} from "@harness/core";
 
 import type { LiveCanvasHandle } from "./LiveCanvas";
 import { outlineScene } from "./outlineScene";
@@ -256,6 +265,23 @@ function clickButton(el: HTMLElement, text: string): void {
   act(() => {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
+}
+
+/**
+ * Every primitive point of `scene` that falls OUTSIDE the canvas rectangle
+ * `[0, 0, width, height]` (issue #237's acceptance predicate). The export-time
+ * clip must leave this empty; an un-clipped Scene with overflowing geometry
+ * populates it (so a test can prove the clip was both applied AND meaningful).
+ */
+function outOfBoundsPoints(
+  scene: unknown,
+  width: number,
+  height: number,
+): [number, number][] {
+  const s = scene as { primitives: { points: [number, number][] }[] };
+  return s.primitives.flatMap((p) =>
+    p.points.filter(([x, y]) => x < 0 || x > width || y < 0 || y > height),
+  );
 }
 
 describe("SketchControls — seed axis wiring", () => {
@@ -653,6 +679,59 @@ describe("SketchControls — SVG export wiring", () => {
     const [, filename] = downloadBlob.mock.calls[0]!;
     expect(filename).toBe(`waves-seed${seed}-t2.5.svg`);
   });
+
+  // #237: a Scene whose single Primitive overflows the 100×100 canvas on BOTH
+  // sides — a horizontal line from x=-50 to x=150 at y=50. The plain SVG export
+  // must clip it to the canvas rectangle before serializing, so the exported
+  // geometry is exactly [0,50]→[100,50] and nothing lies outside [0,0,100,100].
+  const overflowScene = {
+    space: { width: 100, height: 100 },
+    primitives: [
+      {
+        points: [
+          [-50, 50],
+          [150, 50],
+        ],
+        stroke: { color: "black" },
+      },
+    ],
+  };
+
+  const overflowSketch = (id: string) => {
+    const base = sketchWith(id, {
+      radius: numberSpec({ default: 10 }),
+    }) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      generate: () => overflowScene,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  it("clips overflowing geometry to the canvas bounds before serializing (#237)", async () => {
+    const el = mount(<SketchControls sketch={overflowSketch("circles")} />);
+
+    clickButton(el, "Export SVG");
+
+    // The Scene handed `renderToSVG` is the CLIPPED Scene: no point outside the
+    // canvas rectangle survives.
+    const exported = exportSceneCapture.current;
+    expect(exported).not.toBeNull();
+    expect(outOfBoundsPoints(exported, 100, 100)).toEqual([]);
+    // The clip was MEANINGFUL — the raw generated Scene did overflow the canvas —
+    // and the export applied core's clip exactly.
+    expect(outOfBoundsPoints(overflowScene, 100, 100)).not.toEqual([]);
+    expect(exported).toEqual(
+      clipSceneToBounds(
+        overflowScene as unknown as Parameters<typeof clipSceneToBounds>[0],
+      ),
+    );
+
+    // The overflowing coordinates never reach the serialized SVG string either.
+    const [blob] = downloadBlob.mock.calls[0]!;
+    const svg = await blobText(blob);
+    expect(svg).not.toContain("-50");
+    expect(svg).not.toContain("150");
+  });
 });
 
 describe("SketchControls — Hidden-line SVG export wiring", () => {
@@ -871,6 +950,82 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // state that also drives the export, so the two cannot diverge.
     setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "5");
     expect(canvas().dataset.tolerance).toBe("5");
+  });
+
+  // #237: a filled square straddling the bottom-right corner (x,y ∈ [50,150]),
+  // so half of it lies OUTSIDE the 100×100 canvas. The hidden-line export must
+  // clip AFTER the hidden-line pass and BEFORE serialization, so the exported
+  // stroke geometry stays inside [0,0,100,100].
+  const overflowHlScene = {
+    space: { width: 100, height: 100 },
+    primitives: [
+      {
+        points: [
+          [50, 50],
+          [150, 50],
+          [150, 150],
+          [50, 150],
+        ],
+        closed: true,
+        fill: { color: "tomato" },
+      },
+    ],
+  };
+
+  const overflowHlSketch = (id: string) => {
+    const base = sketchWith(id, {
+      radius: numberSpec({ default: 10 }),
+    }) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      generate: () => overflowHlScene,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  it("clips the hidden-line output to the canvas bounds after the pass (#237)", () => {
+    const sketch = overflowHlSketch("circles");
+    const el = mount(<SketchControls sketch={sketch} />);
+    const seed = Number(
+      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
+    );
+
+    // The un-clipped seam (generate → hidden-line pass) still overflows the
+    // canvas — so the clip that follows is doing real work.
+    const seam = outlineScene(sketch, { radius: 10 }, seed, 0);
+    expect(outOfBoundsPoints(seam, 100, 100)).not.toEqual([]);
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    // The Scene handed `renderToSVG` is the seam CLIPPED to bounds: nothing lies
+    // outside the canvas, and it is exactly `clipSceneToBounds` of the seam
+    // (clip slotted after the hidden-line pass, before serialization).
+    const exported = exportSceneCapture.current;
+    expect(exported).not.toBeNull();
+    expect(outOfBoundsPoints(exported, 100, 100)).toEqual([]);
+    expect(exported).toEqual(clipSceneToBounds(seam));
+  });
+
+  // #237 AC3 (concrete): the real Leaf Field sketch (core) run through the full
+  // hidden-line export path — generate → hiddenLinePass → clipSceneToBounds —
+  // must leave NO output path point outside its own canvas rectangle. This is
+  // the acceptance check against a production sketch (not a hand-built Scene).
+  it("Leaf Field hidden-line export has no point outside the canvas (#237, AC3)", () => {
+    const params = defaultParams(leafField.schema);
+    const seed = 12345 as Seed;
+    // The hidden-line pass is heavy, so run it ONCE and reuse it for both the
+    // pre-clip overflow check and the clipped output.
+    const preClip = hiddenLinePass(leafField.generate(params, seed, 0), {
+      tolerance: 0,
+    });
+    const exported = clipSceneToBounds(preClip);
+    const { width, height } = exported.space;
+    expect(width).toBeGreaterThan(0);
+    expect(height).toBeGreaterThan(0);
+    // The sketch genuinely overflows before clipping (the pre-clip seam has
+    // out-of-bounds points), so the emptiness below is the clip's doing.
+    expect(outOfBoundsPoints(preClip, width, height)).not.toEqual([]);
+    // ...and after the clip, every path point lies within [0,0,width,height].
+    expect(outOfBoundsPoints(exported, width, height)).toEqual([]);
   });
 });
 
