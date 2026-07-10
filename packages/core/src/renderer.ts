@@ -82,9 +82,11 @@ export interface Canvas2DContext {
  * (`closePath`). A Primitive's `fill` is applied only when present
  * (`fillStyle` ← `fill.color`, then `fill()`), and its `stroke` only when
  * present (`strokeStyle` ← `stroke.color`, `lineWidth` ← `stroke.width`, then
- * `stroke()`); both are applied when both are present. Every Primitive's style
- * mutation is bracketed by `save()`/`restore()` so style state does not leak
- * between Primitives.
+ * `stroke()`); both are applied when both are present. The complete draw is
+ * bracketed by one `save()`/`restore()` pair so style state does not leak back
+ * to the caller. Primitives do not need individual state frames: every style
+ * that can affect one of their paint operations is assigned immediately before
+ * that operation.
  *
  * The renderer draws in the Scene's own coordinate space and establishes NO
  * transform of its own; `stroke.width` is read in Scene-space units, so a
@@ -96,16 +98,25 @@ export interface Canvas2DContext {
  * @param scene - The Scene whose Primitives to draw, in painter's order.
  */
 export function renderToCanvas(ctx: Canvas2DContext, scene: Scene): void {
+  if (scene.primitives.length === 0) return
+
+  // Preserve the caller's drawing state once for the complete Scene. A state
+  // frame per Primitive is redundant because every fill/stroke style a
+  // Primitive uses is assigned immediately before its paint operation.
+  ctx.save()
+
   for (const primitive of scene.primitives) {
     const { points, closed, fill, stroke } = primitive
 
-    ctx.save()
-
     ctx.beginPath()
-    points.forEach(([x, y], i) => {
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    })
+    const first = points[0]
+    if (first !== undefined) {
+      ctx.moveTo(first[0], first[1])
+      for (let i = 1; i < points.length; i++) {
+        const point = points[i]!
+        ctx.lineTo(point[0], point[1])
+      }
+    }
     if (closed) ctx.closePath()
 
     if (fill) {
@@ -117,9 +128,9 @@ export function renderToCanvas(ctx: Canvas2DContext, scene: Scene): void {
       ctx.lineWidth = stroke.width
       ctx.stroke()
     }
-
-    ctx.restore()
   }
+
+  ctx.restore()
 }
 
 /**

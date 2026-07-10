@@ -7,7 +7,7 @@ import type { Scene } from '../scene'
  * One recorded interaction with the stub context: either a method call
  * (`method` + `args`) or a style-property assignment (`prop` + `value`). The
  * single ordered log lets a test assert the exact sequence the renderer drives,
- * including how save/restore brackets per-primitive style mutation.
+ * including how save/restore brackets the complete Scene draw.
  */
 type Event =
   | { method: string; args: number[] }
@@ -24,6 +24,7 @@ function createRecordingContext(): Canvas2DContext & { events: Event[] } {
   let fillStyle = ''
   let strokeStyle = ''
   let lineWidth = 0
+  const stack: Array<{ fillStyle: string; strokeStyle: string; lineWidth: number }> = []
 
   const record =
     (method: string) =>
@@ -33,8 +34,19 @@ function createRecordingContext(): Canvas2DContext & { events: Event[] } {
 
   return {
     events,
-    save: record('save'),
-    restore: record('restore'),
+    save() {
+      events.push({ method: 'save', args: [] })
+      stack.push({ fillStyle, strokeStyle, lineWidth })
+    },
+    restore() {
+      events.push({ method: 'restore', args: [] })
+      const state = stack.pop()
+      if (state !== undefined) {
+        fillStyle = state.fillStyle
+        strokeStyle = state.strokeStyle
+        lineWidth = state.lineWidth
+      }
+    },
     beginPath: record('beginPath'),
     moveTo: record('moveTo'),
     lineTo: record('lineTo'),
@@ -237,8 +249,12 @@ describe('renderToCanvas', () => {
     expect(ctx.events).toContainEqual({ prop: 'lineWidth', value: 3 })
   })
 
-  it('sets fillStyle, strokeStyle, and lineWidth from the primitive style', () => {
+  it('restores the caller’s fillStyle, strokeStyle, and lineWidth', () => {
     const ctx = createRecordingContext()
+    ctx.fillStyle = 'caller-fill'
+    ctx.strokeStyle = 'caller-stroke'
+    ctx.lineWidth = 7
+    ctx.events.length = 0
     const scene: Scene = {
       space,
       primitives: [
@@ -252,12 +268,15 @@ describe('renderToCanvas', () => {
 
     renderToCanvas(ctx, scene)
 
-    expect(ctx.fillStyle).toBe('#ff0044')
-    expect(ctx.strokeStyle).toBe('rebeccapurple')
-    expect(ctx.lineWidth).toBe(0.5)
+    expect(ctx.events).toContainEqual({ prop: 'fillStyle', value: '#ff0044' })
+    expect(ctx.events).toContainEqual({ prop: 'strokeStyle', value: 'rebeccapurple' })
+    expect(ctx.events).toContainEqual({ prop: 'lineWidth', value: 0.5 })
+    expect(ctx.fillStyle).toBe('caller-fill')
+    expect(ctx.strokeStyle).toBe('caller-stroke')
+    expect(ctx.lineWidth).toBe(7)
   })
 
-  it('brackets each primitive in save/restore so style does not leak', () => {
+  it('brackets the complete draw in save/restore so style does not leak', () => {
     const ctx = createRecordingContext()
     const scene: Scene = {
       space,
@@ -270,13 +289,12 @@ describe('renderToCanvas', () => {
     renderToCanvas(ctx, scene)
 
     const names = methodNames(ctx.events)
-    // Each primitive opens with save and closes with restore, balanced.
-    expect(names.filter((n) => n === 'save')).toHaveLength(2)
-    expect(names.filter((n) => n === 'restore')).toHaveLength(2)
+    // One outer state frame is sufficient: each Primitive assigns the styles it
+    // uses immediately before painting, and the caller's state is restored once.
+    expect(names.filter((n) => n === 'save')).toHaveLength(1)
+    expect(names.filter((n) => n === 'restore')).toHaveLength(1)
     expect(names[0]).toBe('save')
     expect(names[names.length - 1]).toBe('restore')
-    // restore for the first primitive precedes save for the second — no overlap.
-    expect(names.indexOf('restore')).toBeLessThan(names.lastIndexOf('save'))
   })
 
   it('draws nothing for an empty scene', () => {
