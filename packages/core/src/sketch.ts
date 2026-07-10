@@ -16,7 +16,7 @@
  *   stateful variant can join WITHOUT reworking the stateless path.
  */
 
-import type { Scene } from './scene'
+import type { CoordinateSpace, Scene } from './scene'
 
 /**
  * The single value feeding all of a Sketch's internal randomness.
@@ -246,6 +246,12 @@ export interface SketchBase {
   name: string
   /** The Sketch's tweakable knobs — the spine of the Harness. */
   schema: ParamSchema
+  /**
+   * Optional coordinate space when it is invariant across every param, seed,
+   * and time value. Harness callers may use it for layout without generating a
+   * throwaway Scene. Omit it when frame generation determines the space.
+   */
+  space?: CoordinateSpace
   /**
    * Optional time metadata. Absent ⇒ a static Sketch (ADR-0002); present ⇒ the
    * Harness drives `t` over `duration` with the given `mode`.

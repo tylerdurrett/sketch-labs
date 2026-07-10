@@ -367,6 +367,7 @@ export const leafField = definePreparedSketch({
   id: 'leaf-field',
   name: 'Leaf Field',
   schema,
+  space: { width: WIDTH, height: HEIGHT },
   // NO `time` metadata ⇒ ships static (single frame, scrubber hidden).
   prepare(params: Params, seed: Seed) {
     // Shared seeded Random. It drives the per-leaf shape rolls (size, curl,

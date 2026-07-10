@@ -293,21 +293,21 @@ export function LiveCanvas({
   );
 
   // The paper's CSS-box aspect (#155): the `<canvas>` box is sized to the
-  // SKETCH's OWN aspect, not a fixed square. The `Sketch` type does not
-  // statically expose its coordinate space — only a generated `Scene` carries
-  // `space` — so we derive the width/height ratio from a Scene generated at
-  // t = 0, re-deriving on any sketch/params/seed change (a param could resize
-  // the space). It is threaded onto `.live-canvas` as the `--paper-aspect`
-  // custom property; the CSS there contain-fits the box against the stage at
-  // that ratio. This is a DISPLAY-BOX concern only — the DPR backing store
+  // SKETCH's OWN aspect, not a fixed square. A Sketch with an invariant
+  // coordinate space declares it directly, avoiding a full throwaway Scene on
+  // every params/seed invalidation. Dynamic-space Sketches omit that metadata
+  // and retain the historical t=0 Scene fallback. The ratio is threaded onto
+  // `.live-canvas` as the `--paper-aspect` custom property; the CSS there
+  // contain-fits the box against the stage at that ratio. This is a DISPLAY-BOX
+  // concern only — the DPR backing store
   // (`sizeToBox`) and the in-canvas contain-fit (`drawSceneFitted`) are
   // untouched, so PNG/SVG export still snapshots the displayed frame. A
   // degenerate space (zero/non-finite extent) falls back to a square.
   const paperAspect = useMemo(() => {
-    const { space } = preparedFrame(0);
+    const space = sketch.space ?? preparedFrame(0).space;
     const ratio = space.width / space.height;
     return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
-  }, [preparedFrame]);
+  }, [sketch, preparedFrame]);
 
   // Inline the derived ratio as the `--paper-aspect` custom property the
   // `.live-canvas` rule reads for its `aspect-ratio` + contain-fit width. Cast
