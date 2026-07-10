@@ -284,9 +284,9 @@ const LEAF_STROKE_WIDTH = 2
  *
  * The {@link leaf} generator grows from the origin (0, 0) along +y with signed
  * ±x spread, so a raw outline is anchored at the origin, not at the sampled
- * point. This mirrors single-leaf's `center()` — computing the bbox-center-to-
- * target offset — then translating the (already-rotated) outline so its center
- * lands on the sampled point.
+ * point. Centering works by computing the bbox-center-to-target offset, then
+ * translating the (already-rotated) outline so its center lands on the sampled
+ * point.
  */
 function translate(outline: Polyline, dx: number, dy: number): Polyline {
   return outline.map(([x, y]): Point => [x + dx, y + dy])

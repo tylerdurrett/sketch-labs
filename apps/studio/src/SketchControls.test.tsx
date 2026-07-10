@@ -1,12 +1,49 @@
 // @vitest-environment jsdom
-import { act, useImperativeHandle, type Ref } from "react";
+import { act, useEffect, useImperativeHandle, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { crc32, type ParamSchema, type Preset, type Seed } from "@harness/core";
+import {
+  clipSceneToBounds,
+  crc32,
+  defaultParams,
+  hiddenLinePass,
+  leafField,
+  type ParamSchema,
+  type Preset,
+  type Seed,
+} from "@harness/core";
 
 import type { LiveCanvasHandle } from "./LiveCanvas";
+import { outlineScene } from "./outlineScene";
 import { SketchControls } from "./SketchControls";
+
+// Preview == export seam probe (issue #220): capture the Scene the export path
+// hands `renderToSVG`, so a test can prove it is the SAME processed Scene the
+// shared {@link outlineScene} seam produces (the exact expression the outline
+// preview also consumes). `vi.hoisted` lifts the holder above the hoisted
+// `vi.mock` factory below so the factory can close over it.
+const exportSceneCapture = vi.hoisted(() => ({
+  current: null as unknown,
+}));
+
+// Mock ONLY `renderToSVG`, delegating to the real implementation so every
+// existing SVG-export assertion (which checks the serialized string) stays
+// green — we merely tee off the Scene argument on the way through. Everything
+// else in `@harness/core` (buildReproMetadata, hiddenLinePass, insertPngMetadata,
+// exportFilename, crc32, …) is the genuine module via `importActual`.
+vi.mock("@harness/core", async (importActual) => {
+  const actual = await importActual<typeof import("@harness/core")>();
+  return {
+    ...actual,
+    renderToSVG: (
+      ...args: Parameters<typeof actual.renderToSVG>
+    ): ReturnType<typeof actual.renderToSVG> => {
+      exportSceneCapture.current = args[0];
+      return actual.renderToSVG(...args);
+    },
+  };
+});
 
 // The fake canvas node the mocked LiveCanvas hands back through its handle, with
 // a `toBlob` the export test drives. Reassigned per-test so each case controls
@@ -14,6 +51,14 @@ import { SketchControls } from "./SketchControls";
 let fakeCanvasToBlob: HTMLCanvasElement["toBlob"];
 // The current-t the mocked handle reports — the export's `-t{t}` source.
 let fakeCurrentT = 0;
+// #228: the real LiveCanvas signals `onOutlineComputed` when an outline pass has
+// drawn, which the owner uses to clear its "Computing…" affordance. The mock
+// records the latest callback so a test can drive that signal BY HAND (to observe
+// the intermediate "Computing…" state), and — when `autoFireOutlineComputed` is
+// true (the default) — fires it in an effect to model the pass completing, so the
+// busy label clears exactly as the real component clears it.
+let lastOnOutlineComputed: (() => void) | null = null;
+let autoFireOutlineComputed = true;
 
 // LiveCanvas is a browser-only sink (canvas2d, ResizeObserver, matchMedia) and
 // is NOT under test here — these are wiring tests for the control state. Replace
@@ -23,17 +68,40 @@ let fakeCurrentT = 0;
 vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
     seed,
+    renderMode,
+    tolerance,
     handleRef,
+    onOutlineComputed,
   }: {
     seed: Seed;
+    renderMode?: string;
+    tolerance?: number;
     handleRef?: Ref<LiveCanvasHandle>;
+    onOutlineComputed?: () => void;
   }) => {
     useImperativeHandle(handleRef, () => ({
       getCanvas: () =>
         ({ toBlob: fakeCanvasToBlob }) as unknown as HTMLCanvasElement,
       getCurrentT: () => fakeCurrentT,
     }));
-    return <div data-testid="canvas-seed">{String(seed)}</div>;
+    lastOnOutlineComputed = onOutlineComputed ?? null;
+    // Model the outline pass finishing: fire the "computed" signal after each
+    // outline render so the owner's busy label clears (unless a test opts out to
+    // observe the intermediate "Computing…" state itself).
+    useEffect(() => {
+      if (renderMode === "outline" && autoFireOutlineComputed) {
+        onOutlineComputed?.();
+      }
+    });
+    return (
+      <div
+        data-testid="canvas-seed"
+        data-render-mode={String(renderMode)}
+        data-tolerance={String(tolerance)}
+      >
+        {String(seed)}
+      </div>
+    );
   },
 }));
 
@@ -139,10 +207,17 @@ beforeEach(() => {
   // a fresh downloadBlob spy. Per-test overrides drive the time-gated / guard
   // cases. The blob is a real minimal PNG so the metadata byte-splice succeeds.
   fakeCurrentT = 0;
+  // #228: default to auto-firing the outline "computed" signal so the busy label
+  // clears on its own; the label test opts out to observe "Computing…".
+  lastOnOutlineComputed = null;
+  autoFireOutlineComputed = true;
   fakeCanvasToBlob = ((cb: BlobCallback) => {
     cb(new Blob([MINIMAL_PNG], { type: "image/png" }));
   }) as HTMLCanvasElement["toBlob"];
   downloadBlob.mockReset();
+  // Clear the preview == export seam probe so each test observes only its own
+  // `renderToSVG` call (#220).
+  exportSceneCapture.current = null;
 });
 
 afterEach(() => {
@@ -190,6 +265,23 @@ function clickButton(el: HTMLElement, text: string): void {
   act(() => {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
+}
+
+/**
+ * Every primitive point of `scene` that falls OUTSIDE the canvas rectangle
+ * `[0, 0, width, height]` (issue #237's acceptance predicate). The export-time
+ * clip must leave this empty; an un-clipped Scene with overflowing geometry
+ * populates it (so a test can prove the clip was both applied AND meaningful).
+ */
+function outOfBoundsPoints(
+  scene: unknown,
+  width: number,
+  height: number,
+): [number, number][] {
+  const s = scene as { primitives: { points: [number, number][] }[] };
+  return s.primitives.flatMap((p) =>
+    p.points.filter(([x, y]) => x < 0 || x > width || y < 0 || y > height),
+  );
 }
 
 describe("SketchControls — seed axis wiring", () => {
@@ -587,6 +679,361 @@ describe("SketchControls — SVG export wiring", () => {
     const [, filename] = downloadBlob.mock.calls[0]!;
     expect(filename).toBe(`waves-seed${seed}-t2.5.svg`);
   });
+
+  // #237: a Scene whose single Primitive overflows the 100×100 canvas on BOTH
+  // sides — a horizontal line from x=-50 to x=150 at y=50. The plain SVG export
+  // must clip it to the canvas rectangle before serializing, so the exported
+  // geometry is exactly [0,50]→[100,50] and nothing lies outside [0,0,100,100].
+  const overflowScene = {
+    space: { width: 100, height: 100 },
+    primitives: [
+      {
+        points: [
+          [-50, 50],
+          [150, 50],
+        ],
+        stroke: { color: "black" },
+      },
+    ],
+  };
+
+  const overflowSketch = (id: string) => {
+    const base = sketchWith(id, {
+      radius: numberSpec({ default: 10 }),
+    }) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      generate: () => overflowScene,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  it("clips overflowing geometry to the canvas bounds before serializing (#237)", async () => {
+    // Pin the mount-time `useState(() => newSeed(Math.random))` seed so the
+    // repro-metadata envelope embedded in the SVG is deterministic (0.5 ->
+    // 4503599627370495, which contains neither "150" nor "-50"). Without this
+    // the random seed's digits collide with the overflow-coordinate substring
+    // assertions below ~1.4% of runs (#240). `vi.restoreAllMocks()` in
+    // afterEach undoes the stub.
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const el = mount(<SketchControls sketch={overflowSketch("circles")} />);
+
+    clickButton(el, "Export SVG");
+
+    // The Scene handed `renderToSVG` is the CLIPPED Scene: no point outside the
+    // canvas rectangle survives.
+    const exported = exportSceneCapture.current;
+    expect(exported).not.toBeNull();
+    expect(outOfBoundsPoints(exported, 100, 100)).toEqual([]);
+    // The clip was MEANINGFUL — the raw generated Scene did overflow the canvas —
+    // and the export applied core's clip exactly.
+    expect(outOfBoundsPoints(overflowScene, 100, 100)).not.toEqual([]);
+    expect(exported).toEqual(
+      clipSceneToBounds(
+        overflowScene as unknown as Parameters<typeof clipSceneToBounds>[0],
+      ),
+    );
+
+    // The overflowing coordinates never reach the serialized SVG string either.
+    const [blob] = downloadBlob.mock.calls[0]!;
+    const svg = await blobText(blob);
+    expect(svg).not.toContain("-50");
+    expect(svg).not.toContain("150");
+  });
+});
+
+describe("SketchControls — Hidden-line SVG export wiring", () => {
+  // A Scene with TWO overlapping filled squares in painter's order: the nearer
+  // (second) square covers the far-left region of the farther (first) one, so
+  // the Hidden-line pass MUST clip part of the farther square's outline away —
+  // the surviving stroke geometry is strictly less than the raw outline, which
+  // proves the export ran the pass rather than serializing the raw Scene.
+  const hlScene = {
+    space: { width: 100, height: 100 },
+    primitives: [
+      {
+        points: [
+          [0, 0],
+          [40, 0],
+          [40, 40],
+          [0, 40],
+        ],
+        closed: true,
+        fill: { color: "tomato" },
+      },
+      {
+        points: [
+          [20, 0],
+          [60, 0],
+          [60, 40],
+          [20, 40],
+        ],
+        closed: true,
+        fill: { color: "steelblue" },
+      },
+    ],
+  };
+
+  const hlStaticSketch = (id: string) => {
+    const base = sketchWith(id, {
+      radius: numberSpec({ default: 10 }),
+    }) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      generate: () => hlScene,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  const hlTimedSketch = (id: string) => {
+    const base = hlStaticSketch(id) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      time: { duration: 4, mode: "loop" },
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  function blobText(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+  }
+
+  it("downloads a stroke-only hidden-line SVG named -hidden-line for a STATIC sketch", async () => {
+    const el = mount(<SketchControls sketch={hlStaticSketch("circles")} />);
+    const seed = (el.querySelector("#sketch-seed") as HTMLInputElement).value;
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    const [blob, filename] = downloadBlob.mock.calls[0]!;
+    expect(blob).toBeInstanceOf(Blob);
+    expect(blob.type).toBe("image/svg+xml");
+
+    const svg = await blobText(blob);
+    expect(svg).toMatch(/<svg\b[^>]*viewBox="0 0 100 100"/);
+    // The pass ran: its output is STROKE-ONLY (fill-free primitives), so the raw
+    // fill colors never reach the serialized SVG and every path is stroked.
+    expect(svg).not.toContain('fill="tomato"');
+    expect(svg).not.toContain('fill="steelblue"');
+    expect(svg).toMatch(/<path\b[^>]*stroke="black"/);
+
+    // Static sketch ⇒ the variant segment sits right after the seed, no -t.
+    expect(filename).toBe(`circles-seed${seed}-hidden-line.svg`);
+
+    // The reproduction envelope still round-trips to the displayed frame.
+    const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
+    expect(meta).toBeDefined();
+    expect(JSON.parse(meta!)).toMatchObject({
+      version: 1,
+      sketch: "circles",
+      name: `circles-seed${seed}`,
+      seed: Number(seed),
+      params: { radius: 10 },
+      locks: [],
+    });
+  });
+
+  it("carries the -t{t} segment before -hidden-line for a time-driven sketch", () => {
+    fakeCurrentT = 2.5;
+    const el = mount(<SketchControls sketch={hlTimedSketch("waves")} />);
+    const seed = (el.querySelector("#sketch-seed") as HTMLInputElement).value;
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    const [, filename] = downloadBlob.mock.calls[0]!;
+    expect(filename).toBe(`waves-seed${seed}-t2.5-hidden-line.svg`);
+  });
+
+  // AC (#220): the outline-mode canvas input and the hidden-line SVG export input
+  // must be the IDENTICAL processed Scene for the same (params, seed, t). Both
+  // call sites now delegate to the ONE shared `outlineScene` seam, so this holds
+  // by construction. jsdom's `canvas.getContext('2d')` is null, so LiveCanvas's
+  // `drawFrame` early-returns before it would feed the canvas — the preview's
+  // Scene isn't directly observable through a live render. The faithful check is
+  // therefore: drive the REAL `exportHiddenLineSvg` and assert the Scene it hands
+  // `renderToSVG` (captured above) deep-equals `outlineScene(sketch, params, seed,
+  // t)` — the exact seam expression LiveCanvas's outline branch evaluates — for
+  // one fixed frame. Locking the export path to the shared seam is what removes
+  // the drift risk between preview and export.
+  it("export input Scene equals the shared outlineScene seam the preview consumes (#220)", () => {
+    const sketch = hlStaticSketch("circles");
+    const el = mount(<SketchControls sketch={sketch} />);
+    const seed = Number(
+      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
+    );
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    // The export handed `renderToSVG` a Scene.
+    expect(exportSceneCapture.current).not.toBeNull();
+    // A static sketch's export passes `t ?? 0` (t is undefined ⇒ 0); params are
+    // the schema defaults ({ radius: 10 }); seed is the displayed seed. The
+    // outline preview evaluates this SAME expression, so the two inputs match.
+    expect(exportSceneCapture.current).toEqual(
+      outlineScene(sketch, { radius: 10 }, seed, 0),
+    );
+  });
+
+  // AC3 (#232): the studio tolerance knob drives the hidden-line EXPORT's final
+  // simplification. A scene whose surviving stroke has exactly-collinear interior
+  // vertices lets a positive tolerance visibly drop them. Driving the knob then
+  // re-exporting must (a) hand `renderToSVG` the SAME seam expression at the new
+  // tolerance (preview == export by construction) and (b) actually reduce the
+  // exported vertex count versus tolerance 0.
+  const redundantScene = {
+    space: { width: 100, height: 100 },
+    // A single filled Primitive, no occluder ⇒ its whole ring survives as one
+    // stroke. [30,0] and [30,40] are collinear on the top/bottom edges, so a
+    // positive Douglas–Peucker tolerance removes them.
+    primitives: [
+      {
+        points: [
+          [0, 0],
+          [30, 0],
+          [60, 0],
+          [60, 40],
+          [30, 40],
+          [0, 40],
+        ],
+        closed: true,
+        fill: { color: "tomato" },
+      },
+    ],
+  };
+
+  const redundantSketch = (id: string) => {
+    const base = sketchWith(id, {
+      radius: numberSpec({ default: 10 }),
+    }) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      generate: () => redundantScene,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  const totalVerts = (scene: unknown): number =>
+    (scene as { primitives: { points: unknown[] }[] }).primitives.reduce(
+      (sum, p) => sum + p.points.length,
+      0,
+    );
+
+  it("the tolerance knob drives the hidden-line export's simplification (#232, AC3)", () => {
+    const sketch = redundantSketch("circles");
+    const el = mount(<SketchControls sketch={sketch} />);
+    const seed = Number(
+      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
+    );
+
+    // Baseline export at the default tolerance 0 — no simplification.
+    clickButton(el, "Export Hidden-line SVG");
+    const atZero = exportSceneCapture.current;
+    expect(atZero).toEqual(outlineScene(sketch, { radius: 10 }, seed, 0, 0));
+    const vertsAtZero = totalVerts(atZero);
+
+    // Drive the studio knob, then re-export.
+    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "5");
+    clickButton(el, "Export Hidden-line SVG");
+    const atFive = exportSceneCapture.current;
+
+    // preview == export: the export is the SAME seam expression at tolerance 5
+    // (the value LiveCanvas's outline preview also receives — asserted below).
+    expect(atFive).toEqual(outlineScene(sketch, { radius: 10 }, seed, 0, 5));
+    // ...and simplification actually reduced the exported vertex count.
+    expect(totalVerts(atFive)).toBeLessThan(vertsAtZero);
+  });
+
+  it("the tolerance knob value is the one fed to the outline preview (#232, AC3)", () => {
+    const el = mount(<SketchControls sketch={redundantSketch("circles")} />);
+
+    // The mocked LiveCanvas surfaces the tolerance prop it was fed. Default 0.
+    const canvas = () =>
+      el.querySelector('[data-testid="canvas-seed"]') as HTMLElement;
+    expect(canvas().dataset.tolerance).toBe("0");
+
+    // Driving the knob updates the SAME value the preview consumes — the single
+    // state that also drives the export, so the two cannot diverge.
+    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "5");
+    expect(canvas().dataset.tolerance).toBe("5");
+  });
+
+  // #237: a filled square straddling the bottom-right corner (x,y ∈ [50,150]),
+  // so half of it lies OUTSIDE the 100×100 canvas. The hidden-line export must
+  // clip AFTER the hidden-line pass and BEFORE serialization, so the exported
+  // stroke geometry stays inside [0,0,100,100].
+  const overflowHlScene = {
+    space: { width: 100, height: 100 },
+    primitives: [
+      {
+        points: [
+          [50, 50],
+          [150, 50],
+          [150, 150],
+          [50, 150],
+        ],
+        closed: true,
+        fill: { color: "tomato" },
+      },
+    ],
+  };
+
+  const overflowHlSketch = (id: string) => {
+    const base = sketchWith(id, {
+      radius: numberSpec({ default: 10 }),
+    }) as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      generate: () => overflowHlScene,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+  };
+
+  it("clips the hidden-line output to the canvas bounds after the pass (#237)", () => {
+    const sketch = overflowHlSketch("circles");
+    const el = mount(<SketchControls sketch={sketch} />);
+    const seed = Number(
+      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
+    );
+
+    // The un-clipped seam (generate → hidden-line pass) still overflows the
+    // canvas — so the clip that follows is doing real work.
+    const seam = outlineScene(sketch, { radius: 10 }, seed, 0);
+    expect(outOfBoundsPoints(seam, 100, 100)).not.toEqual([]);
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    // The Scene handed `renderToSVG` is the seam CLIPPED to bounds: nothing lies
+    // outside the canvas, and it is exactly `clipSceneToBounds` of the seam
+    // (clip slotted after the hidden-line pass, before serialization).
+    const exported = exportSceneCapture.current;
+    expect(exported).not.toBeNull();
+    expect(outOfBoundsPoints(exported, 100, 100)).toEqual([]);
+    expect(exported).toEqual(clipSceneToBounds(seam));
+  });
+
+  // #237 AC3 (concrete): the real Leaf Field sketch (core) run through the full
+  // hidden-line export path — generate → hiddenLinePass → clipSceneToBounds —
+  // must leave NO output path point outside its own canvas rectangle. This is
+  // the acceptance check against a production sketch (not a hand-built Scene).
+  it("Leaf Field hidden-line export has no point outside the canvas (#237, AC3)", () => {
+    const params = defaultParams(leafField.schema);
+    const seed = 12345 as Seed;
+    // The hidden-line pass is heavy, so run it ONCE and reuse it for both the
+    // pre-clip overflow check and the clipped output.
+    const preClip = hiddenLinePass(leafField.generate(params, seed, 0), {
+      tolerance: 0,
+    });
+    const exported = clipSceneToBounds(preClip);
+    const { width, height } = exported.space;
+    expect(width).toBeGreaterThan(0);
+    expect(height).toBeGreaterThan(0);
+    // The sketch genuinely overflows before clipping (the pre-clip seam has
+    // out-of-bounds points), so the emptiness below is the clip's doing.
+    expect(outOfBoundsPoints(preClip, width, height)).not.toEqual([]);
+    // ...and after the clip, every path point lies within [0,0,width,height].
+    expect(outOfBoundsPoints(exported, width, height)).toEqual([]);
+  });
 });
 
 describe("SketchControls — PNG export wiring", () => {
@@ -689,5 +1136,107 @@ describe("SketchControls — PNG export wiring", () => {
     await flush();
 
     expect(downloadBlob).not.toHaveBeenCalled();
+  });
+});
+
+describe("SketchControls — render-mode toggle wiring (#219)", () => {
+  /** The render mode SketchControls fed the (mocked) LiveCanvas this render. */
+  const canvasRenderMode = (el: HTMLElement): string | null =>
+    el
+      .querySelector('[data-testid="canvas-seed"]')
+      ?.getAttribute("data-render-mode") ?? null;
+
+  const toggleEl = (el: HTMLElement): HTMLButtonElement => {
+    const btn = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    );
+    if (btn === null) throw new Error("no render-mode toggle");
+    return btn;
+  };
+
+  it("defaults to fill and flips the renderMode it passes into LiveCanvas on toggle", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const toggle = toggleEl(el);
+
+    // Default: LiveCanvas receives renderMode="fill", the toggle reads unpressed.
+    expect(canvasRenderMode(el)).toBe("fill");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.textContent).toBe("Fill");
+
+    // Toggle → the outline mode propagates straight into the LiveCanvas prop.
+    act(() => {
+      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(canvasRenderMode(el)).toBe("outline");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.textContent).toBe("Outline");
+
+    // Toggle again → back to fill (a plain view-only flip, both directions).
+    act(() => {
+      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(canvasRenderMode(el)).toBe("fill");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("shows 'Computing…' (disabled) the instant Fill→Outline is clicked, until the pass signals done (#228)", () => {
+    // Opt out of the auto-clear so the intermediate busy state is observable: the
+    // real pass runs asynchronously, so the label must read "Computing…" from the
+    // click's own commit until LiveCanvas signals `onOutlineComputed`.
+    autoFireOutlineComputed = false;
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const toggle = toggleEl(el);
+    expect(toggle.textContent).toBe("Fill");
+    expect(toggle.disabled).toBe(false);
+
+    // Click to outline: the busy label is set SYNCHRONOUSLY with the flip (so it
+    // paints with the click's commit, before the blocking pass), and the button
+    // is disabled + aria-busy. renderMode still propagates to LiveCanvas at once.
+    act(() => {
+      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("aria-busy")).toBe("true");
+    expect(canvasRenderMode(el)).toBe("outline");
+
+    // The pass finishes → LiveCanvas signals done → the label settles on "Outline"
+    // and the control re-enables.
+    act(() => {
+      lastOnOutlineComputed?.();
+    });
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
+  });
+
+  it("flipping render mode touches no param/seed/lock axis", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const seedBefore = (el.querySelector("#sketch-seed") as HTMLInputElement)
+      .value;
+    const radiusBefore = paramInput(el, "radius").value;
+
+    act(() => {
+      toggleEl(el).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    // The toggle is view-only: it swapped the canvas render mode but left the
+    // param and seed axes exactly as they were.
+    expect(canvasRenderMode(el)).toBe("outline");
+    expect((el.querySelector("#sketch-seed") as HTMLInputElement).value).toBe(
+      seedBefore,
+    );
+    expect(paramInput(el, "radius").value).toBe(radiusBefore);
   });
 });

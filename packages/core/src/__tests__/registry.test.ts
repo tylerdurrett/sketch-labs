@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 
 import { createRegistry, registry } from '../registry'
 import { circles } from '../sketches/circles'
-import { singleLeaf } from '../sketches/single-leaf'
 import type { Sketch } from '../sketch'
 
 /** A throwaway second Sketch so tests can exercise multi-entry indexing. */
@@ -39,11 +38,6 @@ describe('the default registry', () => {
   it('contains the circles Sketch keyed by its id', () => {
     expect(registry.get('circles')).toBe(circles)
     expect(registry.list()).toContain(circles)
-  })
-
-  it('contains the single-leaf Sketch keyed by its id', () => {
-    expect(registry.get('single-leaf')).toBe(singleLeaf)
-    expect(registry.list()).toContain(singleLeaf)
   })
 
   it('registers every built-in under a unique id', () => {
