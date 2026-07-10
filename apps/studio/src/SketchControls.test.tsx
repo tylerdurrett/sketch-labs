@@ -708,6 +708,13 @@ describe("SketchControls — SVG export wiring", () => {
   };
 
   it("clips overflowing geometry to the canvas bounds before serializing (#237)", async () => {
+    // Pin the mount-time `useState(() => newSeed(Math.random))` seed so the
+    // repro-metadata envelope embedded in the SVG is deterministic (0.5 ->
+    // 4503599627370495, which contains neither "150" nor "-50"). Without this
+    // the random seed's digits collide with the overflow-coordinate substring
+    // assertions below ~1.4% of runs (#240). `vi.restoreAllMocks()` in
+    // afterEach undoes the stub.
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     const el = mount(<SketchControls sketch={overflowSketch("circles")} />);
 
     clickButton(el, "Export SVG");
