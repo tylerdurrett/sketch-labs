@@ -45,6 +45,35 @@ render live.
 packages/core/node_modules/.bin/vitest run    # headless engine
 ```
 
+## Leaf Field performance benchmark
+
+Run the pinned Leaf Field feedback loop with the package-local Vitest binary:
+
+```sh
+packages/core/node_modules/.bin/vitest run --config packages/core/vitest.leaf-field-benchmark.config.ts
+```
+
+Or, from an environment where workspace scripts are allowed:
+
+```sh
+pnpm --filter @harness/core benchmark:leaf-field
+```
+
+It reports median and p95 timings for fixed-time cold/full generation through
+`generate`, warm varying-time generation, Canvas-port submission, and the warm
+whole frame. Here "cold/full" means each frame has no caller-owned prepared
+state; the timing loop is still JIT-warmed to reduce startup noise. Until a
+Sketch provides the optional `prepare(params, seed) → (t) → Scene` fast path,
+the warm line clearly reports that it is using the `generate` fallback.
+
+The seed, params, scene counts, and a full-geometry checksum are pinned so an
+apparent speedup cannot silently omit work. `LEAF_BENCH_SAMPLES` (minimum 20,
+default 30) and `LEAF_BENCH_WARMUPS` (default 5) tune run length.
+
+The Canvas number measures traversal and submission through the injected
+`Canvas2DContext` port using a counting context. It does not include a browser's
+rasterization, compositor, or GPU flush; use a browser profile for those costs.
+
 ## Layout
 
 - `packages/core` — headless engine, Scene IR, renderers, Sketches
