@@ -1,4 +1,4 @@
-import { DEFAULT_COMPOSITION_FRAME } from '@harness/core'
+import { resolveCompositionFrame } from '@harness/core'
 import type { Params, Scene, Seed, Sketch } from '@harness/core'
 
 /**
@@ -7,9 +7,15 @@ import type { Params, Scene, Seed, Sketch } from '@harness/core'
  * `t` (ADR-0002: a Sketch is a pure function of `(params, seed, t, frame)`, and
  * `t` is seconds, never a frame count).
  *
- * The Sketch's Composition Frame is the DEFAULT `1000 × 1000` frame for now
- * (`DEFAULT_COMPOSITION_FRAME`); deriving the real frame from the render's pixel
- * dimensions is #255's job. Note the Remotion frame INDEX below is a separate
+ * The Composition Frame handed to the Sketch is DERIVED from the render's
+ * resolved pixel dimensions: `resolveCompositionFrame(pixelWidth / pixelHeight)`
+ * yields the fixed-area (`1,000,000`) drawable rectangle whose ASPECT matches the
+ * output. Only the aspect enters — magnitude never does — so any two resolutions
+ * of the same aspect (e.g. `900×1600` and `450×800`) produce the identical frame
+ * and hence identical Scene geometry. This is why the derivation lives here,
+ * reachable from pixel dims alone: `useVideoConfig()` round-trips only
+ * `fps`/`width`/`height`, NOT the frame, so the frame must be re-derivable every
+ * render from `width`/`height`. Note the Remotion frame INDEX is a separate
  * concept from the Composition Frame — the `frame` parameter here is the integer
  * frame clock, not the drawable rectangle.
  *
@@ -30,7 +36,10 @@ import type { Params, Scene, Seed, Sketch } from '@harness/core'
  * @param seed - The explicit Seed all of the Sketch's randomness derives from.
  * @param frame - The Remotion frame index (0-based).
  * @param fps - Frames per second — the Render Setting mapping frames to seconds.
- * @returns The Scene the Sketch produces at `t = frame / fps`.
+ * @param width - The resolved output width in pixels (drives the frame aspect).
+ * @param height - The resolved output height in pixels (drives the frame aspect).
+ * @returns The Scene the Sketch produces at `t = frame / fps` within the
+ *   Composition Frame derived from `width / height`.
  */
 export function frameToScene(
   sketch: Sketch,
@@ -38,6 +47,9 @@ export function frameToScene(
   seed: Seed,
   frame: number,
   fps: number,
+  width: number,
+  height: number,
 ): Scene {
-  return sketch.generate(params, seed, frame / fps, DEFAULT_COMPOSITION_FRAME)
+  const frameSpace = resolveCompositionFrame(width / height)
+  return sketch.generate(params, seed, frame / fps, frameSpace)
 }
