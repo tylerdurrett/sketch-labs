@@ -498,21 +498,10 @@ describe("LiveCanvas export handle — read-only canvas + current t", () => {
 });
 
 describe("LiveCanvas paper aspect — sized to the Scene's space (#155)", () => {
-  it("uses invariant Sketch space without sampling a throwaway frame", () => {
-    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
-    prepared.sketch.space = { width: 1600, height: 900 };
-
-    const el = mount(
-      <LiveCanvas sketch={prepared.sketch} params={{}} seed={1} />,
-    );
-
-    expect(Number(canvasEl(el).style.getPropertyValue("--paper-aspect"))).toBeCloseTo(
-      1600 / 900,
-      5,
-    );
-    expect(prepared.samplers[0]).not.toHaveBeenCalled();
-  });
-
+  // The Sketch-declared `space` metadata that once let LiveCanvas read an
+  // invariant aspect WITHOUT sampling a throwaway Scene was removed with the
+  // widened Composition Frame contract (#251); the aspect now always derives from
+  // the generated Scene's own coordinate space, covered by the tests below.
   it("threads the generated Scene's width/height ratio onto the canvas box", () => {
     // A 1600x900 space is a 16:9 paper — the CSS box must carry that ratio via
     // the `--paper-aspect` custom property, not stay a fixed square.

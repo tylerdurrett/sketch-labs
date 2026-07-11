@@ -1,4 +1,5 @@
 import {
+  DEFAULT_COMPOSITION_FRAME,
   hiddenLinePass,
   type Params,
   type Scene,
@@ -40,5 +41,7 @@ export function outlineScene(
   t: number,
   tolerance = 0,
 ): Scene {
-  return hiddenLinePass(sketch.generate(params, seed, t), { tolerance });
+  return hiddenLinePass(sketch.generate(params, seed, t, DEFAULT_COMPOSITION_FRAME), {
+    tolerance,
+  });
 }
