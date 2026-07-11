@@ -22,7 +22,7 @@
  */
 
 import { createScene } from '../../scene'
-import type { Scene } from '../../scene'
+import type { CoordinateSpace, Scene } from '../../scene'
 import { createRandom } from '../../random'
 import { curl } from '../../curl'
 import type {
@@ -92,7 +92,7 @@ export const flowField: StatelessSketch = {
   name: 'Flow Field',
   schema,
   // NO `time` metadata ⇒ ships static (single frame, scrubber hidden).
-  generate(params: Params, seed: Seed, t: number): Scene {
+  generate(params: Params, seed: Seed, t: number, _frame: CoordinateSpace): Scene {
     const rng = createRandom(seed)
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 

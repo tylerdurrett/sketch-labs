@@ -6,6 +6,7 @@ import {
 } from 'remotion'
 
 import {
+  DEFAULT_COMPOSITION_FRAME,
   drawSceneFitted,
   registry,
   type Canvas2DContext,
@@ -102,7 +103,7 @@ export const calculateCirclesMetadata: CalculateMetadataFunction<CirclesProps> =
   const sketch = registry.get(CIRCLES_ID)
   const durationSeconds = sketch.time?.duration ?? 1
 
-  const probe = sketch.generate(props.params, props.seed, 0)
+  const probe = sketch.generate(props.params, props.seed, 0, DEFAULT_COMPOSITION_FRAME)
   const { fps, width, height } = resolveRenderSettings(props, probe.space)
 
   return {

@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import {
+  DEFAULT_COMPOSITION_FRAME,
   drawSceneFitted,
   prepareSketch,
   type Canvas2DContext,
@@ -288,15 +289,16 @@ export function LiveCanvas({
   // existing `generate`. Changing Sketch, params, or seed invalidates exactly this
   // sampler without touching the single wall-clock `t` (ADR-0002/0005).
   const preparedFrame = useMemo(
-    () => prepareSketch(sketch, params, seed),
+    () => prepareSketch(sketch, params, seed, DEFAULT_COMPOSITION_FRAME),
     [sketch, params, seed],
   );
 
   // The paper's CSS-box aspect (#155): the `<canvas>` box is sized to the
-  // SKETCH's OWN aspect, not a fixed square. A Sketch with an invariant
-  // coordinate space declares it directly, avoiding a full throwaway Scene on
-  // every params/seed invalidation. Dynamic-space Sketches omit that metadata
-  // and retain the historical t=0 Scene fallback. The ratio is threaded onto
+  // SKETCH's OWN aspect, not a fixed square. The aspect is read from the
+  // generated Scene's coordinate space at t=0. (The Sketch-declared `space`
+  // metadata that once short-circuited this throwaway Scene was removed with the
+  // widened Composition Frame contract in #251; the real Harness fallback frame
+  // arrives in #254.) The ratio is threaded onto
   // `.live-canvas` as the `--paper-aspect` custom property; the CSS there
   // contain-fits the box against the stage at that ratio. This is a DISPLAY-BOX
   // concern only — the DPR backing store
@@ -304,10 +306,10 @@ export function LiveCanvas({
   // untouched, so PNG/SVG export still snapshots the displayed frame. A
   // degenerate space (zero/non-finite extent) falls back to a square.
   const paperAspect = useMemo(() => {
-    const space = sketch.space ?? preparedFrame(0).space;
+    const space = preparedFrame(0).space;
     const ratio = space.width / space.height;
     return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
-  }, [sketch, preparedFrame]);
+  }, [preparedFrame]);
 
   // Inline the derived ratio as the `--paper-aspect` custom property the
   // `.live-canvas` rule reads for its `aspect-ratio` + contain-fit width. Cast

@@ -168,7 +168,7 @@ import { lerp } from '../../math'
 import { samplePoissonDisk } from '../../poisson'
 import { createRandom } from '../../random'
 import { createScene } from '../../scene'
-import type { Scene } from '../../scene'
+import type { CoordinateSpace, Scene } from '../../scene'
 import {
   definePreparedSketch,
   type Params,
@@ -411,9 +411,8 @@ export const leafField = definePreparedSketch({
   id: 'leaf-field',
   name: 'Leaf Field',
   schema,
-  space: { width: WIDTH, height: HEIGHT },
   // NO `time` metadata ⇒ ships static (single frame, scrubber hidden).
-  prepare(params: Params, seed: Seed) {
+  prepare(params: Params, seed: Seed, _frame: CoordinateSpace) {
     // Shared seeded Random. It drives the per-leaf shape rolls (size, curl,
     // wobble) AND is threaded into `leaf()` for its broad contour roughness. It
     // ALSO seeds the curl field via its (separate, non-advancing) noise

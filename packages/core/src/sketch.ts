@@ -7,13 +7,24 @@
  *
  * Two design decisions are load-bearing here:
  *
- * - ADR-0002: a Sketch's output is a pure function of `(params, seed, t)`. The
- *   stateless author writes `generate`; randomness flows from the explicit
- *   `Seed`, never from `Math.random()` or the clock.
+ * - ADR-0002: a Sketch's output is a pure function of `(params, seed, t, frame)`.
+ *   The stateless author writes `generate`; randomness flows from the explicit
+ *   `Seed`, never from `Math.random()` or the clock, and the drawable rectangle
+ *   arrives as an explicit {@link CoordinateSpace} Composition Frame rather than
+ *   being self-declared by the Sketch.
  * - ADR-0003: a stateful (simulation) Sketch is a deterministic fold the Harness
  *   drives — `initial(params, seed)` + fixed-`dt` `step(state)` + `draw(state)`.
  *   The top-level `Sketch` type is therefore an OPEN union so that future
- *   stateful variant can join WITHOUT reworking the stateless path.
+ *   stateful variant can join WITHOUT reworking the stateless path — and, when it
+ *   does, it receives the SAME Composition Frame the stateless seam now takes.
+ *
+ * The Composition Frame (CONTEXT.md "Composition Frame"; ADR-0012) is the
+ * scale-independent, aspect-bearing drawable rectangle the Sketch composes into.
+ * It is threaded through the generation seam as an explicit argument so the frame
+ * — not any Sketch-declared metadata — is the single source of layout truth. A
+ * Sketch that has not yet been taught to compose inside an arbitrary frame simply
+ * ignores it and keeps baking into its historical `1000 × 1000` extent; callers
+ * that have no real frame yet pass {@link DEFAULT_COMPOSITION_FRAME}.
  */
 
 import type { CoordinateSpace, Scene } from './scene'
@@ -247,12 +258,6 @@ export interface SketchBase {
   /** The Sketch's tweakable knobs — the spine of the Harness. */
   schema: ParamSchema
   /**
-   * Optional coordinate space when it is invariant across every param, seed,
-   * and time value. Harness callers may use it for layout without generating a
-   * throwaway Scene. Omit it when frame generation determines the space.
-   */
-  space?: CoordinateSpace
-  /**
    * Optional time metadata. Absent ⇒ a static Sketch (ADR-0002); present ⇒ the
    * Harness drives `t` over `duration` with the given `mode`.
    */
@@ -261,58 +266,69 @@ export interface SketchBase {
 
 /**
  * A stateless Sketch (ADR-0002): its entire output is a pure
- * `generate(params, seed, t) → Scene`. Same inputs, same frame, always — no
- * per-frame or cross-frame mutable state. The one function serves every caller
+ * `generate(params, seed, t, frame) → Scene`. Same inputs, same frame, always —
+ * no per-frame or cross-frame mutable state. The one function serves every caller
  * (live exploration, Remotion, plotter export); only how the Harness samples `t`
- * varies.
+ * and which Composition Frame it supplies varies.
  */
 export interface StatelessSketch extends SketchBase {
   /**
-   * Produce the Scene at time `t` for the given params and seed.
+   * Produce the Scene at time `t` for the given params, seed, and Composition
+   * Frame.
    *
    * @param params - Inhabited param values for this Sketch's schema.
    * @param seed - The explicit Seed; all internal randomness derives from it.
    * @param t - Time in seconds; for a static Sketch (no `time`) callers pass 0.
+   * @param frame - The Composition Frame: the drawable rectangle to compose into.
+   *   The source of layout truth; callers with no real frame yet pass
+   *   {@link DEFAULT_COMPOSITION_FRAME}.
    */
-  generate(params: Params, seed: Seed, t: number): Scene
+  generate(params: Params, seed: Seed, t: number, frame: CoordinateSpace): Scene
 
   /**
    * Optionally split time-invariant preparation from repeated sampling in `t`.
    *
-   * The returned sampler is owned by the caller that requested it. It must remain
-   * a pure function of `t`: preparation may retain immutable data derived from
-   * `(params, seed)`, but it may not accumulate frame-to-frame state. Callers that
-   * sample sequentially can retain one sampler until params or seed change;
+   * The Composition Frame is time-invariant, so it joins the `(params, seed)`
+   * prep spine and is captured when the sampler is built. The returned sampler is
+   * owned by the caller that requested it. It must remain a pure function of `t`:
+   * preparation may retain immutable data derived from `(params, seed, frame)`,
+   * but it may not accumulate frame-to-frame state. Callers that sample
+   * sequentially can retain one sampler until params, seed, or frame change;
    * random-access callers can continue using {@link generate} unchanged.
    */
-  prepare?(params: Params, seed: Seed): PreparedFrame
+  prepare?(params: Params, seed: Seed, frame: CoordinateSpace): PreparedFrame
 }
 
-/** A caller-owned, deterministic sampler for one fixed `(params, seed)` pair. */
+/**
+ * A caller-owned, deterministic sampler for one fixed `(params, seed, frame)`
+ * triple. The Composition Frame is captured when the sampler is built, so the
+ * sampler stays a pure function of `t` alone.
+ */
 export type PreparedFrame = (t: number) => Scene
 
 /** A stateless Sketch that provides the optional prepared-frame fast path. */
 export interface PreparedStatelessSketch extends StatelessSketch {
-  prepare(params: Params, seed: Seed): PreparedFrame
+  prepare(params: Params, seed: Seed, frame: CoordinateSpace): PreparedFrame
 }
 
 /**
  * Define a prepared stateless Sketch without duplicating cold and warm frame logic.
  *
- * `generate(params, seed, t)` is derived mechanically as
- * `prepare(params, seed)(t)`. The public ADR-0002 contract therefore remains the
- * source of truth for every random-access caller, while sequential Harness callers
- * can explicitly retain the prepared sampler. No cache lives in the Sketch.
+ * `generate(params, seed, t, frame)` is derived mechanically as
+ * `prepare(params, seed, frame)(t)`. The public ADR-0002 contract therefore
+ * remains the source of truth for every random-access caller, while sequential
+ * Harness callers can explicitly retain the prepared sampler. No cache lives in
+ * the Sketch.
  */
 export function definePreparedSketch(
   definition: SketchBase & {
-    prepare(params: Params, seed: Seed): PreparedFrame
+    prepare(params: Params, seed: Seed, frame: CoordinateSpace): PreparedFrame
   },
 ): PreparedStatelessSketch {
   return {
     ...definition,
-    generate(params, seed, t) {
-      return definition.prepare(params, seed)(t)
+    generate(params, seed, t, frame) {
+      return definition.prepare(params, seed, frame)(t)
     },
   }
 }
@@ -322,14 +338,19 @@ export function definePreparedSketch(
  *
  * Sketches without a specialized preparation seam receive a zero-state adapter
  * over their existing `generate`; prepared Sketches hand back their optimized,
- * caller-owned sampler. Either path has identical observable frame semantics.
+ * caller-owned sampler. Either path has identical observable frame semantics. The
+ * Composition Frame is captured here and threaded to both paths.
  */
 export function prepareSketch(
   sketch: StatelessSketch,
   params: Params,
   seed: Seed,
+  frame: CoordinateSpace,
 ): PreparedFrame {
-  return sketch.prepare?.(params, seed) ?? ((t) => sketch.generate(params, seed, t))
+  return (
+    sketch.prepare?.(params, seed, frame) ??
+    ((t) => sketch.generate(params, seed, t, frame))
+  )
 }
 
 /**
@@ -341,5 +362,12 @@ export function prepareSketch(
  * touching the stateless member: members are distinguished structurally
  * (a stateless Sketch has `generate`; a stateful one has `initial`/`step`/`draw`),
  * so adding the variant is purely additive.
+ *
+ * The Composition Frame reaches the stateful seam the same way it reaches the
+ * stateless one: `initial(params, seed, frame)` receives it alongside the
+ * `(params, seed)` spine (the frame is time-invariant, so it belongs to
+ * initialization, not `step`), and every `draw(state)` composes into that same
+ * frame. The stateful variant is NOT implemented here — this is the reserved
+ * contract only.
  */
 export type Sketch = StatelessSketch

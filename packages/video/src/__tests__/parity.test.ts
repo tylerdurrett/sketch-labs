@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  DEFAULT_COMPOSITION_FRAME,
   defaultParams,
   drawSceneFitted,
   prepareSketch,
@@ -19,7 +20,7 @@ import { RecordingContext } from './recordingContext'
  * a byte-identical ordered stream of draw calls.
  *
  * - The STUDIO-shaped caller mirrors `LiveCanvas.drawFrame`:
- *   `sketch.generate(params, seed, t)` → `drawSceneFitted(ctx, scene, w, h)`.
+ *   `sketch.generate(params, seed, t, DEFAULT_COMPOSITION_FRAME)` → `drawSceneFitted(ctx, scene, w, h)`.
  * - The VIDEO-shaped caller mirrors `CirclesComposition`:
  *   `frameToScene(sketch, params, seed, frame, fps)` → `drawSceneFitted(ctx, scene, w, h)`,
  *   where `frameToScene` samples at `t = frame / fps`.
@@ -46,7 +47,7 @@ describe('cross-caller draw-call parity', () => {
 
   it('studio-shaped and video-shaped invocations emit byte-identical ordered logs', () => {
     const studioCtx = new RecordingContext()
-    const studioScene = sketch.generate(params, seed, t)
+    const studioScene = sketch.generate(params, seed, t, DEFAULT_COMPOSITION_FRAME)
     drawSceneFitted(studioCtx, studioScene, pixelW, pixelH)
 
     const videoCtx = new RecordingContext()
@@ -69,7 +70,7 @@ describe('cross-caller draw-call parity', () => {
 
   it('opens with the background paint, then the contain-fit setTransform', () => {
     const ctx = new RecordingContext()
-    const scene = sketch.generate(params, seed, t)
+    const scene = sketch.generate(params, seed, t, DEFAULT_COMPOSITION_FRAME)
     drawSceneFitted(ctx, scene, pixelW, pixelH)
 
     // The log STARTS with the background paint sequence: identity reset, white
@@ -91,7 +92,7 @@ describe('cross-caller draw-call parity', () => {
 
   it('produces a non-empty draw stream (the proof is not vacuously equal)', () => {
     const ctx = new RecordingContext()
-    const scene = sketch.generate(params, seed, t)
+    const scene = sketch.generate(params, seed, t, DEFAULT_COMPOSITION_FRAME)
     drawSceneFitted(ctx, scene, pixelW, pixelH)
 
     // The 24 default circles each emit save/beginPath/moveTo/…/stroke — a
@@ -113,7 +114,7 @@ describe('prepared Studio sampling remains identical to random-access video samp
 
     // Studio retains this caller-owned sampler across its wall-clock frames;
     // Remotion remains free to request the same frame cold and out of order.
-    const studioScene = prepareSketch(sketch, params, seed)(t)
+    const studioScene = prepareSketch(sketch, params, seed, DEFAULT_COMPOSITION_FRAME)(t)
     const videoScene = frameToScene(sketch, params, seed, frame, fps)
     expect(studioScene).toEqual(videoScene)
 

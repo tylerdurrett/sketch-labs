@@ -1,10 +1,17 @@
+import { DEFAULT_COMPOSITION_FRAME } from '@harness/core'
 import type { Params, Scene, Seed, Sketch } from '@harness/core'
 
 /**
  * Map a Remotion frame index to the Sketch's Scene at that moment — the single
  * place the video package converts frame-space into the Sketch's continuous time
- * `t` (ADR-0002: a Sketch is a pure function of `(params, seed, t)`, and `t` is
- * seconds, never a frame count).
+ * `t` (ADR-0002: a Sketch is a pure function of `(params, seed, t, frame)`, and
+ * `t` is seconds, never a frame count).
+ *
+ * The Sketch's Composition Frame is the DEFAULT `1000 × 1000` frame for now
+ * (`DEFAULT_COMPOSITION_FRAME`); deriving the real frame from the render's pixel
+ * dimensions is #255's job. Note the Remotion frame INDEX below is a separate
+ * concept from the Composition Frame — the `frame` parameter here is the integer
+ * frame clock, not the drawable rectangle.
  *
  * `t = frame / fps` is the whole contract: frame 0 is `t = 0`, and frame `fps`
  * is `t = 1` second. `fps` stays OUT of the Sketch — it is a Render Setting the
@@ -32,5 +39,5 @@ export function frameToScene(
   frame: number,
   fps: number,
 ): Scene {
-  return sketch.generate(params, seed, frame / fps)
+  return sketch.generate(params, seed, frame / fps, DEFAULT_COMPOSITION_FRAME)
 }

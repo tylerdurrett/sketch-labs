@@ -4,6 +4,7 @@ import { scatter } from '../sketches/scatter'
 import type { Params } from '../sketch'
 import type { Primitive } from '../scene'
 import type { Point } from '../types'
+import { DEFAULT_COMPOSITION_FRAME } from '../compositionFrame'
 
 /** Centroid of a baked dot polygon — the point the dot was scattered at. */
 function centroid(primitive: Primitive): Point {
@@ -46,7 +47,7 @@ describe('scatter Sketch contract', () => {
   })
 
   it('bakes a Scene of closed-polygon dot Primitives', () => {
-    const scene = scatter.generate({ baseRadius: 60 }, 'seed-a', 0)
+    const scene = scatter.generate({ baseRadius: 60 }, 'seed-a', 0, DEFAULT_COMPOSITION_FRAME)
     expect(scene.primitives.length).toBeGreaterThan(0)
     for (const primitive of scene.primitives) {
       expect(primitive.closed).toBe(true)
@@ -59,8 +60,8 @@ describe('scatter Sketch contract', () => {
 describe('scatter determinism (ADR-0002)', () => {
   it('is deterministic at the Scene level for identical (params, seed, t)', () => {
     const params: Params = { baseRadius: 50, jitter: 0.2, kSamples: 20 }
-    const a = scatter.generate(params, 'fixed-seed', 0)
-    const b = scatter.generate(params, 'fixed-seed', 0)
+    const a = scatter.generate(params, 'fixed-seed', 0, DEFAULT_COMPOSITION_FRAME)
+    const b = scatter.generate(params, 'fixed-seed', 0, DEFAULT_COMPOSITION_FRAME)
     // Asserted at the Scene level (drawn Primitives), never at the pixel level.
     expect(a).toEqual(b)
   })
@@ -68,10 +69,10 @@ describe('scatter determinism (ADR-0002)', () => {
   it('produces the same Scene for the same inputs (re-evaluated), no cross-call state', () => {
     const params: Params = { baseRadius: 60 }
     // Interleave other generate calls to surface any accumulated state.
-    const first = scatter.generate(params, 's', 0)
-    scatter.generate(params, 'other', 0)
-    scatter.generate({ baseRadius: 30 }, 's', 0)
-    const again = scatter.generate(params, 's', 0)
+    const first = scatter.generate(params, 's', 0, DEFAULT_COMPOSITION_FRAME)
+    scatter.generate(params, 'other', 0, DEFAULT_COMPOSITION_FRAME)
+    scatter.generate({ baseRadius: 30 }, 's', 0, DEFAULT_COMPOSITION_FRAME)
+    const again = scatter.generate(params, 's', 0, DEFAULT_COMPOSITION_FRAME)
     expect(again).toEqual(first)
   })
 })
@@ -79,15 +80,15 @@ describe('scatter determinism (ADR-0002)', () => {
 describe('scatter seed-independence', () => {
   it('reshuffles placement under a new seed while params hold', () => {
     const params: Params = { baseRadius: 60, jitter: 0.15, kSamples: 30 }
-    const sceneA = scatter.generate(params, 'gen-seed-a', 0)
-    const sceneB = scatter.generate(params, 'gen-seed-b', 0)
+    const sceneA = scatter.generate(params, 'gen-seed-a', 0, DEFAULT_COMPOSITION_FRAME)
+    const sceneB = scatter.generate(params, 'gen-seed-b', 0, DEFAULT_COMPOSITION_FRAME)
     // Same params, different seed ⇒ a different drawn arrangement.
     expect(sceneB).not.toEqual(sceneA)
   })
 
   it('raising base radius thins the scatter (density tracks the knob)', () => {
-    const dense = scatter.generate({ baseRadius: 24 }, 's', 0)
-    const sparse = scatter.generate({ baseRadius: 96 }, 's', 0)
+    const dense = scatter.generate({ baseRadius: 24 }, 's', 0, DEFAULT_COMPOSITION_FRAME)
+    const sparse = scatter.generate({ baseRadius: 96 }, 's', 0, DEFAULT_COMPOSITION_FRAME)
     // A larger min-distance packs fewer points into the same extent.
     expect(sparse.primitives.length).toBeLessThan(dense.primitives.length)
   })
@@ -97,7 +98,7 @@ describe('scatter blue-noise sanity', () => {
   it('keeps baked dot centers at least the base radius apart (no clumps)', () => {
     const baseRadius = 60
     // No jitter so the sampler's min-distance guarantee is asserted directly.
-    const scene = scatter.generate({ baseRadius, jitter: 0 }, 'blue-noise', 0)
+    const scene = scatter.generate({ baseRadius, jitter: 0 }, 'blue-noise', 0, DEFAULT_COMPOSITION_FRAME)
     const centers = scene.primitives.map(centroid)
     expect(centers.length).toBeGreaterThan(1)
     const minDist = minPairwiseDistance(centers)

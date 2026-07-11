@@ -22,7 +22,7 @@
 import { samplePoissonDisk } from '../../poisson'
 import { createRandom } from '../../random'
 import { createScene } from '../../scene'
-import type { Scene } from '../../scene'
+import type { CoordinateSpace, Scene } from '../../scene'
 import type {
   NumberParamSpec,
   Params,
@@ -98,7 +98,7 @@ export const scatter: StatelessSketch = {
   id: 'scatter',
   name: 'Scatter',
   schema,
-  generate(params: Params, seed: Seed, _t: number): Scene {
+  generate(params: Params, seed: Seed, _t: number, _frame: CoordinateSpace): Scene {
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
     const baseRadius = numberParam(params, schema, 'baseRadius')

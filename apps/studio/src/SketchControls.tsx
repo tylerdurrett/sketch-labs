@@ -5,6 +5,7 @@ import {
   applyPreset,
   buildReproMetadata,
   clamp,
+  DEFAULT_COMPOSITION_FRAME,
   clipSceneToBounds,
   defaultParams,
   exportFilename,
@@ -275,7 +276,7 @@ export function SketchControls({
     // `generate` takes a concrete `t` (static Sketches conventionally get 0 and
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
-    const scene = sketch.generate(params, seed, t ?? 0);
+    const scene = sketch.generate(params, seed, t ?? 0, DEFAULT_COMPOSITION_FRAME);
     // Clip the generated geometry to the canvas rectangle so the exported plot
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.

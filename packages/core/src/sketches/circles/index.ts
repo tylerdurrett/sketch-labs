@@ -14,7 +14,7 @@
  */
 
 import { createScene } from '../../scene'
-import type { Scene } from '../../scene'
+import type { CoordinateSpace, Scene } from '../../scene'
 import { createRandom } from '../../random'
 import type {
   NumberParamSpec,
@@ -72,7 +72,7 @@ export const circles: StatelessSketch = {
   name: 'Circles',
   schema,
   time: { duration: 4, mode: 'loop' },
-  generate(params: Params, seed: Seed, t: number): Scene {
+  generate(params: Params, seed: Seed, t: number, _frame: CoordinateSpace): Scene {
     const rng = createRandom(seed)
     const builder = createScene({ width: WIDTH, height: HEIGHT })
 
