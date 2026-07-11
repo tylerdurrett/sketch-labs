@@ -38,6 +38,19 @@ import type { CoordinateSpace } from './scene'
 export const COMPOSITION_FRAME_AREA = 1_000_000
 
 /**
+ * The default Composition Frame: the square `1000 × 1000` space, i.e.
+ * `resolveCompositionFrame(1)`. This is the frame that preserves the Harness's
+ * historical coordinate space (the `WIDTH`/`HEIGHT` extent every Sketch baked
+ * into before the frame became an explicit argument, issue #251).
+ *
+ * It exists as a NAMED constant so every call site that has not yet been handed a
+ * real frame — the registered-Sketch adopters (#253), the Studio wiring (#254),
+ * and the Remotion derivation (#255) — can reference the placeholder by name and
+ * be found by a single grep when its real frame arrives.
+ */
+export const DEFAULT_COMPOSITION_FRAME: CoordinateSpace = resolveCompositionFrame(1)
+
+/**
  * Resolve a drawable aspect ratio into a fixed-area Composition Frame coordinate
  * space.
  *
