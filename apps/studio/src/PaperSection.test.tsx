@@ -141,6 +141,23 @@ describe("PaperSection", () => {
     expect(profile).toMatchObject({ width: 210, height: 297 });
   });
 
+  it("leaves an invalid draft and its error untouched when Custom is chosen", () => {
+    const onChange = vi.fn();
+    const { el } = mount(onChange);
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    setInput(width, "");
+    const message = el.querySelector('[role="alert"]')?.textContent;
+    selectFormat(el, "custom");
+
+    expect(width.value).toBe("");
+    expect(width.getAttribute("aria-invalid")).toBe("true");
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe(message);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("commits a valid dimension as one complete canonical profile", () => {
     const onChange = vi.fn();
     const { el } = mount(onChange);
@@ -200,6 +217,10 @@ describe("PaperSection", () => {
     const height = el.querySelector<HTMLInputElement>(
       'input[aria-label="Paper height (mm)"]',
     )!;
+    expect(width.getAttribute("aria-invalid")).toBe("true");
+    expect(width.getAttribute("aria-describedby")).not.toBeNull();
+    expect(height.getAttribute("aria-invalid")).toBe("false");
+    expect(height.getAttribute("aria-describedby")).toBeNull();
     setInput(height, "300");
     expect(onChange).not.toHaveBeenCalled();
 
@@ -235,9 +256,17 @@ describe("PaperSection", () => {
     selectFormat(el, "a5");
 
     expect(onChange).not.toHaveBeenCalled();
-    expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+    const error = el.querySelector('[role="alert"]');
+    const select = el.querySelector("select")!;
+    expect(error?.textContent).toContain(
       "no drawable rectangle",
     );
+    expect(select.getAttribute("aria-invalid")).toBe("true");
+    expect(select.getAttribute("aria-describedby")).toBe(error?.id);
+    for (const input of el.querySelectorAll('input[type="number"]')) {
+      expect(input.getAttribute("aria-invalid")).toBe("false");
+      expect(input.getAttribute("aria-describedby")).toBeNull();
+    }
   });
 
   it("falls back to millimeters when no valid local preference exists", () => {

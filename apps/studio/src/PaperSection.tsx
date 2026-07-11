@@ -54,6 +54,12 @@ function formatDimension(value: number, unit: PaperDisplayUnit): string {
 }
 
 type PaperDimension = "width" | "height";
+type PaperErrorTarget = "format" | PaperDimension;
+
+interface PaperError {
+  target: PaperErrorTarget;
+  message: string;
+}
 
 function paperName(name: StandardPaperName): string {
   return name.startsWith("a")
@@ -77,7 +83,7 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
     width: formatDimension(profile.width, displayUnit),
     height: formatDimension(profile.height, displayUnit),
   }));
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<PaperError | null>(null);
   const dirtyDimensions = useRef<Set<PaperDimension>>(new Set());
   const id = useId();
 
@@ -97,13 +103,29 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
     setError(null);
   }, [displayUnit, profile.height, profile.width]);
 
-  const commitCandidate = (candidate: PlotProfile): void => {
+  const commitCandidate = (
+    candidate: PlotProfile,
+    target: PaperErrorTarget,
+  ): void => {
     try {
       validatePlotProfile(candidate);
       setError(null);
       onChange(candidate);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Invalid paper dimensions");
+      const message =
+        cause instanceof Error ? cause.message : "Invalid paper dimensions";
+      // Dimension edits can accumulate as transient drafts, so validation may
+      // identify the OTHER dirty dimension. Core's messages name the affected
+      // axis; format changes remain owned by the select as a single operation.
+      const resolvedTarget =
+        target === "format"
+          ? target
+          : message.includes("width") || message.includes("horizontal")
+            ? "width"
+            : message.includes("height") || message.includes("vertical")
+              ? "height"
+              : target;
+      setError({ target: resolvedTarget, message });
     }
   };
 
@@ -120,9 +142,10 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
     for (const dirty of dirtyDimensions.current) {
       const dirtyDraft = nextDrafts[dirty];
       if (dirtyDraft.trim() === "") {
-        setError(
-          `${dirty[0]!.toUpperCase()}${dirty.slice(1)} is required.`,
-        );
+        setError({
+          target: dirty,
+          message: `${dirty[0]!.toUpperCase()}${dirty.slice(1)} is required.`,
+        });
         return;
       }
 
@@ -130,18 +153,16 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
       candidate[dirty] =
         displayUnit === "in" ? inchToMm(displayValue) : displayValue;
     }
-    commitCandidate(candidate);
+    commitCandidate(candidate, dimension);
   };
 
   const selectFormat = (value: string): void => {
-    if (value === "custom") {
-      setError(null);
-      return;
-    }
+    if (value === "custom") return;
 
     const name = value as StandardPaperName;
     commitCandidate(
       applyStandardPaper(profile, name, derivePaperOrientation(profile)),
+      "format",
     );
   };
 
@@ -167,6 +188,8 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
             id={`${id}-format`}
             className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
             value={format}
+            aria-invalid={error?.target === "format"}
+            aria-describedby={error?.target === "format" ? errorId : undefined}
             onChange={(event) => selectFormat(event.target.value)}
           >
             {STANDARD_PAPER_NAMES.map((name) => (
@@ -209,8 +232,10 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
                   step="any"
                   value={dimensionDrafts[dimension]}
                   aria-label={`Paper ${dimension} (${displayUnit})`}
-                  aria-invalid={error !== null}
-                  aria-describedby={error === null ? undefined : errorId}
+                  aria-invalid={error?.target === dimension}
+                  aria-describedby={
+                    error?.target === dimension ? errorId : undefined
+                  }
                   onChange={(event) =>
                     editDimension(dimension, event.target.value)
                   }
@@ -224,7 +249,7 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
         </fieldset>
         {error === null ? null : (
           <p id={errorId} role="alert" className="text-sm text-destructive">
-            {error}
+            {error.message}
           </p>
         )}
       </div>
