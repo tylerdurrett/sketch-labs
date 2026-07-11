@@ -61,6 +61,14 @@ function selectFormat(el: HTMLElement, value: string): void {
   });
 }
 
+function clickButton(el: HTMLElement, label: string): void {
+  const button = [...el.querySelectorAll("button")].find(
+    (candidate) => candidate.textContent === label,
+  );
+  if (button === undefined) throw new Error(`no button labelled ${label}`);
+  act(() => button.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+}
+
 function selectUnit(el: HTMLElement, unit: "mm" | "in"): void {
   const input = el.querySelector<HTMLInputElement>(`input[value="${unit}"]`);
   if (input === null) throw new Error(`no ${unit} unit input`);
@@ -267,6 +275,130 @@ describe("PaperSection", () => {
       expect(input.getAttribute("aria-invalid")).toBe("false");
       expect(input.getAttribute("aria-describedby")).toBeNull();
     }
+  });
+
+  it("swaps only width and height while preserving every inset", () => {
+    const onChange = vi.fn();
+    const asymmetric: PlotProfile = {
+      ...profile,
+      insets: { top: 1, right: 2, bottom: 3, left: 4 },
+    };
+    const { el } = mount(onChange, asymmetric);
+
+    clickButton(el, "Swap to landscape");
+
+    expect(onChange).toHaveBeenCalledWith({
+      width: 297,
+      height: 210,
+      insets: asymmetric.insets,
+    });
+  });
+
+  it("rejects an invalid orientation swap and targets the action accessibly", () => {
+    const onChange = vi.fn();
+    const swapWouldExhaust: PlotProfile = {
+      width: 300,
+      height: 100,
+      insets: { top: 10, right: 110, bottom: 10, left: 110 },
+    };
+    const { el } = mount(onChange, swapWouldExhaust);
+    const button = [...el.querySelectorAll("button")].find((candidate) =>
+      candidate.textContent?.includes("Swap to portrait"),
+    )!;
+
+    act(() => button.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    const alert = el.querySelector<HTMLElement>('[role="alert"]')!;
+    expect(onChange).not.toHaveBeenCalled();
+    expect(button.getAttribute("aria-invalid")).toBe("true");
+    expect(button.getAttribute("aria-describedby")).toBe(alert.id);
+    for (const input of el.querySelectorAll('input[type="number"]')) {
+      expect(input.getAttribute("aria-invalid")).toBe("false");
+      expect(input.getAttribute("aria-describedby")).toBeNull();
+    }
+  });
+
+  it("writes one linked margin edit to all four canonical insets", () => {
+    const onChange = vi.fn();
+    const { el } = mount(onChange);
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+
+    expect(margin.value).toBe("10");
+    setInput(margin, "12");
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...profile,
+      insets: { top: 12, right: 12, bottom: 12, left: 12 },
+    });
+  });
+
+  it("converts a linked inch margin to canonical millimeters", () => {
+    window.localStorage.setItem(PAPER_DISPLAY_UNIT_STORAGE_KEY, "in");
+    const onChange = vi.fn();
+    const { el } = mount(onChange);
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (in)"]',
+    )!;
+
+    setInput(margin, "1");
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...profile,
+      insets: { top: 25.4, right: 25.4, bottom: 25.4, left: 25.4 },
+    });
+  });
+
+  it("shows an asymmetric profile as mixed until an explicit edit links it", () => {
+    const onChange = vi.fn();
+    const asymmetric: PlotProfile = {
+      ...profile,
+      insets: { top: 1, right: 2, bottom: 3, left: 4 },
+    };
+    const { el } = mount(onChange, asymmetric);
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+
+    expect(margin.value).toBe("");
+    expect(margin.placeholder).toBe("mixed");
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+
+    setInput(margin, "5");
+    expect(onChange).toHaveBeenCalledWith({
+      ...asymmetric,
+      insets: { top: 5, right: 5, bottom: 5, left: 5 },
+    });
+  });
+
+  it("rejects invalid linked margins without clamping and targets only the margin input", () => {
+    const onChange = vi.fn();
+    const { el } = mount(onChange);
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+
+    for (const invalid of ["-1", "1e999", "105"]) {
+      setInput(margin, invalid);
+      expect(margin.value).toBe(invalid === "1e999" ? "" : invalid);
+      expect(onChange).not.toHaveBeenCalled();
+      const alert = el.querySelector<HTMLElement>('[role="alert"]')!;
+      expect(margin.getAttribute("aria-invalid")).toBe("true");
+      expect(margin.getAttribute("aria-describedby")).toBe(alert.id);
+      for (const input of el.querySelectorAll(
+        'input[aria-label^="Paper "]',
+      )) {
+        expect(input.getAttribute("aria-invalid")).toBe("false");
+      }
+    }
+
+    setInput(margin, "0");
+    expect(onChange).toHaveBeenCalledWith({
+      ...profile,
+      insets: { top: 0, right: 0, bottom: 0, left: 0 },
+    });
+    expect(el.querySelector('[role="alert"]')).toBeNull();
   });
 
   it("falls back to millimeters when no valid local preference exists", () => {

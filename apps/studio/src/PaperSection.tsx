@@ -7,6 +7,7 @@ import {
   matchStandardPaper,
   mmToInch,
   STANDARD_PAPER_NAMES,
+  swapPlotOrientation,
   validatePlotProfile,
   type PlotProfile,
   type StandardPaperName,
@@ -54,7 +55,7 @@ function formatDimension(value: number, unit: PaperDisplayUnit): string {
 }
 
 type PaperDimension = "width" | "height";
-type PaperErrorTarget = "format" | PaperDimension;
+type PaperErrorTarget = "format" | "orientation" | "margin" | PaperDimension;
 
 interface PaperError {
   target: PaperErrorTarget;
@@ -65,6 +66,11 @@ function paperName(name: StandardPaperName): string {
   return name.startsWith("a")
     ? name.toUpperCase()
     : `${name[0]!.toUpperCase()}${name.slice(1)}`;
+}
+
+function linkedInset(profile: PlotProfile): number | null {
+  const { top, right, bottom, left } = profile.insets;
+  return top === right && right === bottom && bottom === left ? top : null;
 }
 
 /**
@@ -83,6 +89,10 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
     width: formatDimension(profile.width, displayUnit),
     height: formatDimension(profile.height, displayUnit),
   }));
+  const [marginDraft, setMarginDraft] = useState(() => {
+    const inset = linkedInset(profile);
+    return inset === null ? "" : formatDimension(inset, displayUnit);
+  });
   const [error, setError] = useState<PaperError | null>(null);
   const dirtyDimensions = useRef<Set<PaperDimension>>(new Set());
   const id = useId();
@@ -99,9 +109,21 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
       width: formatDimension(profile.width, displayUnit),
       height: formatDimension(profile.height, displayUnit),
     });
+    const inset = linkedInset(profile);
+    setMarginDraft(
+      inset === null ? "" : formatDimension(inset, displayUnit),
+    );
     dirtyDimensions.current.clear();
     setError(null);
-  }, [displayUnit, profile.height, profile.width]);
+  }, [
+    displayUnit,
+    profile.height,
+    profile.insets.bottom,
+    profile.insets.left,
+    profile.insets.right,
+    profile.insets.top,
+    profile.width,
+  ]);
 
   const commitCandidate = (
     candidate: PlotProfile,
@@ -118,7 +140,7 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
       // identify the OTHER dirty dimension. Core's messages name the affected
       // axis; format changes remain owned by the select as a single operation.
       const resolvedTarget =
-        target === "format"
+        target !== "width" && target !== "height"
           ? target
           : message.includes("width") || message.includes("horizontal")
             ? "width"
@@ -163,6 +185,34 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
     commitCandidate(
       applyStandardPaper(profile, name, derivePaperOrientation(profile)),
       "format",
+    );
+  };
+
+  const swapOrientation = (): void => {
+    commitCandidate(swapPlotOrientation(profile), "orientation");
+  };
+
+  const editMargin = (draft: string): void => {
+    setMarginDraft(draft);
+    if (draft.trim() === "") {
+      setError({ target: "margin", message: "Margin is required." });
+      return;
+    }
+
+    const displayValue = Number(draft);
+    const millimeters =
+      displayUnit === "in" ? inchToMm(displayValue) : displayValue;
+    commitCandidate(
+      {
+        ...profile,
+        insets: {
+          top: millimeters,
+          right: millimeters,
+          bottom: millimeters,
+          left: millimeters,
+        },
+      },
+      "margin",
     );
   };
 
@@ -247,6 +297,45 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
             </label>
           ))}
         </fieldset>
+        <div className="flex items-center gap-3">
+          <span className="min-w-16 text-sm text-muted-foreground">
+            orientation
+          </span>
+          <button
+            type="button"
+            className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+            aria-invalid={error?.target === "orientation"}
+            aria-describedby={
+              error?.target === "orientation" ? errorId : undefined
+            }
+            onClick={swapOrientation}
+          >
+            Swap to {derivePaperOrientation(profile) === "portrait" ? "landscape" : "portrait"}
+          </button>
+        </div>
+        <label className="grid gap-1 text-sm">
+          <span className="text-muted-foreground">linked margin</span>
+          <span className="flex items-center gap-1.5">
+            <input
+              className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-right tabular-nums"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="any"
+              value={marginDraft}
+              placeholder={linkedInset(profile) === null ? "mixed" : undefined}
+              aria-label={`Linked paper margin (${displayUnit})`}
+              aria-invalid={error?.target === "margin"}
+              aria-describedby={
+                error?.target === "margin" ? errorId : undefined
+              }
+              onChange={(event) => editMargin(event.target.value)}
+            />
+            <span aria-hidden className="text-muted-foreground">
+              {displayUnit}
+            </span>
+          </span>
+        </label>
         {error === null ? null : (
           <p id={errorId} role="alert" className="text-sm text-destructive">
             {error.message}
