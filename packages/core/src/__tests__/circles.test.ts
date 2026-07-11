@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createRandom } from '../random'
 import { circles } from '../sketches/circles'
 import type { Params } from '../sketch'
+import { DEFAULT_COMPOSITION_FRAME } from '../compositionFrame'
 
 /**
  * A minimal engine-level param roll. This stands in for what the Harness engine
@@ -28,7 +29,7 @@ describe('circles Sketch contract', () => {
   })
 
   it('bakes a Scene of closed-polygon circle Primitives', () => {
-    const scene = circles.generate({ count: 5 }, 'seed-a', 0)
+    const scene = circles.generate({ count: 5 }, 'seed-a', 0, DEFAULT_COMPOSITION_FRAME)
     expect(scene.primitives).toHaveLength(5)
     for (const primitive of scene.primitives) {
       expect(primitive.closed).toBe(true)
@@ -41,8 +42,8 @@ describe('circles Sketch contract', () => {
 describe('circles determinism (ADR-0002)', () => {
   it('is deterministic at the Scene level for identical (params, seed, t)', () => {
     const params: Params = { count: 12, minRadius: 8, maxRadius: 40 }
-    const a = circles.generate(params, 'fixed-seed', 1.25)
-    const b = circles.generate(params, 'fixed-seed', 1.25)
+    const a = circles.generate(params, 'fixed-seed', 1.25, DEFAULT_COMPOSITION_FRAME)
+    const b = circles.generate(params, 'fixed-seed', 1.25, DEFAULT_COMPOSITION_FRAME)
     // Asserted at the Scene level (drawn Primitives), never at the pixel level.
     expect(a).toEqual(b)
   })
@@ -50,17 +51,17 @@ describe('circles determinism (ADR-0002)', () => {
   it('produces the same Scene for the same t (re-evaluated), no cross-call state', () => {
     const params: Params = { count: 7 }
     // Interleave other generate calls to surface any accumulated state.
-    const first = circles.generate(params, 's', 0.5)
-    circles.generate(params, 's', 9.9)
-    circles.generate({ count: 3 }, 'other', 2)
-    const again = circles.generate(params, 's', 0.5)
+    const first = circles.generate(params, 's', 0.5, DEFAULT_COMPOSITION_FRAME)
+    circles.generate(params, 's', 9.9, DEFAULT_COMPOSITION_FRAME)
+    circles.generate({ count: 3 }, 'other', 2, DEFAULT_COMPOSITION_FRAME)
+    const again = circles.generate(params, 's', 0.5, DEFAULT_COMPOSITION_FRAME)
     expect(again).toEqual(first)
   })
 
   it('animates with t: a different t yields a different Scene', () => {
     const params: Params = { count: 10 }
-    const atZero = circles.generate(params, 's', 0)
-    const atQuarter = circles.generate(params, 's', 1) // duration/4 ⇒ pulse peak
+    const atZero = circles.generate(params, 's', 0, DEFAULT_COMPOSITION_FRAME)
+    const atQuarter = circles.generate(params, 's', 1, DEFAULT_COMPOSITION_FRAME) // duration/4 ⇒ pulse peak
     expect(atQuarter).not.toEqual(atZero)
   })
 })
@@ -75,8 +76,8 @@ describe('circles two-axis independence (arrangement vs param values)', () => {
 
     // Axis 2: feeding the SAME params through generate under two different seeds
     // changes the circle arrangement...
-    const sceneA = circles.generate(params, 'gen-seed-a', 0)
-    const sceneB = circles.generate(params, 'gen-seed-b', 0)
+    const sceneA = circles.generate(params, 'gen-seed-a', 0, DEFAULT_COMPOSITION_FRAME)
+    const sceneB = circles.generate(params, 'gen-seed-b', 0, DEFAULT_COMPOSITION_FRAME)
     expect(sceneB).not.toEqual(sceneA)
 
     // ...while the rolled param values the test holds are still untouched.
