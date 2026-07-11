@@ -29,6 +29,7 @@ import {
   type RenderMode,
 } from "./LiveCanvas";
 import { outlineScene } from "./outlineScene";
+import { PaperSection } from "./PaperSection";
 import { PresetControls } from "./PresetControls";
 
 /**
@@ -446,6 +447,7 @@ export function SketchControls({
         hidden={collapsed}
       >
         {switcher}
+        <PaperSection profile={profile} onChange={setProfile} />
         <ControlPanel
           schema={sketch.schema}
           params={params}
