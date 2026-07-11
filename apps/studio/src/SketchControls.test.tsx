@@ -8,9 +8,11 @@ import {
   crc32,
   DEFAULT_COMPOSITION_FRAME,
   defaultParams,
+  HARNESS_FALLBACK_PLOT_PROFILE,
   hiddenLinePass,
   leafField,
   type ParamSchema,
+  type PlotProfile,
   type Preset,
   type Seed,
 } from "@harness/core";
@@ -534,7 +536,7 @@ describe("SketchControls — preset save/reload wiring", () => {
     ).toBe("false");
   });
 
-  it("saving serializes the live params, seed, and locks under the sketch id", async () => {
+  it("saving serializes the live params, seed, locks, AND the active profile under the sketch id", async () => {
     const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
     await flush();
 
@@ -556,13 +558,17 @@ describe("SketchControls — preset save/reload wiring", () => {
     await flush();
 
     expect(savePreset).toHaveBeenCalledTimes(1);
+    // The Save now stamps a v2 record (#266) carrying the session's active Plot
+    // Profile (#267). This Sketch declares no default, so the active profile is
+    // the Harness fallback resolved at mount.
     expect(savePreset.mock.calls[0]?.[0]).toEqual({
-      version: 1,
+      version: 2,
       sketch: "a",
       name: "warm",
       seed: 4242,
       params: { radius: 10, count: 33 },
       locks: ["radius"],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
   });
 
@@ -587,6 +593,240 @@ describe("SketchControls — preset save/reload wiring", () => {
     clickButton(el, "Save");
     await flush();
     expect(savePreset).not.toHaveBeenCalled();
+  });
+});
+
+describe("SketchControls — Plot Profile session wiring (#267)", () => {
+  const schema: ParamSchema = {
+    radius: numberSpec({ min: 0, max: 100, default: 10 }),
+  };
+
+  // A profile that differs from the Harness fallback (200×200, 10mm insets) on
+  // every field, so "the active profile IS / is NOT this value" is unambiguous.
+  const customProfile: PlotProfile = {
+    width: 420,
+    height: 297,
+    insets: { top: 15, right: 12, bottom: 9, left: 6 },
+  };
+
+  // A Sketch that DECLARES its own default Output Profile. No registered sketch
+  // does today, so this variant is the only way to exercise #265's middle
+  // precedence rung (the Sketch default) — the fallback-only `sketchWith` always
+  // resolves straight to the Harness fallback.
+  const sketchWithDefault = (id: string, profile: PlotProfile) =>
+    ({
+      ...(sketchWith(id, schema) as unknown as Record<string, unknown>),
+      defaultOutputProfile: profile,
+    }) as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+
+  /** Type a valid name, Save, and return the Preset the client last received. */
+  async function saveAndCapture(
+    el: HTMLElement,
+    presetName: string,
+  ): Promise<Preset> {
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      presetName,
+    );
+    clickButton(el, "Save");
+    await flush();
+    const calls = savePreset.mock.calls;
+    return calls[calls.length - 1]![0];
+  }
+
+  /** Select `presetName` in the picker and click Reload. */
+  function reloadInUi(el: HTMLElement, presetName: string): void {
+    const picker = el.querySelector(
+      'select[aria-label="saved presets"]',
+    ) as HTMLSelectElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, presetName);
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+  }
+
+  it("resolves the active profile from the Sketch's own declared default at mount (#265 sketch-default rung)", async () => {
+    // The declared default wins over the Harness fallback — a plain Save (no
+    // reload) stamps a v2 record carrying THIS Sketch's declared profile.
+    const el = mount(
+      <SketchControls sketch={sketchWithDefault("a", customProfile)} />,
+    );
+    await flush();
+
+    const preset = await saveAndCapture(el, "declared");
+    expect(preset).toMatchObject({ version: 2, profile: customProfile });
+  });
+
+  it("re-resolves per Sketch on a keyed remount, never reusing the prior Sketch's active profile (#267)", async () => {
+    // App mounts this with key={sketch.id}, so a Sketch switch remounts it and
+    // re-runs the lazy initializer against the NEW Sketch's own default. Render
+    // Sketch A (declares customProfile), then remount under a DIFFERENT key onto
+    // Sketch B (no declared default): B must resolve to the Harness fallback, NOT
+    // carry over A's customProfile. The keyed remount IS the per-Sketch reset.
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root!.render(
+        <SketchControls key="a" sketch={sketchWithDefault("a", customProfile)} />,
+      );
+    });
+    await flush();
+
+    // A's active profile is its declared default.
+    const presetA = await saveAndCapture(container, "from-a");
+    expect(presetA).toMatchObject({
+      version: 2,
+      sketch: "a",
+      profile: customProfile,
+    });
+
+    // Switch Sketch: remount under a new key onto B (declares no default).
+    savePreset.mockClear();
+    act(() => {
+      root!.render(<SketchControls key="b" sketch={sketchWith("b", schema)} />);
+    });
+    await flush();
+
+    const presetB = await saveAndCapture(container, "from-b");
+    // B re-resolved from its OWN default (the Harness fallback) — it did NOT
+    // inherit A's active customProfile.
+    expect(presetB).toMatchObject({
+      version: 2,
+      sketch: "b",
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    expect(presetB.profile).not.toEqual(customProfile);
+  });
+
+  it("reloading a v2 Preset adopts its stored profile (it wins) and a subsequent Save re-emits it (#265 v2 rung)", async () => {
+    // A v2 preset carrying customProfile, reloaded onto a Sketch with no declared
+    // default: the stored profile must WIN over the Sketch default / Harness
+    // fallback (the top rung of #265's precedence).
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "wide",
+      seed: 7,
+      params: { radius: 10 },
+      locks: [],
+      profile: customProfile,
+    });
+    listPresets.mockResolvedValue(["wide"]);
+
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    await flush();
+
+    reloadInUi(el, "wide");
+    await flush();
+
+    // A Save now re-emits the reloaded profile — the stored v2 profile won.
+    const preset = await saveAndCapture(el, "again");
+    expect(preset).toMatchObject({ version: 2, profile: customProfile });
+  });
+
+  it("reloading a v1 Preset (no profile) falls back to the Harness fallback when the Sketch declares no default (#265 v1 fallback)", async () => {
+    // A v1 preset carries no profile, so the reload resolves through the fallback
+    // — here the Harness fallback (this Sketch declares no default).
+    loadPreset.mockResolvedValue({
+      version: 1,
+      sketch: "a",
+      name: "legacy",
+      seed: 3,
+      params: { radius: 10 },
+      locks: [],
+    });
+    listPresets.mockResolvedValue(["legacy"]);
+
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    await flush();
+
+    reloadInUi(el, "legacy");
+    await flush();
+
+    const preset = await saveAndCapture(el, "resaved");
+    expect(preset).toMatchObject({
+      version: 2,
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+  });
+
+  it("reloading a v1 Preset falls back to the Sketch's declared default when it has one (#265 middle rung)", async () => {
+    // Same v1 (profile-less) preset, but reloaded onto a Sketch that DECLARES a
+    // default: the fallback resolves to that Sketch default, not the Harness
+    // fallback — the middle rung of #265's precedence.
+    loadPreset.mockResolvedValue({
+      version: 1,
+      sketch: "a",
+      name: "legacy",
+      seed: 3,
+      params: { radius: 10 },
+      locks: [],
+    });
+    listPresets.mockResolvedValue(["legacy"]);
+
+    const el = mount(
+      <SketchControls sketch={sketchWithDefault("a", customProfile)} />,
+    );
+    await flush();
+
+    reloadInUi(el, "legacy");
+    await flush();
+
+    const preset = await saveAndCapture(el, "resaved");
+    expect(preset).toMatchObject({ version: 2, profile: customProfile });
+  });
+
+  it("an SVG export's reproduction metadata carries the session's active (reloaded) profile (#247)", async () => {
+    // Prove the EXPORT path reflects the session's active profile, not just the
+    // mount default: reload a v2 preset carrying customProfile, then export SVG
+    // and assert the embedded envelope is a v2 record carrying that profile.
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "wide",
+      seed: 7,
+      params: { radius: 10 },
+      locks: [],
+      profile: customProfile,
+    });
+    listPresets.mockResolvedValue(["wide"]);
+
+    // A Sketch whose generate yields a serializable (empty-primitives) Scene, so
+    // the SVG export path runs to a real <metadata>-bearing document.
+    const svgSketch = {
+      ...(sketchWith("a", schema) as unknown as Record<string, unknown>),
+      generate: () => ({ space: { width: 100, height: 100 }, primitives: [] }),
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+
+    const el = mount(<SketchControls sketch={svgSketch} />);
+    await flush();
+
+    reloadInUi(el, "wide");
+    await flush();
+
+    clickButton(el, "Export SVG");
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    const [blob] = downloadBlob.mock.calls[0]!;
+    const svg = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
+    expect(meta).toBeDefined();
+    expect(JSON.parse(meta!)).toMatchObject({
+      version: 2,
+      sketch: "a",
+      profile: customProfile,
+    });
   });
 });
 
@@ -656,16 +896,19 @@ describe("SketchControls — SVG export wiring", () => {
     expect(filename).toBe(`circles-seed${seed}.svg`);
 
     // The SVG embeds the reproduction envelope in a <metadata> element (#76),
-    // round-tripping back to the displayed (seed, params, name-stem) — no t.
+    // round-tripping back to the displayed (seed, params, name-stem) — no t. The
+    // envelope is now a v2 record (#266) carrying the active Plot Profile (#267);
+    // this Sketch declares no default, so it is the Harness fallback.
     const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
     expect(meta).toBeDefined();
     expect(JSON.parse(meta!)).toMatchObject({
-      version: 1,
+      version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
       seed: Number(seed),
       params: { radius: 10 },
       locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
   });
 
@@ -823,16 +1066,19 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // Static sketch ⇒ the variant segment sits right after the seed, no -t.
     expect(filename).toBe(`circles-seed${seed}-hidden-line.svg`);
 
-    // The reproduction envelope still round-trips to the displayed frame.
+    // The reproduction envelope still round-trips to the displayed frame — now a
+    // v2 record (#266) carrying the active Plot Profile (#267), the Harness
+    // fallback for this default-less Sketch.
     const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
     expect(meta).toBeDefined();
     expect(JSON.parse(meta!)).toMatchObject({
-      version: 1,
+      version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
       seed: Number(seed),
       params: { radius: 10 },
       locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
   });
 
@@ -1100,15 +1346,18 @@ describe("SketchControls — PNG export wiring", () => {
     expect(filename).toBe(`circles-seed${seed}.png`);
 
     // The downloaded PNG carries the reproduction envelope in an iTXt chunk,
-    // round-tripping back to the displayed (seed, params, name-stem) — no t.
+    // round-tripping back to the displayed (seed, params, name-stem) — no t. The
+    // envelope is now a v2 record (#266) carrying the active Plot Profile (#267),
+    // the Harness fallback for this default-less Sketch.
     const json = JSON.parse(readITxtText(await blobBytes(blob)));
     expect(json).toMatchObject({
-      version: 1,
+      version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
       seed: Number(seed),
       params: { radius: 10 },
       locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
     expect("t" in json).toBe(false);
   });
