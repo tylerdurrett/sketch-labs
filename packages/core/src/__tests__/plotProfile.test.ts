@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   validatePlotProfile,
   plotDrawableRectangle,
+  plotDrawableAspectsEquivalent,
   resolvePlotCompositionFrame,
   type PlotInsets,
   type PlotProfile,
@@ -202,6 +203,36 @@ describe('plotDrawableRectangle', () => {
       insets: { left: 60, right: 60 },
     })
     expect(() => plotDrawableRectangle(profile)).toThrow('validatePlotProfile')
+  })
+})
+
+describe('plotDrawableAspectsEquivalent', () => {
+  it('treats a one-ULP quotient difference from proportional physical scaling as the same aspect', () => {
+    const base = makeProfile({ width: 210, height: 297 })
+    const scale = 1.2
+    const scaled: PlotProfile = {
+      width: base.width * scale,
+      height: base.height * scale,
+      insets: {
+        top: base.insets.top * scale,
+        right: base.insets.right * scale,
+        bottom: base.insets.bottom * scale,
+        left: base.insets.left * scale,
+      },
+    }
+    const baseDrawable = plotDrawableRectangle(base)
+    const scaledDrawable = plotDrawableRectangle(scaled)
+    const baseAspect = baseDrawable.width / baseDrawable.height
+    const scaledAspect = scaledDrawable.width / scaledDrawable.height
+
+    expect(baseAspect).not.toBe(scaledAspect)
+    expect(plotDrawableAspectsEquivalent(baseAspect, scaledAspect)).toBe(true)
+  })
+
+  it('keeps real aspect changes distinct and rejects invalid inputs', () => {
+    expect(plotDrawableAspectsEquivalent(2 / 3, 3 / 4)).toBe(false)
+    expect(plotDrawableAspectsEquivalent(Number.NaN, Number.NaN)).toBe(false)
+    expect(plotDrawableAspectsEquivalent(0, 0)).toBe(false)
   })
 })
 

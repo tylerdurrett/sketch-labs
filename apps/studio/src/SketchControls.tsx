@@ -10,6 +10,7 @@ import {
   exportFilename,
   insertPngMetadata,
   newSeed,
+  plotDrawableAspectsEquivalent,
   plotDrawableRectangle,
   randomize,
   renderToSVG,
@@ -43,6 +44,21 @@ import { PresetControls } from "./PresetControls";
  * tolerances are reachable.
  */
 const TOLERANCE_MAX = 20;
+
+/** Preset params are flat schema values; preserve identity when reload is equal. */
+function sameParams(
+  left: Readonly<Record<string, unknown>>,
+  right: Readonly<Record<string, unknown>>,
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) => Object.hasOwn(right, key) && Object.is(left[key], right[key]),
+    )
+  );
+}
 
 /**
  * Props for {@link SketchControls}.
@@ -134,9 +150,23 @@ export function SketchControls({
   // boundary and do not rebuild prepared geometry.
   const drawable = plotDrawableRectangle(profile);
   const drawableAspect = drawable.width / drawable.height;
+  // Stabilize the memo key across machine-noise-only quotient differences (for
+  // example a 1.2× proportional scale of non-binary A4 dimensions/insets). The
+  // same core equivalence drives commit invalidation below, so frame identity and
+  // the Computing affordance cannot disagree about whether geometry changed.
+  const drawableAspectIdentityRef = useRef(drawableAspect);
+  if (
+    !plotDrawableAspectsEquivalent(
+      drawableAspectIdentityRef.current,
+      drawableAspect,
+    )
+  ) {
+    drawableAspectIdentityRef.current = drawableAspect;
+  }
+  const drawableAspectIdentity = drawableAspectIdentityRef.current;
   const compositionFrame = useMemo(
     () => resolvePlotCompositionFrame(profile),
-    [drawableAspect],
+    [drawableAspectIdentity],
   );
 
   // The preview's render mode (issue #219): `fill` (default) shows the live fill
@@ -196,7 +226,14 @@ export function SketchControls({
   const commitProfile = (next: PlotProfile) => {
     const nextDrawable = plotDrawableRectangle(next);
     const nextDrawableAspect = nextDrawable.width / nextDrawable.height;
-    if (nextDrawableAspect !== drawableAspect) markOutlineRecomputing();
+    if (
+      !plotDrawableAspectsEquivalent(
+        drawableAspectIdentity,
+        nextDrawableAspect,
+      )
+    ) {
+      markOutlineRecomputing();
+    }
     setProfile(next);
   };
 
@@ -258,9 +295,25 @@ export function SketchControls({
   // job — `applyPreset` returns a sorted string[], the studio's live lock state
   // is a Set<string>.
   const reloadPreset = (preset: Preset) => {
-    markOutlineRecomputing();
     const state = applyPreset(sketch.schema, preset);
-    setParams(state.params);
+    const resolvedProfile = resolveOutputProfile(
+      state.profile,
+      sketch.defaultOutputProfile,
+    );
+    const nextDrawable = plotDrawableRectangle(resolvedProfile);
+    const nextAspect = nextDrawable.width / nextDrawable.height;
+    // A Preset may change persistence-only axes or proportionally scale the
+    // physical sheet while preserving the exact composition. Keep param identity
+    // when values are equal and raise Computing only for true Scene inputs.
+    const paramsChanged = !sameParams(params, state.params);
+    const geometryChanged =
+      paramsChanged ||
+      seed !== state.seed ||
+      !plotDrawableAspectsEquivalent(drawableAspectIdentity, nextAspect);
+    if (geometryChanged) markOutlineRecomputing();
+    setParams((current) =>
+      sameParams(current, state.params) ? current : state.params,
+    );
     setSeed(state.seed);
     setLocks(new Set(state.locks));
     // Resolve the active profile through #265's precedence: a v2 Preset's stored
@@ -268,7 +321,7 @@ export function SketchControls({
     // falls back to this Sketch's default / the Harness fallback. `applyPreset`
     // passes the stored profile through verbatim WITHOUT resolving the fallback —
     // resolving it here at the session boundary is #267's job.
-    setProfile(resolveOutputProfile(state.profile, sketch.defaultOutputProfile));
+    setProfile(resolvedProfile);
   };
 
   // Export the CURRENTLY DISPLAYED frame as a PNG — a one-shot user action that
@@ -281,6 +334,11 @@ export function SketchControls({
   // Sketch passes the captured `t` (the last-drawn moment from the handle), a
   // static Sketch omits `t` entirely so the name carries no segment.
   const exportPng = () => {
+    // Outline inputs/profile can commit before LiveCanvas's intentionally
+    // deferred two-rAF rebuild lands. Never snapshot those stale pixels with the
+    // newly committed reproduction metadata, even if this handler is invoked
+    // programmatically while the disabled button cannot be clicked.
+    if (computingOutline) return;
     const handle = canvasHandle.current;
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
@@ -630,6 +688,7 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportPng}
+            disabled={computingOutline}
           >
             Export PNG
           </Button>

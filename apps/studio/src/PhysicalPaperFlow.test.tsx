@@ -59,10 +59,15 @@ const A4_PROFILE: PlotProfile = {
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
 };
 
-const SQUARE_PROFILE: PlotProfile = {
-  width: 200,
-  height: 200,
-  insets: { top: 10, right: 10, bottom: 10, left: 10 },
+const SCALED_A4_PROFILE: PlotProfile = {
+  width: A4_PROFILE.width * 1.2,
+  height: A4_PROFILE.height * 1.2,
+  insets: {
+    top: A4_PROFILE.insets.top * 1.2,
+    right: A4_PROFILE.insets.right * 1.2,
+    bottom: A4_PROFILE.insets.bottom * 1.2,
+    left: A4_PROFILE.insets.left * 1.2,
+  },
 };
 
 function testSketch(defaultOutputProfile: PlotProfile) {
@@ -316,67 +321,76 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
     expect(downloadBlob).not.toHaveBeenCalled();
   });
 
-  it("reloads controls, geometry, and preview together, then preserves exact Outline Scene geometry across a same-aspect physical resize", async () => {
+  it("reloads controls, geometry, and preview together, then preserves exact Outline Scene geometry across a proportional non-square resize", async () => {
     const { sketch, generate } = testSketch(A4_PROFILE);
     const preset: Preset = {
       version: 2,
       sketch: sketch.id,
-      name: "square",
+      name: "paper",
       seed: 7,
       params: { radius: 42 },
       locks: [],
-      profile: SQUARE_PROFILE,
+      profile: A4_PROFILE,
     };
-    presetClient.list.mockResolvedValue(["square"]);
+    presetClient.list.mockResolvedValue(["paper"]);
     presetClient.load.mockResolvedValue(preset);
     const el = mount(sketch);
     await flushPromises();
 
     selectValue(
       el.querySelector<HTMLSelectElement>('select[aria-label="saved presets"]')!,
-      "square",
+      "paper",
     );
     clickButton(el, "Reload");
     await flushPromises();
 
-    const expectedFrame = resolvePlotCompositionFrame(SQUARE_PROFILE);
+    const expectedFrame = resolvePlotCompositionFrame(A4_PROFILE);
     expect(el.querySelector<HTMLInputElement>("#control-radius")?.value).toBe(
       "42",
     );
     expect(el.querySelector<HTMLInputElement>("#sketch-seed")?.value).toBe("7");
     expect(el.querySelector("details summary")?.textContent).toContain(
-      "200 × 200 mm",
+      "210 × 297 mm",
     );
     expect(generate).toHaveBeenLastCalledWith({ radius: 42 }, 7, 0, expectedFrame);
     expect(
       el
         .querySelector<HTMLElement>(".plot-sheet")
         ?.style.getPropertyValue("--plot-inset-top"),
-    ).toBe("5%");
+    ).toBe(`${(10 / 297) * 100}%`);
     expect(
       el
         .querySelector<HTMLElement>("canvas")
         ?.style.getPropertyValue("--paper-aspect"),
-    ).toBe("1");
+    ).toBe(String(expectedFrame.width / expectedFrame.height));
 
     clickButton(el, "Fill");
     flushRaf();
     const callsAfterOutline = generate.mock.calls.length;
     const cachedOutline = previewCapture.paints.at(-1)!.scene;
     const exactGeometry = structuredClone(cachedOutline);
+    const originalFrame = generate.mock.calls.at(-1)![3];
 
-    // A linked-inset change alters physical layout but keeps the drawable square.
-    setInput(
-      el.querySelector<HTMLInputElement>(
-        'input[aria-label="Linked paper margin (mm)"]',
-      )!,
-      "20",
+    // Reload the same Scene axes with every physical dimension/inset scaled 1.2×.
+    // Its raw drawable quotient differs by one ULP, but its composition does not.
+    presetClient.load.mockResolvedValue({
+      ...preset,
+      profile: SCALED_A4_PROFILE,
+    });
+    clickButton(el, "Reload");
+    await flushPromises();
+    expect(el.querySelector("details summary")?.textContent).toContain(
+      "252 × 356.4 mm",
     );
+    expect(generate).toHaveBeenCalledTimes(callsAfterOutline);
     expect(
-      el
-        .querySelector<HTMLElement>(".plot-sheet")
-        ?.style.getPropertyValue("--plot-inset-top"),
-    ).toBe("10%");
+      el.querySelector<HTMLButtonElement>(
+        'button[aria-label="Toggle outline render mode"]',
+      )?.textContent,
+    ).toBe("Outline");
+
+    // The changed physical sheet can resize the drawable backing box, but it
+    // repaints the exact cached processed Scene rather than regenerating it.
     canvasBoxSize = 80;
     act(() => fireResizeObserver?.());
 
@@ -386,10 +400,47 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
     expect(repainted.scene).toBe(cachedOutline);
     expect(repainted.scene).toEqual(exactGeometry);
     expect(generate).toHaveBeenCalledTimes(callsAfterOutline);
+
+    // A vector export re-bakes intentionally, and proves the memoized shared
+    // frame itself retained identity across the one-ULP profile quotient noise.
+    clickButton(el, "Export SVG");
+    expect(generate.mock.calls.at(-1)![3]).toBe(originalFrame);
+  });
+
+  it("keeps PNG unavailable while an aspect-changing Outline rebuild is deferred", async () => {
+    const { sketch, generate } = testSketch(A4_PROFILE);
+    const el = mount(sketch);
+    await flushPromises();
+    clickButton(el, "Fill");
+    flushRaf();
+    const callsBeforeEdit = generate.mock.calls.length;
+
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Paper width (mm)"]',
+      )!,
+      "220",
+    );
+    const pngButton = [...el.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Export PNG",
+    )!;
+
+    // Profile metadata has committed, but the two-rAF Outline rebuild has not.
+    // The stale drawable pixels cannot be snapshotted during this interval.
+    expect(pngButton.disabled).toBe(true);
     expect(
       el.querySelector<HTMLButtonElement>(
         'button[aria-label="Toggle outline render mode"]',
       )?.textContent,
-    ).toBe("Outline");
+    ).toBe("Computing…");
+    act(() => pngButton.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(pngSnapshotCount).toBe(0);
+    expect(generate).toHaveBeenCalledTimes(callsBeforeEdit);
+
+    flushRaf();
+    expect(generate.mock.calls.length).toBeGreaterThan(callsBeforeEdit);
+    expect(pngButton.disabled).toBe(false);
+    clickButton(el, "Export PNG");
+    expect(pngSnapshotCount).toBe(1);
   });
 });
