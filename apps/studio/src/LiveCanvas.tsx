@@ -16,7 +16,7 @@ import {
   type CoordinateSpace,
   type Params,
   type PlotProfile,
-  type PreparedFrame,
+  type Scene,
   type Seed,
   type Sketch,
   type TimeMetadata,
@@ -137,12 +137,12 @@ export interface LiveCanvasProps {
 }
 
 /**
- * Draw one frame of `sketch` at time `t` onto `canvas`.
+ * Paint an already-derived Scene onto `canvas`.
  *
- * This is the WHOLE per-frame path (the slice #6 contract): generate the Scene
- * at `t`, then hand the real `CanvasRenderingContext2D` straight to core's shared
- * render pipeline (`drawSceneFitted`) — no HLR, no path simplification, no pen
- * ordering, no export work. This component keeps the CALLER concerns ADR-0004
+ * Scene derivation is deliberately outside this pixel-only boundary. In
+ * particular, Outline mode caches its expensive hidden-line result so a
+ * ResizeObserver repaint can draw the same geometry into a resized backing store
+ * without rerunning the pass. This component keeps the CALLER concerns ADR-0004
  * assigns to it: the canvas backing store is sized to its CSS box ×
  * `devicePixelRatio`. Clearing and the opaque background NO LONGER live here —
  * they graduated into `drawSceneFitted`, which resets to identity and paints the
@@ -156,17 +156,7 @@ export interface LiveCanvasProps {
  * structurally assignable to core's `Canvas2DContext` port, so it is passed
  * directly with no adapter.
  */
-function drawFrame(
-  canvas: HTMLCanvasElement,
-  sketch: Sketch,
-  params: Params,
-  seed: Seed,
-  preparedFrame: PreparedFrame,
-  compositionFrame: CoordinateSpace,
-  t: number,
-  renderMode: RenderMode,
-  tolerance: number,
-): void {
+function paintFrame(canvas: HTMLCanvasElement, rendered: Scene): void {
   const ctx = canvas.getContext("2d");
   if (ctx === null) return;
 
@@ -177,24 +167,6 @@ function drawFrame(
   // core headless (no DOM types) without any runtime adapter — the renderer only
   // ever writes color strings to those properties.
   const portCtx = ctx as Canvas2DContext;
-
-  // Outline mode (issue #219/#220): swap the fill Scene for the shared
-  // preview == export seam's stroke-only, occlusion-clipped result BEFORE the
-  // shared draw, so the preview shows the SAME processed Scene the hidden-line
-  // SVG export emits — by construction, since both call sites derive it from the
-  // one {@link outlineScene} function (feature #4's "what you see is what you
-  // plot"). `tolerance` (issue #232) is forwarded into that seam so the preview's
-  // final Douglas–Peucker simplification matches the export's exactly; it applies
-  // ONLY on this outline branch — the `fill` branch renders `generate`'s Scene
-  // as-is and never simplifies. This is the ONLY
-  // place the pass touches the live preview, and drawFrame is called with
-  // `outline` ONLY from the on-demand / static-redraw path — never from the rAF
-  // fill loop's `tick`, which hardcodes `fill` — so the export-only pass never
-  // runs per animated frame (feature #4's core invariant, this task's AC2/AC3).
-  const rendered =
-    renderMode === "outline"
-      ? outlineScene(sketch, params, seed, t, compositionFrame, tolerance)
-      : preparedFrame(t);
 
   // Hand the background-fit-and-draw to core's shared pipeline: `drawSceneFitted`
   // resets to identity, paints the full surface (opaque white by default — the
@@ -263,8 +235,8 @@ export function sizeToBox(canvas: HTMLCanvasElement, dpr: number): boolean {
  *     refs so an input change feeds the next frame without tearing down the loop
  *     and snapping the clock back to `t = 0` (issue #40). Only a Sketch switch
  *     (the desired restart) recaptures the `performance.now()` baseline.
- *   - The STATIC-REDRAW effect (keyed `[sketch, params, seed, renderMode,
- *     refitAndRedraw]`) owns STATIC sketches always, PLUS animated sketches while
+ *   - The STATIC-REDRAW effect (keyed by the true geometry inputs) owns STATIC
+ *     sketches always, PLUS animated sketches while
  *     in OUTLINE mode (issue #219) — there the rAF loop is suspended, so this
  *     on-demand path is the sole draw owner. It is the SOLE path that sizes+draws
  *     those frames: on mount, on a switch, on a params/seed change, and on a
@@ -290,6 +262,10 @@ export function LiveCanvas({
   onOutlineComputed,
 }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // The latest expensive, processed Outline Scene. Geometry-input changes
+  // replace it on the deferred on-demand path; box/DPR/profile-layout changes
+  // only repaint this exact Scene into the resized backing store.
+  const outlineFrameRef = useRef<Scene | null>(null);
 
   // Caller-owned preparation is keyed by the time-invariant determinism inputs
   // PLUS the Composition Frame. A prepared Sketch can retain immutable layout
@@ -361,12 +337,12 @@ export function LiveCanvas({
   // immutable layout at the continuing `t`.
   const preparedFrameRef = useRef(preparedFrame);
   const compositionFrameRef = useRef(compositionFrame);
-  // `renderModeRef` lets the `[]`-dep on-demand draw callbacks (drawCurrentFrame,
+  // `renderModeRef` lets the stable on-demand draw callbacks (rebuild/repaint,
   // scrubTo) read the current mode without a `renderMode` dependency, so a mode
   // flip never re-runs the clock effect or resets the rAF baseline. Kept in sync
   // by the same post-commit effect so a StrictMode double-render can't desync it.
   const renderModeRef = useRef(renderMode);
-  // `toleranceRef` lets the `[]`-dep on-demand draw callbacks (drawCurrentFrame,
+  // `toleranceRef` lets the stable on-demand draw callbacks (rebuild/repaint,
   // scrubTo) read the current tolerance without a `tolerance` dependency, so the
   // clock effect and rAF baseline stay untouched by a knob change (issue #232).
   // Kept in sync by the same post-commit effect so a StrictMode double-render
@@ -444,39 +420,53 @@ export function LiveCanvas({
   // ref so the tick can reach the live element imperatively.
   const scrubberRef = useRef<HTMLInputElement>(null);
 
-  // Draw the latest frame onto the canvas through the refs WITHOUT touching the
-  // backing-store size. Params/seed/the current Sketch and the last drawn t are
-  // read through refs so this helper carries no params/seed/sketch dependency —
-  // its `[]` deps keep it referentially stable, so any effect that calls it never
-  // re-runs the clock effect or resets `start` (issue #40 / the #41 contract).
-  // For a static Sketch tRef stays 0; for an animated one it holds the last drawn
-  // t, so a resize repaints the current frame (the next rAF tick overwrites it).
-  const drawCurrentFrame = useCallback(() => {
+  // Derive and paint a geometry frame at `t`. Outline derivation runs only here
+  // and stores its processed Scene for later pixel-only repaints; fill samples
+  // the retained prepared frame directly. The callback stays stable because all
+  // live inputs are read through refs.
+  const rebuildAndDrawAt = useCallback((t: number) => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
-    drawFrame(
-      canvas,
-      sketchRef.current,
-      paramsRef.current,
-      seedRef.current,
-      preparedFrameRef.current,
-      compositionFrameRef.current,
-      tRef.current,
-      renderModeRef.current,
-      toleranceRef.current,
-    );
+    const rendered =
+      renderModeRef.current === "outline"
+        ? outlineScene(
+            sketchRef.current,
+            paramsRef.current,
+            seedRef.current,
+            t,
+            compositionFrameRef.current,
+            toleranceRef.current,
+          )
+        : preparedFrameRef.current(t);
+    if (renderModeRef.current === "outline") {
+      outlineFrameRef.current = rendered;
+    }
+    paintFrame(canvas, rendered);
   }, []);
 
-  // Re-fit the backing store to the CSS box × current devicePixelRatio and ALWAYS
-  // redraw the latest frame. Owned by the static-redraw effect: it must repaint
-  // even when the size is unchanged (a params/seed change has no size change), so
-  // the `sizeToBox` return value is intentionally ignored here.
-  const refitAndRedraw = useCallback(() => {
+  // Repaint the current geometry without deriving it again. Fill sampling is
+  // cheap and time-aware; Outline must use the last processed cache so a pure
+  // box/DPR/profile-layout resize cannot silently rerun hidden-line work without
+  // the owner's Computing affordance.
+  const repaintCurrentFrame = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (canvas === null) return;
+    if (renderModeRef.current === "outline") {
+      const cached = outlineFrameRef.current;
+      if (cached !== null) paintFrame(canvas, cached);
+      return;
+    }
+    paintFrame(canvas, preparedFrameRef.current(tRef.current));
+  }, []);
+
+  // Re-fit then intentionally rebuild: this path is owned by true geometry
+  // inputs (or a mode change), not by ResizeObserver layout repaints.
+  const refitAndRebuild = useCallback(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
     sizeToBox(canvas, window.devicePixelRatio || 1);
-    drawCurrentFrame();
-  }, [drawCurrentFrame]);
+    rebuildAndDrawAt(tRef.current);
+  }, [rebuildAndDrawAt]);
 
   // Issue #223: preserve playback position across an outline↔fill flip. The loop
   // effect below re-keys on `renderMode` (#219), so a flip back to `fill` re-runs
@@ -552,17 +542,7 @@ export function LiveCanvas({
       // guarantee that `tick` can only ever draw fill. Tolerance is hardcoded 0
       // to match: the fill branch never simplifies, so the live loop stays
       // provably simplify-free (issue #232's on-demand-only invariant).
-      drawFrame(
-        canvas,
-        sketch,
-        paramsRef.current,
-        seedRef.current,
-        preparedFrameRef.current,
-        compositionFrameRef.current,
-        t,
-        "fill",
-        0,
-      );
+      paintFrame(canvas, preparedFrameRef.current(t));
       frameId = requestAnimationFrame(tick);
     };
 
@@ -577,7 +557,7 @@ export function LiveCanvas({
   // static Sketch, so this is the only path that sizes+draws one — on mount, on a
   // switch TO a static Sketch, and on a params/seed change — exactly once each,
   // without introducing a clock. For an animated Sketch the early return skips it
-  // (the rAF loop owns its frames). `refitAndRedraw` re-fits the box (tRef is 0
+  // (the rAF loop owns its frames). `refitAndRebuild` re-fits the box (tRef is 0
   // for a static Sketch) and ALWAYS redraws through the refs, since a params/seed
   // change carries no size change for the geometry effect to react to.
   //
@@ -603,12 +583,12 @@ export function LiveCanvas({
     // FILL draws (a static Sketch in fill mode) stay on the cheap synchronous
     // path — no Hidden-line pass runs, so there is nothing to wait on.
     if (renderMode !== "outline") {
-      refitAndRedraw();
+      refitAndRebuild();
       return;
     }
 
     // OUTLINE draw: let the owner's already-committed "Computing…" state paint
-    // before refitAndRedraw runs the blocking Hidden-line pass, then fire
+    // before refitAndRebuild runs the blocking Hidden-line pass, then fire
     // `onOutlineComputed` so the owner clears it. A DOUBLE rAF guarantees a full
     // painted frame elapses first: this effect runs in a post-commit macrotask,
     // and a single rAF scheduled from there can still fire in the SAME frame's
@@ -623,7 +603,7 @@ export function LiveCanvas({
     let innerFrame = 0;
     const outerFrame = requestAnimationFrame(() => {
       innerFrame = requestAnimationFrame(() => {
-        refitAndRedraw();
+        refitAndRebuild();
         onOutlineComputedRef.current?.();
       });
     });
@@ -636,7 +616,7 @@ export function LiveCanvas({
       cancelAnimationFrame(innerFrame);
     };
     // `tolerance` (issue #232) is a dep so a knob change in outline mode RE-RUNS
-    // the on-demand pass at the new tolerance; `refitAndRedraw` reads the current
+    // the on-demand pass at the new tolerance; `refitAndRebuild` reads the current
     // value through `toleranceRef`. Harmless for a static fill Sketch (it takes
     // the cheap fill early-return, no pass).
   }, [
@@ -646,7 +626,7 @@ export function LiveCanvas({
     compositionAspect,
     renderMode,
     tolerance,
-    refitAndRedraw,
+    refitAndRebuild,
   ]);
 
   // Re-fit on box-size AND devicePixelRatio change (the #41 contract). DECOUPLED
@@ -667,7 +647,7 @@ export function LiveCanvas({
     // changed (skips the no-op initial observe fire and any spurious re-fit).
     const refitOnGeometryChange = () => {
       const dpr = window.devicePixelRatio || 1;
-      if (sizeToBox(canvas, dpr)) drawCurrentFrame();
+      if (sizeToBox(canvas, dpr)) repaintCurrentFrame();
     };
 
     // ResizeObserver covers CSS-box changes (window/container resize). It also
@@ -702,7 +682,7 @@ export function LiveCanvas({
       observer.disconnect();
       dprQuery?.removeEventListener("change", onDprChange);
     };
-  }, [drawCurrentFrame]);
+  }, [repaintCurrentFrame]);
 
   // Play/pause toggle — the transport's mode switch (ADR-0005). Pausing simply
   // flips `playing` to `false`, whose effect cleanup cancels the pending frame
@@ -731,19 +711,9 @@ export function LiveCanvas({
     setPlaying(false);
     const canvas = canvasRef.current;
     if (canvas !== null) {
-      drawFrame(
-        canvas,
-        sketchRef.current,
-        paramsRef.current,
-        seedRef.current,
-        preparedFrameRef.current,
-        compositionFrameRef.current,
-        value,
-        renderModeRef.current,
-        toleranceRef.current,
-      );
+      rebuildAndDrawAt(value);
     }
-  }, []);
+  }, [rebuildAndDrawAt]);
 
   // LAYOUT (#156): LiveCanvas owns a column that FILLS the canvas region — the
   // canvas centered/fitted in the stage on top, the slim transport bar pinned to
