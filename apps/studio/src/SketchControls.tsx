@@ -10,6 +10,7 @@ import {
   exportFilename,
   insertPngMetadata,
   newSeed,
+  plotDrawableRectangle,
   randomize,
   renderToSVG,
   resolveOutputProfile,
@@ -131,9 +132,8 @@ export function SketchControls({
   // Physical magnitude belongs to later device mapping. Composition depends only
   // on the drawable rectangle's aspect, so equivalent profiles share this cache
   // boundary and do not rebuild prepared geometry.
-  const drawableAspect =
-    (profile.width - profile.insets.left - profile.insets.right) /
-    (profile.height - profile.insets.top - profile.insets.bottom);
+  const drawable = plotDrawableRectangle(profile);
+  const drawableAspect = drawable.width / drawable.height;
   const compositionFrame = useMemo(
     () => resolvePlotCompositionFrame(profile),
     [drawableAspect],
@@ -185,6 +185,19 @@ export function SketchControls({
   // that edit's commit. A no-op in fill mode (no pass runs). See the flag above.
   const markOutlineRecomputing = () => {
     if (renderMode === "outline") setComputingOutline(true);
+  };
+
+  // PaperSection only emits complete, validated profiles. Keep that controlled
+  // commit as the boundary between physical preview layout and generated Scene
+  // geometry: every profile refreshes the full-sheet chrome, while only a
+  // changed drawable aspect invalidates the shared Composition Frame (and thus
+  // the outline pass). Same-aspect magnitude/inset edits deliberately leave the
+  // frame identity and outline geometry untouched.
+  const commitProfile = (next: PlotProfile) => {
+    const nextDrawable = plotDrawableRectangle(next);
+    const nextDrawableAspect = nextDrawable.width / nextDrawable.height;
+    if (nextDrawableAspect !== drawableAspect) markOutlineRecomputing();
+    setProfile(next);
   };
 
   // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
@@ -466,7 +479,7 @@ export function SketchControls({
         hidden={collapsed}
       >
         {switcher}
-        <PaperSection profile={profile} onChange={setProfile} />
+        <PaperSection profile={profile} onChange={commitProfile} />
         <ControlPanel
           schema={sketch.schema}
           params={params}
