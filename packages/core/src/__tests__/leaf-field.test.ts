@@ -5,11 +5,25 @@ import { prepareCurlAngle4D } from '../curl'
 import { createRandom } from '../random'
 import { circles } from '../sketches/circles'
 import { leafField } from '../sketches/leaf-field'
-import { bbox as pointsBBox, HEIGHT, WIDTH } from '../sketches/sketch-util'
+import { bbox as pointsBBox } from '../sketches/sketch-util'
 import type { Params } from '../sketch'
 import type { Point } from '../types'
 import type { Primitive } from '../scene'
-import { DEFAULT_COMPOSITION_FRAME } from '../compositionFrame'
+import {
+  DEFAULT_COMPOSITION_FRAME,
+  resolveCompositionFrame,
+} from '../compositionFrame'
+
+/**
+ * The frame every reconstruction helper below rebuilds the sketch's normalized
+ * field/placement math against. The sketch now composes into the SUPPLIED frame
+ * (issue #252), so the helpers derive their canvas dims from the same frame the
+ * generate/prepare calls pass — no longer the retired 1000×1000 WIDTH/HEIGHT
+ * constants. The suite drives the sketch with DEFAULT_COMPOSITION_FRAME, so these
+ * resolve to 1000×1000; the space-equals-frame block below also exercises a
+ * non-square frame.
+ */
+const FRAME = DEFAULT_COMPOSITION_FRAME
 
 /**
  * The nineteen leaf-field knobs in Studio declaration order.
@@ -161,8 +175,8 @@ function fieldAxisAt(primitive: Primitive, seed: string): number {
     octaves: ORIENT_OCTAVES,
   })
   return angleAt(
-    (cx / WIDTH) * ORIENT_FIELD_SCALE,
-    (cy / HEIGHT) * ORIENT_FIELD_SCALE,
+    (cx / FRAME.width) * ORIENT_FIELD_SCALE,
+    (cy / FRAME.height) * ORIENT_FIELD_SCALE,
     1,
     0,
   )
@@ -241,6 +255,41 @@ describe('leaf-field Sketch contract', () => {
   })
 })
 
+describe('leaf-field composes into the supplied Composition Frame', () => {
+  it('returns a Scene whose space equals the supplied frame exactly (default + non-square)', () => {
+    const params: Params = { density: 6 }
+    const square = leafField.generate(params, 'frame-seed', 0, DEFAULT_COMPOSITION_FRAME)
+    expect(square.space).toEqual(DEFAULT_COMPOSITION_FRAME)
+
+    const wide = resolveCompositionFrame(2)
+    const tall = resolveCompositionFrame(0.5)
+    expect(leafField.generate(params, 'frame-seed', 0, wide).space).toEqual(wide)
+    expect(leafField.generate(params, 'frame-seed', 0, tall).space).toEqual(tall)
+    // The prepared sampler must adopt the frame it was prepared with, too.
+    expect(leafField.prepare(params, 'frame-seed', wide)(0).space).toEqual(wide)
+  })
+
+  it('scatters leaves across the whole non-square extent — geometry reaches past x=1000', () => {
+    // The Poisson scatter fills the frame; a non-square frame's leaves must reach
+    // past x=1000. A still-hardcoded 1000-wide field would cap short of the width.
+    const wide = resolveCompositionFrame(2) // width = 1000·√2 ≈ 1414
+    const scene = leafField.generate({ density: 8, sphereCount: 0 }, 'fill', 0, wide)
+    let maxX = -Infinity
+    for (const primitive of scene.primitives) {
+      for (const [x] of primitive.points) if (x > maxX) maxX = x
+    }
+    expect(maxX).toBeGreaterThan(1000)
+  })
+
+  it('is deterministic for a fixed non-square frame', () => {
+    const params: Params = { density: 6, sphereCount: 3, variation: 0.5 }
+    const frame = resolveCompositionFrame(2)
+    const a = leafField.generate(params, 'frame-det', 0, frame)
+    const b = leafField.generate(params, 'frame-det', 0, frame)
+    expect(a).toEqual(b)
+  })
+})
+
 describe('leaf-field density is live-tunable', () => {
   it('a higher density yields strictly more leaves than a lower density at the same seed', () => {
     const seed = 'held'
@@ -309,8 +358,18 @@ describe('leaf-field determinism (ADR-0002)', () => {
 
 describe('leaf-field caller-owned preparation', () => {
   it('samples byte-exact Scenes through cold generate and a retained warm sampler', () => {
-    const fixtures: Array<{ params: Params; seed: string; times: number[] }> = [
-      { params: {}, seed: 'prepared-default', times: [0, 1 / 60, 3.75] },
+    const fixtures: Array<{
+      params: Params
+      seed: string
+      times: number[]
+      frame: typeof DEFAULT_COMPOSITION_FRAME
+    }> = [
+      {
+        params: {},
+        seed: 'prepared-default',
+        times: [0, 1 / 60, 3.75],
+        frame: DEFAULT_COMPOSITION_FRAME,
+      },
       {
         params: {
           density: 6,
@@ -320,13 +379,22 @@ describe('leaf-field caller-owned preparation', () => {
         },
         seed: 'prepared-varied',
         times: [0, 0.125, 42],
+        frame: DEFAULT_COMPOSITION_FRAME,
+      },
+      // AC #4 must hold for the SUPPLIED frame, not only the square default: cold
+      // generate and the warm sampler stay byte-exact for a non-square frame too.
+      {
+        params: { density: 6, variation: 0.7, sphereCount: 3, sphereDepth: 0.2 },
+        seed: 'prepared-nonsquare',
+        times: [0, 0.125, 42],
+        frame: resolveCompositionFrame(2),
       },
     ]
 
-    for (const { params, seed, times } of fixtures) {
-      const prepared = leafField.prepare(params, seed, DEFAULT_COMPOSITION_FRAME)
+    for (const { params, seed, times, frame } of fixtures) {
+      const prepared = leafField.prepare(params, seed, frame)
       for (const t of times) {
-        expect(prepared(t)).toEqual(leafField.generate(params, seed, t, DEFAULT_COMPOSITION_FRAME))
+        expect(prepared(t)).toEqual(leafField.generate(params, seed, t, frame))
       }
     }
   })
@@ -705,7 +773,8 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
 
     const areaInside = Math.PI * r * r
     const densityInside = inside / areaInside
-    const densityOutside = (leaves.length - inside) / (WIDTH * HEIGHT - areaInside)
+    const densityOutside =
+      (leaves.length - inside) / (FRAME.width * FRAME.height - areaInside)
 
     // The mechanism is occlusion, not density-thinning: the leaves under the
     // sphere are all still present (just painted over), so per-area leaf density
@@ -765,8 +834,8 @@ describe('leaf-field sphere-set knobs (#141)', () => {
       const x = cx + Math.cos(rimAngle) * radius
       const y = cy + Math.sin(rimAngle) * radius
       const flowAngle = angleAt(
-        (x / WIDTH) * fieldScale,
-        (y / HEIGHT) * fieldScale,
+        (x / FRAME.width) * fieldScale,
+        (y / FRAME.height) * fieldScale,
         1,
         0,
       )
@@ -884,8 +953,8 @@ describe('leaf-field sphere-set knobs (#141)', () => {
       // Reconstruct the former placement policy: the same first two dedicated
       // sphere-stream draws mapped uniformly into the radius-inset canvas.
       const sphereRng = createRandom(`${seed}-sphere`)
-      const randomX = radius + sphereRng.value() * (WIDTH - radius * 2)
-      const randomY = radius + sphereRng.value() * (HEIGHT - radius * 2)
+      const randomX = radius + sphereRng.value() * (FRAME.width - radius * 2)
+      const randomY = radius + sphereRng.value() * (FRAME.height - radius * 2)
       randomTotal += rimTangency(
         seed,
         randomX,
@@ -939,8 +1008,8 @@ describe('leaf-field sphere-set knobs (#141)', () => {
       const { minX, minY, maxX, maxY } = primitiveBBox(disc)
       expect(minX).toBeGreaterThanOrEqual(-eps)
       expect(minY).toBeGreaterThanOrEqual(-eps)
-      expect(maxX).toBeLessThanOrEqual(WIDTH + eps)
-      expect(maxY).toBeLessThanOrEqual(HEIGHT + eps)
+      expect(maxX).toBeLessThanOrEqual(FRAME.width + eps)
+      expect(maxY).toBeLessThanOrEqual(FRAME.height + eps)
       centers.add(primitiveCentroid(disc).join(','))
     }
     expect(centers.size).toBe(discs.length)
