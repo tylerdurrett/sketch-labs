@@ -310,22 +310,22 @@ export function LiveCanvas({
   );
 
   // The paper's CSS-box aspect (#155): the `<canvas>` box is sized to the
-  // SKETCH's OWN aspect, not a fixed square. The aspect is read from the
-  // generated Scene's coordinate space at t=0. (The Sketch-declared `space`
-  // metadata that once short-circuited this throwaway Scene was removed with the
-  // widened Composition Frame contract in #251; the real Harness fallback frame
-  // arrives in #254.) The ratio is threaded onto
-  // `.live-canvas` as the `--paper-aspect` custom property; the CSS there
+  // COMPOSITION FRAME's aspect, not a fixed square and not the Sketch's own
+  // generated space. The ratio is the frame's own `width / height` — with the
+  // square Harness fallback (`DEFAULT_COMPOSITION_FRAME`, 1000×1000) that is 1
+  // until a real frame lands (#247/#248). No throwaway Scene is sampled anymore
+  // (the metadata that once short-circuited that probe was removed with the
+  // widened contract in #251; the frame supersedes both). The ratio is threaded
+  // onto `.live-canvas` as the `--paper-aspect` custom property; the CSS there
   // contain-fits the box against the stage at that ratio. This is a DISPLAY-BOX
-  // concern only — the DPR backing store
-  // (`sizeToBox`) and the in-canvas contain-fit (`drawSceneFitted`) are
-  // untouched, so PNG/SVG export still snapshots the displayed frame. A
-  // degenerate space (zero/non-finite extent) falls back to a square.
+  // concern only — the DPR backing store (`sizeToBox`) and the in-canvas
+  // contain-fit (`drawSceneFitted`) are untouched, so PNG/SVG export still
+  // snapshots the displayed frame. A degenerate frame (zero/non-finite extent)
+  // falls back to a square.
   const paperAspect = useMemo(() => {
-    const space = preparedFrame(0).space;
-    const ratio = space.width / space.height;
+    const ratio = compositionFrame.width / compositionFrame.height;
     return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
-  }, [preparedFrame]);
+  }, [compositionFrame]);
 
   // Inline the derived ratio as the `--paper-aspect` custom property the
   // `.live-canvas` rule reads for its `aspect-ratio` + contain-fit width. Cast
@@ -726,7 +726,7 @@ export function LiveCanvas({
       <div className="live-canvas-stage">
         {/*
          * The framed "paper" canvas (#155): its display box is aspect-sized to the
-         * Scene's own space via the `--paper-aspect` custom property `paperStyle`
+         * Composition Frame via the `--paper-aspect` custom property `paperStyle`
          * threads in, contain-fitting against `.live-canvas-stage` (the size-query
          * container). Relocated into #156's fill-the-region layout unchanged.
          */}
