@@ -10,12 +10,6 @@ export type Point = Vec2
 /** Array of points forming a polyline path */
 export type Polyline = Point[]
 
-/** Paper dimensions in centimeters */
-export interface PaperSize {
-  width: number
-  height: number
-}
-
 /** Physical length unit */
 export type LengthUnit = 'cm' | 'in' | 'mm'
 
