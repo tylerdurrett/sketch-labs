@@ -143,12 +143,13 @@
  */
 .plot-sheet {
   position: relative;
-  box-sizing: border-box;
   --sheet-aspect: 1;
   aspect-ratio: var(--sheet-aspect);
   width: min(100cqw, 100cqh * var(--sheet-aspect));
   background: #fff;
-  border: 1px solid var(--border);
+  /* Paint-only edge: a border would shrink the percentage containing block and
+     make physical inset ratios subtly wrong. Outline consumes no layout space. */
+  outline: 1px solid var(--border);
   box-shadow: 0 8px 30px rgb(0 0 0 / 60%);
 }
 
