@@ -4,7 +4,10 @@ import { scatter } from '../sketches/scatter'
 import type { Params } from '../sketch'
 import type { Primitive } from '../scene'
 import type { Point } from '../types'
-import { DEFAULT_COMPOSITION_FRAME } from '../compositionFrame'
+import {
+  DEFAULT_COMPOSITION_FRAME,
+  resolveCompositionFrame,
+} from '../compositionFrame'
 
 /** Centroid of a baked dot polygon — the point the dot was scattered at. */
 function centroid(primitive: Primitive): Point {
@@ -57,12 +60,46 @@ describe('scatter Sketch contract', () => {
   })
 })
 
+describe('scatter composes into the supplied Composition Frame', () => {
+  it('returns a Scene whose space equals the supplied frame exactly', () => {
+    const params: Params = { baseRadius: 60 }
+    const square = scatter.generate(params, 'frame-seed', 0, DEFAULT_COMPOSITION_FRAME)
+    expect(square.space).toEqual(DEFAULT_COMPOSITION_FRAME)
+
+    const wide = resolveCompositionFrame(2)
+    const tall = resolveCompositionFrame(0.5)
+    expect(scatter.generate(params, 'frame-seed', 0, wide).space).toEqual(wide)
+    expect(scatter.generate(params, 'frame-seed', 0, tall).space).toEqual(tall)
+  })
+
+  it('scatters across the whole non-square extent — dots reach toward the frame width, not 1000', () => {
+    // The Poisson sampler fills the frame, so a non-square frame's dots must reach
+    // past x=1000; a still-hardcoded 1000-wide sampler would cap them near 1000.
+    const wide = resolveCompositionFrame(2) // width = 1000·√2 ≈ 1414
+    const scene = scatter.generate({ baseRadius: 60, jitter: 0 }, 'fill', 0, wide)
+    let maxX = -Infinity
+    for (const primitive of scene.primitives) {
+      for (const [x] of primitive.points) if (x > maxX) maxX = x
+    }
+    expect(maxX).toBeGreaterThan(1000)
+    expect(maxX).toBeLessThanOrEqual(wide.width + 100)
+  })
+})
+
 describe('scatter determinism (ADR-0002)', () => {
   it('is deterministic at the Scene level for identical (params, seed, t)', () => {
     const params: Params = { baseRadius: 50, jitter: 0.2, kSamples: 20 }
     const a = scatter.generate(params, 'fixed-seed', 0, DEFAULT_COMPOSITION_FRAME)
     const b = scatter.generate(params, 'fixed-seed', 0, DEFAULT_COMPOSITION_FRAME)
     // Asserted at the Scene level (drawn Primitives), never at the pixel level.
+    expect(a).toEqual(b)
+  })
+
+  it('is deterministic for a fixed non-square frame', () => {
+    const params: Params = { baseRadius: 50, jitter: 0.2, kSamples: 20 }
+    const frame = resolveCompositionFrame(2)
+    const a = scatter.generate(params, 'fixed-seed', 0, frame)
+    const b = scatter.generate(params, 'fixed-seed', 0, frame)
     expect(a).toEqual(b)
   })
 

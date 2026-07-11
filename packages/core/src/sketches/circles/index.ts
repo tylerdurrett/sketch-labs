@@ -23,7 +23,7 @@ import type {
   StatelessSketch,
 } from '../../sketch'
 import type { Point, Polyline } from '../../types'
-import { HEIGHT, numberParam, WIDTH } from '../sketch-util'
+import { numberParam } from '../sketch-util'
 
 /** Points used to approximate each circle's perimeter as a closed polygon. */
 const PERIMETER_SEGMENTS = 64
@@ -72,9 +72,9 @@ export const circles: StatelessSketch = {
   name: 'Circles',
   schema,
   time: { duration: 4, mode: 'loop' },
-  generate(params: Params, seed: Seed, t: number, _frame: CoordinateSpace): Scene {
+  generate(params: Params, seed: Seed, t: number, frame: CoordinateSpace): Scene {
     const rng = createRandom(seed)
-    const builder = createScene({ width: WIDTH, height: HEIGHT })
+    const builder = createScene(frame)
 
     const count = Math.round(numberParam(params, schema, 'count'))
     const minRadius = numberParam(params, schema, 'minRadius')
@@ -87,8 +87,8 @@ export const circles: StatelessSketch = {
     const pulse = 1 + PULSE_AMPLITUDE * Math.sin(phase * 2 * Math.PI)
 
     for (let i = 0; i < count; i++) {
-      const cx = rng.range(0, WIDTH)
-      const cy = rng.range(0, HEIGHT)
+      const cx = rng.range(0, frame.width)
+      const cy = rng.range(0, frame.height)
       const baseRadius = rng.range(minRadius, maxRadius)
       const radius = baseRadius * pulse
 

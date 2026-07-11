@@ -33,7 +33,7 @@
  * that base, so the knob is live.
  *
  * FLOW COHERENCE (2026-07-02): `fieldScale` samples the curl field over
- * CANVAS-NORMALIZED coordinates (x/WIDTH, y/HEIGHT), so the knob reads directly
+ * CANVAS-NORMALIZED coordinates (x/frame.width, y/frame.height), so the knob reads directly
  * as "how many noise features span the canvas" — a value near 1–2 gives a
  * smooth, current-like sweep, not the near-random per-leaf scatter you get when
  * the base frequency runs into the tens. Fewer `octaves` keeps the field's broad
@@ -176,7 +176,7 @@ import {
   type Seed,
 } from '../../sketch'
 import type { Polyline } from '../../types'
-import { colorParam, HEIGHT, numberParam, WIDTH } from '../sketch-util'
+import { colorParam, numberParam } from '../sketch-util'
 import { leaf } from '../single-leaf/leaf'
 import type { LeafShape } from '../single-leaf/leaf'
 import { placeSpheresAtVortices } from './vortex-placement'
@@ -226,13 +226,14 @@ const schema = {
    */
   sphereCount: { kind: 'number', min: 0, max: 25, default: 6, step: 1, integer: true },
   /**
-   * Sphere radius range low, in coordinate-space units (WIDTH=1000). Default from
-   * the "Nice One" preset (40). Consumed NOW.
+   * Sphere radius range low, in coordinate-space units (the default square frame
+   * is 1000 wide). Default from the "Nice One" preset (40). Consumed NOW.
    */
   sphereRadiusMin: { kind: 'number', min: 40, max: 400, default: 40 },
   /**
-   * Sphere radius range high, in coordinate-space units (WIDTH=1000). Default from
-   * the "Nice One" preset (190.12). `generate` guards min ≤ max internally (Sketch
+   * Sphere radius range high, in coordinate-space units (the default square frame
+   * is 1000 wide). Default from the "Nice One" preset (190.12). `generate` guards
+   * min ≤ max internally (Sketch
    * owns its inter-param coherence). Consumed NOW.
    */
   sphereRadiusMax: { kind: 'number', min: 40, max: 400, default: 190.12 },
@@ -412,7 +413,7 @@ export const leafField = definePreparedSketch({
   name: 'Leaf Field',
   schema,
   // NO `time` metadata ⇒ ships static (single frame, scrubber hidden).
-  prepare(params: Params, seed: Seed, _frame: CoordinateSpace) {
+  prepare(params: Params, seed: Seed, frame: CoordinateSpace) {
     // Shared seeded Random. It drives the per-leaf shape rolls (size, curl,
     // wobble) AND is threaded into `leaf()` for its broad contour roughness. It
     // ALSO seeds the curl field via its (separate, non-advancing) noise
@@ -486,13 +487,13 @@ export const leafField = definePreparedSketch({
     const spheres = placeSpheresAtVortices(
       (x, y) =>
         potential4D(
-          (x / WIDTH) * fieldScale,
-          (y / HEIGHT) * fieldScale,
+          (x / frame.width) * fieldScale,
+          (y / frame.height) * fieldScale,
           placementZ,
           placementW,
         ),
-      WIDTH,
-      HEIGHT,
+      frame.width,
+      frame.height,
       sphereRequests,
     )
 
@@ -501,8 +502,8 @@ export const leafField = definePreparedSketch({
     // (mirror scatter). Variable/flow-driven radius is out of scope (#TASK2).
     const radius = REFERENCE_SPACING / density
     const sampled = samplePoissonDisk({
-      width: WIDTH,
-      height: HEIGHT,
+      width: frame.width,
+      height: frame.height,
       radius: () => radius,
       minRadius: radius,
       seed,
@@ -608,10 +609,7 @@ export const leafField = definePreparedSketch({
       // The Sketch-declared background (ADR-0009): the whole output surface,
       // letterbox included, painted from the `backgroundColor` knob — part of the
       // image, so it rides the (params, seed) determinism spine.
-      const builder = createScene(
-        { width: WIDTH, height: HEIGHT },
-        { color: backgroundColor },
-      )
+      const builder = createScene(frame, { color: backgroundColor })
 
       // Discs are rebuilt into fresh Scene-owned point arrays on every sample.
       const drawDisc = (sphere: { cx: number; cy: number; r: number }): void => {
@@ -632,8 +630,8 @@ export const leafField = definePreparedSketch({
         // make fieldScale read as features across the canvas; octaves/turbulence
         // shape the fBm stack.
         const angle = flowAngleAt(
-          (x / WIDTH) * fieldScale,
-          (y / HEIGHT) * fieldScale,
+          (x / frame.width) * fieldScale,
+          (y / frame.height) * fieldScale,
           loopZ,
           loopW,
         )

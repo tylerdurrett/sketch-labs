@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { createRandom } from '../random'
 import { circles } from '../sketches/circles'
 import type { Params } from '../sketch'
-import { DEFAULT_COMPOSITION_FRAME } from '../compositionFrame'
+import {
+  DEFAULT_COMPOSITION_FRAME,
+  resolveCompositionFrame,
+} from '../compositionFrame'
 
 /**
  * A minimal engine-level param roll. This stands in for what the Harness engine
@@ -39,12 +42,50 @@ describe('circles Sketch contract', () => {
   })
 })
 
+describe('circles composes into the supplied Composition Frame', () => {
+  it('returns a Scene whose space equals the supplied frame exactly', () => {
+    const params: Params = { count: 8 }
+    // Default (square) frame.
+    const square = circles.generate(params, 'frame-seed', 0, DEFAULT_COMPOSITION_FRAME)
+    expect(square.space).toEqual(DEFAULT_COMPOSITION_FRAME)
+
+    // A non-square frame and its transpose — the Scene must adopt each exactly,
+    // not the historical hardcoded 1000×1000 extent.
+    const wide = resolveCompositionFrame(2)
+    const tall = resolveCompositionFrame(0.5)
+    expect(circles.generate(params, 'frame-seed', 0, wide).space).toEqual(wide)
+    expect(circles.generate(params, 'frame-seed', 0, tall).space).toEqual(tall)
+  })
+
+  it('fills the non-square extent — geometry reaches toward the frame width, not 1000', () => {
+    // Many circles so the seeded centers sample the full width; a still-hardcoded
+    // 1000-wide implementation would cap maxX near 1000 and fail this.
+    const wide = resolveCompositionFrame(2) // width = 1000·√2 ≈ 1414
+    const scene = circles.generate({ count: 80, minRadius: 2, maxRadius: 4 }, 'fill', 0, wide)
+    let maxX = -Infinity
+    for (const primitive of scene.primitives) {
+      for (const [x] of primitive.points) if (x > maxX) maxX = x
+    }
+    expect(maxX).toBeGreaterThan(1000)
+    // Centers land in [0, width]; the tiny radius keeps maxX just past the edge.
+    expect(maxX).toBeLessThanOrEqual(wide.width + 10)
+  })
+})
+
 describe('circles determinism (ADR-0002)', () => {
   it('is deterministic at the Scene level for identical (params, seed, t)', () => {
     const params: Params = { count: 12, minRadius: 8, maxRadius: 40 }
     const a = circles.generate(params, 'fixed-seed', 1.25, DEFAULT_COMPOSITION_FRAME)
     const b = circles.generate(params, 'fixed-seed', 1.25, DEFAULT_COMPOSITION_FRAME)
     // Asserted at the Scene level (drawn Primitives), never at the pixel level.
+    expect(a).toEqual(b)
+  })
+
+  it('is deterministic for a fixed non-square frame', () => {
+    const params: Params = { count: 12, minRadius: 8, maxRadius: 40 }
+    const frame = resolveCompositionFrame(2)
+    const a = circles.generate(params, 'fixed-seed', 1.25, frame)
+    const b = circles.generate(params, 'fixed-seed', 1.25, frame)
     expect(a).toEqual(b)
   })
 
