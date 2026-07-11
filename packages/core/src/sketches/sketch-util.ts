@@ -9,9 +9,10 @@
 import type { ColorParamSpec, NumberParamSpec, Params, ParamSpec } from '../sketch'
 import type { Point } from '../types'
 
-/** Coordinate-space extent every Sketch bakes its Scene into (square, unitless). */
-export const WIDTH = 1000
-export const HEIGHT = 1000
+// The fixed 1000×1000 WIDTH/HEIGHT extent was retired in issue #252: every Sketch
+// now composes into the Composition Frame supplied to generate/prepare
+// (`frame.width` / `frame.height`) rather than a self-owned constant, so no
+// hardcoded normalization constant lives here anymore.
 
 /**
  * The keys of a frozen schema `S` whose spec is the {@link ParamSpec} member

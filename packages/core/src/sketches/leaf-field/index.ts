@@ -33,7 +33,7 @@
  * that base, so the knob is live.
  *
  * FLOW COHERENCE (2026-07-02): `fieldScale` samples the curl field over
- * CANVAS-NORMALIZED coordinates (x/WIDTH, y/HEIGHT), so the knob reads directly
+ * CANVAS-NORMALIZED coordinates (x/frame.width, y/frame.height), so the knob reads directly
  * as "how many noise features span the canvas" — a value near 1–2 gives a
  * smooth, current-like sweep, not the near-random per-leaf scatter you get when
  * the base frequency runs into the tens. Fewer `octaves` keeps the field's broad
@@ -226,13 +226,14 @@ const schema = {
    */
   sphereCount: { kind: 'number', min: 0, max: 25, default: 6, step: 1, integer: true },
   /**
-   * Sphere radius range low, in coordinate-space units (WIDTH=1000). Default from
-   * the "Nice One" preset (40). Consumed NOW.
+   * Sphere radius range low, in coordinate-space units (the default square frame
+   * is 1000 wide). Default from the "Nice One" preset (40). Consumed NOW.
    */
   sphereRadiusMin: { kind: 'number', min: 40, max: 400, default: 40 },
   /**
-   * Sphere radius range high, in coordinate-space units (WIDTH=1000). Default from
-   * the "Nice One" preset (190.12). `generate` guards min ≤ max internally (Sketch
+   * Sphere radius range high, in coordinate-space units (the default square frame
+   * is 1000 wide). Default from the "Nice One" preset (190.12). `generate` guards
+   * min ≤ max internally (Sketch
    * owns its inter-param coherence). Consumed NOW.
    */
   sphereRadiusMax: { kind: 'number', min: 40, max: 400, default: 190.12 },
