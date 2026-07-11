@@ -442,6 +442,7 @@ export function SketchControls({
             params={params}
             seed={seed}
             compositionFrame={compositionFrame}
+            profile={profile}
             renderMode={renderMode}
             tolerance={tolerance}
             onOutlineComputed={() => setComputingOutline(false)}

@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_COMPOSITION_FRAME,
+  HARNESS_FALLBACK_PLOT_PROFILE,
   resolveCompositionFrame,
+  resolvePlotCompositionFrame,
+  type PlotProfile,
   type Scene,
   type Sketch,
   type TimeMetadata,
@@ -19,13 +22,14 @@ import {
 
 /** Keep legacy tests terse while the production component requires an explicit frame. */
 function LiveCanvas(
-  props: Omit<LiveCanvasProps, "compositionFrame"> &
-    Partial<Pick<LiveCanvasProps, "compositionFrame">>,
+  props: Omit<LiveCanvasProps, "compositionFrame" | "profile"> &
+    Partial<Pick<LiveCanvasProps, "compositionFrame" | "profile">>,
 ) {
   return (
     <RawLiveCanvas
       {...props}
       compositionFrame={props.compositionFrame ?? DEFAULT_COMPOSITION_FRAME}
+      profile={props.profile ?? HARNESS_FALLBACK_PLOT_PROFILE}
     />
   );
 }
@@ -607,6 +611,92 @@ describe("LiveCanvas paper aspect — sized to the Composition Frame (#155/#253)
     expect(
       Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
     ).toBeCloseTo(2);
+  });
+});
+
+describe("LiveCanvas full-sheet preview chrome (#248)", () => {
+  const asymmetricProfile: PlotProfile = {
+    width: 200,
+    height: 100,
+    insets: { top: 10, right: 20, bottom: 30, left: 40 },
+  };
+
+  it("contain-fits the full sheet and positions the drawable region from all four inset ratios", () => {
+    const el = mount(
+      <LiveCanvas
+        sketch={spacedSketch(100, 100)}
+        params={{}}
+        seed={1}
+        profile={asymmetricProfile}
+        compositionFrame={resolvePlotCompositionFrame(asymmetricProfile)}
+      />,
+    );
+    const sheet = el.querySelector(".plot-sheet") as HTMLElement;
+    const drawable = el.querySelector(".plot-drawable") as HTMLElement;
+
+    expect(sheet.getAttribute("aria-label")).toBe("Plot sheet preview");
+    expect(sheet.style.getPropertyValue("--sheet-aspect")).toBe("2");
+    expect(sheet.style.getPropertyValue("--plot-inset-top")).toBe("10%");
+    expect(sheet.style.getPropertyValue("--plot-inset-right")).toBe("10%");
+    expect(sheet.style.getPropertyValue("--plot-inset-bottom")).toBe("30%");
+    expect(sheet.style.getPropertyValue("--plot-inset-left")).toBe("20%");
+    expect(drawable.querySelector("canvas")).toBe(canvasEl(el));
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(140 / 60);
+  });
+
+  it("keeps Fill and Outline on the same drawable canvas inside the sheet", () => {
+    const sketch = spacedSketch(100, 100);
+    const params = {};
+    const compositionFrame = resolvePlotCompositionFrame(asymmetricProfile);
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        profile={asymmetricProfile}
+        compositionFrame={compositionFrame}
+        renderMode="fill"
+      />,
+    );
+    const sheet = el.querySelector(".plot-sheet");
+    const drawable = el.querySelector(".plot-drawable");
+    const canvas = canvasEl(el);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={params}
+          seed={1}
+          profile={asymmetricProfile}
+          compositionFrame={compositionFrame}
+          renderMode="outline"
+        />,
+      );
+    });
+
+    expect(el.querySelector(".plot-sheet")).toBe(sheet);
+    expect(el.querySelector(".plot-drawable")).toBe(drawable);
+    expect(canvasEl(el)).toBe(canvas);
+  });
+
+  it("keeps the export handle pointed at the drawable canvas, not its sheet chrome", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={spacedSketch(100, 100)}
+        params={{}}
+        seed={1}
+        profile={asymmetricProfile}
+        compositionFrame={resolvePlotCompositionFrame(asymmetricProfile)}
+      />,
+    );
+
+    expect(handle.current?.getCanvas()).toBe(canvasEl(el));
+    expect(handle.current?.getCanvas()).not.toBe(el.querySelector(".plot-sheet"));
   });
 });
 

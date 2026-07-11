@@ -15,6 +15,7 @@ import {
   type Canvas2DContext,
   type CoordinateSpace,
   type Params,
+  type PlotProfile,
   type PreparedFrame,
   type Seed,
   type Sketch,
@@ -92,6 +93,8 @@ export interface LiveCanvasProps {
   seed: Seed;
   /** The caller-resolved, aspect-bearing frame used by every composition path. */
   compositionFrame: CoordinateSpace;
+  /** Physical sheet and inset proportions used only by the preview chrome. */
+  profile: PlotProfile;
   /**
    * Which processed Scene the preview draws (issue #219). Optional, defaulting to
    * `fill` so the live path is unchanged when a caller omits it: `fill` renders
@@ -280,6 +283,7 @@ export function LiveCanvas({
   params,
   seed,
   compositionFrame,
+  profile,
   renderMode = "fill",
   tolerance = 0,
   handleRef,
@@ -325,6 +329,18 @@ export function LiveCanvas({
   // `.live-canvas` rule reads for its `aspect-ratio` + contain-fit width. Cast
   // through CSSProperties: React types don't model custom-property keys.
   const paperStyle = { "--paper-aspect": paperAspect } as CSSProperties;
+
+  // Full-sheet preview chrome. These are dimensionless ratios only: the browser
+  // contain-fits a paper-shaped box, then positions the drawable frame inside it
+  // from all four independent insets. No CSS pixel is claimed to be a physical
+  // millimeter; actual device mapping remains an export concern.
+  const sheetStyle = {
+    "--sheet-aspect": profile.width / profile.height,
+    "--plot-inset-top": `${(profile.insets.top / profile.height) * 100}%`,
+    "--plot-inset-right": `${(profile.insets.right / profile.width) * 100}%`,
+    "--plot-inset-bottom": `${(profile.insets.bottom / profile.height) * 100}%`,
+    "--plot-inset-left": `${(profile.insets.left / profile.width) * 100}%`,
+  } as CSSProperties;
 
   // The current params/seed are read through refs inside the rAF `tick` (and the
   // static redraw effect) so the loop effect does NOT depend on them. Keeping the
@@ -741,12 +757,22 @@ export function LiveCanvas({
     <div className="live-canvas-layout">
       <div className="live-canvas-stage">
         {/*
-         * The framed "paper" canvas (#155): its display box is aspect-sized to the
-         * Composition Frame via the `--paper-aspect` custom property `paperStyle`
-         * threads in, contain-fitting against `.live-canvas-stage` (the size-query
-         * container). Relocated into #156's fill-the-region layout unchanged.
+         * Full-sheet preview chrome (#248): the outer box follows the profile's
+         * physical paper aspect; the inner wrapper follows all four inset ratios;
+         * the real canvas fills only that drawable rectangle. The canvas remains
+         * the sole rendered/exported pixel surface — neither margin chrome nor the
+         * guide enters getCanvas()/PNG.
          */}
-        <canvas ref={canvasRef} className="live-canvas" style={paperStyle} />
+        <div
+          className="plot-sheet"
+          style={sheetStyle}
+          role="group"
+          aria-label="Plot sheet preview"
+        >
+          <div className="plot-drawable">
+            <canvas ref={canvasRef} className="live-canvas" style={paperStyle} />
+          </div>
+        </div>
       </div>
       {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
       {time !== undefined && (
