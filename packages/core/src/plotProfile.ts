@@ -50,6 +50,9 @@
  *   module that owns it (`./compositionFrame`).
  */
 
+import { resolveCompositionFrame } from './compositionFrame'
+import type { CoordinateSpace } from './scene'
+
 /**
  * The four independent margin insets of a {@link PlotProfile}, in millimeters.
  *
@@ -154,4 +157,65 @@ export function validatePlotProfile(profile: PlotProfile): void {
       `validatePlotProfile: vertical insets (top ${insets.top} + bottom ${insets.bottom} = ${vertical}) meet or exceed the paper height ${height}, leaving no drawable rectangle`,
     )
   }
+}
+
+/**
+ * A rectangle in physical millimeters — distinct from the unitless
+ * {@link CoordinateSpace} a Composition Frame lives in. The drawable rectangle of
+ * a {@link PlotProfile} is measured in the same canonical millimeters as the
+ * paper; only its ASPECT crosses over into the frame's normalized coordinate
+ * space.
+ */
+export interface PlotRectangle {
+  /** Rectangle width, in millimeters. */
+  width: number
+  /** Rectangle height, in millimeters. */
+  height: number
+}
+
+/**
+ * Derive a {@link PlotProfile}'s drawable rectangle — the paper minus its four
+ * insets — in millimeters.
+ *
+ * The profile is validated first (see {@link validatePlotProfile}), so an
+ * exhausted-region profile fails with the Plot-Profile message before this
+ * returns. A valid profile always yields a rectangle with strictly positive
+ * `width` and `height`, since valid insets leave a positive drawable region.
+ *
+ * @param profile - The profile to inset.
+ * @returns The drawable rectangle in millimeters:
+ *   `width  = width  - left - right`, `height = height - top  - bottom`.
+ * @throws via {@link validatePlotProfile} if the profile is invalid.
+ */
+export function plotDrawableRectangle(profile: PlotProfile): PlotRectangle {
+  validatePlotProfile(profile)
+  const { width, height, insets } = profile
+  return {
+    width: width - insets.left - insets.right,
+    height: height - insets.top - insets.bottom,
+  }
+}
+
+/**
+ * Resolve a {@link PlotProfile}'s Composition Frame from its drawable rectangle's
+ * aspect.
+ *
+ * The drawable rectangle (paper minus the four insets) carries the profile's
+ * aspect; its magnitude belongs to the later output mapping, not to the frame.
+ * This delegates the aspect → fixed-area frame step to
+ * {@link resolveCompositionFrame} — the one system module that owns fixed-area
+ * normalization — rather than reimplementing it. Validation runs first (via
+ * {@link plotDrawableRectangle}), so an exhausted region fails with the
+ * Plot-Profile message rather than the resolver's downstream throw.
+ *
+ * @param profile - The plot profile to resolve.
+ * @returns The Composition Frame as a {@link CoordinateSpace}, normalized to the
+ *   Harness's `1,000,000` square coordinate units.
+ * @throws via {@link validatePlotProfile} if the profile is invalid.
+ */
+export function resolvePlotCompositionFrame(
+  profile: PlotProfile,
+): CoordinateSpace {
+  const drawable = plotDrawableRectangle(profile)
+  return resolveCompositionFrame(drawable.width / drawable.height)
 }
