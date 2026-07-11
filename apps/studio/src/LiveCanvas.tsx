@@ -283,33 +283,49 @@ export function LiveCanvas({
 }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Caller-owned preparation is keyed by the two time-invariant determinism
-  // inputs. A prepared Sketch can retain immutable layout derived from
-  // `(params, seed)`; an ordinary Sketch receives a zero-state adapter over its
-  // existing `generate`. Changing Sketch, params, or seed invalidates exactly this
-  // sampler without touching the single wall-clock `t` (ADR-0002/0005).
+  // The Composition Frame the Studio composes into — the scale-independent,
+  // aspect-bearing rectangle handed to `prepareSketch`/`generate` (#246). For now
+  // it is the Harness's square fallback (`DEFAULT_COMPOSITION_FRAME`, 1000×1000);
+  // a real frame — a Plot Profile's paper-inside-margins or authored physical
+  // paper — arrives in siblings #247/#248. Holding it as ONE named seam value is
+  // load-bearing: both the prepared sampler (below) and the preview aspect derive
+  // from it, so when a real frame replaces this constant a single change flows to
+  // both, and a frame change invalidates the prepared sampler alongside
+  // sketch/params/seed.
+  const compositionFrame = DEFAULT_COMPOSITION_FRAME;
+
+  // Caller-owned preparation is keyed by the time-invariant determinism inputs
+  // PLUS the Composition Frame. A prepared Sketch can retain immutable layout
+  // derived from `(params, seed, frame)`; an ordinary Sketch receives a zero-state
+  // adapter over its existing `generate`. Changing Sketch, params, seed, or the
+  // Composition Frame invalidates exactly this sampler without touching the single
+  // wall-clock `t` — the rAF baseline/`tRef` reads the sampler through
+  // `preparedFrameRef`, which the post-commit effect resyncs, so the new layout is
+  // sampled at the continuing `t`, not from 0 (ADR-0002/0005). `compositionFrame`
+  // is a stable module constant today, so listing it costs no extra prepare;
+  // it makes the frame→sampler invalidation explicit for when a real frame lands.
   const preparedFrame = useMemo(
-    () => prepareSketch(sketch, params, seed, DEFAULT_COMPOSITION_FRAME),
-    [sketch, params, seed],
+    () => prepareSketch(sketch, params, seed, compositionFrame),
+    [sketch, params, seed, compositionFrame],
   );
 
   // The paper's CSS-box aspect (#155): the `<canvas>` box is sized to the
-  // SKETCH's OWN aspect, not a fixed square. The aspect is read from the
-  // generated Scene's coordinate space at t=0. (The Sketch-declared `space`
-  // metadata that once short-circuited this throwaway Scene was removed with the
-  // widened Composition Frame contract in #251; the real Harness fallback frame
-  // arrives in #254.) The ratio is threaded onto
-  // `.live-canvas` as the `--paper-aspect` custom property; the CSS there
+  // COMPOSITION FRAME's aspect, not a fixed square and not the Sketch's own
+  // generated space. The ratio is the frame's own `width / height` — with the
+  // square Harness fallback (`DEFAULT_COMPOSITION_FRAME`, 1000×1000) that is 1
+  // until a real frame lands (#247/#248). No throwaway Scene is sampled anymore
+  // (the metadata that once short-circuited that probe was removed with the
+  // widened contract in #251; the frame supersedes both). The ratio is threaded
+  // onto `.live-canvas` as the `--paper-aspect` custom property; the CSS there
   // contain-fits the box against the stage at that ratio. This is a DISPLAY-BOX
-  // concern only — the DPR backing store
-  // (`sizeToBox`) and the in-canvas contain-fit (`drawSceneFitted`) are
-  // untouched, so PNG/SVG export still snapshots the displayed frame. A
-  // degenerate space (zero/non-finite extent) falls back to a square.
+  // concern only — the DPR backing store (`sizeToBox`) and the in-canvas
+  // contain-fit (`drawSceneFitted`) are untouched, so PNG/SVG export still
+  // snapshots the displayed frame. A degenerate frame (zero/non-finite extent)
+  // falls back to a square.
   const paperAspect = useMemo(() => {
-    const space = preparedFrame(0).space;
-    const ratio = space.width / space.height;
+    const ratio = compositionFrame.width / compositionFrame.height;
     return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
-  }, [preparedFrame]);
+  }, [compositionFrame]);
 
   // Inline the derived ratio as the `--paper-aspect` custom property the
   // `.live-canvas` rule reads for its `aspect-ratio` + contain-fit width. Cast
@@ -710,7 +726,7 @@ export function LiveCanvas({
       <div className="live-canvas-stage">
         {/*
          * The framed "paper" canvas (#155): its display box is aspect-sized to the
-         * Scene's own space via the `--paper-aspect` custom property `paperStyle`
+         * Composition Frame via the `--paper-aspect` custom property `paperStyle`
          * threads in, contain-fitting against `.live-canvas-stage` (the size-query
          * container). Relocated into #156's fill-the-region layout unchanged.
          */}
