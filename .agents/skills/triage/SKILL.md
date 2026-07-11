@@ -26,11 +26,25 @@ The maintainer's request shape picks the mode:
 
 Read the full spec (body, comments, labels, dates). Parse any prior triage notes so you don't re-ask resolved questions. Read `CONTEXT.md` if present, respect ADRs in the touched area, use the project's domain glossary. Read `.out-of-scope/*.md` and surface any prior rejection that resembles this spec.
 
-### 2. Verify size
+### 2. Verify size and tier-completeness
 
-`/to-spec` should have picked one of `size:initiative` / `size:feature` / `size:slice` / `size:task`. If the size looks right, proceed. If it looks wrong, propose a correction and wait for direction; default toward the larger tier when ambiguous.
+Two gating checks. `ready-for-agent` on a slice (and a clear-to-`/decompose` on a feature/initiative) is a promise that the next skill — `/decompose`, `/audit`, `/autopilot` — can actually run the spec. A size check alone does not keep that promise: a correctly-sized spec can still be missing the sections those skills consume. Both checks must pass before you apply the happy-path state.
 
-If the spec has no size label (hand-created without `/to-spec`), recommend one and apply it after confirmation. This is the only path by which `/triage` originates a size; the default path is verification.
+**Size.** `/to-spec` should have picked one of `size:initiative` / `size:feature` / `size:slice` / `size:task`. If the size looks right, proceed. If it looks wrong, propose a correction and wait for direction; default toward the larger tier when ambiguous. If the spec has no size label (hand-created without `/to-spec`), recommend one and apply it after confirmation — the only path by which `/triage` originates a size; the default path is verification.
+
+**Tier-completeness.** Verify the body carries the load-bearing sections its tier's `/to-spec` template defines — the ones downstream skills read. `/to-spec`-authored specs have them by construction; hand-created and grill-surfaced specs frequently don't, and a missing section is invisible to a size check.
+
+| Size | Required sections (downstream consumer) |
+| ---- | --------------------------------------- |
+| `size:initiative` | `## Definition of done`, `## Out of scope` — `/decompose` → features |
+| `size:feature` | `## Problem Statement`, `## Solution`, `## User Stories` — `/decompose` → slices |
+| `size:slice` | `## Scope`, `## Acceptance criteria`, `## Out of scope` — `/decompose` → tasks; **`/audit` refuses outright without `## Acceptance criteria`** |
+| `size:task` | `## Scope`, `## Acceptance criteria` — `/execute`, `/verify` |
+
+If a required section is missing, the spec is **not** happy-path ready — do not clear `needs-triage` into `ready-for-agent` (or into a decompose-ready no-state). Resolve it one of two ways:
+
+- **The alignment context already establishes it** — fill the section inline from that context (show the edit, apply it), then continue to the happy path once the body is complete.
+- **It genuinely needs input or re-alignment** — route to the non-happy path: `needs-info` with triage notes naming exactly which sections are missing, or `needs-grilling` if the gap is deep enough for `/grill-with-docs`. Never stamp `ready-for-agent` over a missing section and let a downstream skill — or an unattended `/autopilot` run — discover it two stages later.
 
 ### 3. Per-tier bookkeeping
 
@@ -50,13 +64,15 @@ For `bug`-category specs, attempt repro before transitioning state: read the rep
 
 Clear `needs-triage` and apply one of the seven canonical state labels (or, for initiative and feature specs ready to decompose, no state label at all). Pick from the happy-path table below; if none fits, drop to the non-happy-path table.
 
-**Happy path** (the spec was well-specified and ready):
+**Happy path** (size verified and tier-complete per step 2, and the spec is ready):
 
 | Size | New state | Next step |
 | ---- | --------- | --------- |
 | `size:task` | `ready-for-agent` | `/execute <N>` |
 | `size:slice` | `ready-for-agent` | `/decompose <N>` (or `/autopilot <N>` to run the whole slice autonomously) |
 | `size:feature` / `size:initiative` | *(no state label)* | `/decompose <N>` |
+
+A spec that fails the step-2 tier-completeness check never reaches this table — it lands in the non-happy path (`needs-info` / `needs-grilling`) until its missing sections are filled.
 
 `size:feature` and `size:initiative` skip `ready-for-agent` because they decompose, not execute (see [triage-labels.md §Size axis](../../../docs/agents/triage-labels.md#size-axis)). For `ready-for-agent` outcomes, post an agent brief comment (see [AGENT-BRIEF.md](AGENT-BRIEF.md)) **only if the spec body is thin**; `/to-spec`-published specs usually make a separate brief redundant.
 
@@ -175,8 +191,9 @@ Manual end-to-end checklist. For each fresh-spec row, `needs-triage` comes off a
 | `size:initiative` | *(none)* | `<!-- progress-comment:initiative -->` marker comment posted | *(none)* |
 | `size:task` | *(none)* | *(none)* | `ready-for-agent` |
 
-Plus three non-table cases:
+Plus four non-table cases:
 
+- **Tier-incomplete spec.** A spec missing a required section for its tier (step 2's table) does not reach `ready-for-agent` — it is filled inline from the alignment context, or dropped to `needs-info` / `needs-grilling` naming the missing sections. A `size:slice` with no `## Acceptance criteria` must never leave triage as `ready-for-agent`.
 - **`needs-grilling` spec.** Either `/grill-with-docs` runs (then the label drops), or the label drops with a comment.
 - **Hand-created spec lacking a size label.** Triage proposes a size, applies it after confirmation, then proceeds with the bookkeeping pass.
 - **Show-attention mode.** `/triage` with no arguments prints the buckets in order and ends with one concrete next-step recommendation embedded in prose (not the three-block template).
