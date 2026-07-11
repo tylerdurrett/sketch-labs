@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 
-import { makePreset, type Params, type Preset, type Seed } from "@harness/core";
+import {
+  makePreset,
+  type Params,
+  type PlotProfile,
+  type Preset,
+  type Seed,
+} from "@harness/core";
 
 import { Button } from "./components/ui/button";
 import {
@@ -29,9 +35,16 @@ export interface PresetControlsProps {
   /** The live locked-keys set, emitted SORTED into a saved Preset. */
   locks: ReadonlySet<string>;
   /**
+   * The session's active Plot Profile (#247), captured into a saved Preset so a
+   * Save stamps a v2 record carrying the physical-plot output dimensions. The
+   * owner ({@link SketchControls}) resolves it per-Sketch through #265's
+   * precedence; this component only forwards it verbatim into `makePreset`.
+   */
+  profile: PlotProfile;
+  /**
    * Hand a freshly-loaded Preset to the owner, which reconciles it through
-   * `applyPreset` and hydrates its `params` / `seed` / `locks` state. This
-   * component does NOT run the reconcile — that array→Set glue is the owner's.
+   * `applyPreset` and hydrates its `params` / `seed` / `locks` / `profile` state.
+   * This component does NOT run the reconcile — that array→Set glue is the owner's.
    */
   onReload: (preset: Preset) => void;
 }
@@ -56,6 +69,7 @@ export function PresetControls({
   params,
   seed,
   locks,
+  profile,
   onReload,
 }: PresetControlsProps) {
   const [name, setName] = useState("");
@@ -80,7 +94,9 @@ export function PresetControls({
     if (names.includes(name) && !window.confirm(`Overwrite preset "${name}"?`)) {
       return;
     }
-    const preset = makePreset(sketchId, name, params, seed, locks);
+    // Forward the active Plot Profile (#247) as the 6th arg so `makePreset`
+    // stamps a v2 record carrying it (profile present ⇔ version === 2).
+    const preset = makePreset(sketchId, name, params, seed, locks, profile);
     savePreset(preset)
       .then(() => {
         setError(null);

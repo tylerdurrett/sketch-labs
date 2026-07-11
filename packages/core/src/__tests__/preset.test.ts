@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import type { PlotProfile } from '../plotProfile'
 import {
   applyPreset,
   deserialize,
@@ -8,6 +9,15 @@ import {
   serialize,
 } from '../preset'
 import type { Params, ParamSchema } from '../sketch'
+// A real, shipped on-disk v1 record — proves old presets still load unchanged.
+import leafFieldV1 from '../sketches/leaf-field/presets/nice1.json'
+
+/** A valid active Output Profile: A4 landscape with symmetric 10 mm insets. */
+const profile: PlotProfile = {
+  width: 297,
+  height: 210,
+  insets: { top: 10, right: 10, bottom: 10, left: 10 },
+}
 
 describe('makePreset', () => {
   it('serializes locks as a sorted string array regardless of Set insertion order', () => {
@@ -21,24 +31,108 @@ describe('makePreset', () => {
     expect(preset.locks).toEqual(['alpha', 'count', 'radius'])
   })
 
-  it('stamps the current PRESET_VERSION and copies (does not alias) params', () => {
+  it('stamps a v1 record with NO profile when none is supplied, and copies (does not alias) params', () => {
     const params: Params = { count: 24 }
     const preset = makePreset('circles', 'p', params, 42, new Set())
-    expect(preset.version).toBe(PRESET_VERSION)
+    expect(preset.version).toBe(1)
+    expect('profile' in preset).toBe(false)
     expect(preset.params).not.toBe(params)
     expect(preset.params).toEqual({ count: 24 })
+  })
+
+  it('stamps a v2 record (PRESET_VERSION) carrying the profile when one is supplied', () => {
+    const preset = makePreset('circles', 'p', { count: 24 }, 42, new Set(), profile)
+    expect(preset.version).toBe(2)
+    expect(PRESET_VERSION).toBe(2)
+    expect(preset.version).toBe(PRESET_VERSION)
+    expect(preset.profile).toEqual(profile)
+  })
+
+  it('defensively copies the profile (never aliases the caller’s object or its insets)', () => {
+    const live: PlotProfile = {
+      width: 297,
+      height: 210,
+      insets: { top: 10, right: 10, bottom: 10, left: 10 },
+    }
+    const preset = makePreset('circles', 'p', {}, 42, new Set(), live)
+    expect(preset.profile).not.toBe(live)
+    expect(preset.profile?.insets).not.toBe(live.insets)
+    live.width = 999
+    live.insets.top = 999
+    expect(preset.profile).toEqual(profile)
   })
 })
 
 describe('deserialize', () => {
-  it('round-trips a serialized Preset', () => {
+  it('round-trips a serialized v1 Preset (no profile)', () => {
     const preset = makePreset('circles', 'p', { count: 24 }, 42, new Set(['count']))
     expect(deserialize(serialize(preset))).toEqual(preset)
   })
 
-  it('rejects a non-1 version', () => {
-    const bad = { ...makePreset('circles', 'p', {}, 1, new Set()), version: 2 }
+  it('round-trips a serialized v2 Preset carrying the profile', () => {
+    const preset = makePreset(
+      'circles',
+      'p',
+      { count: 24 },
+      42,
+      new Set(['count']),
+      profile,
+    )
+    const back = deserialize(serialize(preset))
+    expect(back).toEqual(preset)
+    expect(back.version).toBe(2)
+    expect(back.profile).toEqual(profile)
+  })
+
+  it('accepts both a v1 record (no profile) and a v2 record (with profile)', () => {
+    const v1 = makePreset('circles', 'p', { count: 24 }, 42, new Set())
+    const v2 = makePreset('circles', 'p', { count: 24 }, 42, new Set(), profile)
+    expect(deserialize(serialize(v1)).version).toBe(1)
+    expect(deserialize(serialize(v2)).version).toBe(2)
+  })
+
+  it('rejects an unsupported version (not 1 or 2)', () => {
+    const bad = { ...serialize(makePreset('circles', 'p', {}, 1, new Set())), version: 3 }
     expect(() => deserialize(bad)).toThrow(/version/)
+  })
+
+  it('rejects a v1 record that carries a profile (invariant: profile ⇔ v2)', () => {
+    const bad = {
+      version: 1,
+      sketch: 'circles',
+      name: 'p',
+      seed: 1,
+      params: {},
+      locks: [],
+      profile,
+    }
+    expect(() => deserialize(bad)).toThrow(/version 1 record must not carry a `profile`/)
+  })
+
+  it('rejects a v2 record missing its profile (invariant: profile ⇔ v2)', () => {
+    const bad = {
+      version: 2,
+      sketch: 'circles',
+      name: 'p',
+      seed: 1,
+      params: {},
+      locks: [],
+    }
+    expect(() => deserialize(bad)).toThrow(/version 2 record must carry a `profile`/)
+  })
+
+  it('loudly rejects a structurally-broken v2 profile', () => {
+    const bad = {
+      version: 2,
+      sketch: 'circles',
+      name: 'p',
+      seed: 1,
+      params: {},
+      locks: [],
+      // insets exhaust the sheet — validatePlotProfile throws.
+      profile: { width: 100, height: 100, insets: { top: 60, right: 0, bottom: 60, left: 0 } },
+    }
+    expect(() => deserialize(bad)).toThrow(/validatePlotProfile/)
   })
 
   it('rejects a non-object value', () => {
@@ -56,6 +150,16 @@ describe('deserialize', () => {
       locks: ['radius', 'count'],
     }
     expect(deserialize(wireShape).locks).toEqual(['count', 'radius'])
+  })
+
+  it('loads a real on-disk v1 preset: params/seed/locks preserved, profile absent', () => {
+    const loaded = deserialize(leafFieldV1)
+    expect(loaded.version).toBe(1)
+    expect(loaded.profile).toBeUndefined()
+    expect('profile' in loaded).toBe(false)
+    expect(loaded.seed).toBe(leafFieldV1.seed)
+    expect(loaded.locks).toEqual(leafFieldV1.locks)
+    expect(loaded.params).toEqual(leafFieldV1.params)
   })
 })
 
@@ -109,8 +213,22 @@ describe('applyPreset', () => {
     expect(state.locks).toEqual(['count', 'radius'])
   })
 
+  it('surfaces the stored profile VERBATIM for a v2 preset (no fallback resolution)', () => {
+    const preset = makePreset('circles', 'p', { count: 30 }, 1, new Set(), profile)
+    const state = applyPreset(schema, preset)
+    expect(state.profile).toEqual(profile)
+    // Passed through as-is — the same reference the record holds, un-resolved.
+    expect(state.profile).toBe(preset.profile)
+  })
+
+  it('surfaces an undefined profile for a v1 preset', () => {
+    const preset = makePreset('circles', 'p', { count: 30 }, 1, new Set())
+    const state = applyPreset(schema, preset)
+    expect(state.profile).toBeUndefined()
+  })
+
   it('throws on a wrong-version preset even when reached directly', () => {
-    const bad = { ...makePreset('circles', 'p', {}, 1, new Set()), version: 2 as 1 }
+    const bad = { ...makePreset('circles', 'p', {}, 1, new Set()), version: 3 as 1 }
     expect(() => applyPreset(schema, bad)).toThrow(/version/)
   })
 })

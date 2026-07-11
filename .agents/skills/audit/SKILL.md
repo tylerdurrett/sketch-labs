@@ -169,7 +169,7 @@ Build the unified findings set with these rules:
 | slice      | `grounding` / `sizing` / `sequencing` / `ac-uncovered` / `ac-partial` / `oos-drift`            |
 | task       | `grounding` / `ac-sanity` / `sibling-context`                                                  |
 
-The classified set is what every subsequent step operates on.
+The classified set is what every subsequent step operates on. In slice mode, keep `ac-uncovered` / `ac-partial` (an **in-boundary** gap — a declared AC/scope bullet with no covering task) distinct from `oos-drift` (scope reaching **outside** the declared boundary); the two are routed very differently downstream.
 
 ### 6. Forward-scope check
 
@@ -262,7 +262,7 @@ Each draft uses the per-tier body template `/decompose` writes (feature template
 
 The new children will be created with `size:<child-tier>` + `needs-triage` so they enter the standard triage flow.
 
-In slice and task modes, no new children are drafted. Slice-level gaps in the AC list are a `/decompose` re-decompose problem; task is a leaf.
+In slice and task modes, no new children are drafted. Slice-level gaps in the AC list are a `/decompose` re-decompose problem; task is a leaf. An `ac-uncovered` / `ac-partial` finding is an in-boundary gap — a declared AC/scope bullet with no covering task — so it is closable by a per-child body-edit note on the natural-home sibling, or else it is that `/decompose` re-decompose problem; an `oos-drift` finding, by contrast, is scope reaching outside the declared boundary and needs a human re-scope, not a re-decompose.
 
 #### Synthesis comment
 

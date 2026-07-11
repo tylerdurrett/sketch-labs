@@ -27,6 +27,7 @@
  * that have no real frame yet pass {@link DEFAULT_COMPOSITION_FRAME}.
  */
 
+import type { PlotProfile } from './plotProfile'
 import type { CoordinateSpace, Scene } from './scene'
 
 /**
@@ -262,6 +263,21 @@ export interface SketchBase {
    * Harness drives `t` over `duration` with the given `mode`.
    */
   time?: TimeMetadata
+  /**
+   * Optional default Output Profile this Sketch declares (CONTEXT.md "Output
+   * Profile"). A {@link PlotProfile} today — the only concrete Output Profile —
+   * naming the physical sheet the Sketch is authored to plot onto.
+   *
+   * Purely ADDITIVE and open-union-safe (ADR-0003): a Sketch that omits it
+   * (circles, scatter, flow-field, leaf-field) keeps compiling unchanged, and its
+   * absence simply means `resolveOutputProfile` (see `./outputProfile`) falls
+   * through to the Harness's square fallback. It participates ONLY as a
+   * precedence input — a Preset's captured Output Profile still wins on reload;
+   * this declared default wins otherwise, with the Harness fallback terminal.
+   * Nothing here selects or validates the profile; that is the resolver's and
+   * the caller's concern.
+   */
+  defaultOutputProfile?: PlotProfile
 }
 
 /**

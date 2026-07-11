@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest'
 
+import type { PlotProfile } from '../plotProfile'
 import { PRESET_VERSION } from '../preset'
 import { buildReproMetadata, reproFilenameStem } from '../reproMetadata'
 
 /**
- * These prove the embedded payload reuses the six-field {@link Preset} envelope
- * (no new schema) plus the frame time `t`, and that `name` carries the export
- * filename STEM. The JSON must parse back to
- * `{ version:1, sketch, name, seed, params, locks, t? }`.
+ * These prove the embedded payload reuses the {@link Preset} envelope (no new
+ * schema) plus the frame time `t`, and that `name` carries the export filename
+ * STEM. Without an active profile the JSON parses back to the v1 shape
+ * `{ version:1, sketch, name, seed, params, locks, t? }`; supplying a profile
+ * makes it the v2 shape that also carries `profile`.
  */
+
+/** A valid active Output Profile: A4 landscape with symmetric 10 mm insets. */
+const profile: PlotProfile = {
+  width: 297,
+  height: 210,
+  insets: { top: 10, right: 10, bottom: 10, left: 10 },
+}
 
 describe('reproFilenameStem', () => {
   it('omits the -t segment (and the extension) for a static Sketch', () => {
@@ -31,7 +40,7 @@ describe('reproFilenameStem', () => {
 })
 
 describe('buildReproMetadata', () => {
-  it('serializes the full six-field Preset envelope plus t for a timed Sketch', () => {
+  it('serializes the full v1 Preset envelope plus t for a timed Sketch (no profile)', () => {
     const json = buildReproMetadata({
       sketchId: 'waves',
       seed: 123,
@@ -41,7 +50,7 @@ describe('buildReproMetadata', () => {
     })
 
     expect(JSON.parse(json)).toEqual({
-      version: PRESET_VERSION,
+      version: 1,
       sketch: 'waves',
       name: 'waves-seed123-t2.5',
       seed: 123,
@@ -62,7 +71,7 @@ describe('buildReproMetadata', () => {
     const parsed = JSON.parse(json)
 
     expect(parsed).toEqual({
-      version: PRESET_VERSION,
+      version: 1,
       sketch: 'circles',
       name: 'circles-seed42',
       seed: 42,
@@ -109,5 +118,59 @@ describe('buildReproMetadata', () => {
     })
     params.radius = 999
     expect(JSON.parse(json).params.radius).toBe(10)
+  })
+
+  it('embeds a v2 envelope carrying the profile when one is supplied', () => {
+    const json = buildReproMetadata({
+      sketchId: 'waves',
+      seed: 123,
+      params: { radius: 10 },
+      locks: new Set(['radius']),
+      t: 2.5,
+      profile,
+    })
+
+    expect(JSON.parse(json)).toEqual({
+      version: PRESET_VERSION,
+      sketch: 'waves',
+      name: 'waves-seed123-t2.5',
+      seed: 123,
+      params: { radius: 10 },
+      locks: ['radius'],
+      profile,
+      t: 2.5,
+    })
+    expect(PRESET_VERSION).toBe(2)
+  })
+
+  it('stays a v1 envelope with NO profile key when none is supplied', () => {
+    const parsed = JSON.parse(
+      buildReproMetadata({
+        sketchId: 'circles',
+        seed: 42,
+        params: { radius: 10 },
+        locks: new Set(),
+      }),
+    )
+    expect(parsed.version).toBe(1)
+    expect('profile' in parsed).toBe(false)
+  })
+
+  it('does not alias the caller’s live profile object', () => {
+    const live: PlotProfile = {
+      width: 297,
+      height: 210,
+      insets: { top: 10, right: 10, bottom: 10, left: 10 },
+    }
+    const json = buildReproMetadata({
+      sketchId: 'circles',
+      seed: 1,
+      params: {},
+      locks: new Set(),
+      profile: live,
+    })
+    live.width = 999
+    live.insets.top = 999
+    expect(JSON.parse(json).profile).toEqual(profile)
   })
 })
