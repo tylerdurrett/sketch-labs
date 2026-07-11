@@ -13,6 +13,8 @@ import {
   newSeed,
   randomize,
   renderToSVG,
+  resolveOutputProfile,
+  type PlotProfile,
   type Preset,
   type Sketch,
 } from "@harness/core";
@@ -92,6 +94,19 @@ export interface SketchControlsProps {
  * across a roll. A lock NEVER gates editability — a locked control stays fully
  * hand-editable. Like `seed` and `params`, `locks` lives in keyed-remount state,
  * so a Sketch switch clears every lock for free (no manual reset).
+ *
+ * PROFILE is the session's ONE active Plot Profile — the physical-plot output
+ * dimensions (#247). Like params/seed/locks it lives in keyed-remount state, so
+ * it is RESOLVED fresh per Sketch: the lazy initializer runs `resolveOutputProfile`
+ * against THIS Sketch's own `defaultOutputProfile` (#265's precedence: preset ??
+ * sketch default ?? Harness fallback), so a Sketch switch re-resolves from the
+ * newly-mounted Sketch and NEVER reuses the previous Sketch's dimensions. It is
+ * threaded through the persistence paths only — captured into a saved Preset
+ * (via `PresetControls` → `makePreset`), re-resolved on a Preset reload (a v2
+ * Preset's stored profile wins; a v1 falls back to the Sketch default / Harness
+ * fallback), and embedded into every export's reproduction metadata. It does NOT
+ * re-wire LiveCanvas's Composition Frame — the live preview keeps using the square
+ * `DEFAULT_COMPOSITION_FRAME` (that consumption is slice #248).
  */
 export function SketchControls({
   sketch,
@@ -102,6 +117,16 @@ export function SketchControls({
   const [params, setParams] = useState(() => defaultParams(sketch.schema));
   const [seed, setSeed] = useState(() => newSeed(Math.random));
   const [locks, setLocks] = useState<ReadonlySet<string>>(() => new Set());
+
+  // The session's ONE active Plot Profile (#247), resolved per-Sketch in keyed-
+  // remount state. The lazy initializer runs #265's precedence against THIS
+  // Sketch's own default (no preset in play at mount ⇒ `undefined` first arg), so
+  // a Sketch switch re-resolves from the freshly-mounted Sketch's default (or the
+  // Harness fallback) and never reuses the previous Sketch's dimensions. See the
+  // module header for how it threads through save / reload / export metadata.
+  const [profile, setProfile] = useState<PlotProfile>(() =>
+    resolveOutputProfile(undefined, sketch.defaultOutputProfile),
+  );
 
   // The preview's render mode (issue #219): `fill` (default) shows the live fill
   // preview; `outline` swaps in the Hidden-line pass's stroke-only, occlusion-
@@ -214,6 +239,12 @@ export function SketchControls({
     setParams(state.params);
     setSeed(state.seed);
     setLocks(new Set(state.locks));
+    // Resolve the active profile through #265's precedence: a v2 Preset's stored
+    // profile (`state.profile`) wins; a v1 Preset (`state.profile === undefined`)
+    // falls back to this Sketch's default / the Harness fallback. `applyPreset`
+    // passes the stored profile through verbatim WITHOUT resolving the fallback —
+    // resolving it here at the session boundary is #267's job.
+    setProfile(resolveOutputProfile(state.profile, sketch.defaultOutputProfile));
   };
 
   // Export the CURRENTLY DISPLAYED frame as a PNG — a one-shot user action that
@@ -233,13 +264,16 @@ export function SketchControls({
     // Sketch carries its captured moment, a static one omits `t` entirely.
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
     // The reproduction envelope embedded into BOTH exports (issue #76), built
-    // once from the same displayed `(params, seed, locks, t)` spine.
+    // once from the same displayed `(params, seed, locks, t)` spine. The active
+    // Plot Profile (#247) rides along too, so the exported PNG's metadata is a v2
+    // Preset carrying the physical-plot output dimensions.
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
       seed,
       params,
       locks,
       t,
+      profile,
     });
     canvas.toBlob((blob) => {
       if (blob === null) return;
@@ -282,14 +316,16 @@ export function SketchControls({
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
     const clipped = clipSceneToBounds(scene);
     // Embed the same reproduction envelope as a <metadata> element (issue #76),
-    // built from the displayed `(params, seed, locks, t)` spine — core's
-    // `renderToSVG` does the injection (ADR-0004: serialization lives in core).
+    // built from the displayed `(params, seed, locks, t)` spine plus the active
+    // Plot Profile (#247) — core's `renderToSVG` does the injection (ADR-0004:
+    // serialization lives in core).
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
       seed,
       params,
       locks,
       t,
+      profile,
     });
     const svg = renderToSVG(clipped, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
@@ -328,12 +364,14 @@ export function SketchControls({
     // stays out of `outlineScene` itself — that seam also feeds the live outline
     // preview (LiveCanvas), and clipping must remain export-only.
     const clipped = clipSceneToBounds(hiddenLineScene);
+    // Same reproduction envelope + active Plot Profile (#247) as the other exports.
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
       seed,
       params,
       locks,
       t,
+      profile,
     });
     const svg = renderToSVG(clipped, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
@@ -437,6 +475,7 @@ export function SketchControls({
             params={params}
             seed={seed}
             locks={locks}
+            profile={profile}
             onReload={reloadPreset}
           />
         </div>
