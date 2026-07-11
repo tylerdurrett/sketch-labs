@@ -48,6 +48,17 @@
  *   stored state (resolved in feature #245: "portrait/landscape and swap controls
  *   only reorder width and height"; CONTEXT.md: "its portrait/landscape
  *   convenience swaps width and height").
+ *
+ * - Millimeter↔inch conversion is a DISPLAY transform at the model boundary that
+ *   NEVER overwrites the canonical millimeter model. Millimeters stay canonical
+ *   ({@link MM_PER_INCH} = 25.4). {@link plotProfileToInches} produces an
+ *   inch-valued VIEW of a profile for the Paper UI to display and edit;
+ *   {@link plotProfileFromInches} maps an inch-valued edit back to canonical
+ *   millimeters. Because these are pure and only ever return new records, the
+ *   round trip is an identity on the stored model — the canonical profile is
+ *   never mutated — and a numeric mm→inch→mm round trip returns to the canonical
+ *   value within floating-point tolerance (CONTEXT.md: "the Paper UI accepts and
+ *   displays both millimeters and inches by converting at its boundary").
  */
 
 import type { PlotInsets, PlotProfile, PlotRectangle } from './plotProfile'
@@ -241,5 +252,75 @@ export function swapPlotOrientation(profile: PlotProfile): PlotProfile {
     width: profile.height,
     height: profile.width,
     insets: profile.insets,
+  }
+}
+
+/**
+ * Millimeters per inch — the exact conversion factor. Millimeters are the
+ * canonical unit of the model; inches exist only as a display representation
+ * derived through this factor.
+ */
+export const MM_PER_INCH = 25.4
+
+/** Convert a scalar length from millimeters to inches. */
+export function mmToInch(mm: number): number {
+  return mm / MM_PER_INCH
+}
+
+/** Convert a scalar length from inches to millimeters. */
+export function inchToMm(inch: number): number {
+  return inch * MM_PER_INCH
+}
+
+/** Convert every inset with `convert`, returning a new {@link PlotInsets}. */
+function convertInsets(
+  insets: PlotInsets,
+  convert: (value: number) => number,
+): PlotInsets {
+  return {
+    top: convert(insets.top),
+    right: convert(insets.right),
+    bottom: convert(insets.bottom),
+    left: convert(insets.left),
+  }
+}
+
+/**
+ * Produce an inch-valued VIEW of a Plot Profile for display at the model
+ * boundary — width, height, and all four insets converted to inches.
+ *
+ * This is a DISPLAY transform, not a model change: the returned record's numbers
+ * are inches, not canonical millimeters, so it must be shown/edited and then
+ * mapped straight back with {@link plotProfileFromInches} — never persisted. The
+ * input (canonical) profile is not mutated.
+ *
+ * @param profile - A canonical millimeter Plot Profile.
+ * @returns A new profile whose dimensions and insets are expressed in inches.
+ */
+export function plotProfileToInches(profile: PlotProfile): PlotProfile {
+  return {
+    width: mmToInch(profile.width),
+    height: mmToInch(profile.height),
+    insets: convertInsets(profile.insets, mmToInch),
+  }
+}
+
+/**
+ * Map an inch-valued profile edit back to a canonical millimeter Plot Profile —
+ * the inverse of {@link plotProfileToInches}.
+ *
+ * Converts width, height, and all four insets from inches to canonical
+ * millimeters, returning a new record. Round-tripping a profile out to inches and
+ * back returns to the canonical millimeter value within floating-point tolerance;
+ * because both directions are pure, the stored model is never overwritten.
+ *
+ * @param profile - A profile whose numbers are inches (a display-space view).
+ * @returns A new canonical millimeter Plot Profile.
+ */
+export function plotProfileFromInches(profile: PlotProfile): PlotProfile {
+  return {
+    width: inchToMm(profile.width),
+    height: inchToMm(profile.height),
+    insets: convertInsets(profile.insets, inchToMm),
   }
 }

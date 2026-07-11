@@ -7,6 +7,11 @@ import {
   matchStandardPaper,
   derivePaperOrientation,
   swapPlotOrientation,
+  MM_PER_INCH,
+  mmToInch,
+  inchToMm,
+  plotProfileToInches,
+  plotProfileFromInches,
 } from '../paperCatalog'
 import type { PlotInsets, PlotProfile } from '../plotProfile'
 
@@ -247,5 +252,70 @@ describe('swapPlotOrientation', () => {
     expect(derivePaperOrientation(landscape)).toBe('landscape')
     expect(matchStandardPaper(portrait)).toBe('a4')
     expect(matchStandardPaper(landscape)).toBe('a4')
+  })
+})
+
+describe('millimeter <-> inch conversion', () => {
+  it('MM_PER_INCH is the exact 25.4 factor', () => {
+    expect(MM_PER_INCH).toBe(25.4)
+  })
+
+  it('mmToInch / inchToMm convert scalar lengths', () => {
+    expect(mmToInch(25.4)).toBeCloseTo(1)
+    expect(inchToMm(1)).toBeCloseTo(25.4)
+    expect(mmToInch(210)).toBeCloseTo(210 / 25.4)
+  })
+
+  it('plotProfileToInches converts width, height, and all four insets', () => {
+    const profile: PlotProfile = {
+      width: 25.4,
+      height: 50.8,
+      insets: { top: 25.4, right: 50.8, bottom: 12.7, left: 0 },
+    }
+    const inches = plotProfileToInches(profile)
+    expect(inches.width).toBeCloseTo(1)
+    expect(inches.height).toBeCloseTo(2)
+    expect(inches.insets.top).toBeCloseTo(1)
+    expect(inches.insets.right).toBeCloseTo(2)
+    expect(inches.insets.bottom).toBeCloseTo(0.5)
+    expect(inches.insets.left).toBeCloseTo(0)
+  })
+
+  it('round-trips mm -> inch -> mm back to the canonical value (AC3)', () => {
+    const profile: PlotProfile = {
+      width: 210,
+      height: 297,
+      insets: ASYMMETRIC_INSETS,
+    }
+    const roundTripped = plotProfileFromInches(plotProfileToInches(profile))
+    // toBeCloseTo — the round trip returns within float tolerance, e.g. 210 may
+    // come back as 210.00000000000003; NOT exact float equality.
+    expect(roundTripped.width).toBeCloseTo(profile.width)
+    expect(roundTripped.height).toBeCloseTo(profile.height)
+    expect(roundTripped.insets.top).toBeCloseTo(profile.insets.top)
+    expect(roundTripped.insets.right).toBeCloseTo(profile.insets.right)
+    expect(roundTripped.insets.bottom).toBeCloseTo(profile.insets.bottom)
+    expect(roundTripped.insets.left).toBeCloseTo(profile.insets.left)
+  })
+
+  it('never overwrites the canonical mm model — the input profile is unchanged (AC3)', () => {
+    const profile: PlotProfile = {
+      width: 210,
+      height: 297,
+      insets: ASYMMETRIC_INSETS,
+    }
+    plotProfileToInches(profile)
+    plotProfileFromInches(profile)
+    expect(profile).toEqual({
+      width: 210,
+      height: 297,
+      insets: ASYMMETRIC_INSETS,
+    })
+  })
+
+  it('the round trip still matches the same standard within catalog tolerance', () => {
+    const profile: PlotProfile = { width: 210, height: 297, insets: ZERO_INSETS }
+    const roundTripped = plotProfileFromInches(plotProfileToInches(profile))
+    expect(matchStandardPaper(roundTripped)).toBe('a4')
   })
 })
