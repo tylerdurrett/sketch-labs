@@ -37,8 +37,20 @@ The studio preview render-mode toggle that swaps the live painter's-order fill p
 The single declaration a **Sketch** makes of its tweakable knobs. It is the *spine* of the Harness: the control panel, **Lock** toggles, **Randomize**, and **Preset** shape are all derived views over this one schema.
 _Avoid_: config, settings
 
+**Composition Frame**:
+The scale-independent, aspect-ratio-bearing drawable rectangle a **Sketch** composes into, expressed as a unitless coordinate space normalized to the area of the Harness's `1000 × 1000` square; for a plot it takes the aspect of the paper inside its margins, while physical paper size and pixel resolution belong to the later output mapping.
+_Avoid_: paper size (physical output), resolution (pixel output), canvas size (ambiguous between layout and pixels)
+
+**Output Profile**:
+The one target-specific artifact description active in a Sketch session and captured by its **Preset**—plot dimensions and margins for paper, or resolution and frame settings for video—whose aspect determines the **Composition Frame** while whose magnitude only controls output mapping; a Sketch may declare its default, otherwise the Harness initially supplies a square `200 × 200 mm` plot profile with linked `10 mm` insets.
+_Avoid_: render target (the target is only one field), export options, last-used settings
+
+**Tool width**:
+The fixed physical width of a plotter pen or analogous output tool, owned by the plot **Output Profile** rather than the unitless Scene styling, so enlarging artwork does not enlarge the real nib.
+_Avoid_: stroke width (a Scene-space style that scales with the artwork), line weight (ambiguous between the two)
+
 **Sketch contract**:
-What a Sketch file exports: a **Parameter Schema** plus its frame logic. A *stateless* Sketch exports a pure `generate(params, seed, t)`. A *stateful* (simulation) Sketch instead exports an `initial(params, seed)` + **Step** + **Draw** triple that the Harness folds into the same `(params, seed, t) → Scene` behaviour. Either way the author writes only the schema and the frame logic; all chrome (canvas, controls, timeline, presets, navigation, export) is Harness-provided, and the author never owns the animation loop.
+What a Sketch file exports: a **Parameter Schema** plus its frame logic. A *stateless* Sketch exports a pure generation function of params, seed, time, and **Composition Frame**, returning a Scene in that exact frame space. A *stateful* (simulation) Sketch instead exports an `initial` + **Step** + **Draw** triple that the Harness folds into the same deterministic behaviour and frame-space invariant. Either way the author writes only the schema and the frame logic; all chrome (canvas, controls, timeline, presets, navigation, export) is Harness-provided, and the author never owns the animation loop.
 
 **Draw** (verb):
 The per-frame projection of a **Sketch**'s private domain structures into a **Scene** of **Primitives** — the `draw(state) → Scene` step. Named after the Processing/p5 per-frame `draw()`. "Draw" is the **Sketch**'s job; the **Scene Renderer** then *renders* that Scene to output.
@@ -49,7 +61,7 @@ For a stateful (simulation) **Sketch**, one advance of the private domain state 
 _Avoid_: update, tick, simulate
 
 **Bake** (verb):
-Precompute a simulation's whole trajectory and cache it (checkpoints across `t`) so scrubbing and export don't re-fold from zero. A Harness optimization invisible to output: keyed on `(params, seed)`, a bake can only change *speed*, never the frame. Matches the Blender/Houdini sense of "bake."
+Precompute a simulation's whole trajectory and cache it (checkpoints across `t`) so scrubbing and export don't re-fold from zero. A Harness optimization invisible to output: keyed on params, seed, and **Composition Frame**, a bake can only change *speed*, never the frame. Matches the Blender/Houdini sense of "bake."
 _Avoid_: snapshot (collides with **Preset**), cache (as the verb for this)
 
 **Seed**:
@@ -62,12 +74,12 @@ An action distinct from re-seeding: it rolls new *values* for every unlocked num
 A per-param flag that pins its value and excludes it from **Randomize**.
 
 **Preset**:
-A committed, per-Sketch snapshot that fully reproduces an image and resumes an exploration session — it captures the param values, the seed, and which params were locked. Stored as a JSON file per Sketch under `{sketchesRoot}/{id}/presets/`, colocated with the Sketch's code (a Sketch is a folder, `{sketchesRoot}/{id}/index.ts`). `sketchesRoot` is a single configured knob — today `packages/core/src/sketches` — so sketches and their presets can later move out of the harness by repointing it (ADR-0006). Presets are written in dev via a Vite dev-server middleware plugin (no standalone server) and read by every consumer (studio, Remotion) as a static file at the stable logical URL `/sketches/{id}/presets/{name}.json`.
+A committed, per-Sketch snapshot that fully reproduces an image and resumes an exploration session — it captures params, seed, locks, and one active **Output Profile**. Stored as a JSON file per Sketch under `{sketchesRoot}/{id}/presets/`, colocated with the Sketch's code (a Sketch is a folder, `{sketchesRoot}/{id}/index.ts`). `sketchesRoot` is a single configured knob — today `packages/core/src/sketches` — so sketches and their presets can later move out of the harness by repointing it (ADR-0006). Presets are written in dev via a Vite dev-server middleware plugin (no standalone server) and read by every consumer (studio, Remotion) as a static file at the stable logical URL `/sketches/{id}/presets/{name}.json`.
 
-The serialized record is a self-describing envelope over the studio's live state: `{ version, sketch, name, seed, params, locks }` — `seed` + `params` reproduce the image (the ADR-0002 determinism spine), `locks` (a sorted array of param keys) resume the session and do _not_ affect the rendered frame. The **Parameter Schema** is authoritative _on read_, not just on write: a Preset is a derived view, so reloading reconciles its `params` against the live schema — keys absent from the schema are dropped, keys missing from the Preset are filled from their spec `default`, and out-of-bounds values load **as-is, unclamped** (exact-image fidelity beats staying in-bounds; a clamp would silently reproduce a different frame). `version` is the migration escape hatch: v1 stores `1` and does presence-only reconciliation; a future breaking change bumps it and branches the loader.
+The serialized record is a self-describing envelope over the studio's live state. In addition to seed, params, and locks, it captures one active **Output Profile**: its aspect supplies the **Composition Frame** needed to reproduce the Scene, while its complete dimensions resume the intended artifact; locks resume the session and do _not_ affect the rendered frame. The **Parameter Schema** is authoritative _on read_, not just on write: a Preset is a derived view, so reloading reconciles its `params` against the live schema — keys absent from the schema are dropped, keys missing from the Preset are filled from their spec `default`, and out-of-bounds values load **as-is, unclamped** (exact-image fidelity beats staying in-bounds; a clamp would silently reproduce a different frame). `version` is the migration escape hatch: v1 stores `{ version, sketch, name, seed, params, locks }`; this widening requires a later version whose exact Output Profile shape remains to be resolved.
 
 **Render Settings**:
-The per-render output configuration a consumer chooses when turning a **Sketch** into a concrete artifact — frame rate and pixel dimensions today, format and frame range later. Orthogonal to the three determinism inputs: Render Settings are _not_ **Params** (Sketch knobs), _not_ the **Seed**, and _not_ captured in a **Preset**; they change how a frame is _sampled and sized_, never which frame `generate(params, seed, t)` produces. Because a Sketch is continuous in `t` (ADR-0002), frame rate is a caller concern — the same `generate` sampled at any fps serves every caller — so fps lives here, never in the **Sketch contract**. In the Remotion consumer they arrive as composition input props (a default set plus per-render overrides); the same concept covers export dimensions for the **Scene Renderer** paths.
+The resolved per-render execution values a consumer uses when turning a **Sketch** into an artifact, derived from an **Output Profile** or supplied directly by a caller such as Remotion. Their output dimensions' aspect supplies the **Composition Frame** and can therefore regenerate the Scene; their magnitude, frame rate, format, and frame range affect only sampling and output mapping. Frame rate remains outside the Sketch contract because a Sketch is continuous in `t` (ADR-0002). Unlike the persisted authoring intent of an Output Profile, direct Remotion Render Settings arrive as composition input props and are not themselves Preset state.
 _Avoid_: config, params, options, export options
 
 ## Relationships
@@ -76,21 +88,33 @@ _Avoid_: config, params, options, export options
 - A vector **Sketch**'s generator produces private domain structures (e.g. its own leaf instances), then **draws** them into a **Scene** of **Primitives**. Domain types never leave the generator.
 - A **Sketch** binds to one or more **Renderers**. Vector Sketches use **Scene Renderers** (and get SVG/plotter/raster export for free); non-vector Sketches use **Direct Renderers**.
 - "Can this Sketch bake itself into a **Scene**?" is the dividing line between the two renderer families.
+- One active **Output Profile** supplies the **Composition Frame** aspect to generation and the target-specific dimensions to the later output mapping.
+- A **Preset**'s Output Profile wins on reload; otherwise a Sketch's declared default wins, with the Harness's square default as the terminal fallback.
+- Plot profiles store authoritative physical dimensions, not a redundant paper name or orientation; the Harness derives standard-size labels, and its portrait/landscape convenience swaps width and height, regenerating when that changes the Composition Frame aspect.
+- A plot profile's margins inset the paper to form its drawable rectangle; that rectangle's aspect supplies the Composition Frame, so a margin change regenerates only when it changes the drawable aspect.
+- Plot margins are four physical insets; the initial Harness UI edits them as one linked value, leaving asymmetric plotter-safe regions representable without changing the Preset model later.
+- Composition Frames use fixed-area normalization: for aspect `r`, the Harness resolves `width = 1000√r` and `height = 1000/√r`, preserving one million square coordinate units across aspect changes; an Output Profile later supplies the uniform conversion from those unitless coordinates to millimeters or pixels.
+- Scene geometry and Scene stroke widths scale through the output mapping; a plotter's physical **Tool width** remains fixed in millimeters and can drive a plot preview independently.
+- The Studio exposes the active plot Output Profile in a Paper section near the top of the inspector; it is collapsible and collapsed by default, with its active dimensions retained in the summary.
+- A plotter-ready SVG maps artwork into the profile's physical paper and margins but emits only plot paths; paper edges, margin guides, and backgrounds are preview chrome rather than drawable geometry, while the Output Profile remains available as metadata.
+- Every generated Scene uses the Composition Frame's exact normalized coordinate space; the Harness therefore knows layout before generation and does not need Sketch-authored fixed-space metadata or a throwaway Scene probe.
+- Plot dimensions and insets are canonical millimeters; the Paper UI accepts and displays both millimeters and inches by converting at its boundary, while the display-unit choice is a Studio local-storage preference rather than Preset or Sketch state.
+- The first Output Profile implementation is plot-focused in Studio; Remotion derives the same fixed-area Composition Frame from its existing pixel width and height while retaining its current resolution/fps inputs, and a Studio Video profile/target switch waits until video authoring moves there.
 
-## Core invariant: a Sketch is a pure function of (params, seed, time)
+## Core invariant: a Sketch is a pure function of (params, seed, time, composition frame)
 
-A Sketch's output is deterministic in `(params, seed, t)` — same inputs, same frame, always. This single function has three callers:
+A Sketch's output is deterministic in its params, seed, time, and **Composition Frame** — same inputs, same Scene, always. Changing the Composition Frame's aspect fully regenerates the Scene; changing only physical paper size or pixel resolution does not. This single function has three callers:
 - **Exploration** samples it at `t = wall-clock`, as fast as it can, to *feel* realtime while tuning.
 - **Remotion** samples it at `t = frame / fps` for deterministic video.
 - **Static / plotter export** freezes `t` and exports that frame's vector IR exactly.
 
 There is no separate "realtime mode" vs "render mode" — one function, sampled at different `t`. Expensive, export-only work (hidden-line removal, path simplification, pen ordering) lives *outside* the exploration loop, which is only `generate → draw → painter's-order render`. True 60fps GPU output is explicitly the lowest priority, so the early system keeps a single vector representation rather than a parallel GPU-parametric one.
 
-A stateless Sketch may optionally expose caller-owned **frame preparation** as an optimization of that same function: `prepare(params, seed) → (t) → Scene`. The returned sampler may retain immutable data derived from `(params, seed)`, but it remains pure in `t` and carries no accumulated frame state. `generate` stays the public random-access contract and is derived from the same preparation implementation; sequential Harness callers may retain one sampler only until params, seed, or Sketch identity changes. This is not a second realtime mode and not a hidden Sketch cache. See ADR-0012.
+A stateless Sketch may optionally expose caller-owned **frame preparation** as an optimization of that same function. The returned sampler may retain immutable data derived from params, seed, and Composition Frame, but it remains pure in `t` and carries no accumulated frame state. `generate` stays the public random-access contract and is derived from the same preparation implementation; sequential Harness callers may retain one sampler only until params, seed, Composition Frame, or Sketch identity changes. This is not a second realtime mode and not a hidden Sketch cache. See ADR-0012.
 
 ### Time semantics
 
-`generate` is always `(params, seed, t)`, where **`t` is in seconds** uniformly across every mode; only *how the Harness drives `t`* varies, declared by optional time metadata (a duration, and whether it loops) alongside the **Parameter Schema**. No time metadata ⇒ static. A Sketch that wants normalized progress derives it itself as `t / duration` (e.g. circles computes its loop phase this way) — the contract never hands the Sketch a normalized `t`.
+In `generate(params, seed, t, compositionFrame)`, **`t` is in seconds** uniformly across every mode; only *how the Harness drives `t`* varies, declared by optional time metadata (a duration, and whether it loops) alongside the **Parameter Schema**. No time metadata ⇒ static. A Sketch that wants normalized progress derives it itself as `t / duration` (e.g. circles computes its loop phase this way) — the contract never hands the Sketch a normalized `t`.
 
 - **Static** — output is constant in `t`; the Harness hides the scrubber. Not a "paused" mode — `t` is simply unused.
 - **Loop** — `t` wraps `0 → duration → 0` (seconds); periodic (use periodic noise for seamless loops). Any frame is a valid export.
