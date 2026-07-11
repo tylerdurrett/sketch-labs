@@ -1,15 +1,6 @@
-import type { CirclesProps } from './CirclesComposition'
+import { DEFAULT_COMPOSITION_FRAME } from '@harness/core'
 
-/**
- * The Sketch's coordinate space — the width/height a probe `generate` reports on
- * its `scene.space`. It is the default output size when a render does not pass an
- * explicit `width`/`height`, so the video matches the Scene's aspect ratio with
- * no letterboxing.
- */
-export interface Space {
-  width: number
-  height: number
-}
+import type { CirclesProps } from './CirclesComposition'
 
 /**
  * The resolved Render Settings — every field a finite positive number, ready to
@@ -39,11 +30,14 @@ export interface RenderSettings {
  * - `fps` must be finite and `> 0` — it is the frame→seconds sampling rate and
  *   the multiplier in `durationInFrames = round(duration × fps)`, so `0`,
  *   negative, `NaN`, and `Infinity` are all rejected.
- * - `width`/`height` keep the deliberate `0`-means-"use the Sketch's coordinate
- *   space" sentinel: exactly `0` (`-0` included) resolves to `space.width` /
- *   `space.height`. ANY other value must be finite and `> 0`; negative, `NaN`,
- *   and `Infinity` are rejected rather than passed through (the old `|| space.*`
- *   fallback only caught falsy values, letting a truthy `-100` or `NaN` slip in).
+ * - `width`/`height` keep the deliberate `0`-means-"use the default Composition
+ *   Frame size" sentinel: exactly `0` (`-0` included) resolves to
+ *   {@link DEFAULT_COMPOSITION_FRAME}'s `width` / `height` (`1000 × 1000`). ANY
+ *   other value must be finite and `> 0`; negative, `NaN`, and `Infinity` are
+ *   rejected rather than passed through (the old `|| space.*` fallback only
+ *   caught falsy values, letting a truthy `-100` or `NaN` slip in). The default
+ *   is a static constant now, not a probe-sourced Scene space, so resolving the
+ *   default output size no longer requires generating and discarding a Scene.
  * - `background` is the opaque backdrop the shared pipeline paints (issue #92). It
  *   is a CSS color string OR `'transparent'`, and the default white lives in
  *   `defaultProps` (Root.tsx) rather than here. We cannot fully validate a CSS
@@ -55,7 +49,6 @@ export interface RenderSettings {
  * introduce.
  *
  * @param props - The render's `fps`/`width`/`height`/`background` input props.
- * @param space - The Sketch's coordinate space, read from a probe `generate`.
  * @returns The resolved {@link RenderSettings}, dimensions finite positive.
  * @throws if `fps`, or an explicitly-provided (non-zero) `width`/`height`, is not
  *   a finite positive number, or `background` is not a non-empty string — the
@@ -63,7 +56,6 @@ export interface RenderSettings {
  */
 export function resolveRenderSettings(
   props: Pick<CirclesProps, 'fps' | 'width' | 'height' | 'background'>,
-  space: Space,
 ): RenderSettings {
   const { fps, width, height, background } = props
 
@@ -79,16 +71,17 @@ export function resolveRenderSettings(
 
   return {
     fps,
-    width: resolveDimension('width', width, space.width),
-    height: resolveDimension('height', height, space.height),
+    width: resolveDimension('width', width, DEFAULT_COMPOSITION_FRAME.width),
+    height: resolveDimension('height', height, DEFAULT_COMPOSITION_FRAME.height),
     background,
   }
 }
 
 /**
  * Resolve one output dimension against the `0`-sentinel: exactly `0` (`-0`
- * included) falls back to the Sketch-space default; any other value must be a
- * finite positive number or it throws (naming the dimension and its bad value).
+ * included) falls back to the default Composition Frame size; any other value
+ * must be a finite positive number or it throws (naming the dimension and its
+ * bad value).
  */
 function resolveDimension(name: 'width' | 'height', value: number, fallback: number): number {
   if (value === 0) return fallback

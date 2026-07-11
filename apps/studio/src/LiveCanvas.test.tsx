@@ -397,8 +397,10 @@ describe("LiveCanvas caller-owned frame preparation", () => {
 
     expect(prepared.prepare).toHaveBeenCalledTimes(1);
     expect(prepared.generate).not.toHaveBeenCalled();
-    expect(prepared.samplers[0]).toHaveBeenCalledWith(0); // paper-aspect probe
 
+    // The aspect no longer samples the prepared frame (it derives from the
+    // Composition Frame), so an animated Sketch does not draw until the first rAF
+    // tick — the sampler is exercised then, at the live `t`.
     tick(1000);
     expect(prepared.samplers[0]).toHaveBeenLastCalledWith(1);
 
@@ -497,37 +499,29 @@ describe("LiveCanvas export handle — read-only canvas + current t", () => {
   });
 });
 
-describe("LiveCanvas paper aspect — sized to the Scene's space (#155)", () => {
-  it("uses invariant Sketch space without sampling a throwaway frame", () => {
-    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
-    prepared.sketch.space = { width: 1600, height: 900 };
-
-    const el = mount(
-      <LiveCanvas sketch={prepared.sketch} params={{}} seed={1} />,
-    );
-
-    expect(Number(canvasEl(el).style.getPropertyValue("--paper-aspect"))).toBeCloseTo(
-      1600 / 900,
-      5,
-    );
-    expect(prepared.samplers[0]).not.toHaveBeenCalled();
-  });
-
-  it("threads the generated Scene's width/height ratio onto the canvas box", () => {
-    // A 1600x900 space is a 16:9 paper — the CSS box must carry that ratio via
-    // the `--paper-aspect` custom property, not stay a fixed square.
+describe("LiveCanvas paper aspect — sized to the Composition Frame (#155/#253)", () => {
+  // The preview box aspect now derives from the COMPOSITION FRAME, not from the
+  // Sketch's own generated space (#253, slice #246). Studio hands the square
+  // Harness fallback (`DEFAULT_COMPOSITION_FRAME`, 1000×1000) for now, so the box
+  // is a square (`--paper-aspect` === 1) no matter what coordinate space the
+  // Sketch's `generate` yields. A real frame (#247/#248) will change the ratio at
+  // that single seam; the assertions below pin the fallback-square behavior and,
+  // crucially, that the Sketch's own space does NOT drive the box anymore (AC3).
+  it("follows the Composition Frame (square fallback ⇒ 1) for a landscape Sketch space", () => {
+    // A 1600x900 (16:9) generated space must NOT leak into the box: the frame is
+    // square, so `--paper-aspect` is 1, not 1600/900.
     const el = mount(
       <LiveCanvas sketch={spacedSketch(1600, 900)} params={{}} seed={1} />,
     );
-    const aspect = canvasEl(el).style.getPropertyValue("--paper-aspect");
-    expect(Number(aspect)).toBeCloseTo(1600 / 900, 5);
+    expect(Number(canvasEl(el).style.getPropertyValue("--paper-aspect"))).toBe(1);
   });
 
-  it("falls back to a square (1) for a degenerate zero-height space", () => {
-    // A zero (or non-finite) extent would make width/height NaN/∞; the derivation
-    // must clamp that to a square so the box stays coherent.
+  it("follows the Composition Frame (square fallback ⇒ 1) for a portrait Sketch space", () => {
+    // A tall 200x1000 generated space likewise does not drive the box — the same
+    // square frame yields 1, proving the derivation ignores `sketch.space`
+    // entirely (the degenerate-space case is moot: the frame is always valid).
     const el = mount(
-      <LiveCanvas sketch={spacedSketch(1000, 0)} params={{}} seed={1} />,
+      <LiveCanvas sketch={spacedSketch(200, 1000)} params={{}} seed={1} />,
     );
     expect(Number(canvasEl(el).style.getPropertyValue("--paper-aspect"))).toBe(1);
   });

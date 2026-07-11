@@ -9,6 +9,7 @@ import {
 } from '../sketch'
 import type { Params, ParamSchema, StatelessSketch } from '../sketch'
 import type { Scene } from '../scene'
+import { DEFAULT_COMPOSITION_FRAME } from '../compositionFrame'
 
 /**
  * A scripted `rand` stub: yields the given values in order, so a test can pin
@@ -175,8 +176,8 @@ describe('caller-owned prepared frames', () => {
     })
 
     const params = { offset: 2 }
-    expect(sketch.generate(params, 3, 4)).toEqual(sceneAt(9))
-    expect(sketch.prepare(params, 3)(4)).toEqual(sceneAt(9))
+    expect(sketch.generate(params, 3, 4, DEFAULT_COMPOSITION_FRAME)).toEqual(sceneAt(9))
+    expect(sketch.prepare(params, 3, DEFAULT_COMPOSITION_FRAME)(4)).toEqual(sceneAt(9))
     expect(calls).toEqual([
       [params, 3],
       [params, 3],
@@ -205,13 +206,13 @@ describe('caller-owned prepared frames', () => {
       },
     }
 
-    const warm = prepareSketch(specialized, {}, 1)
+    const warm = prepareSketch(specialized, {}, 1, DEFAULT_COMPOSITION_FRAME)
     expect(prepared).toBe(1)
     expect(warm(1)).toEqual(sceneAt(1))
     expect(warm(2)).toEqual(sceneAt(2))
     expect(prepared).toBe(1)
 
-    const adapted = prepareSketch(legacy, {}, 1)
+    const adapted = prepareSketch(legacy, {}, 1, DEFAULT_COMPOSITION_FRAME)
     expect(adapted(1)).toEqual(sceneAt(1))
     expect(adapted(2)).toEqual(sceneAt(2))
     expect(generated).toBe(2)

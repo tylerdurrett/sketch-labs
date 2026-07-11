@@ -52,9 +52,8 @@ export const DEFAULT_BACKGROUND: string = 'white'
  * - Render Settings (`fps`, `width`, `height`, `background`): how the discrete
  *   renderer samples, sizes, and backs the output. `fps` defaults to
  *   {@link DEFAULT_FPS}; `width`/`height` default (via
- *   {@link calculateCirclesMetadata}) to the Sketch's own coordinate space so the
- *   video matches the Scene's aspect ratio with no letterboxing; `background`
- *   defaults to {@link DEFAULT_BACKGROUND}.
+ *   {@link calculateCirclesMetadata}) to the default Composition Frame size
+ *   (`1000 × 1000`); `background` defaults to {@link DEFAULT_BACKGROUND}.
  * - Determinism inputs (`params`, `seed`): what the Sketch draws. `params`
  *   defaults to `defaultParams(sketch.schema)`; `seed` to {@link DEFAULT_SEED}.
  *
@@ -64,9 +63,9 @@ export const DEFAULT_BACKGROUND: string = 'white'
 export interface CirclesProps extends Record<string, unknown> {
   /** Frames per second — the frame→seconds sampling rate (`t = frame / fps`). */
   fps: number
-  /** Output width in pixels; defaults to the Sketch's coordinate-space width. */
+  /** Output width in pixels; defaults to the default Composition Frame width. */
   width: number
-  /** Output height in pixels; defaults to the Sketch's coordinate-space height. */
+  /** Output height in pixels; defaults to the default Composition Frame height. */
   height: number
   /** Opaque backdrop CSS color painted over the full surface; `'transparent'` clears. */
   background: string
@@ -83,14 +82,15 @@ export interface CirclesProps extends Record<string, unknown> {
  * - `durationInFrames = round(time.duration × fps)` — the Sketch's declared
  *   loop length (circles: `time.duration = 4`) turned into a frame count at the
  *   chosen fps. `mode` is not part of frame math (it is a playback intent, ADR-0002).
- * - `width`/`height` default to the Sketch's coordinate space, read from ONE
- *   probe `generate` (`scene.space`). Any explicit `width`/`height` in the props
- *   wins, so a render can override the output size.
+ * - `width`/`height` default to the default Composition Frame size (`1000 ×
+ *   1000`, a static constant), so no Scene is generated just to size the output.
+ *   Any explicit `width`/`height` in the props wins, so a render can override the
+ *   output size — and the Composition Frame is then re-derived per frame from
+ *   those pixel dims in {@link frameToScene}, aspect only.
  *
- * The probe is a throwaway sample at `t = 0` purely to read the coordinate space;
- * its geometry is discarded. Keeping this in `calculateMetadata` (not the
- * component) means the frame count and default dimensions are settled ONCE per
- * render, before any frame draws.
+ * Keeping this in `calculateMetadata` (not the component) means the frame count
+ * and default dimensions are settled ONCE per render, before any frame draws —
+ * and without generating and discarding a throwaway probe Scene.
  *
  * The Render Settings (`fps`, `width`, `height`) are validated via
  * {@link resolveRenderSettings} before use — `--props` is untyped JSON at the
@@ -102,8 +102,7 @@ export const calculateCirclesMetadata: CalculateMetadataFunction<CirclesProps> =
   const sketch = registry.get(CIRCLES_ID)
   const durationSeconds = sketch.time?.duration ?? 1
 
-  const probe = sketch.generate(props.params, props.seed, 0)
-  const { fps, width, height } = resolveRenderSettings(props, probe.space)
+  const { fps, width, height } = resolveRenderSettings(props)
 
   return {
     fps,
@@ -122,8 +121,10 @@ export const calculateCirclesMetadata: CalculateMetadataFunction<CirclesProps> =
  * fps` via the pure {@link frameToScene} (no cross-frame state — this component
  * holds none), then `drawSceneFitted(ctx, scene, width, height, background)` onto
  * the canvas. `width`/`height` come from `useVideoConfig` (the metadata-resolved
- * output size), and the canvas backing store is sized to them. `mode` never
- * enters the frame math.
+ * output size); they size the canvas backing store AND are passed to
+ * {@link frameToScene}, which derives the Composition Frame from their aspect
+ * (`useVideoConfig` round-trips only `fps`/`width`/`height`, not the frame, so it
+ * is re-derived here every render). `mode` never enters the frame math.
  *
  * `background` is NOT part of Remotion's returned metadata (only
  * `fps`/`durationInFrames`/`width`/`height` round-trip through `useVideoConfig`),
@@ -150,7 +151,7 @@ export function CirclesComposition({ params, seed, background }: CirclesProps) {
     if (ctx === null) return
 
     const sketch = registry.get(CIRCLES_ID)
-    const scene = frameToScene(sketch, params, seed, frame, fps)
+    const scene = frameToScene(sketch, params, seed, frame, fps, width, height)
     drawSceneFitted(ctx as Canvas2DContext, scene, width, height, background)
   }, [frame, fps, width, height, params, seed, background])
 

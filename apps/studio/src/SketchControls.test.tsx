@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clipSceneToBounds,
   crc32,
+  DEFAULT_COMPOSITION_FRAME,
   defaultParams,
   hiddenLinePass,
   leafField,
@@ -1021,9 +1022,10 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     const seed = 12345 as Seed;
     // The hidden-line pass is heavy, so run it ONCE and reuse it for both the
     // pre-clip overflow check and the clipped output.
-    const preClip = hiddenLinePass(leafField.generate(params, seed, 0), {
-      tolerance: 0,
-    });
+    const preClip = hiddenLinePass(
+      leafField.generate(params, seed, 0, DEFAULT_COMPOSITION_FRAME),
+      { tolerance: 0 },
+    );
     const exported = clipSceneToBounds(preClip);
     const { width, height } = exported.space;
     expect(width).toBeGreaterThan(0);

@@ -22,7 +22,7 @@
  */
 
 import { createScene } from '../../scene'
-import type { Scene } from '../../scene'
+import type { CoordinateSpace, Scene } from '../../scene'
 import { createRandom } from '../../random'
 import { curl } from '../../curl'
 import type {
@@ -32,7 +32,7 @@ import type {
   StatelessSketch,
 } from '../../sketch'
 import type { Point, Polyline } from '../../types'
-import { HEIGHT, numberParam, WIDTH } from '../sketch-util'
+import { numberParam } from '../sketch-util'
 
 /**
  * The flow-field Parameter Schema — the five knobs the brief exposes, all
@@ -92,9 +92,9 @@ export const flowField: StatelessSketch = {
   name: 'Flow Field',
   schema,
   // NO `time` metadata ⇒ ships static (single frame, scrubber hidden).
-  generate(params: Params, seed: Seed, t: number): Scene {
+  generate(params: Params, seed: Seed, t: number, frame: CoordinateSpace): Scene {
     const rng = createRandom(seed)
-    const builder = createScene({ width: WIDTH, height: HEIGHT })
+    const builder = createScene(frame)
 
     const fieldScale = numberParam(params, schema, 'fieldScale')
     const octaves = Math.round(numberParam(params, schema, 'octaves'))
@@ -104,8 +104,8 @@ export const flowField: StatelessSketch = {
 
     // Grid points sit at cell centers, so the lattice is inset from the edges
     // symmetrically (spacing/2 margin) rather than crowding the borders.
-    const cellW = WIDTH / density
-    const cellH = HEIGHT / density
+    const cellW = frame.width / density
+    const cellH = frame.height / density
 
     for (let row = 0; row < density; row++) {
       for (let col = 0; col < density; col++) {
@@ -114,13 +114,13 @@ export const flowField: StatelessSketch = {
 
         // Sample the field in NORMALIZED [0,1) coordinates, not raw pixel space.
         // curl's `scale` (fieldScale) is a frequency *per unit* of input, and the
-        // field's coherence length is ~1 unit; feeding raw 0..WIDTH coordinates
-        // multiplies the sample coords by hundreds, decorrelating every adjacent
-        // tick (≈π/2 apart) so no coherent current emerges. Dividing by the
-        // extent makes `fieldScale` a true swirls-per-canvas knob: low = broad
-        // swirls, high = tighter detail — the behavior the schema documents.
-        const nx = cx / WIDTH
-        const ny = cy / HEIGHT
+        // field's coherence length is ~1 unit; feeding raw 0..frame.width
+        // coordinates multiplies the sample coords by hundreds, decorrelating
+        // every adjacent tick (≈π/2 apart) so no coherent current emerges.
+        // Dividing by the frame extent makes `fieldScale` a true swirls-per-canvas
+        // knob: low = broad swirls, high = tighter detail — the schema's behavior.
+        const nx = cx / frame.width
+        const ny = cy / frame.height
 
         // 3D curl path: `t` is passed as `z` to thread animation. Held fixed
         // per frame, so within a frame the field is a plain function of (x, y).
