@@ -190,9 +190,20 @@ export function createScene(
       return builder
     },
     build() {
+      // Give the built Scene its own coordinate-space value rather than
+      // aliasing the caller-owned frame. With the Composition Frame contract,
+      // callers pass a frame they own — often the shared
+      // `DEFAULT_COMPOSITION_FRAME` singleton — so returning `space` directly
+      // would make every Scene built from that frame share one object. A fresh
+      // literal (structurally equal, so existing `toEqual` assertions hold)
+      // keeps the boundary clean.
+      const builtSpace: CoordinateSpace = {
+        width: space.width,
+        height: space.height,
+      }
       return background === undefined
-        ? { space, primitives }
-        : { space, primitives, background }
+        ? { space: builtSpace, primitives }
+        : { space: builtSpace, primitives, background }
     },
   }
 
