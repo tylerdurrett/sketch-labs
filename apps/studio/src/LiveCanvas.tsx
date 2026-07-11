@@ -10,10 +10,10 @@ import {
 } from "react";
 
 import {
-  DEFAULT_COMPOSITION_FRAME,
   drawSceneFitted,
   prepareSketch,
   type Canvas2DContext,
+  type CoordinateSpace,
   type Params,
   type PreparedFrame,
   type Seed,
@@ -90,6 +90,8 @@ export interface LiveCanvasProps {
   params: Params;
   /** The explicit Seed all of the Sketch's randomness derives from. */
   seed: Seed;
+  /** The caller-resolved, aspect-bearing frame used by every composition path. */
+  compositionFrame: CoordinateSpace;
   /**
    * Which processed Scene the preview draws (issue #219). Optional, defaulting to
    * `fill` so the live path is unchanged when a caller omits it: `fill` renders
@@ -157,6 +159,7 @@ function drawFrame(
   params: Params,
   seed: Seed,
   preparedFrame: PreparedFrame,
+  compositionFrame: CoordinateSpace,
   t: number,
   renderMode: RenderMode,
   tolerance: number,
@@ -187,7 +190,7 @@ function drawFrame(
   // runs per animated frame (feature #4's core invariant, this task's AC2/AC3).
   const rendered =
     renderMode === "outline"
-      ? outlineScene(sketch, params, seed, t, tolerance)
+      ? outlineScene(sketch, params, seed, t, compositionFrame, tolerance)
       : preparedFrame(t);
 
   // Hand the background-fit-and-draw to core's shared pipeline: `drawSceneFitted`
@@ -276,23 +279,13 @@ export function LiveCanvas({
   sketch,
   params,
   seed,
+  compositionFrame,
   renderMode = "fill",
   tolerance = 0,
   handleRef,
   onOutlineComputed,
 }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  // The Composition Frame the Studio composes into — the scale-independent,
-  // aspect-bearing rectangle handed to `prepareSketch`/`generate` (#246). For now
-  // it is the Harness's square fallback (`DEFAULT_COMPOSITION_FRAME`, 1000×1000);
-  // a real frame — a Plot Profile's paper-inside-margins or authored physical
-  // paper — arrives in siblings #247/#248. Holding it as ONE named seam value is
-  // load-bearing: both the prepared sampler (below) and the preview aspect derive
-  // from it, so when a real frame replaces this constant a single change flows to
-  // both, and a frame change invalidates the prepared sampler alongside
-  // sketch/params/seed.
-  const compositionFrame = DEFAULT_COMPOSITION_FRAME;
 
   // Caller-owned preparation is keyed by the time-invariant determinism inputs
   // PLUS the Composition Frame. A prepared Sketch can retain immutable layout
@@ -301,19 +294,20 @@ export function LiveCanvas({
   // Composition Frame invalidates exactly this sampler without touching the single
   // wall-clock `t` — the rAF baseline/`tRef` reads the sampler through
   // `preparedFrameRef`, which the post-commit effect resyncs, so the new layout is
-  // sampled at the continuing `t`, not from 0 (ADR-0002/0005). `compositionFrame`
-  // is a stable module constant today, so listing it costs no extra prepare;
-  // it makes the frame→sampler invalidation explicit for when a real frame lands.
+  // sampled at the continuing `t`, not from 0 (ADR-0002/0005). Fixed-area
+  // Composition Frames are determined by aspect, so the aspect — not caller
+  // object identity — is the cache boundary. Recreating an equivalent frame does
+  // not discard prepared geometry; changing drawable aspect does.
+  const compositionAspect = compositionFrame.width / compositionFrame.height;
   const preparedFrame = useMemo(
     () => prepareSketch(sketch, params, seed, compositionFrame),
-    [sketch, params, seed, compositionFrame],
+    [sketch, params, seed, compositionAspect],
   );
 
   // The paper's CSS-box aspect (#155): the `<canvas>` box is sized to the
   // COMPOSITION FRAME's aspect, not a fixed square and not the Sketch's own
-  // generated space. The ratio is the frame's own `width / height` — with the
-  // square Harness fallback (`DEFAULT_COMPOSITION_FRAME`, 1000×1000) that is 1
-  // until a real frame lands (#247/#248). No throwaway Scene is sampled anymore
+  // generated space. The ratio is the caller-resolved frame's own
+  // `width / height`. No throwaway Scene is sampled anymore
   // (the metadata that once short-circuited that probe was removed with the
   // widened contract in #251; the frame supersedes both). The ratio is threaded
   // onto `.live-canvas` as the `--paper-aspect` custom property; the CSS there
@@ -350,6 +344,7 @@ export function LiveCanvas({
   // preparation never resets the animation clock; the next tick samples the new
   // immutable layout at the continuing `t`.
   const preparedFrameRef = useRef(preparedFrame);
+  const compositionFrameRef = useRef(compositionFrame);
   // `renderModeRef` lets the `[]`-dep on-demand draw callbacks (drawCurrentFrame,
   // scrubTo) read the current mode without a `renderMode` dependency, so a mode
   // flip never re-runs the clock effect or resets the rAF baseline. Kept in sync
@@ -372,10 +367,20 @@ export function LiveCanvas({
     seedRef.current = seed;
     sketchRef.current = sketch;
     preparedFrameRef.current = preparedFrame;
+    compositionFrameRef.current = compositionFrame;
     renderModeRef.current = renderMode;
     toleranceRef.current = tolerance;
     onOutlineComputedRef.current = onOutlineComputed;
-  }, [params, seed, sketch, preparedFrame, renderMode, tolerance, onOutlineComputed]);
+  }, [
+    params,
+    seed,
+    sketch,
+    preparedFrame,
+    compositionFrame,
+    renderMode,
+    tolerance,
+    onOutlineComputed,
+  ]);
 
   // The latest `t` the loop has drawn (0 for a static Sketch). The resize re-fit
   // redraws THIS frame so a box change repaints the current moment, not t = 0 —
@@ -439,6 +444,7 @@ export function LiveCanvas({
       paramsRef.current,
       seedRef.current,
       preparedFrameRef.current,
+      compositionFrameRef.current,
       tRef.current,
       renderModeRef.current,
       toleranceRef.current,
@@ -536,6 +542,7 @@ export function LiveCanvas({
         paramsRef.current,
         seedRef.current,
         preparedFrameRef.current,
+        compositionFrameRef.current,
         t,
         "fill",
         0,
@@ -616,7 +623,15 @@ export function LiveCanvas({
     // the on-demand pass at the new tolerance; `refitAndRedraw` reads the current
     // value through `toleranceRef`. Harmless for a static fill Sketch (it takes
     // the cheap fill early-return, no pass).
-  }, [sketch, params, seed, renderMode, tolerance, refitAndRedraw]);
+  }, [
+    sketch,
+    params,
+    seed,
+    compositionAspect,
+    renderMode,
+    tolerance,
+    refitAndRedraw,
+  ]);
 
   // Re-fit on box-size AND devicePixelRatio change (the #41 contract). DECOUPLED
   // from the clock effect on purpose: it depends on stable callbacks alone, never
@@ -706,6 +721,7 @@ export function LiveCanvas({
         paramsRef.current,
         seedRef.current,
         preparedFrameRef.current,
+        compositionFrameRef.current,
         value,
         renderModeRef.current,
         toleranceRef.current,

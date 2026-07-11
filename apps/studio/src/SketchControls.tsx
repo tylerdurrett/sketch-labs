@@ -1,11 +1,10 @@
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   applyPreset,
   buildReproMetadata,
   clamp,
-  DEFAULT_COMPOSITION_FRAME,
   clipSceneToBounds,
   defaultParams,
   exportFilename,
@@ -14,6 +13,7 @@ import {
   randomize,
   renderToSVG,
   resolveOutputProfile,
+  resolvePlotCompositionFrame,
   type PlotProfile,
   type Preset,
   type Sketch,
@@ -102,12 +102,11 @@ export interface SketchControlsProps {
  * against THIS Sketch's own `defaultOutputProfile` (#265's precedence: preset ??
  * sketch default ?? Harness fallback), so a Sketch switch re-resolves from the
  * newly-mounted Sketch and NEVER reuses the previous Sketch's dimensions. It is
- * threaded through the persistence paths only — captured into a saved Preset
+ * threaded through persistence and composition — captured into a saved Preset
  * (via `PresetControls` → `makePreset`), re-resolved on a Preset reload (a v2
  * Preset's stored profile wins; a v1 falls back to the Sketch default / Harness
- * fallback), and embedded into every export's reproduction metadata. It does NOT
- * re-wire LiveCanvas's Composition Frame — the live preview keeps using the square
- * `DEFAULT_COMPOSITION_FRAME` (that consumption is slice #248).
+ * fallback), and embedded into every export's reproduction metadata. Its drawable
+ * aspect resolves the ONE Composition Frame shared by preview and vector exports.
  */
 export function SketchControls({
   sketch,
@@ -127,6 +126,17 @@ export function SketchControls({
   // module header for how it threads through save / reload / export metadata.
   const [profile, setProfile] = useState<PlotProfile>(() =>
     resolveOutputProfile(undefined, sketch.defaultOutputProfile),
+  );
+
+  // Physical magnitude belongs to later device mapping. Composition depends only
+  // on the drawable rectangle's aspect, so equivalent profiles share this cache
+  // boundary and do not rebuild prepared geometry.
+  const drawableAspect =
+    (profile.width - profile.insets.left - profile.insets.right) /
+    (profile.height - profile.insets.top - profile.insets.bottom);
+  const compositionFrame = useMemo(
+    () => resolvePlotCompositionFrame(profile),
+    [drawableAspect],
   );
 
   // The preview's render mode (issue #219): `fill` (default) shows the live fill
@@ -311,7 +321,7 @@ export function SketchControls({
     // `generate` takes a concrete `t` (static Sketches conventionally get 0 and
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
-    const scene = sketch.generate(params, seed, t ?? 0, DEFAULT_COMPOSITION_FRAME);
+    const scene = sketch.generate(params, seed, t ?? 0, compositionFrame);
     // Clip the generated geometry to the canvas rectangle so the exported plot
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
@@ -358,7 +368,14 @@ export function SketchControls({
     // carry the SAME final Douglas–Peucker simplification the outline preview
     // shows (issue #232) — both read this one state through this one seam.
     // `renderToSVG` then serializes the stroke-only result.
-    const hiddenLineScene = outlineScene(sketch, params, seed, t ?? 0, tolerance);
+    const hiddenLineScene = outlineScene(
+      sketch,
+      params,
+      seed,
+      t ?? 0,
+      compositionFrame,
+      tolerance,
+    );
     // Clip AFTER the hidden-line pass and BEFORE serialization (issue #237): the
     // pass can emit stroke geometry beyond the canvas, so the clip is the last
     // export-only stage that guarantees no plotted line escapes `space`. The clip
@@ -424,6 +441,7 @@ export function SketchControls({
             sketch={sketch}
             params={params}
             seed={seed}
+            compositionFrame={compositionFrame}
             renderMode={renderMode}
             tolerance={tolerance}
             onOutlineComputed={() => setComputingOutline(false)}

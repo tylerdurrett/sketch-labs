@@ -3,9 +3,32 @@ import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Scene, Sketch, TimeMetadata } from "@harness/core";
+import {
+  DEFAULT_COMPOSITION_FRAME,
+  resolveCompositionFrame,
+  type Scene,
+  type Sketch,
+  type TimeMetadata,
+} from "@harness/core";
 
-import { LiveCanvas, type LiveCanvasHandle } from "./LiveCanvas";
+import {
+  LiveCanvas as RawLiveCanvas,
+  type LiveCanvasHandle,
+  type LiveCanvasProps,
+} from "./LiveCanvas";
+
+/** Keep legacy tests terse while the production component requires an explicit frame. */
+function LiveCanvas(
+  props: Omit<LiveCanvasProps, "compositionFrame"> &
+    Partial<Pick<LiveCanvasProps, "compositionFrame">>,
+) {
+  return (
+    <RawLiveCanvas
+      {...props}
+      compositionFrame={props.compositionFrame ?? DEFAULT_COMPOSITION_FRAME}
+    />
+  );
+}
 
 /**
  * LiveCanvas IS under test here (unlike SketchControls.test, which mocks it), so
@@ -440,6 +463,52 @@ describe("LiveCanvas caller-owned frame preparation", () => {
     expect(replacement.prepare).toHaveBeenCalledTimes(1);
     expect(replacement.generate).not.toHaveBeenCalled();
   });
+
+  it("keys preparation by frame aspect while preserving the animation clock", () => {
+    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    const params = {};
+    const squareA = { width: 1000, height: 1000 };
+    const squareB = { width: 1000, height: 1000 };
+    const wide = resolveCompositionFrame(2);
+
+    mount(
+      <LiveCanvas
+        sketch={prepared.sketch}
+        params={params}
+        seed={2}
+        compositionFrame={squareA}
+      />,
+    );
+    tick(1000);
+    expect(prepared.prepare).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={prepared.sketch}
+          params={params}
+          seed={2}
+          compositionFrame={squareB}
+        />,
+      );
+    });
+    expect(prepared.prepare).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={prepared.sketch}
+          params={params}
+          seed={2}
+          compositionFrame={wide}
+        />,
+      );
+    });
+    expect(prepared.prepare).toHaveBeenCalledTimes(2);
+    expect(prepared.prepare).toHaveBeenLastCalledWith({}, 2, wide);
+    tick(1500);
+    expect(prepared.samplers[1]).toHaveBeenLastCalledWith(1.5);
+  });
 });
 
 describe("LiveCanvas transport — resume from scrubbed t, no snap to 0 (AC3)", () => {
@@ -524,6 +593,20 @@ describe("LiveCanvas paper aspect — sized to the Composition Frame (#155/#253)
       <LiveCanvas sketch={spacedSketch(200, 1000)} params={{}} seed={1} />,
     );
     expect(Number(canvasEl(el).style.getPropertyValue("--paper-aspect"))).toBe(1);
+  });
+
+  it("uses the explicit frame aspect rather than generated Scene space", () => {
+    const el = mount(
+      <LiveCanvas
+        sketch={spacedSketch(200, 1000)}
+        params={{}}
+        seed={1}
+        compositionFrame={resolveCompositionFrame(2)}
+      />,
+    );
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(2);
   });
 });
 

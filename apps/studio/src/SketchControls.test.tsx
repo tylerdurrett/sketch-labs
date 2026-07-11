@@ -11,7 +11,9 @@ import {
   HARNESS_FALLBACK_PLOT_PROFILE,
   hiddenLinePass,
   leafField,
+  resolvePlotCompositionFrame,
   type ParamSchema,
+  type CoordinateSpace,
   type PlotProfile,
   type Preset,
   type Seed,
@@ -62,6 +64,7 @@ let fakeCurrentT = 0;
 // busy label clears exactly as the real component clears it.
 let lastOnOutlineComputed: (() => void) | null = null;
 let autoFireOutlineComputed = true;
+let lastCompositionFrame: CoordinateSpace | null = null;
 
 // LiveCanvas is a browser-only sink (canvas2d, ResizeObserver, matchMedia) and
 // is NOT under test here — these are wiring tests for the control state. Replace
@@ -73,12 +76,14 @@ vi.mock("./LiveCanvas", () => ({
     seed,
     renderMode,
     tolerance,
+    compositionFrame,
     handleRef,
     onOutlineComputed,
   }: {
     seed: Seed;
     renderMode?: string;
     tolerance?: number;
+    compositionFrame: CoordinateSpace;
     handleRef?: Ref<LiveCanvasHandle>;
     onOutlineComputed?: () => void;
   }) => {
@@ -88,6 +93,7 @@ vi.mock("./LiveCanvas", () => ({
       getCurrentT: () => fakeCurrentT,
     }));
     lastOnOutlineComputed = onOutlineComputed ?? null;
+    lastCompositionFrame = compositionFrame;
     // Model the outline pass finishing: fire the "computed" signal after each
     // outline render so the owner's busy label clears (unless a test opts out to
     // observe the intermediate "Computing…" state itself).
@@ -213,6 +219,7 @@ beforeEach(() => {
   // #228: default to auto-firing the outline "computed" signal so the busy label
   // clears on its own; the label test opts out to observe "Computing…".
   lastOnOutlineComputed = null;
+  lastCompositionFrame = null;
   autoFireOutlineComputed = true;
   fakeCanvasToBlob = ((cb: BlobCallback) => {
     cb(new Blob([MINIMAL_PNG], { type: "image/png" }));
@@ -828,6 +835,65 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
       profile: customProfile,
     });
   });
+
+  it("threads one profile-resolved frame through preview and plain SVG at the captured t", async () => {
+    const generate = vi.fn(() => ({
+      space: { width: 100, height: 100 },
+      primitives: [],
+    }));
+    const sketch = {
+      ...(sketchWith("a", schema) as unknown as Record<string, unknown>),
+      time: { duration: 4, mode: "loop" },
+      generate,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "wide",
+      seed: 7,
+      params: { radius: 10 },
+      locks: [],
+      profile: customProfile,
+    });
+    listPresets.mockResolvedValue(["wide"]);
+    fakeCurrentT = 2.5;
+
+    const el = mount(<SketchControls sketch={sketch} />);
+    await flush();
+    reloadInUi(el, "wide");
+    await flush();
+
+    const expected = resolvePlotCompositionFrame(customProfile);
+    expect(lastCompositionFrame).toEqual(expected);
+    clickButton(el, "Export SVG");
+    expect(generate).toHaveBeenLastCalledWith({ radius: 10 }, 7, 2.5, expected);
+  });
+
+  it("keeps the resolved frame identity when profile magnitude changes at the same drawable aspect", async () => {
+    const sameAspectProfile: PlotProfile = {
+      width: 400,
+      height: 400,
+      insets: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "larger-square",
+      seed: 7,
+      params: { radius: 10 },
+      locks: [],
+      profile: sameAspectProfile,
+    });
+    listPresets.mockResolvedValue(["larger-square"]);
+
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    await flush();
+    const initialFrame = lastCompositionFrame;
+    reloadInUi(el, "larger-square");
+    await flush();
+
+    expect(lastCompositionFrame).toBe(initialFrame);
+  });
 });
 
 describe("SketchControls — SVG export wiring", () => {
@@ -1120,7 +1186,13 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // the schema defaults ({ radius: 10 }); seed is the displayed seed. The
     // outline preview evaluates this SAME expression, so the two inputs match.
     expect(exportSceneCapture.current).toEqual(
-      outlineScene(sketch, { radius: 10 }, seed, 0),
+      outlineScene(
+        sketch,
+        { radius: 10 },
+        seed,
+        0,
+        resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+      ),
     );
   });
 
@@ -1177,7 +1249,16 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // Baseline export at the default tolerance 0 — no simplification.
     clickButton(el, "Export Hidden-line SVG");
     const atZero = exportSceneCapture.current;
-    expect(atZero).toEqual(outlineScene(sketch, { radius: 10 }, seed, 0, 0));
+    expect(atZero).toEqual(
+      outlineScene(
+        sketch,
+        { radius: 10 },
+        seed,
+        0,
+        resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+        0,
+      ),
+    );
     const vertsAtZero = totalVerts(atZero);
 
     // Drive the studio knob, then re-export.
@@ -1187,7 +1268,16 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     // preview == export: the export is the SAME seam expression at tolerance 5
     // (the value LiveCanvas's outline preview also receives — asserted below).
-    expect(atFive).toEqual(outlineScene(sketch, { radius: 10 }, seed, 0, 5));
+    expect(atFive).toEqual(
+      outlineScene(
+        sketch,
+        { radius: 10 },
+        seed,
+        0,
+        resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+        5,
+      ),
+    );
     // ...and simplification actually reduced the exported vertex count.
     expect(totalVerts(atFive)).toBeLessThan(vertsAtZero);
   });
@@ -1245,7 +1335,13 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     // The un-clipped seam (generate → hidden-line pass) still overflows the
     // canvas — so the clip that follows is doing real work.
-    const seam = outlineScene(sketch, { radius: 10 }, seed, 0);
+    const seam = outlineScene(
+      sketch,
+      { radius: 10 },
+      seed,
+      0,
+      resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+    );
     expect(outOfBoundsPoints(seam, 100, 100)).not.toEqual([]);
 
     clickButton(el, "Export Hidden-line SVG");
