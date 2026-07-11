@@ -8,16 +8,15 @@ const SEED = 'leaf-field-performance-v1'
 // Intentionally explicit rather than derived from schema defaults. A default
 // change should not silently change this workload and invalidate comparisons.
 const PARAMS = Object.freeze({
+  fieldPhase: 0,
   fieldScale: 0.75,
   turbulence: 0.1536,
   octaves: 2,
   density: 18.696,
-  leafSizeMin: 50,
-  leafSizeMax: 64.6,
-  leafWidthMin: 0.5,
-  leafWidthMax: 1.15,
-  pointinessMin: 0,
-  pointinessMax: 0,
+  leafScale: 57.3,
+  leafSizeVariance: 7.3,
+  leafSlenderness: 1.435,
+  leafSlendernessVariance: 0.565,
   variation: 0,
   sphereCount: 6,
   sphereRadiusMin: 40,
@@ -25,7 +24,6 @@ const PARAMS = Object.freeze({
   sphereDepth: 0.5,
   backgroundColor: '#878787',
   discColor: '#ffffff',
-  fieldPhase: 0,
 })
 
 const PIXEL_WIDTH = 1000
@@ -35,7 +33,7 @@ const DEFAULT_WARMUPS = 5
 const MIN_SAMPLES = 20
 const EXPECTED_PRIMITIVES = 1405
 const EXPECTED_POINTS = 136093
-const EXPECTED_CHECKSUM = 'a094921b8280299c'
+const EXPECTED_CHECKSUM = '081c5776ec4b21bd'
 
 function readPositiveInteger(name, fallback, minimum) {
   const raw = process.env[name]

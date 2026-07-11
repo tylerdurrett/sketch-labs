@@ -4,16 +4,15 @@
   "name": "nice1",
   "seed": 789019568114854,
   "params": {
+    "fieldPhase": 0,
     "fieldScale": 0.75,
     "turbulence": 0.1536,
     "octaves": 2,
     "density": 18.696,
-    "leafSizeMin": 50,
-    "leafSizeMax": 64.6,
-    "leafWidthMin": 0.5,
-    "leafWidthMax": 1.15,
-    "pointinessMin": 0,
-    "pointinessMax": 0,
+    "leafScale": 57.3,
+    "leafSizeVariance": 7.3,
+    "leafSlenderness": 1.434783,
+    "leafSlendernessVariance": 0.565217,
     "variation": 0,
     "sphereCount": 6,
     "sphereRadiusMin": 40,
@@ -21,10 +20,9 @@
     "sphereDepth": 0.5,
     "backgroundColor": "#878787",
     "discColor": "#ffffff",
-    "fieldPhase": 0,
+    "discStrokeColor": "#ffffff",
     "leafColor": "#1a1a1a",
-    "leafStrokeColor": "#f4f1ea",
-    "discStrokeColor": "#ffffff"
+    "leafStrokeColor": "#f4f1ea"
   },
   "locks": []
 }

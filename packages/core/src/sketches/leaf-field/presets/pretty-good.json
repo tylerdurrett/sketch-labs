@@ -4,16 +4,15 @@
   "name": "pretty-good",
   "seed": 4876662002869356,
   "params": {
+    "fieldPhase": 0.679,
     "fieldScale": 0.75,
     "turbulence": 0.9,
     "octaves": 2,
     "density": 17.195,
-    "leafSizeMin": 41.61,
-    "leafSizeMax": 64.6,
-    "leafWidthMin": 0.9,
-    "leafWidthMax": 1.3,
-    "pointinessMin": 0,
-    "pointinessMax": 0,
+    "leafScale": 53.105,
+    "leafSizeVariance": 11.495,
+    "leafSlenderness": 0.940171,
+    "leafSlendernessVariance": 0.17094,
     "variation": 0,
     "sphereCount": 3,
     "sphereRadiusMin": 40,
@@ -21,10 +20,9 @@
     "sphereDepth": 0.556,
     "backgroundColor": "#878787",
     "discColor": "#ffffff",
-    "fieldPhase": 0.679,
+    "discStrokeColor": "#ffffff",
     "leafColor": "#1a1a1a",
-    "leafStrokeColor": "#f4f1ea",
-    "discStrokeColor": "#ffffff"
+    "leafStrokeColor": "#f4f1ea"
   },
   "locks": []
 }

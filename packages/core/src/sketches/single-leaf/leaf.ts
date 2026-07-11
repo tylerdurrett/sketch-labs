@@ -20,7 +20,7 @@ export interface LeafShape {
    * 0 = straight; positive curls toward +x, negative toward -x.
    */
   curl: number
-  /** Amplitude of seeded per-vertex jitter along the outline. */
+  /** Amplitude of seeded, broad contour roughness along the outline. */
   wobble: number
   /**
    * Apex shape in [0, 1]. Higher values pull the flanks' control points
@@ -32,6 +32,14 @@ export interface LeafShape {
 
 /** Number of segments per flank Bezier — even, smooth silhouette. */
 const FLANK_SEGMENTS = 48
+
+/** Broad roughness features around a closed outline (roughly six per flank). */
+const ROUGHNESS_KNOTS = 12
+
+/** Cubic interpolation with zero slope at both ends. */
+function smoothstep(t: number): number {
+  return t * t * (3 - 2 * t)
+}
 
 /**
  * Position along the spine at parameter t in [0, 1].
@@ -51,9 +59,10 @@ function spineAt(t: number, length: number, curlOffset: number): Point {
  * base as one continuous closed Polyline (last point === first). Each flank is
  * a cubic Bezier bulging out to `width / 2` at mid-spine and converging on the
  * tip; `tipSharpness` slides the upper control point toward the apex to sharpen
- * it. `curl` bends the spine sideways, and `wobble` adds seeded gaussian jitter
- * to every non-anchor vertex so re-seeding varies texture while gross
- * proportions hold.
+ * it. `curl` bends the spine sideways, and `wobble` adds seeded, low-frequency
+ * displacement along the outline normal so re-seeding varies texture while
+ * gross proportions hold. Neighboring vertices share interpolated noise:
+ * visible roughness therefore reads as broad waviness rather than tiny spikes.
  *
  * ALL randomness flows through the passed {@link Random} — no Math.random.
  */
@@ -100,14 +109,36 @@ export function leaf(shape: LeafShape, rng: Random): Polyline {
   // between the two cubics; the base is re-appended explicitly to close.
   const ring: Polyline = [...rightFlank, ...leftFlank.slice(1)]
 
-  // Seeded per-vertex wobble. The base (first vertex) is left un-jittered so
-  // the closing point can match it exactly; every other vertex gets gaussian
-  // jitter scaled by `wobble`, keyed by index so it is deterministic per seed.
+  // Seeded contour wobble. Twelve gaussian knots are smoothly interpolated
+  // around the ring, producing features several vertices wide. Moving each
+  // point along its local normal changes the silhouette without dragging it
+  // arbitrarily along the path. The sine envelope keeps the anchored base at
+  // zero displacement and eases its closing neighborhood back into that seam.
+  const roughness = Array.from({ length: ROUGHNESS_KNOTS + 1 }, () =>
+    rng.gaussian(0, wobble),
+  )
+  roughness[ROUGHNESS_KNOTS] = roughness[0]!
+  const lastIndex = ring.length - 1
   const out: Polyline = ring.map(([x, y], i) => {
-    if (i === 0) return [x, y]
-    const jx = rng.gaussian(0, wobble)
-    const jy = rng.gaussian(0, wobble)
-    return [x + jx, y + jy]
+    if (i === 0 || i === lastIndex) return [x, y]
+
+    const knotPosition = (i / lastIndex) * ROUGHNESS_KNOTS
+    const knotIndex = Math.min(Math.floor(knotPosition), ROUGHNESS_KNOTS - 1)
+    const localT = knotPosition - knotIndex
+    const offset =
+      (roughness[knotIndex]! +
+        (roughness[knotIndex + 1]! - roughness[knotIndex]!) * smoothstep(localT)) *
+      Math.sin((Math.PI * i) / lastIndex)
+
+    const [px, py] = ring[i - 1]!
+    const [nx, ny] = ring[i + 1]!
+    const tangentX = nx - px
+    const tangentY = ny - py
+    const tangentLength = Math.hypot(tangentX, tangentY) || 1
+    return [
+      x + (-tangentY / tangentLength) * offset,
+      y + (tangentX / tangentLength) * offset,
+    ]
   })
 
   // Explicitly close the polyline (last point === first).

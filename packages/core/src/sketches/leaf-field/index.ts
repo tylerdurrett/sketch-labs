@@ -10,34 +10,26 @@
  *
  * It samples the seeded variable-radius Poisson-disk sampler under a CONSTANT
  * radius field (the field's spacing is driven by the `density` knob), rolls a
- * seeded {@link LeafShape} at every sampled point (size/curl/wobble scaled by
- * the `variation` knob), rotates each so its spine aligns with the local flow
- * direction, and draws them into a painter's-order Scene — earlier points sit
+ * seeded {@link LeafShape} at every sampled point, rotates each so its spine
+ * aligns with the local flow direction, and draws them into a painter's-order
+ * Scene — earlier points sit
  * under later ones, so the overlap reads as a real composited field, not a flat
  * stamp sheet.
  *
- * ALL TWENTY-ONE KNOBS LIVE: the first eleven complete the scatter + placement +
- * flow-field orientation + per-leaf variation + compositing, the four appended
+ * ALL NINETEEN KNOBS LIVE: the field and shape controls complete scatter,
+ * placement, flow-field orientation, per-leaf variation, and compositing. Four
  * sphere knobs (`sphereCount`, `sphereRadiusMin`, `sphereRadiusMax`,
- * `sphereDepth`) drive the occluder discs (below), and the two appended color
- * knobs (`backgroundColor`, `discColor` — the first `kind: 'color'` params,
- * ADR-0010) own the scene background and the disc fill, `fieldPhase` scrubs
- * around the seamless 4D flow loop, and the final three color knobs
- * (`leafColor`, `leafStrokeColor`, `discStrokeColor`) own the leaf fill/rim and
- * disc outline. `density`
- * drives spacing;
+ * `sphereDepth`) drive the occluder discs (below). Five color knobs own the scene
+ * and primitive styling (ADR-0010), and `fieldPhase` scrubs around the seamless
+ * 4D flow loop. `density` drives spacing;
  * `fieldScale` (curl base frequency, in features across the canvas),
  * `octaves` (how many noise layers stack) and `turbulence` (curl octave falloff
- * → fbm `gain`) shape the flow each leaf bends into; `leafSizeMin`/`leafSizeMax`
- * bound the seeded length, `leafWidthMin`/`leafWidthMax` bound the seeded width
- * (as a fraction of that length — slenderness) and `pointinessMin`/`pointinessMax`
- * bound the seeded tip
- * sharpness; each leaf's length draws uniformly across [leafSizeMin, leafSizeMax],
- * its width fraction across [leafWidthMin, leafWidthMax], and its tip sharpness
- * across [pointinessMin, pointinessMax]
- * (set each pair equal for a uniform field), while `variation` scales how far
- * each leaf's curl/wobble
- * strays from the fixed base — at `variation` 0 the curl/wobble collapse back to
+ * → fbm `gain`) shape the flow each leaf bends into. `leafScale` and its
+ * variance define a centered length range; `leafSlenderness` and its variance
+ * define a centered length-to-width ratio (higher is skinnier). Tip pointiness
+ * is fixed at the former blunt default, while `variation` scales how far each
+ * leaf's curl and broad contour wobble stray from the fixed base — at
+ * `variation` 0 the curl/wobble collapse back to
  * that base, so the knob is live.
  *
  * FLOW COHERENCE (2026-07-02): `fieldScale` samples the curl field over
@@ -190,45 +182,39 @@ import type { LeafShape } from '../single-leaf/leaf'
 import { placeSpheresAtVortices } from './vortex-placement'
 
 /**
- * The leaf-field Parameter Schema — twenty-one knobs (sixteen numeric, five
- * color), all consumed NOW. Order is fixed and part of the contract; each
- * widening APPENDS so earlier knobs keep their positions: the sphere knobs
- * (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then `sphereDepth`
- * #142) after the original eleven, then the color knobs (`backgroundColor`,
- * `discColor` — the first `kind: 'color'` specs, ADR-0010), then the normalized
- * `fieldPhase` loop scrubber, then the styling knobs (`leafColor`,
- * `leafStrokeColor`, `discStrokeColor`) last. `satisfies`
+ * The leaf-field Parameter Schema — nineteen knobs (fourteen numeric, five
+ * color), all consumed NOW. Declaration order is the Studio control order:
+ * phase first, field/shape controls, sphere controls, then colors with each
+ * object's fill and stroke adjacent. `satisfies`
  * keeps the literal key set (so `numberParam`/`colorParam` can filter
  * `keyof typeof schema` by each spec's literal `kind`) while enforcing the spec
  * type — the target is the full `ParamSpec` union now that the kinds mix.
  */
 const schema = {
+  /** Normalized position around the seamless 4D flow-field loop. Consumed NOW. */
+  fieldPhase: { kind: 'number', min: 0, max: 1, default: 0, step: 0.001 },
   /**
    * Curl-field base frequency, in noise features across the canvas (the sampled
    * coords are canvas-normalized). A tight range with a low default: the flow
    * stays coherent near 1–2 and the low end is where the fine control lives —
    * higher values start to look random. Consumed NOW (flow orientation).
    */
-  fieldScale: { kind: 'number', min: 0.25, max: 4, default: 0.75, step: 0.05 },
-  /** Curl-field roughness — mapped to fbm's per-octave amplitude falloff (`gain`). Consumed NOW. */
-  turbulence: { kind: 'number', min: 0.1, max: 0.9, default: 0.1536 },
+  fieldScale: { kind: 'number', min: 0.05, max: 4, default: 0.75, step: 0.05 },
+  /** Curl-field roughness — mapped to fBm's per-octave amplitude multiplier (`gain`); values above 1 make finer octaves progressively stronger. Consumed NOW. */
+  turbulence: { kind: 'number', min: 0.1, max: 3, default: 0.1536 },
   /** Number of noise layers stacked into the flow field (fbm `octaves`); fewer = broader, less turbulent. Consumed NOW. */
   octaves: { kind: 'number', min: 1, max: 6, default: 2, step: 1, integer: true },
   /** Drives the Poisson spacing radius (radius = REFERENCE_SPACING / density). Consumed NOW. */
   density: { kind: 'number', min: 1, max: 80, default: 18.696 },
-  /** Leaf length range low — each leaf's length draws uniformly in [min, max]. Set equal to max for a uniform-size field. Consumed NOW. */
-  leafSizeMin: { kind: 'number', min: 10, max: 300, default: 50 },
-  /** Leaf length range high — each leaf's length draws uniformly in [min, max]. Consumed NOW. */
-  leafSizeMax: { kind: 'number', min: 10, max: 400, default: 64.6 },
-  /** Leaf width range low — width as a fraction of the leaf's own length; each leaf draws uniformly in [min, max]. Lower = long & slender, higher = short & fat. Set equal to max for a uniform-width field. Consumed NOW. */
-  leafWidthMin: { kind: 'number', min: 0.15, max: 2, default: 0.5, step: 0.05 },
-  /** Leaf width range high — width as a fraction of the leaf's own length; each leaf draws uniformly in [min, max]. Above 1 the leaf is wider than it is long. Consumed NOW. */
-  leafWidthMax: { kind: 'number', min: 0.15, max: 2, default: 1.15, step: 0.05 },
-  /** Leaf tip sharpness range low — each leaf's `tipSharpness` draws uniformly in [min, max]; 0 = round/blunt apex, 1 = sharp/pointed. Set equal to max for a uniform field. Consumed NOW. */
-  pointinessMin: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
-  /** Leaf tip sharpness range high — each leaf's `tipSharpness` draws uniformly in [min, max]; 0 = round/blunt apex, 1 = sharp/pointed. Consumed NOW. */
-  pointinessMax: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
-  /** Per-leaf shape variation — scales how far each leaf's curl/wobble strays from the base shape (size is its own [leafSizeMin, leafSizeMax] range, independent of this). Consumed NOW. */
+  /** Midpoint of the per-leaf length range, in coordinate-space units. Consumed NOW. */
+  leafScale: { kind: 'number', min: 10, max: 400, default: 57.3 },
+  /** Symmetric ± spread around `leafScale`; zero makes every leaf the same size. Consumed NOW. */
+  leafSizeVariance: { kind: 'number', min: 0, max: 200, default: 7.3 },
+  /** Midpoint length-to-width ratio. Higher values make leaves longer and skinnier. Consumed NOW. */
+  leafSlenderness: { kind: 'number', min: 0.5, max: 6.5, default: 1.435, step: 0.05 },
+  /** Symmetric ± spread around `leafSlenderness`; zero gives uniform proportions. Consumed NOW. */
+  leafSlendernessVariance: { kind: 'number', min: 0, max: 3, default: 0.565, step: 0.05 },
+  /** Per-leaf shape variation — scales curl and broad, correlated contour roughness. Consumed NOW. */
   variation: { kind: 'number', min: 0, max: 1, default: 0 },
   /**
    * How many implied-sphere occluder discs to place at the field's strongest
@@ -283,26 +269,14 @@ const schema = {
    */
   discColor: { kind: 'color', default: '#ffffff' },
   /**
-   * Normalized position around the seamless 4D flow-field loop. 0 and 1 sample
-   * the same point; changing this param evolves leaf orientation and re-prepares
-   * sphere centers against that field slice. Prepared-frame time advances only
-   * orientation from this phase while its spheres remain anchored, and the Sketch
-   * stays static until time metadata is deliberately added. Consumed NOW.
-   * Appended after the original color knobs (2026-07-10).
-   */
-  fieldPhase: { kind: 'number', min: 0, max: 1, default: 0, step: 0.001 },
-  /** Leaf fill color. Defaults to the original bold dark linocut fill. Consumed NOW. */
-  leafColor: { kind: 'color', default: '#1a1a1a' },
-  /**
-   * Leaf outline color. Defaults to the original paper-colored separating rim.
-   * Consumed NOW.
-   */
-  leafStrokeColor: { kind: 'color', default: '#f4f1ea' },
-  /**
    * Disc outline color. Defaults to white to blend into the white disc fill.
    * Consumed NOW.
    */
   discStrokeColor: { kind: 'color', default: '#ffffff' },
+  /** Leaf fill color. Defaults to the original bold dark linocut fill. Consumed NOW. */
+  leafColor: { kind: 'color', default: '#1a1a1a' },
+  /** Leaf outline color. Defaults to the paper-colored separating rim. Consumed NOW. */
+  leafStrokeColor: { kind: 'color', default: '#f4f1ea' },
 } satisfies Record<string, ParamSpec>
 
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
@@ -332,11 +306,9 @@ function loopCoordinatesAt(phase: number): readonly [number, number] {
   ]
 }
 
-// Base shape constants. Each leaf's length draws uniformly in its own
-// [leafSizeMin, leafSizeMax] range, its tip sharpness in its own
-// [pointinessMin, pointinessMax] range, and its width fraction in its own
-// [leafWidthMin, leafWidthMax] range (all three independent of `variation` —
-// that knob owns curl/wobble only). Curl and wobble stray from these bases by
+// Base shape constants. Leaf scale and slenderness each draw from their own
+// centered ±variance range, independently of `variation`; pointiness stays at
+// the former blunt default. Curl and wobble stray from their bases by
 // seeded amounts scaled by `variation`; at `variation` 0 they collapse to the
 // fixed base (base curl, zero wobble).
 const FIXED_CURL = 0.12
@@ -345,7 +317,7 @@ const FIXED_CURL = 0.12
 const CURL_JITTER_STD = 0.15
 
 /** Max seeded per-leaf wobble amplitude at `variation` 1; the base (variation 0) is 0. */
-const MAX_WOBBLE = 2
+const MAX_WOBBLE = 6
 
 /** Stroke width of each leaf's paper rim, in coordinate-space units. */
 const LEAF_STROKE_WIDTH = 2
@@ -443,19 +415,21 @@ export const leafField = definePreparedSketch({
   // NO `time` metadata ⇒ ships static (single frame, scrubber hidden).
   prepare(params: Params, seed: Seed) {
     // Shared seeded Random. It drives the per-leaf shape rolls (size, curl,
-    // wobble) AND is threaded into `leaf()` for its per-vertex wobble jitter. It
+    // wobble) AND is threaded into `leaf()` for its broad contour roughness. It
     // ALSO seeds the curl field via its (separate, non-advancing) noise
     // instances — sampling curl does not consume value()/gaussian() draws, so
     // the placement/shape roll sequence stays untouched by orientation.
     const rng = createRandom(seed)
 
     const density = numberParam(params, schema, 'density')
-    const leafSizeMin = numberParam(params, schema, 'leafSizeMin')
-    const leafSizeMax = numberParam(params, schema, 'leafSizeMax')
-    const leafWidthMin = numberParam(params, schema, 'leafWidthMin')
-    const leafWidthMax = numberParam(params, schema, 'leafWidthMax')
-    const pointinessMin = numberParam(params, schema, 'pointinessMin')
-    const pointinessMax = numberParam(params, schema, 'pointinessMax')
+    const leafScale = numberParam(params, schema, 'leafScale')
+    const leafSizeVariance = numberParam(params, schema, 'leafSizeVariance')
+    const leafSlenderness = numberParam(params, schema, 'leafSlenderness')
+    const leafSlendernessVariance = numberParam(
+      params,
+      schema,
+      'leafSlendernessVariance',
+    )
     const fieldScale = numberParam(params, schema, 'fieldScale')
     const turbulence = numberParam(params, schema, 'turbulence')
     const octaves = numberParam(params, schema, 'octaves')
@@ -539,7 +513,7 @@ export const leafField = definePreparedSketch({
     // x for a stable, deterministic order) so leaves lower on the canvas paint
     // last and overlap the ones above them — the field reads like overlapping
     // scales, not an arbitrary stack. Sorting only re-orders draw/roll sequence;
-    // each leaf still consumes exactly its three rng draws, so the deterministic
+    // every leaf still consumes the same fixed draw sequence, so the deterministic
     // seam holds (a copy is sorted — the sampler output is not mutated).
     const points = [...sampled].sort(([ax, ay], [bx, by]) => ay - by || ax - bx)
 
@@ -563,7 +537,7 @@ export const leafField = definePreparedSketch({
     // points below the threshold IS that disc's splice index. Still a knob, not an
     // rng roll — it touches only these indices, leaving every cx/cy/r and every
     // leaf byte-identical.
-    const depthMargin = leafSizeMax / 2
+    const depthMargin = (leafScale + leafSizeVariance) / 2
     const placedSpheres = spheres.map((sphere) => {
       const thresholdY = lerp(
         sphere.cy - sphere.r - depthMargin,
@@ -582,33 +556,31 @@ export const leafField = definePreparedSketch({
     // sampling never advances the main PRNG, so moving these shape rolls ahead of
     // the per-`t` flow sampling preserves the exact historical draw sequence.
     const leaves = points.map(([x, y]) => {
-      // Roll this leaf's shape from `rng`. CRUCIAL: roll all five (length, curl,
-      // wobble, tipSharpness, widthRatio) UNCONDITIONALLY and in a fixed order —
+      // Roll this leaf's shape from `rng`. CRUCIAL: roll all four values (length,
+      // curl, wobble, slenderness) UNCONDITIONALLY and in a fixed order —
       // the rng-consumption COUNT per leaf must stay constant regardless of knob
       // values so the deterministic seam holds and changing a knob reshapes the
       // field without desyncing the sequence. Length draws uniformly across the
-      // full [leafSizeMin, leafSizeMax] range so leaves genuinely differ in size,
-      // tipSharpness draws uniformly across [pointinessMin, pointinessMax] so tip
-      // pointiness varies per leaf, and widthRatio draws uniformly across
-      // [leafWidthMin, leafWidthMax] so width (as a fraction of length) varies per
-      // leaf — size, pointiness, and width variation are each owned by their own
-      // range (set any pair equal for a uniform field). `variation` governs only
+      // centered scale range so leaves genuinely differ in size, and slenderness
+      // draws across its own centered range. `variation` governs only
       // the curl/wobble shape strays, which collapse to the fixed base (FIXED curl
-      // / zero wobble) at variation 0 while still consuming their draws. The
-      // tipSharpness and widthRatio draws are APPENDED LAST (in that order) so the
-      // pre-existing length/curl/wobble order is untouched; widthRatio is the last
-      // per-leaf roll.
-      const length = rng.range(leafSizeMin, leafSizeMax)
+      // / zero wobble) at variation 0 while still consuming their draws.
+      const length = rng.range(
+        Math.max(1, leafScale - leafSizeVariance),
+        leafScale + leafSizeVariance,
+      )
       const curlAmount = FIXED_CURL + rng.gaussian(0, CURL_JITTER_STD) * variation
       const wobble = MAX_WOBBLE * variation * rng.value()
-      const tipSharpness = rng.range(pointinessMin, pointinessMax)
-      const widthRatio = rng.range(leafWidthMin, leafWidthMax)
+      const slenderness = rng.range(
+        Math.max(0.1, leafSlenderness - leafSlendernessVariance),
+        leafSlenderness + leafSlendernessVariance,
+      )
       const shape: LeafShape = {
         length,
-        width: length * widthRatio,
+        width: length / slenderness,
         curl: curlAmount,
         wobble,
-        tipSharpness,
+        tipSharpness: 0,
       }
 
       // The unrotated silhouette depends only on params/seed. It stays private to

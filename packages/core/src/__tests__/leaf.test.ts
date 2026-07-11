@@ -76,6 +76,30 @@ describe('leaf', () => {
     expect(last).toEqual(first)
   })
 
+  it('makes visible wobble broad and correlated instead of vertex-scale jaggies', () => {
+    const smooth = leaf({ ...baseShape, wobble: 0 }, createRandom(7))
+    const rough = leaf({ ...baseShape, wobble: 6 }, createRandom(7))
+    const displacement = rough.map(([x, y], i) => [
+      x - smooth[i]![0],
+      y - smooth[i]![1],
+    ] as const)
+
+    let displacementEnergy = 0
+    let highFrequencyEnergy = 0
+    for (let i = 2; i < displacement.length - 2; i++) {
+      const [px, py] = displacement[i - 1]!
+      const [x, y] = displacement[i]!
+      const [nx, ny] = displacement[i + 1]!
+      displacementEnergy += Math.hypot(x, y)
+      highFrequencyEnergy += Math.hypot(nx - 2 * x + px, ny - 2 * y + py)
+    }
+
+    // The roughness remains clearly visible, but neighboring vertices move as
+    // one broad contour feature instead of receiving unrelated offsets.
+    expect(displacementEnergy / displacement.length).toBeGreaterThan(1)
+    expect(highFrequencyEnergy / displacementEnergy).toBeLessThan(0.35)
+  })
+
   describe('knob response', () => {
     it('wider width => larger x-extent', () => {
       const narrow = bounds(leaf({ ...baseShape, width: 20 }, createRandom(1)))

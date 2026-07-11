@@ -11,24 +11,18 @@ import type { Point } from '../types'
 import type { Primitive } from '../scene'
 
 /**
- * The twenty-one leaf-field knobs, in declaration order. Each widening APPENDS
- * so earlier knobs keep their positions (order is part of the contract): the
- * sphere knobs (`sphereCount`/`sphereRadiusMin`/`sphereRadiusMax` #141, then
- * `sphereDepth` #142) after the original eleven, then the two color knobs
- * (`backgroundColor`, `discColor` — ADR-0010), `fieldPhase`, then the leaf
- * styling knobs (`leafColor`, `leafStrokeColor`, `discStrokeColor`) last.
+ * The nineteen leaf-field knobs in Studio declaration order.
  */
 const KNOBS = [
+  'fieldPhase',
   'fieldScale',
   'turbulence',
   'octaves',
   'density',
-  'leafSizeMin',
-  'leafSizeMax',
-  'leafWidthMin',
-  'leafWidthMax',
-  'pointinessMin',
-  'pointinessMax',
+  'leafScale',
+  'leafSizeVariance',
+  'leafSlenderness',
+  'leafSlendernessVariance',
   'variation',
   'sphereCount',
   'sphereRadiusMin',
@@ -36,10 +30,9 @@ const KNOBS = [
   'sphereDepth',
   'backgroundColor',
   'discColor',
-  'fieldPhase',
+  'discStrokeColor',
   'leafColor',
   'leafStrokeColor',
-  'discStrokeColor',
 ] as const
 
 /** The bold dark fill and paper-colored rim the audit pinned (see the sketch header). */
@@ -213,9 +206,11 @@ function meanLeafArea(primitives: Primitive[]): number {
 }
 
 describe('leaf-field Sketch contract', () => {
-  it('declares exactly the twenty-one knobs in order and NO time metadata (static)', () => {
+  it('declares exactly the nineteen knobs in Studio order and NO time metadata (static)', () => {
     expect(Object.keys(leafField.schema)).toEqual([...KNOBS])
     expect(leafField.schema.sphereCount.max).toBe(25)
+    expect(leafField.schema.fieldScale.min).toBe(0.05)
+    expect(leafField.schema.turbulence.max).toBe(3)
     expect(leafField.schema.fieldPhase).toEqual({
       kind: 'number',
       min: 0,
@@ -259,7 +254,7 @@ describe("leaf-field painter's order / overlap", () => {
     // A dense field of large leaves: total leaf area far exceeds the canvas, so
     // leaves must overlap. Assert externally-observable overlap of two bboxes.
     const scene = leafField.generate(
-      { density: 12, leafSizeMin: 300, leafSizeMax: 400 },
+      { density: 12, leafScale: 350, leafSizeVariance: 50 },
       'overlap-seed',
       0,
     )
@@ -282,7 +277,7 @@ describe("leaf-field painter's order / overlap", () => {
 
 describe('leaf-field determinism (ADR-0002)', () => {
   it('is deterministic at the Scene level for identical (params, seed, t)', () => {
-    const params: Params = { density: 6, leafSizeMin: 120, leafSizeMax: 200 }
+    const params: Params = { density: 6, leafScale: 160, leafSizeVariance: 40 }
     const a = leafField.generate(params, 'fixed-seed', 0)
     const b = leafField.generate(params, 'fixed-seed', 0)
     expect(a).toEqual(b)
@@ -493,13 +488,18 @@ describe('leaf-field per-leaf variation (#127)', () => {
     expect(new Set(hashes).size).toBe(hashes.length)
   })
 
-  it('a wider leafSize range yields strictly more size spread than a narrow one at the same seed', () => {
+  it('more leafSizeVariance yields strictly more size spread at the same seed', () => {
     const seed = 'spread'
-    // Size spread is owned by the [leafSizeMin, leafSizeMax] range now, not by
-    // `variation` (which governs only curl/wobble). A wider range ⇒ leaves drawn
-    // farther apart in length ⇒ larger spine-length spread.
-    const narrow = leafField.generate({ density: 6, leafSizeMin: 90, leafSizeMax: 110 }, seed, 0)
-    const wide = leafField.generate({ density: 6, leafSizeMin: 20, leafSizeMax: 200 }, seed, 0)
+    const narrow = leafField.generate(
+      { density: 6, leafScale: 110, leafSizeVariance: 10 },
+      seed,
+      0,
+    )
+    const wide = leafField.generate(
+      { density: 6, leafScale: 110, leafSizeVariance: 90 },
+      seed,
+      0,
+    )
     expect(spineLengthSpread(leavesOf(wide))).toBeGreaterThan(
       spineLengthSpread(leavesOf(narrow)),
     )
@@ -509,16 +509,16 @@ describe('leaf-field per-leaf variation (#127)', () => {
     // At variation 0 curl/wobble collapse to the base, but length still draws
     // across the range, so the field is NOT uniform in size.
     const scene = leafField.generate(
-      { density: 6, variation: 0, leafSizeMin: 30, leafSizeMax: 200 },
+      { density: 6, variation: 0, leafScale: 115, leafSizeVariance: 85 },
       'flat',
       0,
     )
     expect(spineLengthSpread(leavesOf(scene))).toBeGreaterThan(1)
   })
 
-  it('leafSizeMin == leafSizeMax yields a uniform-size field (spread ~0)', () => {
+  it('leafSizeVariance 0 yields a uniform-size field (spread ~0)', () => {
     const scene = leafField.generate(
-      { density: 6, leafSizeMin: 120, leafSizeMax: 120 },
+      { density: 6, leafScale: 120, leafSizeVariance: 0 },
       'uniform',
       0,
     )
@@ -529,107 +529,52 @@ describe('leaf-field per-leaf variation (#127)', () => {
   })
 })
 
-describe('leaf-field shape knobs — width & pointiness (#127)', () => {
-  it('a wider leafWidth range yields larger leaves (rotation-invariant area) at the same seed', () => {
-    const seed = 'width'
-    // variation 0 and each width range collapsed to a point, so every leaf is the
-    // same base shape (only rotated) — the area difference then comes from the
-    // width fraction alone, not per-leaf size rolls.
+describe('leaf-field slenderness knobs', () => {
+  it('higher slenderness yields skinnier leaves at the same seed', () => {
+    const seed = 'slenderness'
     const slender = leafField.generate(
-      { density: 5, variation: 0, leafWidthMin: 0.2, leafWidthMax: 0.2 },
+      { density: 5, variation: 0, leafSlenderness: 5, leafSlendernessVariance: 0 },
       seed,
       0,
     )
-    const fat = leafField.generate(
-      { density: 5, variation: 0, leafWidthMin: 0.9, leafWidthMax: 0.9 },
+    const broad = leafField.generate(
+      { density: 5, variation: 0, leafSlenderness: 1, leafSlendernessVariance: 0 },
       seed,
       0,
     )
-    // Same seed/density ⇒ same placement/count; only the per-leaf width differs.
-    expect(leavesOf(fat).length).toBe(leavesOf(slender).length)
-    expect(meanLeafArea(leavesOf(fat))).toBeGreaterThan(meanLeafArea(leavesOf(slender)))
+    expect(leavesOf(broad).length).toBe(leavesOf(slender).length)
+    expect(meanLeafArea(leavesOf(broad))).toBeGreaterThan(
+      meanLeafArea(leavesOf(slender)),
+    )
   })
 
-  it('a wide leafWidth range bakes a different field than a narrow one at the same seed', () => {
-    // Width fraction is owned by the [leafWidthMin, leafWidthMax] range: widening
-    // it makes each leaf draw its own width across a broader span, so the baked
-    // field differs from a uniform (narrow) one. Same seed/density ⇒ same
-    // placement/count; only the per-leaf width roll differs.
-    const seed = 'width-range'
+  it('leafSlendernessVariance changes the baked proportions', () => {
+    const seed = 'slenderness-range'
     const uniform = leafField.generate(
-      { density: 6, variation: 0, leafWidthMin: 0.5, leafWidthMax: 0.5 },
+      { density: 6, variation: 0, leafSlenderness: 2, leafSlendernessVariance: 0 },
       seed,
       0,
     )
     const wide = leafField.generate(
-      { density: 6, variation: 0, leafWidthMin: 0.15, leafWidthMax: 1 },
+      { density: 6, variation: 0, leafSlenderness: 2, leafSlendernessVariance: 1.5 },
       seed,
       0,
     )
     expect(wide).not.toEqual(uniform)
   })
 
-  it('leafWidthMin == leafWidthMax is deterministic and reproducible (uniform widths)', () => {
-    // With the range collapsed to a point every leaf draws the same width fraction,
-    // so two identical-param generations reproduce the same Scene exactly.
+  it('zero slenderness variance is deterministic and reproducible', () => {
     const params: Params = {
       density: 6,
       variation: 0,
-      leafWidthMin: 0.6,
-      leafWidthMax: 0.6,
+      leafSlenderness: 2,
+      leafSlendernessVariance: 0,
     }
     const a = leafField.generate(params, 'width-uniform', 0)
     const b = leafField.generate(params, 'width-uniform', 0)
     expect(a).toEqual(b)
   })
 
-  it('pointiness is live — changing the tip sharpness rebakes the field', () => {
-    const params: Params = { density: 5, variation: 0 }
-    const round = leafField.generate(
-      { ...params, pointinessMin: 0.05, pointinessMax: 0.05 },
-      'point',
-      0,
-    )
-    const sharp = leafField.generate(
-      { ...params, pointinessMin: 0.95, pointinessMax: 0.95 },
-      'point',
-      0,
-    )
-    expect(sharp).not.toEqual(round)
-  })
-
-  it('a wide pointiness range bakes a different field than a narrow one at the same seed', () => {
-    // Tip sharpness is owned by the [pointinessMin, pointinessMax] range now:
-    // widening it makes each leaf draw its own tipSharpness across a broader
-    // span, so the baked field differs from a uniform (narrow) one. Same
-    // seed/density ⇒ same placement/count; only the per-leaf tip roll differs.
-    const seed = 'point-range'
-    const uniform = leafField.generate(
-      { density: 6, variation: 0, pointinessMin: 0.5, pointinessMax: 0.5 },
-      seed,
-      0,
-    )
-    const wide = leafField.generate(
-      { density: 6, variation: 0, pointinessMin: 0, pointinessMax: 1 },
-      seed,
-      0,
-    )
-    expect(wide).not.toEqual(uniform)
-  })
-
-  it('pointinessMin == pointinessMax is deterministic and reproducible (uniform tips)', () => {
-    // With the range collapsed to a point every leaf draws the same tipSharpness,
-    // so two identical-param generations reproduce the same Scene exactly.
-    const params: Params = {
-      density: 6,
-      variation: 0,
-      pointinessMin: 0.4,
-      pointinessMax: 0.4,
-    }
-    const a = leafField.generate(params, 'point-uniform', 0)
-    const b = leafField.generate(params, 'point-uniform', 0)
-    expect(a).toEqual(b)
-  })
 })
 
 describe('leaf-field draw boundary', () => {
