@@ -10,22 +10,28 @@
  * this module owns only the JSON STRING both export paths embed, which is why it
  * lives in `core`: one envelope shape, derived identically by every consumer.
  *
- * The payload reuses the existing six-field {@link Preset} envelope —
- * `{ version, sketch, name, seed, params, locks }` — built through
+ * The payload reuses the {@link Preset} envelope — built through
  * {@link makePreset}/{@link serialize} so the shape stays schema-authoritative
- * (NO new schema), PLUS the frame time `t`. Including `name` (the export filename
- * stem) makes the embedded blob a complete, re-importable Preset. Re-import
- * (reading it back to restore Studio state) is explicitly OUT OF SCOPE for #76;
- * this only WRITES the metadata.
+ * (NO new schema), PLUS the frame time `t`. When an active Output Profile is
+ * supplied the embedded record is a v2 Preset carrying it
+ * (`{ version:2, sketch, name, seed, params, locks, profile }`); otherwise it is
+ * the six-field v1 envelope with no profile — the same `profile` present ⇔
+ * `version === 2` invariant `preset.ts` owns. Including `name` (the export
+ * filename stem) makes the embedded blob a complete, re-importable Preset.
+ * Re-import (reading it back to restore Studio state) is explicitly OUT OF SCOPE
+ * for #76; this only WRITES the metadata.
  */
 
 import { exportFilename, type ExportNameParts } from './exportName'
+import type { PlotProfile } from './plotProfile'
 import { makePreset, serialize, type Preset } from './preset'
 import type { Params, Seed } from './sketch'
 
 /**
- * The embedded reproduction envelope — the full {@link Preset} plus the frame
- * time `t`. This is exactly what {@link buildReproMetadata} serializes to JSON.
+ * The embedded reproduction envelope — the full {@link Preset} (including its
+ * optional `profile`, inherited automatically by extending `Preset`) plus the
+ * frame time `t`. This is exactly what {@link buildReproMetadata} serializes to
+ * JSON: a v2 record when an active profile is supplied, a v1 record otherwise.
  */
 export interface ReproMetadata extends Preset {
   /**
@@ -57,6 +63,14 @@ export interface ReproMetadataInput {
    * the payload carries a time. An absent value is the static case, NOT `t = 0`.
    */
   t?: number | undefined
+  /**
+   * The active Output Profile to embed. Supplied -> the envelope becomes a v2
+   * Preset carrying it; OMITTED (or `undefined`) -> the envelope stays a v1
+   * Preset with no profile. Forwarded verbatim to {@link makePreset} (which
+   * defensively copies it). Wiring the live profile in at the export call site is
+   * issue #267's job; this only ACCEPTS it.
+   */
+  profile?: PlotProfile | undefined
 }
 
 /**
@@ -76,19 +90,22 @@ export function reproFilenameStem(parts: ExportNameParts): string {
 /**
  * Build the reproduction-metadata JSON string both export paths embed.
  *
- * Constructs the six-field {@link Preset} envelope via {@link makePreset} (so the
- * shape stays authoritative and `params`/`locks` are defensively copied/sorted),
- * stamps the filename stem as `name`, attaches the captured `t`, then
- * `JSON.stringify`s the {@link serialize}d record. The `t` key is OMITTED for a
- * static Sketch (undefined input), matching the filename's time-gating.
+ * Constructs the {@link Preset} envelope via {@link makePreset} (so the shape
+ * stays authoritative and `params`/`locks`/`profile` are defensively
+ * copied/sorted), stamps the filename stem as `name`, attaches the captured `t`,
+ * then `JSON.stringify`s the {@link serialize}d record. Forwarding `profile` to
+ * `makePreset` makes the embedded record a v2 Preset carrying it when supplied
+ * and a v1 Preset otherwise. The `t` key is OMITTED for a static Sketch
+ * (undefined input), matching the filename's time-gating.
  *
- * @param input - The live `{ sketchId, seed, params, locks, t? }` to capture.
+ * @param input - The live `{ sketchId, seed, params, locks, t?, profile? }` to
+ *   capture.
  * @returns The UTF-8 JSON string of the envelope + optional `t`.
  */
 export function buildReproMetadata(input: ReproMetadataInput): string {
-  const { sketchId, seed, params, locks, t } = input
+  const { sketchId, seed, params, locks, t, profile } = input
   const name = reproFilenameStem({ sketchId, seed, t })
-  const preset = makePreset(sketchId, name, params, seed, locks)
+  const preset = makePreset(sketchId, name, params, seed, locks, profile)
   const payload: ReproMetadata =
     t === undefined
       ? serialize(preset)
