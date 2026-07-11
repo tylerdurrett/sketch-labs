@@ -10,17 +10,22 @@ For label vocabulary see [docs/agents/triage-labels.md](../../../docs/agents/tri
 
 You are running unattended under `/autopilot`: where `/triage` would confirm with a human (size verification, state choice), make the call yourself per the tables below. The expected happy path is `ready-for-agent`, but never force it — if the task genuinely warrants a non-happy-path state (`needs-info`, `ready-for-human`, …), apply it honestly. End with the structured summary the orchestrator asked for: the size verified (or changed), the state applied, and one sentence of reasoning.
 
-## Verify size
+## Verify size and tier-completeness
 
 `/decompose` should have labeled the child `size:task`. If the size looks right, proceed. If it looks wrong, change the label yourself — do not propose and wait for direction; default toward the larger tier when ambiguous.
 
 `size:task` needs no structural bookkeeping (no integration-branch declaration, no progress comment) — and pipeline triage only ever sees task-sized children.
 
+**Tier-completeness gate.** Before the happy-path stamp, verify the child body carries a `## Scope` and a `## Acceptance criteria` section — what `/execute` and `/verify` consume, and what `ready-for-agent` promises is present. `/decompose` normally produces both; if one is missing, do **not** force `ready-for-agent`:
+
+- If the decompose context plainly establishes the missing section, fill it inline, then continue to the happy path.
+- Otherwise apply `needs-info` (or `ready-for-human`) and name the missing section in your summary. Autopilot's Stage 4 then halts rather than batch an underspecified task — the correct outcome; do not paper over it to keep the run going.
+
 ## Pick the next state
 
 Clear `needs-triage` and apply one state label. Pick from the happy-path table; if none fits, drop to the non-happy-path table.
 
-**Happy path** (the spec was well-specified and ready):
+**Happy path** (size verified and tier-complete, and the spec is ready):
 
 | Size | New state | Next step |
 | ---- | --------- | --------- |
