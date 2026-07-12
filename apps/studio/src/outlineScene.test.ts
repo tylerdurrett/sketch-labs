@@ -1,22 +1,29 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { resolveCompositionFrame, type Scene, type Sketch } from "@harness/core";
+import { hiddenLinePass, type Scene } from "@harness/core";
 
 import { outlineScene } from "./outlineScene";
 
-describe("outlineScene Composition Frame seam", () => {
-  it("generates the requested t in the explicit frame before hidden-line processing", () => {
-    const frame = resolveCompositionFrame(2);
-    const scene: Scene = { space: frame, primitives: [] };
-    const generate = vi.fn(() => scene);
-    const sketch = {
-      id: "frame-probe",
-      name: "Frame probe",
-      schema: {},
-      generate,
-    } as Sketch;
+describe("outlineScene processing seam", () => {
+  it("applies the exact hidden-line pass to an already-sampled Scene", () => {
+    const scene: Scene = {
+      space: { width: 100, height: 100 },
+      primitives: [
+        {
+          points: [
+            [0, 0],
+            [50, 0],
+            [50, 50],
+            [0, 50],
+          ],
+          closed: true,
+          fill: { color: "tomato" },
+        },
+      ],
+    };
 
-    expect(outlineScene(sketch, { density: 3 }, 17, 2.5, frame)).toEqual(scene);
-    expect(generate).toHaveBeenCalledWith({ density: 3 }, 17, 2.5, frame);
+    expect(outlineScene(scene, 2)).toEqual(
+      hiddenLinePass(scene, { tolerance: 2 }),
+    );
   });
 });

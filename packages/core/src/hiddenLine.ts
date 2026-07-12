@@ -1,5 +1,9 @@
 import { simplifyPath } from './simplifyPath'
-import { subtractPolygonsFromPolyline } from './polygonClip'
+import {
+  preparePolygon,
+  subtractPreparedPolygonsFromPolyline,
+} from './polygonClip'
+import type { PreparedPolygon } from './polygonClip'
 import type { Scene, Primitive, Stroke } from './scene'
 import type { Point, Polyline } from './types'
 
@@ -156,13 +160,23 @@ export function hiddenLinePass(
   const { primitives } = scene
 
   // Precompute each filled Primitive's index and AABB for the broad-phase.
-  const filled: { index: number; primitive: Primitive; aabb: AABB }[] = []
+  const filled: {
+    index: number
+    primitive: Primitive
+    aabb: AABB
+    polygon: PreparedPolygon
+  }[] = []
   for (let i = 0; i < primitives.length; i++) {
     const primitive = primitives[i]!
     if (!primitive.fill) continue // decision (c): stroke-only inputs ignored
     const aabb = computeAABB(primitive.points)
     if (aabb === null) continue
-    filled.push({ index: i, primitive, aabb })
+    filled.push({
+      index: i,
+      primitive,
+      aabb,
+      polygon: preparePolygon(primitive.points),
+    })
   }
 
   const out: Primitive[] = []
@@ -173,15 +187,15 @@ export function hiddenLinePass(
     if (outline.length < 2) continue
 
     // Broad-phase: nearer (higher-index) filled Primitives whose AABB overlaps.
-    const occluders: Polyline[] = []
+    const occluders: PreparedPolygon[] = []
     for (let g = f + 1; g < filled.length; g++) {
       const other = filled[g]!
       if (aabbOverlap(self.aabb, other.aabb)) {
-        occluders.push(other.primitive.points)
+        occluders.push(other.polygon)
       }
     }
 
-    const survivors = subtractPolygonsFromPolyline(outline, occluders)
+    const survivors = subtractPreparedPolygonsFromPolyline(outline, occluders)
     const stroke = self.primitive.stroke ?? DEFAULT_STROKE
     for (const survivor of survivors) {
       // FINAL stage: Douglas–Peucker simplification at the requested tolerance.

@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -27,7 +28,8 @@ import { outlineScene } from "./outlineScene";
 /**
  * Which processed Scene the live preview renders (issue #219, feature #4).
  *
- * `fill` is the default, unchanged live path — `generate` → `drawSceneFitted`.
+ * `fill` is the default, unchanged live path — prepared sample →
+ * `drawSceneFitted`.
  * `outline` swaps the fill preview for the Hidden-line pass's stroke-only,
  * occlusion-clipped result (the same processed Scene the hidden-line SVG export
  * emits), drawn through the identical Canvas2D pipeline. The pass is expensive
@@ -35,6 +37,14 @@ import { outlineScene } from "./outlineScene";
  * on the static/on-demand redraw path — never inside the live rAF fill loop.
  */
 export type RenderMode = "fill" | "outline";
+
+/** An atomic record of the Scene that most recently reached the live canvas. */
+export interface DisplayedSceneSnapshot {
+  readonly scene: Scene;
+  readonly t: number;
+  readonly renderMode: RenderMode;
+  readonly tolerance: number;
+}
 
 /**
  * Map a wall-clock elapsed time onto the Sketch's timeline per its `mode`
@@ -59,9 +69,8 @@ function timeForElapsed(elapsedSeconds: number, time: TimeMetadata): number {
  * keeps them deliberately internal so nothing outside can drive the single-owner
  * draw model. Export, though, is a one-shot user action that must read the frame
  * already on screen WITHOUT entering the per-frame loop — so this handle surfaces
- * exactly two read-only getters and nothing that could mutate state or trigger a
- * draw. The owner (SketchControls) calls them on a button click to rasterize the
- * current backing-store pixels.
+ * only read-only getters and nothing that could mutate state or trigger a
+ * draw. The owner (SketchControls) reads them only from one-shot export handlers.
  */
 export interface LiveCanvasHandle {
   /**
@@ -76,6 +85,12 @@ export interface LiveCanvasHandle {
    * encodes. Read-only; reading it never advances or resets the clock.
    */
   getCurrentT(): number;
+  /**
+   * The exact Scene most recently derived and painted, or `null` while geometry
+   * inputs are awaiting their next draw. Read-only and caller-owned: export may
+   * reuse it without asking the Sketch to regenerate the displayed frame.
+   */
+  getDisplayedScene(): DisplayedSceneSnapshot | null;
 }
 
 /**
@@ -98,10 +113,10 @@ export interface LiveCanvasProps {
   /**
    * Which processed Scene the preview draws (issue #219). Optional, defaulting to
    * `fill` so the live path is unchanged when a caller omits it: `fill` renders
-   * `generate`'s Scene as-is; `outline` derives its Scene from the shared
-   * {@link outlineScene} seam (`generate` → Hidden-line pass — the SAME
-   * derivation the hidden-line SVG export consumes, issue #220), showing the
-   * stroke-only occlusion-clipped result. The outline pass is
+   * the prepared sampler's Scene as-is; `outline` derives its Scene from the
+   * shared {@link outlineScene} seam (prepared Scene → Hidden-line pass — the
+   * SAME processing seam the hidden-line SVG export consumes, issue #220),
+   * showing the stroke-only occlusion-clipped result. The outline pass is
    * on-demand only (feature #4 invariant) — it never runs inside the live rAF
    * fill loop; toggling to `outline` suspends that loop and draws once on the
    * static/on-demand redraw path, recomputing on toggle and param-settle.
@@ -156,9 +171,9 @@ export interface LiveCanvasProps {
  * structurally assignable to core's `Canvas2DContext` port, so it is passed
  * directly with no adapter.
  */
-function paintFrame(canvas: HTMLCanvasElement, rendered: Scene): void {
+function paintFrame(canvas: HTMLCanvasElement, rendered: Scene): boolean {
   const ctx = canvas.getContext("2d");
-  if (ctx === null) return;
+  if (ctx === null) return false;
 
   // The browser CanvasRenderingContext2D has everything core's Canvas2DContext
   // port needs; its fillStyle/strokeStyle getters are merely typed wider
@@ -174,6 +189,7 @@ function paintFrame(canvas: HTMLCanvasElement, rendered: Scene): void {
   // The studio and the Remotion renderer thus run one identical mapping AND one
   // identical backdrop — structural parity, not coincidence (ADR-0004 / #85 / #92).
   drawSceneFitted(portCtx, rendered, canvas.width, canvas.height);
+  return true;
 }
 
 /**
@@ -266,6 +282,10 @@ export function LiveCanvas({
   // replace it on the deferred on-demand path; box/DPR/profile-layout changes
   // only repaint this exact Scene into the resized backing store.
   const outlineFrameRef = useRef<Scene | null>(null);
+  // The exact Scene most recently painted, exposed read-only to one-shot export.
+  // A layout-effect invalidation below clears it synchronously after every
+  // geometry-input commit, before the deferred outline double-rAF can run.
+  const displayedSceneRef = useRef<DisplayedSceneSnapshot | null>(null);
 
   // Caller-owned preparation is keyed by the time-invariant determinism inputs
   // PLUS the Composition Frame. A prepared Sketch can retain immutable layout
@@ -318,25 +338,11 @@ export function LiveCanvas({
     "--plot-inset-left": `${(profile.insets.left / profile.width) * 100}%`,
   } as CSSProperties;
 
-  // The current params/seed are read through refs inside the rAF `tick` (and the
-  // static redraw effect) so the loop effect does NOT depend on them. Keeping the
-  // loop keyed on `sketch` alone means a params/seed change feeds new inputs into
-  // the next frame WITHOUT tearing down the loop and resetting its wall-clock
-  // baseline (issue #40). They are kept up to date by an effect (not assigned
-  // during render) so a StrictMode double-render can't desync them.
-  const paramsRef = useRef(params);
-  const seedRef = useRef(seed);
-  // `sketchRef` lets the clockless re-fit helper read the current Sketch without
-  // a `sketch` dependency (so a resize never re-runs the clock effect). Kept in
-  // sync by the same effect — assigned post-commit, not during render, so a
-  // StrictMode double-render can't desync it.
-  const sketchRef = useRef(sketch);
   // The latest caller-owned sampler follows the same post-commit ref discipline
-  // as params/seed. The rAF effect does not depend on it, so invalidating
-  // preparation never resets the animation clock; the next tick samples the new
-  // immutable layout at the continuing `t`.
+  // as the other live inputs. The rAF effect does not depend on it, so
+  // invalidating preparation never resets the animation clock; the next tick
+  // samples the new immutable layout at the continuing `t`.
   const preparedFrameRef = useRef(preparedFrame);
-  const compositionFrameRef = useRef(compositionFrame);
   // `renderModeRef` lets the stable on-demand draw callbacks (rebuild/repaint,
   // scrubTo) read the current mode without a `renderMode` dependency, so a mode
   // flip never re-runs the clock effect or resets the rAF baseline. Kept in sync
@@ -355,24 +361,24 @@ export function LiveCanvas({
   // re-trigger the pass every render. Kept in sync post-commit like the others.
   const onOutlineComputedRef = useRef(onOutlineComputed);
   useEffect(() => {
-    paramsRef.current = params;
-    seedRef.current = seed;
-    sketchRef.current = sketch;
     preparedFrameRef.current = preparedFrame;
-    compositionFrameRef.current = compositionFrame;
     renderModeRef.current = renderMode;
     toleranceRef.current = tolerance;
     onOutlineComputedRef.current = onOutlineComputed;
   }, [
-    params,
-    seed,
-    sketch,
     preparedFrame,
-    compositionFrame,
     renderMode,
     tolerance,
     onOutlineComputed,
   ]);
+
+  // Never let export observe old geometry during the window between an input or
+  // mode commit and its next draw. Layout effects run synchronously after the
+  // commit and before paint/events, while the outline rebuild intentionally waits
+  // two rAFs; the cache is therefore null for that entire deferred interval.
+  useLayoutEffect(() => {
+    displayedSceneRef.current = null;
+  }, [sketch, params, seed, compositionAspect, renderMode, tolerance]);
 
   // The latest `t` the loop has drawn (0 for a static Sketch). The resize re-fit
   // redraws THIS frame so a box change repaints the current moment, not t = 0 —
@@ -392,6 +398,7 @@ export function LiveCanvas({
     () => ({
       getCanvas: () => canvasRef.current,
       getCurrentT: () => tRef.current,
+      getDisplayedScene: () => displayedSceneRef.current,
     }),
     [],
   );
@@ -429,19 +436,19 @@ export function LiveCanvas({
     if (canvas === null) return;
     const rendered =
       renderModeRef.current === "outline"
-        ? outlineScene(
-            sketchRef.current,
-            paramsRef.current,
-            seedRef.current,
-            t,
-            compositionFrameRef.current,
-            toleranceRef.current,
-          )
+        ? outlineScene(preparedFrameRef.current(t), toleranceRef.current)
         : preparedFrameRef.current(t);
     if (renderModeRef.current === "outline") {
       outlineFrameRef.current = rendered;
     }
-    paintFrame(canvas, rendered);
+    if (paintFrame(canvas, rendered)) {
+      displayedSceneRef.current = {
+        scene: rendered,
+        t,
+        renderMode: renderModeRef.current,
+        tolerance: toleranceRef.current,
+      };
+    }
   }, []);
 
   // Repaint the current geometry without deriving it again. Fill sampling is
@@ -542,7 +549,15 @@ export function LiveCanvas({
       // guarantee that `tick` can only ever draw fill. Tolerance is hardcoded 0
       // to match: the fill branch never simplifies, so the live loop stays
       // provably simplify-free (issue #232's on-demand-only invariant).
-      paintFrame(canvas, preparedFrameRef.current(t));
+      const rendered = preparedFrameRef.current(t);
+      if (paintFrame(canvas, rendered)) {
+        displayedSceneRef.current = {
+          scene: rendered,
+          t,
+          renderMode: "fill",
+          tolerance: toleranceRef.current,
+        };
+      }
       frameId = requestAnimationFrame(tick);
     };
 
