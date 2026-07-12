@@ -30,8 +30,47 @@ describe('renderPlotterSVG', () => {
     const svg = renderPlotterSVG(scene, profile)
 
     expect(svg).toMatch(
-      /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="240mm" height="160mm" viewBox="0 0 240 160">/,
+      /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="240mm" height="160mm" viewBox="0 0 240 160" data-paper-extent="paper">/,
     )
+  })
+
+  it('preserves paper extent and margin offsets by default and when explicitly included', () => {
+    const implicit = renderPlotterSVG(scene, profile)
+    const explicit = renderPlotterSVG(scene, profile, undefined, {
+      includePaperMargins: true,
+    })
+
+    expect(explicit).toBe(implicit)
+    expect(explicit).toContain('width="240mm" height="160mm"')
+    expect(explicit).toContain('viewBox="0 0 240 160"')
+    expect(explicit).toContain('data-paper-extent="paper"')
+    expect(explicit).toContain('d="M10 20 L210 120"')
+  })
+
+  it('uses the drawable extent and rebases asymmetric margin offsets when excluded', () => {
+    const svg = renderPlotterSVG(scene, profile, undefined, {
+      includePaperMargins: false,
+    })
+
+    expect(svg).toMatch(
+      /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="200mm" height="100mm" viewBox="0 0 200 100" data-paper-extent="drawable">/,
+    )
+    expect(svg).toContain('d="M0 0 L200 100"')
+  })
+
+  it('changes only document extent and origin, preserving physical geometry and stroke scale', () => {
+    const paperPath = paths(renderPlotterSVG(scene, profile))[0]
+    const drawableSVG = renderPlotterSVG(scene, profile, undefined, {
+      includePaperMargins: false,
+    })
+    const drawablePath = paths(drawableSVG)[0]
+
+    expect(paperPath).toContain('d="M10 20 L210 120"')
+    expect(drawablePath).toContain('d="M0 0 L200 100"')
+    expect(paperPath).toContain('stroke-width="1"')
+    expect(drawablePath).toContain('stroke-width="1"')
+    expect(drawableSVG).not.toMatch(/<(?:rect|g|clipPath)\b/)
+    expect(drawableSVG).not.toMatch(/\btransform=|\bclip-path=/)
   })
 
   it('bakes asymmetric drawable placement into path coordinates', () => {
@@ -68,6 +107,14 @@ describe('renderPlotterSVG', () => {
 
     const svg = renderPlotterSVG(noisyScene, noisyProfile)
     expect(svg).toContain('d="M0.1 0.2 L0.7667 1.2"')
+
+    const drawableSVG = renderPlotterSVG(
+      noisyScene,
+      noisyProfile,
+      undefined,
+      { includePaperMargins: false },
+    )
+    expect(drawableSVG).toContain('d="M0 0 L0.6667 1"')
   })
 
   it('scales geometry and Scene stroke widths by the same uniform factor', () => {
@@ -227,6 +274,16 @@ describe('renderPlotterSVG', () => {
       .replace(/&lt;/g, '<')
       .replace(/&amp;/g, '&')
     expect(JSON.parse(unescaped)).toEqual(envelope)
+  })
+
+  it('does not alter reproduction metadata when the drawable extent is selected', () => {
+    const metadata = JSON.stringify({ version: 1, outputProfile: profile })
+    const svg = renderPlotterSVG(scene, profile, metadata, {
+      includePaperMargins: false,
+    })
+
+    expect(svg).toContain(`  <metadata>${metadata}</metadata>`)
+    expect(svg).toContain('data-paper-extent="drawable"')
   })
 
   it('omits metadata cleanly when none is supplied', () => {
