@@ -9,13 +9,12 @@ import {
   type PlotProfile,
 } from "@harness/core";
 
-import {
-  PAPER_DISPLAY_UNIT_STORAGE_KEY,
-  PaperSection,
-} from "./PaperSection";
+import { PAPER_DISPLAY_UNIT_STORAGE_KEY, PaperSection } from "./PaperSection";
+import type { EditTransactionLifecycle } from "./editHistory";
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-  true;
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 const profile: PlotProfile = {
   width: 210,
@@ -56,6 +55,79 @@ function setInput(input: HTMLInputElement, value: string): void {
     setter.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
+}
+
+function focusInput(input: HTMLInputElement): void {
+  act(() => input.focus());
+}
+
+function pressKey(input: HTMLInputElement, key: string): void {
+  act(() =>
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+    ),
+  );
+}
+
+function blurInput(input: HTMLInputElement): void {
+  act(() => input.blur());
+}
+
+function mountTransactional(initialProfile: PlotProfile = profile) {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  let current = structuredClone(initialProfile);
+  let snapshot = structuredClone(initialProfile);
+  const events: string[] = [];
+  const onIncludePaperMarginsChange = vi.fn();
+  const onAtomicChange = vi.fn((next: PlotProfile) => {
+    events.push("atomic");
+    current = structuredClone(next);
+    render();
+  });
+  const transaction: EditTransactionLifecycle<PlotProfile> = {
+    onBegin: () => {
+      events.push("begin");
+      snapshot = structuredClone(current);
+    },
+    onPreview: (next) => {
+      events.push("preview");
+      current = structuredClone(next);
+      render();
+    },
+    onCommit: () => events.push("commit"),
+    onCancel: () => {
+      events.push("cancel");
+      current = structuredClone(snapshot);
+      render();
+    },
+  };
+
+  function render(): void {
+    root.render(
+      <PaperSection
+        profile={current}
+        transaction={transaction}
+        onAtomicChange={onAtomicChange}
+        includePaperMargins
+        onIncludePaperMarginsChange={onIncludePaperMarginsChange}
+      />,
+    );
+  }
+
+  act(render);
+  return {
+    el: container,
+    events,
+    onAtomicChange,
+    onIncludePaperMarginsChange,
+    profile: () => current,
+    restore: (next: PlotProfile) => {
+      current = structuredClone(next);
+      act(render);
+    },
+  };
 }
 
 function selectFormat(el: HTMLElement, value: string): void {
@@ -118,6 +190,150 @@ afterEach(() => {
 });
 
 describe("PaperSection", () => {
+  it("previews a valid field live and commits it once on Enter", () => {
+    const {
+      el,
+      events,
+      onAtomicChange,
+      profile: controlled,
+    } = mountTransactional();
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    focusInput(width);
+    setInput(width, "220");
+    pressKey(width, "Enter");
+
+    expect(events).toEqual(["begin", "preview", "commit"]);
+    expect(controlled()).toEqual({ ...profile, width: 220 });
+    expect(onAtomicChange).not.toHaveBeenCalled();
+  });
+
+  it("commits a field once on blur", () => {
+    const { el, events } = mountTransactional();
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+
+    focusInput(margin);
+    setInput(margin, "12");
+    blurInput(margin);
+
+    expect(events).toEqual(["begin", "preview", "commit"]);
+  });
+
+  it("restores the focus snapshot on Escape without a later blur commit", () => {
+    const { el, events, profile: controlled } = mountTransactional();
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    focusInput(width);
+    setInput(width, "220");
+    pressKey(width, "Enter");
+
+    const height = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper height (mm)"]',
+    )!;
+    focusInput(height);
+    setInput(height, "310");
+    pressKey(height, "Escape");
+    blurInput(height);
+
+    expect(events).toEqual([
+      "begin",
+      "preview",
+      "commit",
+      "begin",
+      "preview",
+      "cancel",
+    ]);
+    expect(controlled()).toEqual({ ...profile, width: 220 });
+    expect(width.value).toBe("220");
+    expect(height.value).toBe("297");
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("routes discrete paper controls only through atomic complete-profile commits", () => {
+    const { el, events, onAtomicChange } = mountTransactional();
+
+    selectFormat(el, "a3");
+    clickButton(el, "Swap to landscape");
+    act(() =>
+      frameCheckbox(el).dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      ),
+    );
+
+    expect(events).toEqual(["atomic", "atomic", "atomic"]);
+    expect(onAtomicChange).toHaveBeenCalledTimes(3);
+    for (const [candidate] of onAtomicChange.mock.calls) {
+      expect(candidate).toEqual({
+        width: expect.any(Number),
+        height: expect.any(Number),
+        insets: expect.objectContaining({
+          top: expect.any(Number),
+          right: expect.any(Number),
+          bottom: expect.any(Number),
+          left: expect.any(Number),
+        }),
+        includeFrame: expect.any(Boolean),
+      });
+    }
+  });
+
+  it("suppresses Custom and unchanged format choices before the history layer", () => {
+    const { el, events, onAtomicChange } = mountTransactional();
+
+    selectFormat(el, "custom");
+    selectFormat(el, "a4");
+
+    expect(events).toEqual([]);
+    expect(onAtomicChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps disclosure, units, storage, and export-margin preference outside edit history", () => {
+    const { el, events, onAtomicChange, onIncludePaperMarginsChange } =
+      mountTransactional();
+    const details = el.querySelector("details")!;
+
+    act(() =>
+      details.dispatchEvent(new MouseEvent("click", { bubbles: true })),
+    );
+    selectUnit(el, "in");
+    act(() =>
+      paperMarginsCheckbox(el).dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      ),
+    );
+
+    expect(events).toEqual([]);
+    expect(onAtomicChange).not.toHaveBeenCalled();
+    expect(onIncludePaperMarginsChange).toHaveBeenCalledOnce();
+    expect(window.localStorage.getItem(PAPER_DISPLAY_UNIT_STORAGE_KEY)).toBe(
+      "in",
+    );
+  });
+
+  it("reconciles invalid local drafts when the controlled profile is restored", () => {
+    const { el, restore } = mountTransactional();
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    focusInput(width);
+    setInput(width, "");
+    blurInput(width);
+    expect(width.value).toBe("");
+    expect(el.querySelector('[role="alert"]')).not.toBeNull();
+
+    restore({ ...profile, width: 230 });
+
+    expect(width.value).toBe("230");
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+  });
+
   it.each([
     [true, false],
     [false, true],
@@ -274,9 +490,10 @@ describe("PaperSection", () => {
     const select = el.querySelector("select");
 
     expect(select?.value).toBe("a4");
-    expect(
-      [...(select?.options ?? [])].map((option) => option.value),
-    ).toEqual([...STANDARD_PAPER_NAMES, "custom"]);
+    expect([...(select?.options ?? [])].map((option) => option.value)).toEqual([
+      ...STANDARD_PAPER_NAMES,
+      "custom",
+    ]);
   });
 
   it("derives the Harness fallback as Square with no orientation action", () => {
@@ -486,9 +703,7 @@ describe("PaperSection", () => {
     expect(onChange).not.toHaveBeenCalled();
     const error = el.querySelector('[role="alert"]');
     const select = el.querySelector("select")!;
-    expect(error?.textContent).toContain(
-      "no drawable rectangle",
-    );
+    expect(error?.textContent).toContain("no drawable rectangle");
     expect(select.getAttribute("aria-invalid")).toBe("true");
     expect(select.getAttribute("aria-describedby")).toBe(error?.id);
     for (const input of el.querySelectorAll('input[type="number"]')) {
@@ -633,9 +848,7 @@ describe("PaperSection", () => {
       const alert = el.querySelector<HTMLElement>('[role="alert"]')!;
       expect(margin.getAttribute("aria-invalid")).toBe("true");
       expect(margin.getAttribute("aria-describedby")).toBe(alert.id);
-      for (const input of el.querySelectorAll(
-        'input[aria-label^="Paper "]',
-      )) {
+      for (const input of el.querySelectorAll('input[aria-label^="Paper "]')) {
         expect(input.getAttribute("aria-invalid")).toBe("false");
       }
     }
@@ -681,7 +894,9 @@ describe("PaperSection", () => {
     expect(el.querySelector("summary")?.textContent).toContain(
       "8.268 × 11.693 in",
     );
-    expect(window.localStorage.getItem(PAPER_DISPLAY_UNIT_STORAGE_KEY)).toBe("in");
+    expect(window.localStorage.getItem(PAPER_DISPLAY_UNIT_STORAGE_KEY)).toBe(
+      "in",
+    );
     expect(onChange).not.toHaveBeenCalled();
     expect(profile).toEqual(before);
   });

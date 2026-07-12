@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 
 import {
   applyStandardPaper,
@@ -13,22 +13,39 @@ import {
   type StandardPaperName,
 } from "@harness/core";
 
+import type { EditTransactionLifecycle } from "./editHistory";
+
 /** The Studio-local preference key. Display units are never Plot Profile state. */
-export const PAPER_DISPLAY_UNIT_STORAGE_KEY =
-  "sketch-labs.paper-display-unit";
+export const PAPER_DISPLAY_UNIT_STORAGE_KEY = "sketch-labs.paper-display-unit";
 
 export type PaperDisplayUnit = "mm" | "in";
 
-export interface PaperSectionProps {
+interface PaperSectionBaseProps {
   /** The authoritative, millimeter-canonical Plot Profile owned by Studio. */
   profile: PlotProfile;
-  /** Commit a canonical Plot Profile edit to the owning Studio session. */
-  onChange: (profile: PlotProfile) => void;
   /** Whether physical plotter SVGs include the full paper extent. */
   includePaperMargins: boolean;
   /** Update Studio's export preference without changing the Plot Profile. */
   onIncludePaperMarginsChange: (includePaperMargins: boolean) => void;
 }
+
+interface TransactionalPaperSectionProps {
+  /** Lifecycle for focus-bounded dimension and margin edits. */
+  transaction: EditTransactionLifecycle<PlotProfile>;
+  /** Commit one format, orientation, or composition-frame command. */
+  onAtomicChange: (profile: PlotProfile) => void;
+  onChange?: never;
+}
+
+interface LegacyPaperSectionProps {
+  /** @deprecated Supply `transaction` and `onAtomicChange` for history support. */
+  onChange: (profile: PlotProfile) => void;
+  transaction?: never;
+  onAtomicChange?: never;
+}
+
+export type PaperSectionProps = PaperSectionBaseProps &
+  (TransactionalPaperSectionProps | LegacyPaperSectionProps);
 
 /** Read the presentation-only unit preference without assuming storage is usable. */
 function readDisplayUnit(): PaperDisplayUnit {
@@ -60,6 +77,7 @@ function formatDimension(value: number, unit: PaperDisplayUnit): string {
 
 type PaperDimension = "width" | "height";
 type PaperErrorTarget = "format" | "orientation" | "margin" | PaperDimension;
+type PaperField = PaperDimension | "margin";
 
 interface PaperError {
   target: PaperErrorTarget;
@@ -77,20 +95,36 @@ function linkedInset(profile: PlotProfile): number | null {
   return top === right && right === bottom && bottom === left ? top : null;
 }
 
+function copyProfile(profile: PlotProfile): PlotProfile {
+  return { ...profile, insets: { ...profile.insets } };
+}
+
+function sameProfile(left: PlotProfile, right: PlotProfile): boolean {
+  return (
+    Object.is(left.width, right.width) &&
+    Object.is(left.height, right.height) &&
+    Object.is(left.insets.top, right.insets.top) &&
+    Object.is(left.insets.right, right.insets.right) &&
+    Object.is(left.insets.bottom, right.insets.bottom) &&
+    Object.is(left.insets.left, right.insets.left) &&
+    left.includeFrame === right.includeFrame
+  );
+}
+
 /**
  * The controlled Paper inspector boundary.
  *
  * The native disclosure is collapsed by default and keeps the active dimensions
  * visible in its summary. Display units are deliberately local presentation
  * state: changing them never rewrites the canonical millimeter profile and never
- * calls {@link PaperSectionProps.onChange}. Dimension edits convert back to
- * millimeters and validate a complete candidate before committing it atomically.
+ * invokes an edit callback. Dimension and margin fields preview complete profiles
+ * through one focus-bounded transaction; discrete controls commit atomically.
  */
 export function PaperSection({
   profile,
-  onChange,
   includePaperMargins,
   onIncludePaperMarginsChange,
+  ...editProps
 }: PaperSectionProps) {
   const [displayUnit, setDisplayUnit] =
     useState<PaperDisplayUnit>(readDisplayUnit);
@@ -103,6 +137,10 @@ export function PaperSection({
     return inset === null ? "" : formatDimension(inset, displayUnit);
   });
   const [error, setError] = useState<PaperError | null>(null);
+  const activeField = useRef<{
+    field: PaperField;
+    snapshot: PlotProfile;
+  } | null>(null);
   const dirtyDimensions = useRef<Set<PaperDimension>>(new Set());
   const id = useId();
 
@@ -114,14 +152,13 @@ export function PaperSection({
   // unit change replaces the drafts from the canonical model. Invalid partial
   // text otherwise remains editable because it does not change these dependencies.
   useEffect(() => {
+    if (activeField.current !== null) return;
     setDimensionDrafts({
       width: formatDimension(profile.width, displayUnit),
       height: formatDimension(profile.height, displayUnit),
     });
     const inset = linkedInset(profile);
-    setMarginDraft(
-      inset === null ? "" : formatDimension(inset, displayUnit),
-    );
+    setMarginDraft(inset === null ? "" : formatDimension(inset, displayUnit));
     dirtyDimensions.current.clear();
     setError(null);
   }, [
@@ -134,6 +171,67 @@ export function PaperSection({
     profile.width,
   ]);
 
+  const preview = (candidate: PlotProfile): void => {
+    if ("transaction" in editProps && editProps.transaction !== undefined) {
+      editProps.transaction.onPreview(candidate);
+    } else {
+      editProps.onChange(candidate);
+    }
+  };
+
+  const beginField = (field: PaperField): void => {
+    if (activeField.current?.field === field) return;
+    dirtyDimensions.current.clear();
+    activeField.current = { field, snapshot: copyProfile(profile) };
+    if ("transaction" in editProps && editProps.transaction !== undefined) {
+      editProps.transaction.onBegin();
+    }
+  };
+
+  const commitField = (field: PaperField): void => {
+    if (activeField.current?.field !== field) return;
+    activeField.current = null;
+    dirtyDimensions.current.clear();
+    if ("transaction" in editProps && editProps.transaction !== undefined) {
+      editProps.transaction.onCommit();
+    }
+  };
+
+  const cancelField = (field: PaperField): void => {
+    const active = activeField.current;
+    if (active?.field !== field) return;
+    activeField.current = null;
+    dirtyDimensions.current.clear();
+    const snapshot = active.snapshot;
+    setDimensionDrafts({
+      width: formatDimension(snapshot.width, displayUnit),
+      height: formatDimension(snapshot.height, displayUnit),
+    });
+    const inset = linkedInset(snapshot);
+    setMarginDraft(inset === null ? "" : formatDimension(inset, displayUnit));
+    setError(null);
+    if ("transaction" in editProps && editProps.transaction !== undefined) {
+      editProps.transaction.onCancel();
+    } else {
+      editProps.onChange(snapshot);
+    }
+  };
+
+  const handleFieldKeyDown = (
+    field: PaperField,
+    event: KeyboardEvent<HTMLInputElement>,
+  ): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelField(field);
+      event.currentTarget.blur();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      commitField(field);
+      event.currentTarget.blur();
+    }
+  };
+
   const commitCandidate = (
     candidate: PlotProfile,
     target: PaperErrorTarget,
@@ -141,7 +239,7 @@ export function PaperSection({
     try {
       validatePlotProfile(candidate);
       setError(null);
-      onChange(candidate);
+      preview(candidate);
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : "Invalid paper dimensions";
@@ -165,10 +263,6 @@ export function PaperSection({
     setDimensionDrafts(nextDrafts);
     dirtyDimensions.current.add(dimension);
 
-    // Validate and commit ALL fields the artist has touched as one profile. An
-    // untouched field keeps its exact canonical value (important in inch mode,
-    // where its displayed text is rounded); a dirty invalid sibling prevents a
-    // partial commit until the whole authored candidate becomes valid.
     const candidate = { ...profile };
     for (const dirty of dirtyDimensions.current) {
       const dirtyDraft = nextDrafts[dirty];
@@ -179,7 +273,6 @@ export function PaperSection({
         });
         return;
       }
-
       const displayValue = Number(dirtyDraft);
       candidate[dirty] =
         displayUnit === "in" ? inchToMm(displayValue) : displayValue;
@@ -187,18 +280,43 @@ export function PaperSection({
     commitCandidate(candidate, dimension);
   };
 
+  const commitAtomicCandidate = (
+    candidate: PlotProfile,
+    target: PaperErrorTarget,
+  ): void => {
+    try {
+      validatePlotProfile(candidate);
+      setError(null);
+      if (sameProfile(profile, candidate)) return;
+      if (
+        "onAtomicChange" in editProps &&
+        editProps.onAtomicChange !== undefined
+      ) {
+        editProps.onAtomicChange(candidate);
+      } else {
+        editProps.onChange(candidate);
+      }
+    } catch (cause) {
+      setError({
+        target,
+        message:
+          cause instanceof Error ? cause.message : "Invalid paper dimensions",
+      });
+    }
+  };
+
   const selectFormat = (value: string): void => {
     if (value === "custom") return;
 
     const name = value as StandardPaperName;
-    commitCandidate(
+    commitAtomicCandidate(
       applyStandardPaper(profile, name, derivePaperOrientation(profile)),
       "format",
     );
   };
 
   const swapOrientation = (): void => {
-    commitCandidate(swapPlotOrientation(profile), "orientation");
+    commitAtomicCandidate(swapPlotOrientation(profile), "orientation");
   };
 
   const editMargin = (draft: string): void => {
@@ -301,6 +419,9 @@ export function PaperSection({
                   onChange={(event) =>
                     editDimension(dimension, event.target.value)
                   }
+                  onFocus={() => beginField(dimension)}
+                  onBlur={() => commitField(dimension)}
+                  onKeyDown={(event) => handleFieldKeyDown(dimension, event)}
                 />
                 <span aria-hidden className="text-muted-foreground">
                   {displayUnit}
@@ -345,6 +466,9 @@ export function PaperSection({
                 error?.target === "margin" ? errorId : undefined
               }
               onChange={(event) => editMargin(event.target.value)}
+              onFocus={() => beginField("margin")}
+              onBlur={() => commitField("margin")}
+              onKeyDown={(event) => handleFieldKeyDown("margin", event)}
             />
             <span aria-hidden className="text-muted-foreground">
               {displayUnit}
@@ -356,7 +480,10 @@ export function PaperSection({
             type="checkbox"
             checked={profile.includeFrame}
             onChange={(event) =>
-              onChange({ ...profile, includeFrame: event.target.checked })
+              commitAtomicCandidate(
+                { ...profile, includeFrame: event.target.checked },
+                "format",
+              )
             }
           />
           <span>Include composition frame</span>
