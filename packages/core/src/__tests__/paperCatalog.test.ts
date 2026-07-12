@@ -20,8 +20,8 @@ import type { PlotInsets, PlotProfile } from '../plotProfile'
 const ASYMMETRIC_INSETS: PlotInsets = { top: 5, right: 10, bottom: 15, left: 20 }
 const ZERO_INSETS: PlotInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 
-/** The record shape carries only dimensions and insets — nothing derived. */
-const PROFILE_KEYS = ['height', 'insets', 'width']
+/** The record shape carries physical settings and the authored-frame option. */
+const PROFILE_KEYS = ['height', 'includeFrame', 'insets', 'width']
 
 describe('STANDARD_PAPERS catalog', () => {
   it('covers the seven standard formats in portrait millimeters (AC4)', () => {
@@ -77,11 +77,13 @@ describe('standardPaperProfile', () => {
       width: 200,
       height: 200,
       insets: ZERO_INSETS,
+      includeFrame: true,
     })
     expect(standardPaperProfile('square', 'landscape')).toEqual({
       width: 200,
       height: 200,
       insets: ZERO_INSETS,
+      includeFrame: true,
     })
   })
 
@@ -95,7 +97,7 @@ describe('standardPaperProfile', () => {
     )
   })
 
-  it('stores only dimensions and insets — no paper name or orientation (AC1)', () => {
+  it('stores no derived paper name or orientation (AC1)', () => {
     expect(Object.keys(standardPaperProfile('a4')).sort()).toEqual(PROFILE_KEYS)
   })
 })
@@ -106,11 +108,13 @@ describe('applyStandardPaper', () => {
       width: 200,
       height: 200,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: false,
     }
     const next = applyStandardPaper(profile, 'a3')
     expect(next.width).toBe(297)
     expect(next.height).toBe(420)
     expect(next.insets).toEqual(ASYMMETRIC_INSETS)
+    expect(next.includeFrame).toBe(false)
   })
 
   it('preserves insets when writing a landscape standard', () => {
@@ -118,6 +122,7 @@ describe('applyStandardPaper', () => {
       width: 200,
       height: 200,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: true,
     }
     const next = applyStandardPaper(profile, 'letter', 'landscape')
     expect(next.width).toBe(279.4)
@@ -130,35 +135,58 @@ describe('applyStandardPaper', () => {
       width: 297,
       height: 210,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: true,
     }
 
     expect(applyStandardPaper(profile, 'square', 'portrait')).toEqual({
       width: 200,
       height: 200,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: true,
     })
     expect(applyStandardPaper(profile, 'square', 'landscape')).toEqual({
       width: 200,
       height: 200,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: true,
     })
   })
 
   it('persists no standard name or orientation on the profile (AC1)', () => {
-    const profile: PlotProfile = { width: 200, height: 200, insets: ZERO_INSETS }
+    const profile: PlotProfile = {
+      width: 200,
+      height: 200,
+      insets: ZERO_INSETS,
+      includeFrame: true,
+    }
     expect(Object.keys(applyStandardPaper(profile, 'a4')).sort()).toEqual(
       PROFILE_KEYS,
     )
   })
 
   it('does not mutate the input profile', () => {
-    const profile: PlotProfile = { width: 200, height: 200, insets: ZERO_INSETS }
+    const profile: PlotProfile = {
+      width: 200,
+      height: 200,
+      insets: ZERO_INSETS,
+      includeFrame: true,
+    }
     applyStandardPaper(profile, 'a4', 'landscape')
-    expect(profile).toEqual({ width: 200, height: 200, insets: ZERO_INSETS })
+    expect(profile).toEqual({
+      width: 200,
+      height: 200,
+      insets: ZERO_INSETS,
+      includeFrame: true,
+    })
   })
 
   it('writes dimensions from which the label and orientation are re-derivable (AC1)', () => {
-    const profile: PlotProfile = { width: 200, height: 200, insets: ZERO_INSETS }
+    const profile: PlotProfile = {
+      width: 200,
+      height: 200,
+      insets: ZERO_INSETS,
+      includeFrame: true,
+    }
     const next = applyStandardPaper(profile, 'a4', 'landscape')
     expect(matchStandardPaper(next)).toBe('a4')
     expect(derivePaperOrientation(next)).toBe('landscape')
@@ -186,6 +214,7 @@ describe('matchStandardPaper', () => {
       width: 210,
       height: 297,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: true,
     }
     expect(matchStandardPaper(profile)).toBe('a4')
   })
@@ -223,6 +252,7 @@ describe('derivePaperOrientation', () => {
       width: 297,
       height: 210,
       insets: ZERO_INSETS,
+      includeFrame: true,
     }
     expect(derivePaperOrientation(profile)).toBe('landscape')
   })
@@ -234,6 +264,7 @@ describe('swapPlotOrientation', () => {
       width: 210,
       height: 297,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: false,
     })
     expect(swapped.width).toBe(297)
     expect(swapped.height).toBe(210)
@@ -244,16 +275,18 @@ describe('swapPlotOrientation', () => {
       width: 210,
       height: 297,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: false,
     })
     // top/right/bottom/left are identical — not rotated with the paper.
     expect(swapped.insets).toEqual(ASYMMETRIC_INSETS)
   })
 
-  it('introduces no new stored state — only width, height, insets (AC2)', () => {
+  it('introduces no derived paper or orientation state (AC2)', () => {
     const swapped = swapPlotOrientation({
       width: 210,
       height: 297,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: true,
     })
     expect(Object.keys(swapped).sort()).toEqual(PROFILE_KEYS)
   })
@@ -263,12 +296,14 @@ describe('swapPlotOrientation', () => {
       width: 210,
       height: 297,
       insets: { ...ASYMMETRIC_INSETS },
+      includeFrame: false,
     }
     swapPlotOrientation(profile)
     expect(profile).toEqual({
       width: 210,
       height: 297,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: false,
     })
   })
 
@@ -277,6 +312,7 @@ describe('swapPlotOrientation', () => {
       width: 210,
       height: 297,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: false,
     }
     expect(swapPlotOrientation(swapPlotOrientation(profile))).toEqual(profile)
   })
@@ -286,6 +322,7 @@ describe('swapPlotOrientation', () => {
       width: 210,
       height: 297,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: false,
     }
     const landscape = swapPlotOrientation(portrait)
     expect(derivePaperOrientation(portrait)).toBe('portrait')
@@ -311,6 +348,7 @@ describe('millimeter <-> inch conversion', () => {
       width: 25.4,
       height: 50.8,
       insets: { top: 25.4, right: 50.8, bottom: 12.7, left: 0 },
+      includeFrame: false,
     }
     const inches = plotProfileToInches(profile)
     expect(inches.width).toBeCloseTo(1)
@@ -319,6 +357,7 @@ describe('millimeter <-> inch conversion', () => {
     expect(inches.insets.right).toBeCloseTo(2)
     expect(inches.insets.bottom).toBeCloseTo(0.5)
     expect(inches.insets.left).toBeCloseTo(0)
+    expect(inches.includeFrame).toBe(false)
   })
 
   it('round-trips mm -> inch -> mm back to the canonical value (AC3)', () => {
@@ -326,6 +365,7 @@ describe('millimeter <-> inch conversion', () => {
       width: 210,
       height: 297,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: false,
     }
     const roundTripped = plotProfileFromInches(plotProfileToInches(profile))
     // toBeCloseTo — the round trip returns within float tolerance, e.g. 210 may
@@ -336,6 +376,7 @@ describe('millimeter <-> inch conversion', () => {
     expect(roundTripped.insets.right).toBeCloseTo(profile.insets.right)
     expect(roundTripped.insets.bottom).toBeCloseTo(profile.insets.bottom)
     expect(roundTripped.insets.left).toBeCloseTo(profile.insets.left)
+    expect(roundTripped.includeFrame).toBe(false)
   })
 
   it('never overwrites the canonical mm model — the input profile is unchanged (AC3)', () => {
@@ -343,6 +384,7 @@ describe('millimeter <-> inch conversion', () => {
       width: 210,
       height: 297,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: false,
     }
     plotProfileToInches(profile)
     plotProfileFromInches(profile)
@@ -350,11 +392,17 @@ describe('millimeter <-> inch conversion', () => {
       width: 210,
       height: 297,
       insets: ASYMMETRIC_INSETS,
+      includeFrame: false,
     })
   })
 
   it('the round trip still matches the same standard within catalog tolerance', () => {
-    const profile: PlotProfile = { width: 210, height: 297, insets: ZERO_INSETS }
+    const profile: PlotProfile = {
+      width: 210,
+      height: 297,
+      insets: ZERO_INSETS,
+      includeFrame: true,
+    }
     const roundTripped = plotProfileFromInches(plotProfileToInches(profile))
     expect(matchStandardPaper(roundTripped)).toBe('a4')
   })

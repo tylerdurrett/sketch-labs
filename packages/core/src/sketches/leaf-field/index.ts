@@ -4,9 +4,8 @@
  * seeded curl-noise flow field, carrying seeded per-leaf shape variation,
  * composited in painter's order over a param-colored background, and — with a
  * SEEDED SET of opaque occluder discs spliced into that order — carrying round
- * volumes in the field: colored orbs the leaves lap over (white on mid gray at
- * the defaults), which when disc color == background color read as IMPLIED
- * SPHERES in the field's negative space.
+ * volumes in the field: white discs the leaves lap over on white at the
+ * defaults, reading as IMPLIED SPHERES in the field's negative space.
  *
  * It samples the seeded variable-radius Poisson-disk sampler under a CONSTANT
  * radius field (the field's spacing is driven by the `density` knob), rolls a
@@ -60,13 +59,12 @@
  * specifically to be INVISIBLE AS AN OBJECT: only the occlusion of the leaves it
  * covers read, a pure figure-ground implied sphere (a tinted fill would have
  * shown up as a faint drawn circle, 2026-07-03 audit). `discColor` DECOUPLES
- * that: the disc is now a VISIBLE colored occluder in its own right — a colored
- * orb the leaves lap over — and that is the SHIPPED DEFAULT (2026-07-07): white
- * discs (`discColor` `'#ffffff'`) on a mid-gray ground (`backgroundColor`
- * `'#878787'`), so a bare generate reads as white orbs in the field. The
- * original implied-sphere figure-ground survives as the OPT-IN SPECIAL CASE
- * `discColor === discStrokeColor === backgroundColor` (set all three knobs to
- * the same color; no shipped preset pins it). Each disc is spliced into the
+ * that: the disc can also be a VISIBLE colored occluder in its own right — a
+ * colored orb the leaves lap over. For the physical-plot-first default palette
+ * (2026-07-11, issue #276), however, its white fill matches the white Scene
+ * background while its black outline remains plot-readable. Existing Presets
+ * pin their captured palettes explicitly and therefore retain either treatment.
+ * Each disc is spliced into the
  * painter's order at a DEPTH index driven by the global `sphereDepth` knob. Leaves drawn
  * BEFORE it (top/back of the field) are painted over where they cross it, so the
  * disc's TRUE circular silhouette cuts a hard, genuinely round edge on the
@@ -152,13 +150,14 @@
  * is still derived solely from `sphereDepth` and each selected cy/r; changing
  * depth leaves every disc geometry and leaf byte-identical.
  *
- * PAPER-RIM DEFAULT RATIONALE (2026-07-01 audit): a matching dark stroke would
- * make the painter's-order overlap visually unobservable — adjacent dark leaves
- * merge into one shape and the layering is invisible. So each leaf keeps the
- * bold dark FILL (linocut idiom, initiative #3) but carries a paper-colored
- * (light) STROKE, giving every overlap a light separating rim so the draw order
- * reads live. `leafColor` and `leafStrokeColor` now make both choices tunable
- * while preserving that palette as the default.
+ * PHYSICAL-PLOT DEFAULT RATIONALE (2026-07-11, issue #276): every fill defaults
+ * to paper white and every authored contour defaults to black. A fresh Leaf
+ * Field therefore previews the same black-line-on-white language as the plotter
+ * workflow, while ordinary filled rendering remains tunable through all five
+ * color knobs. This intentionally supersedes the former mid-gray / dark-leaf /
+ * paper-rim defaults. Saved Presets are not recolored: they explicitly carry
+ * all five historical colors, and schema reconciliation preserves those stored
+ * values instead of substituting these new defaults.
  */
 
 import { prepareCurlAngle4D } from '../../curl'
@@ -252,32 +251,26 @@ const schema = {
   /**
    * The Scene's background color (hex) — the whole output surface, letterbox
    * included, carried as `Scene.background` so it rides the determinism spine
-   * and round-trips through Presets (ADR-0009). Defaults to a mid gray
-   * (2026-07-07), deliberately DIFFERENT from `discColor`'s white so the discs
-   * read as visible orbs out of the box; the pre-color white-on-white image is
-   * an opt-in param choice now (set the background, disc fill, and disc stroke
-   * to the same color). Consumed NOW.
+   * and round-trips through Presets (ADR-0009). Defaults to paper white for the
+   * physical-plot-first palette introduced by issue #276. Consumed NOW.
    * Appended last with `discColor` (ADR-0010).
    */
-  backgroundColor: { kind: 'color', default: '#878787' },
+  backgroundColor: { kind: 'color', default: '#ffffff' },
   /**
-   * The occluder discs' fill color (hex). DIFFERENT from `backgroundColor` at
-   * the defaults (white orbs on mid gray), so each disc reads as a visible
-   * colored orb the leaves lap over; set it EQUAL to `backgroundColor` to make
-   * the disc invisible as an object and recover the original implied-sphere
-   * figure-ground (see the header's occluder rationale). Consumed NOW. Appended
-   * last (ADR-0010).
+   * The occluder discs' fill color (hex). Defaults to the same paper white as
+   * `backgroundColor`, leaving the black contour to describe the sphere.
+   * Consumed NOW. Appended last (ADR-0010).
    */
   discColor: { kind: 'color', default: '#ffffff' },
   /**
-   * Disc outline color. Defaults to white to blend into the white disc fill.
+   * Disc outline color. Defaults to black for physical plotting.
    * Consumed NOW.
    */
-  discStrokeColor: { kind: 'color', default: '#ffffff' },
-  /** Leaf fill color. Defaults to the original bold dark linocut fill. Consumed NOW. */
-  leafColor: { kind: 'color', default: '#1a1a1a' },
-  /** Leaf outline color. Defaults to the paper-colored separating rim. Consumed NOW. */
-  leafStrokeColor: { kind: 'color', default: '#f4f1ea' },
+  discStrokeColor: { kind: 'color', default: '#000000' },
+  /** Leaf fill color. Defaults to paper white for physical plotting. Consumed NOW. */
+  leafColor: { kind: 'color', default: '#ffffff' },
+  /** Leaf outline color. Defaults to black for physical plotting. Consumed NOW. */
+  leafStrokeColor: { kind: 'color', default: '#000000' },
 } satisfies Record<string, ParamSpec>
 
 /** Poisson spacing radius at density 1; `radius = REFERENCE_SPACING / density`. */
@@ -320,7 +313,7 @@ const CURL_JITTER_STD = 0.15
 /** Max seeded per-leaf wobble amplitude at `variation` 1; the base (variation 0) is 0. */
 const MAX_WOBBLE = 6
 
-/** Stroke width of each leaf's paper rim, in coordinate-space units. */
+/** Stroke width of each leaf outline, in coordinate-space units. */
 const LEAF_STROKE_WIDTH = 2
 
 /** Stroke width of each disc outline, in coordinate-space units. */
@@ -328,9 +321,8 @@ const DISC_STROKE_WIDTH = 2
 
 // The disc fill is the `discColor` knob (read in `generate`), which superseded
 // the old hardwired DISC_FILL = 'white' constant. See the file header's occluder
-// rationale: at the defaults (white on mid gray) the disc is a visible colored
-// orb; setting discColor === discStrokeColor === backgroundColor makes it
-// invisible as an object — the original implied-sphere figure-ground.
+// rationale: at the physical-plot defaults its white fill matches the white
+// background and its black contour remains visible. Presets may pin any palette.
 
 /**
  * Translate a newly-created leaf outline by a fixed `(dx, dy)` offset in place.
@@ -393,9 +385,9 @@ function copyRotateAndMeasure(
 /**
  * The leaf-field Sketch: a static, stateless field of seeded-variant leaves,
  * oriented along a seeded curl-noise flow field, over a param-colored
- * background, with a seeded set of opaque `discColor`-filled occluder discs —
- * visible colored orbs at the defaults (white on mid gray), implied spheres
- * when disc and background colors match.
+ * background, with a seeded set of opaque `discColor`-filled occluder discs.
+ * The default white-on-white fills leave black contours to describe the field;
+ * custom colors can instead make the discs visible colored orbs.
  *
  * `generate` reads the spacing/size/field/variation knobs plus the five color
  * knobs, blue-noise-samples the coordinate space, rolls a seeded

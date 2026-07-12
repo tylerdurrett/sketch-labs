@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   validatePlotProfile,
+  normalizePlotProfile,
   plotDrawableRectangle,
   plotDrawableAspectsEquivalent,
   resolvePlotCompositionFrame,
@@ -23,6 +24,7 @@ function makeProfile(
     width?: number
     height?: number
     insets?: Partial<PlotInsets>
+    includeFrame?: boolean
   } = {},
 ): PlotProfile {
   return {
@@ -34,6 +36,7 @@ function makeProfile(
       bottom: overrides.insets?.bottom ?? 10,
       left: overrides.insets?.left ?? 10,
     },
+    includeFrame: overrides.includeFrame ?? true,
   }
 }
 
@@ -69,6 +72,12 @@ describe('validatePlotProfile', () => {
     it('accepts a non-square (portrait) sheet', () => {
       expect(() =>
         validatePlotProfile(makeProfile({ width: 210, height: 297 })),
+      ).not.toThrow()
+    })
+
+    it('accepts an explicitly disabled Composition Frame', () => {
+      expect(() =>
+        validatePlotProfile(makeProfile({ includeFrame: false })),
       ).not.toThrow()
     })
   })
@@ -176,6 +185,39 @@ describe('validatePlotProfile', () => {
   })
 })
 
+describe('normalizePlotProfile', () => {
+  it('defaults a legacy profile with no includeFrame field to true', () => {
+    const { includeFrame: _includeFrame, ...legacy } = makeProfile()
+    expect(normalizePlotProfile(legacy).includeFrame).toBe(true)
+  })
+
+  it('preserves an explicit false value', () => {
+    expect(
+      normalizePlotProfile({ ...makeProfile(), includeFrame: false })
+        .includeFrame,
+    ).toBe(false)
+  })
+
+  it.each([undefined, null, 0, 'false', {}])(
+    'rejects a present non-boolean includeFrame value (%j)',
+    (includeFrame) => {
+      expect(() =>
+        normalizePlotProfile({ ...makeProfile(), includeFrame }),
+      ).toThrow('normalizePlotProfile: includeFrame must be a boolean')
+    },
+  )
+
+  it('returns defensive copies of the profile and its nested insets', () => {
+    const source = makeProfile()
+    const normalized = normalizePlotProfile(source)
+
+    expect(normalized).not.toBe(source)
+    expect(normalized.insets).not.toBe(source.insets)
+    normalized.insets.top = 99
+    expect(source.insets.top).toBe(10)
+  })
+})
+
 describe('plotDrawableRectangle', () => {
   it('derives the drawable rectangle as paper minus the four insets', () => {
     const profile = makeProfile({
@@ -219,6 +261,7 @@ describe('plotDrawableAspectsEquivalent', () => {
         bottom: base.insets.bottom * scale,
         left: base.insets.left * scale,
       },
+      includeFrame: base.includeFrame,
     }
     const baseDrawable = plotDrawableRectangle(base)
     const scaledDrawable = plotDrawableRectangle(scaled)

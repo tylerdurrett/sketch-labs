@@ -2,11 +2,12 @@
  * The Plot Profile domain model (CONTEXT.md "Output Profile", "Composition Frame").
  *
  * A Plot Profile is the plot-target Output Profile: the authoritative physical
- * description of the sheet a Sketch plots onto — its paper `width` and `height`
- * plus four independent margin `insets` — stored in canonical MILLIMETERS. Its
- * drawable rectangle (paper minus insets) has an aspect that supplies the
- * Composition Frame; its magnitude belongs to the later output mapping, not to
- * the frame's coordinate space.
+ * description of the sheet a Sketch plots onto — its paper `width` and `height`,
+ * four independent margin `insets`, and whether to author the drawable frame —
+ * with physical measurements stored in canonical MILLIMETERS. Its drawable
+ * rectangle (paper minus insets) has an aspect that supplies the Composition
+ * Frame; its magnitude belongs to the later output mapping, not to the frame's
+ * coordinate space.
  *
  * This module is deliberately headless and minimal. It owns the record shape,
  * validation, drawable-aspect equivalence, and pure Composition Frame derivation.
@@ -73,9 +74,9 @@ export interface PlotInsets {
  * A Plot Profile: the plot-target Output Profile's authoritative physical
  * description, in canonical millimeters.
  *
- * Carries ONLY the paper's physical extent and its four margin insets — no
- * derived standard-paper name, orientation flag, or display-unit field (those
- * belong to sibling tasks). `width`/`height` are strictly positive; the four
+ * Carries the paper's physical extent, four margin insets, and the authored
+ * Composition Frame option — no derived standard-paper name, orientation flag,
+ * or display-unit field. `width`/`height` are strictly positive; the four
  * `insets` are non-negative (zero valid). The drawable rectangle (paper minus
  * insets) supplies the Composition Frame via {@link resolvePlotCompositionFrame}.
  */
@@ -86,6 +87,16 @@ export interface PlotProfile {
   height: number
   /** The four independent margin insets, in millimeters. */
   insets: PlotInsets
+  /** Whether plot output includes the drawable Composition Frame boundary. */
+  includeFrame: boolean
+}
+
+/**
+ * Compatibility input accepted at persisted/trust boundaries. Older profiles
+ * predate `includeFrame`; no other widening of the canonical record is allowed.
+ */
+export type LegacyPlotProfile = Omit<PlotProfile, 'includeFrame'> & {
+  includeFrame?: unknown
 }
 
 /** The four inset edges, in the canonical top/right/bottom/left order. */
@@ -102,13 +113,14 @@ const INSET_EDGES: ReadonlyArray<keyof PlotInsets> = [
  *
  * Enforced in order so later checks operate on already-finite values:
  *
- * 1. `width` and `height` must each be a finite number strictly `> 0`. Zero, a
+ * 1. `includeFrame` must be a boolean.
+ * 2. `width` and `height` must each be a finite number strictly `> 0`. Zero, a
  *    negative, `NaN`, and `Infinity` are all rejected — a sheet with no positive
  *    physical extent is meaningless.
- * 2. Each of the four `insets` must be a finite number `>= 0`. Zero is VALID (the
+ * 3. Each of the four `insets` must be a finite number `>= 0`. Zero is VALID (the
  *    provisional `10 mm` margin may be set to zero); only a negative,
  *    `NaN`, or `Infinity` inset is rejected.
- * 3. The insets must leave a positive drawable rectangle: `left + right` must be
+ * 4. The insets must leave a positive drawable rectangle: `left + right` must be
  *    strictly less than `width`, and `top + bottom` strictly less than `height`.
  *    Insets that meet or exceed the sheet exhaust the drawable region and are
  *    rejected here — rather than deferring to {@link resolveCompositionFrame}'s
@@ -119,7 +131,13 @@ const INSET_EDGES: ReadonlyArray<keyof PlotInsets> = [
  *   negative/non-finite, or the insets exhaust the drawable region.
  */
 export function validatePlotProfile(profile: PlotProfile): void {
-  const { width, height, insets } = profile
+  const { width, height, insets, includeFrame } = profile
+
+  if (typeof includeFrame !== 'boolean') {
+    throw new Error(
+      `validatePlotProfile: includeFrame must be a boolean, got ${String(includeFrame)}`,
+    )
+  }
 
   for (const [name, value] of [
     ['width', width],
@@ -154,6 +172,38 @@ export function validatePlotProfile(profile: PlotProfile): void {
       `validatePlotProfile: vertical insets (top ${insets.top} + bottom ${insets.bottom} = ${vertical}) meet or exceed the paper height ${height}, leaving no drawable rectangle`,
     )
   }
+}
+
+/**
+ * Reconcile a persisted Plot Profile with the canonical record shape.
+ *
+ * Profiles written before `includeFrame` existed default the option on. An
+ * explicit `false` is preserved, while any present non-boolean value is rejected
+ * at this trust boundary. The returned profile and nested insets are defensive
+ * copies, so callers cannot mutate the persisted input through the result.
+ */
+export function normalizePlotProfile(profile: LegacyPlotProfile): PlotProfile {
+  const includeFrame = Object.prototype.hasOwnProperty.call(
+    profile,
+    'includeFrame',
+  )
+    ? profile.includeFrame
+    : true
+
+  if (typeof includeFrame !== 'boolean') {
+    throw new Error(
+      `normalizePlotProfile: includeFrame must be a boolean when present, got ${String(includeFrame)}`,
+    )
+  }
+
+  const normalized: PlotProfile = {
+    width: profile.width,
+    height: profile.height,
+    insets: { ...profile.insets },
+    includeFrame,
+  }
+  validatePlotProfile(normalized)
+  return normalized
 }
 
 /**

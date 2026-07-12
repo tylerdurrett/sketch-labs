@@ -17,6 +17,7 @@ const profile: PlotProfile = {
   width: 297,
   height: 210,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
+  includeFrame: true,
 }
 
 describe('makePreset', () => {
@@ -53,6 +54,7 @@ describe('makePreset', () => {
       width: 297,
       height: 210,
       insets: { top: 10, right: 10, bottom: 10, left: 10 },
+      includeFrame: true,
     }
     const preset = makePreset('circles', 'p', {}, 42, new Set(), live)
     expect(preset.profile).not.toBe(live)
@@ -82,6 +84,80 @@ describe('deserialize', () => {
     expect(back).toEqual(preset)
     expect(back.version).toBe(2)
     expect(back.profile).toEqual(profile)
+  })
+
+  it.each([true, false])(
+    'round-trips an explicit includeFrame=%s without changing preset version',
+    (includeFrame) => {
+      const preset = makePreset(
+        'circles',
+        'p',
+        { count: 24 },
+        42,
+        new Set(['count']),
+        { ...profile, includeFrame },
+      )
+
+      const serialized = serialize(preset)
+      const back = deserialize(serialized)
+
+      expect(serialized.version).toBe(PRESET_VERSION)
+      expect(serialized.profile?.includeFrame).toBe(includeFrame)
+      expect(back.version).toBe(PRESET_VERSION)
+      expect(back.profile?.includeFrame).toBe(includeFrame)
+    },
+  )
+
+  it('defaults a legacy v2 profile with no includeFrame field to true', () => {
+    const legacyProfile = {
+      width: 297,
+      height: 210,
+      insets: { top: 10, right: 10, bottom: 10, left: 10 },
+    }
+    const loaded = deserialize({
+      version: 2,
+      sketch: 'circles',
+      name: 'legacy-v2',
+      seed: 42,
+      params: { count: 24 },
+      locks: [],
+      profile: legacyProfile,
+    })
+
+    expect(loaded.version).toBe(PRESET_VERSION)
+    expect(loaded.profile).toEqual(profile)
+    expect(loaded.profile).not.toBe(legacyProfile)
+    expect(loaded.profile?.insets).not.toBe(legacyProfile.insets)
+  })
+
+  it('serializes a defensive profile copy including the active frame flag', () => {
+    const source = makePreset(
+      'circles',
+      'p',
+      {},
+      42,
+      new Set(),
+      { ...profile, includeFrame: false },
+    )
+    const serialized = serialize(source)
+
+    expect(serialized.profile).not.toBe(source.profile)
+    expect(serialized.profile?.insets).not.toBe(source.profile?.insets)
+    expect(serialized.profile?.includeFrame).toBe(false)
+  })
+
+  it('rejects a v2 profile with a present non-boolean includeFrame value', () => {
+    expect(() =>
+      deserialize({
+        version: 2,
+        sketch: 'circles',
+        name: 'bad-frame-option',
+        seed: 42,
+        params: {},
+        locks: [],
+        profile: { ...profile, includeFrame: 'yes' },
+      }),
+    ).toThrow(/normalizePlotProfile: includeFrame must be a boolean/)
   })
 
   it('accepts both a v1 record (no profile) and a v2 record (with profile)', () => {
@@ -130,7 +206,12 @@ describe('deserialize', () => {
       params: {},
       locks: [],
       // insets exhaust the sheet — validatePlotProfile throws.
-      profile: { width: 100, height: 100, insets: { top: 60, right: 0, bottom: 60, left: 0 } },
+      profile: {
+        width: 100,
+        height: 100,
+        insets: { top: 60, right: 0, bottom: 60, left: 0 },
+        includeFrame: true,
+      },
     }
     expect(() => deserialize(bad)).toThrow(/validatePlotProfile/)
   })
@@ -220,6 +301,26 @@ describe('applyPreset', () => {
     // Passed through as-is — the same reference the record holds, un-resolved.
     expect(state.profile).toBe(preset.profile)
   })
+
+  it.each([true, false])(
+    'applies a loaded v2 profile with includeFrame=%s unchanged',
+    (includeFrame) => {
+      const preset = deserialize(
+        serialize(
+          makePreset(
+            'circles',
+            'p',
+            { count: 30 },
+            1,
+            new Set(),
+            { ...profile, includeFrame },
+          ),
+        ),
+      )
+
+      expect(applyPreset(schema, preset).profile?.includeFrame).toBe(includeFrame)
+    },
+  )
 
   it('surfaces an undefined profile for a v1 preset', () => {
     const preset = makePreset('circles', 'p', { count: 30 }, 1, new Set())

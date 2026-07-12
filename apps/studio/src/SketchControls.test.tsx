@@ -132,6 +132,7 @@ vi.mock("./LiveCanvas", () => ({
         data-testid="canvas-seed"
         data-render-mode={String(renderMode)}
         data-tolerance={String(tolerance)}
+        data-include-frame={String(profile.includeFrame)}
       >
         {String(seed)}
       </div>
@@ -721,6 +722,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     width: 420,
     height: 297,
     insets: { top: 15, right: 12, bottom: 9, left: 6 },
+    includeFrame: false,
   };
 
   // A Sketch that DECLARES its own default Output Profile. No registered sketch
@@ -984,6 +986,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
       width: 400,
       height: 400,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: false,
     };
     loadPreset.mockResolvedValue({
       version: 2,
@@ -1032,10 +1035,77 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
       width: 200,
       height: 200,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: true,
     });
     expect(lastCompositionFrame).toBe(initialFrame);
     expect(toggle.textContent).toBe("Outline");
     expect(toggle.disabled).toBe(false);
+  });
+
+  it("marks Outline recomputing when the composition-frame option changes", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    const frameOption = el.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]',
+    )!;
+
+    act(() => toggle.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    act(() => lastOnOutlineComputed?.());
+    const initialFrame = lastCompositionFrame;
+    expect(frameOption.checked).toBe(true);
+
+    act(() => frameOption.click());
+
+    expect(lastProfile?.includeFrame).toBe(false);
+    expect(lastCompositionFrame).toBe(initialFrame);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-include-frame",
+      ),
+    ).toBe("false");
+    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.disabled).toBe(true);
+  });
+
+  it("restores includeFrame from a Preset and recomputes the visible Outline", async () => {
+    autoFireOutlineComputed = false;
+    listPresets.mockResolvedValue(["without-frame"]);
+    const profileWithoutFrame: PlotProfile = {
+      ...HARNESS_FALLBACK_PLOT_PROFILE,
+      includeFrame: false,
+    };
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    await flush();
+    const seed = Number(
+      el.querySelector<HTMLInputElement>("#sketch-seed")!.value,
+    );
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "without-frame",
+      seed,
+      params: { radius: 10 },
+      locks: [],
+      profile: profileWithoutFrame,
+    });
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => toggle.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    act(() => lastOnOutlineComputed?.());
+
+    reloadInUi(el, "without-frame");
+    await flush();
+
+    expect(lastProfile).toEqual(profileWithoutFrame);
+    expect(el.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(
+      false,
+    );
+    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.disabled).toBe(true);
   });
 
   it("marks Outline recomputing only when a committed paper edit changes drawable aspect", () => {
@@ -1303,14 +1373,41 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           t: 2.5,
           renderMode: "outline",
           tolerance: 3,
+          includeFrame: false,
         },
         currentT: 2.5,
         renderMode: "outline",
         tolerance: 3,
+        includeFrame: false,
         generate,
       }),
     ).toBe(processed);
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a displayed Scene whose composition-frame identity is stale", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const withoutFrame = outlineScene(source, 0, false);
+    const generate = vi.fn(() => source);
+
+    const selected = hiddenLineSceneForExport({
+      displayed: {
+        scene: withoutFrame,
+        t: 0,
+        renderMode: "outline",
+        tolerance: 0,
+        includeFrame: false,
+      },
+      currentT: 0,
+      renderMode: "outline",
+      tolerance: 0,
+      includeFrame: true,
+      generate,
+    });
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(selected).toEqual(outlineScene(source, 0, true));
+    expect(selected).not.toBe(withoutFrame);
   });
 
   function blobText(blob: Blob): Promise<string> {
@@ -1368,6 +1465,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       width: 250,
       height: 180,
       insets: { top: 15, right: 45, bottom: 15, left: 25 },
+      includeFrame: false,
     };
     const source = {
       space: { width: 120, height: 100 },
@@ -1434,7 +1532,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
   it("atomically scales the physical sheet via Preset reload while reusing the cached Outline Scene", async () => {
     listPresets.mockResolvedValue(["double"]);
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
-    const processed = outlineScene(source);
+    const processed = outlineScene(source, 0, true);
     const processedBefore = structuredClone(processed);
     const generate = vi.fn(() => source);
     const el = mount(
@@ -1451,6 +1549,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       t: 0,
       renderMode: "outline",
       tolerance: 0,
+      includeFrame: true,
     };
     clickButton(el, "Export Hidden-line SVG");
     const firstScene = plotterExportCapture.current?.scene;
@@ -1462,6 +1561,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       width: 400,
       height: 400,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: true,
     };
     loadPreset.mockResolvedValue({
       version: 2,
@@ -1522,7 +1622,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
   it("reuses the exact displayed outline Scene without generating or reprocessing", () => {
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
-    const processed = outlineScene(source);
+    const processed = outlineScene(source, 0, true);
     const base = hlStaticSketch("circles");
     const generate = vi.fn(() => source);
     const sketch = { ...base, generate };
@@ -1534,6 +1634,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       t: 0,
       renderMode: "outline",
       tolerance: 0,
+      includeFrame: true,
     };
     clickButton(el, "Export Hidden-line SVG");
 
@@ -1554,13 +1655,14 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       t: 0,
       renderMode: "fill",
       tolerance: 0,
+      includeFrame: true,
     };
 
     clickButton(el, "Export Hidden-line SVG");
 
     expect(generate).not.toHaveBeenCalled();
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(source)),
+      clipSceneToBounds(outlineScene(source, 0, true)),
     );
   });
 
@@ -1574,7 +1676,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).toHaveBeenCalledTimes(1);
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(source)),
+      clipSceneToBounds(outlineScene(source, 0, true)),
     );
   });
 
@@ -1589,13 +1691,14 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       t: 99,
       renderMode: "fill",
       tolerance: 0,
+      includeFrame: true,
     };
 
     clickButton(el, "Export Hidden-line SVG");
 
     expect(generate).toHaveBeenCalledTimes(1);
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(source)),
+      clipSceneToBounds(outlineScene(source, 0, true)),
     );
   });
 
@@ -1633,6 +1736,8 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           0,
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
+        0,
+        true,
       ),
     );
   });
@@ -1714,6 +1819,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
         0,
+        true,
       ),
     );
     const vertsAtZero = totalVerts(atZero);
@@ -1734,6 +1840,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
         1,
+        true,
       ),
     );
     // ...and simplification actually reduced the exported vertex count.
@@ -1800,6 +1907,8 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
         0,
         resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
       ),
+      0,
+      true,
     );
     expect(outOfBoundsPoints(seam, 100, 100)).not.toEqual([]);
 

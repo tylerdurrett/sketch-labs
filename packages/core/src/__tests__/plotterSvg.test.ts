@@ -7,6 +7,7 @@ const profile: PlotProfile = {
   width: 240,
   height: 160,
   insets: { top: 20, right: 30, bottom: 40, left: 10 },
+  includeFrame: false,
 }
 
 const scene: Scene = {
@@ -50,6 +51,7 @@ describe('renderPlotterSVG', () => {
       width: drawableWidth + 0.2,
       height: 1.4,
       insets: { top: 0.2, right: 0.1, bottom: 0.2, left: 0.1 },
+      includeFrame: false,
     }
     const noisyScene: Scene = {
       space: { width: 2 / 3, height: 1 },
@@ -95,7 +97,57 @@ describe('renderPlotterSVG', () => {
     )
   })
 
-  it('preserves stroke color, open/closed semantics, and primitive order', () => {
+  it('preserves open paths without adding a return segment', () => {
+    const svg = renderPlotterSVG(scene, profile)
+
+    expect(svg).toContain('d="M10 20 L210 120"')
+    expect(svg).not.toMatch(/\bZ\b/)
+  })
+
+  it('closes contours with an explicit line to the mapped first point', () => {
+    const closed: Scene = {
+      space: scene.space,
+      primitives: [
+        {
+          points: [
+            [0, 0],
+            [400, 0],
+            [400, 200],
+          ],
+          closed: true,
+          stroke: { color: 'black', width: 1 },
+        },
+      ],
+    }
+
+    const svg = renderPlotterSVG(closed, profile)
+    expect(svg).toContain('d="M10 20 L210 20 L210 120 L10 20"')
+    expect(svg).not.toMatch(/\bZ\b/)
+  })
+
+  it('does not duplicate an existing explicit return to the first point', () => {
+    const alreadyClosed: Scene = {
+      space: scene.space,
+      primitives: [
+        {
+          points: [
+            [0, 0],
+            [400, 0],
+            [0, 0],
+          ],
+          closed: true,
+          stroke: { color: 'black', width: 1 },
+        },
+      ],
+    }
+
+    const [path] = paths(renderPlotterSVG(alreadyClosed, profile))
+    expect(path).toContain('d="M10 20 L210 20 L10 20"')
+    expect(path?.match(/L10 20/g)).toHaveLength(1)
+    expect(path).not.toMatch(/\bZ\b/)
+  })
+
+  it('preserves stroke color and primitive order', () => {
     const ordered: Scene = {
       space: scene.space,
       primitives: [
@@ -119,9 +171,8 @@ describe('renderPlotterSVG', () => {
 
     const [first, second] = paths(renderPlotterSVG(ordered, profile))
     expect(first).toContain('stroke="first&amp;color"')
-    expect(first).not.toMatch(/\bZ\b/)
     expect(second).toContain('stroke="second"')
-    expect(second).toMatch(/d="[^"]* Z"/)
+    expect(second).toContain('d="M11 21 L11.5 21.5 L11 21"')
   })
 
   it('emits only drawable, stroke-bearing paths with fill="none"', () => {
@@ -157,6 +208,7 @@ describe('renderPlotterSVG', () => {
     expect(svg).toContain('kept-stroke')
     expect(svg).not.toMatch(/paper-preview|fill-only|point-only|ignored-fill/)
     expect(svg).not.toMatch(/<(?:rect|polygon|polyline|line|g|clipPath)\b/)
+    expect(svg).not.toMatch(/\bZ\b/)
   })
 
   it('embeds escaped reproduction metadata before paths and round-trips its profile', () => {

@@ -43,23 +43,26 @@ export function hiddenLineSceneForExport({
   currentT,
   renderMode,
   tolerance,
+  includeFrame,
   generate,
 }: {
   displayed: DisplayedSceneSnapshot | null;
   currentT: number;
   renderMode: RenderMode;
   tolerance: number;
+  includeFrame: boolean;
   generate: () => Scene;
 }): Scene {
   const cacheMatches =
     displayed !== null &&
     displayed.t === currentT &&
     displayed.renderMode === renderMode &&
-    displayed.tolerance === tolerance;
-  if (!cacheMatches) return outlineScene(generate(), tolerance);
+    displayed.tolerance === tolerance &&
+    displayed.includeFrame === includeFrame;
+  if (!cacheMatches) return outlineScene(generate(), tolerance, includeFrame);
   return displayed.renderMode === "outline"
     ? displayed.scene
-    : outlineScene(displayed.scene, tolerance);
+    : outlineScene(displayed.scene, tolerance, includeFrame);
 }
 
 /**
@@ -254,6 +257,7 @@ export function SketchControls({
     const nextDrawable = plotDrawableRectangle(next);
     const nextDrawableAspect = nextDrawable.width / nextDrawable.height;
     if (
+      next.includeFrame !== profile.includeFrame ||
       !plotDrawableAspectsEquivalent(
         drawableAspectIdentity,
         nextDrawableAspect,
@@ -336,6 +340,7 @@ export function SketchControls({
     const geometryChanged =
       paramsChanged ||
       seed !== state.seed ||
+      profile.includeFrame !== resolvedProfile.includeFrame ||
       !plotDrawableAspectsEquivalent(drawableAspectIdentity, nextAspect);
     if (geometryChanged) markOutlineRecomputing();
     setParams((current) =>
@@ -472,6 +477,7 @@ export function SketchControls({
       currentT,
       renderMode,
       tolerance,
+      includeFrame: profile.includeFrame,
       generate: () =>
         sketch.generate(params, seed, t ?? 0, compositionFrame),
     });

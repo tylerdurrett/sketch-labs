@@ -21,6 +21,7 @@ const profile: PlotProfile = {
   width: 210,
   height: 297,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
+  includeFrame: false,
 };
 
 let container: HTMLDivElement;
@@ -79,6 +80,16 @@ function selectUnit(el: HTMLElement, unit: "mm" | "in"): void {
   act(() => input.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 }
 
+function frameCheckbox(el: HTMLElement): HTMLInputElement {
+  const input = [
+    ...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+  ].find((candidate) =>
+    candidate.labels?.[0]?.textContent?.includes("Include composition frame"),
+  );
+  if (input === undefined) throw new Error("no composition frame checkbox");
+  return input;
+}
+
 beforeEach(() => {
   window.localStorage.clear();
 });
@@ -119,6 +130,54 @@ describe("PaperSection", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("shows the fallback profile's default-on composition frame option", () => {
+    const { el } = mount(vi.fn(), HARNESS_FALLBACK_PLOT_PROFILE);
+
+    expect(frameCheckbox(el).checked).toBe(true);
+  });
+
+  it.each([
+    [true, false],
+    [false, true],
+  ] as const)(
+    "changes only includeFrame from %s to %s and emits the complete profile",
+    (includeFrame, expected) => {
+      const onChange = vi.fn();
+      const controlled = { ...profile, includeFrame };
+      const { el } = mount(onChange, controlled);
+
+      act(() =>
+        frameCheckbox(el).dispatchEvent(
+          new MouseEvent("click", { bubbles: true }),
+        ),
+      );
+
+      expect(onChange).toHaveBeenCalledOnce();
+      expect(onChange).toHaveBeenCalledWith({
+        ...controlled,
+        includeFrame: expected,
+      });
+    },
+  );
+
+  it("reloads the composition frame option from the controlled profile", () => {
+    const onChange = vi.fn();
+    const { el } = mount(onChange, { ...profile, includeFrame: true });
+
+    expect(frameCheckbox(el).checked).toBe(true);
+    act(() => {
+      root.render(
+        <PaperSection
+          profile={{ ...profile, includeFrame: false }}
+          onChange={onChange}
+        />,
+      );
+    });
+
+    expect(frameCheckbox(el).checked).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("derives the format and lists every supported standard plus Custom", () => {
     const { el } = mount();
     const select = el.querySelector("select");
@@ -156,6 +215,7 @@ describe("PaperSection", () => {
       const initialProfile: PlotProfile = {
         ...dimensions,
         insets: { top: 1, right: 2, bottom: 3, left: 4 },
+        includeFrame: false,
       };
       const { el } = mount(onChange, initialProfile);
 
@@ -165,6 +225,7 @@ describe("PaperSection", () => {
         width: 200,
         height: 200,
         insets: initialProfile.insets,
+        includeFrame: false,
       };
       expect(onChange).toHaveBeenCalledWith(accepted);
 
@@ -190,6 +251,7 @@ describe("PaperSection", () => {
       width: 297,
       height: 210,
       insets: profile.insets,
+      includeFrame: false,
     });
   });
 
@@ -234,6 +296,7 @@ describe("PaperSection", () => {
       width: 220,
       height: 297,
       insets: profile.insets,
+      includeFrame: false,
     });
     expect(el.querySelector('[role="alert"]')).toBeNull();
 
@@ -265,6 +328,7 @@ describe("PaperSection", () => {
       width: 254,
       height: 297,
       insets: profile.insets,
+      includeFrame: false,
     });
   });
 
@@ -302,6 +366,7 @@ describe("PaperSection", () => {
       width: 220,
       height: 300,
       insets: profile.insets,
+      includeFrame: false,
     });
     expect(el.querySelector('[role="alert"]')).toBeNull();
   });
@@ -312,6 +377,7 @@ describe("PaperSection", () => {
       width: 200,
       height: 200,
       insets: { top: 80, right: 80, bottom: 80, left: 80 },
+      includeFrame: false,
     };
     const { el } = mount(onChange, tight);
 
@@ -345,6 +411,7 @@ describe("PaperSection", () => {
       width: 297,
       height: 210,
       insets: asymmetric.insets,
+      includeFrame: false,
     });
   });
 
@@ -354,6 +421,7 @@ describe("PaperSection", () => {
       width: 200.2,
       height: 199.8,
       insets: { top: 1, right: 2, bottom: 3, left: 4 },
+      includeFrame: false,
     };
     const { el } = mount(onChange, nearSquare);
     const button = [...el.querySelectorAll("button")].find(
@@ -368,6 +436,7 @@ describe("PaperSection", () => {
       width: 199.8,
       height: 200.2,
       insets: nearSquare.insets,
+      includeFrame: false,
     });
   });
 
@@ -377,6 +446,7 @@ describe("PaperSection", () => {
       width: 300,
       height: 100,
       insets: { top: 10, right: 110, bottom: 10, left: 110 },
+      includeFrame: false,
     };
     const { el } = mount(onChange, swapWouldExhaust);
     const button = [...el.querySelectorAll("button")].find((candidate) =>
@@ -514,6 +584,29 @@ describe("PaperSection", () => {
     expect(window.localStorage.getItem(PAPER_DISPLAY_UNIT_STORAGE_KEY)).toBe("in");
     expect(onChange).not.toHaveBeenCalled();
     expect(profile).toEqual(before);
+  });
+
+  it("preserves a disabled composition frame through Paper edits", () => {
+    const onChange = vi.fn();
+    const { el } = mount(onChange);
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+
+    selectFormat(el, "a3");
+    setInput(width, "220");
+    clickButton(el, "Swap to landscape");
+    setInput(margin, "12");
+    selectUnit(el, "in");
+
+    expect(onChange).toHaveBeenCalledTimes(4);
+    for (const [emitted] of onChange.mock.calls) {
+      expect(emitted).toMatchObject({ includeFrame: false });
+    }
+    expect(frameCheckbox(el).checked).toBe(false);
   });
 
   it("keeps working with the millimeter fallback when local storage throws", () => {

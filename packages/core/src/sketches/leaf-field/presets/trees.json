@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "sketch": "leaf-field",
+  "name": "trees",
+  "seed": 146704215472362,
+  "params": {
+    "fieldPhase": 0.27,
+    "fieldScale": 1.940434176317848,
+    "turbulence": 2.2015239762226257,
+    "octaves": 5,
+    "density": 78.6451274487171,
+    "leafScale": 343.4587642555256,
+    "leafSizeVariance": 9.657050397172995,
+    "leafSlenderness": 3.384956742128485,
+    "leafSlendernessVariance": 2.62566410276811,
+    "variation": 0.36296475302521936,
+    "sphereCount": 7,
+    "sphereRadiusMin": 117.04,
+    "sphereRadiusMax": 261.76,
+    "sphereDepth": 0.586,
+    "backgroundColor": "#f5f0f0",
+    "discColor": "#ffffff",
+    "discStrokeColor": "#353131",
+    "leafColor": "#ffffff",
+    "leafStrokeColor": "#000000"
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    }
+  }
+}

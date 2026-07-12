@@ -44,6 +44,7 @@ export interface DisplayedSceneSnapshot {
   readonly t: number;
   readonly renderMode: RenderMode;
   readonly tolerance: number;
+  readonly includeFrame: boolean;
 }
 
 /**
@@ -355,6 +356,11 @@ export function LiveCanvas({
   // can't desync it. The static outline-redraw effect lists `tolerance` directly
   // in its deps so a change RE-RUNS the pass.
   const toleranceRef = useRef(tolerance);
+  // The composition-frame path is Outline-only geometry. Read it through a ref
+  // so it shares the on-demand derivation path without perturbing Fill's loop.
+  const includeFrame = profile.includeFrame;
+  const outlineIncludeFrame = renderMode === "outline" && includeFrame;
+  const includeFrameRef = useRef(includeFrame);
   // `onOutlineComputedRef` lets the outline draw fire the owner's "compute done"
   // callback WITHOUT listing it in the draw effect's deps — otherwise an inline
   // arrow from the parent (new identity each render) would re-run the effect and
@@ -364,11 +370,13 @@ export function LiveCanvas({
     preparedFrameRef.current = preparedFrame;
     renderModeRef.current = renderMode;
     toleranceRef.current = tolerance;
+    includeFrameRef.current = includeFrame;
     onOutlineComputedRef.current = onOutlineComputed;
   }, [
     preparedFrame,
     renderMode,
     tolerance,
+    includeFrame,
     onOutlineComputed,
   ]);
 
@@ -379,6 +387,18 @@ export function LiveCanvas({
   useLayoutEffect(() => {
     displayedSceneRef.current = null;
   }, [sketch, params, seed, compositionAspect, renderMode, tolerance]);
+
+  // `includeFrame` changes only Outline geometry. In Fill, retain the exact
+  // displayed source Scene and advance its cache identity without repainting;
+  // in Outline, invalidate it until the deferred rebuild lands.
+  useLayoutEffect(() => {
+    const displayed = displayedSceneRef.current;
+    if (renderMode === "fill" && displayed?.renderMode === "fill") {
+      displayedSceneRef.current = { ...displayed, includeFrame };
+      return;
+    }
+    displayedSceneRef.current = null;
+  }, [includeFrame, renderMode]);
 
   // The latest `t` the loop has drawn (0 for a static Sketch). The resize re-fit
   // redraws THIS frame so a box change repaints the current moment, not t = 0 —
@@ -436,7 +456,11 @@ export function LiveCanvas({
     if (canvas === null) return;
     const rendered =
       renderModeRef.current === "outline"
-        ? outlineScene(preparedFrameRef.current(t), toleranceRef.current)
+        ? outlineScene(
+            preparedFrameRef.current(t),
+            toleranceRef.current,
+            includeFrameRef.current,
+          )
         : preparedFrameRef.current(t);
     if (renderModeRef.current === "outline") {
       outlineFrameRef.current = rendered;
@@ -447,6 +471,7 @@ export function LiveCanvas({
         t,
         renderMode: renderModeRef.current,
         tolerance: toleranceRef.current,
+        includeFrame: includeFrameRef.current,
       };
     }
   }, []);
@@ -556,6 +581,7 @@ export function LiveCanvas({
           t,
           renderMode: "fill",
           tolerance: toleranceRef.current,
+          includeFrame: includeFrameRef.current,
         };
       }
       frameId = requestAnimationFrame(tick);
@@ -641,6 +667,7 @@ export function LiveCanvas({
     compositionAspect,
     renderMode,
     tolerance,
+    outlineIncludeFrame,
     refitAndRebuild,
   ]);
 

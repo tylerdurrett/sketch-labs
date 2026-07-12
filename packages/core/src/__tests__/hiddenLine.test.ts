@@ -183,7 +183,7 @@ describe('hiddenLinePass — output is stroke-only, fill-free, open polylines', 
     }
   })
 
-  it('reuses the source stroke when present, else falls back to DEFAULT_STROKE', () => {
+  it('emits black strokes while preserving authored widths and the default width', () => {
     const authored: Stroke = { color: '#ff0044', width: 3 }
     const withStroke = filledSquare(0, 0, 20, 20, authored)
     const noStroke = filledSquare(60, 60, 80, 80, undefined)
@@ -191,7 +191,7 @@ describe('hiddenLinePass — output is stroke-only, fill-free, open polylines', 
 
     const out = hiddenLinePass(scene)
 
-    expect(out.primitives[0]!.stroke).toEqual(authored)
+    expect(out.primitives[0]!.stroke).toEqual({ color: 'black', width: 3 })
     expect(out.primitives[1]!.stroke).toEqual(DEFAULT_STROKE)
   })
 })
@@ -225,7 +225,7 @@ describe('hiddenLinePass — Scene wiring decisions', () => {
     ])
   })
 
-  it('carries the input Scene background into the output; drops it when absent', () => {
+  it('drops the input Scene background and omits the field when absent', () => {
     const bg = { color: 'papayawhip' }
     const withBg: Scene = {
       space,
@@ -234,7 +234,7 @@ describe('hiddenLinePass — Scene wiring decisions', () => {
     }
     const withoutBg: Scene = { space, primitives: [filledSquare(0, 0, 20, 20)] }
 
-    expect(hiddenLinePass(withBg).background).toEqual(bg)
+    expect('background' in hiddenLinePass(withBg)).toBe(false)
     expect('background' in hiddenLinePass(withoutBg)).toBe(false)
   })
 

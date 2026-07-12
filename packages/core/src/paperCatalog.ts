@@ -161,15 +161,18 @@ function orientedStandardDimensions(
  * @param name - The standard format to write.
  * @param orientation - Portrait (default) or landscape.
  * @param insets - The four margin insets, in millimeters (default: all zero).
- * @returns A new Plot Profile carrying the format's millimeters and the insets.
+ * @param includeFrame - Whether plot output includes the drawable frame.
+ * @returns A new Plot Profile carrying the format's millimeters and authored
+ *   settings.
  */
 export function standardPaperProfile(
   name: StandardPaperName,
   orientation: PaperOrientation = 'portrait',
   insets: PlotInsets = { top: 0, right: 0, bottom: 0, left: 0 },
+  includeFrame = true,
 ): PlotProfile {
   const { width, height } = orientedStandardDimensions(name, orientation)
-  return { width, height, insets }
+  return { width, height, insets, includeFrame }
 }
 
 /**
@@ -178,21 +181,28 @@ export function standardPaperProfile(
  *
  * This is the "select a standard size" operation: it replaces `width`/`height`
  * with the catalog dimensions for `name` at `orientation` and carries the
- * profile's existing `insets` through unchanged. It persists no standard name or
- * orientation — those remain derivable via {@link matchStandardPaper} and
- * {@link derivePaperOrientation}. The input profile is not mutated.
+ * profile's existing `insets` and `includeFrame` through unchanged. It persists
+ * no standard name or orientation — those remain derivable via
+ * {@link matchStandardPaper} and {@link derivePaperOrientation}. The input
+ * profile is not mutated.
  *
  * @param profile - The profile whose dimensions are being replaced.
  * @param name - The standard format to write.
  * @param orientation - Portrait (default) or landscape.
- * @returns A new profile with the catalog dimensions and the original insets.
+ * @returns A new profile with catalog dimensions and original authored
+ *   settings.
  */
 export function applyStandardPaper(
   profile: PlotProfile,
   name: StandardPaperName,
   orientation: PaperOrientation = 'portrait',
 ): PlotProfile {
-  return standardPaperProfile(name, orientation, profile.insets)
+  return standardPaperProfile(
+    name,
+    orientation,
+    profile.insets,
+    profile.includeFrame,
+  )
 }
 
 /**
@@ -243,18 +253,20 @@ export function derivePaperOrientation(
  * Swap a Plot Profile's orientation by transposing WIDTH AND HEIGHT ONLY.
  *
  * Portrait/landscape is a convenience over the stored dimensions, so this returns
- * a new profile with `width`/`height` exchanged and the four `insets` carried
- * through UNCHANGED — the insets are not reordered — introducing no new stored
- * state. Swapping twice restores the original. The input profile is not mutated.
+ * a new profile with `width`/`height` exchanged and both the four `insets` and
+ * `includeFrame` carried through UNCHANGED — the insets are not reordered.
+ * Swapping twice restores the original. The input profile is not mutated.
  *
  * @param profile - The profile to transpose.
- * @returns A new profile with transposed dimensions and the same insets.
+ * @returns A new profile with transposed dimensions and the same authored
+ *   settings.
  */
 export function swapPlotOrientation(profile: PlotProfile): PlotProfile {
   return {
     width: profile.height,
     height: profile.width,
     insets: profile.insets,
+    includeFrame: profile.includeFrame,
   }
 }
 
@@ -305,6 +317,7 @@ export function plotProfileToInches(profile: PlotProfile): PlotProfile {
     width: mmToInch(profile.width),
     height: mmToInch(profile.height),
     insets: convertInsets(profile.insets, mmToInch),
+    includeFrame: profile.includeFrame,
   }
 }
 
@@ -325,5 +338,6 @@ export function plotProfileFromInches(profile: PlotProfile): PlotProfile {
     width: inchToMm(profile.width),
     height: inchToMm(profile.height),
     insets: convertInsets(profile.insets, inchToMm),
+    includeFrame: profile.includeFrame,
   }
 }

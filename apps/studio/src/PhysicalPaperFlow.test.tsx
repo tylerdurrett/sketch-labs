@@ -4,6 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  clipSceneToBounds,
+  leafField,
   resolvePlotCompositionFrame,
   type CoordinateSpace,
   type Params,
@@ -13,11 +15,17 @@ import {
   type Seed,
   type Sketch,
 } from "@harness/core";
+import leafFieldNice1 from "../../../packages/core/src/sketches/leaf-field/presets/nice1.json";
 
 import { SketchControls } from "./SketchControls";
 
 const previewCapture = vi.hoisted(() => ({
   paints: [] as Array<{ scene: unknown; width: number; height: number }>,
+  plotterExport: null as null | {
+    scene: Scene;
+    profile: PlotProfile;
+    metadata: string | undefined;
+  },
 }));
 
 vi.mock("@harness/core", async (importActual) => {
@@ -30,6 +38,16 @@ vi.mock("@harness/core", async (importActual) => {
       width: number,
       height: number,
     ) => previewCapture.paints.push({ scene, width, height }),
+    renderPlotterSVG: (
+      ...args: Parameters<typeof actual.renderPlotterSVG>
+    ): ReturnType<typeof actual.renderPlotterSVG> => {
+      previewCapture.plotterExport = {
+        scene: args[0],
+        profile: args[1],
+        metadata: args[2],
+      };
+      return actual.renderPlotterSVG(...args);
+    },
   };
 });
 
@@ -57,6 +75,7 @@ const A4_PROFILE: PlotProfile = {
   width: 210,
   height: 297,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
+  includeFrame: false,
 };
 
 const SCALED_A4_PROFILE: PlotProfile = {
@@ -68,6 +87,7 @@ const SCALED_A4_PROFILE: PlotProfile = {
     bottom: A4_PROFILE.insets.bottom * 1.2,
     left: A4_PROFILE.insets.left * 1.2,
   },
+  includeFrame: false,
 };
 
 function testSketch(defaultOutputProfile: PlotProfile) {
@@ -171,6 +191,7 @@ function clickButton(el: HTMLElement, text: string): void {
 beforeEach(() => {
   window.localStorage.clear();
   previewCapture.paints = [];
+  previewCapture.plotterExport = null;
   presetClient.list.mockReset().mockResolvedValue([]);
   presetClient.load.mockReset();
   presetClient.save.mockReset().mockResolvedValue(undefined);
@@ -269,6 +290,7 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
       width: 279.4,
       height: 254,
       insets: { top: 12.7, right: 12.7, bottom: 12.7, left: 12.7 },
+      includeFrame: false,
     };
     const expectedFrame = resolvePlotCompositionFrame(expectedProfile);
     expect(paper.querySelector("summary")?.textContent).toContain("11 × 10 in");
@@ -443,4 +465,166 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
     clickButton(el, "Export PNG");
     expect(pngSnapshotCount).toBe(1);
   });
+});
+
+describe("physical plot artifact acceptance flow (#276)", () => {
+  it("keeps a saved Leaf Field palette in Fill while frame on/off produces matching monochrome, path-only plot output", async () => {
+    const profile: PlotProfile = {
+      width: 240,
+      height: 180,
+      insets: { top: 11, right: 23, bottom: 17, left: 29 },
+      includeFrame: true,
+    };
+    const preset: Preset = {
+      version: 2,
+      sketch: leafFieldNice1.sketch,
+      name: leafFieldNice1.name,
+      seed: leafFieldNice1.seed as Seed,
+      params: leafFieldNice1.params,
+      locks: leafFieldNice1.locks,
+      profile,
+    };
+    presetClient.list.mockResolvedValue([preset.name]);
+    presetClient.load.mockResolvedValue(preset);
+
+    const el = mount(leafField);
+    await flushPromises();
+    selectValue(
+      el.querySelector<HTMLSelectElement>('select[aria-label="saved presets"]')!,
+      preset.name,
+    );
+    clickButton(el, "Reload");
+    await flushPromises();
+
+    // The real on-disk preset remains an authored-color Fill scene even though
+    // Leaf Field's current schema defaults are plot-first black and white.
+    for (const [key, color] of Object.entries({
+      backgroundColor: "#878787",
+      discColor: "#ffffff",
+      discStrokeColor: "#ffffff",
+      leafColor: "#1a1a1a",
+      leafStrokeColor: "#f4f1ea",
+    })) {
+      expect(
+        el.querySelector<HTMLInputElement>(`#control-${key}`)?.value,
+      ).toBe(color);
+    }
+    const fillScene = previewCapture.paints.at(-1)!.scene as Scene;
+    expect(fillScene.background).toEqual({ color: "#878787" });
+    expect(
+      new Set(
+        fillScene.primitives
+          .flatMap((primitive) => [
+            primitive.fill?.color,
+            primitive.stroke?.color,
+          ])
+          .filter((color): color is string => color !== undefined),
+      ),
+    ).toEqual(new Set(["#ffffff", "#1a1a1a", "#f4f1ea"]));
+
+    clickButton(el, "Fill");
+    flushRaf();
+    const enabledPreview = previewCapture.paints.at(-1)!.scene as Scene;
+    expect(enabledPreview).not.toHaveProperty("background");
+    expect(
+      enabledPreview.primitives.every(
+        (primitive) =>
+          primitive.fill === undefined && primitive.stroke?.color === "black",
+      ),
+    ).toBe(true);
+
+    clickButton(el, "Export Hidden-line SVG");
+    const enabledExportScene = previewCapture.plotterExport!.scene;
+    // Canvas clipping is implicit in preview pixels and explicit for exported
+    // vectors; after that boundary step the geometry and styling are identical.
+    expect(enabledExportScene).toEqual(clipSceneToBounds(enabledPreview));
+    expect(previewCapture.plotterExport?.profile).toEqual(profile);
+    const enabledSvg = await downloadBlob.mock.calls.at(-1)![0].text();
+    const enabledDocument = new DOMParser().parseFromString(
+      enabledSvg,
+      "image/svg+xml",
+    );
+    const enabledRoot = enabledDocument.documentElement;
+    const enabledPaths = [...enabledRoot.querySelectorAll(":scope > path")];
+    expect(enabledPaths).toHaveLength(enabledExportScene.primitives.length);
+    expect(enabledPaths.at(-1)?.getAttribute("d")).toBe(
+      "M29 11 L217 11 L217 163 L29 163 L29 11",
+    );
+    expect(enabledPaths.at(-1)?.getAttribute("d")).not.toContain("M0 0");
+    expect(
+      JSON.parse(enabledRoot.querySelector("metadata")!.textContent!),
+    ).toMatchObject({ profile: { ...profile, includeFrame: true } });
+
+    const frameCheckbox = [
+      ...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ].find((input) =>
+      input.parentElement?.textContent?.includes("Include composition frame"),
+    )!;
+    act(() => frameCheckbox.click());
+    flushRaf();
+    const disabledPreview = previewCapture.paints.at(-1)!.scene as Scene;
+    expect(disabledPreview.primitives).toEqual(
+      enabledPreview.primitives.slice(0, -1),
+    );
+
+    clickButton(el, "Export Hidden-line SVG");
+    const disabledExportScene = previewCapture.plotterExport!.scene;
+    expect(disabledExportScene).toEqual(clipSceneToBounds(disabledPreview));
+    const disabledSvg = await downloadBlob.mock.calls.at(-1)![0].text();
+    const disabledDocument = new DOMParser().parseFromString(
+      disabledSvg,
+      "image/svg+xml",
+    );
+    const disabledRoot = disabledDocument.documentElement;
+    const disabledPaths = [...disabledRoot.querySelectorAll(":scope > path")];
+    expect(disabledPaths).toHaveLength(enabledPaths.length - 1);
+    expect(disabledPaths.map((path) => path.outerHTML)).toEqual(
+      enabledPaths.slice(0, -1).map((path) => path.outerHTML),
+    );
+    expect(
+      JSON.parse(disabledRoot.querySelector("metadata")!.textContent!),
+    ).toMatchObject({ profile: { ...profile, includeFrame: false } });
+
+    for (const root of [enabledRoot, disabledRoot]) {
+      expect(
+        root.querySelector(
+          "rect, polygon, polyline, line, g, circle, ellipse, image",
+        ),
+      ).toBeNull();
+      expect(
+        [...root.children].every(
+          (child) => child.tagName === "metadata" || child.tagName === "path",
+        ),
+      ).toBe(true);
+      for (const path of root.querySelectorAll(":scope > path")) {
+        expect(path.getAttribute("fill")).toBe("none");
+        expect(path.getAttribute("stroke")).toBe("black");
+        expect(path.getAttribute("d")).not.toMatch(/[zZ]/);
+      }
+    }
+
+    // Every unbroken contour that returns to its origin in the shared preview
+    // remains explicitly closed by an L coordinate in the serialized artifact.
+    const completeContours = disabledExportScene.primitives
+      .map((primitive, index) => ({ primitive, path: disabledPaths[index]! }))
+      .filter(({ primitive }) => {
+        const first = primitive.points[0];
+        const last = primitive.points.at(-1);
+        return (
+          first !== undefined &&
+          last !== undefined &&
+          first[0] === last[0] &&
+          first[1] === last[1]
+        );
+      });
+    expect(completeContours.length).toBeGreaterThan(0);
+    for (const { path } of completeContours) {
+      const coordinates = [
+        ...path
+          .getAttribute("d")!
+          .matchAll(/[ML](-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g),
+      ].map((match) => [match[1], match[2]]);
+      expect(coordinates.at(-1)).toEqual(coordinates[0]);
+    }
+  }, 60_000);
 });

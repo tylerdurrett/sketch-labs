@@ -21,7 +21,11 @@
  *   saved from, defeating the entire point of a Preset.
  */
 
-import { validatePlotProfile, type PlotProfile } from './plotProfile'
+import {
+  normalizePlotProfile,
+  type LegacyPlotProfile,
+  type PlotProfile,
+} from './plotProfile'
 import type { Params, ParamSchema, Seed } from './sketch'
 
 /**
@@ -93,19 +97,6 @@ export interface Preset {
 }
 
 /**
- * Defensively copy a {@link PlotProfile} so a stored/serialized record never
- * aliases the caller's live profile — the `insets` sub-object is cloned too, not
- * just the top level. Mirrors the `{ ...params }` copy discipline elsewhere here.
- */
-function copyProfile(profile: PlotProfile): PlotProfile {
-  return {
-    width: profile.width,
-    height: profile.height,
-    insets: { ...profile.insets },
-  }
-}
-
-/**
  * Build a {@link Preset} record from the Studio's live state.
  *
  * The natural serialize entry point: it accepts `locks` as a
@@ -151,7 +142,7 @@ export function makePreset(
   if (profile === undefined) {
     return { version: 1, ...base }
   }
-  return { version: 2, ...base, profile: copyProfile(profile) }
+  return { version: 2, ...base, profile: normalizePlotProfile(profile) }
 }
 
 /**
@@ -180,7 +171,7 @@ export function serialize(preset: Preset): Preset {
   }
   return preset.profile === undefined
     ? base
-    : { ...base, profile: copyProfile(preset.profile) }
+    : { ...base, profile: normalizePlotProfile(preset.profile) }
 }
 
 /**
@@ -195,10 +186,12 @@ export function serialize(preset: Preset): Preset {
  * (`2`) are known, so any other value is rejected here. Beyond the version it
  * enforces the `profile` present ⇔ `version === 2` invariant — a v1 record
  * carrying a `profile` and a v2 record missing one are BOTH rejected — and a v2
- * `profile` is run through {@link validatePlotProfile} so a structurally-broken
- * profile fails loudly rather than loading. This is the deserialize leg of the
- * version assertion; {@link applyPreset} re-asserts so the public apply path
- * cannot be reached with a wrong version even if a caller skips deserialize.
+ * `profile` is run through {@link normalizePlotProfile}. That defaults a legacy
+ * missing `includeFrame` to `true`, preserves an explicit boolean, defensively
+ * copies the record, and fails loudly on malformed profiles. This is the
+ * deserialize leg of the version assertion; {@link applyPreset} re-asserts so
+ * the public apply path cannot be reached with a wrong version even if a caller
+ * skips deserialize.
  *
  * @param value - An unknown value (typically the result of `JSON.parse`).
  * @returns The validated {@link Preset} record.
@@ -261,11 +254,11 @@ export function deserialize(value: unknown): Preset {
   if (typeof record.profile !== 'object' || record.profile === null) {
     throw new Error('Preset deserialize: `profile` must be an object')
   }
-  const profile = record.profile as PlotProfile
-  // Rejects a structurally-broken profile (non-positive dims, bad insets, or
-  // insets that exhaust the sheet) with a Plot-Profile-specific message.
-  validatePlotProfile(profile)
-  return { version: 2, ...base, profile: copyProfile(profile) }
+  // Normalizes the backward-compatible persisted shape, defensively copies it,
+  // and rejects a structurally-broken profile with a Plot-Profile-specific
+  // message. Profiles written before `includeFrame` existed default it on.
+  const profile = normalizePlotProfile(record.profile as LegacyPlotProfile)
+  return { version: 2, ...base, profile }
 }
 
 /**
