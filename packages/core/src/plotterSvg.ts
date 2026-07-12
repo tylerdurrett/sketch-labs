@@ -8,6 +8,9 @@
  * styling wrapper. Paper edges, margins, Scene backgrounds, and fills are not
  * plot geometry and are deliberately absent.
  *
+ * Closed primitives return to their mapped first point with an explicit line
+ * segment. Plotter output never relies on SVG's `Z` close-path command.
+ *
  * Clipping and hidden-line removal are caller-owned preprocessing steps. This
  * module preserves the supplied Scene's geometry and order exactly; it neither
  * clips nor otherwise rewrites the source data.
@@ -42,14 +45,22 @@ export function renderPlotterSVG(
     const { points, closed, stroke } = primitive
     if (stroke === undefined || points.length < 2) return []
 
-    const d =
-      points
-        .map(([x, y], index) => {
-          const mappedX = offsetX + x * scale
-          const mappedY = offsetY + y * scale
-          return `${index === 0 ? 'M' : 'L'}${round(mappedX)} ${round(mappedY)}`
-        })
-        .join(' ') + (closed ? ' Z' : '')
+    const mappedPoints: [number, number][] = points.map(([x, y]) => [
+      round(offsetX + x * scale),
+      round(offsetY + y * scale),
+    ])
+    const firstPoint = mappedPoints[0]!
+    const lastPoint = mappedPoints.at(-1)!
+    const pathPoints =
+      closed &&
+      (lastPoint[0] !== firstPoint[0] || lastPoint[1] !== firstPoint[1])
+        ? [...mappedPoints, firstPoint]
+        : mappedPoints
+    const d = pathPoints
+      .map(
+        ([x, y], index) => `${index === 0 ? 'M' : 'L'}${x} ${y}`,
+      )
+      .join(' ')
 
     return [
       `  <path d="${d}" fill="none" stroke="${escapeAttr(stroke.color)}" stroke-width="${round(stroke.width * scale)}" />`,
