@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "sketch": "leaf-field",
+  "name": "g6-3",
+  "seed": 7387405533736678,
+  "params": {
+    "fieldPhase": 0.829,
+    "fieldScale": 0.4,
+    "turbulence": 2.0111,
+    "octaves": 2,
+    "density": 21.382,
+    "leafScale": 46.27,
+    "leafSizeVariance": 7.3,
+    "leafSlenderness": 1.435,
+    "leafSlendernessVariance": 0.565,
+    "variation": 0.091,
+    "sphereCount": 12,
+    "sphereRadiusMin": 40,
+    "sphereRadiusMax": 236.92,
+    "sphereDepth": 0.5,
+    "backgroundColor": "#ffffff",
+    "discColor": "#ffffff",
+    "discStrokeColor": "#000500",
+    "leafColor": "#ffffff",
+    "leafStrokeColor": "#000000"
+  },
+  "locks": [],
+  "profile": {
+    "width": 215.9,
+    "height": 279.4,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true
+  }
+}
