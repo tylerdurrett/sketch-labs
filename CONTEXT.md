@@ -31,7 +31,7 @@ A pure `Scene → Scene` transform (_not_ a **Scene Renderer**) that removes out
 _Avoid_: hidden-line renderer (it is a pass, not a renderer), HLR-as-renderer.
 
 **Outline mode**:
-The studio preview render-mode toggle that swaps the live painter's-order fill preview for the **Hidden-line pass**'s stroke-only output, rendered through the ordinary Canvas2D renderer. Plotter SVG export consumes that same processed Scene, then applies only its target-specific physical mapping and path-only document contract.
+The Studio preview state that atomically replaces the live painter's-order Fill preview with the current **Hidden-line pass** Scene through the ordinary Canvas2D renderer; its background derivation is cancellable and latest-input-wins, so unfinished or stale work never becomes visible, while plotter SVG export consumes the same completed Scene before applying only its target-specific document contract.
 
 **Parameter Schema**:
 The single declaration a **Sketch** makes of its tweakable knobs. It is the *spine* of the Harness: the control panel, **Lock** toggles, **Randomize**, and **Preset** shape are all derived views over this one schema.
