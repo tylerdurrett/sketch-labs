@@ -218,16 +218,19 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
 
   const dimensions = `${formatDimension(profile.width, displayUnit)} × ${formatDimension(profile.height, displayUnit)} ${displayUnit}`;
   const format = matchStandardPaper(profile) ?? "custom";
+  const isExactSquare = profile.width === profile.height;
   const errorId = `${id}-error`;
 
   return (
-    <details className="rounded-lg border border-border bg-card px-3 py-2">
-      <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-medium">
+    <details className="min-w-0 rounded-lg border border-border bg-card px-3 py-2">
+      <summary className="flex min-w-0 cursor-pointer items-center justify-between gap-3 text-sm font-medium">
         <span>Paper</span>
-        <span className="text-muted-foreground tabular-nums">{dimensions}</span>
+        <span className="min-w-0 text-muted-foreground tabular-nums">
+          {dimensions}
+        </span>
       </summary>
-      <div className="mt-3 space-y-3">
-        <div className="flex items-center gap-3">
+      <div className="mt-3 min-w-0 space-y-3">
+        <div className="flex min-w-0 items-center gap-3">
           <label
             className="min-w-16 text-sm text-muted-foreground"
             htmlFor={`${id}-format`}
@@ -236,7 +239,7 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
           </label>
           <select
             id={`${id}-format`}
-            className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+            className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
             value={format}
             aria-invalid={error?.target === "format"}
             aria-describedby={error?.target === "format" ? errorId : undefined}
@@ -250,7 +253,7 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
             <option value="custom">Custom</option>
           </select>
         </div>
-        <fieldset className="flex items-center gap-3 border-0 p-0">
+        <fieldset className="flex min-w-0 items-center gap-3 border-0 p-0">
           <legend className="sr-only">Paper display units</legend>
           <span aria-hidden className="min-w-16 text-sm text-muted-foreground">
             units
@@ -268,14 +271,14 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
             </label>
           ))}
         </fieldset>
-        <fieldset className="grid grid-cols-2 gap-3 border-0 p-0">
+        <fieldset className="grid min-w-0 grid-cols-2 gap-3 border-0 p-0">
           <legend className="sr-only">Custom paper dimensions</legend>
           {(["width", "height"] as const).map((dimension) => (
-            <label key={dimension} className="grid gap-1 text-sm">
+            <label key={dimension} className="grid min-w-0 gap-1 text-sm">
               <span className="text-muted-foreground">{dimension}</span>
-              <span className="flex items-center gap-1.5">
+              <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">
                 <input
-                  className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-right tabular-nums"
+                  className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 text-right tabular-nums"
                   type="number"
                   inputMode="decimal"
                   min="0"
@@ -297,27 +300,30 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
             </label>
           ))}
         </fieldset>
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="min-w-16 text-sm text-muted-foreground">
             orientation
           </span>
           <button
             type="button"
-            className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+            className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+            disabled={isExactSquare}
             aria-invalid={error?.target === "orientation"}
             aria-describedby={
               error?.target === "orientation" ? errorId : undefined
             }
-            onClick={swapOrientation}
+            onClick={isExactSquare ? undefined : swapOrientation}
           >
-            Swap to {derivePaperOrientation(profile) === "portrait" ? "landscape" : "portrait"}
+            {isExactSquare
+              ? "Square — no orientation"
+              : `Swap to ${derivePaperOrientation(profile) === "portrait" ? "landscape" : "portrait"}`}
           </button>
         </div>
-        <label className="grid gap-1 text-sm">
+        <label className="grid min-w-0 gap-1 text-sm">
           <span className="text-muted-foreground">linked margin</span>
-          <span className="flex items-center gap-1.5">
+          <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">
             <input
-              className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-right tabular-nums"
+              className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 text-right tabular-nums"
               type="number"
               inputMode="decimal"
               min="0"

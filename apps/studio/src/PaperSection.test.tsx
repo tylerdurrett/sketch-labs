@@ -3,7 +3,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { STANDARD_PAPER_NAMES, type PlotProfile } from "@harness/core";
+import {
+  HARNESS_FALLBACK_PLOT_PROFILE,
+  STANDARD_PAPER_NAMES,
+  type PlotProfile,
+} from "@harness/core";
 
 import {
   PAPER_DISPLAY_UNIT_STORAGE_KEY,
@@ -124,6 +128,56 @@ describe("PaperSection", () => {
       [...(select?.options ?? [])].map((option) => option.value),
     ).toEqual([...STANDARD_PAPER_NAMES, "custom"]);
   });
+
+  it("derives the Harness fallback as Square with no orientation action", () => {
+    const onChange = vi.fn();
+    const { el } = mount(onChange, HARNESS_FALLBACK_PLOT_PROFILE);
+    const button = [...el.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent === "Square — no orientation",
+    );
+
+    expect(el.querySelector("select")?.value).toBe("square");
+    expect(button).toBeInstanceOf(HTMLButtonElement);
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    act(() =>
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true })),
+    );
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["custom", { width: 260, height: 260 }],
+    ["portrait", { width: 210, height: 297 }],
+    ["landscape", { width: 297, height: 210 }],
+  ] as const)(
+    "selects Square from a %s profile, preserving insets and disabling orientation after acceptance",
+    (_source, dimensions) => {
+      const onChange = vi.fn();
+      const initialProfile: PlotProfile = {
+        ...dimensions,
+        insets: { top: 1, right: 2, bottom: 3, left: 4 },
+      };
+      const { el } = mount(onChange, initialProfile);
+
+      selectFormat(el, "square");
+
+      const accepted: PlotProfile = {
+        width: 200,
+        height: 200,
+        insets: initialProfile.insets,
+      };
+      expect(onChange).toHaveBeenCalledWith(accepted);
+
+      act(() => {
+        root.render(<PaperSection profile={accepted} onChange={onChange} />);
+      });
+      const orientation = [...el.querySelectorAll("button")].find(
+        (candidate) => candidate.textContent === "Square — no orientation",
+      );
+      expect(el.querySelector("select")?.value).toBe("square");
+      expect((orientation as HTMLButtonElement).disabled).toBe(true);
+    },
+  );
 
   it("applies a selected standard in the current orientation while preserving insets", () => {
     const onChange = vi.fn();
@@ -291,6 +345,29 @@ describe("PaperSection", () => {
       width: 297,
       height: 210,
       insets: asymmetric.insets,
+    });
+  });
+
+  it("keeps a tolerant near-square match swappable while labeling it Square", () => {
+    const onChange = vi.fn();
+    const nearSquare: PlotProfile = {
+      width: 200.2,
+      height: 199.8,
+      insets: { top: 1, right: 2, bottom: 3, left: 4 },
+    };
+    const { el } = mount(onChange, nearSquare);
+    const button = [...el.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent === "Swap to portrait",
+    );
+
+    expect(el.querySelector("select")?.value).toBe("square");
+    expect(button).toBeInstanceOf(HTMLButtonElement);
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    clickButton(el, "Swap to portrait");
+    expect(onChange).toHaveBeenCalledWith({
+      width: 199.8,
+      height: 200.2,
+      insets: nearSquare.insets,
     });
   });
 
