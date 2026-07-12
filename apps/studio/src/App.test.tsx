@@ -193,3 +193,30 @@ describe("App — keyed edit-history sessions", () => {
     expect(pressUndo().defaultPrevented).toBe(false);
   });
 });
+
+describe("App — hidden-line navigation guard (#289)", () => {
+  it("disables Sketch navigation for the full active interval with the exact reason", () => {
+    mountApp();
+    const outlineToggle = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => outlineToggle.click());
+
+    expect(trigger().disabled).toBe(true);
+    expect(trigger().getAttribute("aria-describedby")).toBe(
+      "sketch-switch-disabled-reason",
+    );
+    const wrapper = trigger().parentElement!;
+    expect(wrapper.title).toBe(
+      "Finish or cancel the hidden-line job before switching Sketches.",
+    );
+    expect(
+      document.querySelector("#sketch-switch-disabled-reason")?.textContent,
+    ).toContain(
+      "Finish or cancel the hidden-line job before switching Sketches.",
+    );
+
+    act(() => outlineToggle.click());
+    expect(trigger().disabled).toBe(false);
+  });
+});

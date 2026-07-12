@@ -63,6 +63,7 @@ function defaultSketchId(): string {
 export function App() {
   const [selectedId, setSelectedId] = useState(defaultSketchId);
   const selected = registry.get(selectedId);
+  const [hiddenLineBusy, setHiddenLineBusy] = useState(false);
 
   const [collapsed, setCollapsed] = useState(false);
   const toggleCollapsed = useCallback(() => setCollapsed((prev) => !prev), []);
@@ -128,34 +129,54 @@ export function App() {
   // old button-row aria-current), and `aria-label="Sketches"` keeps the control
   // named.
   const switcher = (
-    <Select
-      value={selectedId}
-      onValueChange={(value: string | null) => {
-        // Guard the no-op path: a same-value selection never changes
-        // `selectedId`, so the `[selectedId]`-keyed layout effect that clears
-        // `restoreFocus` would never run, leaving the flag stuck `true`.
-        if (value === null || value === selectedId) return;
-        // Record that this change came from the switcher so the post-remount
-        // layout effect restores focus to the trigger (see `restoreFocus`).
-        restoreFocus.current = true;
-        setSelectedId(value);
-      }}
-      items={sketches.map((sketch) => ({
-        value: sketch.id,
-        label: sketch.name,
-      }))}
+    <div
+      title={
+        hiddenLineBusy
+          ? "Finish or cancel the hidden-line job before switching Sketches."
+          : undefined
+      }
     >
-      <SelectTrigger ref={triggerRef} aria-label="Sketches">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {sketches.map((sketch) => (
-          <SelectItem key={sketch.id} value={sketch.id}>
-            {sketch.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      <Select
+        value={selectedId}
+        disabled={hiddenLineBusy}
+        onValueChange={(value: string | null) => {
+          // Guard the no-op path: a same-value selection never changes
+          // `selectedId`, so the `[selectedId]`-keyed layout effect that clears
+          // `restoreFocus` would never run, leaving the flag stuck `true`.
+          if (value === null || value === selectedId) return;
+          // Record that this change came from the switcher so the post-remount
+          // layout effect restores focus to the trigger (see `restoreFocus`).
+          restoreFocus.current = true;
+          setSelectedId(value);
+        }}
+        items={sketches.map((sketch) => ({
+          value: sketch.id,
+          label: sketch.name,
+        }))}
+      >
+        <SelectTrigger
+          ref={triggerRef}
+          aria-label="Sketches"
+          aria-describedby={
+            hiddenLineBusy ? "sketch-switch-disabled-reason" : undefined
+          }
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {sketches.map((sketch) => (
+            <SelectItem key={sketch.id} value={sketch.id}>
+              {sketch.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {hiddenLineBusy ? (
+        <span id="sketch-switch-disabled-reason" className="sr-only">
+          Finish or cancel the hidden-line job before switching Sketches.
+        </span>
+      ) : null}
+    </div>
   );
 
   return (
@@ -166,6 +187,7 @@ export function App() {
         switcher={switcher}
         collapsed={collapsed}
         onToggleCollapse={toggleCollapsed}
+        onHiddenLineBusyChange={setHiddenLineBusy}
       />
     </main>
   );
