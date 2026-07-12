@@ -58,6 +58,7 @@ export function RgbColorFields({
 }: RgbColorFieldsProps) {
   const guidanceId = useId();
   const [drafts, setDrafts] = useState(() => colorToDrafts(color));
+  const [active, setActive] = useState(false);
   const focusedChannelRef = useRef<RgbChannel | null>(null);
   const focusColorRef = useRef(color);
   const lastValidColorRef = useRef(color);
@@ -75,6 +76,7 @@ export function RgbColorFields({
   const begin = () => {
     if (activeRef.current) return;
     activeRef.current = true;
+    setActive(true);
     finishedRef.current = false;
     onEditBegin();
   };
@@ -89,6 +91,7 @@ export function RgbColorFields({
 
     finishedRef.current = true;
     activeRef.current = false;
+    setActive(false);
     const channel = focusedChannelRef.current;
     const result = channel === null
       ? { valid: false as const }
@@ -109,6 +112,7 @@ export function RgbColorFields({
     if (!activeRef.current || finishedRef.current) return;
     finishedRef.current = true;
     activeRef.current = false;
+    setActive(false);
     const snapshot = focusColorRef.current;
     restore(snapshot);
     onCancel(snapshot);
@@ -119,6 +123,7 @@ export function RgbColorFields({
       className="flex gap-2"
       role="group"
       aria-label={`${paramKey} RGB channels`}
+      data-studio-history={active ? "exclude" : undefined}
     >
       <span id={guidanceId} className="sr-only">
         Enter an integer from 0 through 255. Out-of-range values are clamped.

@@ -50,8 +50,10 @@ export function ColorControl({
   const latestGestureColorRef = useRef<string | null>(null);
   const lastGestureLiftRef = useRef<string | null>(null);
   const ignoredSurfaceSyncRef = useRef<string | null>(null);
+  const valueRef = useRef(value);
   const onChangeRef = useRef(onChange);
   const editHistoryRef = useRef(editHistory);
+  valueRef.current = value;
   onChangeRef.current = onChange;
   editHistoryRef.current = editHistory;
 
@@ -252,8 +254,11 @@ export function ColorControl({
                   onEditBegin={() => setEditOwner("rgb")}
                   onLocalPreview={setDraftColor}
                   onSettle={applyAtomicEdit}
-                  onCancel={(snapshot) => {
-                    synchronizeDraftColor(snapshot);
+                  onCancel={() => {
+                    // RGB retains its focus snapshot while active, but an
+                    // external controlled update that arrived meanwhile wins
+                    // as soon as cancellation releases local ownership.
+                    synchronizeDraftColor(valueRef.current);
                     setEditOwner("idle");
                   }}
                 />

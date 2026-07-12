@@ -181,6 +181,72 @@ describe("ColorControl RGB ownership", () => {
     expect(initial.onChange).not.toHaveBeenCalled();
     expect(order).toEqual([]);
   });
+
+  it("reconciles an external color after an active invalid draft is escaped", async () => {
+    vi.useFakeTimers();
+    const initial = props();
+    mount(initial);
+    openPicker();
+    const red = rgb("red");
+    act(() => {
+      red.focus();
+      enter(red, "invalid");
+    });
+
+    rerender({ ...initial, value: "#00ff00" });
+    expect(red.value).toBe("invalid");
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #0a141e",
+    );
+
+    act(() => key(red, "Escape"));
+    await act(async () => Promise.resolve());
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #00ff00",
+    );
+    expect(
+      popup()
+        .querySelector('[aria-label="ink hue"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("120");
+    expect([rgb("red").value, rgb("green").value, rgb("blue").value]).toEqual([
+      "0",
+      "255",
+      "0",
+    ]);
+  });
+
+  it("reconciles an external color after an active invalid draft blurs", async () => {
+    vi.useFakeTimers();
+    const initial = props();
+    mount(initial);
+    openPicker();
+    const blue = rgb("blue");
+    act(() => {
+      blue.focus();
+      enter(blue, "invalid");
+    });
+
+    rerender({ ...initial, value: "#00ff00" });
+    expect(blue.value).toBe("invalid");
+    act(() => blue.blur());
+    await act(async () => Promise.resolve());
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #00ff00",
+    );
+    expect(
+      popup()
+        .querySelector('[aria-label="ink hue"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("120");
+    expect([rgb("red").value, rgb("green").value, rgb("blue").value]).toEqual([
+      "0",
+      "255",
+      "0",
+    ]);
+  });
 });
 
 describe("ColorControl Palette", () => {

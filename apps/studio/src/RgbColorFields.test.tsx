@@ -161,13 +161,23 @@ describe("RgbColorFields drafts", () => {
       red!.focus();
       enter(red!, "40");
       enter(red!, "50");
-      key(red!, "Enter");
     });
+    expect(
+      el.querySelector('[aria-label="ink RGB channels"]')?.getAttribute(
+        "data-studio-history",
+      ),
+    ).toBe("exclude");
+    act(() => key(red!, "Enter"));
 
     expect(events.onSettle).toHaveBeenCalledTimes(1);
     expect(events.onSettle).toHaveBeenCalledWith("#32141e");
     expect(events.onCancel).not.toHaveBeenCalled();
     expect(red!.value).toBe("50");
+    expect(
+      el.querySelector('[aria-label="ink RGB channels"]')?.getAttribute(
+        "data-studio-history",
+      ),
+    ).toBeNull();
   });
 
   it("settles a valid blur exactly once", () => {
@@ -248,6 +258,11 @@ describe("RgbColorFields drafts", () => {
     expect(events.onCancel).toHaveBeenCalledTimes(1);
     expect(events.onCancel).toHaveBeenCalledWith("#0a141e");
     expect(inputs(el).map((input) => input.value)).toEqual(["10", "20", "30"]);
+    expect(
+      el.querySelector('[aria-label="ink RGB channels"]')?.getAttribute(
+        "data-studio-history",
+      ),
+    ).toBeNull();
 
     act(() => red!.blur());
     expect(events.onCancel).toHaveBeenCalledTimes(1);

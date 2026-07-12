@@ -883,6 +883,65 @@ describe("SketchControls — central edit-history integration", () => {
     expect(noOp.after.past).toHaveLength(0);
   });
 
+  it("leaves Undo with an active RGB draft and restores Studio Undo after cancel", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          radius: numberSpec({ default: 10 }),
+          ink: { kind: "color", default: "#ff0000" },
+        })}
+      />,
+    );
+    const radius = paramInput(el, "radius");
+    act(() => radius.focus());
+    setInput(radius, "42");
+    act(() => radius.blur());
+    expect(historyCapture.transactionCommits).toHaveLength(1);
+
+    act(() =>
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label^="ink current color"]',
+        )!
+        .click(),
+    );
+    const red = document.querySelector<HTMLInputElement>(
+      'input[aria-label="ink red channel"]',
+    )!;
+    act(() => red.focus());
+    setInput(red, "invalid");
+    expect(
+      red.closest('[aria-label="ink RGB channels"]')?.getAttribute(
+        "data-studio-history",
+      ),
+    ).toBe("exclude");
+
+    const nativeUndo = pressHistoryShortcut(red, { ctrlKey: true });
+    expect(nativeUndo.defaultPrevented).toBe(false);
+    expect(radius.value).toBe("42");
+    expect(red.value).toBe("invalid");
+    expect(historyCapture.transactionCommits).toHaveLength(1);
+
+    act(() =>
+      red.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(
+      red.closest('[aria-label="ink RGB channels"]')?.getAttribute(
+        "data-studio-history",
+      ),
+    ).toBeNull();
+
+    const studioUndo = pressHistoryShortcut(red, { ctrlKey: true });
+    expect(studioUndo.defaultPrevented).toBe(true);
+    expect(paramInput(el, "radius").value).toBe("10");
+  });
+
   it("feeds ControlPanel previews from present and Escape restores the whole transaction", () => {
     const el = mount(
       <SketchControls
