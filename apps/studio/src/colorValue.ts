@@ -12,6 +12,11 @@ export interface HsvColor {
   readonly v: number;
 }
 
+/** The validated state of an RGB channel text draft. */
+export type RgbChannelDraftResult =
+  | { readonly valid: true; readonly value: number }
+  | { readonly valid: false };
+
 const CANONICAL_HEX_COLOR = /^#[0-9a-f]{6}$/;
 const INTEGER_DECIMAL_DRAFT = /^[+-]?\d+$/;
 
@@ -75,13 +80,13 @@ export function hexToHsv(value: string): HsvColor | null {
  * Parse a draft RGB channel as a signed base-10 integer and clamp it to 0–255.
  * Partial, fractional, exponential, and non-finite drafts fail.
  */
-export function parseRgbChannelDraft(value: string): number | null {
+export function parseRgbChannelDraft(value: string): RgbChannelDraftResult {
   const trimmed = value.trim();
-  if (!INTEGER_DECIMAL_DRAFT.test(trimmed)) return null;
+  if (!INTEGER_DECIMAL_DRAFT.test(trimmed)) return { valid: false };
 
   const channel = Number(trimmed);
-  if (!Number.isFinite(channel)) return null;
-  return clampChannel(channel);
+  if (!Number.isFinite(channel)) return { valid: false };
+  return { valid: true, value: clampChannel(channel) };
 }
 
 function channelToHex(channel: number): string {

@@ -38,6 +38,21 @@ describe("canonical hex colors", () => {
     expect(hexToRgb("#000000")).toEqual({ r: 0, g: 0, b: 0 });
     expect(hexToRgb("#ffffff")).toEqual({ r: 255, g: 255, b: 255 });
   });
+
+  it.each([
+    "#000000",
+    "#ffffff",
+    "#ff0000",
+    "#00ff00",
+    "#0000ff",
+    "#09afc3",
+    "#102030",
+  ])("roundtrips canonical value %s through RGB", (value) => {
+    const rgb = hexToRgb(value);
+
+    expect(rgb).not.toBeNull();
+    expect(rgbToHex(rgb!)).toBe(value);
+  });
 });
 
 describe("RGB serialization", () => {
@@ -105,7 +120,7 @@ describe("RGB channel drafts", () => {
     ["-1", 0],
     ["999", 255],
   ])("parses and clamps %j", (draft, channel) => {
-    expect(parseRgbChannelDraft(draft)).toBe(channel);
+    expect(parseRgbChannelDraft(draft)).toEqual({ valid: true, value: channel });
   });
 
   it.each([
@@ -121,10 +136,10 @@ describe("RGB channel drafts", () => {
     "-Infinity",
     "NaN",
   ])("rejects invalid draft %j", (draft) => {
-    expect(parseRgbChannelDraft(draft)).toBeNull();
+    expect(parseRgbChannelDraft(draft)).toEqual({ valid: false });
   });
 
   it("rejects an integer draft that overflows to a non-finite number", () => {
-    expect(parseRgbChannelDraft("9".repeat(400))).toBeNull();
+    expect(parseRgbChannelDraft("9".repeat(400))).toEqual({ valid: false });
   });
 });
