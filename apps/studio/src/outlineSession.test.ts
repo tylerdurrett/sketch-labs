@@ -152,8 +152,7 @@ describe("outlineSessionReducer", () => {
 
   it("keeps desired Outline through transaction previews and launches once on settle", () => {
     const outlined = { ...createOutlineSessionState(), desired: "outline" as const };
-    const began = outlineSessionReducer(outlined, { type: "edit-began" });
-    const preview = outlineSessionReducer(began, {
+    const preview = outlineSessionReducer(outlined, {
       type: "inputs-changed",
       launch: false,
     });

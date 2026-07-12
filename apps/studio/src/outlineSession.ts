@@ -57,7 +57,6 @@ export type OutlineSessionAction =
     }
   | { readonly type: "cancelled"; readonly token?: number }
   | { readonly type: "failed"; readonly token: number; readonly error: string }
-  | { readonly type: "edit-began" }
   | { readonly type: "inputs-changed"; readonly launch: boolean }
   | { readonly type: "dispose" };
 
@@ -179,14 +178,6 @@ export function outlineSessionReducer(
         phase: { kind: "fill-live" },
         active: null,
         failure: action.error,
-      };
-    case "edit-began":
-      return {
-        ...state,
-        phase: { kind: "fill-live" },
-        capture: null,
-        active: null,
-        failure: null,
       };
     case "inputs-changed": {
       const changed = {

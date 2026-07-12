@@ -277,24 +277,31 @@ export function SketchControls({
   };
   const outlineBusy =
     outlineSession.capture !== null || outlineSession.active !== null;
+  // Capture and worker execution are one logical interval and share a token.
+  // A replacement gets a fresh token so its quiet-period clock starts over.
+  const outlineWorkToken =
+    outlineSession.capture?.token ?? outlineSession.active?.token ?? null;
   const onHiddenLineBusyChangeRef = useRef(onHiddenLineBusyChange);
   onHiddenLineBusyChangeRef.current = onHiddenLineBusyChange;
   const renderMode: RenderMode =
     outlineSession.phase.kind === "outline" ? "outline" : "fill";
-  const [showOutlineBusy, setShowOutlineBusy] = useState(false);
+  const [revealedOutlineToken, setRevealedOutlineToken] = useState<number | null>(
+    null,
+  );
 
   useEffect(() => {
     onHiddenLineBusyChangeRef.current?.(outlineBusy);
   }, [outlineBusy]);
 
   useEffect(() => {
-    if (!outlineBusy) {
-      setShowOutlineBusy(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setShowOutlineBusy(true), 750);
+    setRevealedOutlineToken(null);
+    if (outlineWorkToken === null) return;
+    const timer = window.setTimeout(
+      () => setRevealedOutlineToken(outlineWorkToken),
+      750,
+    );
     return () => window.clearTimeout(timer);
-  }, [outlineBusy]);
+  }, [outlineWorkToken]);
 
   useEffect(() => {
     return () => {
@@ -314,16 +321,18 @@ export function SketchControls({
   const updateHistory = (
     transition: (current: EditHistory) => EditHistory,
     launchOutline = true,
-  ): void => {
+  ): boolean => {
     const current = historyRef.current;
     const next = transition(current);
-    if (next === current) return;
+    if (next === current) return false;
     historyRef.current = next;
-    if (outlineInputsChanged(current.present, next.present)) {
+    const invalidated = outlineInputsChanged(current.present, next.present);
+    if (invalidated) {
       cancelCoordinator();
       dispatchOutline({ type: "inputs-changed", launch: launchOutline });
     }
     setHistory(next);
+    return invalidated;
   };
 
   // History belongs to this keyed Sketch session, so its keyboard listener does
@@ -356,15 +365,20 @@ export function SketchControls({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  const transactionOutlineInvalidatedRef = useRef(false);
+
   const previewLeaf = <Key extends keyof StudioEditState>(
     key: Key,
     value: StudioEditState[Key],
   ): void => {
-    updateHistory(
+    const invalidated = updateHistory(
       (current) =>
         previewEditState(current, { ...current.present, [key]: value }),
       false,
     );
+    if (invalidated) {
+      transactionOutlineInvalidatedRef.current = true;
+    }
   };
 
   const commitLeaf = <Key extends keyof StudioEditState>(
@@ -377,15 +391,17 @@ export function SketchControls({
   };
 
   const beginTransaction = (): void => {
-    cancelCoordinator();
-    dispatchOutline({ type: "edit-began" });
+    transactionOutlineInvalidatedRef.current = false;
     updateHistory(beginEditTransaction, false);
   };
   const settleTransaction = (
     transition: (current: EditHistory) => EditHistory,
   ): void => {
-    updateHistory(transition, false);
-    if (outlineSessionRef.current.desired === "outline") {
+    const invalidated =
+      updateHistory(transition, false) ||
+      transactionOutlineInvalidatedRef.current;
+    transactionOutlineInvalidatedRef.current = false;
+    if (invalidated && outlineSessionRef.current.desired === "outline") {
       requestOutlineForCurrentInputs();
     }
   };
@@ -845,7 +861,7 @@ export function SketchControls({
                 : "Fill"}
           </Button>
         </div>
-        {showOutlineBusy && outlineBusy ? (
+        {revealedOutlineToken === outlineWorkToken && outlineBusy ? (
           <div role="status" aria-live="polite" className="text-sm text-muted-foreground">
             <Button
               type="button"

@@ -49,6 +49,7 @@ const historyCapture = vi.hoisted(() => ({
   cancels: [] as { before: EditHistory; after: EditHistory }[],
 }));
 const outlineJob = vi.hoisted(() => ({
+  starts: 0,
   active: null as null | {
     identity: import("./outlineComputeProtocol").OutlineComputeIdentity;
     resolve: (result: unknown) => void;
@@ -58,6 +59,7 @@ const outlineJob = vi.hoisted(() => ({
 vi.mock("./hiddenLineCoordinator", () => ({
   HiddenLineCoordinator: class {
     start(identity: import("./outlineComputeProtocol").OutlineComputeIdentity) {
+      outlineJob.starts += 1;
       return {
         then(resolve: (result: unknown) => void) {
           outlineJob.active = { identity, resolve };
@@ -223,6 +225,7 @@ vi.mock("./LiveCanvas", () => ({
       <div
         data-testid="canvas-seed"
         data-render-mode={renderState?.kind === "outline" ? "outline" : "fill"}
+        data-render-state={renderState?.kind ?? "fill-live"}
         data-tolerance={String(tolerance)}
         data-include-frame={String(profile.includeFrame)}
         data-input-revision={String(inputRevision)}
@@ -326,6 +329,7 @@ const MINIMAL_PNG = Uint8Array.from([
 ]);
 
 beforeEach(() => {
+  outlineJob.starts = 0;
   outlineJob.active = null;
   vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
   // Sensible defaults so a mount's list-on-mount effect resolves quietly; the
@@ -1098,6 +1102,12 @@ describe("SketchControls — central edit-history integration", () => {
     )!;
     act(() => toggle.click());
     act(() => lastOnOutlineComputed?.());
+    expect(outlineJob.starts).toBe(1);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-render-state",
+      ),
+    ).toBe("outline");
     const initialFrame = lastCompositionFrame;
     const margin = el.querySelector<HTMLInputElement>(
       'input[aria-label="Linked paper margin (mm)"]',
@@ -1113,6 +1123,12 @@ describe("SketchControls — central edit-history integration", () => {
     });
     expect(lastCompositionFrame).toBe(initialFrame);
     expect(toggle.textContent).toBe("Outline");
+    expect(outlineJob.starts).toBe(1);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-render-state",
+      ),
+    ).toBe("outline");
 
     act(() =>
       margin.dispatchEvent(
@@ -1128,7 +1144,47 @@ describe("SketchControls — central edit-history integration", () => {
     });
     expect(lastCompositionFrame).toBe(initialFrame);
     expect(toggle.textContent).toBe("Outline");
+    expect(outlineJob.starts).toBe(1);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-render-state",
+      ),
+    ).toBe("outline");
     expect(historyCapture.cancels).toHaveLength(1);
+  });
+
+  it("retains completed Outline when a paper draft never produces a changed preview", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => toggle.click());
+    act(() => lastOnOutlineComputed?.());
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    act(() => width.focus());
+    setInput(width, "");
+    expect(outlineJob.starts).toBe(1);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-render-state",
+      ),
+    ).toBe("outline");
+
+    act(() =>
+      width.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+    );
+    expect(outlineJob.starts).toBe(1);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-render-state",
+      ),
+    ).toBe("outline");
   });
 });
 
@@ -3134,6 +3190,40 @@ describe("SketchControls — background Outline session (#289)", () => {
           'button[aria-label="Toggle outline render mode"]',
         )?.textContent,
       ).toBe("Fill");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("restarts the quiet period for replacements before and after reveal", () => {
+    autoFireOutlineComputed = false;
+    let randomValue = 0.1;
+    vi.spyOn(Math, "random").mockImplementation(() => {
+      randomValue += 0.1;
+      return randomValue;
+    });
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    vi.useFakeTimers();
+    try {
+      clickButton(el, "Fill");
+      expect(outlineJob.starts).toBe(1);
+      act(() => vi.advanceTimersByTime(749));
+      clickButton(el, "New seed");
+      expect(outlineJob.starts).toBe(2);
+      act(() => vi.advanceTimersByTime(1));
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(748));
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(1));
+      expect(el.textContent).toContain("Cancel outline");
+
+      clickButton(el, "New seed");
+      expect(outlineJob.starts).toBe(3);
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(749));
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(1));
+      expect(el.textContent).toContain("Cancel outline");
     } finally {
       vi.useRealTimers();
     }
