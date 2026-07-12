@@ -206,6 +206,28 @@ describe('subtractPolygonsFromPolyline', () => {
     ])
     expect(isDegenerate(result[0]!)).toBe(false)
   })
+
+  it('preserves crossings accepted just beyond an edge endpoint by EPS', () => {
+    // The line sits 5e-9 below the square. That is outside the polygon's raw
+    // AABB, but each vertical edge is length 10, so its u parameter is only
+    // -5e-10: inside segmentCrossParam's ±1e-9 endpoint tolerance. The current
+    // policy therefore records crossings at x=0 and x=10 even though midpoint
+    // classification keeps all three outside spans. Prepared polygon bounds
+    // must not prune those accepted crossings.
+    const line: Polyline = [
+      [-5, -5e-9],
+      [15, -5e-9],
+    ]
+
+    expect(subtractPolygonsFromPolyline(line, [square])).toEqual([
+      [
+        [-5, -5e-9],
+        [0, -5e-9],
+        [10, -5e-9],
+        [15, -5e-9],
+      ],
+    ])
+  })
 })
 
 /** True when every point of the polyline is coincident (a collapsed line). */

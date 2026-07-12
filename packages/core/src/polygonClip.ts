@@ -44,6 +44,112 @@ import type { Point, Polyline } from './types'
 
 const EPS = 1e-9
 
+interface Bounds {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+interface PreparedEdge {
+  c: Point
+  d: Point
+  bounds: Bounds
+}
+
+/** Cached broad-phase data for a polygon used by multiple clipping calls. */
+export interface PreparedPolygon {
+  polygon: Polyline
+  /** Exact vertex bounds, used only to reject point-in-polygon tests. */
+  bounds: Bounds | null
+  /** Union of tolerant edge bounds, used to reject intersection tests. */
+  intersectionBounds: Bounds | null
+  edges: PreparedEdge[]
+}
+
+function coordinateRoundoff(...values: number[]): number {
+  let scale = 1
+  for (const value of values) scale = Math.max(scale, Math.abs(value))
+  return Number.EPSILON * scale * 4
+}
+
+/**
+ * Bounds of the portion of A->B accepted by segmentCrossParam's endpoint
+ * tolerance. The coordinate-scaled term keeps the filter conservative across
+ * the final floating-point rounding of the bound itself.
+ */
+function tolerantSegmentBounds(a: Point, b: Point): Bounds {
+  const roundoff = coordinateRoundoff(a[0], a[1], b[0], b[1])
+  const padX = EPS * Math.abs(b[0] - a[0]) + roundoff
+  const padY = EPS * Math.abs(b[1] - a[1]) + roundoff
+  return {
+    minX: Math.min(a[0], b[0]) - padX,
+    minY: Math.min(a[1], b[1]) - padY,
+    maxX: Math.max(a[0], b[0]) + padX,
+    maxY: Math.max(a[1], b[1]) + padY,
+  }
+}
+
+function boundsOverlap(a: Bounds, b: Bounds): boolean {
+  return (
+    a.minX <= b.maxX &&
+    a.maxX >= b.minX &&
+    a.minY <= b.maxY &&
+    a.maxY >= b.minY
+  )
+}
+
+function boundsContain(bounds: Bounds, p: Point): boolean {
+  return (
+    p[0] >= bounds.minX &&
+    p[0] <= bounds.maxX &&
+    p[1] >= bounds.minY &&
+    p[1] <= bounds.maxY
+  )
+}
+
+/** Prepare immutable lookup data without copying or mutating polygon points. */
+export function preparePolygon(polygon: Polyline): PreparedPolygon {
+  if (polygon.length === 0) {
+    return { polygon, bounds: null, intersectionBounds: null, edges: [] }
+  }
+
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  let intersectionMinX = Infinity
+  let intersectionMinY = Infinity
+  let intersectionMaxX = -Infinity
+  let intersectionMaxY = -Infinity
+  const edges: PreparedEdge[] = []
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const d = polygon[i]!
+    const c = polygon[j]!
+    if (d[0] < minX) minX = d[0]
+    if (d[0] > maxX) maxX = d[0]
+    if (d[1] < minY) minY = d[1]
+    if (d[1] > maxY) maxY = d[1]
+    const edgeBounds = tolerantSegmentBounds(c, d)
+    if (edgeBounds.minX < intersectionMinX) intersectionMinX = edgeBounds.minX
+    if (edgeBounds.minY < intersectionMinY) intersectionMinY = edgeBounds.minY
+    if (edgeBounds.maxX > intersectionMaxX) intersectionMaxX = edgeBounds.maxX
+    if (edgeBounds.maxY > intersectionMaxY) intersectionMaxY = edgeBounds.maxY
+    edges.push({ c, d, bounds: edgeBounds })
+  }
+  return {
+    polygon,
+    bounds: { minX, minY, maxX, maxY },
+    intersectionBounds: {
+      minX: intersectionMinX,
+      minY: intersectionMinY,
+      maxX: intersectionMaxX,
+      maxY: intersectionMaxY,
+    },
+    edges,
+  }
+}
+
 /** 2D scalar cross product: a.x*b.y - a.y*b.x */
 function cross2(a: Point, b: Point): number {
   return a[0] * b[1] - a[1] * b[0]
@@ -70,9 +176,15 @@ export function pointInPolygon(p: Point, polygon: Polyline): boolean {
 }
 
 /** True if `p` is inside ANY of the polygons (union). */
-function insideAny(p: Point, polygons: Polyline[]): boolean {
-  for (const poly of polygons) {
-    if (pointInPolygon(p, poly)) return true
+function insideAny(p: Point, polygons: PreparedPolygon[]): boolean {
+  for (const prepared of polygons) {
+    if (
+      prepared.bounds !== null &&
+      boundsContain(prepared.bounds, p) &&
+      pointInPolygon(p, prepared.polygon)
+    ) {
+      return true
+    }
   }
   return false
 }
@@ -115,6 +227,22 @@ export function subtractPolygonsFromPolyline(
   polyline: Polyline,
   polygons: Polyline[],
 ): Polyline[] {
+  return subtractPreparedPolygonsFromPolyline(
+    polyline,
+    polygons.map(preparePolygon),
+  )
+}
+
+/**
+ * Prepared variant for callers that reuse the same occluder polygons across
+ * multiple outlines. Geometry and output ordering are identical to
+ * subtractPolygonsFromPolyline; only provably disjoint intersection and
+ * point-in-polygon work is skipped.
+ */
+export function subtractPreparedPolygonsFromPolyline(
+  polyline: Polyline,
+  polygons: PreparedPolygon[],
+): Polyline[] {
   if (polyline.length < 2) return []
   if (polygons.length === 0) return [polyline.map((p) => [p[0], p[1]] as Point)]
 
@@ -140,10 +268,17 @@ export function subtractPolygonsFromPolyline(
 
     // Collect split parameters along this segment: endpoints + every crossing.
     const ts: number[] = [0, 1]
-    for (const poly of polygons) {
-      const n = poly.length
-      for (let k = 0, m = n - 1; k < n; m = k++) {
-        const t = segmentCrossParam(a, b, poly[m]!, poly[k]!)
+    const segmentBounds = tolerantSegmentBounds(a, b)
+    for (const prepared of polygons) {
+      if (
+        prepared.intersectionBounds === null ||
+        !boundsOverlap(segmentBounds, prepared.intersectionBounds)
+      ) {
+        continue
+      }
+      for (const edge of prepared.edges) {
+        if (!boundsOverlap(segmentBounds, edge.bounds)) continue
+        const t = segmentCrossParam(a, b, edge.c, edge.d)
         if (t !== null) ts.push(t)
       }
     }
