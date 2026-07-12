@@ -40,6 +40,7 @@ export function ColorControl({
   const [draftColor, setDraftColorState] = useState(value);
   const [editOwner, setEditOwnerState] = useState<EditOwner>("idle");
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const openRef = useRef(false);
   const draftColorRef = useRef(value);
   const editOwnerRef = useRef<EditOwner>("idle");
   const gestureTransactionRef = useRef(false);
@@ -56,19 +57,23 @@ export function ColorControl({
     setEditOwnerState(next);
   };
 
-  const synchronizeDraftColor = (next: string) => {
-    ignoredSurfaceSyncRef.current = next;
-    setDraftColor(next);
+  const ignoreSurfaceCallbacksForTick = (color: string) => {
+    ignoredSurfaceSyncRef.current = color;
     window.setTimeout(() => {
-      if (ignoredSurfaceSyncRef.current === next) {
+      if (ignoredSurfaceSyncRef.current === color) {
         ignoredSurfaceSyncRef.current = null;
       }
     }, 0);
   };
 
+  const synchronizeDraftColor = (next: string) => {
+    ignoreSurfaceCallbacksForTick(next);
+    setDraftColor(next);
+  };
+
   useEffect(() => {
     if (
-      editOwnerRef.current === "idle" &&
+      (!openRef.current || editOwnerRef.current === "idle") &&
       draftColorRef.current !== value
     ) {
       synchronizeDraftColor(value);
@@ -108,8 +113,10 @@ export function ColorControl({
 
   /** One close path so gesture flushing can be strengthened without fan-out. */
   const closePicker = () => {
-    if (editOwnerRef.current === "gesture" && gestureTransactionRef.current) {
-      editHistory?.onCommit();
+    openRef.current = false;
+    if (editOwnerRef.current === "gesture") {
+      if (gestureTransactionRef.current) editHistory?.onCommit();
+      ignoreSurfaceCallbacksForTick(draftColorRef.current);
       gestureTransactionRef.current = false;
       lastGestureLiftRef.current = null;
       setEditOwner("idle");
@@ -125,8 +132,10 @@ export function ColorControl({
       <PopoverPrimitive.Root
         open={open}
         onOpenChange={(nextOpen, eventDetails) => {
-          if (nextOpen) setOpen(true);
-          else {
+          if (nextOpen) {
+            openRef.current = true;
+            setOpen(true);
+          } else {
             closePicker();
             if (eventDetails.reason === "escape-key") {
               // Kept-mounted focus guards restore inside the hidden popup in

@@ -236,6 +236,39 @@ describe("ColorControl dismissal and synchronization", () => {
     expect(document.activeElement).toBe(trigger());
   });
 
+  it("idles a fallback gesture on dismissal so external values resynchronize", async () => {
+    const initial = props({ value: "#ff0000" });
+    mount(initial);
+    openPicker();
+    const hue = popup().querySelector<HTMLElement>('[aria-label="ink hue"]')!;
+
+    act(() => {
+      key(hue, "ArrowRight");
+      key(hue, "Escape");
+    });
+    expect(initial.onChange).toHaveBeenCalledWith("#ff4d00");
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+
+    rerender({ ...initial, value: "#00ff00" });
+    await act(
+      async () => new Promise((resolve) => window.setTimeout(resolve, 0)),
+    );
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #00ff00",
+    );
+    expect(
+      popup()
+        .querySelector('[aria-label="ink hue"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("120");
+    expect([rgb("red").value, rgb("green").value, rgb("blue").value]).toEqual([
+      "0",
+      "255",
+      "0",
+    ]);
+  });
+
   it("keeps settled edits when an outside press closes the popup", () => {
     const onChange = vi.fn<[string], void>();
     const outside = document.createElement("button");
