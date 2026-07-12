@@ -140,8 +140,6 @@ export interface LiveCanvasProps {
    * geometry. Held and Outline states never invoke the Sketch generator.
    */
   renderState?: LiveCanvasRenderState;
-  /** @deprecated Kept temporarily while SketchControls adopts `renderState`. */
-  renderMode?: RenderMode;
   /** Export identity metadata retained in the displayed-scene handle. */
   tolerance?: number;
   /**
@@ -152,8 +150,6 @@ export interface LiveCanvasProps {
    * explicit, documented part of the contract.
    */
   handleRef?: Ref<LiveCanvasHandle>;
-  /** @deprecated Outline completion is now owned by the session coordinator. */
-  onOutlineComputed?: () => void;
 }
 
 /**
@@ -259,10 +255,8 @@ export function LiveCanvas({
   fillCaptureRequest = null,
   onFillCaptured,
   renderState = LIVE_FILL_RENDER_STATE,
-  renderMode: _legacyRenderMode,
   tolerance = 0,
   handleRef,
-  onOutlineComputed: _legacyOnOutlineComputed,
 }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // The exact Scene most recently painted, exposed read-only to one-shot export.

@@ -48,6 +48,35 @@ const historyCapture = vi.hoisted(() => ({
   transactionCommits: [] as { before: EditHistory; after: EditHistory }[],
   cancels: [] as { before: EditHistory; after: EditHistory }[],
 }));
+const outlineJob = vi.hoisted(() => ({
+  active: null as null | {
+    identity: import("./outlineComputeProtocol").OutlineComputeIdentity;
+    resolve: (result: unknown) => void;
+  },
+}));
+
+vi.mock("./hiddenLineCoordinator", () => ({
+  HiddenLineCoordinator: class {
+    start(identity: import("./outlineComputeProtocol").OutlineComputeIdentity) {
+      return {
+        then(resolve: (result: unknown) => void) {
+          outlineJob.active = { identity, resolve };
+          return Promise.resolve();
+        },
+      };
+    }
+    cancel() {
+      const active = outlineJob.active;
+      if (active === null) return false;
+      outlineJob.active = null;
+      active.resolve({ status: "cancelled", jobId: 1 });
+      return true;
+    }
+    dispose() {
+      this.cancel();
+    }
+  },
+}));
 
 // Probe both SVG serializers while delegating to their real implementations, so
 // document assertions exercise core and each wiring test can identify the exact
@@ -132,20 +161,24 @@ let lastProfile: PlotProfile | null = null;
 vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
     seed,
-    renderMode,
+    renderState,
     tolerance,
     compositionFrame,
     profile,
     handleRef,
-    onOutlineComputed,
+    inputRevision = 0,
+    fillCaptureRequest,
+    onFillCaptured,
   }: {
     seed: Seed;
-    renderMode?: string;
+    renderState?: { kind: string; scene?: unknown; t?: number };
     tolerance?: number;
     compositionFrame: CoordinateSpace;
     profile: PlotProfile;
     handleRef?: Ref<LiveCanvasHandle>;
-    onOutlineComputed?: () => void;
+    inputRevision?: number;
+    fillCaptureRequest?: { token: number; inputRevision: number } | null;
+    onFillCaptured?: (capture: unknown) => void;
   }) => {
     useImperativeHandle(handleRef, () => ({
       getCanvas: () =>
@@ -153,23 +186,46 @@ vi.mock("./LiveCanvas", () => ({
       getCurrentT: () => fakeCurrentT,
       getDisplayedScene: () => fakeDisplayedScene,
     }));
-    lastOnOutlineComputed = onOutlineComputed ?? null;
+    lastOnOutlineComputed = () => {
+      const active = outlineJob.active;
+      if (active === null) return;
+      outlineJob.active = null;
+      active.resolve({
+        status: "success",
+        jobId: 1,
+        identity: active.identity,
+        scene: active.identity.sourceScene,
+      });
+    };
     lastCompositionFrame = compositionFrame;
     lastProfile = profile;
     // Model the outline pass finishing: fire the "computed" signal after each
     // outline render so the owner's busy label clears (unless a test opts out to
     // observe the intermediate "Computing…" state itself).
     useEffect(() => {
-      if (renderMode === "outline" && autoFireOutlineComputed) {
-        onOutlineComputed?.();
+      if (fillCaptureRequest !== null && fillCaptureRequest !== undefined) {
+        onFillCaptured?.({
+          ...fillCaptureRequest,
+          scene: {
+            space: compositionFrame,
+            primitives: [],
+          },
+          t: fakeCurrentT,
+        });
+      }
+    }, [fillCaptureRequest?.token]);
+    useEffect(() => {
+      if (outlineJob.active !== null && autoFireOutlineComputed) {
+        lastOnOutlineComputed?.();
       }
     });
     return (
       <div
         data-testid="canvas-seed"
-        data-render-mode={String(renderMode)}
+        data-render-mode={renderState?.kind === "outline" ? "outline" : "fill"}
         data-tolerance={String(tolerance)}
         data-include-frame={String(profile.includeFrame)}
+        data-input-revision={String(inputRevision)}
       >
         {String(seed)}
       </div>
@@ -270,6 +326,7 @@ const MINIMAL_PNG = Uint8Array.from([
 ]);
 
 beforeEach(() => {
+  outlineJob.active = null;
   vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
   // Sensible defaults so a mount's list-on-mount effect resolves quietly; the
   // save/reload tests override loadPreset/savePreset per case.
@@ -638,7 +695,7 @@ describe("SketchControls — central edit-history integration", () => {
     ).toBe("0");
     expect(renderToggle.getAttribute("aria-pressed")).toBe("true");
     expect(paperMarginsCheckbox(el).checked).toBe(false);
-    expect(renderToggle.textContent).toBe("Computing…");
+    expect(renderToggle.textContent).toBe("Outline");
   });
 
   it("routes lock toggle, Randomize, New seed, and frame toggle as named atomic commands", () => {
@@ -1016,7 +1073,7 @@ describe("SketchControls — central edit-history integration", () => {
 
     act(() => width.focus());
     setInput(width, "300");
-    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.textContent).toBe("Outline");
     expect(lastCompositionFrame).not.toBe(initialFrame);
     act(() => lastOnOutlineComputed?.());
 
@@ -1028,7 +1085,7 @@ describe("SketchControls — central edit-history integration", () => {
 
     expect(lastProfile?.width).toBe(200);
     expect(lastCompositionFrame).toEqual(initialFrame);
-    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.textContent).toBe("Outline");
     expect(historyCapture.cancels).toHaveLength(1);
     expect(historyCapture.cancels[0]!.after.past).toHaveLength(0);
   });
@@ -1911,8 +1968,8 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
         "data-include-frame",
       ),
     ).toBe("false");
-    expect(toggle.textContent).toBe("Computing…");
-    expect(toggle.disabled).toBe(true);
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
   });
 
   it("restores includeFrame from a Preset and recomputes the visible Outline", async () => {
@@ -1949,8 +2006,8 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(el.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(
       false,
     );
-    expect(toggle.textContent).toBe("Computing…");
-    expect(toggle.disabled).toBe(true);
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
   });
 
   it("marks Outline recomputing only when a committed paper edit changes drawable aspect", () => {
@@ -1982,8 +2039,8 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(lastCompositionFrame).toEqual(
       resolvePlotCompositionFrame(lastProfile!),
     );
-    expect(toggle.textContent).toBe("Computing…");
-    expect(toggle.disabled).toBe(true);
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
   });
 });
 
@@ -2983,7 +3040,7 @@ describe("SketchControls — render-mode toggle wiring (#219)", () => {
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("shows 'Computing…' (disabled) the instant Fill→Outline is clicked, until the pass signals done (#228)", () => {
+  it("keeps the Fill preview and toggle usable during the quiet Outline interval", () => {
     // Opt out of the auto-clear so the intermediate busy state is observable: the
     // real pass runs asynchronously, so the label must read "Computing…" from the
     // click's own commit until LiveCanvas signals `onOutlineComputed`.
@@ -3003,10 +3060,10 @@ describe("SketchControls — render-mode toggle wiring (#219)", () => {
     act(() => {
       toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(toggle.textContent).toBe("Computing…");
-    expect(toggle.disabled).toBe(true);
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
     expect(toggle.getAttribute("aria-busy")).toBe("true");
-    expect(canvasRenderMode(el)).toBe("outline");
+    expect(canvasRenderMode(el)).toBe("fill");
 
     // The pass finishes → LiveCanvas signals done → the label settles on "Outline"
     // and the control re-enables.
@@ -3040,5 +3097,86 @@ describe("SketchControls — render-mode toggle wiring (#219)", () => {
     expect(paramInput(el, "radius").value).toBe(radiusBefore);
     expect(historyCapture.atomic).toHaveLength(0);
     expect(historyCapture.transactionCommits).toHaveLength(0);
+  });
+});
+
+describe("SketchControls — background Outline session (#289)", () => {
+  it("reveals Cancel outline only after the 750ms quiet period and keeps ordinary actions usable", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    vi.useFakeTimers();
+    try {
+      clickButton(el, "Fill");
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(749));
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(1));
+      expect(el.textContent).toContain("Cancel outline");
+      expect(
+        [...el.querySelectorAll("button")].find((button) =>
+          button.textContent?.includes("Export PNG"),
+        )?.disabled,
+      ).toBe(false);
+      expect(
+        [...el.querySelectorAll("button")].find((button) =>
+          button.textContent?.includes("Export SVG"),
+        )?.disabled,
+      ).toBe(false);
+      expect(
+        [...el.querySelectorAll("button")].find((button) =>
+          button.textContent?.includes("Export Hidden-line SVG"),
+        )?.disabled,
+      ).toBe(true);
+      clickButton(el, "Cancel outline");
+      expect(el.textContent).not.toContain("Cancel outline");
+      expect(
+        el.querySelector<HTMLButtonElement>(
+          'button[aria-label="Toggle outline render mode"]',
+        )?.textContent,
+      ).toBe("Fill");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a sanitized recoverable failure while logging technical detail", () => {
+    autoFireOutlineComputed = false;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    clickButton(el, "Fill");
+    const active = outlineJob.active!;
+    act(() => {
+      outlineJob.active = null;
+      active.resolve({
+        status: "failure",
+        jobId: 1,
+        error: "geometry\u0000 exploded",
+      });
+    });
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+      "Outline failed: geometry  exploded",
+    );
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    expect(toggle.textContent).toBe("Fill");
+    expect(toggle.disabled).toBe(false);
+    expect(consoleError).toHaveBeenCalled();
+  });
+
+  it("reports the full active interval and clears it on keyed unmount", () => {
+    autoFireOutlineComputed = false;
+    const changes: boolean[] = [];
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {})}
+        onHiddenLineBusyChange={(busy) => changes.push(busy)}
+      />,
+    );
+    clickButton(el, "Fill");
+    expect(changes.at(-1)).toBe(true);
+    act(() => root!.unmount());
+    root = null;
+    expect(changes.at(-1)).toBe(false);
   });
 });

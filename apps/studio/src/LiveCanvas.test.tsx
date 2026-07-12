@@ -610,7 +610,7 @@ describe("LiveCanvas full-sheet preview chrome (#248)", () => {
         seed={1}
         profile={asymmetricProfile}
         compositionFrame={compositionFrame}
-        renderMode="fill"
+        renderState={{ kind: "fill-live" }}
       />,
     );
     const sheet = el.querySelector(".plot-sheet");
@@ -625,7 +625,11 @@ describe("LiveCanvas full-sheet preview chrome (#248)", () => {
           seed={1}
           profile={asymmetricProfile}
           compositionFrame={compositionFrame}
-          renderMode="outline"
+          renderState={{
+            kind: "outline",
+            scene: { space: compositionFrame, primitives: [] },
+            t: 0,
+          }}
         />,
       );
     });

@@ -47,9 +47,18 @@ import {
 import {
   LiveCanvas,
   type DisplayedSceneSnapshot,
+  type FillCapture,
   type LiveCanvasHandle,
+  type LiveCanvasRenderState,
   type RenderMode,
 } from "./LiveCanvas";
+import { HiddenLineCoordinator } from "./hiddenLineCoordinator";
+import { createOutlineComputeIdentity } from "./outlineComputeProtocol";
+import {
+  createOutlineSessionState,
+  outlineSessionReducer,
+  type OutlineSessionAction,
+} from "./outlineSession";
 import { outlineScene } from "./outlineScene";
 import { PaperSection } from "./PaperSection";
 import {
@@ -149,6 +158,8 @@ export interface SketchControlsProps {
   collapsed?: boolean;
   /** Toggle the {@link collapsed} state — wired to the canvas-region toggle button. */
   onToggleCollapse?: () => void;
+  /** Reports the complete capture/compute interval to App's navigation guard. */
+  onHiddenLineBusyChange?: (busy: boolean) => void;
 }
 
 /**
@@ -197,6 +208,7 @@ export function SketchControls({
   switcher,
   collapsed = false,
   onToggleCollapse,
+  onHiddenLineBusyChange,
 }: SketchControlsProps) {
   const [history, setHistory] = useState<EditHistory>(() =>
     createEditHistory({
@@ -248,42 +260,68 @@ export function SketchControls({
     [drawableAspectIdentity],
   );
 
-  // The preview's render mode (issue #219): `fill` (default) shows the live fill
-  // preview; `outline` swaps in the Hidden-line pass's stroke-only, occlusion-
-  // clipped result — the same processed Scene the hidden-line SVG export emits —
-  // recomputed on demand by LiveCanvas, never in its live fill loop. Like params/
-  // seed/locks this lives in keyed-remount state, so a Sketch switch resets it to
-  // `fill` for free (no manual reset effect).
-  const [renderMode, setRenderMode] = useState<RenderMode>("fill");
+  const [outlineSession, setOutlineSession] = useState(
+    createOutlineSessionState,
+  );
+  const outlineSessionRef = useRef(outlineSession);
+  outlineSessionRef.current = outlineSession;
+  const coordinatorRef = useRef<HiddenLineCoordinator | null>(null);
+  if (coordinatorRef.current === null) {
+    coordinatorRef.current = new HiddenLineCoordinator();
+  }
+  const dispatchOutline = (action: OutlineSessionAction) => {
+    const next = outlineSessionReducer(outlineSessionRef.current, action);
+    outlineSessionRef.current = next;
+    setOutlineSession(next);
+    return next;
+  };
+  const outlineBusy =
+    outlineSession.capture !== null || outlineSession.active !== null;
+  const onHiddenLineBusyChangeRef = useRef(onHiddenLineBusyChange);
+  onHiddenLineBusyChangeRef.current = onHiddenLineBusyChange;
+  const renderMode: RenderMode =
+    outlineSession.phase.kind === "outline" ? "outline" : "fill";
+  const [showOutlineBusy, setShowOutlineBusy] = useState(false);
 
-  // Issue #228: while an outline draw's Hidden-line pass runs, LiveCanvas freezes
-  // the main thread for seconds. This flag drives a "Computing…" label on the
-  // render toggle so the action registers visibly. It MUST be set synchronously
-  // at the trigger (the toggle click / any param-or-seed edit while in outline)
-  // so React paints the "Computing…" button with that same commit — before the
-  // blocking pass runs. A flag set from inside LiveCanvas's draw effect paints
-  // too late (the pass blocks the very frame it would paint on). LiveCanvas CLEARS
-  // it via `onOutlineComputed` once the outline is drawn. Lives in keyed-remount
-  // state alongside renderMode, so a Sketch switch resets it to `false` for free.
-  const [computingOutline, setComputingOutline] = useState(false);
+  useEffect(() => {
+    onHiddenLineBusyChangeRef.current?.(outlineBusy);
+  }, [outlineBusy]);
 
-  // Any params/seed edit WHILE in outline mode re-runs LiveCanvas's on-demand
-  // Hidden-line pass. Mark computing here at the trigger (a slider drag, New seed,
-  // Randomize, preset reload, seed field) so the "Computing…" label paints with
-  // that edit's commit. A no-op in fill mode (no pass runs). See the flag above.
-  const markOutlineRecomputing = () => {
-    if (renderMode === "outline") setComputingOutline(true);
+  useEffect(() => {
+    if (!outlineBusy) {
+      setShowOutlineBusy(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowOutlineBusy(true), 750);
+    return () => window.clearTimeout(timer);
+  }, [outlineBusy]);
+
+  useEffect(() => {
+    return () => {
+      coordinatorRef.current?.dispose();
+      onHiddenLineBusyChangeRef.current?.(false);
+    };
+  }, []);
+
+  const cancelCoordinator = (): void => {
+    coordinatorRef.current?.cancel();
+  };
+
+  const requestOutlineForCurrentInputs = (): void => {
+    dispatchOutline({ type: "request-outline" });
   };
 
   const updateHistory = (
     transition: (current: EditHistory) => EditHistory,
+    launchOutline = true,
   ): void => {
     const current = historyRef.current;
     const next = transition(current);
     if (next === current) return;
     historyRef.current = next;
     if (outlineInputsChanged(current.present, next.present)) {
-      markOutlineRecomputing();
+      cancelCoordinator();
+      dispatchOutline({ type: "inputs-changed", launch: launchOutline });
     }
     setHistory(next);
   };
@@ -316,14 +354,16 @@ export function SketchControls({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [renderMode]);
+  }, []);
 
   const previewLeaf = <Key extends keyof StudioEditState>(
     key: Key,
     value: StudioEditState[Key],
   ): void => {
-    updateHistory((current) =>
-      previewEditState(current, { ...current.present, [key]: value }),
+    updateHistory(
+      (current) =>
+        previewEditState(current, { ...current.present, [key]: value }),
+      false,
     );
   };
 
@@ -336,12 +376,21 @@ export function SketchControls({
     );
   };
 
-  const beginTransaction = (): void =>
-    updateHistory(beginEditTransaction);
-  const commitTransaction = (): void =>
-    updateHistory(commitEditTransaction);
-  const cancelTransaction = (): void =>
-    updateHistory(cancelEditTransaction);
+  const beginTransaction = (): void => {
+    cancelCoordinator();
+    dispatchOutline({ type: "edit-began" });
+    updateHistory(beginEditTransaction, false);
+  };
+  const settleTransaction = (
+    transition: (current: EditHistory) => EditHistory,
+  ): void => {
+    updateHistory(transition, false);
+    if (outlineSessionRef.current.desired === "outline") {
+      requestOutlineForCurrentInputs();
+    }
+  };
+  const commitTransaction = (): void => settleTransaction(commitEditTransaction);
+  const cancelTransaction = (): void => settleTransaction(cancelEditTransaction);
 
   // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
   // export snapshots. It is a ref, not state — export reads it imperatively on a
@@ -364,18 +413,84 @@ export function SketchControls({
     commitLeaf("locks", next);
   };
 
-  // Flip the preview between fill and outline (issue #219). A view-only toggle:
-  // it swaps which processed Scene LiveCanvas draws and touches no param/seed/lock
-  // axis. The heavy Hidden-line pass runs inside LiveCanvas on demand (on this
-  // toggle / a param settle), never in its live fill loop.
+  // Flip desired preview intent. Entering Outline first asks LiveCanvas for its
+  // exact displayed Fill, then the session's worker coordinator derives geometry;
+  // LiveCanvas only paints the held Fill or atomically completed Outline.
   const toggleRenderMode = () => {
-    const next = renderMode === "outline" ? "fill" : "outline";
-    // Set/clear the busy flag SYNCHRONOUSLY with the flip so the button paints its
-    // "Computing…" state in this same commit — before LiveCanvas's effect runs the
-    // blocking pass (#228). Flipping to fill clears it: no pass runs there.
-    setComputingOutline(next === "outline");
-    setRenderMode(next);
+    if (outlineSessionRef.current.desired === "outline") {
+      cancelCoordinator();
+      dispatchOutline({ type: "request-fill" });
+    } else {
+      requestOutlineForCurrentInputs();
+    }
   };
+
+  const onFillCaptured = (capture: FillCapture): void => {
+    const current = outlineSessionRef.current;
+    if (
+      current.capture?.token !== capture.token ||
+      current.inputRevision !== capture.inputRevision
+    ) {
+      return;
+    }
+    const edit = historyRef.current.present;
+    const identity = createOutlineComputeIdentity({
+      sketchId: sketch.id,
+      schema: sketch.schema,
+      params: edit.params,
+      seed: edit.seed,
+      sampledT: capture.t,
+      compositionFrame,
+      tolerance: edit.tolerance,
+      includeFrame: edit.profile.includeFrame,
+      sourceScene: capture.scene,
+    });
+    const next = dispatchOutline({
+      type: "fill-captured",
+      token: capture.token,
+      inputRevision: capture.inputRevision,
+      identity,
+      scene: capture.scene,
+      t: capture.t,
+    });
+    if (next.active?.token !== capture.token) return;
+    const reportFailure = (detail: string): void => {
+      console.error("Outline worker failed", detail);
+      dispatchOutline({
+        type: "failed",
+        token: capture.token,
+        error: detail.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 160),
+      });
+    };
+    void coordinatorRef.current!
+      .start(identity)
+      .then((result) => {
+        if (result.status === "success") {
+          dispatchOutline({
+            type: "succeeded",
+            token: capture.token,
+            identity: result.identity,
+            scene: result.scene,
+          });
+        } else if (result.status === "failure") {
+          reportFailure(result.error);
+        }
+      })
+      .catch((error: unknown) => {
+        reportFailure(error instanceof Error ? error.message : "Outline worker failed");
+      });
+  };
+
+  const renderState: LiveCanvasRenderState =
+    outlineSession.phase.kind === "fill-live"
+      ? { kind: "fill-live" }
+      : outlineSession.phase.kind === "fill-held-pending"
+        ? {
+            kind: "fill-held",
+            scene: outlineSession.phase.scene,
+            t: outlineSession.phase.t,
+          }
+        : outlineSession.phase;
 
   // New seed: roll a fresh arrangement, leaving every param value untouched —
   // the seed axis is independent of the param (Randomize) axis.
@@ -434,11 +549,6 @@ export function SketchControls({
   // Sketch passes the captured `t` (the last-drawn moment from the handle), a
   // static Sketch omits `t` entirely so the name carries no segment.
   const exportPng = () => {
-    // Outline inputs/profile can commit before LiveCanvas's intentionally
-    // deferred two-rAF rebuild lands. Never snapshot those stale pixels with the
-    // newly committed reproduction metadata, even if this handler is invoked
-    // programmatically while the disabled button cannot be clicked.
-    if (computingOutline) return;
     const handle = canvasHandle.current;
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
@@ -531,6 +641,7 @@ export function SketchControls({
   // profile, while ordinary SVG remains on `renderToSVG`. The file keeps its
   // `-hidden-line` variant segment and existing time-gated name.
   const exportHiddenLineSvg = () => {
+    if (outlineBusy) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
     const displayed = handle.getDisplayedScene();
@@ -618,9 +729,11 @@ export function SketchControls({
             seed={seed}
             compositionFrame={compositionFrame}
             profile={profile}
-            renderMode={renderMode}
+            inputRevision={outlineSession.inputRevision}
+            fillCaptureRequest={outlineSession.capture}
+            onFillCaptured={onFillCaptured}
+            renderState={renderState}
             tolerance={tolerance}
-            onOutlineComputed={() => setComputingOutline(false)}
           />
         </div>
       </section>
@@ -709,10 +822,9 @@ export function SketchControls({
          * is a view-only toggle: `aria-pressed` reflects outline, and flipping it
          * changes nothing about params/seed/locks.
          *
-         * While an outline pass is running (#228) the label reads "Computing…" and
-         * the button is disabled + `aria-busy` — static feedback that the (page-
-         * freezing) Hidden-line pass is underway. `computingOutline` is set at the
-         * trigger and cleared by LiveCanvas's `onOutlineComputed`.
+         * Desired Outline remains pressed while the prior Fill stays visible.
+         * `aria-busy` covers capture plus worker compute, while the toggle remains
+         * usable as the immediate cancel/back-to-Fill action.
          */}
         <div className="mt-auto flex items-center gap-2">
           <span className="flex-none min-w-16 text-sm text-muted-foreground">
@@ -720,22 +832,40 @@ export function SketchControls({
           </span>
           <Button
             type="button"
-            variant={renderMode === "outline" ? "default" : "outline"}
+            variant={outlineSession.desired === "outline" ? "default" : "outline"}
             size="sm"
             className="flex-1"
-            aria-pressed={renderMode === "outline"}
-            aria-busy={computingOutline}
-            disabled={computingOutline}
+            aria-pressed={outlineSession.desired === "outline"}
+            aria-busy={outlineBusy}
             aria-label="Toggle outline render mode"
             onClick={toggleRenderMode}
           >
-            {computingOutline
-              ? "Computing…"
-              : renderMode === "outline"
+            {outlineSession.desired === "outline"
                 ? "Outline"
                 : "Fill"}
           </Button>
         </div>
+        {showOutlineBusy && outlineBusy ? (
+          <div role="status" aria-live="polite" className="text-sm text-muted-foreground">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                cancelCoordinator();
+                dispatchOutline({ type: "cancelled" });
+              }}
+            >
+              Cancel outline
+            </Button>
+          </div>
+        ) : null}
+        {outlineSession.failure !== null ? (
+          <p role="alert" className="text-sm text-destructive">
+            <strong>Outline failed</strong>
+            {outlineSession.failure === "" ? null : `: ${outlineSession.failure}`}
+          </p>
+        ) : null}
         {/*
          * Simplification tolerance knob (#232) — a STUDIO-level control (not a
          * per-sketch schema param) driving the Hidden-line pass's final
@@ -771,7 +901,6 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportPng}
-            disabled={computingOutline}
           >
             Export PNG
           </Button>
@@ -790,6 +919,7 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportHiddenLineSvg}
+            disabled={outlineBusy}
           >
             Export Hidden-line SVG
           </Button>
