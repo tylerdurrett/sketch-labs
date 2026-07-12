@@ -1,4 +1,4 @@
-import { hiddenLinePass, type Scene } from "@harness/core";
+import { DEFAULT_STROKE, hiddenLinePass, type Scene } from "@harness/core";
 
 /**
  * The SINGLE preview == export seam (issue #220, feature #4).
@@ -12,8 +12,10 @@ import { hiddenLinePass, type Scene } from "@harness/core";
  * Collapsing both to this one pure function makes preview == export processing
  * true BY CONSTRUCTION: there is exactly one place the input Scene is reduced.
  *
- * It is a pure `(Scene, tolerance) → Scene` function — the Hidden-line pass and
- * nothing else — so it is trivially unit-testable. Scene sampling deliberately
+ * It is a pure `(Scene, tolerance, includeFrame) → Scene` function: the
+ * Hidden-line pass followed, when requested, by one authored Composition Frame
+ * path. Appending the frame after occlusion processing keeps it from hiding any
+ * source geometry. Scene sampling deliberately
  * stays caller-owned: LiveCanvas supplies its retained ADR-0012 prepared sample,
  * avoiding a redundant cold `generate`, while one-shot export may generate its
  * Scene cold. The `tolerance` (default 0, i.e. no simplification) is the studio's
@@ -27,6 +29,29 @@ import { hiddenLinePass, type Scene } from "@harness/core";
  *
  * Slice-local rationale lives here (not an ADR) per ADR-0007.
  */
-export function outlineScene(scene: Scene, tolerance = 0): Scene {
-  return hiddenLinePass(scene, { tolerance });
+export function outlineScene(
+  scene: Scene,
+  tolerance = 0,
+  includeFrame = false,
+): Scene {
+  const outlined = hiddenLinePass(scene, { tolerance });
+  if (!includeFrame) return outlined;
+
+  const { width, height } = outlined.space;
+  return {
+    ...outlined,
+    primitives: [
+      ...outlined.primitives,
+      {
+        points: [
+          [0, 0],
+          [width, 0],
+          [width, height],
+          [0, height],
+          [0, 0],
+        ],
+        stroke: { color: "black", width: DEFAULT_STROKE.width },
+      },
+    ],
+  };
 }
