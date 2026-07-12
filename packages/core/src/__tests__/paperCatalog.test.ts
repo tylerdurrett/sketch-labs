@@ -13,6 +13,7 @@ import {
   plotProfileToInches,
   plotProfileFromInches,
 } from '../paperCatalog'
+import { HARNESS_FALLBACK_PLOT_PROFILE } from '../outputProfile'
 import type { PlotInsets, PlotProfile } from '../plotProfile'
 
 /** Asymmetric insets — asymmetry proves a swap does NOT reorder them. */
@@ -23,8 +24,9 @@ const ZERO_INSETS: PlotInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 const PROFILE_KEYS = ['height', 'insets', 'width']
 
 describe('STANDARD_PAPERS catalog', () => {
-  it('covers the six standard formats in portrait millimeters (AC4)', () => {
+  it('covers the seven standard formats in portrait millimeters (AC4)', () => {
     expect(STANDARD_PAPERS).toEqual({
+      square: { width: 200, height: 200 },
       a2: { width: 420, height: 594 },
       a3: { width: 297, height: 420 },
       a4: { width: 210, height: 297 },
@@ -34,8 +36,10 @@ describe('STANDARD_PAPERS catalog', () => {
     })
   })
 
-  it('lists exactly the six standard names', () => {
+  it('lists exactly the seven standard names in UI order', () => {
+    expect(STANDARD_PAPER_NAMES).toHaveLength(7)
     expect([...STANDARD_PAPER_NAMES]).toEqual([
+      'square',
       'a2',
       'a3',
       'a4',
@@ -66,6 +70,19 @@ describe('standardPaperProfile', () => {
     const profile = standardPaperProfile('a4', 'landscape')
     expect(profile.width).toBe(297)
     expect(profile.height).toBe(210)
+  })
+
+  it('keeps the square dimensions exact in either orientation state', () => {
+    expect(standardPaperProfile('square', 'portrait')).toEqual({
+      width: 200,
+      height: 200,
+      insets: ZERO_INSETS,
+    })
+    expect(standardPaperProfile('square', 'landscape')).toEqual({
+      width: 200,
+      height: 200,
+      insets: ZERO_INSETS,
+    })
   })
 
   it('defaults to zero insets', () => {
@@ -108,6 +125,25 @@ describe('applyStandardPaper', () => {
     expect(next.insets).toEqual(ASYMMETRIC_INSETS)
   })
 
+  it('writes exact square dimensions in either orientation and preserves insets', () => {
+    const profile: PlotProfile = {
+      width: 297,
+      height: 210,
+      insets: ASYMMETRIC_INSETS,
+    }
+
+    expect(applyStandardPaper(profile, 'square', 'portrait')).toEqual({
+      width: 200,
+      height: 200,
+      insets: ASYMMETRIC_INSETS,
+    })
+    expect(applyStandardPaper(profile, 'square', 'landscape')).toEqual({
+      width: 200,
+      height: 200,
+      insets: ASYMMETRIC_INSETS,
+    })
+  })
+
   it('persists no standard name or orientation on the profile (AC1)', () => {
     const profile: PlotProfile = { width: 200, height: 200, insets: ZERO_INSETS }
     expect(Object.keys(applyStandardPaper(profile, 'a4')).sort()).toEqual(
@@ -141,6 +177,10 @@ describe('matchStandardPaper', () => {
     expect(matchStandardPaper({ width: height, height: width })).toBe('a4')
   })
 
+  it('matches the Harness fallback to the square standard', () => {
+    expect(matchStandardPaper(HARNESS_FALLBACK_PLOT_PROFILE)).toBe('square')
+  })
+
   it('accepts a full Plot Profile and ignores its insets', () => {
     const profile: PlotProfile = {
       width: 210,
@@ -151,7 +191,7 @@ describe('matchStandardPaper', () => {
   })
 
   it('returns null for a custom (non-standard) size', () => {
-    expect(matchStandardPaper({ width: 200, height: 200 })).toBeNull()
+    expect(matchStandardPaper({ width: 180, height: 200 })).toBeNull()
   })
 
   it('tolerates small float noise within tolerance', () => {

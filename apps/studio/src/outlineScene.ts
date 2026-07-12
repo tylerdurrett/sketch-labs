@@ -1,6 +1,6 @@
 import {
-  DEFAULT_COMPOSITION_FRAME,
   hiddenLinePass,
+  type CoordinateSpace,
   type Params,
   type Scene,
   type Seed,
@@ -20,8 +20,9 @@ import {
  * function makes preview == export true BY CONSTRUCTION: there is exactly one
  * place the processed Scene is derived, so the two paths cannot diverge.
  *
- * It is a pure `(params, seed, t, tolerance) → Scene` function — `generate` then
- * the Hidden-line pass, nothing else — so it is trivially unit-testable and lets
+ * It is a pure `(params, seed, t, frame, tolerance) → Scene` function —
+ * `generate` then the Hidden-line pass, nothing else — so it is trivially
+ * unit-testable and lets
  * a test lock the export path to the same expression the preview evaluates. The
  * `tolerance` (default 0, i.e. no simplification) is the studio's single knob
  * value forwarded into the pass's final Douglas–Peucker stage; routing it
@@ -39,9 +40,10 @@ export function outlineScene(
   params: Params,
   seed: Seed,
   t: number,
+  compositionFrame: CoordinateSpace,
   tolerance = 0,
 ): Scene {
-  return hiddenLinePass(sketch.generate(params, seed, t, DEFAULT_COMPOSITION_FRAME), {
+  return hiddenLinePass(sketch.generate(params, seed, t, compositionFrame), {
     tolerance,
   });
 }

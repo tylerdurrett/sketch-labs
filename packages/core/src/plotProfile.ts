@@ -8,11 +8,10 @@
  * Composition Frame; its magnitude belongs to the later output mapping, not to
  * the frame's coordinate space.
  *
- * This module is deliberately headless and minimal. It ships ONLY the record
- * shape, its validator, and the pure drawable-aspect → Composition Frame
- * derivation. Catalog matching (standard-paper names), unit conversion
- * (millimeters ↔ inches), default/fallback resolution, and Preset persistence
- * are sibling concerns under slice #247 and live elsewhere.
+ * This module is deliberately headless and minimal. It owns the record shape,
+ * validation, drawable-aspect equivalence, and pure Composition Frame derivation.
+ * Catalog matching, unit conversion, default resolution, and Preset persistence
+ * remain separate modules rather than UI concerns leaking into this model.
  *
  * Design decisions carried here (a Plot Profile is a Sketch-agnostic system
  * value, so its rationale lives in this header rather than in any one sketch, and
@@ -27,12 +26,10 @@
  *   store authoritative physical dimensions, not a redundant paper name or
  *   orientation"; "Plot dimensions and insets are canonical millimeters").
  *
- * - The four insets are INDEPENDENT (top/right/bottom/left). The first UI (slice
- *   #248) edits them as one linked value, but the four-inset shape lands in the
- *   model now so asymmetric plotter-safe regions stay representable and no later
- *   Preset migration is needed (parent feature #245; CONTEXT.md: "Plot margins
- *   are four physical insets; the initial Harness UI edits them as one linked
- *   value").
+ * - The four insets are INDEPENDENT (top/right/bottom/left). Studio initially
+ *   edits them as one linked value, while the four-inset shape keeps asymmetric
+ *   plotter-safe regions representable without a later Preset migration (parent
+ *   feature #245; CONTEXT.md: "Plot margins are four physical insets").
  *
  * - Validation contract. Paper `width`/`height` are strictly POSITIVE and finite
  *   (a zero, negative, `NaN`, or `Infinity` sheet is meaningless). The four
@@ -194,6 +191,40 @@ export function plotDrawableRectangle(profile: PlotProfile): PlotRectangle {
     width: width - insets.left - insets.right,
     height: height - insets.top - insets.bottom,
   }
+}
+
+/**
+ * Relative tolerance for deciding whether two dimensionless drawable aspects
+ * represent the same composition shape. This is intentionally machine-scale:
+ * unlike the paper catalog's `0.5 mm` physical-input tolerance, aspect has no
+ * unit and should absorb only arithmetic noise (for example, one ULP introduced
+ * when every paper dimension and inset is proportionally scaled).
+ */
+export const PLOT_DRAWABLE_ASPECT_RELATIVE_TOLERANCE = Number.EPSILON * 8
+
+/**
+ * Compare positive drawable aspects without treating floating-point quotient
+ * noise as a geometry change. Invalid aspects are never equivalent; exact values
+ * take the fast path. The `max(1, |a|, |b|)` scale gives a standard symmetric
+ * relative comparison while retaining useful behavior for portrait ratios < 1.
+ */
+export function plotDrawableAspectsEquivalent(
+  left: number,
+  right: number,
+): boolean {
+  if (
+    !Number.isFinite(left) ||
+    left <= 0 ||
+    !Number.isFinite(right) ||
+    right <= 0
+  ) {
+    return false
+  }
+  if (left === right) return true
+  const scale = Math.max(1, Math.abs(left), Math.abs(right))
+  return (
+    Math.abs(left - right) <= PLOT_DRAWABLE_ASPECT_RELATIVE_TOLERANCE * scale
+  )
 }
 
 /**

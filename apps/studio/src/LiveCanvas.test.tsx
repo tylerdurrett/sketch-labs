@@ -3,19 +3,47 @@ import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Scene, Sketch, TimeMetadata } from "@harness/core";
+import {
+  DEFAULT_COMPOSITION_FRAME,
+  HARNESS_FALLBACK_PLOT_PROFILE,
+  resolveCompositionFrame,
+  resolvePlotCompositionFrame,
+  type PlotProfile,
+  type Scene,
+  type Sketch,
+  type TimeMetadata,
+} from "@harness/core";
 
-import { LiveCanvas, type LiveCanvasHandle } from "./LiveCanvas";
+import {
+  LiveCanvas as RawLiveCanvas,
+  type LiveCanvasHandle,
+  type LiveCanvasProps,
+} from "./LiveCanvas";
+
+/** Keep legacy tests terse while the production component requires an explicit frame. */
+function LiveCanvas(
+  props: Omit<LiveCanvasProps, "compositionFrame" | "profile"> &
+    Partial<Pick<LiveCanvasProps, "compositionFrame" | "profile">>,
+) {
+  return (
+    <RawLiveCanvas
+      {...props}
+      compositionFrame={props.compositionFrame ?? DEFAULT_COMPOSITION_FRAME}
+      profile={props.profile ?? HARNESS_FALLBACK_PLOT_PROFILE}
+    />
+  );
+}
 
 /**
  * LiveCanvas IS under test here (unlike SketchControls.test, which mocks it), so
  * the browser stack it touches has to be stood up rather than mocked away:
  *
- *   - `canvas.getContext('2d')` is unimplemented in jsdom and returns `null`;
- *     `drawFrame` early-returns on a null context, so drawing is a harmless
- *     no-op — we observe `t` through the Sketch's `generate` spy, not pixels.
+ *   - `canvas.getContext('2d')` is unimplemented in jsdom and returns `null`, so
+ *     we install a recording/no-op context to exercise the real paint boundary.
+ *     Time remains observable through the Sketch's `generate` spy, not pixels.
  *   - `ResizeObserver` / `matchMedia` are used by the geometry effect on mount;
- *     jsdom ships neither, so we install inert stubs (we are not testing resize).
+ *     jsdom ships neither, so we install controlled stubs. Most tests leave them
+ *     inert; the outline-cache regression drives the captured observer callback.
  *   - `requestAnimationFrame` and `performance.now()` are STUBBED so the rAF loop
  *     is driven tick-by-tick with a clock we control — that determinism is what
  *     lets us assert the baseline-recapture math (resume-from-scrubbed-t) exactly.
@@ -190,6 +218,7 @@ function useRecordingContext(ctx: CanvasRenderingContext2D): void {
 let now = 0;
 let rafCallbacks: Array<(t: number) => void> = [];
 let nextRafId = 1;
+let fireResizeObserver: (() => void) | null = null;
 
 /** Advance the fake wall clock to `ms` and flush exactly one rAF generation. */
 function tick(ms: number): void {
@@ -267,6 +296,7 @@ beforeEach(() => {
   now = 0;
   rafCallbacks = [];
   nextRafId = 1;
+  fireResizeObserver = null;
 
   vi.spyOn(performance, "now").mockImplementation(() => now);
   vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void): number => {
@@ -281,10 +311,15 @@ beforeEach(() => {
     rafCallbacks = [];
   });
 
-  // Inert geometry-effect deps (not under test).
+  // Capture ResizeObserver's callback so resize-specific tests can drive it;
+  // other tests leave it inert.
   vi.stubGlobal(
     "ResizeObserver",
     class {
+      constructor(callback: ResizeObserverCallback) {
+        fireResizeObserver = () =>
+          callback([], this as unknown as ResizeObserver);
+      }
       observe(): void {}
       unobserve(): void {}
       disconnect(): void {}
@@ -299,11 +334,10 @@ beforeEach(() => {
         removeEventListener: () => {},
       }) as unknown as MediaQueryList,
   );
-  // jsdom returns `null` from getContext('2d'), and `drawFrame` early-returns on
-  // a null context — which would skip the `sketch.generate` call we observe `t`
-  // through. Return an inert 2D-context stub instead: a Proxy whose every method
-  // is a no-op and whose fill/strokeStyle accept writes. The renderer's pixel
-  // output is not under test; we only need `drawFrame` to reach `generate(...t)`.
+  // jsdom returns `null` from getContext('2d'). Return an inert context instead:
+  // a Proxy whose every method is a no-op and whose fill/strokeStyle accept
+  // writes. Most tests observe generated time/geometry rather than pixels; the
+  // render-mode cases replace this with a counting context.
   const ctxStub = new Proxy(
     {} as Record<string, unknown>,
     {
@@ -440,6 +474,52 @@ describe("LiveCanvas caller-owned frame preparation", () => {
     expect(replacement.prepare).toHaveBeenCalledTimes(1);
     expect(replacement.generate).not.toHaveBeenCalled();
   });
+
+  it("keys preparation by frame aspect while preserving the animation clock", () => {
+    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    const params = {};
+    const squareA = { width: 1000, height: 1000 };
+    const squareB = { width: 1000, height: 1000 };
+    const wide = resolveCompositionFrame(2);
+
+    mount(
+      <LiveCanvas
+        sketch={prepared.sketch}
+        params={params}
+        seed={2}
+        compositionFrame={squareA}
+      />,
+    );
+    tick(1000);
+    expect(prepared.prepare).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={prepared.sketch}
+          params={params}
+          seed={2}
+          compositionFrame={squareB}
+        />,
+      );
+    });
+    expect(prepared.prepare).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={prepared.sketch}
+          params={params}
+          seed={2}
+          compositionFrame={wide}
+        />,
+      );
+    });
+    expect(prepared.prepare).toHaveBeenCalledTimes(2);
+    expect(prepared.prepare).toHaveBeenLastCalledWith({}, 2, wide);
+    tick(1500);
+    expect(prepared.samplers[1]).toHaveBeenLastCalledWith(1.5);
+  });
 });
 
 describe("LiveCanvas transport — resume from scrubbed t, no snap to 0 (AC3)", () => {
@@ -525,6 +605,106 @@ describe("LiveCanvas paper aspect — sized to the Composition Frame (#155/#253)
     );
     expect(Number(canvasEl(el).style.getPropertyValue("--paper-aspect"))).toBe(1);
   });
+
+  it("uses the explicit frame aspect rather than generated Scene space", () => {
+    const el = mount(
+      <LiveCanvas
+        sketch={spacedSketch(200, 1000)}
+        params={{}}
+        seed={1}
+        compositionFrame={resolveCompositionFrame(2)}
+      />,
+    );
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(2);
+  });
+});
+
+describe("LiveCanvas full-sheet preview chrome (#248)", () => {
+  const asymmetricProfile: PlotProfile = {
+    width: 200,
+    height: 100,
+    insets: { top: 10, right: 20, bottom: 30, left: 40 },
+  };
+
+  it("contain-fits the full sheet and positions the drawable region from all four inset ratios", () => {
+    const el = mount(
+      <LiveCanvas
+        sketch={spacedSketch(100, 100)}
+        params={{}}
+        seed={1}
+        profile={asymmetricProfile}
+        compositionFrame={resolvePlotCompositionFrame(asymmetricProfile)}
+      />,
+    );
+    const sheet = el.querySelector(".plot-sheet") as HTMLElement;
+    const drawable = el.querySelector(".plot-drawable") as HTMLElement;
+
+    expect(sheet.getAttribute("aria-label")).toBe("Plot sheet preview");
+    expect(sheet.style.getPropertyValue("--sheet-aspect")).toBe("2");
+    expect(sheet.style.getPropertyValue("--plot-inset-top")).toBe("10%");
+    expect(sheet.style.getPropertyValue("--plot-inset-right")).toBe("10%");
+    expect(sheet.style.getPropertyValue("--plot-inset-bottom")).toBe("30%");
+    expect(sheet.style.getPropertyValue("--plot-inset-left")).toBe("20%");
+    expect(drawable.querySelector("canvas")).toBe(canvasEl(el));
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(140 / 60);
+  });
+
+  it("keeps Fill and Outline on the same drawable canvas inside the sheet", () => {
+    const sketch = spacedSketch(100, 100);
+    const params = {};
+    const compositionFrame = resolvePlotCompositionFrame(asymmetricProfile);
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        profile={asymmetricProfile}
+        compositionFrame={compositionFrame}
+        renderMode="fill"
+      />,
+    );
+    const sheet = el.querySelector(".plot-sheet");
+    const drawable = el.querySelector(".plot-drawable");
+    const canvas = canvasEl(el);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={params}
+          seed={1}
+          profile={asymmetricProfile}
+          compositionFrame={compositionFrame}
+          renderMode="outline"
+        />,
+      );
+    });
+
+    expect(el.querySelector(".plot-sheet")).toBe(sheet);
+    expect(el.querySelector(".plot-drawable")).toBe(drawable);
+    expect(canvasEl(el)).toBe(canvas);
+  });
+
+  it("keeps the export handle pointed at the drawable canvas, not its sheet chrome", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={spacedSketch(100, 100)}
+        params={{}}
+        seed={1}
+        profile={asymmetricProfile}
+        compositionFrame={resolvePlotCompositionFrame(asymmetricProfile)}
+      />,
+    );
+
+    expect(handle.current?.getCanvas()).toBe(canvasEl(el));
+    expect(handle.current?.getCanvas()).not.toBe(el.querySelector(".plot-sheet"));
+  });
 });
 
 describe("LiveCanvas transport — one-shot range/clamp via synthetic fixture (AC4)", () => {
@@ -588,6 +768,79 @@ describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand
     });
     expect(counts.fill ?? 0).toBeGreaterThan(0);
     expect(counts.stroke ?? 0).toBe(0);
+  });
+
+  it("repaints a cached outline after a same-aspect profile layout resize without deriving it again", () => {
+    const { ctx, counts, reset } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch, generate } = overlapSketch(undefined);
+    const params = {};
+    const onOutlineComputed = vi.fn();
+    let boxSize = 100;
+    vi.spyOn(
+      HTMLCanvasElement.prototype,
+      "getBoundingClientRect",
+    ).mockImplementation(
+      () =>
+        ({
+          width: boxSize,
+          height: boxSize,
+        }) as DOMRect,
+    );
+
+    const initialProfile = HARNESS_FALLBACK_PLOT_PROFILE;
+    const sameAspectProfile: PlotProfile = {
+      width: 200,
+      height: 200,
+      insets: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        profile={initialProfile}
+        renderMode="outline"
+        onOutlineComputed={onOutlineComputed}
+      />,
+    );
+    flushRaf();
+
+    const canvas = canvasEl(el);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
+    expect(canvas.width).toBe(100);
+
+    // Linked-inset magnitude changes update the sheet layout but keep the
+    // drawable aspect square. Model the resulting smaller drawable CSS box,
+    // then fire the real component's ResizeObserver callback.
+    reset();
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={params}
+          seed={1}
+          profile={sameAspectProfile}
+          renderMode="outline"
+          onOutlineComputed={onOutlineComputed}
+        />,
+      );
+    });
+    expect(
+      el
+        .querySelector<HTMLElement>(".plot-sheet")
+        ?.style.getPropertyValue("--plot-inset-top"),
+    ).toBe("10%");
+    boxSize = 80;
+    act(() => fireResizeObserver?.());
+
+    // Backing pixels and rendered strokes refresh from the cached processed
+    // Scene. No new generate/hidden-line derivation or compute signal occurs.
+    expect(canvas.width).toBe(80);
+    expect(counts.stroke ?? 0).toBeGreaterThan(0);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
   });
 
   it("the rAF fill loop NEVER runs the pass — every animated frame stays a fill (AC2/AC3)", () => {

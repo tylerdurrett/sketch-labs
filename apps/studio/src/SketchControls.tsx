@@ -1,19 +1,21 @@
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   applyPreset,
   buildReproMetadata,
   clamp,
-  DEFAULT_COMPOSITION_FRAME,
   clipSceneToBounds,
   defaultParams,
   exportFilename,
   insertPngMetadata,
   newSeed,
+  plotDrawableAspectsEquivalent,
+  plotDrawableRectangle,
   randomize,
   renderToSVG,
   resolveOutputProfile,
+  resolvePlotCompositionFrame,
   type PlotProfile,
   type Preset,
   type Sketch,
@@ -29,6 +31,7 @@ import {
   type RenderMode,
 } from "./LiveCanvas";
 import { outlineScene } from "./outlineScene";
+import { PaperSection } from "./PaperSection";
 import { PresetControls } from "./PresetControls";
 
 /**
@@ -41,6 +44,21 @@ import { PresetControls } from "./PresetControls";
  * tolerances are reachable.
  */
 const TOLERANCE_MAX = 20;
+
+/** Preset params are flat schema values; preserve identity when reload is equal. */
+function sameParams(
+  left: Readonly<Record<string, unknown>>,
+  right: Readonly<Record<string, unknown>>,
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) => Object.hasOwn(right, key) && Object.is(left[key], right[key]),
+    )
+  );
+}
 
 /**
  * Props for {@link SketchControls}.
@@ -101,12 +119,11 @@ export interface SketchControlsProps {
  * against THIS Sketch's own `defaultOutputProfile` (#265's precedence: preset ??
  * sketch default ?? Harness fallback), so a Sketch switch re-resolves from the
  * newly-mounted Sketch and NEVER reuses the previous Sketch's dimensions. It is
- * threaded through the persistence paths only — captured into a saved Preset
+ * threaded through persistence and composition — captured into a saved Preset
  * (via `PresetControls` → `makePreset`), re-resolved on a Preset reload (a v2
  * Preset's stored profile wins; a v1 falls back to the Sketch default / Harness
- * fallback), and embedded into every export's reproduction metadata. It does NOT
- * re-wire LiveCanvas's Composition Frame — the live preview keeps using the square
- * `DEFAULT_COMPOSITION_FRAME` (that consumption is slice #248).
+ * fallback), and embedded into every export's reproduction metadata. Its drawable
+ * aspect resolves the ONE Composition Frame shared by preview and vector exports.
  */
 export function SketchControls({
   sketch,
@@ -126,6 +143,30 @@ export function SketchControls({
   // module header for how it threads through save / reload / export metadata.
   const [profile, setProfile] = useState<PlotProfile>(() =>
     resolveOutputProfile(undefined, sketch.defaultOutputProfile),
+  );
+
+  // Physical magnitude belongs to later device mapping. Composition depends only
+  // on the drawable rectangle's aspect, so equivalent profiles share this cache
+  // boundary and do not rebuild prepared geometry.
+  const drawable = plotDrawableRectangle(profile);
+  const drawableAspect = drawable.width / drawable.height;
+  // Stabilize the memo key across machine-noise-only quotient differences (for
+  // example a 1.2× proportional scale of non-binary A4 dimensions/insets). The
+  // same core equivalence drives commit invalidation below, so frame identity and
+  // the Computing affordance cannot disagree about whether geometry changed.
+  const drawableAspectIdentityRef = useRef(drawableAspect);
+  if (
+    !plotDrawableAspectsEquivalent(
+      drawableAspectIdentityRef.current,
+      drawableAspect,
+    )
+  ) {
+    drawableAspectIdentityRef.current = drawableAspect;
+  }
+  const drawableAspectIdentity = drawableAspectIdentityRef.current;
+  const compositionFrame = useMemo(
+    () => resolvePlotCompositionFrame(profile),
+    [drawableAspectIdentity],
   );
 
   // The preview's render mode (issue #219): `fill` (default) shows the live fill
@@ -174,6 +215,26 @@ export function SketchControls({
   // that edit's commit. A no-op in fill mode (no pass runs). See the flag above.
   const markOutlineRecomputing = () => {
     if (renderMode === "outline") setComputingOutline(true);
+  };
+
+  // PaperSection only emits complete, validated profiles. Keep that controlled
+  // commit as the boundary between physical preview layout and generated Scene
+  // geometry: every profile refreshes the full-sheet chrome, while only a
+  // changed drawable aspect invalidates the shared Composition Frame (and thus
+  // the outline pass). Same-aspect magnitude/inset edits deliberately leave the
+  // frame identity and outline geometry untouched.
+  const commitProfile = (next: PlotProfile) => {
+    const nextDrawable = plotDrawableRectangle(next);
+    const nextDrawableAspect = nextDrawable.width / nextDrawable.height;
+    if (
+      !plotDrawableAspectsEquivalent(
+        drawableAspectIdentity,
+        nextDrawableAspect,
+      )
+    ) {
+      markOutlineRecomputing();
+    }
+    setProfile(next);
   };
 
   // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
@@ -234,9 +295,25 @@ export function SketchControls({
   // job — `applyPreset` returns a sorted string[], the studio's live lock state
   // is a Set<string>.
   const reloadPreset = (preset: Preset) => {
-    markOutlineRecomputing();
     const state = applyPreset(sketch.schema, preset);
-    setParams(state.params);
+    const resolvedProfile = resolveOutputProfile(
+      state.profile,
+      sketch.defaultOutputProfile,
+    );
+    const nextDrawable = plotDrawableRectangle(resolvedProfile);
+    const nextAspect = nextDrawable.width / nextDrawable.height;
+    // A Preset may change persistence-only axes or proportionally scale the
+    // physical sheet while preserving the exact composition. Keep param identity
+    // when values are equal and raise Computing only for true Scene inputs.
+    const paramsChanged = !sameParams(params, state.params);
+    const geometryChanged =
+      paramsChanged ||
+      seed !== state.seed ||
+      !plotDrawableAspectsEquivalent(drawableAspectIdentity, nextAspect);
+    if (geometryChanged) markOutlineRecomputing();
+    setParams((current) =>
+      sameParams(current, state.params) ? current : state.params,
+    );
     setSeed(state.seed);
     setLocks(new Set(state.locks));
     // Resolve the active profile through #265's precedence: a v2 Preset's stored
@@ -244,7 +321,7 @@ export function SketchControls({
     // falls back to this Sketch's default / the Harness fallback. `applyPreset`
     // passes the stored profile through verbatim WITHOUT resolving the fallback —
     // resolving it here at the session boundary is #267's job.
-    setProfile(resolveOutputProfile(state.profile, sketch.defaultOutputProfile));
+    setProfile(resolvedProfile);
   };
 
   // Export the CURRENTLY DISPLAYED frame as a PNG — a one-shot user action that
@@ -257,6 +334,11 @@ export function SketchControls({
   // Sketch passes the captured `t` (the last-drawn moment from the handle), a
   // static Sketch omits `t` entirely so the name carries no segment.
   const exportPng = () => {
+    // Outline inputs/profile can commit before LiveCanvas's intentionally
+    // deferred two-rAF rebuild lands. Never snapshot those stale pixels with the
+    // newly committed reproduction metadata, even if this handler is invoked
+    // programmatically while the disabled button cannot be clicked.
+    if (computingOutline) return;
     const handle = canvasHandle.current;
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
@@ -310,7 +392,7 @@ export function SketchControls({
     // `generate` takes a concrete `t` (static Sketches conventionally get 0 and
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
-    const scene = sketch.generate(params, seed, t ?? 0, DEFAULT_COMPOSITION_FRAME);
+    const scene = sketch.generate(params, seed, t ?? 0, compositionFrame);
     // Clip the generated geometry to the canvas rectangle so the exported plot
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
@@ -357,7 +439,14 @@ export function SketchControls({
     // carry the SAME final Douglas–Peucker simplification the outline preview
     // shows (issue #232) — both read this one state through this one seam.
     // `renderToSVG` then serializes the stroke-only result.
-    const hiddenLineScene = outlineScene(sketch, params, seed, t ?? 0, tolerance);
+    const hiddenLineScene = outlineScene(
+      sketch,
+      params,
+      seed,
+      t ?? 0,
+      compositionFrame,
+      tolerance,
+    );
     // Clip AFTER the hidden-line pass and BEFORE serialization (issue #237): the
     // pass can emit stroke geometry beyond the canvas, so the clip is the last
     // export-only stage that guarantees no plotted line escapes `space`. The clip
@@ -423,6 +512,8 @@ export function SketchControls({
             sketch={sketch}
             params={params}
             seed={seed}
+            compositionFrame={compositionFrame}
+            profile={profile}
             renderMode={renderMode}
             tolerance={tolerance}
             onOutlineComputed={() => setComputingOutline(false)}
@@ -446,6 +537,7 @@ export function SketchControls({
         hidden={collapsed}
       >
         {switcher}
+        <PaperSection profile={profile} onChange={commitProfile} />
         <ControlPanel
           schema={sketch.schema}
           params={params}
@@ -596,6 +688,7 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportPng}
+            disabled={computingOutline}
           >
             Export PNG
           </Button>
