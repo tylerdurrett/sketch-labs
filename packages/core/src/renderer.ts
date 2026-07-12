@@ -22,7 +22,7 @@
 
 import { computeContainFit } from './canvas-fit'
 import type { Scene } from './scene'
-import { escapeAttr, round } from './svgHelpers'
+import { escapeAttr, escapeText, round } from './svgHelpers'
 
 /**
  * The minimal structural Canvas2D port the {@link renderToCanvas} renderer draws
@@ -210,17 +210,6 @@ export function drawSceneFitted(
   )
   ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY)
   renderToCanvas(ctx, scene)
-}
-
-/**
- * Escape XML special characters for TEXT content (between tags). Unlike
- * {@link escapeAttr} it need not escape `"` (no surrounding quotes) but MUST
- * escape `>` as well — a `]]>`-free JSON payload is safe inline, but escaping `&`,
- * `<`, and `>` keeps the document well-formed for any payload without resorting to
- * a CDATA section.
- */
-function escapeText(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 /**
