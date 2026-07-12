@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "sketch": "leaf-field",
+  "name": "towns",
+  "seed": 146704215472362,
+  "params": {
+    "fieldPhase": 0.6188230922074643,
+    "fieldScale": 3.3181584067465537,
+    "turbulence": 0.7673239793111113,
+    "octaves": 4,
+    "density": 70.29057470627016,
+    "leafScale": 80.53104943176996,
+    "leafSizeVariance": 157.26691526860904,
+    "leafSlenderness": 2.937799192054902,
+    "leafSlendernessVariance": 2.415660628019395,
+    "variation": 0.7969275069853579,
+    "sphereCount": 10,
+    "sphereRadiusMin": 42.29812811106311,
+    "sphereRadiusMax": 229.72,
+    "sphereDepth": 0.506,
+    "backgroundColor": "#f5f0f0",
+    "discColor": "#ffffff",
+    "discStrokeColor": "#353131",
+    "leafColor": "#ffffff",
+    "leafStrokeColor": "#000000"
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    }
+  }
+}
