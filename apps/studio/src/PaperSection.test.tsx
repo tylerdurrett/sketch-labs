@@ -80,6 +80,16 @@ function selectUnit(el: HTMLElement, unit: "mm" | "in"): void {
   act(() => input.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 }
 
+function frameCheckbox(el: HTMLElement): HTMLInputElement {
+  const input = [
+    ...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+  ].find((candidate) =>
+    candidate.labels?.[0]?.textContent?.includes("Include composition frame"),
+  );
+  if (input === undefined) throw new Error("no composition frame checkbox");
+  return input;
+}
+
 beforeEach(() => {
   window.localStorage.clear();
 });
@@ -117,6 +127,54 @@ describe("PaperSection", () => {
 
     expect(el.querySelector("summary")?.textContent).toContain("420 × 594 mm");
     expect(el.querySelector("select")?.value).toBe("a2");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("shows the fallback profile's default-on composition frame option", () => {
+    const { el } = mount(vi.fn(), HARNESS_FALLBACK_PLOT_PROFILE);
+
+    expect(frameCheckbox(el).checked).toBe(true);
+  });
+
+  it.each([
+    [true, false],
+    [false, true],
+  ] as const)(
+    "changes only includeFrame from %s to %s and emits the complete profile",
+    (includeFrame, expected) => {
+      const onChange = vi.fn();
+      const controlled = { ...profile, includeFrame };
+      const { el } = mount(onChange, controlled);
+
+      act(() =>
+        frameCheckbox(el).dispatchEvent(
+          new MouseEvent("click", { bubbles: true }),
+        ),
+      );
+
+      expect(onChange).toHaveBeenCalledOnce();
+      expect(onChange).toHaveBeenCalledWith({
+        ...controlled,
+        includeFrame: expected,
+      });
+    },
+  );
+
+  it("reloads the composition frame option from the controlled profile", () => {
+    const onChange = vi.fn();
+    const { el } = mount(onChange, { ...profile, includeFrame: true });
+
+    expect(frameCheckbox(el).checked).toBe(true);
+    act(() => {
+      root.render(
+        <PaperSection
+          profile={{ ...profile, includeFrame: false }}
+          onChange={onChange}
+        />,
+      );
+    });
+
+    expect(frameCheckbox(el).checked).toBe(false);
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -526,6 +584,29 @@ describe("PaperSection", () => {
     expect(window.localStorage.getItem(PAPER_DISPLAY_UNIT_STORAGE_KEY)).toBe("in");
     expect(onChange).not.toHaveBeenCalled();
     expect(profile).toEqual(before);
+  });
+
+  it("preserves a disabled composition frame through Paper edits", () => {
+    const onChange = vi.fn();
+    const { el } = mount(onChange);
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+
+    selectFormat(el, "a3");
+    setInput(width, "220");
+    clickButton(el, "Swap to landscape");
+    setInput(margin, "12");
+    selectUnit(el, "in");
+
+    expect(onChange).toHaveBeenCalledTimes(4);
+    for (const [emitted] of onChange.mock.calls) {
+      expect(emitted).toMatchObject({ includeFrame: false });
+    }
+    expect(frameCheckbox(el).checked).toBe(false);
   });
 
   it("keeps working with the millimeter fallback when local storage throws", () => {

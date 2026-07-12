@@ -342,6 +342,16 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
             </span>
           </span>
         </label>
+        <label className="flex min-w-0 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={profile.includeFrame}
+            onChange={(event) =>
+              onChange({ ...profile, includeFrame: event.target.checked })
+            }
+          />
+          <span>Include composition frame</span>
+        </label>
         {error === null ? null : (
           <p id={errorId} role="alert" className="text-sm text-destructive">
             {error.message}
