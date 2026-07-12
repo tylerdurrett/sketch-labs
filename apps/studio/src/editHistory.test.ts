@@ -18,6 +18,22 @@ import {
   type StudioEditState,
 } from "./editHistory";
 
+/** Compile-time coverage for the snapshot contract's structural immutability. */
+function assertReadonlySnapshot(state: StudioEditState): void {
+  // @ts-expect-error History consumers cannot replace a top-level state axis.
+  state.seed = 2;
+  // @ts-expect-error Dynamic Parameter Schema values are readonly in snapshots.
+  state.params.radius = 20;
+  // @ts-expect-error The complete Plot Profile is readonly in snapshots.
+  state.profile.width = 420;
+  // @ts-expect-error Nested profile insets are readonly too.
+  state.profile.insets.left = 25;
+  // @ts-expect-error Locks expose no mutating Set operations.
+  state.locks.add("radius");
+}
+
+void assertReadonlySnapshot;
+
 function editState(
   seed: number,
   overrides: Partial<StudioEditState> = {},

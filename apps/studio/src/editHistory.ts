@@ -3,6 +3,11 @@ import type { Params, PlotProfile, Seed } from "@harness/core";
 /** The maximum number of committed edit states retained for Undo. */
 export const EDIT_HISTORY_LIMIT = 100;
 
+/** Plot Profile as stored in a history snapshot, including readonly insets. */
+export type StudioEditProfile = Readonly<Omit<PlotProfile, "insets">> & {
+  readonly insets: Readonly<PlotProfile["insets"]>;
+};
+
 /**
  * The complete authored state of one mounted Sketch session.
  *
@@ -10,11 +15,11 @@ export const EDIT_HISTORY_LIMIT = 100;
  * preview, transport, and presentation preferences deliberately live elsewhere.
  */
 export interface StudioEditState {
-  params: Readonly<Params>;
-  seed: Seed;
-  locks: ReadonlySet<string>;
-  profile: PlotProfile;
-  tolerance: number;
+  readonly params: Readonly<Params>;
+  readonly seed: Seed;
+  readonly locks: ReadonlySet<string>;
+  readonly profile: StudioEditProfile;
+  readonly tolerance: number;
 }
 
 /**
@@ -188,7 +193,10 @@ function sameLocks(
   return left.size === right.size && [...left].every((key) => right.has(key));
 }
 
-function sameProfile(left: PlotProfile, right: PlotProfile): boolean {
+function sameProfile(
+  left: StudioEditProfile,
+  right: StudioEditProfile,
+): boolean {
   return (
     Object.is(left.width, right.width) &&
     Object.is(left.height, right.height) &&
