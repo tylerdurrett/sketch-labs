@@ -114,7 +114,41 @@ describe('renderPlotterSVG', () => {
       undefined,
       { includePaperMargins: false },
     )
+    expect(drawableSVG).toContain(
+      'width="0.6667mm" height="1mm" viewBox="0 0 0.6667 1"',
+    )
     expect(drawableSVG).toContain('d="M0 0 L0.6667 1"')
+  })
+
+  it('rounds noisy drawable dimensions from asymmetric decimal insets', () => {
+    const decimalProfile: PlotProfile = {
+      width: 300,
+      height: 180,
+      insets: { top: 20.05, right: 60.2, bottom: 40.1, left: 0.1 },
+      includeFrame: false,
+    }
+    const decimalScene: Scene = {
+      space: { width: 239.7, height: 119.85 },
+      primitives: [
+        {
+          points: [
+            [0, 0],
+            [239.7, 119.85],
+          ],
+          stroke: { color: 'black', width: 1 },
+        },
+      ],
+    }
+
+    const svg = renderPlotterSVG(decimalScene, decimalProfile, undefined, {
+      includePaperMargins: false,
+    })
+
+    expect(svg).toContain(
+      'width="239.7mm" height="119.85mm" viewBox="0 0 239.7 119.85"',
+    )
+    expect(svg).toContain('d="M0 0 L239.7 119.85"')
+    expect(svg).not.toContain('239.70000000000002')
   })
 
   it('scales geometry and Scene stroke widths by the same uniform factor', () => {

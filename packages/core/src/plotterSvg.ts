@@ -49,9 +49,11 @@ export function renderPlotterSVG(
 ): string {
   const { scale, offsetX, offsetY } = computePlotMapping(scene.space, profile)
   const includePaperMargins = options?.includePaperMargins !== false
-  const extent = includePaperMargins
-    ? { width: profile.width, height: profile.height }
-    : plotDrawableRectangle(profile)
+  let extent = { width: profile.width, height: profile.height }
+  if (!includePaperMargins) {
+    const drawable = plotDrawableRectangle(profile)
+    extent = { width: round(drawable.width), height: round(drawable.height) }
+  }
   const originX = includePaperMargins ? 0 : profile.insets.left
   const originY = includePaperMargins ? 0 : profile.insets.top
 
