@@ -150,4 +150,105 @@ describe("ColorControl wiring", () => {
 
     expect(onToggleLock).toHaveBeenCalledTimes(1);
   });
+
+  it("previews native input and commits completed change once, not again on blur", () => {
+    const order: string[] = [];
+    const el = mount(
+      <ColorControl
+        paramKey="ink"
+        spec={colorSpec()}
+        value="#c0ffee"
+        locked={false}
+        onChange={() => {}}
+        editHistory={{
+          onBegin: () => order.push("begin"),
+          onPreview: (next) => order.push(`preview:${next}`),
+          onCommit: () => order.push("commit"),
+          onCancel: () => order.push("cancel"),
+        }}
+        onToggleLock={() => {}}
+      />,
+    );
+    const input = el.querySelector<HTMLInputElement>("#control-ink")!;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+
+    act(() => {
+      setter.call(input, "#123456");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.focus();
+      input.blur();
+    });
+
+    expect(order).toEqual(["begin", "preview:#123456", "commit"]);
+  });
+
+  it("begins and previews a change-only color event before committing", () => {
+    const order: string[] = [];
+    const el = mount(
+      <ColorControl
+        paramKey="ink"
+        spec={colorSpec()}
+        value="#c0ffee"
+        locked={false}
+        onChange={() => {}}
+        editHistory={{
+          onBegin: () => order.push("begin"),
+          onPreview: (next) => order.push(`preview:${next}`),
+          onCommit: () => order.push("commit"),
+          onCancel: () => order.push("cancel"),
+        }}
+        onToggleLock={() => {}}
+      />,
+    );
+    const input = el.querySelector<HTMLInputElement>("#control-ink")!;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+
+    act(() => {
+      setter.call(input, "#654321");
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(order).toEqual(["begin", "preview:#654321", "commit"]);
+  });
+
+  it("uses blur as a guarded commit fallback when no change event arrives", () => {
+    const onCommit = vi.fn<[], void>();
+    const el = mount(
+      <ColorControl
+        paramKey="ink"
+        spec={colorSpec()}
+        value="#c0ffee"
+        locked={false}
+        onChange={() => {}}
+        editHistory={{
+          onBegin: () => {},
+          onPreview: () => {},
+          onCommit,
+          onCancel: () => {},
+        }}
+        onToggleLock={() => {}}
+      />,
+    );
+    const input = el.querySelector<HTMLInputElement>("#control-ink")!;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+
+    act(() => {
+      input.focus();
+      setter.call(input, "#abcdef");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.blur();
+    });
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,6 +1,7 @@
 import type { ParamSchema, Params, ParamSpec } from "@harness/core";
 
 import { ColorControl } from "./ColorControl";
+import type { EditTransactionLifecycle } from "./editHistory";
 import { NumberControl } from "./NumberControl";
 
 /**
@@ -23,12 +24,15 @@ export interface ControlPanelProps {
    */
   locks: ReadonlySet<string>;
   /**
-   * Update a single param by key. The value type widens with the `ParamSpec`
+   * Update a single param by key when no transaction lifecycle is supplied.
+   * The value type widens with the `ParamSpec`
    * union: `number` from a NumberControl, a hex color `string` from a
    * ColorControl. The owner's params state is already `Record<string, unknown>`,
    * so this widening is purely at the handler seam.
    */
   onChange: (key: string, value: number | string) => void;
+  /** Shared transaction lifecycle, adapted to each schema key automatically. */
+  editHistory?: EditTransactionLifecycle<Params> | undefined;
   /** Toggle a single param's lock membership. */
   onToggleLock: (key: string) => void;
 }
@@ -48,9 +52,21 @@ function renderControl(
   spec: ParamSpec,
   value: unknown,
   locked: boolean,
+  params: Params,
   onChange: (key: string, value: number | string) => void,
   onToggleLock: (key: string) => void,
+  editHistory?: EditTransactionLifecycle<Params>,
 ) {
+  const rowHistory = editHistory
+    ? {
+        onBegin: editHistory.onBegin,
+        onPreview: (next: number | string) =>
+          editHistory.onPreview({ ...params, [key]: next }),
+        onCommit: editHistory.onCommit,
+        onCancel: editHistory.onCancel,
+      }
+    : undefined;
+
   switch (spec.kind) {
     case "number":
       return (
@@ -61,6 +77,7 @@ function renderControl(
           value={typeof value === "number" ? value : spec.default}
           locked={locked}
           onChange={(next) => onChange(key, next)}
+          editHistory={rowHistory}
           onToggleLock={() => onToggleLock(key)}
         />
       );
@@ -73,6 +90,7 @@ function renderControl(
           value={typeof value === "string" ? value : spec.default}
           locked={locked}
           onChange={(next) => onChange(key, next)}
+          editHistory={rowHistory}
           onToggleLock={() => onToggleLock(key)}
         />
       );
@@ -104,6 +122,7 @@ export function ControlPanel({
   params,
   locks,
   onChange,
+  editHistory,
   onToggleLock,
 }: ControlPanelProps) {
   return (
@@ -114,8 +133,10 @@ export function ControlPanel({
           spec,
           params[key],
           locks.has(key),
+          params,
           onChange,
           onToggleLock,
+          editHistory,
         ),
       )}
     </div>

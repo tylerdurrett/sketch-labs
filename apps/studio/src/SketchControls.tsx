@@ -1,10 +1,9 @@
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   applyPreset,
   buildReproMetadata,
-  clamp,
   clipSceneToBounds,
   defaultParams,
   exportFilename,
@@ -17,7 +16,6 @@ import {
   renderToSVG,
   resolveOutputProfile,
   resolvePlotCompositionFrame,
-  type PlotProfile,
   type Preset,
   type Scene,
   type Sketch,
@@ -25,8 +23,27 @@ import {
 
 import { ControlPanel } from "./ControlPanel";
 import { Button } from "./components/ui/button";
-import { Slider } from "./components/ui/slider";
 import { downloadBlob } from "./downloadBlob";
+import {
+  beginEditTransaction,
+  canRedo,
+  canUndo,
+  cancelEditTransaction,
+  commitEditState,
+  commitEditTransaction,
+  createEditHistory,
+  hasActiveTransaction,
+  previewEditState,
+  redoEdit,
+  undoEdit,
+  type EditHistory,
+  type StudioEditState,
+} from "./editHistory";
+import {
+  detectHistoryShortcutPlatform,
+  fieldOwnsHistoryShortcut,
+  historyShortcutFor,
+} from "./historyShortcuts";
 import {
   LiveCanvas,
   type DisplayedSceneSnapshot,
@@ -40,6 +57,8 @@ import {
   writePlotterSvgIncludePaperMargins,
 } from "./plotterSvgPreference";
 import { PresetControls } from "./PresetControls";
+import { SeedControl } from "./SeedControl";
+import { SimplifyControl } from "./SimplifyControl";
 
 /** Select the exact hidden-line export input, lazily falling back on a cache miss. */
 export function hiddenLineSceneForExport({
@@ -69,16 +88,6 @@ export function hiddenLineSceneForExport({
     : outlineScene(displayed.scene, tolerance, includeFrame);
 }
 
-/**
- * Upper bound of the studio simplification-tolerance knob (issue #232), in the
- * Scene's coordinate-space units. The Hidden-line pass runs in Scene space, and
- * the studio's sketches use spaces on the order of ~100 units. The useful,
- * plotter-relevant adjustments live close to zero, so the range stops at 2 to
- * give that low end substantially more physical slider travel. Non-integer
- * (continuous) so fine tolerances are reachable.
- */
-const TOLERANCE_MAX = 2;
-
 /** Preset params are flat schema values; preserve identity when reload is equal. */
 function sameParams(
   left: Readonly<Record<string, unknown>>,
@@ -91,6 +100,28 @@ function sameParams(
     leftKeys.every(
       (key) => Object.hasOwn(right, key) && Object.is(left[key], right[key]),
     )
+  );
+}
+
+/** Whether moving between two authored states invalidates prepared Outline geometry. */
+function outlineInputsChanged(
+  previous: StudioEditState,
+  next: StudioEditState,
+): boolean {
+  if (
+    !sameParams(previous.params, next.params) ||
+    previous.seed !== next.seed ||
+    previous.tolerance !== next.tolerance ||
+    previous.profile.includeFrame !== next.profile.includeFrame
+  ) {
+    return true;
+  }
+
+  const previousDrawable = plotDrawableRectangle(previous.profile);
+  const nextDrawable = plotDrawableRectangle(next.profile);
+  return !plotDrawableAspectsEquivalent(
+    previousDrawable.width / previousDrawable.height,
+    nextDrawable.width / nextDrawable.height,
   );
 }
 
@@ -165,19 +196,20 @@ export function SketchControls({
   collapsed = false,
   onToggleCollapse,
 }: SketchControlsProps) {
-  const [params, setParams] = useState(() => defaultParams(sketch.schema));
-  const [seed, setSeed] = useState(() => newSeed(Math.random));
-  const [locks, setLocks] = useState<ReadonlySet<string>>(() => new Set());
-
-  // The session's ONE active Plot Profile (#247), resolved per-Sketch in keyed-
-  // remount state. The lazy initializer runs #265's precedence against THIS
-  // Sketch's own default (no preset in play at mount ⇒ `undefined` first arg), so
-  // a Sketch switch re-resolves from the freshly-mounted Sketch's default (or the
-  // Harness fallback) and never reuses the previous Sketch's dimensions. See the
-  // module header for how it threads through save / reload / export metadata.
-  const [profile, setProfile] = useState<PlotProfile>(() =>
-    resolveOutputProfile(undefined, sketch.defaultOutputProfile),
+  const [history, setHistory] = useState<EditHistory>(() =>
+    createEditHistory({
+      params: defaultParams(sketch.schema),
+      seed: newSeed(Math.random),
+      locks: new Set<string>(),
+      profile: resolveOutputProfile(undefined, sketch.defaultOutputProfile),
+      tolerance: 0,
+    }),
   );
+  // Event lifecycles can emit begin/preview/commit in one React batch. Mirror the
+  // latest transition synchronously so every signal sees the preceding result.
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const { params, seed, locks, profile, tolerance } = history.present;
   // Export-document intent is Studio-wide and deliberately independent of the
   // keyed Sketch session: remounts lazily restore the persisted preference,
   // while Plot Profile, Preset, reproduction, and composition state stay pure.
@@ -233,27 +265,6 @@ export function SketchControls({
   // state alongside renderMode, so a Sketch switch resets it to `false` for free.
   const [computingOutline, setComputingOutline] = useState(false);
 
-  // The Douglas–Peucker tolerance (issue #232) for the Hidden-line pass's FINAL
-  // simplification stage. It is a STUDIO-level knob (NOT a per-sketch schema
-  // param): the pass runs AFTER `sketch.generate`, so simplification is a
-  // post-generation studio concern, not part of any Sketch's declared inputs.
-  // This ONE state feeds BOTH the outline preview (via LiveCanvas's `tolerance`
-  // prop) and the hidden-line SVG export (the tolerance arg to `outlineScene` in
-  // `exportHiddenLineSvg`), so preview and export simplify identically (AC2/AC3).
-  // Like the other axes it lives in keyed-remount state, so a Sketch switch
-  // resets it to 0 (no simplification) for free. 0 is an identity no-op.
-  const [tolerance, setTolerance] = useState(0);
-
-  // Commit a tolerance change from the knob: clamp into [0, TOLERANCE_MAX] and,
-  // while in outline mode, mark the outline recomputing so the "Computing…"
-  // affordance paints with this commit — mirroring the param-edit path — before
-  // LiveCanvas re-runs the (blocking) pass at the new tolerance. A NaN raw is
-  // dropped by the input's own guard, so this only receives finite numbers.
-  const setToleranceValue = (next: number) => {
-    markOutlineRecomputing();
-    setTolerance(clamp(next, 0, TOLERANCE_MAX));
-  };
-
   // Any params/seed edit WHILE in outline mode re-runs LiveCanvas's on-demand
   // Hidden-line pass. Mark computing here at the trigger (a slider drag, New seed,
   // Randomize, preset reload, seed field) so the "Computing…" label paints with
@@ -262,26 +273,73 @@ export function SketchControls({
     if (renderMode === "outline") setComputingOutline(true);
   };
 
-  // PaperSection only emits complete, validated profiles. Keep that controlled
-  // commit as the boundary between physical preview layout and generated Scene
-  // geometry: every profile refreshes the full-sheet chrome, while only a
-  // changed drawable aspect invalidates the shared Composition Frame (and thus
-  // the outline pass). Same-aspect magnitude/inset edits deliberately leave the
-  // frame identity and outline geometry untouched.
-  const commitProfile = (next: PlotProfile) => {
-    const nextDrawable = plotDrawableRectangle(next);
-    const nextDrawableAspect = nextDrawable.width / nextDrawable.height;
-    if (
-      next.includeFrame !== profile.includeFrame ||
-      !plotDrawableAspectsEquivalent(
-        drawableAspectIdentity,
-        nextDrawableAspect,
-      )
-    ) {
+  const updateHistory = (
+    transition: (current: EditHistory) => EditHistory,
+  ): void => {
+    const current = historyRef.current;
+    const next = transition(current);
+    if (next === current) return;
+    historyRef.current = next;
+    if (outlineInputsChanged(current.present, next.present)) {
       markOutlineRecomputing();
     }
-    setProfile(next);
+    setHistory(next);
   };
+
+  // History belongs to this keyed Sketch session, so its keyboard listener does
+  // too. Text/numeric editors keep native Undo while a preview transaction is
+  // active; once Enter/blur settles it, the same focused authored field may
+  // traverse Studio history. Explicitly excluded text remains native always.
+  useEffect(() => {
+    const shortcutPlatform = detectHistoryShortcutPlatform();
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented) return;
+      const command = historyShortcutFor(event, shortcutPlatform);
+      if (command === null) return;
+
+      const current = historyRef.current;
+      if (
+        fieldOwnsHistoryShortcut(
+          event.target,
+          hasActiveTransaction(current),
+        )
+      ) {
+        return;
+      }
+      if (command === "undo" ? !canUndo(current) : !canRedo(current)) return;
+
+      event.preventDefault();
+      updateHistory(command === "undo" ? undoEdit : redoEdit);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [renderMode]);
+
+  const previewLeaf = <Key extends keyof StudioEditState>(
+    key: Key,
+    value: StudioEditState[Key],
+  ): void => {
+    updateHistory((current) =>
+      previewEditState(current, { ...current.present, [key]: value }),
+    );
+  };
+
+  const commitLeaf = <Key extends keyof StudioEditState>(
+    key: Key,
+    value: StudioEditState[Key],
+  ): void => {
+    updateHistory((current) =>
+      commitEditState(current, { ...current.present, [key]: value }),
+    );
+  };
+
+  const beginTransaction = (): void =>
+    updateHistory(beginEditTransaction);
+  const commitTransaction = (): void =>
+    updateHistory(commitEditTransaction);
+  const cancelTransaction = (): void =>
+    updateHistory(cancelEditTransaction);
 
   // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
   // export snapshots. It is a ref, not state — export reads it imperatively on a
@@ -292,19 +350,16 @@ export function SketchControls({
   // NumberControl, a hex color `string` from a ColorControl. The params state
   // itself is `Record<string, unknown>`, so only this handler widens.
   const setParam = (key: string, value: number | string) => {
-    markOutlineRecomputing();
-    setParams((prev) => ({ ...prev, [key]: value }));
+    commitLeaf("params", { ...historyRef.current.present.params, [key]: value });
   };
 
   // Toggle a single param's lock membership. Locks are read ONLY by randomize;
   // toggling one never touches the param's value or its editability.
   const toggleLock = (key: string) => {
-    setLocks((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    const next = new Set(historyRef.current.present.locks);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    commitLeaf("locks", next);
   };
 
   // Flip the preview between fill and outline (issue #219). A view-only toggle:
@@ -323,16 +378,18 @@ export function SketchControls({
   // New seed: roll a fresh arrangement, leaving every param value untouched —
   // the seed axis is independent of the param (Randomize) axis.
   const rollSeed = () => {
-    markOutlineRecomputing();
-    setSeed(newSeed(Math.random));
+    commitLeaf("seed", newSeed(Math.random));
   };
 
   // Randomize: re-roll the unlocked numeric params. The engine reads the current
   // `locks` set (locked keys pass through unchanged) and a `Math.random`-backed
   // source — no roll logic lives here.
   const rollParams = () => {
-    markOutlineRecomputing();
-    setParams((prev) => randomize(sketch.schema, prev, locks, Math.random));
+    const current = historyRef.current.present;
+    commitLeaf(
+      "params",
+      randomize(sketch.schema, current.params, current.locks, Math.random),
+    );
   };
 
   // Reload a saved Preset: reconcile it against the CURRENT schema via core's
@@ -341,34 +398,28 @@ export function SketchControls({
   // job — `applyPreset` returns a sorted string[], the studio's live lock state
   // is a Set<string>.
   const reloadPreset = (preset: Preset) => {
+    const current = historyRef.current.present;
     const state = applyPreset(sketch.schema, preset);
     const resolvedProfile = resolveOutputProfile(
       state.profile,
       sketch.defaultOutputProfile,
     );
-    const nextDrawable = plotDrawableRectangle(resolvedProfile);
-    const nextAspect = nextDrawable.width / nextDrawable.height;
-    // A Preset may change persistence-only axes or proportionally scale the
-    // physical sheet while preserving the exact composition. Keep param identity
-    // when values are equal and raise Computing only for true Scene inputs.
-    const paramsChanged = !sameParams(params, state.params);
-    const geometryChanged =
-      paramsChanged ||
-      seed !== state.seed ||
-      profile.includeFrame !== resolvedProfile.includeFrame ||
-      !plotDrawableAspectsEquivalent(drawableAspectIdentity, nextAspect);
-    if (geometryChanged) markOutlineRecomputing();
-    setParams((current) =>
-      sameParams(current, state.params) ? current : state.params,
-    );
-    setSeed(state.seed);
-    setLocks(new Set(state.locks));
     // Resolve the active profile through #265's precedence: a v2 Preset's stored
     // profile (`state.profile`) wins; a v1 Preset (`state.profile === undefined`)
     // falls back to this Sketch's default / the Harness fallback. `applyPreset`
     // passes the stored profile through verbatim WITHOUT resolving the fallback —
     // resolving it here at the session boundary is #267's job.
-    setProfile(resolvedProfile);
+    updateHistory((historyState) =>
+      commitEditState(historyState, {
+        ...current,
+        params: sameParams(current.params, state.params)
+          ? current.params
+          : state.params,
+        seed: state.seed,
+        locks: new Set(state.locks),
+        profile: resolvedProfile,
+      }),
+    );
   };
 
   // Export the CURRENTLY DISPLAYED frame as a PNG — a one-shot user action that
@@ -590,7 +641,13 @@ export function SketchControls({
         {switcher}
         <PaperSection
           profile={profile}
-          onChange={commitProfile}
+          transaction={{
+            onBegin: beginTransaction,
+            onPreview: (next) => previewLeaf("profile", next),
+            onCommit: commitTransaction,
+            onCancel: cancelTransaction,
+          }}
+          onAtomicChange={(next) => commitLeaf("profile", next)}
           includePaperMargins={includePaperMargins}
           onIncludePaperMarginsChange={commitIncludePaperMargins}
         />
@@ -599,6 +656,12 @@ export function SketchControls({
           params={params}
           locks={locks}
           onChange={setParam}
+          editHistory={{
+            onBegin: beginTransaction,
+            onPreview: (next) => previewLeaf("params", next),
+            onCommit: commitTransaction,
+            onCancel: cancelTransaction,
+          }}
           onToggleLock={toggleLock}
         />
         <div className="flex flex-wrap gap-2">
@@ -627,29 +690,15 @@ export function SketchControls({
             onReload={reloadPreset}
           />
         </div>
-        <div className="flex items-center gap-2">
-          <label
-            className="flex-none min-w-16 text-sm text-muted-foreground"
-            htmlFor="sketch-seed"
-          >
-            seed
-          </label>
-          <input
-            id="sketch-seed"
-            className="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            type="number"
-            value={seed}
-            onChange={(event) => {
-              // A blank field is a no-op, not seed 0: `Number("") === 0`, so an
-              // empty value would otherwise silently commit 0. A typed 0 stays valid.
-              if (event.target.value.trim() === "") return;
-              const parsed = Number(event.target.value);
-              if (Number.isNaN(parsed)) return;
-              markOutlineRecomputing();
-              setSeed(parsed);
-            }}
-          />
-        </div>
+        <SeedControl
+          value={seed}
+          editHistory={{
+            onBegin: beginTransaction,
+            onPreview: (next) => previewLeaf("seed", next),
+            onCommit: commitTransaction,
+            onCancel: cancelTransaction,
+          }}
+        />
         {/*
          * Render-mode toggle (#219) — swaps the whole preview between the live
          * fill render and the on-demand Hidden-line (outline) render. `mt-auto`
@@ -697,40 +746,15 @@ export function SketchControls({
          * the render toggle and the export group since it only affects the
          * outline preview and the hidden-line export.
          */}
-        <div className="flex items-center gap-2">
-          <label
-            className="flex-none min-w-16 text-sm text-muted-foreground"
-            htmlFor="sketch-tolerance"
-          >
-            simplify
-          </label>
-          <Slider
-            aria-label="Simplification tolerance"
-            className="flex-1"
-            min={0}
-            max={TOLERANCE_MAX}
-            step={TOLERANCE_MAX / 1000}
-            value={tolerance}
-            onValueChange={setToleranceValue}
-          />
-          <input
-            id="sketch-tolerance"
-            className="w-16 rounded-md border border-input bg-transparent px-3 py-1 text-right text-sm tabular-nums shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            type="number"
-            min={0}
-            max={TOLERANCE_MAX}
-            step="any"
-            value={tolerance}
-            onChange={(event) => {
-              // A blank field is a no-op (don't commit `Number("") === 0`); a
-              // NaN is dropped so only finite values reach the clamp.
-              if (event.target.value.trim() === "") return;
-              const parsed = Number(event.target.value);
-              if (Number.isNaN(parsed)) return;
-              setToleranceValue(parsed);
-            }}
-          />
-        </div>
+        <SimplifyControl
+          value={tolerance}
+          editHistory={{
+            onBegin: beginTransaction,
+            onPreview: (next) => previewLeaf("tolerance", next),
+            onCommit: commitTransaction,
+            onCancel: cancelTransaction,
+          }}
+        />
         {/*
          * Export controls — the shared home for every export path (PNG snapshots
          * the live canvas frame; SVG re-bakes the displayed Scene; Hidden-line SVG

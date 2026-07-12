@@ -1,9 +1,34 @@
+// @vitest-environment jsdom
+import { act, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { NumberParamSpec } from "@harness/core";
 
 import { coerceToDomain, NumberControl } from "./NumberControl";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+  true;
+
+let container: HTMLDivElement | null = null;
+let root: Root | null = null;
+
+function mount(node: React.ReactElement): HTMLDivElement {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() => root!.render(node));
+  return container;
+}
+
+afterEach(() => {
+  act(() => root?.unmount());
+  container?.remove();
+  container = null;
+  root = null;
+  vi.clearAllMocks();
+});
 
 const numberSpec = (over: Partial<NumberParamSpec> = {}): NumberParamSpec => ({
   kind: "number",
@@ -121,5 +146,230 @@ describe("NumberControl markup", () => {
     expect(locked).toContain("<svg");
     // ...and NEVER gates the inputs: a locked control carries no `disabled`.
     expect(locked).not.toContain("disabled");
+  });
+});
+
+describe("NumberControl transactions", () => {
+  const lifecycle = () => ({
+    onBegin: vi.fn<[], void>(),
+    onPreview: vi.fn<[number], void>(),
+    onCommit: vi.fn<[], void>(),
+    onCancel: vi.fn<[], void>(),
+  });
+
+  function enter(input: HTMLInputElement, value: string) {
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  it("previews valid numeric drafts and commits Enter exactly once despite blur", () => {
+    const editHistory = lifecycle();
+    const el = mount(
+      <NumberControl
+        paramKey="radius"
+        spec={numberSpec()}
+        value={50}
+        locked={false}
+        onChange={() => {}}
+        editHistory={editHistory}
+        onToggleLock={() => {}}
+      />,
+    );
+    const input = el.querySelector<HTMLInputElement>('input[type="number"]')!;
+
+    act(() => {
+      input.focus();
+      enter(input, "60");
+      enter(input, "70");
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+
+    expect(editHistory.onBegin).toHaveBeenCalledTimes(1);
+    expect(editHistory.onPreview.mock.calls).toEqual([[60], [70]]);
+    expect(editHistory.onCommit).toHaveBeenCalledTimes(1);
+    expect(editHistory.onCancel).not.toHaveBeenCalled();
+  });
+
+  it("cancels Escape and a later blur cannot commit the canceled draft", () => {
+    const editHistory = lifecycle();
+    const el = mount(
+      <NumberControl
+        paramKey="radius"
+        spec={numberSpec()}
+        value={50}
+        locked={false}
+        onChange={() => {}}
+        editHistory={editHistory}
+        onToggleLock={() => {}}
+      />,
+    );
+    const input = el.querySelector<HTMLInputElement>('input[type="number"]')!;
+
+    act(() => {
+      input.focus();
+      enter(input, "75");
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      input.blur();
+    });
+
+    expect(editHistory.onBegin).toHaveBeenCalledTimes(1);
+    expect(editHistory.onPreview).toHaveBeenCalledWith(75);
+    expect(editHistory.onCancel).toHaveBeenCalledTimes(1);
+    expect(editHistory.onCommit).not.toHaveBeenCalled();
+    expect(input.value).toBe("50");
+  });
+
+  it("begins an invalid draft immediately, previews nothing, and Escape cancels", () => {
+    const editHistory = lifecycle();
+    const el = mount(
+      <NumberControl
+        paramKey="radius"
+        spec={numberSpec()}
+        value={50}
+        locked={false}
+        onChange={() => {}}
+        editHistory={editHistory}
+        onToggleLock={() => {}}
+      />,
+    );
+    const input = el.querySelector<HTMLInputElement>('input[type="number"]')!;
+
+    act(() => {
+      input.focus();
+      enter(input, "");
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      input.blur();
+    });
+
+    expect(editHistory.onBegin).toHaveBeenCalledTimes(1);
+    expect(editHistory.onPreview).not.toHaveBeenCalled();
+    expect(editHistory.onCancel).toHaveBeenCalledTimes(1);
+    expect(editHistory.onCommit).not.toHaveBeenCalled();
+  });
+
+  it("commits an invalid draft transaction once on Enter and not again on blur", () => {
+    const editHistory = lifecycle();
+    const el = mount(
+      <NumberControl
+        paramKey="radius"
+        spec={numberSpec()}
+        value={50}
+        locked={false}
+        onChange={() => {}}
+        editHistory={editHistory}
+        onToggleLock={() => {}}
+      />,
+    );
+    const input = el.querySelector<HTMLInputElement>('input[type="number"]')!;
+
+    act(() => {
+      input.focus();
+      // Browsers sanitize a lone "-" in a number input to an empty string;
+      // either form is the same temporarily invalid numeric draft.
+      enter(input, "-");
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+
+    expect(editHistory.onBegin).toHaveBeenCalledTimes(1);
+    expect(editHistory.onPreview).not.toHaveBeenCalled();
+    expect(editHistory.onCommit).toHaveBeenCalledTimes(1);
+    expect(editHistory.onCancel).not.toHaveBeenCalled();
+  });
+
+  it("keeps the original standalone onChange behavior without a lifecycle", () => {
+    const onChange = vi.fn<[number], void>();
+    const el = mount(
+      <NumberControl
+        paramKey="radius"
+        spec={numberSpec()}
+        value={50}
+        locked={false}
+        onChange={onChange}
+        onToggleLock={() => {}}
+      />,
+    );
+    const input = el.querySelector<HTMLInputElement>('input[type="number"]')!;
+    act(() => enter(input, "72"));
+    expect(onChange).toHaveBeenCalledWith(72);
+  });
+
+  it("restores the standalone parent value on Escape after live preview", () => {
+    function StandaloneControl() {
+      const [current, setCurrent] = useState(50);
+      return (
+        <NumberControl
+          paramKey="radius"
+          spec={numberSpec()}
+          value={current}
+          locked={false}
+          onChange={setCurrent}
+          onToggleLock={() => {}}
+        />
+      );
+    }
+
+    const el = mount(<StandaloneControl />);
+    const input = el.querySelector<HTMLInputElement>('input[type="number"]')!;
+    const slider = el.querySelector<HTMLInputElement>('input[type="range"]')!;
+
+    act(() => {
+      input.focus();
+      enter(input, "75");
+    });
+    expect(input.value).toBe("75");
+    expect(slider.value).toBe("75");
+
+    act(() => {
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    expect(input.value).toBe("50");
+    expect(slider.value).toBe("50");
+  });
+
+  it("begins before slider preview and commits the completed interaction", () => {
+    const order: string[] = [];
+    const el = mount(
+      <NumberControl
+        paramKey="radius"
+        spec={numberSpec()}
+        value={50}
+        locked={false}
+        onChange={() => {}}
+        editHistory={{
+          onBegin: () => order.push("begin"),
+          onPreview: (next) => order.push(`preview:${next}`),
+          onCommit: () => order.push("commit"),
+          onCancel: () => order.push("cancel"),
+        }}
+        onToggleLock={() => {}}
+      />,
+    );
+    const slider = el.querySelector<HTMLInputElement>('input[type="range"]')!;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+
+    act(() => {
+      setter.call(slider, "80");
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
+      slider.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(order).toEqual(["begin", "preview:80", "commit"]);
   });
 });

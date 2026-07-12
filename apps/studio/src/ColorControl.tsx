@@ -1,15 +1,16 @@
 import { type ColorParamSpec } from "@harness/core";
 import { Lock, LockOpen } from "lucide-react";
+import { useEffect, useRef } from "react";
 
+import type { EditTransactionLifecycle } from "./editHistory";
 import { cn } from "./lib/utils";
 
 /**
  * Props for {@link ColorControl}.
  *
  * The control is fully controlled: it owns no value state. `value` is the
- * current hex color string and `onChange` lifts every committed change up to
- * the panel, which is the single owner of the param map — the exact shape of
- * `NumberControlProps`, with the value typed to the color domain.
+ * current hex color string. Without `editHistory`, `onChange` lifts live values
+ * to the panel; with it, previews and transaction boundaries use that lifecycle.
  */
 export interface ColorControlProps {
   /** The param's key in the schema — used as the label and input id. */
@@ -27,8 +28,10 @@ export interface ColorControlProps {
    * stays fully hand-editable.
    */
   locked: boolean;
-  /** Lift a committed value change up to the owner. */
+  /** Standalone fallback for lifting a live value change to the owner. */
   onChange: (value: string) => void;
+  /** Optional shared-history transaction seam for previewable edits. */
+  editHistory?: EditTransactionLifecycle<string> | undefined;
   /** Toggle this param's lock membership. */
   onToggleLock: () => void;
 }
@@ -62,9 +65,41 @@ export function ColorControl({
   value,
   locked,
   onChange,
+  editHistory,
   onToggleLock,
 }: ColorControlProps) {
   const inputId = `control-${paramKey}`;
+  const inputRef = useRef<HTMLInputElement>(null);
+  const transactionRef = useRef(false);
+
+  const preview = (next: string) => {
+    if (editHistory) {
+      if (!transactionRef.current) {
+        editHistory.onBegin();
+        transactionRef.current = true;
+      }
+      editHistory.onPreview(next);
+    } else {
+      onChange(next);
+    }
+  };
+
+  const commitTransaction = () => {
+    if (!transactionRef.current) return;
+    transactionRef.current = false;
+    editHistory?.onCommit();
+  };
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    const handleChange = () => {
+      if (!transactionRef.current) preview(input.value);
+      commitTransaction();
+    };
+    input.addEventListener("change", handleChange);
+    return () => input.removeEventListener("change", handleChange);
+  });
 
   return (
     <div className="flex items-center gap-2">
@@ -75,10 +110,12 @@ export function ColorControl({
         {paramKey}
       </label>
       <input
+        ref={inputRef}
         id={inputId}
         type="color"
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onInput={(event) => preview(event.currentTarget.value)}
+        onBlur={commitTransaction}
         className="h-8 w-16 shrink-0 cursor-pointer rounded-md border bg-background p-0.5 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
       />
       <button

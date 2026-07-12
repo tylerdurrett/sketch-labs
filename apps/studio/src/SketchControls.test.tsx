@@ -25,6 +25,7 @@ import type {
 } from "./LiveCanvas";
 import { outlineScene } from "./outlineScene";
 import { hiddenLineSceneForExport, SketchControls } from "./SketchControls";
+import type { EditHistory } from "./editHistory";
 
 // Preview == export seam probe (issue #220): capture the Scene the export path
 // hands `renderToSVG`, so a test can prove it is the SAME processed Scene the
@@ -41,6 +42,11 @@ const plotterExportCapture = vi.hoisted(() => ({
     metadata: string | undefined;
     options: { includePaperMargins?: boolean } | undefined;
   },
+}));
+const historyCapture = vi.hoisted(() => ({
+  atomic: [] as { before: EditHistory; after: EditHistory }[],
+  transactionCommits: [] as { before: EditHistory; after: EditHistory }[],
+  cancels: [] as { before: EditHistory; after: EditHistory }[],
 }));
 
 // Probe both SVG serializers while delegating to their real implementations, so
@@ -66,6 +72,35 @@ vi.mock("@harness/core", async (importActual) => {
         options: args[3],
       };
       return actual.renderPlotterSVG(...args);
+    },
+  };
+});
+
+// Keep the real immutable model while recording the central Studio boundary.
+// These integration assertions can distinguish atomic commands and transaction
+// settlement without exposing history as product UI or adding a test-only prop.
+vi.mock("./editHistory", async (importActual) => {
+  const actual = await importActual<typeof import("./editHistory")>();
+  return {
+    ...actual,
+    commitEditState: (...args: Parameters<typeof actual.commitEditState>) => {
+      const after = actual.commitEditState(...args);
+      historyCapture.atomic.push({ before: args[0], after });
+      return after;
+    },
+    commitEditTransaction: (
+      ...args: Parameters<typeof actual.commitEditTransaction>
+    ) => {
+      const after = actual.commitEditTransaction(...args);
+      historyCapture.transactionCommits.push({ before: args[0], after });
+      return after;
+    },
+    cancelEditTransaction: (
+      ...args: Parameters<typeof actual.cancelEditTransaction>
+    ) => {
+      const after = actual.cancelEditTransaction(...args);
+      historyCapture.cancels.push({ before: args[0], after });
+      return after;
     },
   };
 });
@@ -235,6 +270,7 @@ const MINIMAL_PNG = Uint8Array.from([
 ]);
 
 beforeEach(() => {
+  vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
   // Sensible defaults so a mount's list-on-mount effect resolves quietly; the
   // save/reload tests override loadPreset/savePreset per case.
   listPresets.mockResolvedValue([]);
@@ -259,6 +295,9 @@ beforeEach(() => {
   // Clear both serializer probes so each test observes only its own export.
   exportSceneCapture.current = null;
   plotterExportCapture.current = null;
+  historyCapture.atomic.length = 0;
+  historyCapture.transactionCommits.length = 0;
+  historyCapture.cancels.length = 0;
 });
 
 afterEach(() => {
@@ -306,6 +345,20 @@ function clickButton(el: HTMLElement, text: string): void {
   act(() => {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
+}
+
+function pressHistoryShortcut(
+  target: EventTarget,
+  init: KeyboardEventInit,
+): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", {
+    key: "z",
+    bubbles: true,
+    cancelable: true,
+    ...init,
+  });
+  act(() => target.dispatchEvent(event));
+  return event;
 }
 
 function paperMarginsCheckbox(el: HTMLElement): HTMLInputElement {
@@ -417,10 +470,410 @@ describe("SketchControls — seed axis wiring", () => {
     expect(el.querySelector('[data-testid="canvas-seed"]')?.textContent).toBe(
       "12345",
     );
-    // ...and the controlled input reflects that unchanged state (not "" or "0").
-    expect((el.querySelector("#sketch-seed") as HTMLInputElement).value).toBe(
-      "12345",
+    // The invalid partial draft stays local until this field settles.
+    expect((el.querySelector("#sketch-seed") as HTMLInputElement).value).toBe("");
+  });
+});
+
+describe("SketchControls — central edit-history integration", () => {
+  it("handles the non-macOS chord matrix and ignores Meta", () => {
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
     );
+    const input = paramInput(el, "radius");
+
+    expect(pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented).toBe(
+      false,
+    );
+    act(() => input.focus());
+    setInput(input, "42");
+    act(() => input.blur());
+
+    expect(pressHistoryShortcut(window, { metaKey: true }).defaultPrevented).toBe(
+      false,
+    );
+    expect(paramInput(el, "radius").value).toBe("42");
+    expect(
+      pressHistoryShortcut(window, { metaKey: true, shiftKey: true })
+        .defaultPrevented,
+    ).toBe(false);
+    expect(paramInput(el, "radius").value).toBe("42");
+
+    expect(pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented).toBe(
+      true,
+    );
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true, shiftKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(paramInput(el, "radius").value).toBe("42");
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(paramInput(el, "radius").value).toBe("42");
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(false);
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true, altKey: true })
+        .defaultPrevented,
+    ).toBe(false);
+    expect(
+      pressHistoryShortcut(window, { key: "x", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(false);
+  });
+
+  it("handles the macOS chord matrix and ignores Ctrl including Ctrl+Y", () => {
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("MacIntel");
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const input = paramInput(el, "radius");
+    act(() => input.focus());
+    setInput(input, "42");
+    act(() => input.blur());
+
+    expect(pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented).toBe(
+      false,
+    );
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(false);
+    expect(paramInput(el, "radius").value).toBe("42");
+
+    expect(pressHistoryShortcut(window, { metaKey: true }).defaultPrevented).toBe(
+      true,
+    );
+    expect(paramInput(el, "radius").value).toBe("10");
+    expect(
+      pressHistoryShortcut(window, { metaKey: true, shiftKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(paramInput(el, "radius").value).toBe("42");
+  });
+
+  it("yields to an active numeric edit, then traverses after that field settles", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const input = paramInput(el, "radius");
+
+    act(() => input.focus());
+    setInput(input, "20");
+    act(() => input.blur());
+    act(() => input.focus());
+    setInput(input, "30");
+
+    expect(
+      pressHistoryShortcut(input, { ctrlKey: true }).defaultPrevented,
+    ).toBe(false);
+    expect(paramInput(el, "radius").value).toBe("30");
+
+    act(() =>
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      ),
+    );
+    expect(
+      pressHistoryShortcut(input, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(paramInput(el, "radius").value).toBe("20");
+  });
+
+  it("keeps preset-name Undo native even when Studio history is available", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const radius = paramInput(el, "radius");
+    act(() => radius.focus());
+    setInput(radius, "42");
+    act(() => radius.blur());
+    const name = el.querySelector<HTMLInputElement>(
+      'input[aria-label="preset name"]',
+    )!;
+
+    expect(
+      pressHistoryShortcut(name, { ctrlKey: true }).defaultPrevented,
+    ).toBe(false);
+    expect(paramInput(el, "radius").value).toBe("42");
+  });
+
+  it("undoes tolerance through Outline invalidation while retaining excluded state", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    const renderToggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => renderToggle.click());
+    act(() => lastOnOutlineComputed?.());
+    act(() => paperMarginsCheckbox(el).click());
+
+    const tolerance = el.querySelector<HTMLInputElement>("#sketch-tolerance")!;
+    act(() => tolerance.focus());
+    setInput(tolerance, "1");
+    act(() => tolerance.blur());
+    act(() => lastOnOutlineComputed?.());
+    expect(tolerance.value).toBe("1");
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+
+    expect(
+      el.querySelector<HTMLInputElement>("#sketch-tolerance")?.value,
+    ).toBe("0");
+    expect(renderToggle.getAttribute("aria-pressed")).toBe("true");
+    expect(paperMarginsCheckbox(el).checked).toBe(false);
+    expect(renderToggle.textContent).toBe("Computing…");
+  });
+
+  it("routes lock toggle, Randomize, New seed, and frame toggle as named atomic commands", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          radius: numberSpec({ min: 0, max: 100, default: 10 }),
+        })}
+      />,
+    );
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+    act(() => {
+      el.querySelector('button[aria-label="radius lock"]')!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    clickButton(el, "Randomize");
+    clickButton(el, "New seed");
+    act(() => el.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+
+    expect(historyCapture.atomic).toHaveLength(4);
+    const [lock, randomizeCommand, seedCommand, frameCommand] =
+      historyCapture.atomic;
+    expect(lock!.after.present.locks.has("radius")).toBe(true);
+    // Locked randomization is a model-level no-op and therefore adds no entry.
+    expect(randomizeCommand!.after).toBe(randomizeCommand!.before);
+    expect(seedCommand!.after.present.seed).not.toBe(
+      seedCommand!.before.present.seed,
+    );
+    expect(frameCommand!.after.present.profile.includeFrame).toBe(false);
+  });
+
+  it("suppresses an unchanged Randomize command", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          radius: numberSpec({ min: 0, max: 100, default: 50 }),
+        })}
+      />,
+    );
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+    clickButton(el, "Randomize");
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.after).toBe(
+      historyCapture.atomic[0]!.before,
+    );
+    expect(historyCapture.atomic[0]!.after.past).toHaveLength(0);
+  });
+
+  it("records a changed Randomize as one atomic transition", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          radius: numberSpec({ min: 0, max: 100, default: 10 }),
+        })}
+      />,
+    );
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+    clickButton(el, "Randomize");
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const transition = historyCapture.atomic[0]!;
+    expect(transition.after).not.toBe(transition.before);
+    expect(transition.after.past).toHaveLength(1);
+    expect(transition.after.present.params.radius).toBe(50);
+    expect(transition.after.present.seed).toBe(transition.before.present.seed);
+  });
+
+  it("settles params, seed, Simplify, and Paper adapters through commitEditTransaction", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+
+    const settle = (input: HTMLInputElement, value: string): void => {
+      act(() => input.focus());
+      setInput(input, value);
+      act(() => input.blur());
+    };
+
+    settle(paramInput(el, "radius"), "42");
+    settle(el.querySelector<HTMLInputElement>("#sketch-seed")!, "4242");
+    settle(el.querySelector<HTMLInputElement>("#sketch-tolerance")!, "1.25");
+    settle(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Paper width (mm)"]',
+      )!,
+      "300",
+    );
+
+    expect(historyCapture.transactionCommits).toHaveLength(4);
+    const [paramsCommit, seedCommit, toleranceCommit, profileCommit] =
+      historyCapture.transactionCommits;
+    expect(paramsCommit!.after.present.params.radius).toBe(42);
+    expect(seedCommit!.after.present.seed).toBe(4242);
+    expect(toleranceCommit!.after.present.tolerance).toBe(1.25);
+    expect(profileCommit!.after.present.profile.width).toBe(300);
+    expect(profileCommit!.after.past).toHaveLength(4);
+  });
+
+  it("feeds ControlPanel previews from present and Escape restores the whole transaction", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const input = paramInput(el, "radius");
+    act(() => input.focus());
+    setInput(input, "42");
+    expect(paramInput(el, "radius").value).toBe("42");
+
+    act(() =>
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+    );
+
+    expect(paramInput(el, "radius").value).toBe("10");
+    expect(historyCapture.cancels).toHaveLength(1);
+    expect(historyCapture.cancels[0]!.after.present.params.radius).toBe(10);
+    expect(historyCapture.cancels[0]!.after.past).toHaveLength(0);
+  });
+
+  it("routes paper format and orientation as separate atomic commands", () => {
+    const sketch = {
+      ...sketchWith("a", {}),
+      defaultOutputProfile: {
+        width: 210,
+        height: 297,
+        insets: { top: 10, right: 10, bottom: 10, left: 10 },
+        includeFrame: true,
+      },
+    } as Parameters<typeof SketchControls>[0]["sketch"];
+    const el = mount(<SketchControls sketch={sketch} />);
+    const details = el.querySelector("details")!;
+    act(() => details.setAttribute("open", ""));
+    const format = details.querySelector("select")!;
+
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(format, "letter");
+      format.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(details, "Swap to landscape");
+
+    expect(historyCapture.atomic).toHaveLength(2);
+    expect(historyCapture.atomic[0]!.after.present.profile).toMatchObject({
+      width: 215.9,
+      height: 279.4,
+    });
+    expect(historyCapture.atomic[1]!.after.present.profile).toMatchObject({
+      width: 279.4,
+      height: 215.9,
+    });
+  });
+
+  it("re-invalidates Outline when cancel restores a changed profile aspect", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => toggle.click());
+    act(() => lastOnOutlineComputed?.());
+    const initialFrame = lastCompositionFrame;
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    act(() => width.focus());
+    setInput(width, "300");
+    expect(toggle.textContent).toBe("Computing…");
+    expect(lastCompositionFrame).not.toBe(initialFrame);
+    act(() => lastOnOutlineComputed?.());
+
+    act(() =>
+      width.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+    );
+
+    expect(lastProfile?.width).toBe(200);
+    expect(lastCompositionFrame).toEqual(initialFrame);
+    expect(toggle.textContent).toBe("Computing…");
+    expect(historyCapture.cancels).toHaveLength(1);
+    expect(historyCapture.cancels[0]!.after.past).toHaveLength(0);
+  });
+
+  it("restores a same-aspect profile preview without invalidating Outline", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => toggle.click());
+    act(() => lastOnOutlineComputed?.());
+    const initialFrame = lastCompositionFrame;
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+
+    act(() => margin.focus());
+    setInput(margin, "20");
+    expect(lastProfile?.insets).toEqual({
+      top: 20,
+      right: 20,
+      bottom: 20,
+      left: 20,
+    });
+    expect(lastCompositionFrame).toBe(initialFrame);
+    expect(toggle.textContent).toBe("Outline");
+
+    act(() =>
+      margin.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+    );
+
+    expect(lastProfile?.insets).toEqual({
+      top: 10,
+      right: 10,
+      bottom: 10,
+      left: 10,
+    });
+    expect(lastCompositionFrame).toBe(initialFrame);
+    expect(toggle.textContent).toBe("Outline");
+    expect(historyCapture.cancels).toHaveLength(1);
   });
 });
 
@@ -574,6 +1027,8 @@ describe("SketchControls — Paper inspector integration (#248)", () => {
     expect(lastCompositionFrame).toBe(frameBefore);
     expect(renderToggle.textContent).toBe("Outline");
     expect(renderToggle.disabled).toBe(false);
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(historyCapture.transactionCommits).toHaveLength(0);
 
     act(() => root!.unmount());
     container!.remove();
@@ -660,18 +1115,34 @@ describe("SketchControls — preset save/reload wiring", () => {
   it("reloading a preset hydrates params, seed, AND locks-as-a-Set", async () => {
     // A preset whose values differ from the schema defaults and that locks one
     // key, so each axis hydrating is observable.
+    const loadedProfile: PlotProfile = {
+      width: 210,
+      height: 297,
+      insets: { top: 12, right: 13, bottom: 14, left: 15 },
+      includeFrame: false,
+    };
     loadPreset.mockResolvedValue({
-      version: 1,
+      version: 2,
       sketch: "a",
       name: "warm",
       seed: 999,
-      params: { radius: 77, count: 88 },
-      locks: ["radius"],
+      params: { radius: 77, count: 88, futureSchemaKey: 66 },
+      locks: ["radius", "futureSchemaKey"],
+      profile: loadedProfile,
     });
     listPresets.mockResolvedValue(["warm"]);
 
-    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    const reloadSchema: ParamSchema = {
+      ...schema,
+      futureSchemaKey: numberSpec({ default: 6 }),
+    };
+    const el = mount(
+      <SketchControls sketch={sketchWith("a", reloadSchema)} />,
+    );
     await flush(); // list-on-mount populates the picker
+    const initialSeed = el.querySelector('[data-testid="canvas-seed"]')
+      ?.textContent;
+    const initialProfile = structuredClone(lastProfile);
 
     // Pick "warm" and Reload.
     const picker = el.querySelector(
@@ -693,6 +1164,7 @@ describe("SketchControls — preset save/reload wiring", () => {
     // params hydrated exactly (loaded AS-IS, unclamped through applyPreset)...
     expect(paramInput(el, "radius").value).toBe("77");
     expect(paramInput(el, "count").value).toBe("88");
+    expect(paramInput(el, "futureSchemaKey").value).toBe("66");
     // ...seed hydrated (the value the canvas is fed)...
     expect(el.querySelector('[data-testid="canvas-seed"]')?.textContent).toBe(
       "999",
@@ -709,6 +1181,45 @@ describe("SketchControls — preset save/reload wiring", () => {
         .querySelector('button[aria-label="count lock"]')
         ?.getAttribute("aria-pressed"),
     ).toBe("false");
+    // One Preset reload changes params, seed, and locks together, but records a
+    // single whole-state transition.
+    expect(historyCapture.atomic).toHaveLength(1);
+    const reload = historyCapture.atomic[0]!;
+    expect(reload.after.past).toHaveLength(1);
+    expect(reload.after.present.params).toEqual({
+      radius: 77,
+      count: 88,
+      futureSchemaKey: 66,
+    });
+    expect(reload.after.present.seed).toBe(999);
+    expect(reload.after.present.locks).toEqual(
+      new Set(["radius", "futureSchemaKey"]),
+    );
+    expect(reload.after.present.profile).toEqual(loadedProfile);
+    expect(lastProfile).toEqual(loadedProfile);
+
+    // The atomic reload traverses as one whole-state step, including a key that
+    // arrived through the current schema rather than a hard-coded field list.
+    pressHistoryShortcut(window, { ctrlKey: true });
+    expect(paramInput(el, "radius").value).toBe("10");
+    expect(paramInput(el, "count").value).toBe("5");
+    expect(paramInput(el, "futureSchemaKey").value).toBe("6");
+    expect(el.querySelector('[data-testid="canvas-seed"]')?.textContent).toBe(
+      initialSeed,
+    );
+    expect(
+      el
+        .querySelector('button[aria-label="radius lock"]')
+        ?.getAttribute("aria-pressed"),
+    ).toBe("false");
+    expect(lastProfile).toEqual(initialProfile);
+
+    pressHistoryShortcut(window, { key: "y", ctrlKey: true });
+    expect(paramInput(el, "futureSchemaKey").value).toBe("66");
+    expect(el.querySelector('[data-testid="canvas-seed"]')?.textContent).toBe(
+      "999",
+    );
+    expect(lastProfile).toEqual(loadedProfile);
   });
 
   it("saving serializes the live params, seed, locks, AND the active profile under the sketch id", async () => {
@@ -729,6 +1240,8 @@ describe("SketchControls — preset save/reload wiring", () => {
       el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
       "warm",
     );
+    const historyWritesBeforeSave =
+      historyCapture.atomic.length + historyCapture.transactionCommits.length;
     clickButton(el, "Save");
     await flush();
 
@@ -745,6 +1258,9 @@ describe("SketchControls — preset save/reload wiring", () => {
       locks: ["radius"],
       profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
+    expect(
+      historyCapture.atomic.length + historyCapture.transactionCommits.length,
+    ).toBe(historyWritesBeforeSave);
   });
 
   it("rejects an invalid (non-slug) name inline and does not save", async () => {
@@ -2253,5 +2769,7 @@ describe("SketchControls — render-mode toggle wiring (#219)", () => {
       seedBefore,
     );
     expect(paramInput(el, "radius").value).toBe(radiusBefore);
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(historyCapture.transactionCommits).toHaveLength(0);
   });
 });
