@@ -17,6 +17,7 @@ const profile: PlotProfile = {
   width: 297,
   height: 210,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
+  includeFrame: true,
 }
 
 describe('reproFilenameStem', () => {
@@ -143,6 +144,24 @@ describe('buildReproMetadata', () => {
     expect(PRESET_VERSION).toBe(2)
   })
 
+  it.each([true, false])(
+    'embeds the active includeFrame=%s value exactly',
+    (includeFrame) => {
+      const parsed = JSON.parse(
+        buildReproMetadata({
+          sketchId: 'waves',
+          seed: 123,
+          params: { radius: 10 },
+          locks: new Set(),
+          profile: { ...profile, includeFrame },
+        }),
+      )
+
+      expect(parsed.version).toBe(PRESET_VERSION)
+      expect(parsed.profile.includeFrame).toBe(includeFrame)
+    },
+  )
+
   it('stays a v1 envelope with NO profile key when none is supplied', () => {
     const parsed = JSON.parse(
       buildReproMetadata({
@@ -161,6 +180,7 @@ describe('buildReproMetadata', () => {
       width: 297,
       height: 210,
       insets: { top: 10, right: 10, bottom: 10, left: 10 },
+      includeFrame: true,
     }
     const json = buildReproMetadata({
       sketchId: 'circles',
