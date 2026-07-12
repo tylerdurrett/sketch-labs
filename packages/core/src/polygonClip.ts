@@ -43,6 +43,7 @@ import type { Point, Polyline } from './types'
  */
 
 const EPS = 1e-9
+const RAY_BIN_COUNT = 32
 
 interface Bounds {
   minX: number
@@ -65,6 +66,8 @@ export interface PreparedPolygon {
   /** Union of tolerant edge bounds, used to reject intersection tests. */
   intersectionBounds: Bounds | null
   edges: PreparedEdge[]
+  /** Conservative y buckets for the prepared even-odd ray cast. */
+  rayBins: PreparedEdge[][] | null
 }
 
 function coordinateRoundoff(...values: number[]): number {
@@ -111,7 +114,13 @@ function boundsContain(bounds: Bounds, p: Point): boolean {
 /** Prepare immutable lookup data without copying or mutating polygon points. */
 export function preparePolygon(polygon: Polyline): PreparedPolygon {
   if (polygon.length === 0) {
-    return { polygon, bounds: null, intersectionBounds: null, edges: [] }
+    return {
+      polygon,
+      bounds: null,
+      intersectionBounds: null,
+      edges: [],
+      rayBins: null,
+    }
   }
 
   let minX = Infinity
@@ -137,6 +146,30 @@ export function preparePolygon(polygon: Polyline): PreparedPolygon {
     if (edgeBounds.maxY > intersectionMaxY) intersectionMaxY = edgeBounds.maxY
     edges.push({ c, d, bounds: edgeBounds })
   }
+  const height = maxY - minY
+  const rayBins =
+    Number.isFinite(height) && height > 0
+      ? Array.from({ length: RAY_BIN_COUNT }, () => [] as PreparedEdge[])
+      : null
+  if (rayBins !== null) {
+    const scale = RAY_BIN_COUNT / height
+    for (const edge of edges) {
+      const edgeMinY = Math.min(edge.c[1], edge.d[1])
+      const edgeMaxY = Math.max(edge.c[1], edge.d[1])
+      // Horizontal edges can never satisfy the authoritative half-open
+      // straddle predicate, so excluding them is exact.
+      if (edgeMinY === edgeMaxY) continue
+      const rawStart = Math.floor((edgeMinY - minY) * scale)
+      const rawEnd = Math.floor((edgeMaxY - minY) * scale)
+      // Include one neighboring bin on either side. The original straddle test
+      // remains authoritative; this padding makes floating-point bin-boundary
+      // rounding conservative rather than a new geometry decision.
+      const start = Math.max(0, Math.min(RAY_BIN_COUNT - 1, rawStart - 1))
+      const end = Math.max(0, Math.min(RAY_BIN_COUNT - 1, rawEnd + 1))
+      for (let bin = start; bin <= end; bin++) rayBins[bin]!.push(edge)
+    }
+  }
+
   return {
     polygon,
     bounds: { minX, minY, maxX, maxY },
@@ -147,6 +180,7 @@ export function preparePolygon(polygon: Polyline): PreparedPolygon {
       maxY: intersectionMaxY,
     },
     edges,
+    rayBins,
   }
 }
 
@@ -170,13 +204,37 @@ export function pointInPolygon(p: Point, polygon: Polyline): boolean {
   return inside
 }
 
+/** Prepared-only ray cast using conservative y buckets and original arithmetic. */
+function pointInPreparedPolygon(p: Point, prepared: PreparedPolygon): boolean {
+  const bounds = prepared.bounds
+  const bins = prepared.rayBins
+  if (bounds === null || bins === null) {
+    return pointInPolygon(p, prepared.polygon)
+  }
+
+  const [px, py] = p
+  const height = bounds.maxY - bounds.minY
+  const rawBin = Math.floor(((py - bounds.minY) / height) * RAY_BIN_COUNT)
+  const bin = Math.max(0, Math.min(RAY_BIN_COUNT - 1, rawBin))
+  let inside = false
+  for (const edge of bins[bin]!) {
+    const [xi, yi] = edge.d
+    const [xj, yj] = edge.c
+    const straddles = yi > py !== yj > py
+    if (straddles && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
 /** True if `p` is inside ANY of the polygons (union). */
 function insideAny(p: Point, polygons: PreparedPolygon[]): boolean {
   for (const prepared of polygons) {
     if (
       prepared.bounds !== null &&
       boundsContain(prepared.bounds, p) &&
-      pointInPolygon(p, prepared.polygon)
+      pointInPreparedPolygon(p, prepared)
     ) {
       return true
     }
