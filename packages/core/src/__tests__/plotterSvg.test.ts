@@ -7,6 +7,7 @@ const profile: PlotProfile = {
   width: 240,
   height: 160,
   insets: { top: 20, right: 30, bottom: 40, left: 10 },
+  includeFrame: false,
 }
 
 const scene: Scene = {
@@ -50,6 +51,7 @@ describe('renderPlotterSVG', () => {
       width: drawableWidth + 0.2,
       height: 1.4,
       insets: { top: 0.2, right: 0.1, bottom: 0.2, left: 0.1 },
+      includeFrame: false,
     }
     const noisyScene: Scene = {
       space: { width: 2 / 3, height: 1 },

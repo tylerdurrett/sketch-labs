@@ -15,6 +15,7 @@ function makeProfile(label = 1): PlotProfile {
     width: 100 + label,
     height: 150 + label,
     insets: { top: 5, right: 5, bottom: 5, left: 5 },
+    includeFrame: true,
   }
 }
 
@@ -31,6 +32,10 @@ describe('HARNESS_FALLBACK_PLOT_PROFILE', () => {
       bottom: 10,
       left: 10,
     })
+  })
+
+  it('includes the authored Composition Frame by default', () => {
+    expect(HARNESS_FALLBACK_PLOT_PROFILE.includeFrame).toBe(true)
   })
 
   it('validates clean through the #263 model', () => {
@@ -55,6 +60,11 @@ describe('resolveOutputProfile', () => {
   it('returns the Sketch default when no preset profile is present', () => {
     const sketchDefault = makeProfile(2)
     expect(resolveOutputProfile(undefined, sketchDefault)).toBe(sketchDefault)
+  })
+
+  it('preserves a selected profile with includeFrame disabled', () => {
+    const preset = { ...makeProfile(), includeFrame: false }
+    expect(resolveOutputProfile(preset).includeFrame).toBe(false)
   })
 
   it('returns the Harness fallback when neither preset nor Sketch default is present', () => {

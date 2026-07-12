@@ -53,6 +53,7 @@ export const HARNESS_FALLBACK_PLOT_PROFILE: PlotProfile = {
   width: 200,
   height: 200,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
+  includeFrame: true,
 }
 
 // Fail loudly at module load if the fallback ever drifts out of the #263 model's
