@@ -151,6 +151,36 @@ describe('renderPlotterSVG', () => {
     expect(svg).not.toContain('239.70000000000002')
   })
 
+  it('keeps tiny valid drawable dimensions positive when rounding would erase them', () => {
+    const tinyProfile: PlotProfile = {
+      width: 0.00004,
+      height: 0.00002,
+      insets: { top: 0, right: 0, bottom: 0, left: 0 },
+      includeFrame: false,
+    }
+    const tinyScene: Scene = {
+      space: { width: 2, height: 1 },
+      primitives: [
+        {
+          points: [
+            [0, 0],
+            [2, 1],
+          ],
+          stroke: { color: 'black', width: 1 },
+        },
+      ],
+    }
+
+    const svg = renderPlotterSVG(tinyScene, tinyProfile, undefined, {
+      includePaperMargins: false,
+    })
+
+    expect(svg).toContain(
+      'width="0.00004mm" height="0.00002mm" viewBox="0 0 0.00004 0.00002"',
+    )
+    expect(svg).not.toMatch(/(?:width|height)="0mm"|viewBox="0 0 0(?:\s|\")/)
+  })
+
   it('scales geometry and Scene stroke widths by the same uniform factor', () => {
     const [path] = paths(renderPlotterSVG(scene, profile))
 

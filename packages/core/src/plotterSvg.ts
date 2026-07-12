@@ -26,6 +26,11 @@ export interface PlotterSVGOptions {
   includePaperMargins?: boolean
 }
 
+function normalizeExtentDimension(dimension: number): number {
+  const rounded = round(dimension)
+  return rounded > 0 ? rounded : dimension
+}
+
 /**
  * Serialize a Scene as a physically sized, path-only plotter SVG.
  *
@@ -52,7 +57,10 @@ export function renderPlotterSVG(
   let extent = { width: profile.width, height: profile.height }
   if (!includePaperMargins) {
     const drawable = plotDrawableRectangle(profile)
-    extent = { width: round(drawable.width), height: round(drawable.height) }
+    extent = {
+      width: normalizeExtentDimension(drawable.width),
+      height: normalizeExtentDimension(drawable.height),
+    }
   }
   const originX = includePaperMargins ? 0 : profile.insets.left
   const originY = includePaperMargins ? 0 : profile.insets.top
