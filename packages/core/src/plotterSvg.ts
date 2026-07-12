@@ -17,19 +17,31 @@
  */
 
 import { computePlotMapping } from './plotMapping'
-import type { PlotProfile } from './plotProfile'
+import { plotDrawableRectangle, type PlotProfile } from './plotProfile'
 import type { Scene } from './scene'
 import { escapeAttr, escapeText, round } from './svgHelpers'
+
+export interface PlotterSVGOptions {
+  /** Whether the SVG root describes the full paper instead of its drawable area. */
+  includePaperMargins?: boolean
+}
+
+function normalizeExtentDimension(dimension: number): number {
+  const rounded = round(dimension)
+  return rounded > 0 ? rounded : dimension
+}
 
 /**
  * Serialize a Scene as a physically sized, path-only plotter SVG.
  *
- * The root dimensions and coordinate system describe the Plot Profile's full
- * paper in millimeters. Only stroke-bearing primitives with at least one line
- * segment are emitted. Their Scene-space coordinates and stroke widths are
- * uniformly scaled into the profile's drawable rectangle; open/closed semantics,
- * stroke colors, and array order are retained. Optional reproduction metadata
- * uses the same XML text escaping contract as {@link renderToSVG}.
+ * By default, the root dimensions and coordinate system describe the Plot
+ * Profile's full paper in millimeters. When paper margins are excluded, they
+ * instead describe the drawable rectangle and mapped coordinates are rebased to
+ * its origin. Only stroke-bearing primitives with at least one line segment are
+ * emitted. Their Scene-space coordinates and stroke widths are uniformly scaled
+ * into the profile's drawable rectangle; open/closed semantics, stroke colors,
+ * and array order are retained. Optional reproduction metadata uses the same XML
+ * text escaping contract as {@link renderToSVG}.
  *
  * Input validation and aspect matching are delegated to
  * {@link computePlotMapping}. Neither input is mutated.
@@ -38,16 +50,28 @@ export function renderPlotterSVG(
   scene: Scene,
   profile: PlotProfile,
   metadata?: string,
+  options?: PlotterSVGOptions,
 ): string {
   const { scale, offsetX, offsetY } = computePlotMapping(scene.space, profile)
+  const includePaperMargins = options?.includePaperMargins !== false
+  let extent = { width: profile.width, height: profile.height }
+  if (!includePaperMargins) {
+    const drawable = plotDrawableRectangle(profile)
+    extent = {
+      width: normalizeExtentDimension(drawable.width),
+      height: normalizeExtentDimension(drawable.height),
+    }
+  }
+  const originX = includePaperMargins ? 0 : profile.insets.left
+  const originY = includePaperMargins ? 0 : profile.insets.top
 
   const paths = scene.primitives.flatMap((primitive) => {
     const { points, closed, stroke } = primitive
     if (stroke === undefined || points.length < 2) return []
 
     const mappedPoints: [number, number][] = points.map(([x, y]) => [
-      round(offsetX + x * scale),
-      round(offsetY + y * scale),
+      round(offsetX + x * scale - originX),
+      round(offsetY + y * scale - originY),
     ])
     const firstPoint = mappedPoints[0]!
     const lastPoint = mappedPoints.at(-1)!
@@ -73,7 +97,7 @@ export function renderPlotterSVG(
       : `  <metadata>${escapeText(metadata)}</metadata>`
 
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${profile.width}mm" height="${profile.height}mm" viewBox="0 0 ${profile.width} ${profile.height}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${extent.width}mm" height="${extent.height}mm" viewBox="0 0 ${extent.width} ${extent.height}" data-paper-extent="${includePaperMargins ? 'paper' : 'drawable'}">`,
     metadataElement,
     ...paths,
     '</svg>',

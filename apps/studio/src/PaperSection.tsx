@@ -24,6 +24,10 @@ export interface PaperSectionProps {
   profile: PlotProfile;
   /** Commit a canonical Plot Profile edit to the owning Studio session. */
   onChange: (profile: PlotProfile) => void;
+  /** Whether physical plotter SVGs include the full paper extent. */
+  includePaperMargins: boolean;
+  /** Update Studio's export preference without changing the Plot Profile. */
+  onIncludePaperMarginsChange: (includePaperMargins: boolean) => void;
 }
 
 /** Read the presentation-only unit preference without assuming storage is usable. */
@@ -82,7 +86,12 @@ function linkedInset(profile: PlotProfile): number | null {
  * calls {@link PaperSectionProps.onChange}. Dimension edits convert back to
  * millimeters and validate a complete candidate before committing it atomically.
  */
-export function PaperSection({ profile, onChange }: PaperSectionProps) {
+export function PaperSection({
+  profile,
+  onChange,
+  includePaperMargins,
+  onIncludePaperMarginsChange,
+}: PaperSectionProps) {
   const [displayUnit, setDisplayUnit] =
     useState<PaperDisplayUnit>(readDisplayUnit);
   const [dimensionDrafts, setDimensionDrafts] = useState(() => ({
@@ -351,6 +360,16 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
             }
           />
           <span>Include composition frame</span>
+        </label>
+        <label className="flex min-w-0 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={includePaperMargins}
+            onChange={(event) =>
+              onIncludePaperMarginsChange(event.target.checked)
+            }
+          />
+          <span>Include paper margins in plotter SVG</span>
         </label>
         {error === null ? null : (
           <p id={errorId} role="alert" className="text-sm text-destructive">

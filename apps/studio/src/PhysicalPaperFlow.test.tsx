@@ -25,6 +25,7 @@ const previewCapture = vi.hoisted(() => ({
     scene: Scene;
     profile: PlotProfile;
     metadata: string | undefined;
+    options: { includePaperMargins?: boolean } | undefined;
   },
 }));
 
@@ -45,6 +46,7 @@ vi.mock("@harness/core", async (importActual) => {
         scene: args[0],
         profile: args[1],
         metadata: args[2],
+        options: args[3],
       };
       return actual.renderPlotterSVG(...args);
     },
@@ -546,6 +548,10 @@ describe("physical plot artifact acceptance flow (#276)", () => {
     );
     const enabledRoot = enabledDocument.documentElement;
     const enabledPaths = [...enabledRoot.querySelectorAll(":scope > path")];
+    expect(enabledRoot.getAttribute("width")).toBe("240mm");
+    expect(enabledRoot.getAttribute("height")).toBe("180mm");
+    expect(enabledRoot.getAttribute("viewBox")).toBe("0 0 240 180");
+    expect(enabledRoot.getAttribute("data-paper-extent")).toBe("paper");
     expect(enabledPaths).toHaveLength(enabledExportScene.primitives.length);
     expect(enabledPaths.at(-1)?.getAttribute("d")).toBe(
       "M29 11 L217 11 L217 163 L29 163 L29 11",
@@ -554,6 +560,64 @@ describe("physical plot artifact acceptance flow (#276)", () => {
     expect(
       JSON.parse(enabledRoot.querySelector("metadata")!.textContent!),
     ).toMatchObject({ profile: { ...profile, includeFrame: true } });
+
+    const marginsCheckbox = [
+      ...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ].find((input) =>
+      input.parentElement?.textContent?.includes(
+        "Include paper margins in plotter SVG",
+      ),
+    )!;
+    act(() => marginsCheckbox.click());
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(previewCapture.plotterExport?.options).toEqual({
+      includePaperMargins: false,
+    });
+    expect(previewCapture.plotterExport?.scene).toEqual(enabledExportScene);
+    const drawableSvg = await downloadBlob.mock.calls.at(-1)![0].text();
+    const drawableDocument = new DOMParser().parseFromString(
+      drawableSvg,
+      "image/svg+xml",
+    );
+    const drawableRoot = drawableDocument.documentElement;
+    const drawablePaths = [...drawableRoot.querySelectorAll(":scope > path")];
+    expect(drawableRoot.getAttribute("width")).toBe("188mm");
+    expect(drawableRoot.getAttribute("height")).toBe("152mm");
+    expect(drawableRoot.getAttribute("viewBox")).toBe("0 0 188 152");
+    expect(drawableRoot.getAttribute("data-paper-extent")).toBe("drawable");
+    expect(drawablePaths).toHaveLength(enabledPaths.length);
+    expect(drawablePaths.at(-1)?.getAttribute("d")).toBe(
+      "M0 0 L188 0 L188 152 L0 152 L0 0",
+    );
+    for (const [index, paperPath] of enabledPaths.entries()) {
+      const drawablePath = drawablePaths[index]!;
+      const coordinates = (path: Element) => [
+        ...path
+          .getAttribute("d")!
+          .matchAll(/[ML](-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g),
+      ].map((match) => [Number(match[1]), Number(match[2])] as const);
+      const paperCoordinates = coordinates(paperPath);
+      const drawableCoordinates = coordinates(drawablePath);
+      expect(drawableCoordinates).toEqual(
+        paperCoordinates.map(([x, y]) => [
+          Number((x - 29).toFixed(4)),
+          Number((y - 11).toFixed(4)),
+        ]),
+      );
+      expect(drawablePath.getAttribute("stroke")).toBe(
+        paperPath.getAttribute("stroke"),
+      );
+      expect(drawablePath.getAttribute("stroke-width")).toBe(
+        paperPath.getAttribute("stroke-width"),
+      );
+    }
+    expect(drawableRoot.querySelector("metadata")?.textContent).toBe(
+      enabledRoot.querySelector("metadata")?.textContent,
+    );
+
+    // Restore paper extent before exercising the independent frame preference.
+    act(() => marginsCheckbox.click());
 
     const frameCheckbox = [
       ...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),

@@ -36,7 +36,12 @@ function mount(
   root = createRoot(container);
   act(() =>
     root.render(
-      <PaperSection profile={initialProfile} onChange={onChange} />,
+      <PaperSection
+        profile={initialProfile}
+        onChange={onChange}
+        includePaperMargins
+        onIncludePaperMarginsChange={() => {}}
+      />,
     ),
   );
   return { el: container, onChange };
@@ -90,6 +95,18 @@ function frameCheckbox(el: HTMLElement): HTMLInputElement {
   return input;
 }
 
+function paperMarginsCheckbox(el: HTMLElement): HTMLInputElement {
+  const input = [
+    ...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+  ].find((candidate) =>
+    candidate.labels?.[0]?.textContent?.includes(
+      "Include paper margins in plotter SVG",
+    ),
+  );
+  if (input === undefined) throw new Error("no plotter SVG margins checkbox");
+  return input;
+}
+
 beforeEach(() => {
   window.localStorage.clear();
 });
@@ -101,6 +118,76 @@ afterEach(() => {
 });
 
 describe("PaperSection", () => {
+  it.each([
+    [true, false],
+    [false, true],
+  ] as const)(
+    "emits the controlled plotter SVG margin choice from %s to %s without changing the profile",
+    (includePaperMargins, expected) => {
+      const onChange = vi.fn();
+      const onIncludePaperMarginsChange = vi.fn();
+      const before = structuredClone(profile);
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() =>
+        root.render(
+          <PaperSection
+            profile={profile}
+            onChange={onChange}
+            includePaperMargins={includePaperMargins}
+            onIncludePaperMarginsChange={onIncludePaperMarginsChange}
+          />,
+        ),
+      );
+
+      act(() =>
+        paperMarginsCheckbox(container).dispatchEvent(
+          new MouseEvent("click", { bubbles: true }),
+        ),
+      );
+
+      expect(onIncludePaperMarginsChange).toHaveBeenCalledOnce();
+      expect(onIncludePaperMarginsChange).toHaveBeenCalledWith(expected);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(profile).toEqual(before);
+    },
+  );
+
+  it("reflects controlled plotter SVG margin updates without emitting them", () => {
+    const onChange = vi.fn();
+    const onIncludePaperMarginsChange = vi.fn();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root.render(
+        <PaperSection
+          profile={profile}
+          onChange={onChange}
+          includePaperMargins={false}
+          onIncludePaperMarginsChange={onIncludePaperMarginsChange}
+        />,
+      ),
+    );
+    expect(paperMarginsCheckbox(container).checked).toBe(false);
+
+    act(() =>
+      root.render(
+        <PaperSection
+          profile={profile}
+          onChange={onChange}
+          includePaperMargins={true}
+          onIncludePaperMarginsChange={onIncludePaperMarginsChange}
+        />,
+      ),
+    );
+
+    expect(paperMarginsCheckbox(container).checked).toBe(true);
+    expect(onIncludePaperMarginsChange).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("is a native disclosure collapsed by default with active dimensions always in its summary", () => {
     const { el } = mount();
     const details = el.querySelector("details");
@@ -121,6 +208,8 @@ describe("PaperSection", () => {
         <PaperSection
           profile={{ ...profile, width: 420, height: 594 }}
           onChange={onChange}
+          includePaperMargins
+          onIncludePaperMarginsChange={() => {}}
         />,
       );
     });
@@ -170,6 +259,8 @@ describe("PaperSection", () => {
         <PaperSection
           profile={{ ...profile, includeFrame: false }}
           onChange={onChange}
+          includePaperMargins
+          onIncludePaperMarginsChange={() => {}}
         />,
       );
     });
@@ -230,7 +321,14 @@ describe("PaperSection", () => {
       expect(onChange).toHaveBeenCalledWith(accepted);
 
       act(() => {
-        root.render(<PaperSection profile={accepted} onChange={onChange} />);
+        root.render(
+          <PaperSection
+            profile={accepted}
+            onChange={onChange}
+            includePaperMargins
+            onIncludePaperMarginsChange={() => {}}
+          />,
+        );
       });
       const orientation = [...el.querySelectorAll("button")].find(
         (candidate) => candidate.textContent === "Square",
@@ -307,6 +405,8 @@ describe("PaperSection", () => {
         <PaperSection
           profile={{ ...profile, width: 220 }}
           onChange={onChange}
+          includePaperMargins
+          onIncludePaperMarginsChange={() => {}}
         />,
       );
     });
