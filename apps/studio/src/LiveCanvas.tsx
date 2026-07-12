@@ -27,7 +27,8 @@ import { outlineScene } from "./outlineScene";
 /**
  * Which processed Scene the live preview renders (issue #219, feature #4).
  *
- * `fill` is the default, unchanged live path — `generate` → `drawSceneFitted`.
+ * `fill` is the default, unchanged live path — prepared sample →
+ * `drawSceneFitted`.
  * `outline` swaps the fill preview for the Hidden-line pass's stroke-only,
  * occlusion-clipped result (the same processed Scene the hidden-line SVG export
  * emits), drawn through the identical Canvas2D pipeline. The pass is expensive
@@ -98,10 +99,10 @@ export interface LiveCanvasProps {
   /**
    * Which processed Scene the preview draws (issue #219). Optional, defaulting to
    * `fill` so the live path is unchanged when a caller omits it: `fill` renders
-   * `generate`'s Scene as-is; `outline` derives its Scene from the shared
-   * {@link outlineScene} seam (`generate` → Hidden-line pass — the SAME
-   * derivation the hidden-line SVG export consumes, issue #220), showing the
-   * stroke-only occlusion-clipped result. The outline pass is
+   * the prepared sampler's Scene as-is; `outline` derives its Scene from the
+   * shared {@link outlineScene} seam (prepared Scene → Hidden-line pass — the
+   * SAME processing seam the hidden-line SVG export consumes, issue #220),
+   * showing the stroke-only occlusion-clipped result. The outline pass is
    * on-demand only (feature #4 invariant) — it never runs inside the live rAF
    * fill loop; toggling to `outline` suspends that loop and draws once on the
    * static/on-demand redraw path, recomputing on toggle and param-settle.
@@ -318,25 +319,11 @@ export function LiveCanvas({
     "--plot-inset-left": `${(profile.insets.left / profile.width) * 100}%`,
   } as CSSProperties;
 
-  // The current params/seed are read through refs inside the rAF `tick` (and the
-  // static redraw effect) so the loop effect does NOT depend on them. Keeping the
-  // loop keyed on `sketch` alone means a params/seed change feeds new inputs into
-  // the next frame WITHOUT tearing down the loop and resetting its wall-clock
-  // baseline (issue #40). They are kept up to date by an effect (not assigned
-  // during render) so a StrictMode double-render can't desync them.
-  const paramsRef = useRef(params);
-  const seedRef = useRef(seed);
-  // `sketchRef` lets the clockless re-fit helper read the current Sketch without
-  // a `sketch` dependency (so a resize never re-runs the clock effect). Kept in
-  // sync by the same effect — assigned post-commit, not during render, so a
-  // StrictMode double-render can't desync it.
-  const sketchRef = useRef(sketch);
   // The latest caller-owned sampler follows the same post-commit ref discipline
-  // as params/seed. The rAF effect does not depend on it, so invalidating
-  // preparation never resets the animation clock; the next tick samples the new
-  // immutable layout at the continuing `t`.
+  // as the other live inputs. The rAF effect does not depend on it, so
+  // invalidating preparation never resets the animation clock; the next tick
+  // samples the new immutable layout at the continuing `t`.
   const preparedFrameRef = useRef(preparedFrame);
-  const compositionFrameRef = useRef(compositionFrame);
   // `renderModeRef` lets the stable on-demand draw callbacks (rebuild/repaint,
   // scrubTo) read the current mode without a `renderMode` dependency, so a mode
   // flip never re-runs the clock effect or resets the rAF baseline. Kept in sync
@@ -355,20 +342,12 @@ export function LiveCanvas({
   // re-trigger the pass every render. Kept in sync post-commit like the others.
   const onOutlineComputedRef = useRef(onOutlineComputed);
   useEffect(() => {
-    paramsRef.current = params;
-    seedRef.current = seed;
-    sketchRef.current = sketch;
     preparedFrameRef.current = preparedFrame;
-    compositionFrameRef.current = compositionFrame;
     renderModeRef.current = renderMode;
     toleranceRef.current = tolerance;
     onOutlineComputedRef.current = onOutlineComputed;
   }, [
-    params,
-    seed,
-    sketch,
     preparedFrame,
-    compositionFrame,
     renderMode,
     tolerance,
     onOutlineComputed,
@@ -429,14 +408,7 @@ export function LiveCanvas({
     if (canvas === null) return;
     const rendered =
       renderModeRef.current === "outline"
-        ? outlineScene(
-            sketchRef.current,
-            paramsRef.current,
-            seedRef.current,
-            t,
-            compositionFrameRef.current,
-            toleranceRef.current,
-          )
+        ? outlineScene(preparedFrameRef.current(t), toleranceRef.current)
         : preparedFrameRef.current(t);
     if (renderModeRef.current === "outline") {
       outlineFrameRef.current = rendered;

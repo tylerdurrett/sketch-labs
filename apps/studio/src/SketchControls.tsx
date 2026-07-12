@@ -193,7 +193,7 @@ export function SketchControls({
   // param): the pass runs AFTER `sketch.generate`, so simplification is a
   // post-generation studio concern, not part of any Sketch's declared inputs.
   // This ONE state feeds BOTH the outline preview (via LiveCanvas's `tolerance`
-  // prop) and the hidden-line SVG export (the 5th arg to `outlineScene` in
+  // prop) and the hidden-line SVG export (the tolerance arg to `outlineScene` in
   // `exportHiddenLineSvg`), so preview and export simplify identically (AC2/AC3).
   // Like the other axes it lives in keyed-remount state, so a Sketch switch
   // resets it to 0 (no simplification) for free. 0 is an identity no-op.
@@ -416,13 +416,13 @@ export function SketchControls({
 
   // Export the CURRENTLY DISPLAYED frame as a HIDDEN-LINE SVG — a plotter-ready
   // variant of {@link exportSvg} that derives its stroke-only, occlusion-clipped
-  // Scene from the shared {@link outlineScene} seam (`generate` → Hidden-line
-  // pass) BEFORE serialization. Routing through that ONE seam — the same
-  // derivation LiveCanvas's outline preview consumes — is what makes preview ==
-  // export true by construction (issue #220): the two paths cannot drift because
-  // there is only one place the processed Scene is derived. It is the same
-  // one-shot click OUTSIDE the per-frame loop; the pass is heavy and on-demand
-  // only, so it runs HERE inside the handler — never in render or the live loop.
+  // Scene through the shared {@link outlineScene} processing seam BEFORE
+  // serialization. Routing through that ONE seam — the same processing
+  // LiveCanvas's outline preview consumes — is what makes preview == export true
+  // by construction (issue #220): the two paths cannot drift after sampling. It
+  // is the same one-shot click OUTSIDE the per-frame loop; the pass is heavy and
+  // on-demand only, so it runs HERE inside the handler — never in render or the
+  // live loop.
   //
   // Everything else mirrors `exportSvg` exactly (same handle guard, same
   // `sketch.time` time-gating of `t`, same displayed `(params, seed, t)` spine,
@@ -433,18 +433,14 @@ export function SketchControls({
     const handle = canvasHandle.current;
     if (handle == null) return;
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
-    // The shared preview == export seam: `generate` then the occlusion-clipping
-    // Hidden-line pass, on-demand only, strictly inside this click handler. The
-    // studio `tolerance` knob is forwarded as the 5th arg so the exported paths
-    // carry the SAME final Douglas–Peucker simplification the outline preview
+    // Generate the one-shot export Scene, then feed it through the shared preview
+    // == export processing seam, strictly inside this click handler. The studio
+    // `tolerance` knob is forwarded so the exported paths carry the SAME final
+    // Douglas–Peucker simplification the outline preview
     // shows (issue #232) — both read this one state through this one seam.
     // `renderToSVG` then serializes the stroke-only result.
     const hiddenLineScene = outlineScene(
-      sketch,
-      params,
-      seed,
-      t ?? 0,
-      compositionFrame,
+      sketch.generate(params, seed, t ?? 0, compositionFrame),
       tolerance,
     );
     // Clip AFTER the hidden-line pass and BEFORE serialization (issue #237): the
@@ -634,8 +630,8 @@ export function SketchControls({
          * per-sketch schema param) driving the Hidden-line pass's final
          * Douglas–Peucker stage. Its single `tolerance` state feeds BOTH the
          * outline preview (LiveCanvas `tolerance` prop) and the hidden-line SVG
-         * export (`outlineScene`'s 5th arg), so simplification is identical in
-         * preview and export by construction. Slider + number input are two-way
+         * export (`outlineScene`'s tolerance arg), so simplification is identical
+         * in preview and export by construction. Slider + number input are two-way
          * bound to the same value through `setToleranceValue` (continuous, in
          * [0, TOLERANCE_MAX]; 0 = identity, no simplification). It sits between
          * the render toggle and the export group since it only affects the

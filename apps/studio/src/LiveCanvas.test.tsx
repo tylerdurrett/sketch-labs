@@ -75,17 +75,31 @@ function animatedSketch(time: TimeMetadata | undefined) {
 /** A Sketch exposing the prepared-frame fast path, with each retained sampler observable. */
 function explicitlyPreparedSketch(time: TimeMetadata) {
   const samplers: Array<(t: number) => Scene> = [];
-  const prepare = vi.fn((params: Record<string, unknown>, seed: string | number) => {
-    // Snapshot preparation inputs so a later caller mutation cannot change which
-    // layout this retained sampler represents.
-    const value = params.value as number;
-    const sampler = vi.fn((t: number): Scene => ({
-      space: { width: 100, height: 100 },
-      primitives: [{ points: [[value + Number(seed), t]] }],
-    }));
-    samplers.push(sampler);
-    return sampler;
-  });
+  const prepare = vi.fn(
+    (params: Record<string, unknown>, seed: string | number) => {
+      // Snapshot preparation inputs so a later caller mutation cannot change which
+      // layout this retained sampler represents.
+      const value = params.value as number;
+      const seededX = value + Number(seed);
+      const sampler = vi.fn((t: number): Scene => ({
+        space: { width: 100, height: 100 },
+        primitives: [
+          {
+            points: [
+              [seededX + t, 0],
+              [seededX + t + 10, 0],
+              [seededX + t + 10, 10],
+              [seededX + t, 10],
+            ],
+            closed: true,
+            fill: { color: "tomato" },
+          },
+        ],
+      }));
+      samplers.push(sampler);
+      return sampler;
+    },
+  );
   const generate = vi.fn((): Scene => {
     throw new Error("prepared Studio path unexpectedly called cold generate");
   });
@@ -423,6 +437,28 @@ describe("LiveCanvas transport — scrubbing pauses & sets t (AC2)", () => {
 });
 
 describe("LiveCanvas caller-owned frame preparation", () => {
+  it("feeds outline processing from the retained prepared sampler, never cold generate", () => {
+    const { ctx, counts } = recordingContext();
+    useRecordingContext(ctx);
+    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+
+    mount(
+      <LiveCanvas
+        sketch={prepared.sketch}
+        params={{ value: 3 }}
+        seed={2}
+        renderMode="outline"
+      />,
+    );
+    flushRaf();
+
+    expect(prepared.prepare).toHaveBeenCalledTimes(1);
+    expect(prepared.samplers[0]).toHaveBeenCalledTimes(1);
+    expect(prepared.samplers[0]).toHaveBeenCalledWith(0);
+    expect(prepared.generate).not.toHaveBeenCalled();
+    expect(counts.stroke ?? 0).toBeGreaterThan(0);
+  });
+
   it("prepares once per sketch/params/seed and continues the same clock after invalidation", () => {
     const firstParams = { value: 1 };
     const secondParams = { value: 4 };

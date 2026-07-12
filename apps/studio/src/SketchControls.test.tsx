@@ -1321,8 +1321,8 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
   // `drawFrame` early-returns before it would feed the canvas — the preview's
   // Scene isn't directly observable through a live render. The faithful check is
   // therefore: drive the REAL `exportHiddenLineSvg` and assert the Scene it hands
-  // `renderToSVG` (captured above) deep-equals `outlineScene(sketch, params, seed,
-  // t)` — the exact seam expression LiveCanvas's outline branch evaluates — for
+  // `renderToSVG` (captured above) deep-equals `outlineScene(generatedScene)` —
+  // the exact processing seam LiveCanvas's outline branch evaluates — for
   // one fixed frame. Locking the export path to the shared seam is what removes
   // the drift risk between preview and export.
   it("export input Scene equals the shared outlineScene seam the preview consumes (#220)", () => {
@@ -1341,11 +1341,12 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // outline preview evaluates this SAME expression, so the two inputs match.
     expect(exportSceneCapture.current).toEqual(
       outlineScene(
-        sketch,
-        { radius: 10 },
-        seed,
-        0,
-        resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+        sketch.generate(
+          { radius: 10 },
+          seed,
+          0,
+          resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+        ),
       ),
     );
   });
@@ -1405,11 +1406,12 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     const atZero = exportSceneCapture.current;
     expect(atZero).toEqual(
       outlineScene(
-        sketch,
-        { radius: 10 },
-        seed,
-        0,
-        resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+        sketch.generate(
+          { radius: 10 },
+          seed,
+          0,
+          resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+        ),
         0,
       ),
     );
@@ -1424,11 +1426,12 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // (the value LiveCanvas's outline preview also receives — asserted below).
     expect(atFive).toEqual(
       outlineScene(
-        sketch,
-        { radius: 10 },
-        seed,
-        0,
-        resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+        sketch.generate(
+          { radius: 10 },
+          seed,
+          0,
+          resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+        ),
         5,
       ),
     );
@@ -1490,11 +1493,12 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // The un-clipped seam (generate → hidden-line pass) still overflows the
     // canvas — so the clip that follows is doing real work.
     const seam = outlineScene(
-      sketch,
-      { radius: 10 },
-      seed,
-      0,
-      resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+      sketch.generate(
+        { radius: 10 },
+        seed,
+        0,
+        resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+      ),
     );
     expect(outOfBoundsPoints(seam, 100, 100)).not.toEqual([]);
 
