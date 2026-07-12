@@ -9,6 +9,14 @@ const profile: PlotProfile = {
   insets: { top: 20, right: 30, bottom: 40, left: 10 },
 }
 
+function nextRepresentableFloat(value: number): number {
+  const buffer = new ArrayBuffer(8)
+  const view = new DataView(buffer)
+  view.setFloat64(0, value)
+  view.setBigUint64(0, view.getBigUint64(0) + 1n)
+  return view.getFloat64(0)
+}
+
 describe('computePlotMapping', () => {
   it('uniformly maps a matching frame into an asymmetric drawable rectangle', () => {
     // Drawable: 200 × 100 mm, so 400 × 200 Scene units map at 0.5 mm/unit.
@@ -19,13 +27,58 @@ describe('computePlotMapping', () => {
     })
   })
 
-  it('uses the minimum scale and centers floating-point residual slack', () => {
+  it('maps a portrait frame inside asymmetric portrait insets', () => {
+    const portraitProfile: PlotProfile = {
+      width: 120,
+      height: 240,
+      insets: { top: 10, right: 20, bottom: 30, left: 10 },
+    }
+
+    // Drawable: 90 × 200 mm, matching the portrait frame's 0.45 aspect.
+    expect(
+      computePlotMapping({ width: 450, height: 1_000 }, portraitProfile),
+    ).toEqual({
+      scale: 0.2,
+      offsetX: 10,
+      offsetY: 10,
+    })
+  })
+
+  it('changes only physical mapping for proportional same-aspect profiles', () => {
+    const space: CoordinateSpace = { width: 400, height: 200 }
+    const originalSpace = structuredClone(space)
+    const small: PlotProfile = {
+      width: 120,
+      height: 70,
+      insets: { top: 10, right: 10, bottom: 10, left: 10 },
+    }
+    const doubled: PlotProfile = {
+      width: 240,
+      height: 140,
+      insets: { top: 20, right: 20, bottom: 20, left: 20 },
+    }
+
+    expect(computePlotMapping(space, small)).toEqual({
+      scale: 0.25,
+      offsetX: 10,
+      offsetY: 10,
+    })
+    expect(computePlotMapping(space, doubled)).toEqual({
+      scale: 0.5,
+      offsetX: 20,
+      offsetY: 20,
+    })
+    expect(space).toEqual(originalSpace)
+  })
+
+  it('contains and centers a frame whose aspect is one ULP away', () => {
     const space = { width: 2 / 3, height: 1 }
-    const drawableAspect = space.width / space.height + Number.EPSILON
+    const spaceAspect = space.width / space.height
+    const drawableAspect = nextRepresentableFloat(spaceAspect)
     const noisyProfile: PlotProfile = {
-      width: 7 + drawableAspect,
-      height: 6,
-      insets: { top: 5, right: 0, bottom: 0, left: 7 },
+      width: drawableAspect,
+      height: 1,
+      insets: { top: 0, right: 0, bottom: 0, left: 0 },
     }
 
     const mapping = computePlotMapping(space, noisyProfile)
@@ -34,11 +87,21 @@ describe('computePlotMapping', () => {
       1 / space.height,
     )
 
+    const mappedMinX = mapping.offsetX
+    const mappedMaxX = mapping.offsetX + space.width * mapping.scale
+    const mappedMinY = mapping.offsetY
+    const mappedMaxY = mapping.offsetY + space.height * mapping.scale
+    const residualX = drawableAspect - space.width * mapping.scale
+    const residualY = 1 - space.height * mapping.scale
+
+    expect(drawableAspect).toBeGreaterThan(spaceAspect)
     expect(mapping.scale).toBe(expectedScale)
-    expect(mapping.offsetX).toBe(
-      7 + (drawableAspect - space.width * expectedScale) / 2,
-    )
-    expect(mapping.offsetY).toBe(5 + (1 - space.height * expectedScale) / 2)
+    expect(mappedMinX).toBeGreaterThanOrEqual(0)
+    expect(mappedMaxX).toBeLessThanOrEqual(drawableAspect)
+    expect(mappedMinY).toBeGreaterThanOrEqual(0)
+    expect(mappedMaxY).toBeLessThanOrEqual(1)
+    expect(mapping.offsetX).toBe(residualX / 2)
+    expect(mapping.offsetY).toBe(residualY / 2)
   })
 
   it('rejects materially different frame and drawable aspects', () => {
