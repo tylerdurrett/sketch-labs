@@ -88,10 +88,8 @@ function renderControl(
           paramKey={key}
           spec={spec}
           value={typeof value === "string" ? value : spec.default}
-          locked={locked}
           onChange={(next) => onChange(key, next)}
           editHistory={rowHistory}
-          onToggleLock={() => onToggleLock(key)}
         />
       );
     default:

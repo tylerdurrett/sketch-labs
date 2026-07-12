@@ -108,11 +108,11 @@ describe("ControlPanel", () => {
         onToggleLock={() => {}}
       />,
     );
-    // The color param renders a native color input showing its hex value, with
-    // its own lock toggle — NOT the loud unsupported-kind fallback.
-    expect(html).toContain('type="color"');
-    expect(html).toContain('value="#1a2b3c"');
-    expect(html).toContain('aria-label="ink lock"');
+    // The color param renders the custom current-color trigger without a lock,
+    // NOT the loud unsupported-kind fallback.
+    expect(html).toContain('aria-label="ink current color #1a2b3c"');
+    expect(html).not.toContain('type="color"');
+    expect(html).not.toContain('aria-label="ink lock"');
     expect(html).not.toContain("unsupported control kind");
     // The numeric sibling still renders its own control alongside.
     expect(html).toContain('type="number"');
@@ -131,7 +131,7 @@ describe("ControlPanel", () => {
         onToggleLock={() => {}}
       />,
     );
-    expect(html).toContain('value="#aabbcc"');
+    expect(html).toContain('aria-label="ink current color #aabbcc"');
   });
 
   it("renders a LOUD visible fallback for an unsupported kind (never silent)", () => {
