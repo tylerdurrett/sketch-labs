@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 
 import { clipSceneToBounds } from '../src/clipToBounds'
@@ -10,10 +9,10 @@ import { leafField } from '../src/sketches/leaf-field'
 
 const SEED = 12345
 const PARAMS = Object.freeze(defaultParams(leafField.schema))
-const DEFAULT_SAMPLES = 10
+const DEFAULT_SAMPLES = 20
 const DEFAULT_WARMUPS = 1
-const MIN_SAMPLES = 5
-const EXPECTED_OUTLINE_CHECKSUM = 'c4056d4d8f9eb6eb59f7c5e0abb08760a9cdb4f02f92100f3037f7c200418b20'
+const MIN_SAMPLES = 20
+const EXPECTED_OUTLINE_CHECKSUM = '1ffab356a8fc888a'
 
 function readPositiveInteger(name, fallback, minimum) {
   const raw = process.env[name]
@@ -72,7 +71,52 @@ function sceneCounts(scene) {
 }
 
 function sceneChecksum(scene) {
-  return createHash('sha256').update(JSON.stringify(scene)).digest('hex')
+  let hash = 0xcbf29ce484222325n
+  const prime = 0x100000001b3n
+  const mask = 0xffffffffffffffffn
+  const bytes = new Uint8Array(8)
+  const view = new DataView(bytes.buffer)
+
+  const byte = (value) => {
+    hash ^= BigInt(value)
+    hash = (hash * prime) & mask
+  }
+  const number = (value) => {
+    view.setFloat64(0, value, false)
+    for (const valueByte of bytes) byte(valueByte)
+  }
+  const string = (value) => {
+    number(value.length)
+    for (let i = 0; i < value.length; i++) {
+      const code = value.charCodeAt(i)
+      byte(code >>> 8)
+      byte(code & 0xff)
+    }
+  }
+
+  number(scene.space.width)
+  number(scene.space.height)
+  byte(scene.background === undefined ? 0 : 1)
+  if (scene.background !== undefined) string(scene.background.color)
+  number(scene.primitives.length)
+
+  for (const primitive of scene.primitives) {
+    byte(primitive.closed === true ? 1 : 0)
+    byte(primitive.fill === undefined ? 0 : 1)
+    if (primitive.fill !== undefined) string(primitive.fill.color)
+    byte(primitive.stroke === undefined ? 0 : 1)
+    if (primitive.stroke !== undefined) {
+      string(primitive.stroke.color)
+      number(primitive.stroke.width)
+    }
+    number(primitive.points.length)
+    for (const [x, y] of primitive.points) {
+      number(x)
+      number(y)
+    }
+  }
+
+  return hash.toString(16).padStart(16, '0')
 }
 
 function report(label, result, samples) {

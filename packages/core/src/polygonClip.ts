@@ -58,7 +58,13 @@ interface PreparedEdge {
   bounds: Bounds
 }
 
-/** Cached broad-phase data for a polygon used by multiple clipping calls. */
+/**
+ * Cached broad-phase data for a polygon used by multiple clipping calls.
+ *
+ * The prepared value borrows `polygon` and its Point tuples for speed. Callers
+ * must not mutate that geometry while the prepared value is in use; doing so
+ * would make the cached bounds and bins stale.
+ */
 export interface PreparedPolygon {
   polygon: Polyline
   /** Exact vertex bounds, used only to reject point-in-polygon tests. */
@@ -111,7 +117,12 @@ function boundsContain(bounds: Bounds, p: Point): boolean {
   )
 }
 
-/** Prepare immutable lookup data without copying or mutating polygon points. */
+/**
+ * Prepare lookup data without copying or mutating polygon points.
+ *
+ * The returned value borrows the input geometry. Treat both the polygon and its
+ * points as immutable for the lifetime of the prepared value.
+ */
 export function preparePolygon(polygon: Polyline): PreparedPolygon {
   if (polygon.length === 0) {
     return {
@@ -147,20 +158,20 @@ export function preparePolygon(polygon: Polyline): PreparedPolygon {
     edges.push({ c, d, bounds: edgeBounds })
   }
   const height = maxY - minY
+  const rayScale = RAY_BIN_COUNT / height
   const rayBins =
-    Number.isFinite(height) && height > 0
+    Number.isFinite(height) && height > 0 && Number.isFinite(rayScale)
       ? Array.from({ length: RAY_BIN_COUNT }, () => [] as PreparedEdge[])
       : null
   if (rayBins !== null) {
-    const scale = RAY_BIN_COUNT / height
     for (const edge of edges) {
       const edgeMinY = Math.min(edge.c[1], edge.d[1])
       const edgeMaxY = Math.max(edge.c[1], edge.d[1])
       // Horizontal edges can never satisfy the authoritative half-open
       // straddle predicate, so excluding them is exact.
       if (edgeMinY === edgeMaxY) continue
-      const rawStart = Math.floor((edgeMinY - minY) * scale)
-      const rawEnd = Math.floor((edgeMaxY - minY) * scale)
+      const rawStart = Math.floor((edgeMinY - minY) * rayScale)
+      const rawEnd = Math.floor((edgeMaxY - minY) * rayScale)
       // Include one neighboring bin on either side. The original straddle test
       // remains authoritative; this padding makes floating-point bin-boundary
       // rounding conservative rather than a new geometry decision.

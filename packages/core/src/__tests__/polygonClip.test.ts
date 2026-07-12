@@ -89,6 +89,29 @@ describe('pointInPolygon', () => {
       )
     }
   })
+
+  it('falls back to the full ray cast when a subnormal polygon height overflows bin scale', () => {
+    const tiny: Polyline = [
+      [0, 1e-310],
+      [1, 1e-310],
+      [1, 2e-310],
+      [0, 2e-310],
+    ]
+    const midpoint: [number, number] = [0.5, 1.5e-310]
+    const prepared = preparePolygon(tiny)
+
+    expect(pointInPolygon(midpoint, tiny)).toBe(true)
+    expect(prepared.rayBins).toBeNull()
+    expect(
+      subtractPreparedPolygonsFromPolyline(
+        [
+          [0.25, midpoint[1]],
+          [0.75, midpoint[1]],
+        ],
+        [prepared],
+      ),
+    ).toEqual([])
+  })
 })
 
 function classifyWithPreparedBins(
