@@ -59,7 +59,7 @@ afterEach(() => {
 });
 
 describe("RgbColorFields markup", () => {
-  it("provides labelled, constrained, keyboard-accessible text fields", () => {
+  it("provides labelled, described, keyboard-accessible text fields", () => {
     const events = callbacks();
     const html = renderToStaticMarkup(
       <RgbColorFields paramKey="ink" color="#0a141e" {...events} />,
@@ -72,8 +72,18 @@ describe("RgbColorFields markup", () => {
     expect(html).toContain('aria-label="ink blue channel"');
     expect(html.match(/type="text"/g)).toHaveLength(3);
     expect(html.match(/inputMode="numeric"/g)).toHaveLength(3);
-    expect(html.match(/min="0"/g)).toHaveLength(3);
-    expect(html.match(/max="255"/g)).toHaveLength(3);
+    expect(html).toContain(
+      "Enter an integer from 0 through 255. Out-of-range values are clamped.",
+    );
+    const describedBy = html.match(/aria-describedby="([^"]+)"/)?.[1];
+    expect(describedBy).toBeTruthy();
+    expect(
+      html.match(new RegExp(`aria-describedby="${describedBy}"`, "g")),
+    ).toHaveLength(3);
+    expect(html).toContain(`id="${describedBy}"`);
+    expect(html).not.toContain('min="');
+    expect(html).not.toContain('max="');
+    expect(html).not.toContain('aria-invalid="true"');
     expect(html).toContain('value="10"');
     expect(html).toContain('value="20"');
     expect(html).toContain('value="30"');
@@ -100,6 +110,26 @@ describe("RgbColorFields drafts", () => {
     expect(red!.value).toBe("0042");
     expect(green!.value).toBe("20");
     expect(blue!.value).toBe("30");
+  });
+
+  it("marks only an invalid raw draft invalid and clears the state when valid again", () => {
+    const events = callbacks();
+    const el = mount({ paramKey: "ink", color: "#0a141e", ...events });
+    const [red, green, blue] = inputs(el);
+
+    expect(green!.getAttribute("aria-invalid")).toBeNull();
+
+    act(() => {
+      green!.focus();
+      enter(green!, "1.5");
+    });
+    expect(red!.getAttribute("aria-invalid")).toBeNull();
+    expect(green!.getAttribute("aria-invalid")).toBe("true");
+    expect(blue!.getAttribute("aria-invalid")).toBeNull();
+
+    act(() => enter(green!, "256"));
+    expect(green!.getAttribute("aria-invalid")).toBeNull();
+    expect(events.onLocalPreview).toHaveBeenCalledWith("#0aff1e");
   });
 
   it.each(["", "1.5", "1e2", "hello", "+", "-"])(

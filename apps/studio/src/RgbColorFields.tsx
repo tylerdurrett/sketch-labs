@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import {
   hexToRgb,
@@ -56,6 +56,7 @@ export function RgbColorFields({
   onSettle,
   onCancel,
 }: RgbColorFieldsProps) {
+  const guidanceId = useId();
   const [drafts, setDrafts] = useState(() => colorToDrafts(color));
   const focusedChannelRef = useRef<RgbChannel | null>(null);
   const focusColorRef = useRef(color);
@@ -114,7 +115,14 @@ export function RgbColorFields({
   };
 
   return (
-    <div className="flex gap-2" role="group" aria-label={`${paramKey} RGB channels`}>
+    <div
+      className="flex gap-2"
+      role="group"
+      aria-label={`${paramKey} RGB channels`}
+    >
+      <span id={guidanceId} className="sr-only">
+        Enter an integer from 0 through 255. Out-of-range values are clamped.
+      </span>
       {CHANNELS.map((channel) => (
         <label key={channel} className="flex min-w-0 flex-1 items-center gap-1">
           <span className="text-xs font-medium uppercase text-muted-foreground">
@@ -123,9 +131,11 @@ export function RgbColorFields({
           <input
             type="text"
             inputMode="numeric"
-            min={0}
-            max={255}
             aria-label={`${paramKey} ${CHANNEL_NAMES[channel]} channel`}
+            aria-describedby={guidanceId}
+            aria-invalid={
+              parseRgbChannelDraft(drafts[channel]).valid ? undefined : true
+            }
             value={drafts[channel]}
             onFocus={() => {
               focusedChannelRef.current = channel;
