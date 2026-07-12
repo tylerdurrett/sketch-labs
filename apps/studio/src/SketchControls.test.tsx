@@ -1501,6 +1501,21 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       0,
     );
 
+  it("limits the simplification tolerance controls to the useful 0–2 range", () => {
+    const el = mount(<SketchControls sketch={redundantSketch("circles")} />);
+    const numberInput = el.querySelector(
+      "#sketch-tolerance",
+    ) as HTMLInputElement;
+    const sliderInput = el.querySelector(
+      'input[type="range"][aria-label="Simplification tolerance"]',
+    ) as HTMLInputElement;
+
+    expect(numberInput.min).toBe("0");
+    expect(numberInput.max).toBe("2");
+    expect(sliderInput.min).toBe("0");
+    expect(sliderInput.max).toBe("2");
+  });
+
   it("the tolerance knob drives the hidden-line export's simplification (#232, AC3)", () => {
     const sketch = redundantSketch("circles");
     const el = mount(<SketchControls sketch={sketch} />);
@@ -1525,13 +1540,13 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     const vertsAtZero = totalVerts(atZero);
 
     // Drive the studio knob, then re-export.
-    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "5");
+    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "1");
     clickButton(el, "Export Hidden-line SVG");
-    const atFive = exportSceneCapture.current;
+    const atOne = exportSceneCapture.current;
 
-    // preview == export: the export is the SAME seam expression at tolerance 5
+    // preview == export: the export is the SAME seam expression at tolerance 1
     // (the value LiveCanvas's outline preview also receives — asserted below).
-    expect(atFive).toEqual(
+    expect(atOne).toEqual(
       outlineScene(
         sketch.generate(
           { radius: 10 },
@@ -1539,11 +1554,11 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           0,
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
-        5,
+        1,
       ),
     );
     // ...and simplification actually reduced the exported vertex count.
-    expect(totalVerts(atFive)).toBeLessThan(vertsAtZero);
+    expect(totalVerts(atOne)).toBeLessThan(vertsAtZero);
   });
 
   it("the tolerance knob value is the one fed to the outline preview (#232, AC3)", () => {
@@ -1556,8 +1571,8 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     // Driving the knob updates the SAME value the preview consumes — the single
     // state that also drives the export, so the two cannot diverge.
-    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "5");
-    expect(canvas().dataset.tolerance).toBe("5");
+    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "1");
+    expect(canvas().dataset.tolerance).toBe("1");
   });
 
   // #237: a filled square straddling the bottom-right corner (x,y ∈ [50,150]),

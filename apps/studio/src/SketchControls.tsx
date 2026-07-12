@@ -64,13 +64,12 @@ export function hiddenLineSceneForExport({
 /**
  * Upper bound of the studio simplification-tolerance knob (issue #232), in the
  * Scene's coordinate-space units. The Hidden-line pass runs in Scene space, and
- * the studio's sketches use spaces on the order of ~100 units, so a max of 20 is
- * a generous ceiling: it spans from 0 (identity — no simplification) through
- * aggressive vertex reduction while keeping the slider's useful range on the low
- * end where plotter-relevant reductions live. Non-integer (continuous) so fine
- * tolerances are reachable.
+ * the studio's sketches use spaces on the order of ~100 units. The useful,
+ * plotter-relevant adjustments live close to zero, so the range stops at 2 to
+ * give that low end substantially more physical slider travel. Non-integer
+ * (continuous) so fine tolerances are reachable.
  */
-const TOLERANCE_MAX = 20;
+const TOLERANCE_MAX = 2;
 
 /** Preset params are flat schema values; preserve identity when reload is equal. */
 function sameParams(
