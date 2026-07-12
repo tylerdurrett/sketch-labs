@@ -721,6 +721,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     width: 420,
     height: 297,
     insets: { top: 15, right: 12, bottom: 9, left: 6 },
+    includeFrame: false,
   };
 
   // A Sketch that DECLARES its own default Output Profile. No registered sketch
@@ -984,6 +985,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
       width: 400,
       height: 400,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: false,
     };
     loadPreset.mockResolvedValue({
       version: 2,
@@ -1032,6 +1034,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
       width: 200,
       height: 200,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: true,
     });
     expect(lastCompositionFrame).toBe(initialFrame);
     expect(toggle.textContent).toBe("Outline");
@@ -1368,6 +1371,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       width: 250,
       height: 180,
       insets: { top: 15, right: 45, bottom: 15, left: 25 },
+      includeFrame: false,
     };
     const source = {
       space: { width: 120, height: 100 },
@@ -1462,6 +1466,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       width: 400,
       height: 400,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: false,
     };
     loadPreset.mockResolvedValue({
       version: 2,

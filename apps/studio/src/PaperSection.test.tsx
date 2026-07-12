@@ -21,6 +21,7 @@ const profile: PlotProfile = {
   width: 210,
   height: 297,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
+  includeFrame: false,
 };
 
 let container: HTMLDivElement;
@@ -156,6 +157,7 @@ describe("PaperSection", () => {
       const initialProfile: PlotProfile = {
         ...dimensions,
         insets: { top: 1, right: 2, bottom: 3, left: 4 },
+        includeFrame: false,
       };
       const { el } = mount(onChange, initialProfile);
 
@@ -165,6 +167,7 @@ describe("PaperSection", () => {
         width: 200,
         height: 200,
         insets: initialProfile.insets,
+        includeFrame: false,
       };
       expect(onChange).toHaveBeenCalledWith(accepted);
 
@@ -190,6 +193,7 @@ describe("PaperSection", () => {
       width: 297,
       height: 210,
       insets: profile.insets,
+      includeFrame: false,
     });
   });
 
@@ -234,6 +238,7 @@ describe("PaperSection", () => {
       width: 220,
       height: 297,
       insets: profile.insets,
+      includeFrame: false,
     });
     expect(el.querySelector('[role="alert"]')).toBeNull();
 
@@ -265,6 +270,7 @@ describe("PaperSection", () => {
       width: 254,
       height: 297,
       insets: profile.insets,
+      includeFrame: false,
     });
   });
 
@@ -302,6 +308,7 @@ describe("PaperSection", () => {
       width: 220,
       height: 300,
       insets: profile.insets,
+      includeFrame: false,
     });
     expect(el.querySelector('[role="alert"]')).toBeNull();
   });
@@ -312,6 +319,7 @@ describe("PaperSection", () => {
       width: 200,
       height: 200,
       insets: { top: 80, right: 80, bottom: 80, left: 80 },
+      includeFrame: false,
     };
     const { el } = mount(onChange, tight);
 
@@ -345,6 +353,7 @@ describe("PaperSection", () => {
       width: 297,
       height: 210,
       insets: asymmetric.insets,
+      includeFrame: false,
     });
   });
 
@@ -354,6 +363,7 @@ describe("PaperSection", () => {
       width: 200.2,
       height: 199.8,
       insets: { top: 1, right: 2, bottom: 3, left: 4 },
+      includeFrame: false,
     };
     const { el } = mount(onChange, nearSquare);
     const button = [...el.querySelectorAll("button")].find(
@@ -368,6 +378,7 @@ describe("PaperSection", () => {
       width: 199.8,
       height: 200.2,
       insets: nearSquare.insets,
+      includeFrame: false,
     });
   });
 
@@ -377,6 +388,7 @@ describe("PaperSection", () => {
       width: 300,
       height: 100,
       insets: { top: 10, right: 110, bottom: 10, left: 110 },
+      includeFrame: false,
     };
     const { el } = mount(onChange, swapWouldExhaust);
     const button = [...el.querySelectorAll("button")].find((candidate) =>

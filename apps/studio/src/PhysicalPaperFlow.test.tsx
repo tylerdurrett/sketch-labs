@@ -57,6 +57,7 @@ const A4_PROFILE: PlotProfile = {
   width: 210,
   height: 297,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
+  includeFrame: false,
 };
 
 const SCALED_A4_PROFILE: PlotProfile = {
@@ -68,6 +69,7 @@ const SCALED_A4_PROFILE: PlotProfile = {
     bottom: A4_PROFILE.insets.bottom * 1.2,
     left: A4_PROFILE.insets.left * 1.2,
   },
+  includeFrame: false,
 };
 
 function testSketch(defaultOutputProfile: PlotProfile) {
@@ -269,6 +271,7 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
       width: 279.4,
       height: 254,
       insets: { top: 12.7, right: 12.7, bottom: 12.7, left: 12.7 },
+      includeFrame: false,
     };
     const expectedFrame = resolvePlotCompositionFrame(expectedProfile);
     expect(paper.querySelector("summary")?.textContent).toContain("11 × 10 in");

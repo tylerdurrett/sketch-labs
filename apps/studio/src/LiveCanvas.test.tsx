@@ -727,6 +727,7 @@ describe("LiveCanvas full-sheet preview chrome (#248)", () => {
     width: 200,
     height: 100,
     insets: { top: 10, right: 20, bottom: 30, left: 40 },
+    includeFrame: true,
   };
 
   it("contain-fits the full sheet and positions the drawable region from all four inset ratios", () => {
@@ -894,6 +895,7 @@ describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand
       width: 200,
       height: 200,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: false,
     };
     const el = mount(
       <LiveCanvas
