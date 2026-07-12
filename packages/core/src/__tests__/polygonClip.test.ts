@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   pointInPolygon,
+  preparePolygon,
+  subtractPreparedPolygonsFromPolyline,
   subtractPolygonsFromPolyline,
 } from '../polygonClip'
 import type { Polyline } from '../types'
@@ -46,7 +48,83 @@ describe('pointInPolygon', () => {
     // Below the notch, in the solid base:
     expect(pointInPolygon([5, 2], concave)).toBe(true)
   })
+
+  it('prepared ray bins preserve half-open results at vertices and bin boundaries', () => {
+    const prepared = preparePolygon(concave)
+    const next = (value: number, direction: 'up' | 'down') => {
+      if (value === 0) {
+        return direction === 'up' ? Number.MIN_VALUE : -Number.MIN_VALUE
+      }
+      const view = new DataView(new ArrayBuffer(8))
+      view.setFloat64(0, value)
+      let bits = view.getBigUint64(0)
+      bits += direction === 'up' ? 1n : -1n
+      view.setBigUint64(0, bits)
+      return view.getFloat64(0)
+    }
+    const ys = [0, 4, 10]
+    for (let bin = 1; bin < 32; bin++) ys.push((10 * bin) / 32)
+
+    for (const y of ys) {
+      for (const py of [next(y, 'down'), y, next(y, 'up')]) {
+        expect(classifyWithPreparedBins([5, py], prepared)).toBe(
+          pointInPolygon([5, py], concave),
+        )
+      }
+    }
+  })
+
+  it('prepared ray bins match the full ray cast for randomized points', () => {
+    const prepared = preparePolygon(concave)
+    let state = 0x6d2b79f5
+    const random = () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+      return state / 0x1_0000_0000
+    }
+
+    for (let i = 0; i < 2000; i++) {
+      const point: [number, number] = [random() * 10, random() * 10]
+      expect(classifyWithPreparedBins(point, prepared)).toBe(
+        pointInPolygon(point, concave),
+      )
+    }
+  })
+
+  it('falls back to the full ray cast when a subnormal polygon height overflows bin scale', () => {
+    const tiny: Polyline = [
+      [0, 1e-310],
+      [1, 1e-310],
+      [1, 2e-310],
+      [0, 2e-310],
+    ]
+    const midpoint: [number, number] = [0.5, 1.5e-310]
+    const prepared = preparePolygon(tiny)
+
+    expect(pointInPolygon(midpoint, tiny)).toBe(true)
+    expect(prepared.rayBins).toBeNull()
+    expect(
+      subtractPreparedPolygonsFromPolyline(
+        [
+          [0.25, midpoint[1]],
+          [0.75, midpoint[1]],
+        ],
+        [prepared],
+      ),
+    ).toEqual([])
+  })
 })
+
+function classifyWithPreparedBins(
+  point: [number, number],
+  prepared: ReturnType<typeof preparePolygon>,
+): boolean {
+  const delta = 1e-7
+  const line: Polyline = [
+    [point[0] - delta, point[1]],
+    [point[0] + delta, point[1]],
+  ]
+  return subtractPreparedPolygonsFromPolyline(line, [prepared]).length === 0
+}
 
 describe('subtractPolygonsFromPolyline', () => {
   it('returns the polyline intact with no polygons to subtract', () => {
@@ -205,6 +283,28 @@ describe('subtractPolygonsFromPolyline', () => {
       [30, 30],
     ])
     expect(isDegenerate(result[0]!)).toBe(false)
+  })
+
+  it('preserves crossings accepted just beyond an edge endpoint by EPS', () => {
+    // The line sits 5e-9 below the square. That is outside the polygon's raw
+    // AABB, but each vertical edge is length 10, so its u parameter is only
+    // -5e-10: inside segmentCrossParam's ±1e-9 endpoint tolerance. The current
+    // policy therefore records crossings at x=0 and x=10 even though midpoint
+    // classification keeps all three outside spans. Prepared polygon bounds
+    // must not prune those accepted crossings.
+    const line: Polyline = [
+      [-5, -5e-9],
+      [15, -5e-9],
+    ]
+
+    expect(subtractPolygonsFromPolyline(line, [square])).toEqual([
+      [
+        [-5, -5e-9],
+        [0, -5e-9],
+        [10, -5e-9],
+        [15, -5e-9],
+      ],
+    ])
   })
 })
 

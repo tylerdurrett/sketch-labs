@@ -4,6 +4,10 @@ import { createRandom } from '../random'
 import { flowField } from '../sketches/flow-field'
 import type { Params } from '../sketch'
 import type { Primitive } from '../scene'
+import {
+  DEFAULT_COMPOSITION_FRAME,
+  resolveCompositionFrame,
+} from '../compositionFrame'
 
 /**
  * A minimal engine-level param roll — mirrors circles.test.ts. Stands in for
@@ -53,7 +57,7 @@ describe('flow-field Sketch contract', () => {
 
   it('emits one oriented tick per grid point as a 2-point open stroked Polyline', () => {
     const density = 8
-    const scene = flowField.generate({ tickDensity: density }, 'seed-a', 0)
+    const scene = flowField.generate({ tickDensity: density }, 'seed-a', 0, DEFAULT_COMPOSITION_FRAME)
     // density × density grid ⇒ one tick each.
     expect(scene.primitives).toHaveLength(density * density)
     for (const primitive of scene.primitives) {
@@ -67,7 +71,7 @@ describe('flow-field Sketch contract', () => {
   })
 
   it('bakes only generic Scene Primitives — no domain fields leak', () => {
-    const scene = flowField.generate({ tickDensity: 6 }, 'seed-a', 0)
+    const scene = flowField.generate({ tickDensity: 6 }, 'seed-a', 0, DEFAULT_COMPOSITION_FRAME)
     for (const primitive of scene.primitives) {
       // Every key must belong to the generic Primitive shape.
       const allowed = new Set(['points', 'closed', 'fill', 'stroke'])
@@ -75,6 +79,37 @@ describe('flow-field Sketch contract', () => {
         expect(allowed.has(key)).toBe(true)
       }
     }
+  })
+})
+
+describe('flow-field composes into the supplied Composition Frame', () => {
+  it('returns a Scene whose space equals the supplied frame exactly', () => {
+    const params: Params = { tickDensity: 10 }
+    const square = flowField.generate(params, 'frame-seed', 0, DEFAULT_COMPOSITION_FRAME)
+    expect(square.space).toEqual(DEFAULT_COMPOSITION_FRAME)
+
+    const wide = resolveCompositionFrame(2)
+    const tall = resolveCompositionFrame(0.5)
+    expect(flowField.generate(params, 'frame-seed', 0, wide).space).toEqual(wide)
+    expect(flowField.generate(params, 'frame-seed', 0, tall).space).toEqual(tall)
+  })
+
+  it('lays the grid across the whole non-square extent — ticks reach toward the frame width, not 1000', () => {
+    // Cell centers span the frame, so the rightmost tick's center approaches the
+    // frame width; a still-hardcoded 1000-wide grid would cap it near 1000.
+    const wide = resolveCompositionFrame(2) // width = 1000·√2 ≈ 1414
+    const scene = flowField.generate(
+      { tickDensity: 64, tickLength: 2 },
+      'fill',
+      0,
+      wide,
+    )
+    let maxX = -Infinity
+    for (const primitive of scene.primitives) {
+      for (const [x] of primitive.points) if (x > maxX) maxX = x
+    }
+    expect(maxX).toBeGreaterThan(1000)
+    expect(maxX).toBeLessThanOrEqual(wide.width + 10)
   })
 })
 
@@ -87,26 +122,40 @@ describe('flow-field determinism (ADR-0002)', () => {
       tickDensity: 10,
       tickLength: 20,
     }
-    const a = flowField.generate(params, 'fixed-seed', 1.25)
-    const b = flowField.generate(params, 'fixed-seed', 1.25)
+    const a = flowField.generate(params, 'fixed-seed', 1.25, DEFAULT_COMPOSITION_FRAME)
+    const b = flowField.generate(params, 'fixed-seed', 1.25, DEFAULT_COMPOSITION_FRAME)
     // Same primitive count, order, and geometry — asserted at the Scene level.
+    expect(a).toEqual(b)
+  })
+
+  it('is deterministic for a fixed non-square frame', () => {
+    const params: Params = {
+      fieldScale: 3,
+      octaves: 4,
+      turbulence: 0.5,
+      tickDensity: 10,
+      tickLength: 20,
+    }
+    const frame = resolveCompositionFrame(2)
+    const a = flowField.generate(params, 'fixed-seed', 1.25, frame)
+    const b = flowField.generate(params, 'fixed-seed', 1.25, frame)
     expect(a).toEqual(b)
   })
 
   it('carries no cross-call state — interleaved calls do not perturb a repeat', () => {
     const params: Params = { tickDensity: 7 }
-    const first = flowField.generate(params, 's', 0.5)
+    const first = flowField.generate(params, 's', 0.5, DEFAULT_COMPOSITION_FRAME)
     // Interleave unrelated calls to surface any accumulated state.
-    flowField.generate(params, 's', 9.9)
-    flowField.generate({ tickDensity: 3 }, 'other', 2)
-    const again = flowField.generate(params, 's', 0.5)
+    flowField.generate(params, 's', 9.9, DEFAULT_COMPOSITION_FRAME)
+    flowField.generate({ tickDensity: 3 }, 'other', 2, DEFAULT_COMPOSITION_FRAME)
+    const again = flowField.generate(params, 's', 0.5, DEFAULT_COMPOSITION_FRAME)
     expect(again).toEqual(first)
   })
 
   it('threads t through the field: a different t yields a different Scene', () => {
     const params: Params = { tickDensity: 12 }
-    const atZero = flowField.generate(params, 's', 0)
-    const atLater = flowField.generate(params, 's', 5)
+    const atZero = flowField.generate(params, 's', 0, DEFAULT_COMPOSITION_FRAME)
+    const atLater = flowField.generate(params, 's', 5, DEFAULT_COMPOSITION_FRAME)
     expect(atLater).not.toEqual(atZero)
   })
 })
@@ -120,8 +169,8 @@ describe('flow-field seed independence (field vs param values)', () => {
 
     // Feeding the SAME params through generate under two different seeds
     // reshuffles the underlying field, so the tick orientations differ...
-    const sceneA = flowField.generate(params, 'gen-seed-a', 0)
-    const sceneB = flowField.generate(params, 'gen-seed-b', 0)
+    const sceneA = flowField.generate(params, 'gen-seed-a', 0, DEFAULT_COMPOSITION_FRAME)
+    const sceneB = flowField.generate(params, 'gen-seed-b', 0, DEFAULT_COMPOSITION_FRAME)
     expect(sceneB).not.toEqual(sceneA)
     // ...but the grid is the same size (same params ⇒ same tick count).
     expect(sceneB.primitives).toHaveLength(sceneA.primitives.length)

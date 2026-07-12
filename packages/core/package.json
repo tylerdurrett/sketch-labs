@@ -9,6 +9,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
+    "benchmark:hidden-line": "vitest run --config vitest.hidden-line-benchmark.config.ts",
     "benchmark:leaf-field": "vitest run --config vitest.leaf-field-benchmark.config.ts",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

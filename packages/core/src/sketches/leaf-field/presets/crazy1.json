@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "sketch": "leaf-field",
+  "name": "crazy1",
+  "seed": 146704215472362,
+  "params": {
+    "fieldPhase": 0.7258629814042064,
+    "fieldScale": 0.06430853243750648,
+    "turbulence": 1.7388647902949237,
+    "octaves": 4,
+    "density": 66.90385178638614,
+    "leafScale": 188.57968577171877,
+    "leafSizeVariance": 194.3192628266312,
+    "leafSlenderness": 1.1158247076041807,
+    "leafSlendernessVariance": 0.12122508338365379,
+    "variation": 0.7668761255924534,
+    "sphereCount": 11,
+    "sphereRadiusMin": 47.40012992728229,
+    "sphereRadiusMax": 168.52,
+    "sphereDepth": 0.581,
+    "backgroundColor": "#878787",
+    "discColor": "#ffffff",
+    "discStrokeColor": "#ffffff",
+    "leafColor": "#1a1a1a",
+    "leafStrokeColor": "#f4f1ea"
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    }
+  }
+}

@@ -3,19 +3,47 @@ import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Scene, Sketch, TimeMetadata } from "@harness/core";
+import {
+  DEFAULT_COMPOSITION_FRAME,
+  HARNESS_FALLBACK_PLOT_PROFILE,
+  resolveCompositionFrame,
+  resolvePlotCompositionFrame,
+  type PlotProfile,
+  type Scene,
+  type Sketch,
+  type TimeMetadata,
+} from "@harness/core";
 
-import { LiveCanvas, type LiveCanvasHandle } from "./LiveCanvas";
+import {
+  LiveCanvas as RawLiveCanvas,
+  type LiveCanvasHandle,
+  type LiveCanvasProps,
+} from "./LiveCanvas";
+
+/** Keep legacy tests terse while the production component requires an explicit frame. */
+function LiveCanvas(
+  props: Omit<LiveCanvasProps, "compositionFrame" | "profile"> &
+    Partial<Pick<LiveCanvasProps, "compositionFrame" | "profile">>,
+) {
+  return (
+    <RawLiveCanvas
+      {...props}
+      compositionFrame={props.compositionFrame ?? DEFAULT_COMPOSITION_FRAME}
+      profile={props.profile ?? HARNESS_FALLBACK_PLOT_PROFILE}
+    />
+  );
+}
 
 /**
  * LiveCanvas IS under test here (unlike SketchControls.test, which mocks it), so
  * the browser stack it touches has to be stood up rather than mocked away:
  *
- *   - `canvas.getContext('2d')` is unimplemented in jsdom and returns `null`;
- *     `drawFrame` early-returns on a null context, so drawing is a harmless
- *     no-op — we observe `t` through the Sketch's `generate` spy, not pixels.
+ *   - `canvas.getContext('2d')` is unimplemented in jsdom and returns `null`, so
+ *     we install a recording/no-op context to exercise the real paint boundary.
+ *     Time remains observable through the Sketch's `generate` spy, not pixels.
  *   - `ResizeObserver` / `matchMedia` are used by the geometry effect on mount;
- *     jsdom ships neither, so we install inert stubs (we are not testing resize).
+ *     jsdom ships neither, so we install controlled stubs. Most tests leave them
+ *     inert; the outline-cache regression drives the captured observer callback.
  *   - `requestAnimationFrame` and `performance.now()` are STUBBED so the rAF loop
  *     is driven tick-by-tick with a clock we control — that determinism is what
  *     lets us assert the baseline-recapture math (resume-from-scrubbed-t) exactly.
@@ -47,17 +75,31 @@ function animatedSketch(time: TimeMetadata | undefined) {
 /** A Sketch exposing the prepared-frame fast path, with each retained sampler observable. */
 function explicitlyPreparedSketch(time: TimeMetadata) {
   const samplers: Array<(t: number) => Scene> = [];
-  const prepare = vi.fn((params: Record<string, unknown>, seed: string | number) => {
-    // Snapshot preparation inputs so a later caller mutation cannot change which
-    // layout this retained sampler represents.
-    const value = params.value as number;
-    const sampler = vi.fn((t: number): Scene => ({
-      space: { width: 100, height: 100 },
-      primitives: [{ points: [[value + Number(seed), t]] }],
-    }));
-    samplers.push(sampler);
-    return sampler;
-  });
+  const prepare = vi.fn(
+    (params: Record<string, unknown>, seed: string | number) => {
+      // Snapshot preparation inputs so a later caller mutation cannot change which
+      // layout this retained sampler represents.
+      const value = params.value as number;
+      const seededX = value + Number(seed);
+      const sampler = vi.fn((t: number): Scene => ({
+        space: { width: 100, height: 100 },
+        primitives: [
+          {
+            points: [
+              [seededX + t, 0],
+              [seededX + t + 10, 0],
+              [seededX + t + 10, 10],
+              [seededX + t, 10],
+            ],
+            closed: true,
+            fill: { color: "tomato" },
+          },
+        ],
+      }));
+      samplers.push(sampler);
+      return sampler;
+    },
+  );
   const generate = vi.fn((): Scene => {
     throw new Error("prepared Studio path unexpectedly called cold generate");
   });
@@ -190,6 +232,7 @@ function useRecordingContext(ctx: CanvasRenderingContext2D): void {
 let now = 0;
 let rafCallbacks: Array<(t: number) => void> = [];
 let nextRafId = 1;
+let fireResizeObserver: (() => void) | null = null;
 
 /** Advance the fake wall clock to `ms` and flush exactly one rAF generation. */
 function tick(ms: number): void {
@@ -267,6 +310,7 @@ beforeEach(() => {
   now = 0;
   rafCallbacks = [];
   nextRafId = 1;
+  fireResizeObserver = null;
 
   vi.spyOn(performance, "now").mockImplementation(() => now);
   vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void): number => {
@@ -281,10 +325,15 @@ beforeEach(() => {
     rafCallbacks = [];
   });
 
-  // Inert geometry-effect deps (not under test).
+  // Capture ResizeObserver's callback so resize-specific tests can drive it;
+  // other tests leave it inert.
   vi.stubGlobal(
     "ResizeObserver",
     class {
+      constructor(callback: ResizeObserverCallback) {
+        fireResizeObserver = () =>
+          callback([], this as unknown as ResizeObserver);
+      }
       observe(): void {}
       unobserve(): void {}
       disconnect(): void {}
@@ -299,11 +348,10 @@ beforeEach(() => {
         removeEventListener: () => {},
       }) as unknown as MediaQueryList,
   );
-  // jsdom returns `null` from getContext('2d'), and `drawFrame` early-returns on
-  // a null context — which would skip the `sketch.generate` call we observe `t`
-  // through. Return an inert 2D-context stub instead: a Proxy whose every method
-  // is a no-op and whose fill/strokeStyle accept writes. The renderer's pixel
-  // output is not under test; we only need `drawFrame` to reach `generate(...t)`.
+  // jsdom returns `null` from getContext('2d'). Return an inert context instead:
+  // a Proxy whose every method is a no-op and whose fill/strokeStyle accept
+  // writes. Most tests observe generated time/geometry rather than pixels; the
+  // render-mode cases replace this with a counting context.
   const ctxStub = new Proxy(
     {} as Record<string, unknown>,
     {
@@ -389,6 +437,93 @@ describe("LiveCanvas transport — scrubbing pauses & sets t (AC2)", () => {
 });
 
 describe("LiveCanvas caller-owned frame preparation", () => {
+  it("invalidates the displayed Scene before deferred outline recomputes", () => {
+    const { ctx } = recordingContext();
+    useRecordingContext(ctx);
+    const handle = createRef<LiveCanvasHandle>();
+    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    const firstParams = { value: 3 };
+
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={prepared.sketch}
+        params={firstParams}
+        seed={2}
+        renderMode="fill"
+      />,
+    );
+    tick(1000);
+    expect(handle.current?.getDisplayedScene()).toMatchObject({
+      t: 1,
+      renderMode: "fill",
+      tolerance: 0,
+    });
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={prepared.sketch}
+          params={firstParams}
+          seed={2}
+          renderMode="outline"
+        />,
+      );
+    });
+    // The old fill Scene is unavailable throughout the double-rAF window.
+    expect(handle.current?.getDisplayedScene()).toBeNull();
+    flushRaf();
+    expect(handle.current?.getDisplayedScene()).toMatchObject({
+      t: 1,
+      renderMode: "outline",
+      tolerance: 0,
+    });
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={prepared.sketch}
+          params={{ value: 8 }}
+          seed={2}
+          renderMode="outline"
+          tolerance={2}
+        />,
+      );
+    });
+    // Input/tolerance changes invalidate atomically before their deferred pass.
+    expect(handle.current?.getDisplayedScene()).toBeNull();
+    flushRaf();
+    expect(handle.current?.getDisplayedScene()).toMatchObject({
+      t: 1,
+      renderMode: "outline",
+      tolerance: 2,
+    });
+  });
+
+  it("feeds outline processing from the retained prepared sampler, never cold generate", () => {
+    const { ctx, counts } = recordingContext();
+    useRecordingContext(ctx);
+    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+
+    mount(
+      <LiveCanvas
+        sketch={prepared.sketch}
+        params={{ value: 3 }}
+        seed={2}
+        renderMode="outline"
+      />,
+    );
+    flushRaf();
+
+    expect(prepared.prepare).toHaveBeenCalledTimes(1);
+    expect(prepared.samplers[0]).toHaveBeenCalledTimes(1);
+    expect(prepared.samplers[0]).toHaveBeenCalledWith(0);
+    expect(prepared.generate).not.toHaveBeenCalled();
+    expect(counts.stroke ?? 0).toBeGreaterThan(0);
+  });
+
   it("prepares once per sketch/params/seed and continues the same clock after invalidation", () => {
     const firstParams = { value: 1 };
     const secondParams = { value: 4 };
@@ -397,8 +532,10 @@ describe("LiveCanvas caller-owned frame preparation", () => {
 
     expect(prepared.prepare).toHaveBeenCalledTimes(1);
     expect(prepared.generate).not.toHaveBeenCalled();
-    expect(prepared.samplers[0]).toHaveBeenCalledWith(0); // paper-aspect probe
 
+    // The aspect no longer samples the prepared frame (it derives from the
+    // Composition Frame), so an animated Sketch does not draw until the first rAF
+    // tick — the sampler is exercised then, at the live `t`.
     tick(1000);
     expect(prepared.samplers[0]).toHaveBeenLastCalledWith(1);
 
@@ -437,6 +574,52 @@ describe("LiveCanvas caller-owned frame preparation", () => {
     });
     expect(replacement.prepare).toHaveBeenCalledTimes(1);
     expect(replacement.generate).not.toHaveBeenCalled();
+  });
+
+  it("keys preparation by frame aspect while preserving the animation clock", () => {
+    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    const params = {};
+    const squareA = { width: 1000, height: 1000 };
+    const squareB = { width: 1000, height: 1000 };
+    const wide = resolveCompositionFrame(2);
+
+    mount(
+      <LiveCanvas
+        sketch={prepared.sketch}
+        params={params}
+        seed={2}
+        compositionFrame={squareA}
+      />,
+    );
+    tick(1000);
+    expect(prepared.prepare).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={prepared.sketch}
+          params={params}
+          seed={2}
+          compositionFrame={squareB}
+        />,
+      );
+    });
+    expect(prepared.prepare).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={prepared.sketch}
+          params={params}
+          seed={2}
+          compositionFrame={wide}
+        />,
+      );
+    });
+    expect(prepared.prepare).toHaveBeenCalledTimes(2);
+    expect(prepared.prepare).toHaveBeenLastCalledWith({}, 2, wide);
+    tick(1500);
+    expect(prepared.samplers[1]).toHaveBeenLastCalledWith(1.5);
   });
 });
 
@@ -497,39 +680,132 @@ describe("LiveCanvas export handle — read-only canvas + current t", () => {
   });
 });
 
-describe("LiveCanvas paper aspect — sized to the Scene's space (#155)", () => {
-  it("uses invariant Sketch space without sampling a throwaway frame", () => {
-    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
-    prepared.sketch.space = { width: 1600, height: 900 };
-
-    const el = mount(
-      <LiveCanvas sketch={prepared.sketch} params={{}} seed={1} />,
-    );
-
-    expect(Number(canvasEl(el).style.getPropertyValue("--paper-aspect"))).toBeCloseTo(
-      1600 / 900,
-      5,
-    );
-    expect(prepared.samplers[0]).not.toHaveBeenCalled();
-  });
-
-  it("threads the generated Scene's width/height ratio onto the canvas box", () => {
-    // A 1600x900 space is a 16:9 paper — the CSS box must carry that ratio via
-    // the `--paper-aspect` custom property, not stay a fixed square.
+describe("LiveCanvas paper aspect — sized to the Composition Frame (#155/#253)", () => {
+  // The preview box aspect now derives from the COMPOSITION FRAME, not from the
+  // Sketch's own generated space (#253, slice #246). Studio hands the square
+  // Harness fallback (`DEFAULT_COMPOSITION_FRAME`, 1000×1000) for now, so the box
+  // is a square (`--paper-aspect` === 1) no matter what coordinate space the
+  // Sketch's `generate` yields. A real frame (#247/#248) will change the ratio at
+  // that single seam; the assertions below pin the fallback-square behavior and,
+  // crucially, that the Sketch's own space does NOT drive the box anymore (AC3).
+  it("follows the Composition Frame (square fallback ⇒ 1) for a landscape Sketch space", () => {
+    // A 1600x900 (16:9) generated space must NOT leak into the box: the frame is
+    // square, so `--paper-aspect` is 1, not 1600/900.
     const el = mount(
       <LiveCanvas sketch={spacedSketch(1600, 900)} params={{}} seed={1} />,
     );
-    const aspect = canvasEl(el).style.getPropertyValue("--paper-aspect");
-    expect(Number(aspect)).toBeCloseTo(1600 / 900, 5);
+    expect(Number(canvasEl(el).style.getPropertyValue("--paper-aspect"))).toBe(1);
   });
 
-  it("falls back to a square (1) for a degenerate zero-height space", () => {
-    // A zero (or non-finite) extent would make width/height NaN/∞; the derivation
-    // must clamp that to a square so the box stays coherent.
+  it("follows the Composition Frame (square fallback ⇒ 1) for a portrait Sketch space", () => {
+    // A tall 200x1000 generated space likewise does not drive the box — the same
+    // square frame yields 1, proving the derivation ignores `sketch.space`
+    // entirely (the degenerate-space case is moot: the frame is always valid).
     const el = mount(
-      <LiveCanvas sketch={spacedSketch(1000, 0)} params={{}} seed={1} />,
+      <LiveCanvas sketch={spacedSketch(200, 1000)} params={{}} seed={1} />,
     );
     expect(Number(canvasEl(el).style.getPropertyValue("--paper-aspect"))).toBe(1);
+  });
+
+  it("uses the explicit frame aspect rather than generated Scene space", () => {
+    const el = mount(
+      <LiveCanvas
+        sketch={spacedSketch(200, 1000)}
+        params={{}}
+        seed={1}
+        compositionFrame={resolveCompositionFrame(2)}
+      />,
+    );
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(2);
+  });
+});
+
+describe("LiveCanvas full-sheet preview chrome (#248)", () => {
+  const asymmetricProfile: PlotProfile = {
+    width: 200,
+    height: 100,
+    insets: { top: 10, right: 20, bottom: 30, left: 40 },
+    includeFrame: true,
+  };
+
+  it("contain-fits the full sheet and positions the drawable region from all four inset ratios", () => {
+    const el = mount(
+      <LiveCanvas
+        sketch={spacedSketch(100, 100)}
+        params={{}}
+        seed={1}
+        profile={asymmetricProfile}
+        compositionFrame={resolvePlotCompositionFrame(asymmetricProfile)}
+      />,
+    );
+    const sheet = el.querySelector(".plot-sheet") as HTMLElement;
+    const drawable = el.querySelector(".plot-drawable") as HTMLElement;
+
+    expect(sheet.getAttribute("aria-label")).toBe("Plot sheet preview");
+    expect(sheet.style.getPropertyValue("--sheet-aspect")).toBe("2");
+    expect(sheet.style.getPropertyValue("--plot-inset-top")).toBe("10%");
+    expect(sheet.style.getPropertyValue("--plot-inset-right")).toBe("10%");
+    expect(sheet.style.getPropertyValue("--plot-inset-bottom")).toBe("30%");
+    expect(sheet.style.getPropertyValue("--plot-inset-left")).toBe("20%");
+    expect(drawable.querySelector("canvas")).toBe(canvasEl(el));
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(140 / 60);
+  });
+
+  it("keeps Fill and Outline on the same drawable canvas inside the sheet", () => {
+    const sketch = spacedSketch(100, 100);
+    const params = {};
+    const compositionFrame = resolvePlotCompositionFrame(asymmetricProfile);
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        profile={asymmetricProfile}
+        compositionFrame={compositionFrame}
+        renderMode="fill"
+      />,
+    );
+    const sheet = el.querySelector(".plot-sheet");
+    const drawable = el.querySelector(".plot-drawable");
+    const canvas = canvasEl(el);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={params}
+          seed={1}
+          profile={asymmetricProfile}
+          compositionFrame={compositionFrame}
+          renderMode="outline"
+        />,
+      );
+    });
+
+    expect(el.querySelector(".plot-sheet")).toBe(sheet);
+    expect(el.querySelector(".plot-drawable")).toBe(drawable);
+    expect(canvasEl(el)).toBe(canvas);
+  });
+
+  it("keeps the export handle pointed at the drawable canvas, not its sheet chrome", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={spacedSketch(100, 100)}
+        params={{}}
+        seed={1}
+        profile={asymmetricProfile}
+        compositionFrame={resolvePlotCompositionFrame(asymmetricProfile)}
+      />,
+    );
+
+    expect(handle.current?.getCanvas()).toBe(canvasEl(el));
+    expect(handle.current?.getCanvas()).not.toBe(el.querySelector(".plot-sheet"));
   });
 });
 
@@ -594,6 +870,187 @@ describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand
     });
     expect(counts.fill ?? 0).toBeGreaterThan(0);
     expect(counts.stroke ?? 0).toBe(0);
+  });
+
+  it("repaints a cached outline after a same-aspect profile layout resize without deriving it again", () => {
+    const { ctx, counts, reset } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch, generate } = overlapSketch(undefined);
+    const params = {};
+    const onOutlineComputed = vi.fn();
+    let boxSize = 100;
+    vi.spyOn(
+      HTMLCanvasElement.prototype,
+      "getBoundingClientRect",
+    ).mockImplementation(
+      () =>
+        ({
+          width: boxSize,
+          height: boxSize,
+        }) as DOMRect,
+    );
+
+    const initialProfile = HARNESS_FALLBACK_PLOT_PROFILE;
+    const sameAspectProfile: PlotProfile = {
+      width: 200,
+      height: 200,
+      insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: true,
+    };
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        profile={initialProfile}
+        renderMode="outline"
+        onOutlineComputed={onOutlineComputed}
+      />,
+    );
+    flushRaf();
+
+    const canvas = canvasEl(el);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
+    expect(canvas.width).toBe(100);
+
+    // Linked-inset magnitude changes update the sheet layout but keep the
+    // drawable aspect square. Model the resulting smaller drawable CSS box,
+    // then fire the real component's ResizeObserver callback.
+    reset();
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={params}
+          seed={1}
+          profile={sameAspectProfile}
+          renderMode="outline"
+          onOutlineComputed={onOutlineComputed}
+        />,
+      );
+    });
+    expect(
+      el
+        .querySelector<HTMLElement>(".plot-sheet")
+        ?.style.getPropertyValue("--plot-inset-top"),
+    ).toBe("10%");
+    boxSize = 80;
+    act(() => fireResizeObserver?.());
+
+    // Backing pixels and rendered strokes refresh from the cached processed
+    // Scene. No new generate/hidden-line derivation or compute signal occurs.
+    expect(canvas.width).toBe(80);
+    expect(counts.stroke ?? 0).toBeGreaterThan(0);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates and rebuilds Outline when includeFrame changes at the same drawable aspect", () => {
+    const { ctx } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch, generate } = overlapSketch(undefined);
+    const handle = createRef<LiveCanvasHandle>();
+    const onOutlineComputed = vi.fn();
+    const withoutFrame: PlotProfile = {
+      ...HARNESS_FALLBACK_PLOT_PROFILE,
+      includeFrame: false,
+    };
+
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        profile={withoutFrame}
+        renderMode="outline"
+        onOutlineComputed={onOutlineComputed}
+      />,
+    );
+    flushRaf();
+    const first = handle.current?.getDisplayedScene();
+    expect(first?.includeFrame).toBe(false);
+    expect(generate).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          profile={HARNESS_FALLBACK_PLOT_PROFILE}
+          renderMode="outline"
+          onOutlineComputed={onOutlineComputed}
+        />,
+      );
+    });
+
+    expect(handle.current?.getDisplayedScene()).toBeNull();
+    flushRaf();
+    const rebuilt = handle.current?.getDisplayedScene();
+    expect(rebuilt?.includeFrame).toBe(true);
+    expect(rebuilt?.scene.primitives).toHaveLength(
+      (first?.scene.primitives.length ?? 0) + 1,
+    );
+    expect(rebuilt?.scene.primitives.at(-1)?.points).toEqual([
+      [0, 0],
+      [100, 0],
+      [100, 100],
+      [0, 100],
+      [0, 0],
+    ]);
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(onOutlineComputed).toHaveBeenCalledTimes(2);
+  });
+
+  it("updates Fill's snapshot identity without regenerating or repainting", () => {
+    const { ctx, counts, reset } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch, generate } = animatedSketch(undefined);
+    const handle = createRef<LiveCanvasHandle>();
+    const params = {};
+    const withoutFrame: PlotProfile = {
+      ...HARNESS_FALLBACK_PLOT_PROFILE,
+      includeFrame: false,
+    };
+
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        profile={withoutFrame}
+        renderMode="fill"
+      />,
+    );
+    const displayed = handle.current?.getDisplayedScene()?.scene;
+    expect(generate).toHaveBeenCalledTimes(1);
+    reset();
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={1}
+          profile={HARNESS_FALLBACK_PLOT_PROFILE}
+          renderMode="fill"
+        />,
+      );
+    });
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(counts.fill ?? 0).toBe(0);
+    expect(counts.stroke ?? 0).toBe(0);
+    expect(handle.current?.getDisplayedScene()).toMatchObject({
+      scene: displayed,
+      renderMode: "fill",
+      includeFrame: true,
+    });
   });
 
   it("the rAF fill loop NEVER runs the pass — every animated frame stays a fill (AC2/AC3)", () => {

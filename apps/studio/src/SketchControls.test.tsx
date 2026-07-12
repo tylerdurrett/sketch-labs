@@ -6,17 +6,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clipSceneToBounds,
   crc32,
+  DEFAULT_COMPOSITION_FRAME,
   defaultParams,
+  HARNESS_FALLBACK_PLOT_PROFILE,
   hiddenLinePass,
   leafField,
+  resolvePlotCompositionFrame,
   type ParamSchema,
+  type CoordinateSpace,
+  type PlotProfile,
   type Preset,
   type Seed,
 } from "@harness/core";
 
-import type { LiveCanvasHandle } from "./LiveCanvas";
+import type {
+  DisplayedSceneSnapshot,
+  LiveCanvasHandle,
+} from "./LiveCanvas";
 import { outlineScene } from "./outlineScene";
-import { SketchControls } from "./SketchControls";
+import { hiddenLineSceneForExport, SketchControls } from "./SketchControls";
 
 // Preview == export seam probe (issue #220): capture the Scene the export path
 // hands `renderToSVG`, so a test can prove it is the SAME processed Scene the
@@ -26,12 +34,17 @@ import { SketchControls } from "./SketchControls";
 const exportSceneCapture = vi.hoisted(() => ({
   current: null as unknown,
 }));
+const plotterExportCapture = vi.hoisted(() => ({
+  current: null as null | {
+    scene: unknown;
+    profile: PlotProfile;
+    metadata: string | undefined;
+  },
+}));
 
-// Mock ONLY `renderToSVG`, delegating to the real implementation so every
-// existing SVG-export assertion (which checks the serialized string) stays
-// green — we merely tee off the Scene argument on the way through. Everything
-// else in `@harness/core` (buildReproMetadata, hiddenLinePass, insertPngMetadata,
-// exportFilename, crc32, …) is the genuine module via `importActual`.
+// Probe both SVG serializers while delegating to their real implementations, so
+// document assertions exercise core and each wiring test can identify the exact
+// Scene/profile it received. Everything else in `@harness/core` is genuine.
 vi.mock("@harness/core", async (importActual) => {
   const actual = await importActual<typeof import("@harness/core")>();
   return {
@@ -42,6 +55,16 @@ vi.mock("@harness/core", async (importActual) => {
       exportSceneCapture.current = args[0];
       return actual.renderToSVG(...args);
     },
+    renderPlotterSVG: (
+      ...args: Parameters<typeof actual.renderPlotterSVG>
+    ): ReturnType<typeof actual.renderPlotterSVG> => {
+      plotterExportCapture.current = {
+        scene: args[0],
+        profile: args[1],
+        metadata: args[2],
+      };
+      return actual.renderPlotterSVG(...args);
+    },
   };
 });
 
@@ -51,6 +74,8 @@ vi.mock("@harness/core", async (importActual) => {
 let fakeCanvasToBlob: HTMLCanvasElement["toBlob"];
 // The current-t the mocked handle reports — the export's `-t{t}` source.
 let fakeCurrentT = 0;
+// Atomic displayed-Scene snapshot exposed by the mocked LiveCanvas handle.
+let fakeDisplayedScene: DisplayedSceneSnapshot | null = null;
 // #228: the real LiveCanvas signals `onOutlineComputed` when an outline pass has
 // drawn, which the owner uses to clear its "Computing…" affordance. The mock
 // records the latest callback so a test can drive that signal BY HAND (to observe
@@ -59,6 +84,8 @@ let fakeCurrentT = 0;
 // busy label clears exactly as the real component clears it.
 let lastOnOutlineComputed: (() => void) | null = null;
 let autoFireOutlineComputed = true;
+let lastCompositionFrame: CoordinateSpace | null = null;
+let lastProfile: PlotProfile | null = null;
 
 // LiveCanvas is a browser-only sink (canvas2d, ResizeObserver, matchMedia) and
 // is NOT under test here — these are wiring tests for the control state. Replace
@@ -70,12 +97,16 @@ vi.mock("./LiveCanvas", () => ({
     seed,
     renderMode,
     tolerance,
+    compositionFrame,
+    profile,
     handleRef,
     onOutlineComputed,
   }: {
     seed: Seed;
     renderMode?: string;
     tolerance?: number;
+    compositionFrame: CoordinateSpace;
+    profile: PlotProfile;
     handleRef?: Ref<LiveCanvasHandle>;
     onOutlineComputed?: () => void;
   }) => {
@@ -83,8 +114,11 @@ vi.mock("./LiveCanvas", () => ({
       getCanvas: () =>
         ({ toBlob: fakeCanvasToBlob }) as unknown as HTMLCanvasElement,
       getCurrentT: () => fakeCurrentT,
+      getDisplayedScene: () => fakeDisplayedScene,
     }));
     lastOnOutlineComputed = onOutlineComputed ?? null;
+    lastCompositionFrame = compositionFrame;
+    lastProfile = profile;
     // Model the outline pass finishing: fire the "computed" signal after each
     // outline render so the owner's busy label clears (unless a test opts out to
     // observe the intermediate "Computing…" state itself).
@@ -98,6 +132,7 @@ vi.mock("./LiveCanvas", () => ({
         data-testid="canvas-seed"
         data-render-mode={String(renderMode)}
         data-tolerance={String(tolerance)}
+        data-include-frame={String(profile.includeFrame)}
       >
         {String(seed)}
       </div>
@@ -207,17 +242,21 @@ beforeEach(() => {
   // a fresh downloadBlob spy. Per-test overrides drive the time-gated / guard
   // cases. The blob is a real minimal PNG so the metadata byte-splice succeeds.
   fakeCurrentT = 0;
+  fakeDisplayedScene = null;
   // #228: default to auto-firing the outline "computed" signal so the busy label
   // clears on its own; the label test opts out to observe "Computing…".
   lastOnOutlineComputed = null;
+  lastCompositionFrame = null;
+  lastProfile = null;
   autoFireOutlineComputed = true;
+  window.localStorage.clear();
   fakeCanvasToBlob = ((cb: BlobCallback) => {
     cb(new Blob([MINIMAL_PNG], { type: "image/png" }));
   }) as HTMLCanvasElement["toBlob"];
   downloadBlob.mockReset();
-  // Clear the preview == export seam probe so each test observes only its own
-  // `renderToSVG` call (#220).
+  // Clear both serializer probes so each test observes only its own export.
   exportSceneCapture.current = null;
+  plotterExportCapture.current = null;
 });
 
 afterEach(() => {
@@ -411,6 +450,85 @@ describe("SketchControls — collapsed-state a11y (#165)", () => {
   });
 });
 
+describe("SketchControls — Paper inspector integration (#248)", () => {
+  it("places a collapsed Paper disclosure immediately after the switcher and before schema controls", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+        switcher={<div data-testid="sketch-switcher">Sketch switcher</div>}
+      />,
+    );
+    const inspector = el.querySelector("#inspector")!;
+    const switcher = inspector.querySelector('[data-testid="sketch-switcher"]');
+    const paper = inspector.querySelector("details");
+    const schemaControls = paramInput(el, "radius").closest(
+      ".flex.flex-col.gap-4",
+    );
+
+    expect(paper?.open).toBe(false);
+    expect(paper?.querySelector("summary")?.textContent).toContain("Paper");
+    expect(paper?.previousElementSibling).toBe(switcher);
+    expect(paper?.nextElementSibling).toBe(schemaControls);
+  });
+
+  it("keeps Paper mounted and collapsed when the whole inspector is hidden", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+        collapsed
+      />,
+    );
+    const inspector = el.querySelector<HTMLElement>("#inspector")!;
+    const paper = inspector.querySelector("details")!;
+
+    expect(inspector.hidden).toBe(true);
+    expect(paper.open).toBe(false);
+    expect(paper.querySelector("summary")?.textContent).toContain(
+      "200 × 200 mm",
+    );
+  });
+
+  it("preserves the global display-unit preference across a keyed Sketch remount", () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root!.render(
+        <SketchControls
+          key="a"
+          sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+        />,
+      );
+    });
+
+    const inches = container.querySelector<HTMLInputElement>(
+      'input[type="radio"][value="in"]',
+    )!;
+    act(() => inches.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(container.querySelector("details summary")?.textContent).toContain(
+      "in",
+    );
+
+    act(() => {
+      root!.render(
+        <SketchControls
+          key="b"
+          sketch={sketchWith("b", { radius: numberSpec({ default: 20 }) })}
+        />,
+      );
+    });
+
+    expect(
+      container.querySelector<HTMLInputElement>(
+        'input[type="radio"][value="in"]',
+      )?.checked,
+    ).toBe(true);
+    expect(container.querySelector("details summary")?.textContent).toContain(
+      "in",
+    );
+  });
+});
+
 describe("SketchControls — randomize / lock wiring", () => {
   it("Randomize rolls unlocked params but never touches a locked param", () => {
     const el = mount(
@@ -533,7 +651,7 @@ describe("SketchControls — preset save/reload wiring", () => {
     ).toBe("false");
   });
 
-  it("saving serializes the live params, seed, and locks under the sketch id", async () => {
+  it("saving serializes the live params, seed, locks, AND the active profile under the sketch id", async () => {
     const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
     await flush();
 
@@ -555,13 +673,17 @@ describe("SketchControls — preset save/reload wiring", () => {
     await flush();
 
     expect(savePreset).toHaveBeenCalledTimes(1);
+    // The Save now stamps a v2 record (#266) carrying the session's active Plot
+    // Profile (#267). This Sketch declares no default, so the active profile is
+    // the Harness fallback resolved at mount.
     expect(savePreset.mock.calls[0]?.[0]).toEqual({
-      version: 1,
+      version: 2,
       sketch: "a",
       name: "warm",
       seed: 4242,
       params: { radius: 10, count: 33 },
       locks: ["radius"],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
   });
 
@@ -589,11 +711,443 @@ describe("SketchControls — preset save/reload wiring", () => {
   });
 });
 
+describe("SketchControls — Plot Profile session wiring (#267)", () => {
+  const schema: ParamSchema = {
+    radius: numberSpec({ min: 0, max: 100, default: 10 }),
+  };
+
+  // A profile that differs from the Harness fallback (200×200, 10mm insets) on
+  // every field, so "the active profile IS / is NOT this value" is unambiguous.
+  const customProfile: PlotProfile = {
+    width: 420,
+    height: 297,
+    insets: { top: 15, right: 12, bottom: 9, left: 6 },
+    includeFrame: false,
+  };
+
+  // A Sketch that DECLARES its own default Output Profile. No registered sketch
+  // does today, so this variant is the only way to exercise #265's middle
+  // precedence rung (the Sketch default) — the fallback-only `sketchWith` always
+  // resolves straight to the Harness fallback.
+  const sketchWithDefault = (id: string, profile: PlotProfile) =>
+    ({
+      ...(sketchWith(id, schema) as unknown as Record<string, unknown>),
+      defaultOutputProfile: profile,
+    }) as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+
+  /** Type a valid name, Save, and return the Preset the client last received. */
+  async function saveAndCapture(
+    el: HTMLElement,
+    presetName: string,
+  ): Promise<Preset> {
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      presetName,
+    );
+    clickButton(el, "Save");
+    await flush();
+    const calls = savePreset.mock.calls;
+    return calls[calls.length - 1]![0];
+  }
+
+  /** Select `presetName` in the picker and click Reload. */
+  function reloadInUi(el: HTMLElement, presetName: string): void {
+    const picker = el.querySelector(
+      'select[aria-label="saved presets"]',
+    ) as HTMLSelectElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, presetName);
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+  }
+
+  it("resolves the active profile from the Sketch's own declared default at mount (#265 sketch-default rung)", async () => {
+    // The declared default wins over the Harness fallback — a plain Save (no
+    // reload) stamps a v2 record carrying THIS Sketch's declared profile.
+    const el = mount(
+      <SketchControls sketch={sketchWithDefault("a", customProfile)} />,
+    );
+    await flush();
+
+    const preset = await saveAndCapture(el, "declared");
+    expect(preset).toMatchObject({ version: 2, profile: customProfile });
+  });
+
+  it("re-resolves per Sketch on a keyed remount, never reusing the prior Sketch's active profile (#267)", async () => {
+    // App mounts this with key={sketch.id}, so a Sketch switch remounts it and
+    // re-runs the lazy initializer against the NEW Sketch's own default. Render
+    // Sketch A (declares customProfile), then remount under a DIFFERENT key onto
+    // Sketch B (no declared default): B must resolve to the Harness fallback, NOT
+    // carry over A's customProfile. The keyed remount IS the per-Sketch reset.
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root!.render(
+        <SketchControls key="a" sketch={sketchWithDefault("a", customProfile)} />,
+      );
+    });
+    await flush();
+
+    // A's active profile is its declared default.
+    const presetA = await saveAndCapture(container, "from-a");
+    expect(presetA).toMatchObject({
+      version: 2,
+      sketch: "a",
+      profile: customProfile,
+    });
+
+    // Switch Sketch: remount under a new key onto B (declares no default).
+    savePreset.mockClear();
+    act(() => {
+      root!.render(<SketchControls key="b" sketch={sketchWith("b", schema)} />);
+    });
+    await flush();
+
+    const presetB = await saveAndCapture(container, "from-b");
+    // B re-resolved from its OWN default (the Harness fallback) — it did NOT
+    // inherit A's active customProfile.
+    expect(presetB).toMatchObject({
+      version: 2,
+      sketch: "b",
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    expect(presetB.profile).not.toEqual(customProfile);
+  });
+
+  it("reloading a v2 Preset adopts its stored profile (it wins) and a subsequent Save re-emits it (#265 v2 rung)", async () => {
+    // A v2 preset carrying customProfile, reloaded onto a Sketch with no declared
+    // default: the stored profile must WIN over the Sketch default / Harness
+    // fallback (the top rung of #265's precedence).
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "wide",
+      seed: 7,
+      params: { radius: 10 },
+      locks: [],
+      profile: customProfile,
+    });
+    listPresets.mockResolvedValue(["wide"]);
+
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    await flush();
+
+    reloadInUi(el, "wide");
+    await flush();
+
+    expect(lastProfile).toEqual(customProfile);
+    // A Save now re-emits the reloaded profile — the stored v2 profile won.
+    const preset = await saveAndCapture(el, "again");
+    expect(preset).toMatchObject({ version: 2, profile: customProfile });
+  });
+
+  it("reloading a v1 Preset (no profile) falls back to the Harness fallback when the Sketch declares no default (#265 v1 fallback)", async () => {
+    // A v1 preset carries no profile, so the reload resolves through the fallback
+    // — here the Harness fallback (this Sketch declares no default).
+    loadPreset.mockResolvedValue({
+      version: 1,
+      sketch: "a",
+      name: "legacy",
+      seed: 3,
+      params: { radius: 10 },
+      locks: [],
+    });
+    listPresets.mockResolvedValue(["legacy"]);
+
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    await flush();
+
+    reloadInUi(el, "legacy");
+    await flush();
+
+    expect(lastProfile).toEqual(HARNESS_FALLBACK_PLOT_PROFILE);
+    const preset = await saveAndCapture(el, "resaved");
+    expect(preset).toMatchObject({
+      version: 2,
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+  });
+
+  it("reloading a v1 Preset falls back to the Sketch's declared default when it has one (#265 middle rung)", async () => {
+    // Same v1 (profile-less) preset, but reloaded onto a Sketch that DECLARES a
+    // default: the fallback resolves to that Sketch default, not the Harness
+    // fallback — the middle rung of #265's precedence.
+    loadPreset.mockResolvedValue({
+      version: 1,
+      sketch: "a",
+      name: "legacy",
+      seed: 3,
+      params: { radius: 10 },
+      locks: [],
+    });
+    listPresets.mockResolvedValue(["legacy"]);
+
+    const el = mount(
+      <SketchControls sketch={sketchWithDefault("a", customProfile)} />,
+    );
+    await flush();
+
+    reloadInUi(el, "legacy");
+    await flush();
+
+    const preset = await saveAndCapture(el, "resaved");
+    expect(preset).toMatchObject({ version: 2, profile: customProfile });
+  });
+
+  it("an SVG export's reproduction metadata carries the session's active (reloaded) profile (#247)", async () => {
+    // Prove the EXPORT path reflects the session's active profile, not just the
+    // mount default: reload a v2 preset carrying customProfile, then export SVG
+    // and assert the embedded envelope is a v2 record carrying that profile.
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "wide",
+      seed: 7,
+      params: { radius: 10 },
+      locks: [],
+      profile: customProfile,
+    });
+    listPresets.mockResolvedValue(["wide"]);
+
+    // A Sketch whose generate yields a serializable (empty-primitives) Scene, so
+    // the SVG export path runs to a real <metadata>-bearing document.
+    const svgSketch = {
+      ...(sketchWith("a", schema) as unknown as Record<string, unknown>),
+      generate: () => ({ space: { width: 100, height: 100 }, primitives: [] }),
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+
+    const el = mount(<SketchControls sketch={svgSketch} />);
+    await flush();
+
+    reloadInUi(el, "wide");
+    await flush();
+
+    clickButton(el, "Export SVG");
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    const [blob] = downloadBlob.mock.calls[0]!;
+    const svg = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
+    expect(meta).toBeDefined();
+    expect(JSON.parse(meta!)).toMatchObject({
+      version: 2,
+      sketch: "a",
+      profile: customProfile,
+    });
+  });
+
+  it("threads one profile-resolved frame through preview and plain SVG at the captured t", async () => {
+    const generate = vi.fn(() => ({
+      space: { width: 100, height: 100 },
+      primitives: [],
+    }));
+    const sketch = {
+      ...(sketchWith("a", schema) as unknown as Record<string, unknown>),
+      time: { duration: 4, mode: "loop" },
+      generate,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "wide",
+      seed: 7,
+      params: { radius: 10 },
+      locks: [],
+      profile: customProfile,
+    });
+    listPresets.mockResolvedValue(["wide"]);
+    fakeCurrentT = 2.5;
+
+    const el = mount(<SketchControls sketch={sketch} />);
+    await flush();
+    reloadInUi(el, "wide");
+    await flush();
+
+    const expected = resolvePlotCompositionFrame(customProfile);
+    expect(lastProfile).toEqual(customProfile);
+    expect(lastCompositionFrame).toEqual(expected);
+    clickButton(el, "Export SVG");
+    expect(generate).toHaveBeenLastCalledWith({ radius: 10 }, 7, 2.5, expected);
+  });
+
+  it("keeps the resolved frame identity when profile magnitude changes at the same drawable aspect", async () => {
+    const sameAspectProfile: PlotProfile = {
+      width: 400,
+      height: 400,
+      insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: false,
+    };
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "larger-square",
+      seed: 7,
+      params: { radius: 10 },
+      locks: [],
+      profile: sameAspectProfile,
+    });
+    listPresets.mockResolvedValue(["larger-square"]);
+
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    await flush();
+    const initialFrame = lastCompositionFrame;
+    reloadInUi(el, "larger-square");
+    await flush();
+
+    expect(lastProfile).toEqual(sameAspectProfile);
+    expect(lastCompositionFrame).toBe(initialFrame);
+  });
+
+  it("refreshes same-aspect paper layout without replacing geometry or recomputing Outline", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+
+    act(() => toggle.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    act(() => lastOnOutlineComputed?.());
+    expect(toggle.textContent).toBe("Outline");
+    const initialFrame = lastCompositionFrame;
+
+    // The fallback sheet is square. Changing all linked insets together keeps
+    // its drawable rectangle square, while still changing the preview's sheet
+    // layout ratios and active physical profile.
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Linked paper margin (mm)"]',
+      )!,
+      "20",
+    );
+
+    expect(lastProfile).toEqual({
+      width: 200,
+      height: 200,
+      insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: true,
+    });
+    expect(lastCompositionFrame).toBe(initialFrame);
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
+  });
+
+  it("marks Outline recomputing when the composition-frame option changes", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    const frameOption = el.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]',
+    )!;
+
+    act(() => toggle.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    act(() => lastOnOutlineComputed?.());
+    const initialFrame = lastCompositionFrame;
+    expect(frameOption.checked).toBe(true);
+
+    act(() => frameOption.click());
+
+    expect(lastProfile?.includeFrame).toBe(false);
+    expect(lastCompositionFrame).toBe(initialFrame);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-include-frame",
+      ),
+    ).toBe("false");
+    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.disabled).toBe(true);
+  });
+
+  it("restores includeFrame from a Preset and recomputes the visible Outline", async () => {
+    autoFireOutlineComputed = false;
+    listPresets.mockResolvedValue(["without-frame"]);
+    const profileWithoutFrame: PlotProfile = {
+      ...HARNESS_FALLBACK_PLOT_PROFILE,
+      includeFrame: false,
+    };
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    await flush();
+    const seed = Number(
+      el.querySelector<HTMLInputElement>("#sketch-seed")!.value,
+    );
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "without-frame",
+      seed,
+      params: { radius: 10 },
+      locks: [],
+      profile: profileWithoutFrame,
+    });
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => toggle.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    act(() => lastOnOutlineComputed?.());
+
+    reloadInUi(el, "without-frame");
+    await flush();
+
+    expect(lastProfile).toEqual(profileWithoutFrame);
+    expect(el.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(
+      false,
+    );
+    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.disabled).toBe(true);
+  });
+
+  it("marks Outline recomputing only when a committed paper edit changes drawable aspect", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => toggle.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    act(() => lastOnOutlineComputed?.());
+    const initialFrame = lastCompositionFrame;
+    const initialProfile = lastProfile;
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    // A draft that cannot commit remains PaperSection-local: neither profile nor
+    // geometry changes, and the expensive outline pass stays idle.
+    setInput(width, "");
+    expect(lastProfile).toBe(initialProfile);
+    expect(lastCompositionFrame).toBe(initialFrame);
+    expect(toggle.textContent).toBe("Outline");
+
+    // Completing a valid width edit changes the drawable aspect. The one shared
+    // frame is replaced and the busy affordance is raised before regeneration.
+    setInput(width, "300");
+    expect(lastProfile).toMatchObject({ width: 300, height: 200 });
+    expect(lastCompositionFrame).not.toBe(initialFrame);
+    expect(lastCompositionFrame).toEqual(
+      resolvePlotCompositionFrame(lastProfile!),
+    );
+    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.disabled).toBe(true);
+  });
+});
+
 describe("SketchControls — SVG export wiring", () => {
   // A Scene the mocked sketch.generate returns — its single Primitive lets the
   // test assert the downloaded SVG is the serialized vector of THAT Scene.
   const svgScene = {
     space: { width: 100, height: 100 },
+    background: { color: "mintcream" },
     primitives: [
       {
         points: [
@@ -650,22 +1204,37 @@ describe("SketchControls — SVG export wiring", () => {
     // The Blob is the serialized vector of the generated Scene.
     const svg = await blobText(blob);
     expect(svg).toMatch(/<svg\b[^>]*viewBox="0 0 100 100"/);
+    expect(svg).toContain(
+      '<rect x="0" y="0" width="100" height="100" fill="mintcream" />',
+    );
     expect(svg).toMatch(/<path\b[^>]*fill="tomato"/);
+    expect(exportSceneCapture.current).not.toBeNull();
+    expect(plotterExportCapture.current).toBeNull();
     // Static sketch ⇒ no `-t` segment, `.svg` extension.
     expect(filename).toBe(`circles-seed${seed}.svg`);
 
     // The SVG embeds the reproduction envelope in a <metadata> element (#76),
-    // round-tripping back to the displayed (seed, params, name-stem) — no t.
+    // round-tripping back to the displayed (seed, params, name-stem) — no t. The
+    // envelope is now a v2 record (#266) carrying the active Plot Profile (#267);
+    // this Sketch declares no default, so it is the Harness fallback.
     const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
     expect(meta).toBeDefined();
     expect(JSON.parse(meta!)).toMatchObject({
-      version: 1,
+      version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
       seed: Number(seed),
       params: { radius: 10 },
       locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
+
+    // The plotter export of the SAME fixture deliberately drops the Scene
+    // background along with all other non-path preview/image chrome.
+    clickButton(el, "Export Hidden-line SVG");
+    const plotterSvg = await blobText(downloadBlob.mock.calls[1]![0]);
+    expect(plotterSvg).not.toContain("mintcream");
+    expect(plotterSvg).not.toMatch(/<rect\b/);
   });
 
   it("includes the captured -t{t} segment for a time-driven sketch", () => {
@@ -791,6 +1360,56 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
   };
 
+  it("returns a matching displayed outline by identity without invoking fallback", () => {
+    const processed = outlineScene(
+      hlScene as unknown as DisplayedSceneSnapshot["scene"],
+    );
+    const generate = vi.fn();
+
+    expect(
+      hiddenLineSceneForExport({
+        displayed: {
+          scene: processed,
+          t: 2.5,
+          renderMode: "outline",
+          tolerance: 3,
+          includeFrame: false,
+        },
+        currentT: 2.5,
+        renderMode: "outline",
+        tolerance: 3,
+        includeFrame: false,
+        generate,
+      }),
+    ).toBe(processed);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a displayed Scene whose composition-frame identity is stale", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const withoutFrame = outlineScene(source, 0, false);
+    const generate = vi.fn(() => source);
+
+    const selected = hiddenLineSceneForExport({
+      displayed: {
+        scene: withoutFrame,
+        t: 0,
+        renderMode: "outline",
+        tolerance: 0,
+        includeFrame: false,
+      },
+      currentT: 0,
+      renderMode: "outline",
+      tolerance: 0,
+      includeFrame: true,
+      generate,
+    });
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(selected).toEqual(outlineScene(source, 0, true));
+    expect(selected).not.toBe(withoutFrame);
+  });
+
   function blobText(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -812,7 +1431,9 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     expect(blob.type).toBe("image/svg+xml");
 
     const svg = await blobText(blob);
-    expect(svg).toMatch(/<svg\b[^>]*viewBox="0 0 100 100"/);
+    expect(svg).toMatch(
+      /<svg\b[^>]*width="200mm" height="200mm" viewBox="0 0 200 200"/,
+    );
     // The pass ran: its output is STROKE-ONLY (fill-free primitives), so the raw
     // fill colors never reach the serialized SVG and every path is stroked.
     expect(svg).not.toContain('fill="tomato"');
@@ -822,17 +1443,169 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // Static sketch ⇒ the variant segment sits right after the seed, no -t.
     expect(filename).toBe(`circles-seed${seed}-hidden-line.svg`);
 
-    // The reproduction envelope still round-trips to the displayed frame.
+    // The reproduction envelope still round-trips to the displayed frame — now a
+    // v2 record (#266) carrying the active Plot Profile (#267), the Harness
+    // fallback for this default-less Sketch.
     const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
     expect(meta).toBeDefined();
     expect(JSON.parse(meta!)).toMatchObject({
-      version: 1,
+      version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
       seed: Number(seed),
       params: { radius: 10 },
       locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
+  });
+
+  it("exports the cold Outline seam onto a non-square asymmetric physical sheet as paths only", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const profile: PlotProfile = {
+      width: 250,
+      height: 180,
+      insets: { top: 15, right: 45, bottom: 15, left: 25 },
+      includeFrame: false,
+    };
+    const source = {
+      space: { width: 120, height: 100 },
+      background: "papayawhip",
+      primitives: [
+        {
+          points: [
+            [0, 0],
+            [120, 0],
+            [120, 100],
+            [0, 100],
+          ],
+          closed: true,
+          fill: { color: "tomato" },
+        },
+      ],
+    } as unknown as DisplayedSceneSnapshot["scene"];
+    const generate = vi.fn(() => source);
+    const sketch = {
+      ...(hlStaticSketch("physical") as unknown as Record<string, unknown>),
+      defaultOutputProfile: profile,
+      generate,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+
+    const el = mount(<SketchControls sketch={sketch} />);
+    const seed = Number(
+      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
+    );
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(plotterExportCapture.current).toEqual({
+      scene: clipSceneToBounds(outlineScene(source)),
+      profile,
+      metadata: expect.any(String),
+    });
+
+    const svg = await blobText(downloadBlob.mock.calls[0]![0]);
+    expect(svg).toContain(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="250mm" height="180mm" viewBox="0 0 250 180">',
+    );
+    // 120×100 Scene → 180×150 mm drawable: 1.5×, placed at asymmetric
+    // left/right insets 25/45 and top/bottom insets 15/15.
+    expect(svg).toContain('d="M25 15 L205 15 L205 165 L25 165 L25 15"');
+    expect(svg).toContain('stroke-width="1.5"');
+    expect(svg.match(/<path\b/g)).toHaveLength(1);
+    expect(svg).not.toMatch(/<(?:rect|circle|ellipse|polygon|polyline|image)\b/);
+    expect(svg).not.toContain("papayawhip");
+    expect(svg).not.toContain("tomato");
+
+    const encoded = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
+    expect(encoded).toBeDefined();
+    expect(JSON.parse(encoded!)).toEqual({
+      version: 2,
+      sketch: "physical",
+      name: `physical-seed${seed}`,
+      seed,
+      params: { radius: 10 },
+      locks: [],
+      profile,
+    });
+  });
+
+  it("atomically scales the physical sheet via Preset reload while reusing the cached Outline Scene", async () => {
+    listPresets.mockResolvedValue(["double"]);
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const processed = outlineScene(source, 0, true);
+    const processedBefore = structuredClone(processed);
+    const generate = vi.fn(() => source);
+    const el = mount(
+      <SketchControls sketch={{ ...hlStaticSketch("circles"), generate }} />,
+    );
+    await flush();
+    const seed = Number(
+      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
+    );
+
+    clickButton(el, "Fill");
+    fakeDisplayedScene = {
+      scene: processed,
+      t: 0,
+      renderMode: "outline",
+      tolerance: 0,
+      includeFrame: true,
+    };
+    clickButton(el, "Export Hidden-line SVG");
+    const firstScene = plotterExportCapture.current?.scene;
+    const firstSvg = await blobText(downloadBlob.mock.calls[0]![0]);
+
+    // Reload through the real v2 Preset path so width, height, and every inset
+    // commit atomically. Doubling all five magnitudes preserves drawable aspect.
+    const doubledProfile: PlotProfile = {
+      width: 400,
+      height: 400,
+      insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: true,
+    };
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "circles",
+      name: "double",
+      seed,
+      params: { radius: 10 },
+      locks: [],
+      profile: doubledProfile,
+    });
+    const picker = el.querySelector(
+      'select[aria-label="saved presets"]',
+    ) as HTMLSelectElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "double");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+    await flush();
+
+    clickButton(el, "Export Hidden-line SVG");
+    const secondScene = plotterExportCapture.current?.scene;
+    const secondSvg = await blobText(downloadBlob.mock.calls[1]![0]);
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(fakeDisplayedScene?.scene).toBe(processed);
+    expect(processed).toEqual(processedBefore);
+    expect(firstScene).toEqual(secondScene);
+    expect(plotterExportCapture.current?.profile).toEqual(doubledProfile);
+    expect(firstSvg).toContain(
+      'width="200mm" height="200mm" viewBox="0 0 200 200"',
+    );
+    expect(secondSvg).toContain(
+      'width="400mm" height="400mm" viewBox="0 0 400 400"',
+    );
+    expect(firstSvg).toContain('d="M10 10 L46 10"');
+    expect(secondSvg).toContain('d="M20 20 L92 20"');
+    expect(firstSvg).toContain('stroke-width="1.8"');
+    expect(secondSvg).toContain('stroke-width="3.6"');
+    expect(secondSvg).not.toBe(firstSvg);
   });
 
   it("carries the -t{t} segment before -hidden-line for a time-driven sketch", () => {
@@ -847,6 +1620,88 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     expect(filename).toBe(`waves-seed${seed}-t2.5-hidden-line.svg`);
   });
 
+  it("reuses the exact displayed outline Scene without generating or reprocessing", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const processed = outlineScene(source, 0, true);
+    const base = hlStaticSketch("circles");
+    const generate = vi.fn(() => source);
+    const sketch = { ...base, generate };
+    const el = mount(<SketchControls sketch={sketch} />);
+
+    clickButton(el, "Fill");
+    fakeDisplayedScene = {
+      scene: processed,
+      t: 0,
+      renderMode: "outline",
+      tolerance: 0,
+      includeFrame: true,
+    };
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(plotterExportCapture.current?.scene).toEqual(
+      clipSceneToBounds(processed),
+    );
+  });
+
+  it("reuses the exact displayed fill Scene and only runs hidden-line processing", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const base = hlStaticSketch("circles");
+    const generate = vi.fn(() => source);
+    const sketch = { ...base, generate };
+    const el = mount(<SketchControls sketch={sketch} />);
+    fakeDisplayedScene = {
+      scene: source,
+      t: 0,
+      renderMode: "fill",
+      tolerance: 0,
+      includeFrame: true,
+    };
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(plotterExportCapture.current?.scene).toEqual(
+      clipSceneToBounds(outlineScene(source, 0, true)),
+    );
+  });
+
+  it("falls back to exact cold generation when no displayed Scene is cached", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const base = hlStaticSketch("circles");
+    const generate = vi.fn(() => source);
+    const el = mount(<SketchControls sketch={{ ...base, generate }} />);
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(plotterExportCapture.current?.scene).toEqual(
+      clipSceneToBounds(outlineScene(source, 0, true)),
+    );
+  });
+
+  it("rejects a stale displayed Scene and falls back to exact cold generation", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const base = hlStaticSketch("circles");
+    const generate = vi.fn(() => source);
+    const sketch = { ...base, generate };
+    const el = mount(<SketchControls sketch={sketch} />);
+    fakeDisplayedScene = {
+      scene: { space: source.space, primitives: [] },
+      t: 99,
+      renderMode: "fill",
+      tolerance: 0,
+      includeFrame: true,
+    };
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(plotterExportCapture.current?.scene).toEqual(
+      clipSceneToBounds(outlineScene(source, 0, true)),
+    );
+  });
+
   // AC (#220): the outline-mode canvas input and the hidden-line SVG export input
   // must be the IDENTICAL processed Scene for the same (params, seed, t). Both
   // call sites now delegate to the ONE shared `outlineScene` seam, so this holds
@@ -854,8 +1709,9 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
   // `drawFrame` early-returns before it would feed the canvas — the preview's
   // Scene isn't directly observable through a live render. The faithful check is
   // therefore: drive the REAL `exportHiddenLineSvg` and assert the Scene it hands
-  // `renderToSVG` (captured above) deep-equals `outlineScene(sketch, params, seed,
-  // t)` — the exact seam expression LiveCanvas's outline branch evaluates — for
+  // `renderPlotterSVG` (captured above) deep-equals
+  // `outlineScene(generatedScene)` —
+  // the exact processing seam LiveCanvas's outline branch evaluates — for
   // one fixed frame. Locking the export path to the shared seam is what removes
   // the drift risk between preview and export.
   it("export input Scene equals the shared outlineScene seam the preview consumes (#220)", () => {
@@ -867,22 +1723,31 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     clickButton(el, "Export Hidden-line SVG");
 
-    // The export handed `renderToSVG` a Scene.
-    expect(exportSceneCapture.current).not.toBeNull();
+    // The export handed `renderPlotterSVG` a Scene.
+    expect(plotterExportCapture.current).not.toBeNull();
     // A static sketch's export passes `t ?? 0` (t is undefined ⇒ 0); params are
     // the schema defaults ({ radius: 10 }); seed is the displayed seed. The
     // outline preview evaluates this SAME expression, so the two inputs match.
-    expect(exportSceneCapture.current).toEqual(
-      outlineScene(sketch, { radius: 10 }, seed, 0),
+    expect(plotterExportCapture.current?.scene).toEqual(
+      outlineScene(
+        sketch.generate(
+          { radius: 10 },
+          seed,
+          0,
+          resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+        ),
+        0,
+        true,
+      ),
     );
   });
 
   // AC3 (#232): the studio tolerance knob drives the hidden-line EXPORT's final
   // simplification. A scene whose surviving stroke has exactly-collinear interior
   // vertices lets a positive tolerance visibly drop them. Driving the knob then
-  // re-exporting must (a) hand `renderToSVG` the SAME seam expression at the new
-  // tolerance (preview == export by construction) and (b) actually reduce the
-  // exported vertex count versus tolerance 0.
+  // re-exporting must (a) hand `renderPlotterSVG` the SAME seam expression at
+  // the new tolerance (preview == export by construction) and (b) actually
+  // reduce the exported vertex count versus tolerance 0.
   const redundantScene = {
     space: { width: 100, height: 100 },
     // A single filled Primitive, no occluder ⇒ its whole ring survives as one
@@ -920,6 +1785,21 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       0,
     );
 
+  it("limits the simplification tolerance controls to the useful 0–2 range", () => {
+    const el = mount(<SketchControls sketch={redundantSketch("circles")} />);
+    const numberInput = el.querySelector(
+      "#sketch-tolerance",
+    ) as HTMLInputElement;
+    const sliderInput = el.querySelector(
+      'input[type="range"][aria-label="Simplification tolerance"]',
+    ) as HTMLInputElement;
+
+    expect(numberInput.min).toBe("0");
+    expect(numberInput.max).toBe("2");
+    expect(sliderInput.min).toBe("0");
+    expect(sliderInput.max).toBe("2");
+  });
+
   it("the tolerance knob drives the hidden-line export's simplification (#232, AC3)", () => {
     const sketch = redundantSketch("circles");
     const el = mount(<SketchControls sketch={sketch} />);
@@ -929,20 +1809,42 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     // Baseline export at the default tolerance 0 — no simplification.
     clickButton(el, "Export Hidden-line SVG");
-    const atZero = exportSceneCapture.current;
-    expect(atZero).toEqual(outlineScene(sketch, { radius: 10 }, seed, 0, 0));
+    const atZero = plotterExportCapture.current?.scene;
+    expect(atZero).toEqual(
+      outlineScene(
+        sketch.generate(
+          { radius: 10 },
+          seed,
+          0,
+          resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+        ),
+        0,
+        true,
+      ),
+    );
     const vertsAtZero = totalVerts(atZero);
 
     // Drive the studio knob, then re-export.
-    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "5");
+    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "1");
     clickButton(el, "Export Hidden-line SVG");
-    const atFive = exportSceneCapture.current;
+    const atOne = plotterExportCapture.current?.scene;
 
-    // preview == export: the export is the SAME seam expression at tolerance 5
+    // preview == export: the export is the SAME seam expression at tolerance 1
     // (the value LiveCanvas's outline preview also receives — asserted below).
-    expect(atFive).toEqual(outlineScene(sketch, { radius: 10 }, seed, 0, 5));
+    expect(atOne).toEqual(
+      outlineScene(
+        sketch.generate(
+          { radius: 10 },
+          seed,
+          0,
+          resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+        ),
+        1,
+        true,
+      ),
+    );
     // ...and simplification actually reduced the exported vertex count.
-    expect(totalVerts(atFive)).toBeLessThan(vertsAtZero);
+    expect(totalVerts(atOne)).toBeLessThan(vertsAtZero);
   });
 
   it("the tolerance knob value is the one fed to the outline preview (#232, AC3)", () => {
@@ -955,8 +1857,8 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     // Driving the knob updates the SAME value the preview consumes — the single
     // state that also drives the export, so the two cannot diverge.
-    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "5");
-    expect(canvas().dataset.tolerance).toBe("5");
+    setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "1");
+    expect(canvas().dataset.tolerance).toBe("1");
   });
 
   // #237: a filled square straddling the bottom-right corner (x,y ∈ [50,150]),
@@ -989,7 +1891,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
   };
 
-  it("clips the hidden-line output to the canvas bounds after the pass (#237)", () => {
+  it("clips overflowing geometry before physical mapping and keeps it inside the drawable rectangle (#237)", async () => {
     const sketch = overflowHlSketch("circles");
     const el = mount(<SketchControls sketch={sketch} />);
     const seed = Number(
@@ -998,18 +1900,39 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     // The un-clipped seam (generate → hidden-line pass) still overflows the
     // canvas — so the clip that follows is doing real work.
-    const seam = outlineScene(sketch, { radius: 10 }, seed, 0);
+    const seam = outlineScene(
+      sketch.generate(
+        { radius: 10 },
+        seed,
+        0,
+        resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
+      ),
+      0,
+      true,
+    );
     expect(outOfBoundsPoints(seam, 100, 100)).not.toEqual([]);
 
     clickButton(el, "Export Hidden-line SVG");
 
-    // The Scene handed `renderToSVG` is the seam CLIPPED to bounds: nothing lies
-    // outside the canvas, and it is exactly `clipSceneToBounds` of the seam
+    // The Scene handed `renderPlotterSVG` is the seam CLIPPED to bounds: nothing
+    // lies outside the canvas, and it is exactly `clipSceneToBounds` of the seam
     // (clip slotted after the hidden-line pass, before serialization).
-    const exported = exportSceneCapture.current;
+    const exported = plotterExportCapture.current?.scene;
     expect(exported).not.toBeNull();
     expect(outOfBoundsPoints(exported, 100, 100)).toEqual([]);
     expect(exported).toEqual(clipSceneToBounds(seam));
+
+    const svg = await blobText(downloadBlob.mock.calls[0]![0]);
+    const coordinates = [
+      ...svg.matchAll(/[ML](-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g),
+    ].map(([, x, y]) => [Number(x), Number(y)] as const);
+    expect(coordinates.length).toBeGreaterThan(0);
+    // Harness fallback: 200 mm square with 10 mm on every edge.
+    expect(
+      coordinates.every(
+        ([x, y]) => x >= 10 && x <= 190 && y >= 10 && y <= 190,
+      ),
+    ).toBe(true);
   });
 
   // #237 AC3 (concrete): the real Leaf Field sketch (core) run through the full
@@ -1021,9 +1944,10 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     const seed = 12345 as Seed;
     // The hidden-line pass is heavy, so run it ONCE and reuse it for both the
     // pre-clip overflow check and the clipped output.
-    const preClip = hiddenLinePass(leafField.generate(params, seed, 0), {
-      tolerance: 0,
-    });
+    const preClip = hiddenLinePass(
+      leafField.generate(params, seed, 0, DEFAULT_COMPOSITION_FRAME),
+      { tolerance: 0 },
+    );
     const exported = clipSceneToBounds(preClip);
     const { width, height } = exported.space;
     expect(width).toBeGreaterThan(0);
@@ -1098,15 +2022,18 @@ describe("SketchControls — PNG export wiring", () => {
     expect(filename).toBe(`circles-seed${seed}.png`);
 
     // The downloaded PNG carries the reproduction envelope in an iTXt chunk,
-    // round-tripping back to the displayed (seed, params, name-stem) — no t.
+    // round-tripping back to the displayed (seed, params, name-stem) — no t. The
+    // envelope is now a v2 record (#266) carrying the active Plot Profile (#267),
+    // the Harness fallback for this default-less Sketch.
     const json = JSON.parse(readITxtText(await blobBytes(blob)));
     expect(json).toMatchObject({
-      version: 1,
+      version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
       seed: Number(seed),
       params: { radius: 10 },
       locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
     expect("t" in json).toBe(false);
   });

@@ -5,10 +5,25 @@ import { prepareCurlAngle4D } from '../curl'
 import { createRandom } from '../random'
 import { circles } from '../sketches/circles'
 import { leafField } from '../sketches/leaf-field'
-import { bbox as pointsBBox, HEIGHT, WIDTH } from '../sketches/sketch-util'
+import { bbox as pointsBBox } from '../sketches/sketch-util'
 import type { Params } from '../sketch'
 import type { Point } from '../types'
 import type { Primitive } from '../scene'
+import {
+  DEFAULT_COMPOSITION_FRAME,
+  resolveCompositionFrame,
+} from '../compositionFrame'
+
+/**
+ * The frame every reconstruction helper below rebuilds the sketch's normalized
+ * field/placement math against. The sketch now composes into the SUPPLIED frame
+ * (issue #252), so the helpers derive their canvas dims from the same frame the
+ * generate/prepare calls pass — no longer the retired 1000×1000 WIDTH/HEIGHT
+ * constants. The suite drives the sketch with DEFAULT_COMPOSITION_FRAME, so these
+ * resolve to 1000×1000; the space-equals-frame block below also exercises a
+ * non-square frame.
+ */
+const FRAME = DEFAULT_COMPOSITION_FRAME
 
 /**
  * The nineteen leaf-field knobs in Studio declaration order.
@@ -35,22 +50,20 @@ const KNOBS = [
   'leafStrokeColor',
 ] as const
 
-/** The bold dark fill and paper-colored rim the audit pinned (see the sketch header). */
-const LEAF_FILL = '#1a1a1a'
-const PAPER_STROKE = '#f4f1ea'
+const WHITE = '#ffffff'
+const BLACK = '#000000'
 
-/**
- * The occluder discs' DEFAULT fill — the `discColor` knob's default. NOT equal
- * to `backgroundColor`'s default (`#878787`, mid gray): at the defaults the
- * discs read as visible white orbs; disc == background (implied-sphere
- * figure-ground) is an opt-in param choice (see the sketch header's occluder
- * rationale).
- */
-const DISC_FILL = '#ffffff'
+/** The shared circle helper emits its 64 segments plus a closing duplicate. */
+const DISC_POINT_COUNT = 65
 
-/** A leaf Primitive (the dark-filled polygons) as opposed to the occluder disc. */
+/** An occluder disc, classified by authored geometry rather than mutable color. */
+function isDisc(primitive: Primitive): boolean {
+  return primitive.points.length === DISC_POINT_COUNT
+}
+
+/** A leaf Primitive as opposed to the fixed-resolution occluder circle. */
 function isLeaf(primitive: Primitive): boolean {
-  return primitive.fill?.color === LEAF_FILL
+  return !isDisc(primitive)
 }
 
 /** Just the leaf Primitives of a scene, with the single occluder disc filtered out. */
@@ -160,8 +173,8 @@ function fieldAxisAt(primitive: Primitive, seed: string): number {
     octaves: ORIENT_OCTAVES,
   })
   return angleAt(
-    (cx / WIDTH) * ORIENT_FIELD_SCALE,
-    (cy / HEIGHT) * ORIENT_FIELD_SCALE,
+    (cx / FRAME.width) * ORIENT_FIELD_SCALE,
+    (cy / FRAME.height) * ORIENT_FIELD_SCALE,
     1,
     0,
   )
@@ -222,17 +235,31 @@ describe('leaf-field Sketch contract', () => {
     expect(leafField.time).toBeUndefined()
   })
 
-  it('bakes a FIELD of closed leaves, each dark-filled with a distinct paper rim', () => {
-    const scene = leafField.generate({}, 'seed-a', 0)
+  it('defaults the complete authored palette to white fills with black strokes', () => {
+    expect({
+      backgroundColor: leafField.schema.backgroundColor.default,
+      discColor: leafField.schema.discColor.default,
+      leafColor: leafField.schema.leafColor.default,
+      discStrokeColor: leafField.schema.discStrokeColor.default,
+      leafStrokeColor: leafField.schema.leafStrokeColor.default,
+    }).toEqual({
+      backgroundColor: WHITE,
+      discColor: WHITE,
+      leafColor: WHITE,
+      discStrokeColor: BLACK,
+      leafStrokeColor: BLACK,
+    })
+  })
+
+  it('bakes a FIELD of closed leaves with the white-fill/black-stroke defaults', () => {
+    const scene = leafField.generate({}, 'seed-a', 0, DEFAULT_COMPOSITION_FRAME)
     const leaves = leavesOf(scene)
     // A field, not one leaf.
     expect(leaves.length).toBeGreaterThan(1)
     for (const primitive of leaves) {
       expect(primitive.closed).toBe(true)
-      // Audit's painter's-order-observability requirement: bold dark FILL AND a
-      // light paper STROKE, and the two colors must be distinct so overlap reads.
-      expect(primitive.fill?.color).toBe(LEAF_FILL)
-      expect(primitive.stroke?.color).toBe(PAPER_STROKE)
+      expect(primitive.fill?.color).toBe(WHITE)
+      expect(primitive.stroke?.color).toBe(BLACK)
       expect(primitive.fill?.color).not.toBe(primitive.stroke?.color)
       // A closed leaf outline is a non-degenerate ring of points.
       expect(primitive.points.length).toBeGreaterThan(3)
@@ -240,11 +267,46 @@ describe('leaf-field Sketch contract', () => {
   })
 })
 
+describe('leaf-field composes into the supplied Composition Frame', () => {
+  it('returns a Scene whose space equals the supplied frame exactly (default + non-square)', () => {
+    const params: Params = { density: 6 }
+    const square = leafField.generate(params, 'frame-seed', 0, DEFAULT_COMPOSITION_FRAME)
+    expect(square.space).toEqual(DEFAULT_COMPOSITION_FRAME)
+
+    const wide = resolveCompositionFrame(2)
+    const tall = resolveCompositionFrame(0.5)
+    expect(leafField.generate(params, 'frame-seed', 0, wide).space).toEqual(wide)
+    expect(leafField.generate(params, 'frame-seed', 0, tall).space).toEqual(tall)
+    // The prepared sampler must adopt the frame it was prepared with, too.
+    expect(leafField.prepare(params, 'frame-seed', wide)(0).space).toEqual(wide)
+  })
+
+  it('scatters leaves across the whole non-square extent — geometry reaches past x=1000', () => {
+    // The Poisson scatter fills the frame; a non-square frame's leaves must reach
+    // past x=1000. A still-hardcoded 1000-wide field would cap short of the width.
+    const wide = resolveCompositionFrame(2) // width = 1000·√2 ≈ 1414
+    const scene = leafField.generate({ density: 8, sphereCount: 0 }, 'fill', 0, wide)
+    let maxX = -Infinity
+    for (const primitive of scene.primitives) {
+      for (const [x] of primitive.points) if (x > maxX) maxX = x
+    }
+    expect(maxX).toBeGreaterThan(1000)
+  })
+
+  it('is deterministic for a fixed non-square frame', () => {
+    const params: Params = { density: 6, sphereCount: 3, variation: 0.5 }
+    const frame = resolveCompositionFrame(2)
+    const a = leafField.generate(params, 'frame-det', 0, frame)
+    const b = leafField.generate(params, 'frame-det', 0, frame)
+    expect(a).toEqual(b)
+  })
+})
+
 describe('leaf-field density is live-tunable', () => {
   it('a higher density yields strictly more leaves than a lower density at the same seed', () => {
     const seed = 'held'
-    const sparse = leafField.generate({ density: 2 }, seed, 0)
-    const dense = leafField.generate({ density: 10 }, seed, 0)
+    const sparse = leafField.generate({ density: 2 }, seed, 0, DEFAULT_COMPOSITION_FRAME)
+    const dense = leafField.generate({ density: 10 }, seed, 0, DEFAULT_COMPOSITION_FRAME)
     expect(leavesOf(dense).length).toBeGreaterThan(leavesOf(sparse).length)
   })
 })
@@ -256,7 +318,7 @@ describe("leaf-field painter's order / overlap", () => {
     const scene = leafField.generate(
       { density: 12, leafScale: 350, leafSizeVariance: 50 },
       'overlap-seed',
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     expect(scene.primitives.length).toBeGreaterThan(1)
 
@@ -278,18 +340,18 @@ describe("leaf-field painter's order / overlap", () => {
 describe('leaf-field determinism (ADR-0002)', () => {
   it('is deterministic at the Scene level for identical (params, seed, t)', () => {
     const params: Params = { density: 6, leafScale: 160, leafSizeVariance: 40 }
-    const a = leafField.generate(params, 'fixed-seed', 0)
-    const b = leafField.generate(params, 'fixed-seed', 0)
+    const a = leafField.generate(params, 'fixed-seed', 0, DEFAULT_COMPOSITION_FRAME)
+    const b = leafField.generate(params, 'fixed-seed', 0, DEFAULT_COMPOSITION_FRAME)
     expect(a).toEqual(b)
   })
 
   it('carries no cross-call state — an interleaved generate does not perturb the result', () => {
     const params: Params = { density: 7 }
-    const first = leafField.generate(params, 's', 0)
+    const first = leafField.generate(params, 's', 0, DEFAULT_COMPOSITION_FRAME)
     // Interleave unrelated generate calls to surface any accumulated state.
-    leafField.generate({ density: 3 }, 'other', 3)
-    circles.generate({ count: 5 }, 'yet-another', 1)
-    const again = leafField.generate(params, 's', 0)
+    leafField.generate({ density: 3 }, 'other', 3, DEFAULT_COMPOSITION_FRAME)
+    circles.generate({ count: 5 }, 'yet-another', 1, DEFAULT_COMPOSITION_FRAME)
+    const again = leafField.generate(params, 's', 0, DEFAULT_COMPOSITION_FRAME)
     expect(again).toEqual(first)
   })
 
@@ -299,8 +361,8 @@ describe('leaf-field determinism (ADR-0002)', () => {
     // the Harness pins t=0 and this live plumbing is a metadata swap away from
     // animating rather than a rewrite. Determinism at a fixed t is covered above.
     const params: Params = { density: 5 }
-    const atZero = leafField.generate(params, 's', 0)
-    const atLater = leafField.generate(params, 's', 42)
+    const atZero = leafField.generate(params, 's', 0, DEFAULT_COMPOSITION_FRAME)
+    const atLater = leafField.generate(params, 's', 42, DEFAULT_COMPOSITION_FRAME)
     expect(atLater).not.toEqual(atZero)
     expect(leafField.time).toBeUndefined()
   })
@@ -308,8 +370,18 @@ describe('leaf-field determinism (ADR-0002)', () => {
 
 describe('leaf-field caller-owned preparation', () => {
   it('samples byte-exact Scenes through cold generate and a retained warm sampler', () => {
-    const fixtures: Array<{ params: Params; seed: string; times: number[] }> = [
-      { params: {}, seed: 'prepared-default', times: [0, 1 / 60, 3.75] },
+    const fixtures: Array<{
+      params: Params
+      seed: string
+      times: number[]
+      frame: typeof DEFAULT_COMPOSITION_FRAME
+    }> = [
+      {
+        params: {},
+        seed: 'prepared-default',
+        times: [0, 1 / 60, 3.75],
+        frame: DEFAULT_COMPOSITION_FRAME,
+      },
       {
         params: {
           density: 6,
@@ -319,32 +391,41 @@ describe('leaf-field caller-owned preparation', () => {
         },
         seed: 'prepared-varied',
         times: [0, 0.125, 42],
+        frame: DEFAULT_COMPOSITION_FRAME,
+      },
+      // AC #4 must hold for the SUPPLIED frame, not only the square default: cold
+      // generate and the warm sampler stay byte-exact for a non-square frame too.
+      {
+        params: { density: 6, variation: 0.7, sphereCount: 3, sphereDepth: 0.2 },
+        seed: 'prepared-nonsquare',
+        times: [0, 0.125, 42],
+        frame: resolveCompositionFrame(2),
       },
     ]
 
-    for (const { params, seed, times } of fixtures) {
-      const prepared = leafField.prepare(params, seed)
+    for (const { params, seed, times, frame } of fixtures) {
+      const prepared = leafField.prepare(params, seed, frame)
       for (const t of times) {
-        expect(prepared(t)).toEqual(leafField.generate(params, seed, t))
+        expect(prepared(t)).toEqual(leafField.generate(params, seed, t, frame))
       }
     }
   })
 
   it('retains only immutable private layout — mutating one Scene cannot poison another', () => {
     const params: Params = { density: 5, variation: 0.4, sphereCount: 2 }
-    const prepared = leafField.prepare(params, 'prepared-immutable')
+    const prepared = leafField.prepare(params, 'prepared-immutable', DEFAULT_COMPOSITION_FRAME)
     const first = prepared(0.5)
     const firstPoint = first.primitives[0]?.points[0]
     expect(firstPoint).toBeDefined()
     firstPoint![0] = Number.NaN
 
-    expect(prepared(0.5)).toEqual(leafField.generate(params, 'prepared-immutable', 0.5))
+    expect(prepared(0.5)).toEqual(leafField.generate(params, 'prepared-immutable', 0.5, DEFAULT_COMPOSITION_FRAME))
   })
 
   it('carries no shared state across prepared callers or interleaved times', () => {
     const params: Params = { density: 5, variation: 0.6 }
-    const a = leafField.prepare(params, 'prepared-interleave')
-    const b = leafField.prepare(params, 'prepared-interleave')
+    const a = leafField.prepare(params, 'prepared-interleave', DEFAULT_COMPOSITION_FRAME)
+    const b = leafField.prepare(params, 'prepared-interleave', DEFAULT_COMPOSITION_FRAME)
     const expected = a(1.25)
 
     a(9)
@@ -357,8 +438,8 @@ describe('leaf-field caller-owned preparation', () => {
 describe('leaf-field seed independence', () => {
   it('a different seed rearranges the field while params hold', () => {
     const params: Params = { density: 6 }
-    const sceneA = leafField.generate(params, 'seed-a', 0)
-    const sceneB = leafField.generate(params, 'seed-b', 0)
+    const sceneA = leafField.generate(params, 'seed-a', 0, DEFAULT_COMPOSITION_FRAME)
+    const sceneB = leafField.generate(params, 'seed-b', 0, DEFAULT_COMPOSITION_FRAME)
     // The Poisson scatter is seeded, so a re-seed reshuffles placement.
     expect(sceneB).not.toEqual(sceneA)
   })
@@ -369,8 +450,8 @@ describe('leaf-field seed independence', () => {
     // per-leaf spine-length multisets differ — that only holds if the seeded
     // shape rolls (and their flow-driven orientation) genuinely changed.
     const params: Params = { density: 6, variation: 0.6 }
-    const a = leafField.generate(params, 'orient-a', 0)
-    const b = leafField.generate(params, 'orient-b', 0)
+    const a = leafField.generate(params, 'orient-a', 0, DEFAULT_COMPOSITION_FRAME)
+    const b = leafField.generate(params, 'orient-b', 0, DEFAULT_COMPOSITION_FRAME)
     // Rotation-invariant spine lengths: differences here come from the seeded
     // SHAPE rolls (size variation), not merely from different rotations.
     const lengths = (scene: typeof a): number[] =>
@@ -396,7 +477,7 @@ describe('leaf-field flow-field orientation (#127)', () => {
         turbulence: ORIENT_TURBULENCE,
       },
       seed,
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     const leaves = leavesOf(scene)
     expect(leaves.length).toBeGreaterThan(5)
@@ -424,8 +505,8 @@ describe('leaf-field 4D flow phase', () => {
       fieldPhase: 0,
     }
     const seed = 'phase-isolation'
-    const start = leafField.generate(params, seed, 0)
-    const evolved = leafField.generate({ ...params, fieldPhase: 0.25 }, seed, 0)
+    const start = leafField.generate(params, seed, 0, DEFAULT_COMPOSITION_FRAME)
+    const evolved = leafField.generate({ ...params, fieldPhase: 0.25 }, seed, 0, DEFAULT_COMPOSITION_FRAME)
     const startLeaves = leavesOf(start)
     const evolvedLeaves = leavesOf(evolved)
 
@@ -455,7 +536,7 @@ describe('leaf-field 4D flow phase', () => {
   it('anchors sphere geometry at fieldPhase inside one prepared time sampler', () => {
     const prepared = leafField.prepare(
       { density: 4, sphereCount: 3, fieldPhase: 0.17 },
-      'phase-time-anchor',
+      'phase-time-anchor', DEFAULT_COMPOSITION_FRAME,
     )
     const atStart = prepared(0)
     const atLaterTime = prepared(3)
@@ -469,13 +550,13 @@ describe('leaf-field 4D flow phase', () => {
   it('is seamless at the normalized phase boundary and after one future loop duration', () => {
     const params: Params = { density: 4, variation: 0.5, sphereCount: 2 }
     const seed = 'phase-loop-boundary'
-    expect(leafField.generate({ ...params, fieldPhase: 1 }, seed, 0)).toEqual(
-      leafField.generate({ ...params, fieldPhase: 0 }, seed, 0),
+    expect(leafField.generate({ ...params, fieldPhase: 1 }, seed, 0, DEFAULT_COMPOSITION_FRAME)).toEqual(
+      leafField.generate({ ...params, fieldPhase: 0 }, seed, 0, DEFAULT_COMPOSITION_FRAME),
     )
 
     // A nonzero offset keeps this assertion sensitive to floating-point seams
     // caused by composing the public phase with one wrapped time revolution.
-    const prepared = leafField.prepare({ ...params, fieldPhase: 0.37 }, seed)
+    const prepared = leafField.prepare({ ...params, fieldPhase: 0.37 }, seed, DEFAULT_COMPOSITION_FRAME)
     expect(prepared(12)).toEqual(prepared(0))
     expect(prepared(-12)).toEqual(prepared(0))
   })
@@ -483,7 +564,7 @@ describe('leaf-field 4D flow phase', () => {
 
 describe('leaf-field per-leaf variation (#127)', () => {
   it('at nonzero variation, no two leaves are geometrically identical', () => {
-    const scene = leafField.generate({ density: 6, variation: 0.6 }, 'vary', 0)
+    const scene = leafField.generate({ density: 6, variation: 0.6 }, 'vary', 0, DEFAULT_COMPOSITION_FRAME)
     const hashes = leavesOf(scene).map((p) => JSON.stringify(p.points))
     expect(new Set(hashes).size).toBe(hashes.length)
   })
@@ -493,12 +574,12 @@ describe('leaf-field per-leaf variation (#127)', () => {
     const narrow = leafField.generate(
       { density: 6, leafScale: 110, leafSizeVariance: 10 },
       seed,
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     const wide = leafField.generate(
       { density: 6, leafScale: 110, leafSizeVariance: 90 },
       seed,
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     expect(spineLengthSpread(leavesOf(wide))).toBeGreaterThan(
       spineLengthSpread(leavesOf(narrow)),
@@ -511,7 +592,7 @@ describe('leaf-field per-leaf variation (#127)', () => {
     const scene = leafField.generate(
       { density: 6, variation: 0, leafScale: 115, leafSizeVariance: 85 },
       'flat',
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     expect(spineLengthSpread(leavesOf(scene))).toBeGreaterThan(1)
   })
@@ -520,7 +601,7 @@ describe('leaf-field per-leaf variation (#127)', () => {
     const scene = leafField.generate(
       { density: 6, leafScale: 120, leafSizeVariance: 0 },
       'uniform',
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     // Every leaf draws the same length, so spine lengths — a rotation-invariant
     // diagonal measure — match to within float noise. (The occluder disc is
@@ -535,12 +616,12 @@ describe('leaf-field slenderness knobs', () => {
     const slender = leafField.generate(
       { density: 5, variation: 0, leafSlenderness: 5, leafSlendernessVariance: 0 },
       seed,
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     const broad = leafField.generate(
       { density: 5, variation: 0, leafSlenderness: 1, leafSlendernessVariance: 0 },
       seed,
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     expect(leavesOf(broad).length).toBe(leavesOf(slender).length)
     expect(meanLeafArea(leavesOf(broad))).toBeGreaterThan(
@@ -553,12 +634,12 @@ describe('leaf-field slenderness knobs', () => {
     const uniform = leafField.generate(
       { density: 6, variation: 0, leafSlenderness: 2, leafSlendernessVariance: 0 },
       seed,
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     const wide = leafField.generate(
       { density: 6, variation: 0, leafSlenderness: 2, leafSlendernessVariance: 1.5 },
       seed,
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     expect(wide).not.toEqual(uniform)
   })
@@ -570,8 +651,8 @@ describe('leaf-field slenderness knobs', () => {
       leafSlenderness: 2,
       leafSlendernessVariance: 0,
     }
-    const a = leafField.generate(params, 'width-uniform', 0)
-    const b = leafField.generate(params, 'width-uniform', 0)
+    const a = leafField.generate(params, 'width-uniform', 0, DEFAULT_COMPOSITION_FRAME)
+    const b = leafField.generate(params, 'width-uniform', 0, DEFAULT_COMPOSITION_FRAME)
     expect(a).toEqual(b)
   })
 
@@ -579,7 +660,7 @@ describe('leaf-field slenderness knobs', () => {
 
 describe('leaf-field draw boundary', () => {
   it('emits only generic Primitive records — no leaf-typed field crosses the boundary', () => {
-    const scene = leafField.generate({}, 'seed', 0)
+    const scene = leafField.generate({}, 'seed', 0, DEFAULT_COMPOSITION_FRAME)
     // The Scene container carries only the generic IR fields: `space`,
     // `primitives`, and the declared `background` (ADR-0009) — no domain field.
     expect(Object.keys(scene).sort()).toEqual(['background', 'primitives', 'space'])
@@ -613,9 +694,9 @@ describe('leaf-field draw boundary', () => {
  * behind (occluded) and in front of (lapping) the disc.
  */
 describe('leaf-field implied-sphere occluder (#140)', () => {
-  /** The lone occluder disc — the only background-filled Primitive in a scene. */
+  /** The lone occluder disc. */
   function discOf(scene: { primitives: Primitive[] }): Primitive {
-    const discs = scene.primitives.filter((p) => p.fill?.color === DISC_FILL)
+    const discs = scene.primitives.filter(isDisc)
     expect(discs).toHaveLength(1)
     return discs[0]!
   }
@@ -632,20 +713,16 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
   }
 
   it('bakes exactly one opaque discColor-filled, discStrokeColor-outlined disc', () => {
-    const scene = leafField.generate({ sphereCount: 1 }, 'orient', 0)
+    const scene = leafField.generate({ sphereCount: 1 }, 'orient', 0, DEFAULT_COMPOSITION_FRAME)
     const disc = discOf(scene)
     expect(disc.closed).toBe(true)
-    // Fill and stroke match at the defaults, preserving a single white silhouette
-    // on the mid-gray background. Matching both to the background recovers the
-    // implied-sphere figure-ground as an opt-in choice.
-    expect(disc.stroke).toEqual({ color: '#ffffff', width: 2 })
-    expect(disc.fill?.color).toBe(DISC_FILL)
-    expect(disc.fill?.color).not.toBe(scene.background?.color)
-    expect(disc.fill?.color).not.toBe(PAPER_STROKE)
+    expect(disc.stroke).toEqual({ color: BLACK, width: 2 })
+    expect(disc.fill?.color).toBe(WHITE)
+    expect(disc.fill?.color).toBe(scene.background?.color)
   })
 
   it('the occluder is a genuinely round silhouette — every rim point equidistant from center', () => {
-    const scene = leafField.generate({ sphereCount: 1 }, 'orient', 0)
+    const scene = leafField.generate({ sphereCount: 1 }, 'orient', 0, DEFAULT_COMPOSITION_FRAME)
     const disc = discOf(scene)
     // Drop the closing duplicate vertex, then measure each rim point's radius.
     const ring = disc.points.slice(0, -1)
@@ -665,9 +742,9 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
     // depth-0.5 splice — placement is now inset by the disc's OWN radius (#146),
     // so a disc can sit near an edge with no back leaves reaching it; this fixture
     // seed keeps both sides of the occlusion observable (assertions unchanged).
-    const scene = leafField.generate({ sphereCount: 1 }, 'disc', 0)
+    const scene = leafField.generate({ sphereCount: 1 }, 'disc', 0, DEFAULT_COMPOSITION_FRAME)
     const prims = scene.primitives
-    const discIdx = prims.findIndex((p) => p.fill?.color === DISC_FILL)
+    const discIdx = prims.findIndex(isDisc)
     const disc = prims[discIdx]!
     const [cx, cy] = discCenter(disc)
     const r = discRadius(disc)
@@ -691,7 +768,7 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
   })
 
   it('OCCLUDES rather than THINS — leaf density under the disc matches the surrounding field', () => {
-    const scene = leafField.generate({ sphereCount: 1 }, 'orient', 0)
+    const scene = leafField.generate({ sphereCount: 1 }, 'orient', 0, DEFAULT_COMPOSITION_FRAME)
     const disc = discOf(scene)
     const [cx, cy] = discCenter(disc)
     const r = discRadius(disc)
@@ -704,7 +781,8 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
 
     const areaInside = Math.PI * r * r
     const densityInside = inside / areaInside
-    const densityOutside = (leaves.length - inside) / (WIDTH * HEIGHT - areaInside)
+    const densityOutside =
+      (leaves.length - inside) / (FRAME.width * FRAME.height - areaInside)
 
     // The mechanism is occlusion, not density-thinning: the leaves under the
     // sphere are all still present (just painted over), so per-area leaf density
@@ -716,12 +794,12 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
 
   it('is deterministic including the occluder — identical Scene for identical (params, seed, t) (ADR-0002)', () => {
     const params: Params = { density: 8, sphereCount: 1 }
-    const a = leafField.generate(params, 'disc-det', 0)
-    const b = leafField.generate(params, 'disc-det', 0)
+    const a = leafField.generate(params, 'disc-det', 0, DEFAULT_COMPOSITION_FRAME)
+    const b = leafField.generate(params, 'disc-det', 0, DEFAULT_COMPOSITION_FRAME)
     expect(a).toEqual(b)
     // The disc placement (off the per-leaf rng stream) reproduces exactly too.
-    expect(a.primitives.filter((p) => p.fill?.color === DISC_FILL)).toEqual(
-      b.primitives.filter((p) => p.fill?.color === DISC_FILL),
+    expect(a.primitives.filter(isDisc)).toEqual(
+      b.primitives.filter(isDisc),
     )
   })
 })
@@ -735,9 +813,9 @@ describe('leaf-field implied-sphere occluder (#140)', () => {
  * including all discs.
  */
 describe('leaf-field sphere-set knobs (#141)', () => {
-  /** All occluder discs in a scene (background-filled Primitives). */
+  /** All fixed-resolution occluder circles in a scene. */
   function discsOf(scene: { primitives: Primitive[] }): Primitive[] {
-    return scene.primitives.filter((p) => p.fill?.color === DISC_FILL)
+    return scene.primitives.filter(isDisc)
   }
 
   /** A disc's radius, read off the bbox half-width of the circular silhouette. */
@@ -764,8 +842,8 @@ describe('leaf-field sphere-set knobs (#141)', () => {
       const x = cx + Math.cos(rimAngle) * radius
       const y = cy + Math.sin(rimAngle) * radius
       const flowAngle = angleAt(
-        (x / WIDTH) * fieldScale,
-        (y / HEIGHT) * fieldScale,
+        (x / FRAME.width) * fieldScale,
+        (y / FRAME.height) * fieldScale,
         1,
         0,
       )
@@ -776,8 +854,8 @@ describe('leaf-field sphere-set knobs (#141)', () => {
 
   it('emits exactly `sphereCount` discs, so raising it yields strictly more', () => {
     const seed = 'set-count'
-    const few = leafField.generate({ sphereCount: 1 }, seed, 0)
-    const many = leafField.generate({ sphereCount: 5 }, seed, 0)
+    const few = leafField.generate({ sphereCount: 1 }, seed, 0, DEFAULT_COMPOSITION_FRAME)
+    const many = leafField.generate({ sphereCount: 5 }, seed, 0, DEFAULT_COMPOSITION_FRAME)
     expect(discsOf(few)).toHaveLength(1)
     expect(discsOf(many)).toHaveLength(5)
     expect(discsOf(many).length).toBeGreaterThan(discsOf(few).length)
@@ -788,8 +866,8 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     // plain leaf scatter. The default is now 6 (the "Nice One" preset), so a bare
     // generate carries the full implied-sphere set. Either way a field of leaves
     // still bakes, and the disc count never perturbs the leaves (separate stream).
-    const explicit = leafField.generate({ sphereCount: 0 }, 'set-none', 0)
-    const byDefault = leafField.generate({}, 'set-none', 0)
+    const explicit = leafField.generate({ sphereCount: 0 }, 'set-none', 0, DEFAULT_COMPOSITION_FRAME)
+    const byDefault = leafField.generate({}, 'set-none', 0, DEFAULT_COMPOSITION_FRAME)
     expect(discsOf(explicit)).toHaveLength(0)
     expect(discsOf(byDefault)).toHaveLength(6)
     // A disc-free field is still a field — leaves are unaffected by disc count.
@@ -803,7 +881,7 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     const scene = leafField.generate(
       { sphereCount: 6, sphereRadiusMin, sphereRadiusMax },
       'set-radius',
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     const discs = discsOf(scene)
     expect(discs).toHaveLength(6)
@@ -823,7 +901,7 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     const scene = leafField.generate(
       { sphereCount: 5, sphereRadiusMin: hi, sphereRadiusMax: lo },
       'set-swap',
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     for (const disc of discsOf(scene)) {
       const r = discRadius(disc)
@@ -834,8 +912,8 @@ describe('leaf-field sphere-set knobs (#141)', () => {
 
   it('a re-seed rearranges the sphere set while the params hold', () => {
     const params: Params = { sphereCount: 4 }
-    const a = leafField.generate(params, 'spheres-a', 0)
-    const b = leafField.generate(params, 'spheres-b', 0)
+    const a = leafField.generate(params, 'spheres-a', 0, DEFAULT_COMPOSITION_FRAME)
+    const b = leafField.generate(params, 'spheres-b', 0, DEFAULT_COMPOSITION_FRAME)
     // Same count, but the seeded centers/radii/depths differ ⇒ the disc set moves.
     expect(discsOf(a)).toHaveLength(4)
     expect(discsOf(b)).toHaveLength(4)
@@ -867,7 +945,7 @@ describe('leaf-field sphere-set knobs (#141)', () => {
           sphereRadiusMax: radius,
         },
         seed,
-        0,
+        0, DEFAULT_COMPOSITION_FRAME,
       )
       const [selectedX, selectedY] = primitiveCentroid(discsOf(scene)[0]!)
       selectedTotal += rimTangency(
@@ -883,8 +961,8 @@ describe('leaf-field sphere-set knobs (#141)', () => {
       // Reconstruct the former placement policy: the same first two dedicated
       // sphere-stream draws mapped uniformly into the radius-inset canvas.
       const sphereRng = createRandom(`${seed}-sphere`)
-      const randomX = radius + sphereRng.value() * (WIDTH - radius * 2)
-      const randomY = radius + sphereRng.value() * (HEIGHT - radius * 2)
+      const randomX = radius + sphereRng.value() * (FRAME.width - radius * 2)
+      const randomY = radius + sphereRng.value() * (FRAME.height - radius * 2)
       randomTotal += rimTangency(
         seed,
         randomX,
@@ -907,16 +985,16 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     // must consume more sphere draws WITHOUT shifting a single per-leaf roll.
     const seed = 'seam'
     const base: Params = { density: 6, variation: 0.6 }
-    const one = leafField.generate({ ...base, sphereCount: 1 }, seed, 0)
-    const many = leafField.generate({ ...base, sphereCount: 5 }, seed, 0)
+    const one = leafField.generate({ ...base, sphereCount: 1 }, seed, 0, DEFAULT_COMPOSITION_FRAME)
+    const many = leafField.generate({ ...base, sphereCount: 5 }, seed, 0, DEFAULT_COMPOSITION_FRAME)
     // The leaf primitives (filtered from the disc splices) are byte-identical.
     expect(leavesOf(many)).toEqual(leavesOf(one))
   })
 
   it('is deterministic including every disc for identical (params, seed, t) (ADR-0002)', () => {
     const params: Params = { density: 6, sphereCount: 4, sphereRadiusMin: 120, sphereRadiusMax: 260 }
-    const a = leafField.generate(params, 'set-det', 0)
-    const b = leafField.generate(params, 'set-det', 0)
+    const a = leafField.generate(params, 'set-det', 0, DEFAULT_COMPOSITION_FRAME)
+    const b = leafField.generate(params, 'set-det', 0, DEFAULT_COMPOSITION_FRAME)
     expect(a).toEqual(b)
     expect(discsOf(a)).toEqual(discsOf(b))
   })
@@ -929,7 +1007,7 @@ describe('leaf-field sphere-set knobs (#141)', () => {
     const scene = leafField.generate(
       { sphereCount: 6, sphereRadiusMin: 400, sphereRadiusMax: 400 },
       'on-canvas',
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     const discs = discsOf(scene)
     expect(discs).toHaveLength(6)
@@ -938,8 +1016,8 @@ describe('leaf-field sphere-set knobs (#141)', () => {
       const { minX, minY, maxX, maxY } = primitiveBBox(disc)
       expect(minX).toBeGreaterThanOrEqual(-eps)
       expect(minY).toBeGreaterThanOrEqual(-eps)
-      expect(maxX).toBeLessThanOrEqual(WIDTH + eps)
-      expect(maxY).toBeLessThanOrEqual(HEIGHT + eps)
+      expect(maxX).toBeLessThanOrEqual(FRAME.width + eps)
+      expect(maxY).toBeLessThanOrEqual(FRAME.height + eps)
       centers.add(primitiveCentroid(disc).join(','))
     }
     expect(centers.size).toBe(discs.length)
@@ -947,8 +1025,8 @@ describe('leaf-field sphere-set knobs (#141)', () => {
 
   it('re-seeding still moves discs at a smaller radius (placement stays seeded)', () => {
     const params: Params = { sphereCount: 4, sphereRadiusMin: 80, sphereRadiusMax: 80 }
-    const a = leafField.generate(params, 'move-a', 0)
-    const b = leafField.generate(params, 'move-b', 0)
+    const a = leafField.generate(params, 'move-a', 0, DEFAULT_COMPOSITION_FRAME)
+    const b = leafField.generate(params, 'move-b', 0, DEFAULT_COMPOSITION_FRAME)
     expect(discsOf(a)).toHaveLength(4)
     expect(discsOf(b)).toHaveLength(4)
     expect(discsOf(b)).not.toEqual(discsOf(a))
@@ -965,7 +1043,7 @@ describe('leaf-field sphere-set knobs (#141)', () => {
 describe('leaf-field sphereDepth — front/behind split (#142)', () => {
   /** Count of leaf Primitives drawn BEFORE the single disc (its splice position). */
   function leavesBeforeDisc(scene: { primitives: Primitive[] }): number {
-    const discIdx = scene.primitives.findIndex((p) => p.fill?.color === DISC_FILL)
+    const discIdx = scene.primitives.findIndex(isDisc)
     expect(discIdx).toBeGreaterThanOrEqual(0)
     return scene.primitives.slice(0, discIdx).filter(isLeaf).length
   }
@@ -975,8 +1053,8 @@ describe('leaf-field sphereDepth — front/behind split (#142)', () => {
     // ⇒ identical leaf set, only the disc's insert index moves with the knob.
     const base: Params = { sphereCount: 1, density: 8 }
     const seed = 'depth-split'
-    const shallow = leafField.generate({ ...base, sphereDepth: 0.1 }, seed, 0)
-    const deep = leafField.generate({ ...base, sphereDepth: 0.9 }, seed, 0)
+    const shallow = leafField.generate({ ...base, sphereDepth: 0.1 }, seed, 0, DEFAULT_COMPOSITION_FRAME)
+    const deep = leafField.generate({ ...base, sphereDepth: 0.9 }, seed, 0, DEFAULT_COMPOSITION_FRAME)
     // Higher depth ⇒ more leaves painted before (behind) the disc ⇒ cleaner edge.
     expect(leavesBeforeDisc(deep)).toBeGreaterThan(leavesBeforeDisc(shallow))
   })
@@ -986,15 +1064,15 @@ describe('leaf-field sphereDepth — front/behind split (#142)', () => {
     // set stays byte-identical while only the disc's stack position shifts.
     const base: Params = { sphereCount: 1, density: 8 }
     const seed = 'depth-seam'
-    const shallow = leafField.generate({ ...base, sphereDepth: 0.1 }, seed, 0)
-    const deep = leafField.generate({ ...base, sphereDepth: 0.9 }, seed, 0)
+    const shallow = leafField.generate({ ...base, sphereDepth: 0.1 }, seed, 0, DEFAULT_COMPOSITION_FRAME)
+    const deep = leafField.generate({ ...base, sphereDepth: 0.9 }, seed, 0, DEFAULT_COMPOSITION_FRAME)
     expect(leavesOf(deep)).toEqual(leavesOf(shallow))
   })
 
   it('is deterministic for identical (params, seed, t) (ADR-0002)', () => {
     const params: Params = { sphereCount: 3, sphereDepth: 0.7, density: 6 }
-    const a = leafField.generate(params, 'depth-det', 0)
-    const b = leafField.generate(params, 'depth-det', 0)
+    const a = leafField.generate(params, 'depth-det', 0, DEFAULT_COMPOSITION_FRAME)
+    const b = leafField.generate(params, 'depth-det', 0, DEFAULT_COMPOSITION_FRAME)
     expect(a).toEqual(b)
   })
 })
@@ -1002,49 +1080,45 @@ describe('leaf-field sphereDepth — front/behind split (#142)', () => {
 /**
  * The two appended color knobs (ADR-0010): `backgroundColor` feeds the Scene's
  * declared background (ADR-0009) and `discColor` the occluder discs' fill. The
- * defaults DIFFER deliberately — white discs (`#ffffff`) on a mid-gray ground
- * (`#878787`) — so the discs read as visible orbs out of the box (the look the
- * "Nice One" preset also pins); the original white-on-white implied-sphere
- * image is an opt-in param choice (set both knobs white). Neither knob consumes
- * an rng draw, so geometry is byte-identical across any color value.
+ * defaults now match deliberately — white discs on a white ground — while both
+ * authored strokes default black. Neither knob consumes an rng draw, so
+ * geometry is byte-identical across any color value.
  */
 describe('leaf-field color knobs — backgroundColor & discColor (ADR-0010)', () => {
   /** All occluder discs of a scene, keyed by the given disc fill color. */
   function discsFilled(scene: { primitives: Primitive[] }, color: string): Primitive[] {
-    return scene.primitives.filter((p) => p.fill?.color === color)
+    return scene.primitives.filter((p) => isDisc(p) && p.fill?.color === color)
   }
 
   it('carries the backgroundColor param as the Scene-declared background', () => {
-    const scene = leafField.generate({ backgroundColor: '#112233' }, 'color', 0)
+    const scene = leafField.generate({ backgroundColor: '#112233' }, 'color', 0, DEFAULT_COMPOSITION_FRAME)
     expect(scene.background).toEqual({ color: '#112233' })
   })
 
-  it('defaults the background to mid gray (#878787)', () => {
-    const scene = leafField.generate({}, 'color', 0)
-    expect(scene.background).toEqual({ color: '#878787' })
+  it('defaults the background to white', () => {
+    const scene = leafField.generate({}, 'color', 0, DEFAULT_COMPOSITION_FRAME)
+    expect(scene.background).toEqual({ color: WHITE })
   })
 
   it('fills every occluder disc with the discColor param', () => {
     const scene = leafField.generate(
       { sphereCount: 4, discColor: '#aa3366' },
       'color',
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     const discs = discsFilled(scene, '#aa3366')
     expect(discs).toHaveLength(4)
     for (const disc of discs) {
-      expect(disc.stroke).toEqual({ color: '#ffffff', width: 2 })
+      expect(disc.stroke).toEqual({ color: BLACK, width: 2 })
       expect(disc.closed).toBe(true)
     }
   })
 
-  it('defaults discColor to white — visible orbs on the gray ground, NOT figure-ground', () => {
-    const scene = leafField.generate({ sphereCount: 3 }, 'color', 0)
+  it('defaults discColor to white on the white ground', () => {
+    const scene = leafField.generate({ sphereCount: 3 }, 'color', 0, DEFAULT_COMPOSITION_FRAME)
     const discs = discsFilled(scene, '#ffffff')
     expect(discs).toHaveLength(3)
-    // The defaults deliberately differ: disc fill + stroke == background (the
-    // implied-sphere special case) is opt-in via params.
-    expect(scene.background?.color).toBe('#878787')
+    expect(scene.background?.color).toBe(WHITE)
   })
 
   it('consumes NO rng draws — geometry is byte-identical across color values', () => {
@@ -1053,11 +1127,11 @@ describe('leaf-field color knobs — backgroundColor & discColor (ADR-0010)', ()
     // colors are not param-driven), and every disc keeps its exact outline.
     const seed = 'color-seam'
     const base: Params = { density: 6, variation: 0.6, sphereCount: 3 }
-    const plain = leafField.generate(base, seed, 0)
+    const plain = leafField.generate(base, seed, 0, DEFAULT_COMPOSITION_FRAME)
     const tinted = leafField.generate(
       { ...base, backgroundColor: '#0a141e', discColor: '#c2b280' },
       seed,
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     expect(leavesOf(tinted)).toEqual(leavesOf(plain))
     const outlines = (scene: typeof plain, color: string): unknown[] =>
@@ -1072,8 +1146,8 @@ describe('leaf-field color knobs — backgroundColor & discColor (ADR-0010)', ()
       backgroundColor: '#123123',
       discColor: '#456456',
     }
-    const a = leafField.generate(params, 'color-det', 0)
-    const b = leafField.generate(params, 'color-det', 0)
+    const a = leafField.generate(params, 'color-det', 0, DEFAULT_COMPOSITION_FRAME)
+    const b = leafField.generate(params, 'color-det', 0, DEFAULT_COMPOSITION_FRAME)
     expect(a).toEqual(b)
   })
 })
@@ -1087,7 +1161,7 @@ describe('leaf-field disc stroke color knob', () => {
         discStrokeColor: '#663399',
       },
       'disc-stroke-color',
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
     const discs = scene.primitives.filter(
       (primitive) => primitive.fill?.color === '#ccddee',
@@ -1109,7 +1183,7 @@ describe('leaf-field leaf color knobs', () => {
         leafStrokeColor: '#f6c453',
       },
       'leaf-colors',
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
 
     expect(scene.primitives.length).toBeGreaterThan(1)
@@ -1122,11 +1196,11 @@ describe('leaf-field leaf color knobs', () => {
 
   it('changes only leaf styling, not geometry or draw order', () => {
     const params: Params = { density: 6, sphereCount: 0 }
-    const plain = leafField.generate(params, 'leaf-color-seam', 0)
+    const plain = leafField.generate(params, 'leaf-color-seam', 0, DEFAULT_COMPOSITION_FRAME)
     const tinted = leafField.generate(
       { ...params, leafColor: '#335577', leafStrokeColor: '#ddeeff' },
       'leaf-color-seam',
-      0,
+      0, DEFAULT_COMPOSITION_FRAME,
     )
 
     expect(

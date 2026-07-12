@@ -135,26 +135,61 @@
 }
 
 /*
- * The framed "paper" (#155). Its CSS box is sized to the SKETCH's OWN aspect —
- * not a fixed square — and contain-fit against the stage: `--paper-aspect` (a
- * unitless width/height ratio) is threaded on inline by LiveCanvas from the
- * generated Scene's `space`, defaulting here to 1 (square) so the box is
- * coherent before any JS runs. `width: min(100cqw, 100cqh * aspect)` picks the
- * largest width that fits BOTH the stage's width and its height-at-aspect (a
- * pure-CSS contain-fit), and `aspect-ratio` derives the matching height; the
- * stage flex-centers the result. The border + drop shadow read as a paper frame
- * lifted off the dark chrome. LiveCanvas still sizes the backing store to this
- * box x devicePixelRatio and contain-fits the Scene into it, so `Stroke.width`
- * scales correctly and PNG/SVG export snapshots the displayed frame unchanged.
+ * Full physical-sheet preview chrome (#248). `--sheet-aspect` is the active Plot
+ * Profile's paper width/height ratio; container units contain-fit that shape in
+ * the stage. This is proportional preview only: no CSS pixel claims a physical
+ * size. The white surface and shadow distinguish the whole sheet from the dark
+ * Studio chrome.
+ */
+.plot-sheet {
+  position: relative;
+  --sheet-aspect: 1;
+  aspect-ratio: var(--sheet-aspect);
+  width: min(100cqw, 100cqh * var(--sheet-aspect));
+  background: #fff;
+  /* Paint-only edge: a border would shrink the percentage containing block and
+     make physical inset ratios subtly wrong. Outline consumes no layout space. */
+  outline: 1px solid var(--border);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 60%);
+}
+
+/*
+ * The drawable rectangle is positioned from every independent profile inset.
+ * Percentages are relative to the matching paper axis (top/bottom to height,
+ * left/right to width), so asymmetric safe areas remain faithful. The pseudo
+ * element is a non-interactive margin guide painted above either render mode.
+ */
+.plot-drawable {
+  position: absolute;
+  top: var(--plot-inset-top, 0%);
+  right: var(--plot-inset-right, 0%);
+  bottom: var(--plot-inset-bottom, 0%);
+  left: var(--plot-inset-left, 0%);
+}
+
+.plot-drawable::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border: 1px dashed rgb(0 0 0 / 40%);
+  content: "";
+  pointer-events: none;
+}
+
+/*
+ * The real drawable canvas fills that inner rectangle. Its frame aspect is kept
+ * explicit as a contract/check, while both dimensions are supplied by the
+ * profile-derived wrapper. The backing store still follows this element's box,
+ * so getCanvas/PNG continue to expose only drawable pixels, never the sheet
+ * chrome or margins.
  */
 .live-canvas {
   display: block;
   box-sizing: border-box;
   --paper-aspect: 1;
+  width: 100%;
+  height: 100%;
   aspect-ratio: var(--paper-aspect);
-  width: min(100cqw, 100cqh * var(--paper-aspect));
-  border: 1px solid var(--border);
-  box-shadow: 0 8px 30px rgb(0 0 0 / 60%);
 }
 
 /*

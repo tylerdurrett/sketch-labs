@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "sketch": "leaf-field",
+  "name": "pretty-good-4-3",
+  "seed": 4876662002869356,
+  "params": {
+    "fieldPhase": 0.326,
+    "fieldScale": 0.5,
+    "turbulence": 1.4369,
+    "octaves": 2,
+    "density": 24.147,
+    "leafScale": 43.93,
+    "leafSizeVariance": 3.6,
+    "leafSlenderness": 1.25,
+    "leafSlendernessVariance": 0.17094,
+    "variation": 0.154,
+    "sphereCount": 7,
+    "sphereRadiusMin": 40,
+    "sphereRadiusMax": 191.56,
+    "sphereDepth": 0.439,
+    "backgroundColor": "#ffffff",
+    "discColor": "#ffffff",
+    "discStrokeColor": "#000000",
+    "leafColor": "#ffffff",
+    "leafStrokeColor": "#000000"
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    }
+  }
+}

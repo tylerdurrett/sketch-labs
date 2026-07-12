@@ -22,7 +22,7 @@
 import { samplePoissonDisk } from '../../poisson'
 import { createRandom } from '../../random'
 import { createScene } from '../../scene'
-import type { Scene } from '../../scene'
+import type { CoordinateSpace, Scene } from '../../scene'
 import type {
   NumberParamSpec,
   Params,
@@ -30,7 +30,7 @@ import type {
   StatelessSketch,
 } from '../../sketch'
 import type { Point, Polyline } from '../../types'
-import { HEIGHT, numberParam, WIDTH } from '../sketch-util'
+import { numberParam } from '../sketch-util'
 
 /** Points used to approximate each dot's perimeter as a closed polygon. */
 const DOT_SEGMENTS = 12
@@ -98,8 +98,8 @@ export const scatter: StatelessSketch = {
   id: 'scatter',
   name: 'Scatter',
   schema,
-  generate(params: Params, seed: Seed, _t: number): Scene {
-    const builder = createScene({ width: WIDTH, height: HEIGHT })
+  generate(params: Params, seed: Seed, _t: number, frame: CoordinateSpace): Scene {
+    const builder = createScene(frame)
 
     const baseRadius = numberParam(params, schema, 'baseRadius')
     const jitter = numberParam(params, schema, 'jitter')
@@ -109,8 +109,8 @@ export const scatter: StatelessSketch = {
     // constant so the accel grid is sized accurately (variable/density-driven
     // radius is out of scope — lands with the clearings slice #98).
     const points = samplePoissonDisk({
-      width: WIDTH,
-      height: HEIGHT,
+      width: frame.width,
+      height: frame.height,
       radius: () => baseRadius,
       minRadius: baseRadius,
       k: kSamples,

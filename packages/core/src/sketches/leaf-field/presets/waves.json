@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "sketch": "leaf-field",
+  "name": "waves",
+  "seed": 146704215472362,
+  "params": {
+    "fieldPhase": 0.6546706535141561,
+    "fieldScale": 1.4051731388552278,
+    "turbulence": 0.12498537129462912,
+    "octaves": 5,
+    "density": 71.64557731071028,
+    "leafScale": 310.7537794243831,
+    "leafSizeVariance": 67.38687928460595,
+    "leafSlenderness": 3.3945276550576438,
+    "leafSlendernessVariance": 2.4658106865784624,
+    "variation": 0.09278401771340461,
+    "sphereCount": 14,
+    "sphereRadiusMin": 159.22612718868504,
+    "sphereRadiusMax": 195.88,
+    "sphereDepth": 0.6077061023209206,
+    "backgroundColor": "#f5f0f0",
+    "discColor": "#ffffff",
+    "discStrokeColor": "#353131",
+    "leafColor": "#ffffff",
+    "leafStrokeColor": "#000000"
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    }
+  }
+}

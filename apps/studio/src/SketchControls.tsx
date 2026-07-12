@@ -1,5 +1,5 @@
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   applyPreset,
@@ -10,9 +10,16 @@ import {
   exportFilename,
   insertPngMetadata,
   newSeed,
+  plotDrawableAspectsEquivalent,
+  plotDrawableRectangle,
   randomize,
+  renderPlotterSVG,
   renderToSVG,
+  resolveOutputProfile,
+  resolvePlotCompositionFrame,
+  type PlotProfile,
   type Preset,
+  type Scene,
   type Sketch,
 } from "@harness/core";
 
@@ -22,22 +29,66 @@ import { Slider } from "./components/ui/slider";
 import { downloadBlob } from "./downloadBlob";
 import {
   LiveCanvas,
+  type DisplayedSceneSnapshot,
   type LiveCanvasHandle,
   type RenderMode,
 } from "./LiveCanvas";
 import { outlineScene } from "./outlineScene";
+import { PaperSection } from "./PaperSection";
 import { PresetControls } from "./PresetControls";
+
+/** Select the exact hidden-line export input, lazily falling back on a cache miss. */
+export function hiddenLineSceneForExport({
+  displayed,
+  currentT,
+  renderMode,
+  tolerance,
+  includeFrame,
+  generate,
+}: {
+  displayed: DisplayedSceneSnapshot | null;
+  currentT: number;
+  renderMode: RenderMode;
+  tolerance: number;
+  includeFrame: boolean;
+  generate: () => Scene;
+}): Scene {
+  const cacheMatches =
+    displayed !== null &&
+    displayed.t === currentT &&
+    displayed.renderMode === renderMode &&
+    displayed.tolerance === tolerance &&
+    displayed.includeFrame === includeFrame;
+  if (!cacheMatches) return outlineScene(generate(), tolerance, includeFrame);
+  return displayed.renderMode === "outline"
+    ? displayed.scene
+    : outlineScene(displayed.scene, tolerance, includeFrame);
+}
 
 /**
  * Upper bound of the studio simplification-tolerance knob (issue #232), in the
  * Scene's coordinate-space units. The Hidden-line pass runs in Scene space, and
- * the studio's sketches use spaces on the order of ~100 units, so a max of 20 is
- * a generous ceiling: it spans from 0 (identity — no simplification) through
- * aggressive vertex reduction while keeping the slider's useful range on the low
- * end where plotter-relevant reductions live. Non-integer (continuous) so fine
- * tolerances are reachable.
+ * the studio's sketches use spaces on the order of ~100 units. The useful,
+ * plotter-relevant adjustments live close to zero, so the range stops at 2 to
+ * give that low end substantially more physical slider travel. Non-integer
+ * (continuous) so fine tolerances are reachable.
  */
-const TOLERANCE_MAX = 20;
+const TOLERANCE_MAX = 2;
+
+/** Preset params are flat schema values; preserve identity when reload is equal. */
+function sameParams(
+  left: Readonly<Record<string, unknown>>,
+  right: Readonly<Record<string, unknown>>,
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) => Object.hasOwn(right, key) && Object.is(left[key], right[key]),
+    )
+  );
+}
 
 /**
  * Props for {@link SketchControls}.
@@ -91,6 +142,18 @@ export interface SketchControlsProps {
  * across a roll. A lock NEVER gates editability — a locked control stays fully
  * hand-editable. Like `seed` and `params`, `locks` lives in keyed-remount state,
  * so a Sketch switch clears every lock for free (no manual reset).
+ *
+ * PROFILE is the session's ONE active Plot Profile — the physical-plot output
+ * dimensions (#247). Like params/seed/locks it lives in keyed-remount state, so
+ * it is RESOLVED fresh per Sketch: the lazy initializer runs `resolveOutputProfile`
+ * against THIS Sketch's own `defaultOutputProfile` (#265's precedence: preset ??
+ * sketch default ?? Harness fallback), so a Sketch switch re-resolves from the
+ * newly-mounted Sketch and NEVER reuses the previous Sketch's dimensions. It is
+ * threaded through persistence and composition — captured into a saved Preset
+ * (via `PresetControls` → `makePreset`), re-resolved on a Preset reload (a v2
+ * Preset's stored profile wins; a v1 falls back to the Sketch default / Harness
+ * fallback), and embedded into every export's reproduction metadata. Its drawable
+ * aspect resolves the ONE Composition Frame shared by preview and vector exports.
  */
 export function SketchControls({
   sketch,
@@ -101,6 +164,40 @@ export function SketchControls({
   const [params, setParams] = useState(() => defaultParams(sketch.schema));
   const [seed, setSeed] = useState(() => newSeed(Math.random));
   const [locks, setLocks] = useState<ReadonlySet<string>>(() => new Set());
+
+  // The session's ONE active Plot Profile (#247), resolved per-Sketch in keyed-
+  // remount state. The lazy initializer runs #265's precedence against THIS
+  // Sketch's own default (no preset in play at mount ⇒ `undefined` first arg), so
+  // a Sketch switch re-resolves from the freshly-mounted Sketch's default (or the
+  // Harness fallback) and never reuses the previous Sketch's dimensions. See the
+  // module header for how it threads through save / reload / export metadata.
+  const [profile, setProfile] = useState<PlotProfile>(() =>
+    resolveOutputProfile(undefined, sketch.defaultOutputProfile),
+  );
+
+  // Physical magnitude belongs to later device mapping. Composition depends only
+  // on the drawable rectangle's aspect, so equivalent profiles share this cache
+  // boundary and do not rebuild prepared geometry.
+  const drawable = plotDrawableRectangle(profile);
+  const drawableAspect = drawable.width / drawable.height;
+  // Stabilize the memo key across machine-noise-only quotient differences (for
+  // example a 1.2× proportional scale of non-binary A4 dimensions/insets). The
+  // same core equivalence drives commit invalidation below, so frame identity and
+  // the Computing affordance cannot disagree about whether geometry changed.
+  const drawableAspectIdentityRef = useRef(drawableAspect);
+  if (
+    !plotDrawableAspectsEquivalent(
+      drawableAspectIdentityRef.current,
+      drawableAspect,
+    )
+  ) {
+    drawableAspectIdentityRef.current = drawableAspect;
+  }
+  const drawableAspectIdentity = drawableAspectIdentityRef.current;
+  const compositionFrame = useMemo(
+    () => resolvePlotCompositionFrame(profile),
+    [drawableAspectIdentity],
+  );
 
   // The preview's render mode (issue #219): `fill` (default) shows the live fill
   // preview; `outline` swaps in the Hidden-line pass's stroke-only, occlusion-
@@ -126,7 +223,7 @@ export function SketchControls({
   // param): the pass runs AFTER `sketch.generate`, so simplification is a
   // post-generation studio concern, not part of any Sketch's declared inputs.
   // This ONE state feeds BOTH the outline preview (via LiveCanvas's `tolerance`
-  // prop) and the hidden-line SVG export (the 5th arg to `outlineScene` in
+  // prop) and the hidden-line SVG export (the tolerance arg to `outlineScene` in
   // `exportHiddenLineSvg`), so preview and export simplify identically (AC2/AC3).
   // Like the other axes it lives in keyed-remount state, so a Sketch switch
   // resets it to 0 (no simplification) for free. 0 is an identity no-op.
@@ -148,6 +245,27 @@ export function SketchControls({
   // that edit's commit. A no-op in fill mode (no pass runs). See the flag above.
   const markOutlineRecomputing = () => {
     if (renderMode === "outline") setComputingOutline(true);
+  };
+
+  // PaperSection only emits complete, validated profiles. Keep that controlled
+  // commit as the boundary between physical preview layout and generated Scene
+  // geometry: every profile refreshes the full-sheet chrome, while only a
+  // changed drawable aspect invalidates the shared Composition Frame (and thus
+  // the outline pass). Same-aspect magnitude/inset edits deliberately leave the
+  // frame identity and outline geometry untouched.
+  const commitProfile = (next: PlotProfile) => {
+    const nextDrawable = plotDrawableRectangle(next);
+    const nextDrawableAspect = nextDrawable.width / nextDrawable.height;
+    if (
+      next.includeFrame !== profile.includeFrame ||
+      !plotDrawableAspectsEquivalent(
+        drawableAspectIdentity,
+        nextDrawableAspect,
+      )
+    ) {
+      markOutlineRecomputing();
+    }
+    setProfile(next);
   };
 
   // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
@@ -208,11 +326,34 @@ export function SketchControls({
   // job — `applyPreset` returns a sorted string[], the studio's live lock state
   // is a Set<string>.
   const reloadPreset = (preset: Preset) => {
-    markOutlineRecomputing();
     const state = applyPreset(sketch.schema, preset);
-    setParams(state.params);
+    const resolvedProfile = resolveOutputProfile(
+      state.profile,
+      sketch.defaultOutputProfile,
+    );
+    const nextDrawable = plotDrawableRectangle(resolvedProfile);
+    const nextAspect = nextDrawable.width / nextDrawable.height;
+    // A Preset may change persistence-only axes or proportionally scale the
+    // physical sheet while preserving the exact composition. Keep param identity
+    // when values are equal and raise Computing only for true Scene inputs.
+    const paramsChanged = !sameParams(params, state.params);
+    const geometryChanged =
+      paramsChanged ||
+      seed !== state.seed ||
+      profile.includeFrame !== resolvedProfile.includeFrame ||
+      !plotDrawableAspectsEquivalent(drawableAspectIdentity, nextAspect);
+    if (geometryChanged) markOutlineRecomputing();
+    setParams((current) =>
+      sameParams(current, state.params) ? current : state.params,
+    );
     setSeed(state.seed);
     setLocks(new Set(state.locks));
+    // Resolve the active profile through #265's precedence: a v2 Preset's stored
+    // profile (`state.profile`) wins; a v1 Preset (`state.profile === undefined`)
+    // falls back to this Sketch's default / the Harness fallback. `applyPreset`
+    // passes the stored profile through verbatim WITHOUT resolving the fallback —
+    // resolving it here at the session boundary is #267's job.
+    setProfile(resolvedProfile);
   };
 
   // Export the CURRENTLY DISPLAYED frame as a PNG — a one-shot user action that
@@ -225,6 +366,11 @@ export function SketchControls({
   // Sketch passes the captured `t` (the last-drawn moment from the handle), a
   // static Sketch omits `t` entirely so the name carries no segment.
   const exportPng = () => {
+    // Outline inputs/profile can commit before LiveCanvas's intentionally
+    // deferred two-rAF rebuild lands. Never snapshot those stale pixels with the
+    // newly committed reproduction metadata, even if this handler is invoked
+    // programmatically while the disabled button cannot be clicked.
+    if (computingOutline) return;
     const handle = canvasHandle.current;
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
@@ -232,13 +378,16 @@ export function SketchControls({
     // Sketch carries its captured moment, a static one omits `t` entirely.
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
     // The reproduction envelope embedded into BOTH exports (issue #76), built
-    // once from the same displayed `(params, seed, locks, t)` spine.
+    // once from the same displayed `(params, seed, locks, t)` spine. The active
+    // Plot Profile (#247) rides along too, so the exported PNG's metadata is a v2
+    // Preset carrying the physical-plot output dimensions.
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
       seed,
       params,
       locks,
       t,
+      profile,
     });
     canvas.toBlob((blob) => {
       if (blob === null) return;
@@ -262,8 +411,9 @@ export function SketchControls({
   // path to {@link exportPng}, also a one-shot click OUTSIDE the per-frame loop.
   // Unlike PNG (which snapshots the live canvas's pixels), SVG re-bakes the
   // displayed `(params, seed, t)` into a Scene via `sketch.generate` and serializes
-  // it with core's `renderToSVG` — matching the PNG path's pattern keeps
-  // LiveCanvas's handle unchanged (no Scene is threaded out of it).
+  // it with core's `renderToSVG`. Plain SVG deliberately keeps this cold path;
+  // the displayed-Scene snapshot is consumed only by Hidden-line export, where
+  // generation and occlusion processing are materially expensive.
   //
   // `t` is read from the handle and TIME-GATED on `sketch.time` exactly as the
   // PNG path does, so the regenerated Scene and the `-t{t}` filename segment both
@@ -275,20 +425,22 @@ export function SketchControls({
     // `generate` takes a concrete `t` (static Sketches conventionally get 0 and
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
-    const scene = sketch.generate(params, seed, t ?? 0);
+    const scene = sketch.generate(params, seed, t ?? 0, compositionFrame);
     // Clip the generated geometry to the canvas rectangle so the exported plot
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
     const clipped = clipSceneToBounds(scene);
     // Embed the same reproduction envelope as a <metadata> element (issue #76),
-    // built from the displayed `(params, seed, locks, t)` spine — core's
-    // `renderToSVG` does the injection (ADR-0004: serialization lives in core).
+    // built from the displayed `(params, seed, locks, t)` spine plus the active
+    // Plot Profile (#247) — core's `renderToSVG` does the injection (ADR-0004:
+    // serialization lives in core).
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
       seed,
       params,
       locks,
       t,
+      profile,
     });
     const svg = renderToSVG(clipped, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
@@ -297,44 +449,54 @@ export function SketchControls({
 
   // Export the CURRENTLY DISPLAYED frame as a HIDDEN-LINE SVG — a plotter-ready
   // variant of {@link exportSvg} that derives its stroke-only, occlusion-clipped
-  // Scene from the shared {@link outlineScene} seam (`generate` → Hidden-line
-  // pass) BEFORE serialization. Routing through that ONE seam — the same
-  // derivation LiveCanvas's outline preview consumes — is what makes preview ==
-  // export true by construction (issue #220): the two paths cannot drift because
-  // there is only one place the processed Scene is derived. It is the same
-  // one-shot click OUTSIDE the per-frame loop; the pass is heavy and on-demand
-  // only, so it runs HERE inside the handler — never in render or the live loop.
+  // Scene through the shared {@link outlineScene} processing seam BEFORE
+  // serialization. Routing through that ONE seam — the same processing
+  // LiveCanvas's outline preview consumes — is what makes preview == export true
+  // by construction (issue #220): the two paths cannot drift after sampling. It
+  // is the same one-shot click OUTSIDE the per-frame loop; the pass is heavy and
+  // on-demand only, so it runs HERE inside the handler — never in render or the
+  // live loop.
   //
-  // Everything else mirrors `exportSvg` exactly (same handle guard, same
-  // `sketch.time` time-gating of `t`, same displayed `(params, seed, t)` spine,
-  // same reproduction envelope), so both SVG exports reflect the identical
-  // displayed moment. The file is tagged with a `-hidden-line` variant segment so
-  // it never collides with the plain SVG export's name.
+  // Sampling still mirrors `exportSvg` exactly (same handle guard, time gating,
+  // displayed state, and reproduction envelope). Serialization deliberately
+  // differs: plotter output maps the clipped Scene through the active physical
+  // profile, while ordinary SVG remains on `renderToSVG`. The file keeps its
+  // `-hidden-line` variant segment and existing time-gated name.
   const exportHiddenLineSvg = () => {
     const handle = canvasHandle.current;
     if (handle == null) return;
-    const t = sketch.time === undefined ? undefined : handle.getCurrentT();
-    // The shared preview == export seam: `generate` then the occlusion-clipping
-    // Hidden-line pass, on-demand only, strictly inside this click handler. The
-    // studio `tolerance` knob is forwarded as the 5th arg so the exported paths
-    // carry the SAME final Douglas–Peucker simplification the outline preview
-    // shows (issue #232) — both read this one state through this one seam.
-    // `renderToSVG` then serializes the stroke-only result.
-    const hiddenLineScene = outlineScene(sketch, params, seed, t ?? 0, tolerance);
+    const displayed = handle.getDisplayedScene();
+    const currentT = handle.getCurrentT();
+    const t = sketch.time === undefined ? undefined : currentT;
+    // Reuse only an atomic snapshot matching the current t/mode/tolerance. An
+    // outline snapshot is already the exact processed preview Scene; a fill
+    // snapshot is the exact displayed source fed through the shared seam here.
+    // A null/stale snapshot falls back to cold generation plus that same seam.
+    const hiddenLineScene = hiddenLineSceneForExport({
+      displayed,
+      currentT,
+      renderMode,
+      tolerance,
+      includeFrame: profile.includeFrame,
+      generate: () =>
+        sketch.generate(params, seed, t ?? 0, compositionFrame),
+    });
     // Clip AFTER the hidden-line pass and BEFORE serialization (issue #237): the
     // pass can emit stroke geometry beyond the canvas, so the clip is the last
     // export-only stage that guarantees no plotted line escapes `space`. The clip
     // stays out of `outlineScene` itself — that seam also feeds the live outline
     // preview (LiveCanvas), and clipping must remain export-only.
     const clipped = clipSceneToBounds(hiddenLineScene);
+    // Same reproduction envelope + active Plot Profile (#247) as the other exports.
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
       seed,
       params,
       locks,
       t,
+      profile,
     });
-    const svg = renderToSVG(clipped, metadata);
+    const svg = renderPlotterSVG(clipped, profile, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     downloadBlob(
       blob,
@@ -384,6 +546,8 @@ export function SketchControls({
             sketch={sketch}
             params={params}
             seed={seed}
+            compositionFrame={compositionFrame}
+            profile={profile}
             renderMode={renderMode}
             tolerance={tolerance}
             onOutlineComputed={() => setComputingOutline(false)}
@@ -407,6 +571,7 @@ export function SketchControls({
         hidden={collapsed}
       >
         {switcher}
+        <PaperSection profile={profile} onChange={commitProfile} />
         <ControlPanel
           schema={sketch.schema}
           params={params}
@@ -436,6 +601,7 @@ export function SketchControls({
             params={params}
             seed={seed}
             locks={locks}
+            profile={profile}
             onReload={reloadPreset}
           />
         </div>
@@ -502,8 +668,8 @@ export function SketchControls({
          * per-sketch schema param) driving the Hidden-line pass's final
          * Douglas–Peucker stage. Its single `tolerance` state feeds BOTH the
          * outline preview (LiveCanvas `tolerance` prop) and the hidden-line SVG
-         * export (`outlineScene`'s 5th arg), so simplification is identical in
-         * preview and export by construction. Slider + number input are two-way
+         * export (`outlineScene`'s tolerance arg), so simplification is identical
+         * in preview and export by construction. Slider + number input are two-way
          * bound to the same value through `setToleranceValue` (continuous, in
          * [0, TOLERANCE_MAX]; 0 = identity, no simplification). It sits between
          * the render toggle and the export group since it only affects the
@@ -546,7 +712,8 @@ export function SketchControls({
         {/*
          * Export controls — the shared home for every export path (PNG snapshots
          * the live canvas frame; SVG re-bakes the displayed Scene; Hidden-line SVG
-         * re-bakes then occlusion-clips it for plotting). The buttons split the row
+         * reuses an exact displayed Scene when available, then occlusion-clips as
+         * needed for plotting). The buttons split the row
          * (`flex-1`) and wrap as the group grows.
          */}
         <div className="flex flex-wrap gap-2">
@@ -556,6 +723,7 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportPng}
+            disabled={computingOutline}
           >
             Export PNG
           </Button>
