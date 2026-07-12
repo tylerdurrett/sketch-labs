@@ -51,20 +51,16 @@ import type { Point, Polyline } from './types'
  *
  * Local decisions (per ADR-0007 these are pass-local rationale, not an ADR)
  * -----------------------------------------------------------------------
- * (a) OUTPUT STROKE — each survivor reuses the SOURCE Primitive's own `stroke`
- *     when it has one, so an authored outline color/width carries through to the
- *     plotter line. A filled Primitive with no `stroke` falls back to
+ * (a) OUTPUT STROKE — every survivor is black for clean monochrome plotter
+ *     output. Its width comes from the SOURCE Primitive's own `stroke` when
+ *     present; a filled Primitive with no `stroke` falls back to
  *     {@link DEFAULT_STROKE} (thin black), because a fill-only Primitive still
  *     has a boundary the plotter must draw and a stroke-only output Primitive
  *     without a stroke would be invisible/degenerate.
  *
- * (b) BACKGROUND — the input Scene's `background` is CARRIED into the output
- *     Scene (when present). Outline mode shows the plotter result in place of the
- *     fill preview, and preserving the Scene-declared backdrop keeps that view's
- *     framing identical to the fill preview and the eventual export; the pass
- *     only removes occluded strokes, it does not restyle the surface. A
- *     background-less input yields a background-less output (no explicit
- *     `undefined` field), so the Scene stays byte-identical in that common case.
+ * (b) BACKGROUND — the input Scene's authored `background` is DROPPED. The
+ *     result is clean plotter geometry rather than a styled preview surface;
+ *     callers and renderers remain responsible for any presentation backdrop.
  *
  * (c) STROKE-ONLY INPUTS — Primitives with no `fill` are IGNORED entirely:
  *     neither drawn as an outline nor treated as occluders. The pass is defined
@@ -147,9 +143,9 @@ function outlineRing(primitive: Primitive): Polyline {
  *   Outline-mode preview and hidden-line SVG export simplify identically. A
  *   tolerance of 0 is an identity no-op (survivors pass through unchanged), so
  *   output stays byte-identical to an un-simplified pass.
- * @returns A NEW stroke-only Scene sharing `scene.space` (and carrying
- *   `scene.background` when present): the occlusion-clipped outlines of the
- *   input's filled Primitives, emitted as fill-free OPEN Primitives, each
+ * @returns A NEW background-free, stroke-only Scene sharing `scene.space`: the
+ *   occlusion-clipped outlines of the input's filled Primitives, emitted as
+ *   black, fill-free OPEN Primitives, each preserving its source width and
  *   simplified at `opts.tolerance`.
  */
 export function hiddenLinePass(
@@ -196,7 +192,9 @@ export function hiddenLinePass(
     }
 
     const survivors = subtractPreparedPolygonsFromPolyline(outline, occluders)
-    const stroke = self.primitive.stroke ?? DEFAULT_STROKE
+    const stroke: Stroke = self.primitive.stroke
+      ? { color: 'black', width: self.primitive.stroke.width }
+      : DEFAULT_STROKE
     for (const survivor of survivors) {
       // FINAL stage: Douglas–Peucker simplification at the requested tolerance.
       // At tolerance 0 this is an identity no-op (same array reference), so the
@@ -205,7 +203,5 @@ export function hiddenLinePass(
     }
   }
 
-  return scene.background === undefined
-    ? { space: scene.space, primitives: out }
-    : { space: scene.space, primitives: out, background: scene.background }
+  return { space: scene.space, primitives: out }
 }
