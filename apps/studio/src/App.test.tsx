@@ -26,7 +26,9 @@ import { App } from "./App";
   true;
 
 vi.mock("./LiveCanvas", () => ({
-  LiveCanvas: () => <div data-testid="canvas" />,
+  LiveCanvas: ({ params }: { params: Readonly<Record<string, unknown>> }) => (
+    <div data-testid="canvas" data-params={JSON.stringify(params)} />
+  ),
 }));
 
 let container: HTMLDivElement | null = null;
@@ -89,6 +91,30 @@ function selectOption(label: string): void {
   });
 }
 
+function setNumberInput(input: HTMLInputElement, value: string): void {
+  act(() => input.focus());
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  act(() => input.blur());
+}
+
+function pressUndo(): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  act(() => window.dispatchEvent(event));
+  return event;
+}
+
 describe("App — switcher focus retention (#165)", () => {
   it("restores focus to the trigger after a sketch selection remounts the subtree", () => {
     mountApp();
@@ -117,5 +143,52 @@ describe("App — switcher focus retention (#165)", () => {
     // On mount the layout effect must NOT grab focus for the trigger — nobody
     // selected anything, so the page's initial focus is left untouched.
     expect(document.activeElement).not.toBe(trigger());
+  });
+});
+
+describe("App — keyed edit-history sessions", () => {
+  it("cannot traverse an old sketch's history after switching or fresh remounting", () => {
+    mountApp();
+    const firstSketch = trigger().textContent!;
+    const input = document.querySelector<HTMLInputElement>(
+      '#inspector input[id^="control-"]',
+    )!;
+    const inputId = input.id;
+    const initial = input.value;
+    const changed = String(
+      Math.min(
+        Number(input.max),
+        Math.max(Number(input.min), Number(initial) + 1),
+      ),
+    );
+    setNumberInput(
+      input,
+      changed === initial ? String(Number(initial) - 1) : changed,
+    );
+    expect(
+      document.querySelector<HTMLInputElement>(`#${inputId}`)?.value,
+    ).not.toBe(initial);
+
+    selectOption("Circles");
+    const circlesBefore = document
+      .querySelector('[data-testid="canvas"]')
+      ?.getAttribute("data-params");
+    expect(pressUndo().defaultPrevented).toBe(false);
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-params"),
+    ).toBe(circlesBefore);
+
+    selectOption(firstSketch);
+    expect(document.querySelector<HTMLInputElement>(`#${inputId}`)?.value).toBe(
+      initial,
+    );
+    expect(pressUndo().defaultPrevented).toBe(false);
+
+    act(() => root!.unmount());
+    root = createRoot(container!);
+    act(() => root!.render(<App />));
+    expect(pressUndo().defaultPrevented).toBe(false);
   });
 });

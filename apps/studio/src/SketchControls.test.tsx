@@ -346,6 +346,20 @@ function clickButton(el: HTMLElement, text: string): void {
   });
 }
 
+function pressHistoryShortcut(
+  target: EventTarget,
+  init: KeyboardEventInit,
+): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", {
+    key: "z",
+    bubbles: true,
+    cancelable: true,
+    ...init,
+  });
+  act(() => target.dispatchEvent(event));
+  return event;
+}
+
 function paperMarginsCheckbox(el: HTMLElement): HTMLInputElement {
   const checkbox = [
     ...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
@@ -461,6 +475,138 @@ describe("SketchControls — seed axis wiring", () => {
 });
 
 describe("SketchControls — central edit-history integration", () => {
+  it("handles the platform chord matrix and prevents only available traversal", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const input = paramInput(el, "radius");
+
+    expect(pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented).toBe(
+      false,
+    );
+    act(() => input.focus());
+    setInput(input, "42");
+    act(() => input.blur());
+
+    expect(pressHistoryShortcut(window, { metaKey: true }).defaultPrevented).toBe(
+      true,
+    );
+    expect(paramInput(el, "radius").value).toBe("10");
+    expect(
+      pressHistoryShortcut(window, { metaKey: true, shiftKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(paramInput(el, "radius").value).toBe("42");
+
+    expect(pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented).toBe(
+      true,
+    );
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true, shiftKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(paramInput(el, "radius").value).toBe("42");
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(paramInput(el, "radius").value).toBe("42");
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(false);
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true, altKey: true })
+        .defaultPrevented,
+    ).toBe(false);
+    expect(
+      pressHistoryShortcut(window, { key: "x", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(false);
+  });
+
+  it("yields to an active numeric edit, then traverses after that field settles", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const input = paramInput(el, "radius");
+
+    act(() => input.focus());
+    setInput(input, "20");
+    act(() => input.blur());
+    act(() => input.focus());
+    setInput(input, "30");
+
+    expect(
+      pressHistoryShortcut(input, { ctrlKey: true }).defaultPrevented,
+    ).toBe(false);
+    expect(paramInput(el, "radius").value).toBe("30");
+
+    act(() =>
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      ),
+    );
+    expect(
+      pressHistoryShortcut(input, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(paramInput(el, "radius").value).toBe("20");
+  });
+
+  it("keeps preset-name Undo native even when Studio history is available", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const radius = paramInput(el, "radius");
+    act(() => radius.focus());
+    setInput(radius, "42");
+    act(() => radius.blur());
+    const name = el.querySelector<HTMLInputElement>(
+      'input[aria-label="preset name"]',
+    )!;
+
+    expect(
+      pressHistoryShortcut(name, { ctrlKey: true }).defaultPrevented,
+    ).toBe(false);
+    expect(paramInput(el, "radius").value).toBe("42");
+  });
+
+  it("undoes tolerance through Outline invalidation while retaining excluded state", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    const renderToggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => renderToggle.click());
+    act(() => lastOnOutlineComputed?.());
+    act(() => paperMarginsCheckbox(el).click());
+
+    const tolerance = el.querySelector<HTMLInputElement>("#sketch-tolerance")!;
+    act(() => tolerance.focus());
+    setInput(tolerance, "1");
+    act(() => tolerance.blur());
+    act(() => lastOnOutlineComputed?.());
+    expect(tolerance.value).toBe("1");
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+
+    expect(
+      el.querySelector<HTMLInputElement>("#sketch-tolerance")?.value,
+    ).toBe("0");
+    expect(renderToggle.getAttribute("aria-pressed")).toBe("true");
+    expect(paperMarginsCheckbox(el).checked).toBe(false);
+    expect(renderToggle.textContent).toBe("Computing…");
+  });
+
   it("routes lock toggle, Randomize, New seed, and frame toggle as named atomic commands", () => {
     const el = mount(
       <SketchControls
@@ -946,14 +1092,23 @@ describe("SketchControls — preset save/reload wiring", () => {
       sketch: "a",
       name: "warm",
       seed: 999,
-      params: { radius: 77, count: 88 },
-      locks: ["radius"],
+      params: { radius: 77, count: 88, futureSchemaKey: 66 },
+      locks: ["radius", "futureSchemaKey"],
       profile: loadedProfile,
     });
     listPresets.mockResolvedValue(["warm"]);
 
-    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    const reloadSchema: ParamSchema = {
+      ...schema,
+      futureSchemaKey: numberSpec({ default: 6 }),
+    };
+    const el = mount(
+      <SketchControls sketch={sketchWith("a", reloadSchema)} />,
+    );
     await flush(); // list-on-mount populates the picker
+    const initialSeed = el.querySelector('[data-testid="canvas-seed"]')
+      ?.textContent;
+    const initialProfile = structuredClone(lastProfile);
 
     // Pick "warm" and Reload.
     const picker = el.querySelector(
@@ -975,6 +1130,7 @@ describe("SketchControls — preset save/reload wiring", () => {
     // params hydrated exactly (loaded AS-IS, unclamped through applyPreset)...
     expect(paramInput(el, "radius").value).toBe("77");
     expect(paramInput(el, "count").value).toBe("88");
+    expect(paramInput(el, "futureSchemaKey").value).toBe("66");
     // ...seed hydrated (the value the canvas is fed)...
     expect(el.querySelector('[data-testid="canvas-seed"]')?.textContent).toBe(
       "999",
@@ -996,10 +1152,39 @@ describe("SketchControls — preset save/reload wiring", () => {
     expect(historyCapture.atomic).toHaveLength(1);
     const reload = historyCapture.atomic[0]!;
     expect(reload.after.past).toHaveLength(1);
-    expect(reload.after.present.params).toEqual({ radius: 77, count: 88 });
+    expect(reload.after.present.params).toEqual({
+      radius: 77,
+      count: 88,
+      futureSchemaKey: 66,
+    });
     expect(reload.after.present.seed).toBe(999);
-    expect(reload.after.present.locks).toEqual(new Set(["radius"]));
+    expect(reload.after.present.locks).toEqual(
+      new Set(["radius", "futureSchemaKey"]),
+    );
     expect(reload.after.present.profile).toEqual(loadedProfile);
+    expect(lastProfile).toEqual(loadedProfile);
+
+    // The atomic reload traverses as one whole-state step, including a key that
+    // arrived through the current schema rather than a hard-coded field list.
+    pressHistoryShortcut(window, { ctrlKey: true });
+    expect(paramInput(el, "radius").value).toBe("10");
+    expect(paramInput(el, "count").value).toBe("5");
+    expect(paramInput(el, "futureSchemaKey").value).toBe("6");
+    expect(el.querySelector('[data-testid="canvas-seed"]')?.textContent).toBe(
+      initialSeed,
+    );
+    expect(
+      el
+        .querySelector('button[aria-label="radius lock"]')
+        ?.getAttribute("aria-pressed"),
+    ).toBe("false");
+    expect(lastProfile).toEqual(initialProfile);
+
+    pressHistoryShortcut(window, { key: "y", ctrlKey: true });
+    expect(paramInput(el, "futureSchemaKey").value).toBe("66");
+    expect(el.querySelector('[data-testid="canvas-seed"]')?.textContent).toBe(
+      "999",
+    );
     expect(lastProfile).toEqual(loadedProfile);
   });
 

@@ -1,5 +1,5 @@
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   applyPreset,
@@ -26,14 +26,23 @@ import { Button } from "./components/ui/button";
 import { downloadBlob } from "./downloadBlob";
 import {
   beginEditTransaction,
+  canRedo,
+  canUndo,
   cancelEditTransaction,
   commitEditState,
   commitEditTransaction,
   createEditHistory,
+  hasActiveTransaction,
   previewEditState,
+  redoEdit,
+  undoEdit,
   type EditHistory,
   type StudioEditState,
 } from "./editHistory";
+import {
+  fieldOwnsHistoryShortcut,
+  historyShortcutFor,
+} from "./historyShortcuts";
 import {
   LiveCanvas,
   type DisplayedSceneSnapshot,
@@ -275,6 +284,35 @@ export function SketchControls({
     }
     setHistory(next);
   };
+
+  // History belongs to this keyed Sketch session, so its keyboard listener does
+  // too. Text/numeric editors keep native Undo while a preview transaction is
+  // active; once Enter/blur settles it, the same focused authored field may
+  // traverse Studio history. Explicitly excluded text remains native always.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented) return;
+      const command = historyShortcutFor(event);
+      if (command === null) return;
+
+      const current = historyRef.current;
+      if (
+        fieldOwnsHistoryShortcut(
+          event.target,
+          hasActiveTransaction(current),
+        )
+      ) {
+        return;
+      }
+      if (command === "undo" ? !canUndo(current) : !canRedo(current)) return;
+
+      event.preventDefault();
+      updateHistory(command === "undo" ? undoEdit : redoEdit);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [renderMode]);
 
   const previewLeaf = <Key extends keyof StudioEditState>(
     key: Key,

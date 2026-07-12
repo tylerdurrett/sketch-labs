@@ -121,6 +121,7 @@ export function PresetControls({
         <input
           className="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
           type="text"
+          data-studio-history="exclude"
           placeholder="preset name"
           aria-label="preset name"
           value={name}
