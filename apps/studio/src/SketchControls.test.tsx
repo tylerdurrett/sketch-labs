@@ -1077,6 +1077,7 @@ describe("SketchControls — SVG export wiring", () => {
   // test assert the downloaded SVG is the serialized vector of THAT Scene.
   const svgScene = {
     space: { width: 100, height: 100 },
+    background: { color: "mintcream" },
     primitives: [
       {
         points: [
@@ -1133,6 +1134,9 @@ describe("SketchControls — SVG export wiring", () => {
     // The Blob is the serialized vector of the generated Scene.
     const svg = await blobText(blob);
     expect(svg).toMatch(/<svg\b[^>]*viewBox="0 0 100 100"/);
+    expect(svg).toContain(
+      '<rect x="0" y="0" width="100" height="100" fill="mintcream" />',
+    );
     expect(svg).toMatch(/<path\b[^>]*fill="tomato"/);
     expect(exportSceneCapture.current).not.toBeNull();
     expect(plotterExportCapture.current).toBeNull();
@@ -1154,6 +1158,13 @@ describe("SketchControls — SVG export wiring", () => {
       locks: [],
       profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
+
+    // The plotter export of the SAME fixture deliberately drops the Scene
+    // background along with all other non-path preview/image chrome.
+    clickButton(el, "Export Hidden-line SVG");
+    const plotterSvg = await blobText(downloadBlob.mock.calls[1]![0]);
+    expect(plotterSvg).not.toContain("mintcream");
+    expect(plotterSvg).not.toMatch(/<rect\b/);
   });
 
   it("includes the captured -t{t} segment for a time-driven sketch", () => {
@@ -1420,13 +1431,18 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     });
   });
 
-  it("changes only physical mapping for a same-aspect profile edit while reusing the cached Outline Scene", async () => {
+  it("atomically scales the physical sheet via Preset reload while reusing the cached Outline Scene", async () => {
+    listPresets.mockResolvedValue(["double"]);
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
     const processed = outlineScene(source);
     const processedBefore = structuredClone(processed);
     const generate = vi.fn(() => source);
     const el = mount(
       <SketchControls sketch={{ ...hlStaticSketch("circles"), generate }} />,
+    );
+    await flush();
+    const seed = Number(
+      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
     );
 
     clickButton(el, "Fill");
@@ -1440,12 +1456,36 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     const firstScene = plotterExportCapture.current?.scene;
     const firstSvg = await blobText(downloadBlob.mock.calls[0]![0]);
 
-    setInput(
-      el.querySelector<HTMLInputElement>(
-        'input[aria-label="Linked paper margin (mm)"]',
-      )!,
-      "20",
-    );
+    // Reload through the real v2 Preset path so width, height, and every inset
+    // commit atomically. Doubling all five magnitudes preserves drawable aspect.
+    const doubledProfile: PlotProfile = {
+      width: 400,
+      height: 400,
+      insets: { top: 20, right: 20, bottom: 20, left: 20 },
+    };
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "circles",
+      name: "double",
+      seed,
+      params: { radius: 10 },
+      locks: [],
+      profile: doubledProfile,
+    });
+    const picker = el.querySelector(
+      'select[aria-label="saved presets"]',
+    ) as HTMLSelectElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "double");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+    await flush();
+
     clickButton(el, "Export Hidden-line SVG");
     const secondScene = plotterExportCapture.current?.scene;
     const secondSvg = await blobText(downloadBlob.mock.calls[1]![0]);
@@ -1454,13 +1494,17 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     expect(fakeDisplayedScene?.scene).toBe(processed);
     expect(processed).toEqual(processedBefore);
     expect(firstScene).toEqual(secondScene);
-    expect(plotterExportCapture.current?.profile).toEqual({
-      width: 200,
-      height: 200,
-      insets: { top: 20, right: 20, bottom: 20, left: 20 },
-    });
+    expect(plotterExportCapture.current?.profile).toEqual(doubledProfile);
+    expect(firstSvg).toContain(
+      'width="200mm" height="200mm" viewBox="0 0 200 200"',
+    );
+    expect(secondSvg).toContain(
+      'width="400mm" height="400mm" viewBox="0 0 400 400"',
+    );
+    expect(firstSvg).toContain('d="M10 10 L46 10"');
+    expect(secondSvg).toContain('d="M20 20 L92 20"');
     expect(firstSvg).toContain('stroke-width="1.8"');
-    expect(secondSvg).toContain('stroke-width="1.6"');
+    expect(secondSvg).toContain('stroke-width="3.6"');
     expect(secondSvg).not.toBe(firstSvg);
   });
 
