@@ -1,14 +1,40 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   defaultParams,
   type ParamSchema,
   type ParamSpec,
+  type Params,
 } from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
 import { SketchControls } from "./SketchControls";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+  true;
+
+let container: HTMLDivElement | null = null;
+let root: Root | null = null;
+
+function mount(node: React.ReactElement): HTMLDivElement {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() => root!.render(node));
+  return container;
+}
+
+afterEach(() => {
+  act(() => root?.unmount());
+  container?.remove();
+  container = null;
+  root = null;
+  vi.clearAllMocks();
+});
 
 const numberSpec = (over: Record<string, unknown> = {}): ParamSpec =>
   ({
@@ -179,6 +205,56 @@ describe("ControlPanel", () => {
     );
     // The lock NEVER gates the input: the control markup carries no `disabled`.
     expect(html).not.toContain("disabled");
+  });
+
+  it("adapts the shared lifecycle to a dynamic schema key and keeps lock atomic", () => {
+    const previews: Params[] = [];
+    const onBegin = vi.fn<[], void>();
+    const onCommit = vi.fn<[], void>();
+    const onToggleLock = vi.fn<[string], void>();
+    const schema: ParamSchema = {
+      futureDynamicKey: numberSpec({ default: 10 }),
+    };
+    const el = mount(
+      <ControlPanel
+        schema={schema}
+        params={{ futureDynamicKey: 10 }}
+        locks={new Set()}
+        onChange={() => {}}
+        editHistory={{
+          onBegin,
+          onPreview: (next) => previews.push(next),
+          onCommit,
+          onCancel: () => {},
+        }}
+        onToggleLock={onToggleLock}
+      />,
+    );
+    const input = el.querySelector<HTMLInputElement>('input[type="number"]')!;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+
+    act(() => {
+      input.focus();
+      setter.call(input, "44");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="futureDynamicKey lock"]',
+        )!
+        .click();
+    });
+
+    expect(onBegin).toHaveBeenCalledTimes(1);
+    expect(previews).toEqual([{ futureDynamicKey: 44 }]);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onToggleLock).toHaveBeenCalledTimes(1);
+    expect(onToggleLock).toHaveBeenCalledWith("futureDynamicKey");
   });
 });
 

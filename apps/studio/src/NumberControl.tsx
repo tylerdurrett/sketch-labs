@@ -1,15 +1,18 @@
 import { clamp, type NumberParamSpec } from "@harness/core";
 import { Lock, LockOpen } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { Slider } from "./components/ui/slider";
+import type { EditTransactionLifecycle } from "./editHistory";
 import { cn } from "./lib/utils";
 
 /**
  * Props for {@link NumberControl}.
  *
- * The control is fully controlled: it owns no value state. `value` is the
- * current number and `onChange` lifts every committed change up to the panel,
- * which is the single owner of the param map.
+ * The authored value is controlled by `value`; the component owns only the
+ * transient text draft needed for partial numeric entry. Without `editHistory`,
+ * `onChange` lifts live values to the panel; with it, previews and transaction
+ * boundaries use that lifecycle.
  */
 export interface NumberControlProps {
   /** The param's key in the schema — used as the label and input id. */
@@ -24,8 +27,10 @@ export interface NumberControlProps {
    * control stays fully hand-editable.
    */
   locked: boolean;
-  /** Lift a committed value change up to the owner. */
+  /** Standalone fallback for lifting a live value change to the owner. */
   onChange: (value: number) => void;
+  /** Optional shared-history transaction seam for previewable edits. */
+  editHistory?: EditTransactionLifecycle<number> | undefined;
   /** Toggle this param's lock membership. */
   onToggleLock: () => void;
 }
@@ -78,14 +83,49 @@ export function NumberControl({
   value,
   locked,
   onChange,
+  editHistory,
   onToggleLock,
 }: NumberControlProps) {
   const inputId = `control-${paramKey}`;
+  const [draft, setDraft] = useState(String(value));
+  const editingRef = useRef(false);
+  const transactionRef = useRef(false);
+  const focusValueRef = useRef(value);
+  const lastPreviewRef = useRef(value);
 
-  const commit = (raw: string) => {
+  useEffect(() => {
+    if (!editingRef.current) setDraft(String(value));
+  }, [value]);
+
+  const parse = (raw: string) => {
+    if (raw.trim() === "") return null;
     const parsed = Number(raw);
-    if (Number.isNaN(parsed)) return;
-    onChange(coerceToDomain(parsed, spec));
+    return Number.isFinite(parsed) ? coerceToDomain(parsed, spec) : null;
+  };
+
+  const preview = (next: number) => {
+    if (editHistory) {
+      if (!transactionRef.current) {
+        editHistory.onBegin();
+        transactionRef.current = true;
+      }
+      editHistory.onPreview(next);
+    } else {
+      onChange(next);
+    }
+    lastPreviewRef.current = next;
+  };
+
+  const commitTransaction = () => {
+    if (!transactionRef.current) return;
+    transactionRef.current = false;
+    editHistory?.onCommit();
+  };
+
+  const cancelTransaction = () => {
+    if (!transactionRef.current) return;
+    transactionRef.current = false;
+    editHistory?.onCancel();
   };
 
   // Drag granularity: the declared step, or a fine range-relative fallback that
@@ -107,8 +147,39 @@ export function NumberControl({
           type="number"
           min={spec.min}
           max={spec.max}
-          value={value}
-          onChange={(event) => commit(event.target.value)}
+          value={draft}
+          onFocus={() => {
+            editingRef.current = true;
+            focusValueRef.current = value;
+            lastPreviewRef.current = value;
+            setDraft(String(value));
+          }}
+          onChange={(event) => {
+            const nextDraft = event.target.value;
+            setDraft(nextDraft);
+            const next = parse(nextDraft);
+            if (next !== null) preview(next);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              const next = parse(draft);
+              commitTransaction();
+              editingRef.current = false;
+              setDraft(String(next ?? value));
+              event.currentTarget.blur();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              cancelTransaction();
+              editingRef.current = false;
+              lastPreviewRef.current = focusValueRef.current;
+              setDraft(String(focusValueRef.current));
+            }
+          }}
+          onBlur={() => {
+            if (transactionRef.current) commitTransaction();
+            editingRef.current = false;
+            setDraft(String(lastPreviewRef.current));
+          }}
           className="w-16 rounded-md border bg-background px-2 py-1 text-right text-sm text-foreground tabular-nums outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         />
         <button
@@ -134,7 +205,8 @@ export function NumberControl({
         max={spec.max}
         step={sliderStep}
         value={value}
-        onValueChange={(next) => onChange(coerceToDomain(next, spec))}
+        onValueChange={(next) => preview(coerceToDomain(next, spec))}
+        onValueCommitted={commitTransaction}
       />
     </div>
   );
