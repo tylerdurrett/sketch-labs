@@ -19,9 +19,12 @@ import {
   type Seed,
 } from "@harness/core";
 
-import type { LiveCanvasHandle } from "./LiveCanvas";
+import type {
+  DisplayedSceneSnapshot,
+  LiveCanvasHandle,
+} from "./LiveCanvas";
 import { outlineScene } from "./outlineScene";
-import { SketchControls } from "./SketchControls";
+import { hiddenLineSceneForExport, SketchControls } from "./SketchControls";
 
 // Preview == export seam probe (issue #220): capture the Scene the export path
 // hands `renderToSVG`, so a test can prove it is the SAME processed Scene the
@@ -56,6 +59,8 @@ vi.mock("@harness/core", async (importActual) => {
 let fakeCanvasToBlob: HTMLCanvasElement["toBlob"];
 // The current-t the mocked handle reports — the export's `-t{t}` source.
 let fakeCurrentT = 0;
+// Atomic displayed-Scene snapshot exposed by the mocked LiveCanvas handle.
+let fakeDisplayedScene: DisplayedSceneSnapshot | null = null;
 // #228: the real LiveCanvas signals `onOutlineComputed` when an outline pass has
 // drawn, which the owner uses to clear its "Computing…" affordance. The mock
 // records the latest callback so a test can drive that signal BY HAND (to observe
@@ -94,6 +99,7 @@ vi.mock("./LiveCanvas", () => ({
       getCanvas: () =>
         ({ toBlob: fakeCanvasToBlob }) as unknown as HTMLCanvasElement,
       getCurrentT: () => fakeCurrentT,
+      getDisplayedScene: () => fakeDisplayedScene,
     }));
     lastOnOutlineComputed = onOutlineComputed ?? null;
     lastCompositionFrame = compositionFrame;
@@ -220,6 +226,7 @@ beforeEach(() => {
   // a fresh downloadBlob spy. Per-test overrides drive the time-gated / guard
   // cases. The blob is a real minimal PNG so the metadata byte-splice succeeds.
   fakeCurrentT = 0;
+  fakeDisplayedScene = null;
   // #228: default to auto-firing the outline "computed" signal so the busy label
   // clears on its own; the label test opts out to observe "Computing…".
   lastOnOutlineComputed = null;
@@ -1255,6 +1262,29 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
   };
 
+  it("returns a matching displayed outline by identity without invoking fallback", () => {
+    const processed = outlineScene(
+      hlScene as unknown as DisplayedSceneSnapshot["scene"],
+    );
+    const generate = vi.fn();
+
+    expect(
+      hiddenLineSceneForExport({
+        displayed: {
+          scene: processed,
+          t: 2.5,
+          renderMode: "outline",
+          tolerance: 3,
+        },
+        currentT: 2.5,
+        renderMode: "outline",
+        tolerance: 3,
+        generate,
+      }),
+    ).toBe(processed);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   function blobText(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -1312,6 +1342,83 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     expect(downloadBlob).toHaveBeenCalledTimes(1);
     const [, filename] = downloadBlob.mock.calls[0]!;
     expect(filename).toBe(`waves-seed${seed}-t2.5-hidden-line.svg`);
+  });
+
+  it("reuses the exact displayed outline Scene without generating or reprocessing", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const processed = outlineScene(source);
+    const base = hlStaticSketch("circles");
+    const generate = vi.fn(() => source);
+    const sketch = { ...base, generate };
+    const el = mount(<SketchControls sketch={sketch} />);
+
+    clickButton(el, "Fill");
+    fakeDisplayedScene = {
+      scene: processed,
+      t: 0,
+      renderMode: "outline",
+      tolerance: 0,
+    };
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toEqual(clipSceneToBounds(processed));
+  });
+
+  it("reuses the exact displayed fill Scene and only runs hidden-line processing", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const base = hlStaticSketch("circles");
+    const generate = vi.fn(() => source);
+    const sketch = { ...base, generate };
+    const el = mount(<SketchControls sketch={sketch} />);
+    fakeDisplayedScene = {
+      scene: source,
+      t: 0,
+      renderMode: "fill",
+      tolerance: 0,
+    };
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toEqual(
+      clipSceneToBounds(outlineScene(source)),
+    );
+  });
+
+  it("falls back to exact cold generation when no displayed Scene is cached", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const base = hlStaticSketch("circles");
+    const generate = vi.fn(() => source);
+    const el = mount(<SketchControls sketch={{ ...base, generate }} />);
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(exportSceneCapture.current).toEqual(
+      clipSceneToBounds(outlineScene(source)),
+    );
+  });
+
+  it("rejects a stale displayed Scene and falls back to exact cold generation", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const base = hlStaticSketch("circles");
+    const generate = vi.fn(() => source);
+    const sketch = { ...base, generate };
+    const el = mount(<SketchControls sketch={sketch} />);
+    fakeDisplayedScene = {
+      scene: { space: source.space, primitives: [] },
+      t: 99,
+      renderMode: "fill",
+      tolerance: 0,
+    };
+
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(exportSceneCapture.current).toEqual(
+      clipSceneToBounds(outlineScene(source)),
+    );
   });
 
   // AC (#220): the outline-mode canvas input and the hidden-line SVG export input

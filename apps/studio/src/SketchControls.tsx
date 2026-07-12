@@ -18,6 +18,7 @@ import {
   resolvePlotCompositionFrame,
   type PlotProfile,
   type Preset,
+  type Scene,
   type Sketch,
 } from "@harness/core";
 
@@ -27,12 +28,38 @@ import { Slider } from "./components/ui/slider";
 import { downloadBlob } from "./downloadBlob";
 import {
   LiveCanvas,
+  type DisplayedSceneSnapshot,
   type LiveCanvasHandle,
   type RenderMode,
 } from "./LiveCanvas";
 import { outlineScene } from "./outlineScene";
 import { PaperSection } from "./PaperSection";
 import { PresetControls } from "./PresetControls";
+
+/** Select the exact hidden-line export input, lazily falling back on a cache miss. */
+export function hiddenLineSceneForExport({
+  displayed,
+  currentT,
+  renderMode,
+  tolerance,
+  generate,
+}: {
+  displayed: DisplayedSceneSnapshot | null;
+  currentT: number;
+  renderMode: RenderMode;
+  tolerance: number;
+  generate: () => Scene;
+}): Scene {
+  const cacheMatches =
+    displayed !== null &&
+    displayed.t === currentT &&
+    displayed.renderMode === renderMode &&
+    displayed.tolerance === tolerance;
+  if (!cacheMatches) return outlineScene(generate(), tolerance);
+  return displayed.renderMode === "outline"
+    ? displayed.scene
+    : outlineScene(displayed.scene, tolerance);
+}
 
 /**
  * Upper bound of the studio simplification-tolerance knob (issue #232), in the
@@ -379,8 +406,9 @@ export function SketchControls({
   // path to {@link exportPng}, also a one-shot click OUTSIDE the per-frame loop.
   // Unlike PNG (which snapshots the live canvas's pixels), SVG re-bakes the
   // displayed `(params, seed, t)` into a Scene via `sketch.generate` and serializes
-  // it with core's `renderToSVG` — matching the PNG path's pattern keeps
-  // LiveCanvas's handle unchanged (no Scene is threaded out of it).
+  // it with core's `renderToSVG`. Plain SVG deliberately keeps this cold path;
+  // the displayed-Scene snapshot is consumed only by Hidden-line export, where
+  // generation and occlusion processing are materially expensive.
   //
   // `t` is read from the handle and TIME-GATED on `sketch.time` exactly as the
   // PNG path does, so the regenerated Scene and the `-t{t}` filename segment both
@@ -432,17 +460,21 @@ export function SketchControls({
   const exportHiddenLineSvg = () => {
     const handle = canvasHandle.current;
     if (handle == null) return;
-    const t = sketch.time === undefined ? undefined : handle.getCurrentT();
-    // Generate the one-shot export Scene, then feed it through the shared preview
-    // == export processing seam, strictly inside this click handler. The studio
-    // `tolerance` knob is forwarded so the exported paths carry the SAME final
-    // Douglas–Peucker simplification the outline preview
-    // shows (issue #232) — both read this one state through this one seam.
-    // `renderToSVG` then serializes the stroke-only result.
-    const hiddenLineScene = outlineScene(
-      sketch.generate(params, seed, t ?? 0, compositionFrame),
+    const displayed = handle.getDisplayedScene();
+    const currentT = handle.getCurrentT();
+    const t = sketch.time === undefined ? undefined : currentT;
+    // Reuse only an atomic snapshot matching the current t/mode/tolerance. An
+    // outline snapshot is already the exact processed preview Scene; a fill
+    // snapshot is the exact displayed source fed through the shared seam here.
+    // A null/stale snapshot falls back to cold generation plus that same seam.
+    const hiddenLineScene = hiddenLineSceneForExport({
+      displayed,
+      currentT,
+      renderMode,
       tolerance,
-    );
+      generate: () =>
+        sketch.generate(params, seed, t ?? 0, compositionFrame),
+    });
     // Clip AFTER the hidden-line pass and BEFORE serialization (issue #237): the
     // pass can emit stroke geometry beyond the canvas, so the clip is the last
     // export-only stage that guarantees no plotted line escapes `space`. The clip
@@ -674,7 +706,8 @@ export function SketchControls({
         {/*
          * Export controls — the shared home for every export path (PNG snapshots
          * the live canvas frame; SVG re-bakes the displayed Scene; Hidden-line SVG
-         * re-bakes then occlusion-clips it for plotting). The buttons split the row
+         * reuses an exact displayed Scene when available, then occlusion-clips as
+         * needed for plotting). The buttons split the row
          * (`flex-1`) and wrap as the group grows.
          */}
         <div className="flex flex-wrap gap-2">

@@ -437,6 +437,71 @@ describe("LiveCanvas transport — scrubbing pauses & sets t (AC2)", () => {
 });
 
 describe("LiveCanvas caller-owned frame preparation", () => {
+  it("invalidates the displayed Scene before deferred outline recomputes", () => {
+    const { ctx } = recordingContext();
+    useRecordingContext(ctx);
+    const handle = createRef<LiveCanvasHandle>();
+    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    const firstParams = { value: 3 };
+
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={prepared.sketch}
+        params={firstParams}
+        seed={2}
+        renderMode="fill"
+      />,
+    );
+    tick(1000);
+    expect(handle.current?.getDisplayedScene()).toMatchObject({
+      t: 1,
+      renderMode: "fill",
+      tolerance: 0,
+    });
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={prepared.sketch}
+          params={firstParams}
+          seed={2}
+          renderMode="outline"
+        />,
+      );
+    });
+    // The old fill Scene is unavailable throughout the double-rAF window.
+    expect(handle.current?.getDisplayedScene()).toBeNull();
+    flushRaf();
+    expect(handle.current?.getDisplayedScene()).toMatchObject({
+      t: 1,
+      renderMode: "outline",
+      tolerance: 0,
+    });
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={prepared.sketch}
+          params={{ value: 8 }}
+          seed={2}
+          renderMode="outline"
+          tolerance={2}
+        />,
+      );
+    });
+    // Input/tolerance changes invalidate atomically before their deferred pass.
+    expect(handle.current?.getDisplayedScene()).toBeNull();
+    flushRaf();
+    expect(handle.current?.getDisplayedScene()).toMatchObject({
+      t: 1,
+      renderMode: "outline",
+      tolerance: 2,
+    });
+  });
+
   it("feeds outline processing from the retained prepared sampler, never cold generate", () => {
     const { ctx, counts } = recordingContext();
     useRecordingContext(ctx);
