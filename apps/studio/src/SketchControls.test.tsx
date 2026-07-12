@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { act, useEffect, useImperativeHandle, type Ref } from "react";
+import {
+  act,
+  StrictMode,
+  useEffect,
+  useImperativeHandle,
+  type Ref,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -49,6 +55,8 @@ const historyCapture = vi.hoisted(() => ({
   cancels: [] as { before: EditHistory; after: EditHistory }[],
 }));
 const outlineJob = vi.hoisted(() => ({
+  coordinators: 0,
+  disposals: 0,
   starts: 0,
   active: null as null | {
     identity: import("./outlineComputeProtocol").OutlineComputeIdentity;
@@ -58,7 +66,16 @@ const outlineJob = vi.hoisted(() => ({
 
 vi.mock("./hiddenLineCoordinator", () => ({
   HiddenLineCoordinator: class {
+    private disposed = false;
+
+    constructor() {
+      outlineJob.coordinators += 1;
+    }
+
     start(identity: import("./outlineComputeProtocol").OutlineComputeIdentity) {
+      if (this.disposed) {
+        return Promise.reject(new Error("Hidden-line coordinator is disposed"));
+      }
       outlineJob.starts += 1;
       return {
         then(resolve: (result: unknown) => void) {
@@ -75,6 +92,9 @@ vi.mock("./hiddenLineCoordinator", () => ({
       return true;
     }
     dispose() {
+      if (this.disposed) return;
+      this.disposed = true;
+      outlineJob.disposals += 1;
       this.cancel();
     }
   },
@@ -299,6 +319,15 @@ function mount(node: React.ReactElement): HTMLDivElement {
   return container;
 }
 
+/** The render mode SketchControls fed the mocked LiveCanvas this render. */
+function canvasRenderMode(el: HTMLElement): string | null {
+  return (
+    el
+      .querySelector('[data-testid="canvas-seed"]')
+      ?.getAttribute("data-render-mode") ?? null
+  );
+}
+
 /** Big-endian 4-byte encoding of an unsigned 32-bit integer. */
 function uint32BE(value: number): number[] {
   return [
@@ -329,6 +358,8 @@ const MINIMAL_PNG = Uint8Array.from([
 ]);
 
 beforeEach(() => {
+  outlineJob.coordinators = 0;
+  outlineJob.disposals = 0;
   outlineJob.starts = 0;
   outlineJob.active = null;
   vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
@@ -1062,7 +1093,7 @@ describe("SketchControls — central edit-history integration", () => {
     });
   });
 
-  it("re-invalidates Outline when cancel restores a changed profile aspect", () => {
+  it("shows live Fill for a changed transaction and reuses exact cache on cancel", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -1076,9 +1107,11 @@ describe("SketchControls — central edit-history integration", () => {
     )!;
 
     act(() => width.focus());
+    expect(canvasRenderMode(el)).toBe("fill");
     setInput(width, "300");
     expect(toggle.textContent).toBe("Outline");
     expect(lastCompositionFrame).not.toBe(initialFrame);
+    expect(outlineJob.starts).toBe(1);
     act(() => lastOnOutlineComputed?.());
 
     act(() =>
@@ -1090,11 +1123,13 @@ describe("SketchControls — central edit-history integration", () => {
     expect(lastProfile?.width).toBe(200);
     expect(lastCompositionFrame).toEqual(initialFrame);
     expect(toggle.textContent).toBe("Outline");
+    expect(canvasRenderMode(el)).toBe("outline");
+    expect(outlineJob.starts).toBe(1);
     expect(historyCapture.cancels).toHaveLength(1);
     expect(historyCapture.cancels[0]!.after.past).toHaveLength(0);
   });
 
-  it("restores a same-aspect profile preview without invalidating Outline", () => {
+  it("shows live Fill during a same-identity edit and restores exact cache on cancel", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -1114,6 +1149,7 @@ describe("SketchControls — central edit-history integration", () => {
     )!;
 
     act(() => margin.focus());
+    expect(canvasRenderMode(el)).toBe("fill");
     setInput(margin, "20");
     expect(lastProfile?.insets).toEqual({
       top: 20,
@@ -1128,7 +1164,7 @@ describe("SketchControls — central edit-history integration", () => {
       el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
         "data-render-state",
       ),
-    ).toBe("outline");
+    ).toBe("fill-live");
 
     act(() =>
       margin.dispatchEvent(
@@ -1153,7 +1189,7 @@ describe("SketchControls — central edit-history integration", () => {
     expect(historyCapture.cancels).toHaveLength(1);
   });
 
-  it("retains completed Outline when a paper draft never produces a changed preview", () => {
+  it("shows live Fill for an invalid draft and restores exact cache on settle", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -1172,7 +1208,7 @@ describe("SketchControls — central edit-history integration", () => {
       el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
         "data-render-state",
       ),
-    ).toBe("outline");
+    ).toBe("fill-live");
 
     act(() =>
       width.dispatchEvent(
@@ -3053,12 +3089,6 @@ describe("SketchControls — PNG export wiring", () => {
 });
 
 describe("SketchControls — render-mode toggle wiring (#219)", () => {
-  /** The render mode SketchControls fed the (mocked) LiveCanvas this render. */
-  const canvasRenderMode = (el: HTMLElement): string | null =>
-    el
-      .querySelector('[data-testid="canvas-seed"]')
-      ?.getAttribute("data-render-mode") ?? null;
-
   const toggleEl = (el: HTMLElement): HTMLButtonElement => {
     const btn = el.querySelector<HTMLButtonElement>(
       'button[aria-label="Toggle outline render mode"]',
@@ -3157,6 +3187,61 @@ describe("SketchControls — render-mode toggle wiring (#219)", () => {
 });
 
 describe("SketchControls — background Outline session (#289)", () => {
+  it("creates a live coordinator after StrictMode rehearsal and disposes each lifetime", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(
+      <StrictMode>
+        <SketchControls sketch={sketchWith("a", {})} />
+      </StrictMode>,
+    );
+
+    expect(outlineJob.coordinators).toBe(2);
+    expect(outlineJob.disposals).toBe(1);
+    clickButton(el, "Fill");
+    expect(outlineJob.starts).toBe(1);
+    act(() => lastOnOutlineComputed?.());
+    expect(canvasRenderMode(el)).toBe("outline");
+    expect(el.textContent).not.toContain("Outline failed");
+
+    act(() => root!.unmount());
+    root = null;
+    expect(outlineJob.disposals).toBe(2);
+  });
+
+  it("cancels at edit begin, launches no preview jobs, and starts one final changed job", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    clickButton(el, "Fill");
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.active).not.toBeNull();
+
+    const radius = paramInput(el, "radius");
+    act(() => radius.focus());
+    setInput(radius, "42");
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.active).toBeNull();
+    expect(canvasRenderMode(el)).toBe("fill");
+    expect(
+      el
+        .querySelector('[data-testid="canvas-seed"]')
+        ?.getAttribute("data-render-state"),
+    ).toBe("fill-live");
+
+    act(() =>
+      radius.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      ),
+    );
+    expect(outlineJob.starts).toBe(2);
+    expect(canvasRenderMode(el)).toBe("fill");
+    act(() => lastOnOutlineComputed?.());
+    expect(canvasRenderMode(el)).toBe("outline");
+  });
+
   it("reveals Cancel outline only after the 750ms quiet period and keeps ordinary actions usable", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);

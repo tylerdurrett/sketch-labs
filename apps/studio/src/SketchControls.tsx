@@ -266,9 +266,6 @@ export function SketchControls({
   const outlineSessionRef = useRef(outlineSession);
   outlineSessionRef.current = outlineSession;
   const coordinatorRef = useRef<HiddenLineCoordinator | null>(null);
-  if (coordinatorRef.current === null) {
-    coordinatorRef.current = new HiddenLineCoordinator();
-  }
   const dispatchOutline = (action: OutlineSessionAction) => {
     const next = outlineSessionReducer(outlineSessionRef.current, action);
     outlineSessionRef.current = next;
@@ -304,8 +301,15 @@ export function SketchControls({
   }, [outlineWorkToken]);
 
   useEffect(() => {
+    // The coordinator's lifetime matches this effect, not the render-retained
+    // ref: StrictMode rehearses setup → cleanup → setup without another render.
+    const coordinator = new HiddenLineCoordinator();
+    coordinatorRef.current = coordinator;
     return () => {
-      coordinatorRef.current?.dispose();
+      coordinator.dispose();
+      if (coordinatorRef.current === coordinator) {
+        coordinatorRef.current = null;
+      }
       onHiddenLineBusyChangeRef.current?.(false);
     };
   }, []);
@@ -365,20 +369,15 @@ export function SketchControls({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const transactionOutlineInvalidatedRef = useRef(false);
-
   const previewLeaf = <Key extends keyof StudioEditState>(
     key: Key,
     value: StudioEditState[Key],
   ): void => {
-    const invalidated = updateHistory(
+    updateHistory(
       (current) =>
         previewEditState(current, { ...current.present, [key]: value }),
       false,
     );
-    if (invalidated) {
-      transactionOutlineInvalidatedRef.current = true;
-    }
   };
 
   const commitLeaf = <Key extends keyof StudioEditState>(
@@ -391,17 +390,21 @@ export function SketchControls({
   };
 
   const beginTransaction = (): void => {
-    transactionOutlineInvalidatedRef.current = false;
+    // Every authored transaction is a preview boundary even before its first
+    // valid value: cancel stale work and paint live Fill while retaining intent
+    // and the one exact-result cache for settlement.
+    cancelCoordinator();
+    dispatchOutline({ type: "transaction-began" });
     updateHistory(beginEditTransaction, false);
   };
   const settleTransaction = (
     transition: (current: EditHistory) => EditHistory,
   ): void => {
-    const invalidated =
-      updateHistory(transition, false) ||
-      transactionOutlineInvalidatedRef.current;
-    transactionOutlineInvalidatedRef.current = false;
-    if (invalidated && outlineSessionRef.current.desired === "outline") {
+    updateHistory(transition, false);
+    // Settlement always resamples the final Fill. The reducer reuses an exact
+    // cache identity without occupying the worker slot; changed inputs start
+    // exactly one job, while previews above launch none.
+    if (outlineSessionRef.current.desired === "outline") {
       requestOutlineForCurrentInputs();
     }
   };
@@ -478,9 +481,12 @@ export function SketchControls({
         error: detail.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 160),
       });
     };
-    void coordinatorRef.current!
+    const coordinator = coordinatorRef.current;
+    if (coordinator === null) return;
+    void coordinator
       .start(identity)
       .then((result) => {
+        if (coordinatorRef.current !== coordinator) return;
         if (result.status === "success") {
           dispatchOutline({
             type: "succeeded",
@@ -493,6 +499,7 @@ export function SketchControls({
         }
       })
       .catch((error: unknown) => {
+        if (coordinatorRef.current !== coordinator) return;
         reportFailure(error instanceof Error ? error.message : "Outline worker failed");
       });
   };

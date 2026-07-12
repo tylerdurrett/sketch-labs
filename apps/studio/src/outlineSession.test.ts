@@ -151,8 +151,17 @@ describe("outlineSessionReducer", () => {
   });
 
   it("keeps desired Outline through transaction previews and launches once on settle", () => {
-    const outlined = { ...createOutlineSessionState(), desired: "outline" as const };
-    const preview = outlineSessionReducer(outlined, {
+    const outlined = activeSession();
+    const begun = outlineSessionReducer(outlined, {
+      type: "transaction-began",
+    });
+    expect(begun.desired).toBe("outline");
+    expect(begun.phase).toEqual({ kind: "fill-live" });
+    expect(begun.capture).toBeNull();
+    expect(begun.active).toBeNull();
+    expect(begun.cache).toBe(outlined.cache);
+
+    const preview = outlineSessionReducer(begun, {
       type: "inputs-changed",
       launch: false,
     });
