@@ -895,7 +895,7 @@ describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand
       width: 200,
       height: 200,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
-      includeFrame: false,
+      includeFrame: true,
     };
     const el = mount(
       <LiveCanvas
@@ -944,6 +944,113 @@ describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand
     expect(counts.stroke ?? 0).toBeGreaterThan(0);
     expect(generate).toHaveBeenCalledTimes(1);
     expect(onOutlineComputed).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates and rebuilds Outline when includeFrame changes at the same drawable aspect", () => {
+    const { ctx } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch, generate } = overlapSketch(undefined);
+    const handle = createRef<LiveCanvasHandle>();
+    const onOutlineComputed = vi.fn();
+    const withoutFrame: PlotProfile = {
+      ...HARNESS_FALLBACK_PLOT_PROFILE,
+      includeFrame: false,
+    };
+
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        profile={withoutFrame}
+        renderMode="outline"
+        onOutlineComputed={onOutlineComputed}
+      />,
+    );
+    flushRaf();
+    const first = handle.current?.getDisplayedScene();
+    expect(first?.includeFrame).toBe(false);
+    expect(generate).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          profile={HARNESS_FALLBACK_PLOT_PROFILE}
+          renderMode="outline"
+          onOutlineComputed={onOutlineComputed}
+        />,
+      );
+    });
+
+    expect(handle.current?.getDisplayedScene()).toBeNull();
+    flushRaf();
+    const rebuilt = handle.current?.getDisplayedScene();
+    expect(rebuilt?.includeFrame).toBe(true);
+    expect(rebuilt?.scene.primitives).toHaveLength(
+      (first?.scene.primitives.length ?? 0) + 1,
+    );
+    expect(rebuilt?.scene.primitives.at(-1)?.points).toEqual([
+      [0, 0],
+      [100, 0],
+      [100, 100],
+      [0, 100],
+      [0, 0],
+    ]);
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(onOutlineComputed).toHaveBeenCalledTimes(2);
+  });
+
+  it("updates Fill's snapshot identity without regenerating or repainting", () => {
+    const { ctx, counts, reset } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch, generate } = animatedSketch(undefined);
+    const handle = createRef<LiveCanvasHandle>();
+    const params = {};
+    const withoutFrame: PlotProfile = {
+      ...HARNESS_FALLBACK_PLOT_PROFILE,
+      includeFrame: false,
+    };
+
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        profile={withoutFrame}
+        renderMode="fill"
+      />,
+    );
+    const displayed = handle.current?.getDisplayedScene()?.scene;
+    expect(generate).toHaveBeenCalledTimes(1);
+    reset();
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={1}
+          profile={HARNESS_FALLBACK_PLOT_PROFILE}
+          renderMode="fill"
+        />,
+      );
+    });
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(counts.fill ?? 0).toBe(0);
+    expect(counts.stroke ?? 0).toBe(0);
+    expect(handle.current?.getDisplayedScene()).toMatchObject({
+      scene: displayed,
+      renderMode: "fill",
+      includeFrame: true,
+    });
   });
 
   it("the rAF fill loop NEVER runs the pass — every animated frame stays a fill (AC2/AC3)", () => {
