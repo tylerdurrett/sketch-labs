@@ -511,6 +511,59 @@ describe("SketchControls — central edit-history integration", () => {
     expect(historyCapture.atomic[0]!.after.past).toHaveLength(0);
   });
 
+  it("records a changed Randomize as one atomic transition", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          radius: numberSpec({ min: 0, max: 100, default: 10 }),
+        })}
+      />,
+    );
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+    clickButton(el, "Randomize");
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const transition = historyCapture.atomic[0]!;
+    expect(transition.after).not.toBe(transition.before);
+    expect(transition.after.past).toHaveLength(1);
+    expect(transition.after.present.params.radius).toBe(50);
+    expect(transition.after.present.seed).toBe(transition.before.present.seed);
+  });
+
+  it("settles params, seed, Simplify, and Paper adapters through commitEditTransaction", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+
+    const settle = (input: HTMLInputElement, value: string): void => {
+      act(() => input.focus());
+      setInput(input, value);
+      act(() => input.blur());
+    };
+
+    settle(paramInput(el, "radius"), "42");
+    settle(el.querySelector<HTMLInputElement>("#sketch-seed")!, "4242");
+    settle(el.querySelector<HTMLInputElement>("#sketch-tolerance")!, "1.25");
+    settle(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Paper width (mm)"]',
+      )!,
+      "300",
+    );
+
+    expect(historyCapture.transactionCommits).toHaveLength(4);
+    const [paramsCommit, seedCommit, toleranceCommit, profileCommit] =
+      historyCapture.transactionCommits;
+    expect(paramsCommit!.after.present.params.radius).toBe(42);
+    expect(seedCommit!.after.present.seed).toBe(4242);
+    expect(toleranceCommit!.after.present.tolerance).toBe(1.25);
+    expect(profileCommit!.after.present.profile.width).toBe(300);
+    expect(profileCommit!.after.past).toHaveLength(4);
+  });
+
   it("feeds ControlPanel previews from present and Escape restores the whole transaction", () => {
     const el = mount(
       <SketchControls
@@ -568,6 +621,79 @@ describe("SketchControls — central edit-history integration", () => {
       width: 279.4,
       height: 215.9,
     });
+  });
+
+  it("re-invalidates Outline when cancel restores a changed profile aspect", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => toggle.click());
+    act(() => lastOnOutlineComputed?.());
+    const initialFrame = lastCompositionFrame;
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    act(() => width.focus());
+    setInput(width, "300");
+    expect(toggle.textContent).toBe("Computing…");
+    expect(lastCompositionFrame).not.toBe(initialFrame);
+    act(() => lastOnOutlineComputed?.());
+
+    act(() =>
+      width.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+    );
+
+    expect(lastProfile?.width).toBe(200);
+    expect(lastCompositionFrame).toEqual(initialFrame);
+    expect(toggle.textContent).toBe("Computing…");
+    expect(historyCapture.cancels).toHaveLength(1);
+    expect(historyCapture.cancels[0]!.after.past).toHaveLength(0);
+  });
+
+  it("restores a same-aspect profile preview without invalidating Outline", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => toggle.click());
+    act(() => lastOnOutlineComputed?.());
+    const initialFrame = lastCompositionFrame;
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+
+    act(() => margin.focus());
+    setInput(margin, "20");
+    expect(lastProfile?.insets).toEqual({
+      top: 20,
+      right: 20,
+      bottom: 20,
+      left: 20,
+    });
+    expect(lastCompositionFrame).toBe(initialFrame);
+    expect(toggle.textContent).toBe("Outline");
+
+    act(() =>
+      margin.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+    );
+
+    expect(lastProfile?.insets).toEqual({
+      top: 10,
+      right: 10,
+      bottom: 10,
+      left: 10,
+    });
+    expect(lastCompositionFrame).toBe(initialFrame);
+    expect(toggle.textContent).toBe("Outline");
+    expect(historyCapture.cancels).toHaveLength(1);
   });
 });
 
@@ -809,13 +935,20 @@ describe("SketchControls — preset save/reload wiring", () => {
   it("reloading a preset hydrates params, seed, AND locks-as-a-Set", async () => {
     // A preset whose values differ from the schema defaults and that locks one
     // key, so each axis hydrating is observable.
+    const loadedProfile: PlotProfile = {
+      width: 210,
+      height: 297,
+      insets: { top: 12, right: 13, bottom: 14, left: 15 },
+      includeFrame: false,
+    };
     loadPreset.mockResolvedValue({
-      version: 1,
+      version: 2,
       sketch: "a",
       name: "warm",
       seed: 999,
       params: { radius: 77, count: 88 },
       locks: ["radius"],
+      profile: loadedProfile,
     });
     listPresets.mockResolvedValue(["warm"]);
 
@@ -866,6 +999,8 @@ describe("SketchControls — preset save/reload wiring", () => {
     expect(reload.after.present.params).toEqual({ radius: 77, count: 88 });
     expect(reload.after.present.seed).toBe(999);
     expect(reload.after.present.locks).toEqual(new Set(["radius"]));
+    expect(reload.after.present.profile).toEqual(loadedProfile);
+    expect(lastProfile).toEqual(loadedProfile);
   });
 
   it("saving serializes the live params, seed, locks, AND the active profile under the sketch id", async () => {
