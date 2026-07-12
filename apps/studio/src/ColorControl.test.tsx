@@ -152,7 +152,15 @@ describe("ColorControl RGB ownership", () => {
   });
 
   it("cancels to the focus snapshot, idles, and keeps RGB Escape inside", () => {
-    const initial = props();
+    const order: string[] = [];
+    const initial = props({
+      editHistory: {
+        onBegin: () => order.push("begin"),
+        onPreview: (next) => order.push(`preview:${next}`),
+        onCommit: () => order.push("commit"),
+        onCancel: () => order.push("cancel"),
+      },
+    });
     mount(initial);
     openPicker();
     expect(trigger().getAttribute("aria-label")).toBe(
@@ -171,6 +179,7 @@ describe("ColorControl RGB ownership", () => {
       "ink current color #0a141e",
     );
     expect(initial.onChange).not.toHaveBeenCalled();
+    expect(order).toEqual([]);
   });
 });
 
@@ -235,6 +244,22 @@ describe("ColorControl gesture timing", () => {
         keyCode: 39,
       }),
     );
+  }
+
+  function historyOrder(): {
+    order: string[];
+    editHistory: NonNullable<ColorControlProps["editHistory"]>;
+  } {
+    const order: string[] = [];
+    return {
+      order,
+      editHistory: {
+        onBegin: () => order.push("begin"),
+        onPreview: (next) => order.push(`preview:${next}`),
+        onCommit: () => order.push("commit"),
+        onCancel: () => order.push("cancel"),
+      },
+    };
   }
 
   it("updates the local color immediately without lifting before 100ms", () => {
@@ -303,6 +328,77 @@ describe("ColorControl gesture timing", () => {
     expect(order).toEqual(["begin", "preview:#ff4d00"]);
   });
 
+  it("begins once before the timer and commits many changes as one gesture", () => {
+    vi.useFakeTimers();
+    const { order, editHistory } = historyOrder();
+    mount(props({ value: "#ff0000", editHistory }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keydown"));
+    expect(order).toEqual(["begin"]);
+
+    act(() => vi.advanceTimersByTime(100));
+    expect(order).toEqual(["begin", "preview:#ffe500"]);
+    act(() => hueKey("keyup"));
+
+    expect(order).toEqual(["begin", "preview:#ffe500", "commit"]);
+  });
+
+  it("flushes a new final value after an idle debounce preview", () => {
+    vi.useFakeTimers();
+    const { order, editHistory } = historyOrder();
+    mount(props({ value: "#ff0000", editHistory }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    act(() => vi.advanceTimersByTime(100));
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keyup"));
+
+    expect(order).toEqual([
+      "begin",
+      "preview:#ff4d00",
+      "preview:#ff9900",
+      "commit",
+    ]);
+    act(() => vi.runOnlyPendingTimers());
+    expect(order).toHaveLength(4);
+  });
+
+  it("wraps a mouse gesture in the same begin-preview-commit boundary", () => {
+    vi.useFakeTimers();
+    const { order, editHistory } = historyOrder();
+    mount(props({ value: "#ff0000", editHistory }));
+    openPicker();
+    const saturation = popup().querySelector<HTMLElement>(
+      '[aria-label="ink saturation and value"]',
+    )!;
+    saturation.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 200, height: 100 }) as DOMRect;
+
+    act(() => {
+      saturation.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          cancelable: true,
+          buttons: 1,
+          clientX: 100,
+          clientY: 25,
+        }),
+      );
+    });
+    expect(order).toEqual(["begin"]);
+    act(() =>
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })),
+    );
+
+    expect(order).toEqual(["begin", "preview:#bf6060", "commit"]);
+    act(() => vi.runOnlyPendingTimers());
+    expect(order).toHaveLength(3);
+  });
+
   it("uses the latest fallback callback when the deadline fires", () => {
     vi.useFakeTimers();
     const firstOnChange = vi.fn<[string], void>();
@@ -337,20 +433,23 @@ describe("ColorControl gesture timing", () => {
     openPicker();
     act(() => hueKey("keydown"));
 
+    const replacementCommit = vi.fn();
     rerender({
       ...initial,
       editHistory: {
         onBegin: vi.fn(),
         onPreview: replacementPreview,
-        onCommit: vi.fn(),
+        onCommit: replacementCommit,
         onCancel: vi.fn(),
       },
     });
     act(() => vi.advanceTimersByTime(100));
+    act(() => hueKey("keyup"));
 
     expect(firstPreview).not.toHaveBeenCalled();
     expect(replacementPreview).toHaveBeenCalledTimes(1);
     expect(replacementPreview).toHaveBeenCalledWith("#ff4d00");
+    expect(replacementCommit).toHaveBeenCalledTimes(1);
   });
 
   it("flushes a final color synchronously when the gesture ends early", () => {
@@ -429,6 +528,27 @@ describe("ColorControl gesture timing", () => {
 });
 
 describe("ColorControl dismissal and synchronization", () => {
+  function hue(): HTMLElement {
+    return popup().querySelector<HTMLElement>('[aria-label="ink hue"]')!;
+  }
+
+  function startHistoryGesture(order: string[]) {
+    mount(
+      props({
+        value: "#ff0000",
+        editHistory: {
+          onBegin: () => order.push("begin"),
+          onPreview: (next) => order.push(`preview:${next}`),
+          onCommit: () => order.push("commit"),
+          onCancel: () => order.push("cancel"),
+        },
+      }),
+    );
+    openPicker();
+    act(() => key(hue(), "ArrowRight"));
+    expect(order).toEqual(["begin"]);
+  }
+
   it("closes on non-field Escape and returns keyboard focus to the trigger", async () => {
     mount();
     openPicker();
@@ -476,6 +596,76 @@ describe("ColorControl dismissal and synchronization", () => {
       "255",
       "0",
     ]);
+  });
+
+  it("flushes and commits once when Escape dismisses an active gesture", async () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    startHistoryGesture(order);
+
+    act(() => key(hue(), "Escape"));
+    expect(order).toEqual(["begin", "preview:#ff4d00", "commit"]);
+    act(() => vi.runOnlyPendingTimers());
+    expect(order).toHaveLength(3);
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  it("flushes and commits once when the trigger dismisses an active gesture", () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    startHistoryGesture(order);
+
+    act(() => trigger().click());
+
+    expect(order).toEqual(["begin", "preview:#ff4d00", "commit"]);
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+    act(() => vi.runOnlyPendingTimers());
+    expect(order).toHaveLength(3);
+  });
+
+  it("flushes and commits once when an outside press dismisses a gesture", () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    startHistoryGesture(order);
+
+    act(() => {
+      outside.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+      );
+      outside.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    outside.remove();
+
+    expect(order).toEqual(["begin", "preview:#ff4d00", "commit"]);
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).not.toBe(trigger());
+    act(() => vi.runOnlyPendingTimers());
+    expect(order).toHaveLength(3);
+  });
+
+  it("does not commit again when a settled gesture is then dismissed", () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    startHistoryGesture(order);
+
+    act(() =>
+      hue().dispatchEvent(
+        new KeyboardEvent("keyup", {
+          bubbles: true,
+          key: "ArrowRight",
+          code: "ArrowRight",
+          keyCode: 39,
+        }),
+      ),
+    );
+    act(() => key(hue(), "Escape"));
+
+    expect(order).toEqual(["begin", "preview:#ff4d00", "commit"]);
   });
 
   it("keeps settled edits when an outside press closes the popup", () => {

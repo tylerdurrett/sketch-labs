@@ -744,6 +744,145 @@ describe("SketchControls — central edit-history integration", () => {
     expect(profileCommit!.after.past).toHaveLength(4);
   });
 
+  it("records one color-key gesture and keeps the mounted picker synced through Undo/Redo", async () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          ink: { kind: "color", default: "#ff0000" },
+        })}
+      />,
+    );
+    const colorTrigger = el.querySelector<HTMLButtonElement>(
+      'button[aria-label^="ink current color"]',
+    )!;
+    act(() => colorTrigger.click());
+    const hue = document.querySelector<HTMLElement>('[aria-label="ink hue"]')!;
+    const hueKey = (type: "keydown" | "keyup") =>
+      hue.dispatchEvent(
+        new KeyboardEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          key: "ArrowRight",
+          code: "ArrowRight",
+          keyCode: 39,
+        }),
+      );
+
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keyup"));
+
+    expect(historyCapture.transactionCommits).toHaveLength(1);
+    const gesture = historyCapture.transactionCommits[0]!;
+    expect(gesture.after.past).toHaveLength(1);
+    expect(gesture.after.present.params.ink).toBe("#ff9900");
+    expect(colorTrigger.getAttribute("aria-label")).toBe(
+      "ink current color #ff9900",
+    );
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+    await flush();
+    expect(colorTrigger.getAttribute("aria-label")).toBe(
+      "ink current color #ff0000",
+    );
+    expect(hue.getAttribute("aria-valuenow")).toBe("0");
+
+    pressHistoryShortcut(window, { key: "y", ctrlKey: true });
+    await flush();
+    expect(colorTrigger.getAttribute("aria-label")).toBe(
+      "ink current color #ff9900",
+    );
+    expect(hue.getAttribute("aria-valuenow")).toBe("36");
+  });
+
+  it("records a mouse color gesture as one Undo step", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          ink: { kind: "color", default: "#ff0000" },
+        })}
+      />,
+    );
+    act(() =>
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label^="ink current color"]',
+        )!
+        .click(),
+    );
+    const saturation = document.querySelector<HTMLElement>(
+      '[aria-label="ink saturation and value"]',
+    )!;
+    saturation.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 200, height: 100 }) as DOMRect;
+
+    act(() => {
+      saturation.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          cancelable: true,
+          buttons: 1,
+          clientX: 100,
+          clientY: 25,
+        }),
+      );
+    });
+    act(() =>
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })),
+    );
+
+    expect(historyCapture.transactionCommits).toHaveLength(1);
+    expect(
+      historyCapture.transactionCommits[0]!.after.present.params.ink,
+    ).toBe("#bf6060");
+    expect(historyCapture.transactionCommits[0]!.after.past).toHaveLength(1);
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+    expect(
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label^="ink current color"]',
+        )
+        ?.getAttribute("aria-label"),
+    ).toBe("ink current color #ff0000");
+  });
+
+  it("suppresses a color gesture that returns to its starting value", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          ink: { kind: "color", default: "#ff0000" },
+        })}
+      />,
+    );
+    act(() =>
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label^="ink current color"]',
+        )!
+        .click(),
+    );
+    const hue = document.querySelector<HTMLElement>('[aria-label="ink hue"]')!;
+    const arrow = (type: "keydown" | "keyup") =>
+      hue.dispatchEvent(
+        new KeyboardEvent(type, {
+          bubbles: true,
+          key: "ArrowRight",
+          code: "ArrowRight",
+          keyCode: 39,
+        }),
+      );
+
+    for (let step = 0; step < 20; step += 1) act(() => arrow("keydown"));
+    act(() => arrow("keyup"));
+
+    expect(historyCapture.transactionCommits).toHaveLength(1);
+    const noOp = historyCapture.transactionCommits[0]!;
+    expect(noOp.after).not.toBe(noOp.before);
+    expect(noOp.after.present.params.ink).toBe("#ff0000");
+    expect(noOp.after.past).toHaveLength(0);
+  });
+
   it("feeds ControlPanel previews from present and Escape restores the whole transaction", () => {
     const el = mount(
       <SketchControls

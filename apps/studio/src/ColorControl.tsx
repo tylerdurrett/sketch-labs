@@ -117,47 +117,46 @@ export function ColorControl({
 
   const applyAtomicEdit = (next: string) => {
     synchronizeDraftColor(next);
-    if (editHistory) {
-      editHistory.onBegin();
-      editHistory.onPreview(next);
-      editHistory.onCommit();
+    const currentEditHistory = editHistoryRef.current;
+    if (currentEditHistory) {
+      currentEditHistory.onBegin();
+      currentEditHistory.onPreview(next);
+      currentEditHistory.onCommit();
     } else {
-      onChange(next);
+      onChangeRef.current(next);
     }
     setEditOwner("idle");
   };
 
-  const finishGesture = (finalColor: string) => {
-    setDraftColor(finalColor);
-    latestGestureColorRef.current = finalColor;
-    clearGestureLiftTimer();
-    if (editHistory) {
-      if (!gestureTransactionRef.current) {
-        editHistory.onBegin();
-        gestureTransactionRef.current = true;
-      }
-      liftGestureColor(finalColor);
-      editHistory.onCommit();
-    } else liftGestureColor(finalColor);
+  const resetGesture = () => {
     gestureTransactionRef.current = false;
     latestGestureColorRef.current = null;
     lastGestureLiftRef.current = null;
     setEditOwner("idle");
   };
 
-  /** One close path so gesture flushing can be strengthened without fan-out. */
+  const finishGesture = (finalColor?: string) => {
+    if (editOwnerRef.current !== "gesture") return;
+
+    if (finalColor !== undefined) {
+      setDraftColor(finalColor);
+      latestGestureColorRef.current = finalColor;
+    }
+    clearGestureLiftTimer();
+    const latest = latestGestureColorRef.current;
+    if (latest !== null) liftGestureColor(latest);
+    if (gestureTransactionRef.current) {
+      editHistoryRef.current?.onCommit();
+    }
+    resetGesture();
+  };
+
+  /** One close path for every Base UI dismissal reason and direct close. */
   const closePicker = () => {
     openRef.current = false;
     if (editOwnerRef.current === "gesture") {
-      clearGestureLiftTimer();
-      const latest = latestGestureColorRef.current;
-      if (latest !== null) liftGestureColor(latest);
-      if (gestureTransactionRef.current) editHistory?.onCommit();
+      finishGesture();
       ignoreSurfaceCallbacksForTick(draftColorRef.current);
-      gestureTransactionRef.current = false;
-      latestGestureColorRef.current = null;
-      lastGestureLiftRef.current = null;
-      setEditOwner("idle");
     }
     setOpen(false);
   };
@@ -212,31 +211,34 @@ export function ColorControl({
                     if (ignoredSurfaceSyncRef.current !== null) {
                       return;
                     }
+                    if (!openRef.current) {
+                      // react-colorful may batch the last keyboard/pointer
+                      // change until after Base UI has reported dismissal. At
+                      // that point there was no active gesture for closePicker
+                      // to flush, so settle this one completed value atomically.
+                      applyAtomicEdit(next);
+                      return;
+                    }
                     // A controlled react-colorful update can round-trip through
                     // HSV. The RGB editor remains the sole owner while active.
                     if (editOwnerRef.current === "rgb") return;
+                    if (
+                      editOwnerRef.current !== "gesture" &&
+                      next === draftColorRef.current
+                    ) {
+                      return;
+                    }
                     setEditOwner("gesture");
                     setDraftColor(next);
                     latestGestureColorRef.current = next;
-                    if (editHistory) {
-                      if (!gestureTransactionRef.current) {
-                        editHistory.onBegin();
+                    if (!gestureTransactionRef.current) {
+                      const currentEditHistory = editHistoryRef.current;
+                      if (currentEditHistory) {
+                        // History must snapshot the pre-gesture state before
+                        // any delayed preview can reach the shared owner.
+                        currentEditHistory.onBegin();
                         gestureTransactionRef.current = true;
                       }
-                    }
-                    // Base UI can report a close before react-colorful's
-                    // batched preview callback. Preserve the completed value;
-                    // E2 owns the fuller dismissal transaction policy.
-                    if (!openRef.current) {
-                      liftGestureColor(next);
-                      if (gestureTransactionRef.current) {
-                        editHistory?.onCommit();
-                      }
-                      gestureTransactionRef.current = false;
-                      latestGestureColorRef.current = null;
-                      lastGestureLiftRef.current = null;
-                      setEditOwner("idle");
-                      return;
                     }
                     scheduleGestureLift();
                   }}
