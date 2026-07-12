@@ -50,6 +50,10 @@ export function ColorControl({
   const latestGestureColorRef = useRef<string | null>(null);
   const lastGestureLiftRef = useRef<string | null>(null);
   const ignoredSurfaceSyncRef = useRef<string | null>(null);
+  const onChangeRef = useRef(onChange);
+  const editHistoryRef = useRef(editHistory);
+  onChangeRef.current = onChange;
+  editHistoryRef.current = editHistory;
 
   const setDraftColor = (next: string) => {
     draftColorRef.current = next;
@@ -89,8 +93,9 @@ export function ColorControl({
 
   const liftGestureColor = (next: string) => {
     if (lastGestureLiftRef.current === next) return;
-    if (editHistory) editHistory.onPreview(next);
-    else onChange(next);
+    const currentEditHistory = editHistoryRef.current;
+    if (currentEditHistory) currentEditHistory.onPreview(next);
+    else onChangeRef.current(next);
     lastGestureLiftRef.current = next;
   };
 

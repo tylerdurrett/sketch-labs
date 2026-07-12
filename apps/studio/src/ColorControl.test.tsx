@@ -303,6 +303,56 @@ describe("ColorControl gesture timing", () => {
     expect(order).toEqual(["begin", "preview:#ff4d00"]);
   });
 
+  it("uses the latest fallback callback when the deadline fires", () => {
+    vi.useFakeTimers();
+    const firstOnChange = vi.fn<[string], void>();
+    const replacementOnChange = vi.fn<[string], void>();
+    const initial = props({ value: "#ff0000", onChange: firstOnChange });
+    mount(initial);
+    openPicker();
+    act(() => hueKey("keydown"));
+
+    rerender({ ...initial, onChange: replacementOnChange });
+    act(() => vi.advanceTimersByTime(100));
+
+    expect(firstOnChange).not.toHaveBeenCalled();
+    expect(replacementOnChange).toHaveBeenCalledTimes(1);
+    expect(replacementOnChange).toHaveBeenCalledWith("#ff4d00");
+  });
+
+  it("uses the latest history lifecycle when the deadline fires", () => {
+    vi.useFakeTimers();
+    const firstPreview = vi.fn<[string], void>();
+    const replacementPreview = vi.fn<[string], void>();
+    const initial = props({
+      value: "#ff0000",
+      editHistory: {
+        onBegin: vi.fn(),
+        onPreview: firstPreview,
+        onCommit: vi.fn(),
+        onCancel: vi.fn(),
+      },
+    });
+    mount(initial);
+    openPicker();
+    act(() => hueKey("keydown"));
+
+    rerender({
+      ...initial,
+      editHistory: {
+        onBegin: vi.fn(),
+        onPreview: replacementPreview,
+        onCommit: vi.fn(),
+        onCancel: vi.fn(),
+      },
+    });
+    act(() => vi.advanceTimersByTime(100));
+
+    expect(firstPreview).not.toHaveBeenCalled();
+    expect(replacementPreview).toHaveBeenCalledTimes(1);
+    expect(replacementPreview).toHaveBeenCalledWith("#ff4d00");
+  });
+
   it("flushes a final color synchronously when the gesture ends early", () => {
     vi.useFakeTimers();
     const onChange = vi.fn<[string], void>();
