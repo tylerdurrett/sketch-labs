@@ -8,6 +8,8 @@ import { RgbColorFields } from "./RgbColorFields";
 
 type EditOwner = "idle" | "rgb" | "gesture";
 
+const GESTURE_LIFT_DELAY_MS = 100;
+
 /** Props for the Studio-owned color popover. */
 export interface ColorControlProps {
   /** The param's key in the schema and the root of its accessible names. */
@@ -44,6 +46,8 @@ export function ColorControl({
   const draftColorRef = useRef(value);
   const editOwnerRef = useRef<EditOwner>("idle");
   const gestureTransactionRef = useRef(false);
+  const gestureLiftTimerRef = useRef<number | null>(null);
+  const latestGestureColorRef = useRef<string | null>(null);
   const lastGestureLiftRef = useRef<string | null>(null);
   const ignoredSurfaceSyncRef = useRef<string | null>(null);
 
@@ -72,13 +76,39 @@ export function ColorControl({
   };
 
   useEffect(() => {
-    if (
-      (!openRef.current || editOwnerRef.current === "idle") &&
-      draftColorRef.current !== value
-    ) {
+    if (editOwnerRef.current === "idle" && draftColorRef.current !== value) {
       synchronizeDraftColor(value);
     }
   }, [value]);
+
+  const clearGestureLiftTimer = () => {
+    if (gestureLiftTimerRef.current === null) return;
+    window.clearTimeout(gestureLiftTimerRef.current);
+    gestureLiftTimerRef.current = null;
+  };
+
+  const liftGestureColor = (next: string) => {
+    if (lastGestureLiftRef.current === next) return;
+    if (editHistory) editHistory.onPreview(next);
+    else onChange(next);
+    lastGestureLiftRef.current = next;
+  };
+
+  const scheduleGestureLift = () => {
+    clearGestureLiftTimer();
+    gestureLiftTimerRef.current = window.setTimeout(() => {
+      gestureLiftTimerRef.current = null;
+      const latest = latestGestureColorRef.current;
+      if (latest !== null) liftGestureColor(latest);
+    }, GESTURE_LIFT_DELAY_MS);
+  };
+
+  useEffect(
+    () => () => {
+      clearGestureLiftTimer();
+    },
+    [],
+  );
 
   const applyAtomicEdit = (next: string) => {
     synchronizeDraftColor(next);
@@ -94,19 +124,18 @@ export function ColorControl({
 
   const finishGesture = (finalColor: string) => {
     setDraftColor(finalColor);
+    latestGestureColorRef.current = finalColor;
+    clearGestureLiftTimer();
     if (editHistory) {
       if (!gestureTransactionRef.current) {
         editHistory.onBegin();
         gestureTransactionRef.current = true;
       }
-      if (lastGestureLiftRef.current !== finalColor) {
-        editHistory.onPreview(finalColor);
-      }
+      liftGestureColor(finalColor);
       editHistory.onCommit();
-    } else if (lastGestureLiftRef.current !== finalColor) {
-      onChange(finalColor);
-    }
+    } else liftGestureColor(finalColor);
     gestureTransactionRef.current = false;
+    latestGestureColorRef.current = null;
     lastGestureLiftRef.current = null;
     setEditOwner("idle");
   };
@@ -115,9 +144,13 @@ export function ColorControl({
   const closePicker = () => {
     openRef.current = false;
     if (editOwnerRef.current === "gesture") {
+      clearGestureLiftTimer();
+      const latest = latestGestureColorRef.current;
+      if (latest !== null) liftGestureColor(latest);
       if (gestureTransactionRef.current) editHistory?.onCommit();
       ignoreSurfaceCallbacksForTick(draftColorRef.current);
       gestureTransactionRef.current = false;
+      latestGestureColorRef.current = null;
       lastGestureLiftRef.current = null;
       setEditOwner("idle");
     }
@@ -179,16 +212,28 @@ export function ColorControl({
                     if (editOwnerRef.current === "rgb") return;
                     setEditOwner("gesture");
                     setDraftColor(next);
+                    latestGestureColorRef.current = next;
                     if (editHistory) {
                       if (!gestureTransactionRef.current) {
                         editHistory.onBegin();
                         gestureTransactionRef.current = true;
                       }
-                      editHistory.onPreview(next);
-                    } else {
-                      onChange(next);
                     }
-                    lastGestureLiftRef.current = next;
+                    // Base UI can report a close before react-colorful's
+                    // batched preview callback. Preserve the completed value;
+                    // E2 owns the fuller dismissal transaction policy.
+                    if (!openRef.current) {
+                      liftGestureColor(next);
+                      if (gestureTransactionRef.current) {
+                        editHistory?.onCommit();
+                      }
+                      gestureTransactionRef.current = false;
+                      latestGestureColorRef.current = null;
+                      lastGestureLiftRef.current = null;
+                      setEditOwner("idle");
+                      return;
+                    }
+                    scheduleGestureLift();
                   }}
                   onChangeEnd={(next) => {
                     if (editOwnerRef.current === "gesture") finishGesture(next);

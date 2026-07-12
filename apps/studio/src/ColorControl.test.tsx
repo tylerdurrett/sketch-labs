@@ -85,6 +85,7 @@ afterEach(() => {
   container = null;
   root = null;
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("ColorControl composition", () => {
@@ -216,6 +217,164 @@ describe("ColorControl Palette", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith("#ffffff");
     expect(document.activeElement).not.toBe(trigger());
+  });
+});
+
+describe("ColorControl gesture timing", () => {
+  function hue(): HTMLElement {
+    return popup().querySelector<HTMLElement>('[aria-label="ink hue"]')!;
+  }
+
+  function hueKey(type: "keydown" | "keyup") {
+    hue().dispatchEvent(
+      new KeyboardEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        key: "ArrowRight",
+        code: "ArrowRight",
+        keyCode: 39,
+      }),
+    );
+  }
+
+  it("updates the local color immediately without lifting before 100ms", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn<[string], void>();
+    mount(props({ value: "#ff0000", onChange }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #ff4d00",
+    );
+    expect([rgb("red").value, rgb("green").value, rgb("blue").value]).toEqual([
+      "255",
+      "77",
+      "0",
+    ]);
+    expect(onChange).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(99));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("restarts the trailing deadline and lifts only the latest color", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn<[string], void>();
+    mount(props({ value: "#ff0000", onChange }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    act(() => vi.advanceTimersByTime(75));
+    act(() => hueKey("keydown"));
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #ff9900",
+    );
+
+    act(() => vi.advanceTimersByTime(99));
+    expect(onChange).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(1));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("#ff9900");
+  });
+
+  it("routes the trailing lift through edit history preview", () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    mount(
+      props({
+        value: "#ff0000",
+        editHistory: {
+          onBegin: () => order.push("begin"),
+          onPreview: (next) => order.push(`preview:${next}`),
+          onCommit: () => order.push("commit"),
+          onCancel: () => order.push("cancel"),
+        },
+      }),
+    );
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    expect(order).toEqual(["begin"]);
+    act(() => vi.advanceTimersByTime(100));
+
+    expect(order).toEqual(["begin", "preview:#ff4d00"]);
+  });
+
+  it("flushes a final color synchronously when the gesture ends early", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn<[string], void>();
+    mount(props({ value: "#ff0000", onChange }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keyup"));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("#ff4d00");
+    act(() => vi.advanceTimersByTime(100));
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not lift the final color twice after the trailing deadline", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn<[string], void>();
+    mount(props({ value: "#ff0000", onChange }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    act(() => vi.advanceTimersByTime(100));
+    act(() => hueKey("keyup"));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("#ff4d00");
+  });
+
+  it("clears a pending lift on unmount without previewing or committing", () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    mount(
+      props({
+        value: "#ff0000",
+        editHistory: {
+          onBegin: () => order.push("begin"),
+          onPreview: (next) => order.push(`preview:${next}`),
+          onCommit: () => order.push("commit"),
+          onCancel: () => order.push("cancel"),
+        },
+      }),
+    );
+    openPicker();
+    act(() => hueKey("keydown"));
+    expect(order).toEqual(["begin"]);
+
+    act(() => root!.unmount());
+    root = null;
+    act(() => vi.advanceTimersByTime(100));
+
+    expect(order).toEqual(["begin"]);
+  });
+
+  it("does not let a stale external value overwrite an active draft", () => {
+    vi.useFakeTimers();
+    const initial = props({ value: "#ff0000" });
+    mount(initial);
+    openPicker();
+    act(() => hueKey("keydown"));
+
+    rerender({ ...initial, value: "#00ff00" });
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #ff4d00",
+    );
+    expect([rgb("red").value, rgb("green").value, rgb("blue").value]).toEqual([
+      "255",
+      "77",
+      "0",
+    ]);
+    expect(initial.onChange).not.toHaveBeenCalled();
   });
 });
 
