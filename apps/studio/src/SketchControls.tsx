@@ -13,6 +13,7 @@ import {
   plotDrawableAspectsEquivalent,
   plotDrawableRectangle,
   randomize,
+  renderPlotterSVG,
   renderToSVG,
   resolveOutputProfile,
   resolvePlotCompositionFrame,
@@ -451,11 +452,11 @@ export function SketchControls({
   // on-demand only, so it runs HERE inside the handler — never in render or the
   // live loop.
   //
-  // Everything else mirrors `exportSvg` exactly (same handle guard, same
-  // `sketch.time` time-gating of `t`, same displayed `(params, seed, t)` spine,
-  // same reproduction envelope), so both SVG exports reflect the identical
-  // displayed moment. The file is tagged with a `-hidden-line` variant segment so
-  // it never collides with the plain SVG export's name.
+  // Sampling still mirrors `exportSvg` exactly (same handle guard, time gating,
+  // displayed state, and reproduction envelope). Serialization deliberately
+  // differs: plotter output maps the clipped Scene through the active physical
+  // profile, while ordinary SVG remains on `renderToSVG`. The file keeps its
+  // `-hidden-line` variant segment and existing time-gated name.
   const exportHiddenLineSvg = () => {
     const handle = canvasHandle.current;
     if (handle == null) return;
@@ -489,7 +490,7 @@ export function SketchControls({
       t,
       profile,
     });
-    const svg = renderToSVG(clipped, metadata);
+    const svg = renderPlotterSVG(clipped, profile, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     downloadBlob(
       blob,
