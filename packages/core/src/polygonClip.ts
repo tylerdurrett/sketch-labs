@@ -150,11 +150,6 @@ export function preparePolygon(polygon: Polyline): PreparedPolygon {
   }
 }
 
-/** 2D scalar cross product: a.x*b.y - a.y*b.x */
-function cross2(a: Point, b: Point): number {
-  return a[0] * b[1] - a[1] * b[0]
-}
-
 /**
  * Even-odd ray-cast point-in-polygon test. Correct for concave polygons.
  * Treats the vertex ring as implicitly closed (wrap edge from last to first).
@@ -199,13 +194,19 @@ function segmentCrossParam(
   c: Point,
   d: Point,
 ): number | null {
-  const r = vec.sub(b, a)
-  const s = vec.sub(d, c)
-  const denom = cross2(r, s)
+  // Spell the same vector arithmetic out as scalars in this hot loop. A dense
+  // hidden-line pass calls this millions of times; allocating r, s, and qp for
+  // every rejected edge creates substantial short-lived garbage.
+  const rx = b[0] - a[0]
+  const ry = b[1] - a[1]
+  const sx = d[0] - c[0]
+  const sy = d[1] - c[1]
+  const denom = rx * sy - ry * sx
   if (Math.abs(denom) < EPS) return null // parallel or collinear — ignored
-  const qp = vec.sub(c, a)
-  const t = cross2(qp, s) / denom
-  const u = cross2(qp, r) / denom
+  const qpx = c[0] - a[0]
+  const qpy = c[1] - a[1]
+  const t = (qpx * sy - qpy * sx) / denom
+  const u = (qpx * ry - qpy * rx) / denom
   if (t < -EPS || t > 1 + EPS || u < -EPS || u > 1 + EPS) return null
   return Math.min(1, Math.max(0, t))
 }
@@ -264,7 +265,7 @@ export function subtractPreparedPolygonsFromPolyline(
     // polyline — and, mid-`current`, push a duplicate coincident point. `current`
     // is intentionally left untouched so a contiguous run stays stitched across
     // the duplicate rather than being split by it.
-    if (vec.dist(a, b) <= EPS) continue
+    if (vec.distSq(a, b) <= EPS * EPS) continue
 
     // Collect split parameters along this segment: endpoints + every crossing.
     const ts: number[] = [0, 1]
@@ -281,6 +282,22 @@ export function subtractPreparedPolygonsFromPolyline(
         const t = segmentCrossParam(a, b, edge.c, edge.d)
         if (t !== null) ts.push(t)
       }
+    }
+
+    // Most locally bounded segment/edge pairs do not cross. Preserve the exact
+    // lerp expressions and classification used by the general path, but avoid
+    // allocating, sorting, and re-copying a two-element cuts array.
+    if (ts.length === 2) {
+      const p1 = vec.lerp(a, b, 1)
+      const mid = vec.lerp(a, b, 0.5)
+      if (insideAny(mid, polygons)) {
+        flush()
+      } else if (current === null) {
+        current = [vec.lerp(a, b, 0), p1]
+      } else {
+        current.push(p1)
+      }
+      continue
     }
 
     // Sort and merge near-duplicate split points.
