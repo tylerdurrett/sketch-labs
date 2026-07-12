@@ -133,7 +133,7 @@ describe("PaperSection", () => {
     const onChange = vi.fn();
     const { el } = mount(onChange, HARNESS_FALLBACK_PLOT_PROFILE);
     const button = [...el.querySelectorAll("button")].find(
-      (candidate) => candidate.textContent === "Square — no orientation",
+      (candidate) => candidate.textContent === "Square",
     );
 
     expect(el.querySelector("select")?.value).toBe("square");
@@ -172,7 +172,7 @@ describe("PaperSection", () => {
         root.render(<PaperSection profile={accepted} onChange={onChange} />);
       });
       const orientation = [...el.querySelectorAll("button")].find(
-        (candidate) => candidate.textContent === "Square — no orientation",
+        (candidate) => candidate.textContent === "Square",
       );
       expect(el.querySelector("select")?.value).toBe("square");
       expect((orientation as HTMLButtonElement).disabled).toBe(true);

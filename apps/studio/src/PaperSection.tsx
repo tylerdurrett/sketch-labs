@@ -315,7 +315,7 @@ export function PaperSection({ profile, onChange }: PaperSectionProps) {
             onClick={isExactSquare ? undefined : swapOrientation}
           >
             {isExactSquare
-              ? "Square — no orientation"
+              ? "Square"
               : `Swap to ${derivePaperOrientation(profile) === "portrait" ? "landscape" : "portrait"}`}
           </button>
         </div>
