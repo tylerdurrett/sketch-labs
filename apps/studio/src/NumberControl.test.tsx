@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -227,6 +227,67 @@ describe("NumberControl transactions", () => {
     expect(input.value).toBe("50");
   });
 
+  it("begins an invalid draft immediately, previews nothing, and Escape cancels", () => {
+    const editHistory = lifecycle();
+    const el = mount(
+      <NumberControl
+        paramKey="radius"
+        spec={numberSpec()}
+        value={50}
+        locked={false}
+        onChange={() => {}}
+        editHistory={editHistory}
+        onToggleLock={() => {}}
+      />,
+    );
+    const input = el.querySelector<HTMLInputElement>('input[type="number"]')!;
+
+    act(() => {
+      input.focus();
+      enter(input, "");
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      input.blur();
+    });
+
+    expect(editHistory.onBegin).toHaveBeenCalledTimes(1);
+    expect(editHistory.onPreview).not.toHaveBeenCalled();
+    expect(editHistory.onCancel).toHaveBeenCalledTimes(1);
+    expect(editHistory.onCommit).not.toHaveBeenCalled();
+  });
+
+  it("commits an invalid draft transaction once on Enter and not again on blur", () => {
+    const editHistory = lifecycle();
+    const el = mount(
+      <NumberControl
+        paramKey="radius"
+        spec={numberSpec()}
+        value={50}
+        locked={false}
+        onChange={() => {}}
+        editHistory={editHistory}
+        onToggleLock={() => {}}
+      />,
+    );
+    const input = el.querySelector<HTMLInputElement>('input[type="number"]')!;
+
+    act(() => {
+      input.focus();
+      // Browsers sanitize a lone "-" in a number input to an empty string;
+      // either form is the same temporarily invalid numeric draft.
+      enter(input, "-");
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+
+    expect(editHistory.onBegin).toHaveBeenCalledTimes(1);
+    expect(editHistory.onPreview).not.toHaveBeenCalled();
+    expect(editHistory.onCommit).toHaveBeenCalledTimes(1);
+    expect(editHistory.onCancel).not.toHaveBeenCalled();
+  });
+
   it("keeps the original standalone onChange behavior without a lifecycle", () => {
     const onChange = vi.fn<[number], void>();
     const el = mount(
@@ -242,6 +303,41 @@ describe("NumberControl transactions", () => {
     const input = el.querySelector<HTMLInputElement>('input[type="number"]')!;
     act(() => enter(input, "72"));
     expect(onChange).toHaveBeenCalledWith(72);
+  });
+
+  it("restores the standalone parent value on Escape after live preview", () => {
+    function StandaloneControl() {
+      const [current, setCurrent] = useState(50);
+      return (
+        <NumberControl
+          paramKey="radius"
+          spec={numberSpec()}
+          value={current}
+          locked={false}
+          onChange={setCurrent}
+          onToggleLock={() => {}}
+        />
+      );
+    }
+
+    const el = mount(<StandaloneControl />);
+    const input = el.querySelector<HTMLInputElement>('input[type="number"]')!;
+    const slider = el.querySelector<HTMLInputElement>('input[type="range"]')!;
+
+    act(() => {
+      input.focus();
+      enter(input, "75");
+    });
+    expect(input.value).toBe("75");
+    expect(slider.value).toBe("75");
+
+    act(() => {
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    expect(input.value).toBe("50");
+    expect(slider.value).toBe("50");
   });
 
   it("begins before slider preview and commits the completed interaction", () => {

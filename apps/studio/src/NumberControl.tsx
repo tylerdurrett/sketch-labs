@@ -103,12 +103,15 @@ export function NumberControl({
     return Number.isFinite(parsed) ? coerceToDomain(parsed, spec) : null;
   };
 
+  const beginTransaction = () => {
+    if (!editHistory || transactionRef.current) return;
+    editHistory.onBegin();
+    transactionRef.current = true;
+  };
+
   const preview = (next: number) => {
     if (editHistory) {
-      if (!transactionRef.current) {
-        editHistory.onBegin();
-        transactionRef.current = true;
-      }
+      beginTransaction();
       editHistory.onPreview(next);
     } else {
       onChange(next);
@@ -157,6 +160,10 @@ export function NumberControl({
           onChange={(event) => {
             const nextDraft = event.target.value;
             setDraft(nextDraft);
+            // Even an empty or temporarily invalid draft is an active field
+            // edit. Begin before parsing so native field-level Undo keeps
+            // precedence until Enter, blur, or Escape ends the transaction.
+            beginTransaction();
             const next = parse(nextDraft);
             if (next !== null) preview(next);
           }}
@@ -169,7 +176,13 @@ export function NumberControl({
               event.currentTarget.blur();
             } else if (event.key === "Escape") {
               event.preventDefault();
-              cancelTransaction();
+              if (editHistory) {
+                cancelTransaction();
+              } else if (
+                !Object.is(lastPreviewRef.current, focusValueRef.current)
+              ) {
+                onChange(focusValueRef.current);
+              }
               editingRef.current = false;
               lastPreviewRef.current = focusValueRef.current;
               setDraft(String(focusValueRef.current));
