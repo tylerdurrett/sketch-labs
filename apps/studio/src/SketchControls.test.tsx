@@ -34,12 +34,17 @@ import { hiddenLineSceneForExport, SketchControls } from "./SketchControls";
 const exportSceneCapture = vi.hoisted(() => ({
   current: null as unknown,
 }));
+const plotterExportCapture = vi.hoisted(() => ({
+  current: null as null | {
+    scene: unknown;
+    profile: PlotProfile;
+    metadata: string | undefined;
+  },
+}));
 
-// Mock ONLY `renderToSVG`, delegating to the real implementation so every
-// existing SVG-export assertion (which checks the serialized string) stays
-// green — we merely tee off the Scene argument on the way through. Everything
-// else in `@harness/core` (buildReproMetadata, hiddenLinePass, insertPngMetadata,
-// exportFilename, crc32, …) is the genuine module via `importActual`.
+// Probe both SVG serializers while delegating to their real implementations, so
+// document assertions exercise core and each wiring test can identify the exact
+// Scene/profile it received. Everything else in `@harness/core` is genuine.
 vi.mock("@harness/core", async (importActual) => {
   const actual = await importActual<typeof import("@harness/core")>();
   return {
@@ -49,6 +54,16 @@ vi.mock("@harness/core", async (importActual) => {
     ): ReturnType<typeof actual.renderToSVG> => {
       exportSceneCapture.current = args[0];
       return actual.renderToSVG(...args);
+    },
+    renderPlotterSVG: (
+      ...args: Parameters<typeof actual.renderPlotterSVG>
+    ): ReturnType<typeof actual.renderPlotterSVG> => {
+      plotterExportCapture.current = {
+        scene: args[0],
+        profile: args[1],
+        metadata: args[2],
+      };
+      return actual.renderPlotterSVG(...args);
     },
   };
 });
@@ -238,9 +253,9 @@ beforeEach(() => {
     cb(new Blob([MINIMAL_PNG], { type: "image/png" }));
   }) as HTMLCanvasElement["toBlob"];
   downloadBlob.mockReset();
-  // Clear the preview == export seam probe so each test observes only its own
-  // `renderToSVG` call (#220).
+  // Clear both serializer probes so each test observes only its own export.
   exportSceneCapture.current = null;
+  plotterExportCapture.current = null;
 });
 
 afterEach(() => {
@@ -1119,6 +1134,8 @@ describe("SketchControls — SVG export wiring", () => {
     const svg = await blobText(blob);
     expect(svg).toMatch(/<svg\b[^>]*viewBox="0 0 100 100"/);
     expect(svg).toMatch(/<path\b[^>]*fill="tomato"/);
+    expect(exportSceneCapture.current).not.toBeNull();
+    expect(plotterExportCapture.current).toBeNull();
     // Static sketch ⇒ no `-t` segment, `.svg` extension.
     expect(filename).toBe(`circles-seed${seed}.svg`);
 
@@ -1306,7 +1323,9 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     expect(blob.type).toBe("image/svg+xml");
 
     const svg = await blobText(blob);
-    expect(svg).toMatch(/<svg\b[^>]*viewBox="0 0 100 100"/);
+    expect(svg).toMatch(
+      /<svg\b[^>]*width="200mm" height="200mm" viewBox="0 0 200 200"/,
+    );
     // The pass ran: its output is STROKE-ONLY (fill-free primitives), so the raw
     // fill colors never reach the serialized SVG and every path is stroked.
     expect(svg).not.toContain('fill="tomato"');
@@ -1330,6 +1349,119 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       locks: [],
       profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
+  });
+
+  it("exports the cold Outline seam onto a non-square asymmetric physical sheet as paths only", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const profile: PlotProfile = {
+      width: 250,
+      height: 180,
+      insets: { top: 15, right: 45, bottom: 15, left: 25 },
+    };
+    const source = {
+      space: { width: 120, height: 100 },
+      background: "papayawhip",
+      primitives: [
+        {
+          points: [
+            [0, 0],
+            [120, 0],
+            [120, 100],
+            [0, 100],
+          ],
+          closed: true,
+          fill: { color: "tomato" },
+        },
+      ],
+    } as unknown as DisplayedSceneSnapshot["scene"];
+    const generate = vi.fn(() => source);
+    const sketch = {
+      ...(hlStaticSketch("physical") as unknown as Record<string, unknown>),
+      defaultOutputProfile: profile,
+      generate,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+
+    const el = mount(<SketchControls sketch={sketch} />);
+    const seed = Number(
+      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
+    );
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(plotterExportCapture.current).toEqual({
+      scene: clipSceneToBounds(outlineScene(source)),
+      profile,
+      metadata: expect.any(String),
+    });
+
+    const svg = await blobText(downloadBlob.mock.calls[0]![0]);
+    expect(svg).toContain(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="250mm" height="180mm" viewBox="0 0 250 180">',
+    );
+    // 120×100 Scene → 180×150 mm drawable: 1.5×, placed at asymmetric
+    // left/right insets 25/45 and top/bottom insets 15/15.
+    expect(svg).toContain('d="M25 15 L205 15 L205 165 L25 165 L25 15"');
+    expect(svg).toContain('stroke-width="1.5"');
+    expect(svg.match(/<path\b/g)).toHaveLength(1);
+    expect(svg).not.toMatch(/<(?:rect|circle|ellipse|polygon|polyline|image)\b/);
+    expect(svg).not.toContain("papayawhip");
+    expect(svg).not.toContain("tomato");
+
+    const encoded = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
+    expect(encoded).toBeDefined();
+    expect(JSON.parse(encoded!)).toEqual({
+      version: 2,
+      sketch: "physical",
+      name: `physical-seed${seed}`,
+      seed,
+      params: { radius: 10 },
+      locks: [],
+      profile,
+    });
+  });
+
+  it("changes only physical mapping for a same-aspect profile edit while reusing the cached Outline Scene", async () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const processed = outlineScene(source);
+    const processedBefore = structuredClone(processed);
+    const generate = vi.fn(() => source);
+    const el = mount(
+      <SketchControls sketch={{ ...hlStaticSketch("circles"), generate }} />,
+    );
+
+    clickButton(el, "Fill");
+    fakeDisplayedScene = {
+      scene: processed,
+      t: 0,
+      renderMode: "outline",
+      tolerance: 0,
+    };
+    clickButton(el, "Export Hidden-line SVG");
+    const firstScene = plotterExportCapture.current?.scene;
+    const firstSvg = await blobText(downloadBlob.mock.calls[0]![0]);
+
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Linked paper margin (mm)"]',
+      )!,
+      "20",
+    );
+    clickButton(el, "Export Hidden-line SVG");
+    const secondScene = plotterExportCapture.current?.scene;
+    const secondSvg = await blobText(downloadBlob.mock.calls[1]![0]);
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(fakeDisplayedScene?.scene).toBe(processed);
+    expect(processed).toEqual(processedBefore);
+    expect(firstScene).toEqual(secondScene);
+    expect(plotterExportCapture.current?.profile).toEqual({
+      width: 200,
+      height: 200,
+      insets: { top: 20, right: 20, bottom: 20, left: 20 },
+    });
+    expect(firstSvg).toContain('stroke-width="1.8"');
+    expect(secondSvg).toContain('stroke-width="1.6"');
+    expect(secondSvg).not.toBe(firstSvg);
   });
 
   it("carries the -t{t} segment before -hidden-line for a time-driven sketch", () => {
@@ -1362,7 +1494,9 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     clickButton(el, "Export Hidden-line SVG");
 
     expect(generate).not.toHaveBeenCalled();
-    expect(exportSceneCapture.current).toEqual(clipSceneToBounds(processed));
+    expect(plotterExportCapture.current?.scene).toEqual(
+      clipSceneToBounds(processed),
+    );
   });
 
   it("reuses the exact displayed fill Scene and only runs hidden-line processing", () => {
@@ -1381,7 +1515,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     clickButton(el, "Export Hidden-line SVG");
 
     expect(generate).not.toHaveBeenCalled();
-    expect(exportSceneCapture.current).toEqual(
+    expect(plotterExportCapture.current?.scene).toEqual(
       clipSceneToBounds(outlineScene(source)),
     );
   });
@@ -1395,7 +1529,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     clickButton(el, "Export Hidden-line SVG");
 
     expect(generate).toHaveBeenCalledTimes(1);
-    expect(exportSceneCapture.current).toEqual(
+    expect(plotterExportCapture.current?.scene).toEqual(
       clipSceneToBounds(outlineScene(source)),
     );
   });
@@ -1416,7 +1550,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     clickButton(el, "Export Hidden-line SVG");
 
     expect(generate).toHaveBeenCalledTimes(1);
-    expect(exportSceneCapture.current).toEqual(
+    expect(plotterExportCapture.current?.scene).toEqual(
       clipSceneToBounds(outlineScene(source)),
     );
   });
@@ -1428,7 +1562,8 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
   // `drawFrame` early-returns before it would feed the canvas — the preview's
   // Scene isn't directly observable through a live render. The faithful check is
   // therefore: drive the REAL `exportHiddenLineSvg` and assert the Scene it hands
-  // `renderToSVG` (captured above) deep-equals `outlineScene(generatedScene)` —
+  // `renderPlotterSVG` (captured above) deep-equals
+  // `outlineScene(generatedScene)` —
   // the exact processing seam LiveCanvas's outline branch evaluates — for
   // one fixed frame. Locking the export path to the shared seam is what removes
   // the drift risk between preview and export.
@@ -1441,12 +1576,12 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     clickButton(el, "Export Hidden-line SVG");
 
-    // The export handed `renderToSVG` a Scene.
-    expect(exportSceneCapture.current).not.toBeNull();
+    // The export handed `renderPlotterSVG` a Scene.
+    expect(plotterExportCapture.current).not.toBeNull();
     // A static sketch's export passes `t ?? 0` (t is undefined ⇒ 0); params are
     // the schema defaults ({ radius: 10 }); seed is the displayed seed. The
     // outline preview evaluates this SAME expression, so the two inputs match.
-    expect(exportSceneCapture.current).toEqual(
+    expect(plotterExportCapture.current?.scene).toEqual(
       outlineScene(
         sketch.generate(
           { radius: 10 },
@@ -1461,9 +1596,9 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
   // AC3 (#232): the studio tolerance knob drives the hidden-line EXPORT's final
   // simplification. A scene whose surviving stroke has exactly-collinear interior
   // vertices lets a positive tolerance visibly drop them. Driving the knob then
-  // re-exporting must (a) hand `renderToSVG` the SAME seam expression at the new
-  // tolerance (preview == export by construction) and (b) actually reduce the
-  // exported vertex count versus tolerance 0.
+  // re-exporting must (a) hand `renderPlotterSVG` the SAME seam expression at
+  // the new tolerance (preview == export by construction) and (b) actually
+  // reduce the exported vertex count versus tolerance 0.
   const redundantScene = {
     space: { width: 100, height: 100 },
     // A single filled Primitive, no occluder ⇒ its whole ring survives as one
@@ -1525,7 +1660,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     // Baseline export at the default tolerance 0 — no simplification.
     clickButton(el, "Export Hidden-line SVG");
-    const atZero = exportSceneCapture.current;
+    const atZero = plotterExportCapture.current?.scene;
     expect(atZero).toEqual(
       outlineScene(
         sketch.generate(
@@ -1542,7 +1677,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // Drive the studio knob, then re-export.
     setInput(el.querySelector("#sketch-tolerance") as HTMLInputElement, "1");
     clickButton(el, "Export Hidden-line SVG");
-    const atOne = exportSceneCapture.current;
+    const atOne = plotterExportCapture.current?.scene;
 
     // preview == export: the export is the SAME seam expression at tolerance 1
     // (the value LiveCanvas's outline preview also receives — asserted below).
@@ -1605,7 +1740,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
   };
 
-  it("clips the hidden-line output to the canvas bounds after the pass (#237)", () => {
+  it("clips overflowing geometry before physical mapping and keeps it inside the drawable rectangle (#237)", async () => {
     const sketch = overflowHlSketch("circles");
     const el = mount(<SketchControls sketch={sketch} />);
     const seed = Number(
@@ -1626,13 +1761,25 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     clickButton(el, "Export Hidden-line SVG");
 
-    // The Scene handed `renderToSVG` is the seam CLIPPED to bounds: nothing lies
-    // outside the canvas, and it is exactly `clipSceneToBounds` of the seam
+    // The Scene handed `renderPlotterSVG` is the seam CLIPPED to bounds: nothing
+    // lies outside the canvas, and it is exactly `clipSceneToBounds` of the seam
     // (clip slotted after the hidden-line pass, before serialization).
-    const exported = exportSceneCapture.current;
+    const exported = plotterExportCapture.current?.scene;
     expect(exported).not.toBeNull();
     expect(outOfBoundsPoints(exported, 100, 100)).toEqual([]);
     expect(exported).toEqual(clipSceneToBounds(seam));
+
+    const svg = await blobText(downloadBlob.mock.calls[0]![0]);
+    const coordinates = [
+      ...svg.matchAll(/[ML](-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g),
+    ].map(([, x, y]) => [Number(x), Number(y)] as const);
+    expect(coordinates.length).toBeGreaterThan(0);
+    // Harness fallback: 200 mm square with 10 mm on every edge.
+    expect(
+      coordinates.every(
+        ([x, y]) => x >= 10 && x <= 190 && y >= 10 && y <= 190,
+      ),
+    ).toBe(true);
   });
 
   // #237 AC3 (concrete): the real Leaf Field sketch (core) run through the full
