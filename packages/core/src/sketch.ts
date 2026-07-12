@@ -84,14 +84,11 @@ export interface NumberParamSpec {
 /**
  * A color knob's declaration — a CSS hex color string with a default.
  *
- * VALUE DOMAIN: the value (and the `default`) is a hex CSS color string like
- * `'#1a2b3c'`. Hex is chosen deliberately over the full CSS color grammar
- * (`'white'`, `rgb(…)`, `oklch(…)`) because the native `<input type="color">`
- * the control panel binds this to speaks ONLY the 7-character `#rrggbb` form —
- * it both emits hex and refuses to display anything else — so pinning the domain
- * to hex keeps the stored param, the control, and the Preset round-trip all in
- * one representation with no normalization layer. Any downstream consumer
- * (Canvas2D `fillStyle`, SVG `fill`) accepts hex natively.
+ * VALUE DOMAIN: the value (and the `default`) is a canonical 7-character hex
+ * CSS color string like `'#1a2b3c'`. The Studio-owned picker converts its visual
+ * surface and integer RGB fields to and from this one representation, keeping
+ * param equality, Preset round-trips, and reproduction metadata deterministic.
+ * Any downstream consumer (Canvas2D `fillStyle`, SVG `fill`) accepts hex natively.
  *
  * Randomize NEVER rolls a color (see {@link randomize}): a color is a deliberate
  * aesthetic choice, not a bounded numeric range to explore, so it passes through
@@ -115,16 +112,16 @@ export interface ColorParamSpec {
  * member, issue #47) and {@link ColorParamSpec} (`kind: 'color'`, the first
  * non-numeric widening, ADR-0010) are the inhabited members today, and future
  * control kinds (boolean, enum, …) join as new `kind`-tagged members WITHOUT
- * reworking these — purely additive. The control panel, Lock, Randomize, and
- * Preset shape are all derived views that widen alongside the union, never
- * against it.
+ * reworking these — purely additive. The control panel, Randomize, and Preset
+ * shape are derived views that widen alongside the union; affordances such as
+ * numeric-only Lock remain meaningful only for the kinds they affect.
  */
 export type ParamSpec = NumberParamSpec | ColorParamSpec
 
 /**
  * The single declaration a Sketch makes of its tweakable knobs — the spine of
- * the Harness. The control panel, Lock toggles, Randomize, and Preset shape are
- * all derived views over this one schema.
+ * the Harness. The control panel, applicable Lock toggles, Randomize, and Preset
+ * shape are all derived views over this one schema.
  *
  * Modeled as a loose record keyed by param name, per the brief: keep the format
  * minimal and emergent rather than freezing it now.
@@ -183,8 +180,10 @@ export function defaultParams(schema: ParamSchema): Params {
  *
  * @param schema - The Sketch's Parameter Schema.
  * @param params - The current inhabited param values; NOT mutated.
- * @param locks - The set of locked param keys; only READ (the Studio owns the
- *   lock state). A locked key keeps its current value.
+ * @param locks - The generic set of locked param keys; only READ (the Studio
+ *   owns the lock state). A locked numeric key keeps its current value. A
+ *   persisted color key is harmless and inert because colors already pass
+ *   through every roll; callers need not filter or migrate it.
  * @param rand - Injected uniform `[0, 1)` source (matches `value()` in
  *   `random.ts`).
  * @returns A NEW {@link Params}; unlocked numeric keys re-rolled, the rest as-is.

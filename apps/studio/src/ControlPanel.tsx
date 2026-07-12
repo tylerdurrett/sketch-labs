@@ -18,9 +18,9 @@ export interface ControlPanelProps {
   /** The current value of every param, keyed as in `schema`. */
   params: Params;
   /**
-   * The set of locked param keys. Lock is Randomize-EXCLUSION only: a locked
-   * control is excluded from a roll but stays fully hand-editable — this set
-   * NEVER gates a control's input.
+   * The generic set of locked param keys. Numeric controls expose Lock as a
+   * Randomize-exclusion affordance; persisted color keys may remain in this set
+   * but are inert and render no Lock. This set NEVER gates a control's input.
    */
   locks: ReadonlySet<string>;
   /**
@@ -33,19 +33,19 @@ export interface ControlPanelProps {
   onChange: (key: string, value: number | string) => void;
   /** Shared transaction lifecycle, adapted to each schema key automatically. */
   editHistory?: EditTransactionLifecycle<Params> | undefined;
-  /** Toggle a single param's lock membership. */
+  /** Toggle a numeric param's lock membership. */
   onToggleLock: (key: string) => void;
 }
 
 /**
  * Render one control for a single schema entry, switching on `spec.kind`.
  *
- * `kind: 'number'` → a {@link NumberControl}; `kind: 'color'` → a
- * {@link ColorControl}. An UNKNOWN kind renders a LOUD, visible fallback (never
- * a silent skip) so an unsupported control surfaces in the UI as a defect to
- * fix rather than vanishing. As the open `ParamSpec` union widens further
- * (boolean, enum, …) this switch grows a case per kind; the `default` branch is
- * the safety net for any kind not yet handled.
+ * `kind: 'number'` → a lock-aware {@link NumberControl}; `kind: 'color'` → a
+ * lock-free {@link ColorControl}. An UNKNOWN kind renders a LOUD, visible
+ * fallback (never a silent skip) so an unsupported control surfaces in the UI
+ * as a defect to fix rather than vanishing. As the open `ParamSpec` union
+ * widens further (boolean, enum, …) this switch grows a case per kind; the
+ * `default` branch is the safety net for any kind not yet handled.
  */
 function renderControl(
   key: string,

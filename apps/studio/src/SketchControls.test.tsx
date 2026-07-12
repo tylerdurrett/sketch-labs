@@ -1222,6 +1222,77 @@ describe("SketchControls — preset save/reload wiring", () => {
     expect(lastProfile).toEqual(loadedProfile);
   });
 
+  it("preserves a persisted color lock as inert data across reload and save", async () => {
+    const mixedSchema: ParamSchema = {
+      radius: numberSpec({ min: 0, max: 100, default: 10 }),
+      ink: { kind: "color", default: "#1a2b3c" },
+    };
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "legacy-color-lock",
+      seed: 999,
+      params: { radius: 20, ink: "#abcdef" },
+      locks: ["ink"],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    listPresets.mockResolvedValue(["legacy-color-lock"]);
+
+    const el = mount(
+      <SketchControls sketch={sketchWith("a", mixedSchema)} />,
+    );
+    await flush();
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "legacy-color-lock");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+    await flush();
+
+    // Reconciliation keeps a schema-present color key in the generic lock Set,
+    // but the mixed control surface exposes Lock only for the numeric sibling.
+    expect(historyCapture.atomic.at(-1)?.after.present.locks).toEqual(
+      new Set(["ink"]),
+    );
+    expect(el.querySelector('button[aria-label="ink lock"]')).toBeNull();
+    expect(el.querySelector('button[aria-label="radius lock"]')).not.toBeNull();
+    expect(
+      el.querySelector('button[aria-label^="ink current color #abcdef"]'),
+    ).not.toBeNull();
+
+    // The inert color entry does not prevent an unlocked numeric roll and the
+    // color still follows Randomize's unconditional pass-through contract.
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    clickButton(el, "Randomize");
+    expect(paramInput(el, "radius").value).toBe("50");
+    expect(
+      el.querySelector('button[aria-label^="ink current color #abcdef"]'),
+    ).not.toBeNull();
+
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      "roundtrip",
+    );
+    clickButton(el, "Save");
+    await flush();
+
+    // Save receives the generic Set unchanged; makePreset serializes the legacy
+    // color key normally instead of filtering or migrating it away.
+    expect(savePreset).toHaveBeenCalledTimes(1);
+    expect(savePreset.mock.calls[0]?.[0]).toMatchObject({
+      name: "roundtrip",
+      params: { radius: 50, ink: "#abcdef" },
+      locks: ["ink"],
+    });
+  });
+
   it("saving serializes the live params, seed, locks, AND the active profile under the sketch id", async () => {
     const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
     await flush();

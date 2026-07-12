@@ -94,7 +94,7 @@ describe("ControlPanel", () => {
     expect(rowRoots.length).toBe(3);
   });
 
-  it("renders a ColorControl for a color spec (the kind: 'color' branch)", () => {
+  it("routes locks only to numeric controls in a mixed schema", () => {
     const schema: ParamSchema = {
       ink: { kind: "color", default: "#1a2b3c" },
       radius: numberSpec({ default: 10 }),
@@ -103,19 +103,20 @@ describe("ControlPanel", () => {
       <ControlPanel
         schema={schema}
         params={defaultParams(schema)}
-        locks={new Set()}
+        locks={new Set(["ink", "radius"])}
         onChange={() => {}}
         onToggleLock={() => {}}
       />,
     );
-    // The color param renders the custom current-color trigger without a lock,
-    // NOT the loud unsupported-kind fallback.
+    // A persisted color key is allowed in the generic Set, but the color branch
+    // deliberately does not route lock state or a toggle into ColorControl.
     expect(html).toContain('aria-label="ink current color #1a2b3c"');
     expect(html).not.toContain('type="color"');
     expect(html).not.toContain('aria-label="ink lock"');
     expect(html).not.toContain("unsupported control kind");
-    // The numeric sibling still renders its own control alongside.
+    // The numeric sibling still receives the same Set's lock membership.
     expect(html).toContain('type="number"');
+    expect(html).toContain('aria-label="radius lock" aria-pressed="true"');
   });
 
   it("resolves an unset color param to its spec default (same fallback as number)", () => {
@@ -171,7 +172,7 @@ describe("ControlPanel", () => {
     expect(html).toContain('value="73"');
   });
 
-  it("renders a lock affordance per control, reflecting `locks` membership", () => {
+  it("renders a lock affordance per numeric control, reflecting `locks` membership", () => {
     const schema: ParamSchema = {
       radius: numberSpec(),
       count: numberSpec(),
