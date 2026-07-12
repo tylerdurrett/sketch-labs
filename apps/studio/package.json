@@ -17,6 +17,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^1.21.0",
     "react": "^19.2.7",
+    "react-colorful": "5.7.0",
     "react-dom": "^19.2.7",
     "tailwind-merge": "^3.6.0"
   },

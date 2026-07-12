@@ -508,8 +508,10 @@ describe("physical plot artifact acceptance flow (#276)", () => {
       leafStrokeColor: "#f4f1ea",
     })) {
       expect(
-        el.querySelector<HTMLInputElement>(`#control-${key}`)?.value,
-      ).toBe(color);
+        el.querySelector<HTMLButtonElement>(
+          `button[aria-label="${key} current color ${color}"]`,
+        ),
+      ).not.toBeNull();
     }
     const fillScene = previewCapture.paints.at(-1)!.scene as Scene;
     expect(fillScene.background).toEqual({ color: "#878787" });

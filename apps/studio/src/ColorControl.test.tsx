@@ -2,253 +2,785 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
 
 import type { ColorParamSpec } from "@harness/core";
 
-import { ColorControl } from "./ColorControl";
+import { ColorControl, type ColorControlProps } from "./ColorControl";
 
-const colorSpec = (over: Partial<ColorParamSpec> = {}): ColorParamSpec => ({
-  kind: "color",
-  default: "#1a2b3c",
-  ...over,
-});
-
-// React 19's `act` requires this flag; vitest's jsdom env does not set it.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
+const spec: ColorParamSpec = { kind: "color", default: "#1a2b3c" };
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
-/** Mount a node into a fresh jsdom container (the SketchControls test pattern). */
-function mount(node: React.ReactElement): HTMLDivElement {
+function props(overrides: Partial<ColorControlProps> = {}): ColorControlProps {
+  return {
+    paramKey: "ink",
+    spec,
+    value: "#0a141e",
+    onChange: vi.fn(),
+    ...overrides,
+  };
+}
+
+function mount(controlProps = props()): HTMLDivElement {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => {
-    root!.render(node);
-  });
+  act(() => root!.render(<ColorControl {...controlProps} />));
   return container;
 }
 
+function rerender(controlProps: ColorControlProps) {
+  act(() => root!.render(<ColorControl {...controlProps} />));
+}
+
+function trigger(): HTMLButtonElement {
+  return container!.querySelector<HTMLButtonElement>(
+    'button[aria-label^="ink current color"]',
+  )!;
+}
+
+function popup(): HTMLElement {
+  return document.querySelector<HTMLElement>('[aria-label="ink color picker"]')!;
+}
+
+function openPicker() {
+  act(() => trigger().click());
+  expect(trigger().getAttribute("aria-expanded")).toBe("true");
+}
+
+function rgb(channel: "red" | "green" | "blue"): HTMLInputElement {
+  return popup().querySelector<HTMLInputElement>(
+    `input[aria-label="ink ${channel} channel"]`,
+  )!;
+}
+
+function enter(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    "value",
+  )!.set!;
+  setter.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function key(element: HTMLElement, value: string) {
+  const keyCode = value === "ArrowRight" ? 39 : value === "Enter" ? 13 : 27;
+  element.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: value,
+      code: value,
+      keyCode,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
 afterEach(() => {
-  act(() => {
-    root?.unmount();
-  });
+  act(() => root?.unmount());
   container?.remove();
   container = null;
   root = null;
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
-describe("ColorControl markup", () => {
-  it("renders ONE line: a labelled native color input showing the value, plus a lock", () => {
-    const html = renderToStaticMarkup(
-      <ColorControl
-        paramKey="ink"
-        spec={colorSpec()}
-        value="#c0ffee"
-        locked={false}
-        onChange={() => {}}
-        onToggleLock={() => {}}
-      />,
+describe("ColorControl composition", () => {
+  it("uses a labelled current-color trigger with no native picker or lock", () => {
+    const el = mount();
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #0a141e",
     );
-    // The native color input is the whole value surface (no slider line — a
-    // color has no [min, max] to drag across) and displays the current hex.
-    expect(html).toContain('type="color"');
-    expect(html).toContain('value="#c0ffee"');
-    expect(html).not.toContain('type="range"');
-    // The label ties to the input by the shared control id convention.
-    expect(html).toContain('for="control-ink"');
-    expect(html).toContain('id="control-ink"');
-    expect(html).toContain("ink");
+    expect(el.textContent).toContain("ink");
+    expect(document.querySelector('input[type="color"]')).toBeNull();
+    expect(document.querySelector('[aria-label="ink lock"]')).toBeNull();
   });
 
-  it("renders the lucide lock as a toggle: aria-pressed reflects lock, never disables", () => {
-    const locked = renderToStaticMarkup(
-      <ColorControl
-        paramKey="ink"
-        spec={colorSpec()}
-        value="#c0ffee"
-        locked={true}
-        onChange={() => {}}
-        onToggleLock={() => {}}
-      />,
-    );
-    const unlocked = renderToStaticMarkup(
-      <ColorControl
-        paramKey="ink"
-        spec={colorSpec()}
-        value="#c0ffee"
-        locked={false}
-        onChange={() => {}}
-        onToggleLock={() => {}}
-      />,
-    );
-    // The lock keeps its accessible label and toggle semantics (mirroring
-    // NumberControl's exactly — colors never roll, but the chrome is uniform)...
-    expect(locked).toContain('aria-label="ink lock"');
-    expect(locked).toContain('aria-pressed="true"');
-    expect(unlocked).toContain('aria-pressed="false"');
-    // ...is a lucide icon (an inline svg), not a text button...
-    expect(locked).toContain("<svg");
-    // ...and NEVER gates the input: a locked control carries no `disabled`.
-    expect(locked).not.toContain("disabled");
+  it("keeps the composed picker, RGB fields, then black/white Palette mounted", () => {
+    mount();
+    const picker = popup();
+    const surface = picker.querySelector(".color-picker-surface")!;
+    const fields = picker.querySelector('[aria-label="ink RGB channels"]')!;
+    const palette = picker.querySelector('[aria-label="ink Palette"]')!;
+
+    expect(picker.getAttribute("role")).toBe("dialog");
+    expect(surface.compareDocumentPosition(fields) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(fields.compareDocumentPosition(palette) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(palette.querySelectorAll("button")).toHaveLength(2);
+    expect(palette.querySelector('[aria-label="ink Palette Black"]')).toBeTruthy();
+    expect(palette.querySelector('[aria-label="ink Palette White"]')).toBeTruthy();
   });
 });
 
-describe("ColorControl wiring", () => {
-  it("fires onChange with the newly picked hex string", () => {
-    const onChange = vi.fn<[string], void>();
-    const el = mount(
-      <ColorControl
-        paramKey="ink"
-        spec={colorSpec()}
-        value="#c0ffee"
-        locked={false}
-        onChange={onChange}
-        onToggleLock={() => {}}
-      />,
+describe("ColorControl RGB ownership", () => {
+  it("keeps valid and invalid drafts local, then atomically settles once", () => {
+    const order: string[] = [];
+    mount(
+      props({
+        editHistory: {
+          onBegin: () => order.push("begin"),
+          onPreview: (next) => order.push(`preview:${next}`),
+          onCommit: () => order.push("commit"),
+          onCancel: () => order.push("cancel"),
+        },
+      }),
     );
+    openPicker();
+    const red = rgb("red");
 
-    const input = el.querySelector<HTMLInputElement>("#control-ink")!;
     act(() => {
-      // Set the value through the native setter and fire the React-observed
-      // `input` event — the same dispatch pattern the SketchControls tests use.
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        "value",
-      )!.set!;
-      setter.call(input, "#123456");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      red.focus();
+      enter(red, "40");
+      enter(red, "invalid");
+    });
+    expect(order).toEqual([]);
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #28141e",
+    );
+
+    act(() => {
+      enter(red, "50");
+      key(red, "Enter");
+    });
+    expect(order).toEqual(["begin", "preview:#32141e", "commit"]);
+  });
+
+  it("cancels to the focus snapshot, idles, and keeps RGB Escape inside", () => {
+    const order: string[] = [];
+    const initial = props({
+      editHistory: {
+        onBegin: () => order.push("begin"),
+        onPreview: (next) => order.push(`preview:${next}`),
+        onCommit: () => order.push("commit"),
+        onCancel: () => order.push("cancel"),
+      },
+    });
+    mount(initial);
+    openPicker();
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #0a141e",
+    );
+    const blue = rgb("blue");
+
+    act(() => {
+      blue.focus();
+      enter(blue, "255");
+      key(blue, "Escape");
+    });
+
+    expect(trigger().getAttribute("aria-expanded")).toBe("true");
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #0a141e",
+    );
+    expect(initial.onChange).not.toHaveBeenCalled();
+    expect(order).toEqual([]);
+  });
+
+  it("reconciles an external color after an active invalid draft is escaped", async () => {
+    vi.useFakeTimers();
+    const initial = props();
+    mount(initial);
+    openPicker();
+    const red = rgb("red");
+    act(() => {
+      red.focus();
+      enter(red, "invalid");
+    });
+
+    rerender({ ...initial, value: "#00ff00" });
+    expect(red.value).toBe("invalid");
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #0a141e",
+    );
+
+    act(() => key(red, "Escape"));
+    await act(async () => Promise.resolve());
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #00ff00",
+    );
+    expect(
+      popup()
+        .querySelector('[aria-label="ink hue"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("120");
+    expect([rgb("red").value, rgb("green").value, rgb("blue").value]).toEqual([
+      "0",
+      "255",
+      "0",
+    ]);
+  });
+
+  it("reconciles an external color after an active invalid draft blurs", async () => {
+    vi.useFakeTimers();
+    const initial = props();
+    mount(initial);
+    openPicker();
+    const blue = rgb("blue");
+    act(() => {
+      blue.focus();
+      enter(blue, "invalid");
+    });
+
+    rerender({ ...initial, value: "#00ff00" });
+    expect(blue.value).toBe("invalid");
+    act(() => blue.blur());
+    await act(async () => Promise.resolve());
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #00ff00",
+    );
+    expect(
+      popup()
+        .querySelector('[aria-label="ink hue"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("120");
+    expect([rgb("red").value, rgb("green").value, rgb("blue").value]).toEqual([
+      "0",
+      "255",
+      "0",
+    ]);
+  });
+});
+
+describe("ColorControl Palette", () => {
+  it.each([
+    ["Black", "#000000"],
+    ["White", "#ffffff"],
+  ])("applies %s as one atomic edit and closes", (name, color) => {
+    const order: string[] = [];
+    mount(
+      props({
+        editHistory: {
+          onBegin: () => order.push("begin"),
+          onPreview: (next) => order.push(`preview:${next}`),
+          onCommit: () => order.push("commit"),
+          onCancel: () => order.push("cancel"),
+        },
+      }),
+    );
+    openPicker();
+
+    act(() =>
+      popup()
+        .querySelector<HTMLButtonElement>(`[aria-label="ink Palette ${name}"]`)!
+        .click(),
+    );
+
+    expect(order).toEqual(["begin", `preview:${color}`, "commit"]);
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("uses one fallback onChange and does not steal focus on pointer close", () => {
+    const onChange = vi.fn<[string], void>();
+    mount(props({ onChange }));
+    openPicker();
+    const white = popup().querySelector<HTMLButtonElement>(
+      '[aria-label="ink Palette White"]',
+    )!;
+    act(() => {
+      white.focus();
+      white.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith("#123456");
+    expect(onChange).toHaveBeenCalledWith("#ffffff");
+    expect(document.activeElement).not.toBe(trigger());
+  });
+});
+
+describe("ColorControl gesture timing", () => {
+  function hue(): HTMLElement {
+    return popup().querySelector<HTMLElement>('[aria-label="ink hue"]')!;
+  }
+
+  function hueKey(type: "keydown" | "keyup") {
+    hue().dispatchEvent(
+      new KeyboardEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        key: "ArrowRight",
+        code: "ArrowRight",
+        keyCode: 39,
+      }),
+    );
+  }
+
+  function historyOrder(): {
+    order: string[];
+    editHistory: NonNullable<ColorControlProps["editHistory"]>;
+  } {
+    const order: string[] = [];
+    return {
+      order,
+      editHistory: {
+        onBegin: () => order.push("begin"),
+        onPreview: (next) => order.push(`preview:${next}`),
+        onCommit: () => order.push("commit"),
+        onCancel: () => order.push("cancel"),
+      },
+    };
+  }
+
+  it("updates the local color immediately without lifting before 100ms", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn<[string], void>();
+    mount(props({ value: "#ff0000", onChange }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #ff4d00",
+    );
+    expect([rgb("red").value, rgb("green").value, rgb("blue").value]).toEqual([
+      "255",
+      "77",
+      "0",
+    ]);
+    expect(onChange).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(99));
+    expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("fires onToggleLock when the lock toggle is clicked", () => {
-    const onToggleLock = vi.fn<[], void>();
-    const el = mount(
-      <ColorControl
-        paramKey="ink"
-        spec={colorSpec()}
-        value="#c0ffee"
-        locked={false}
-        onChange={() => {}}
-        onToggleLock={onToggleLock}
-      />,
+  it("restarts the trailing deadline and lifts only the latest color", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn<[string], void>();
+    mount(props({ value: "#ff0000", onChange }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    act(() => vi.advanceTimersByTime(75));
+    act(() => hueKey("keydown"));
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #ff9900",
     );
 
-    const toggle = el.querySelector<HTMLButtonElement>(
-      'button[aria-label="ink lock"]',
+    act(() => vi.advanceTimersByTime(99));
+    expect(onChange).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(1));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("#ff9900");
+  });
+
+  it("routes the trailing lift through edit history preview", () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    mount(
+      props({
+        value: "#ff0000",
+        editHistory: {
+          onBegin: () => order.push("begin"),
+          onPreview: (next) => order.push(`preview:${next}`),
+          onCommit: () => order.push("commit"),
+          onCancel: () => order.push("cancel"),
+        },
+      }),
+    );
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    expect(order).toEqual(["begin"]);
+    act(() => vi.advanceTimersByTime(100));
+
+    expect(order).toEqual(["begin", "preview:#ff4d00"]);
+  });
+
+  it("begins once before the timer and commits many changes as one gesture", () => {
+    vi.useFakeTimers();
+    const { order, editHistory } = historyOrder();
+    mount(props({ value: "#ff0000", editHistory }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keydown"));
+    expect(order).toEqual(["begin"]);
+
+    act(() => vi.advanceTimersByTime(100));
+    expect(order).toEqual(["begin", "preview:#ffe500"]);
+    act(() => hueKey("keyup"));
+
+    expect(order).toEqual(["begin", "preview:#ffe500", "commit"]);
+  });
+
+  it("flushes a new final value after an idle debounce preview", () => {
+    vi.useFakeTimers();
+    const { order, editHistory } = historyOrder();
+    mount(props({ value: "#ff0000", editHistory }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    act(() => vi.advanceTimersByTime(100));
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keyup"));
+
+    expect(order).toEqual([
+      "begin",
+      "preview:#ff4d00",
+      "preview:#ff9900",
+      "commit",
+    ]);
+    act(() => vi.runOnlyPendingTimers());
+    expect(order).toHaveLength(4);
+  });
+
+  it("wraps a mouse gesture in the same begin-preview-commit boundary", () => {
+    vi.useFakeTimers();
+    const { order, editHistory } = historyOrder();
+    mount(props({ value: "#ff0000", editHistory }));
+    openPicker();
+    const saturation = popup().querySelector<HTMLElement>(
+      '[aria-label="ink saturation and value"]',
     )!;
-    act(() => {
-      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+    saturation.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 200, height: 100 }) as DOMRect;
 
-    expect(onToggleLock).toHaveBeenCalledTimes(1);
+    act(() => {
+      saturation.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          cancelable: true,
+          buttons: 1,
+          clientX: 100,
+          clientY: 25,
+        }),
+      );
+    });
+    expect(order).toEqual(["begin"]);
+    act(() =>
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })),
+    );
+
+    expect(order).toEqual(["begin", "preview:#bf6060", "commit"]);
+    act(() => vi.runOnlyPendingTimers());
+    expect(order).toHaveLength(3);
   });
 
-  it("previews native input and commits completed change once, not again on blur", () => {
+  it("uses the latest fallback callback when the deadline fires", () => {
+    vi.useFakeTimers();
+    const firstOnChange = vi.fn<[string], void>();
+    const replacementOnChange = vi.fn<[string], void>();
+    const initial = props({ value: "#ff0000", onChange: firstOnChange });
+    mount(initial);
+    openPicker();
+    act(() => hueKey("keydown"));
+
+    rerender({ ...initial, onChange: replacementOnChange });
+    act(() => vi.advanceTimersByTime(100));
+
+    expect(firstOnChange).not.toHaveBeenCalled();
+    expect(replacementOnChange).toHaveBeenCalledTimes(1);
+    expect(replacementOnChange).toHaveBeenCalledWith("#ff4d00");
+  });
+
+  it("uses the latest history lifecycle when the deadline fires", () => {
+    vi.useFakeTimers();
+    const firstPreview = vi.fn<[string], void>();
+    const replacementPreview = vi.fn<[string], void>();
+    const initial = props({
+      value: "#ff0000",
+      editHistory: {
+        onBegin: vi.fn(),
+        onPreview: firstPreview,
+        onCommit: vi.fn(),
+        onCancel: vi.fn(),
+      },
+    });
+    mount(initial);
+    openPicker();
+    act(() => hueKey("keydown"));
+
+    const replacementCommit = vi.fn();
+    rerender({
+      ...initial,
+      editHistory: {
+        onBegin: vi.fn(),
+        onPreview: replacementPreview,
+        onCommit: replacementCommit,
+        onCancel: vi.fn(),
+      },
+    });
+    act(() => vi.advanceTimersByTime(100));
+    act(() => hueKey("keyup"));
+
+    expect(firstPreview).not.toHaveBeenCalled();
+    expect(replacementPreview).toHaveBeenCalledTimes(1);
+    expect(replacementPreview).toHaveBeenCalledWith("#ff4d00");
+    expect(replacementCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("flushes a final color synchronously when the gesture ends early", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn<[string], void>();
+    mount(props({ value: "#ff0000", onChange }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keyup"));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("#ff4d00");
+    act(() => vi.advanceTimersByTime(100));
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not lift the final color twice after the trailing deadline", () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn<[string], void>();
+    mount(props({ value: "#ff0000", onChange }));
+    openPicker();
+
+    act(() => hueKey("keydown"));
+    act(() => vi.advanceTimersByTime(100));
+    act(() => hueKey("keyup"));
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("#ff4d00");
+  });
+
+  it("clears a pending lift on unmount without previewing or committing", () => {
+    vi.useFakeTimers();
     const order: string[] = [];
-    const el = mount(
-      <ColorControl
-        paramKey="ink"
-        spec={colorSpec()}
-        value="#c0ffee"
-        locked={false}
-        onChange={() => {}}
-        editHistory={{
+    mount(
+      props({
+        value: "#ff0000",
+        editHistory: {
           onBegin: () => order.push("begin"),
           onPreview: (next) => order.push(`preview:${next}`),
           onCommit: () => order.push("commit"),
           onCancel: () => order.push("cancel"),
-        }}
-        onToggleLock={() => {}}
-      />,
+        },
+      }),
     );
-    const input = el.querySelector<HTMLInputElement>("#control-ink")!;
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      "value",
-    )!.set!;
+    openPicker();
+    act(() => hueKey("keydown"));
+    expect(order).toEqual(["begin"]);
 
-    act(() => {
-      setter.call(input, "#123456");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-      input.focus();
-      input.blur();
-    });
+    act(() => root!.unmount());
+    root = null;
+    act(() => vi.advanceTimersByTime(100));
 
-    expect(order).toEqual(["begin", "preview:#123456", "commit"]);
+    expect(order).toEqual(["begin"]);
   });
 
-  it("begins and previews a change-only color event before committing", () => {
-    const order: string[] = [];
-    const el = mount(
-      <ColorControl
-        paramKey="ink"
-        spec={colorSpec()}
-        value="#c0ffee"
-        locked={false}
-        onChange={() => {}}
-        editHistory={{
+  it("does not let a stale external value overwrite an active draft", () => {
+    vi.useFakeTimers();
+    const initial = props({ value: "#ff0000" });
+    mount(initial);
+    openPicker();
+    act(() => hueKey("keydown"));
+
+    rerender({ ...initial, value: "#00ff00" });
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #ff4d00",
+    );
+    expect([rgb("red").value, rgb("green").value, rgb("blue").value]).toEqual([
+      "255",
+      "77",
+      "0",
+    ]);
+    expect(initial.onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("ColorControl dismissal and synchronization", () => {
+  function hue(): HTMLElement {
+    return popup().querySelector<HTMLElement>('[aria-label="ink hue"]')!;
+  }
+
+  function startHistoryGesture(order: string[]) {
+    mount(
+      props({
+        value: "#ff0000",
+        editHistory: {
           onBegin: () => order.push("begin"),
           onPreview: (next) => order.push(`preview:${next}`),
           onCommit: () => order.push("commit"),
           onCancel: () => order.push("cancel"),
-        }}
-        onToggleLock={() => {}}
-      />,
+        },
+      }),
     );
-    const input = el.querySelector<HTMLInputElement>("#control-ink")!;
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      "value",
-    )!.set!;
+    openPicker();
+    act(() => key(hue(), "ArrowRight"));
+    expect(order).toEqual(["begin"]);
+  }
 
+  it("closes on non-field Escape and returns keyboard focus to the trigger", async () => {
+    mount();
+    openPicker();
+    const hue = popup().querySelector<HTMLElement>('[aria-label="ink hue"]')!;
     act(() => {
-      setter.call(input, "#654321");
-      input.dispatchEvent(new Event("change", { bubbles: true }));
+      hue.focus();
+      key(hue, "Escape");
     });
+    await act(
+      async () => new Promise((resolve) => window.setTimeout(resolve, 0)),
+    );
 
-    expect(order).toEqual(["begin", "preview:#654321", "commit"]);
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(trigger());
   });
 
-  it("uses blur as a guarded commit fallback when no change event arrives", () => {
-    const onCommit = vi.fn<[], void>();
-    const el = mount(
-      <ColorControl
-        paramKey="ink"
-        spec={colorSpec()}
-        value="#c0ffee"
-        locked={false}
-        onChange={() => {}}
-        editHistory={{
-          onBegin: () => {},
-          onPreview: () => {},
-          onCommit,
-          onCancel: () => {},
-        }}
-        onToggleLock={() => {}}
-      />,
-    );
-    const input = el.querySelector<HTMLInputElement>("#control-ink")!;
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      "value",
-    )!.set!;
+  it("idles a fallback gesture on dismissal so external values resynchronize", async () => {
+    const initial = props({ value: "#ff0000" });
+    mount(initial);
+    openPicker();
+    const hue = popup().querySelector<HTMLElement>('[aria-label="ink hue"]')!;
 
     act(() => {
-      input.focus();
-      setter.call(input, "#abcdef");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.blur();
+      key(hue, "ArrowRight");
+      key(hue, "Escape");
     });
+    expect(initial.onChange).toHaveBeenCalledWith("#ff4d00");
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
 
-    expect(onCommit).toHaveBeenCalledTimes(1);
+    rerender({ ...initial, value: "#00ff00" });
+    await act(
+      async () => new Promise((resolve) => window.setTimeout(resolve, 0)),
+    );
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #00ff00",
+    );
+    expect(
+      popup()
+        .querySelector('[aria-label="ink hue"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("120");
+    expect([rgb("red").value, rgb("green").value, rgb("blue").value]).toEqual([
+      "0",
+      "255",
+      "0",
+    ]);
+  });
+
+  it("flushes and commits once when Escape dismisses an active gesture", async () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    startHistoryGesture(order);
+
+    act(() => key(hue(), "Escape"));
+    expect(order).toEqual(["begin", "preview:#ff4d00", "commit"]);
+    act(() => vi.runOnlyPendingTimers());
+    expect(order).toHaveLength(3);
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  it("flushes and commits once when the trigger dismisses an active gesture", () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    startHistoryGesture(order);
+
+    act(() => trigger().click());
+
+    expect(order).toEqual(["begin", "preview:#ff4d00", "commit"]);
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+    act(() => vi.runOnlyPendingTimers());
+    expect(order).toHaveLength(3);
+  });
+
+  it("flushes and commits once when an outside press dismisses a gesture", () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    startHistoryGesture(order);
+
+    act(() => {
+      outside.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+      );
+      outside.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    outside.remove();
+
+    expect(order).toEqual(["begin", "preview:#ff4d00", "commit"]);
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).not.toBe(trigger());
+    act(() => vi.runOnlyPendingTimers());
+    expect(order).toHaveLength(3);
+  });
+
+  it("does not commit again when a settled gesture is then dismissed", () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    startHistoryGesture(order);
+
+    act(() =>
+      hue().dispatchEvent(
+        new KeyboardEvent("keyup", {
+          bubbles: true,
+          key: "ArrowRight",
+          code: "ArrowRight",
+          keyCode: 39,
+        }),
+      ),
+    );
+    act(() => key(hue(), "Escape"));
+
+    expect(order).toEqual(["begin", "preview:#ff4d00", "commit"]);
+  });
+
+  it("keeps settled edits when an outside press closes the popup", () => {
+    const onChange = vi.fn<[string], void>();
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    mount(props({ onChange }));
+    openPicker();
+    const red = rgb("red");
+    act(() => {
+      red.focus();
+      enter(red, "40");
+      red.blur();
+    });
+    expect(onChange).toHaveBeenCalledWith("#28141e");
+
+    act(() => {
+      outside.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+      );
+      outside.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+      );
+      outside.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    outside.remove();
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #28141e",
+    );
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("synchronizes the keep-mounted trigger, surface, and RGB fields while idle", async () => {
+    const initial = props();
+    mount(initial);
+    rerender({ ...initial, value: "#00ff00" });
+    await act(async () => Promise.resolve());
+
+    expect(trigger().getAttribute("aria-label")).toBe(
+      "ink current color #00ff00",
+    );
+    expect(popup().querySelector('[aria-label="ink hue"]')?.getAttribute("aria-valuenow"))
+      .toBe("120");
+    expect([rgb("red").value, rgb("green").value, rgb("blue").value]).toEqual([
+      "0",
+      "255",
+      "0",
+    ]);
   });
 });

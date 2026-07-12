@@ -744,6 +744,204 @@ describe("SketchControls — central edit-history integration", () => {
     expect(profileCommit!.after.past).toHaveLength(4);
   });
 
+  it("records one color-key gesture and keeps the mounted picker synced through Undo/Redo", async () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          ink: { kind: "color", default: "#ff0000" },
+        })}
+      />,
+    );
+    const colorTrigger = el.querySelector<HTMLButtonElement>(
+      'button[aria-label^="ink current color"]',
+    )!;
+    act(() => colorTrigger.click());
+    const hue = document.querySelector<HTMLElement>('[aria-label="ink hue"]')!;
+    const hueKey = (type: "keydown" | "keyup") =>
+      hue.dispatchEvent(
+        new KeyboardEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          key: "ArrowRight",
+          code: "ArrowRight",
+          keyCode: 39,
+        }),
+      );
+
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keydown"));
+    act(() => hueKey("keyup"));
+
+    expect(historyCapture.transactionCommits).toHaveLength(1);
+    const gesture = historyCapture.transactionCommits[0]!;
+    expect(gesture.after.past).toHaveLength(1);
+    expect(gesture.after.present.params.ink).toBe("#ff9900");
+    expect(colorTrigger.getAttribute("aria-label")).toBe(
+      "ink current color #ff9900",
+    );
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+    await flush();
+    expect(colorTrigger.getAttribute("aria-label")).toBe(
+      "ink current color #ff0000",
+    );
+    expect(hue.getAttribute("aria-valuenow")).toBe("0");
+
+    pressHistoryShortcut(window, { key: "y", ctrlKey: true });
+    await flush();
+    expect(colorTrigger.getAttribute("aria-label")).toBe(
+      "ink current color #ff9900",
+    );
+    expect(hue.getAttribute("aria-valuenow")).toBe("36");
+  });
+
+  it("records a mouse color gesture as one Undo step", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          ink: { kind: "color", default: "#ff0000" },
+        })}
+      />,
+    );
+    act(() =>
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label^="ink current color"]',
+        )!
+        .click(),
+    );
+    const saturation = document.querySelector<HTMLElement>(
+      '[aria-label="ink saturation and value"]',
+    )!;
+    saturation.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 200, height: 100 }) as DOMRect;
+
+    act(() => {
+      saturation.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          cancelable: true,
+          buttons: 1,
+          clientX: 100,
+          clientY: 25,
+        }),
+      );
+    });
+    act(() =>
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })),
+    );
+
+    expect(historyCapture.transactionCommits).toHaveLength(1);
+    expect(
+      historyCapture.transactionCommits[0]!.after.present.params.ink,
+    ).toBe("#bf6060");
+    expect(historyCapture.transactionCommits[0]!.after.past).toHaveLength(1);
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+    expect(
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label^="ink current color"]',
+        )
+        ?.getAttribute("aria-label"),
+    ).toBe("ink current color #ff0000");
+  });
+
+  it("suppresses a color gesture that returns to its starting value", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          ink: { kind: "color", default: "#ff0000" },
+        })}
+      />,
+    );
+    act(() =>
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label^="ink current color"]',
+        )!
+        .click(),
+    );
+    const hue = document.querySelector<HTMLElement>('[aria-label="ink hue"]')!;
+    const arrow = (type: "keydown" | "keyup") =>
+      hue.dispatchEvent(
+        new KeyboardEvent(type, {
+          bubbles: true,
+          key: "ArrowRight",
+          code: "ArrowRight",
+          keyCode: 39,
+        }),
+      );
+
+    for (let step = 0; step < 20; step += 1) act(() => arrow("keydown"));
+    act(() => arrow("keyup"));
+
+    expect(historyCapture.transactionCommits).toHaveLength(1);
+    const noOp = historyCapture.transactionCommits[0]!;
+    expect(noOp.after).not.toBe(noOp.before);
+    expect(noOp.after.present.params.ink).toBe("#ff0000");
+    expect(noOp.after.past).toHaveLength(0);
+  });
+
+  it("leaves Undo with an active RGB draft and restores Studio Undo after cancel", () => {
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {
+          radius: numberSpec({ default: 10 }),
+          ink: { kind: "color", default: "#ff0000" },
+        })}
+      />,
+    );
+    const radius = paramInput(el, "radius");
+    act(() => radius.focus());
+    setInput(radius, "42");
+    act(() => radius.blur());
+    expect(historyCapture.transactionCommits).toHaveLength(1);
+
+    act(() =>
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label^="ink current color"]',
+        )!
+        .click(),
+    );
+    const red = document.querySelector<HTMLInputElement>(
+      'input[aria-label="ink red channel"]',
+    )!;
+    act(() => red.focus());
+    setInput(red, "invalid");
+    expect(
+      red.closest('[aria-label="ink RGB channels"]')?.getAttribute(
+        "data-studio-history",
+      ),
+    ).toBe("exclude");
+
+    const nativeUndo = pressHistoryShortcut(red, { ctrlKey: true });
+    expect(nativeUndo.defaultPrevented).toBe(false);
+    expect(radius.value).toBe("42");
+    expect(red.value).toBe("invalid");
+    expect(historyCapture.transactionCommits).toHaveLength(1);
+
+    act(() =>
+      red.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(
+      red.closest('[aria-label="ink RGB channels"]')?.getAttribute(
+        "data-studio-history",
+      ),
+    ).toBeNull();
+
+    const studioUndo = pressHistoryShortcut(red, { ctrlKey: true });
+    expect(studioUndo.defaultPrevented).toBe(true);
+    expect(paramInput(el, "radius").value).toBe("10");
+  });
+
   it("feeds ControlPanel previews from present and Escape restores the whole transaction", () => {
     const el = mount(
       <SketchControls
@@ -1220,6 +1418,77 @@ describe("SketchControls — preset save/reload wiring", () => {
       "999",
     );
     expect(lastProfile).toEqual(loadedProfile);
+  });
+
+  it("preserves a persisted color lock as inert data across reload and save", async () => {
+    const mixedSchema: ParamSchema = {
+      radius: numberSpec({ min: 0, max: 100, default: 10 }),
+      ink: { kind: "color", default: "#1a2b3c" },
+    };
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "a",
+      name: "legacy-color-lock",
+      seed: 999,
+      params: { radius: 20, ink: "#abcdef" },
+      locks: ["ink"],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    listPresets.mockResolvedValue(["legacy-color-lock"]);
+
+    const el = mount(
+      <SketchControls sketch={sketchWith("a", mixedSchema)} />,
+    );
+    await flush();
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "legacy-color-lock");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+    await flush();
+
+    // Reconciliation keeps a schema-present color key in the generic lock Set,
+    // but the mixed control surface exposes Lock only for the numeric sibling.
+    expect(historyCapture.atomic.at(-1)?.after.present.locks).toEqual(
+      new Set(["ink"]),
+    );
+    expect(el.querySelector('button[aria-label="ink lock"]')).toBeNull();
+    expect(el.querySelector('button[aria-label="radius lock"]')).not.toBeNull();
+    expect(
+      el.querySelector('button[aria-label^="ink current color #abcdef"]'),
+    ).not.toBeNull();
+
+    // The inert color entry does not prevent an unlocked numeric roll and the
+    // color still follows Randomize's unconditional pass-through contract.
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    clickButton(el, "Randomize");
+    expect(paramInput(el, "radius").value).toBe("50");
+    expect(
+      el.querySelector('button[aria-label^="ink current color #abcdef"]'),
+    ).not.toBeNull();
+
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      "roundtrip",
+    );
+    clickButton(el, "Save");
+    await flush();
+
+    // Save receives the generic Set unchanged; makePreset serializes the legacy
+    // color key normally instead of filtering or migrating it away.
+    expect(savePreset).toHaveBeenCalledTimes(1);
+    expect(savePreset.mock.calls[0]?.[0]).toMatchObject({
+      name: "roundtrip",
+      params: { radius: 50, ink: "#abcdef" },
+      locks: ["ink"],
+    });
   });
 
   it("saving serializes the live params, seed, locks, AND the active profile under the sketch id", async () => {

@@ -172,11 +172,13 @@ export interface SketchControlsProps {
  * shape). Editing the seed re-renders the canvas (LiveCanvas reads `seed`
  * through a ref) WITHOUT touching any param value — the two axes are independent.
  *
- * LOCKS are Randomize-EXCLUSION ONLY: the studio owns a `Set<string>` of locked
- * param keys, passed solely into `randomize` so a locked key keeps its value
- * across a roll. A lock NEVER gates editability — a locked control stays fully
- * hand-editable. Like `seed` and `params`, `locks` lives in keyed-remount state,
- * so a Sketch switch clears every lock for free (no manual reset).
+ * LOCKS are Randomize-EXCLUSION ONLY: the studio owns a generic `Set<string>` of
+ * locked param keys, passed solely into `randomize` so a locked numeric key keeps
+ * its value across a roll. Numeric controls expose the Lock affordance and stay
+ * fully hand-editable while locked. Color controls expose no Lock because colors
+ * never randomize; a persisted color key may still inhabit the generic Set and
+ * round-trip unchanged as harmless inert data. Like `seed` and `params`, `locks`
+ * lives in keyed-remount state, so a Sketch switch clears every lock for free.
  *
  * PROFILE is the session's ONE active Plot Profile — the physical-plot output
  * dimensions (#247). Like params/seed/locks it lives in keyed-remount state, so
@@ -353,8 +355,8 @@ export function SketchControls({
     commitLeaf("params", { ...historyRef.current.present.params, [key]: value });
   };
 
-  // Toggle a single param's lock membership. Locks are read ONLY by randomize;
-  // toggling one never touches the param's value or its editability.
+  // Toggle a numeric param's lock membership. Only NumberControl routes here;
+  // locks are read ONLY by randomize, never by a control's editability.
   const toggleLock = (key: string) => {
     const next = new Set(historyRef.current.present.locks);
     if (next.has(key)) next.delete(key);
@@ -395,8 +397,8 @@ export function SketchControls({
   // Reload a saved Preset: reconcile it against the CURRENT schema via core's
   // `applyPreset` (the authority on which keys exist), then hydrate all three
   // state axes TOGETHER. The array→Set conversion on `locks` is this owner's
-  // job — `applyPreset` returns a sorted string[], the studio's live lock state
-  // is a Set<string>.
+  // job — including preserved color keys, which remain inert rather than being
+  // filtered or migrated just because ColorControl has no Lock affordance.
   const reloadPreset = (preset: Preset) => {
     const current = historyRef.current.present;
     const state = applyPreset(sketch.schema, preset);
