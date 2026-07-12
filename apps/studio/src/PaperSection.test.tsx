@@ -36,7 +36,12 @@ function mount(
   root = createRoot(container);
   act(() =>
     root.render(
-      <PaperSection profile={initialProfile} onChange={onChange} />,
+      <PaperSection
+        profile={initialProfile}
+        onChange={onChange}
+        includePaperMargins
+        onIncludePaperMarginsChange={() => {}}
+      />,
     ),
   );
   return { el: container, onChange };
@@ -203,6 +208,8 @@ describe("PaperSection", () => {
         <PaperSection
           profile={{ ...profile, width: 420, height: 594 }}
           onChange={onChange}
+          includePaperMargins
+          onIncludePaperMarginsChange={() => {}}
         />,
       );
     });
@@ -252,6 +259,8 @@ describe("PaperSection", () => {
         <PaperSection
           profile={{ ...profile, includeFrame: false }}
           onChange={onChange}
+          includePaperMargins
+          onIncludePaperMarginsChange={() => {}}
         />,
       );
     });
@@ -312,7 +321,14 @@ describe("PaperSection", () => {
       expect(onChange).toHaveBeenCalledWith(accepted);
 
       act(() => {
-        root.render(<PaperSection profile={accepted} onChange={onChange} />);
+        root.render(
+          <PaperSection
+            profile={accepted}
+            onChange={onChange}
+            includePaperMargins
+            onIncludePaperMarginsChange={() => {}}
+          />,
+        );
       });
       const orientation = [...el.querySelectorAll("button")].find(
         (candidate) => candidate.textContent === "Square",
@@ -389,6 +405,8 @@ describe("PaperSection", () => {
         <PaperSection
           profile={{ ...profile, width: 220 }}
           onChange={onChange}
+          includePaperMargins
+          onIncludePaperMarginsChange={() => {}}
         />,
       );
     });

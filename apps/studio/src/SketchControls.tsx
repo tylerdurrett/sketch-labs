@@ -35,6 +35,10 @@ import {
 } from "./LiveCanvas";
 import { outlineScene } from "./outlineScene";
 import { PaperSection } from "./PaperSection";
+import {
+  readPlotterSvgIncludePaperMargins,
+  writePlotterSvgIncludePaperMargins,
+} from "./plotterSvgPreference";
 import { PresetControls } from "./PresetControls";
 
 /** Select the exact hidden-line export input, lazily falling back on a cache miss. */
@@ -174,6 +178,17 @@ export function SketchControls({
   const [profile, setProfile] = useState<PlotProfile>(() =>
     resolveOutputProfile(undefined, sketch.defaultOutputProfile),
   );
+  // Export-document intent is Studio-wide and deliberately independent of the
+  // keyed Sketch session: remounts lazily restore the persisted preference,
+  // while Plot Profile, Preset, reproduction, and composition state stay pure.
+  const [includePaperMargins, setIncludePaperMargins] = useState(
+    readPlotterSvgIncludePaperMargins,
+  );
+
+  const commitIncludePaperMargins = (next: boolean): void => {
+    setIncludePaperMargins(next);
+    writePlotterSvgIncludePaperMargins(next);
+  };
 
   // Physical magnitude belongs to later device mapping. Composition depends only
   // on the drawable rectangle's aspect, so equivalent profiles share this cache
@@ -496,7 +511,9 @@ export function SketchControls({
       t,
       profile,
     });
-    const svg = renderPlotterSVG(clipped, profile, metadata);
+    const svg = renderPlotterSVG(clipped, profile, metadata, {
+      includePaperMargins,
+    });
     const blob = new Blob([svg], { type: "image/svg+xml" });
     downloadBlob(
       blob,
@@ -571,7 +588,12 @@ export function SketchControls({
         hidden={collapsed}
       >
         {switcher}
-        <PaperSection profile={profile} onChange={commitProfile} />
+        <PaperSection
+          profile={profile}
+          onChange={commitProfile}
+          includePaperMargins={includePaperMargins}
+          onIncludePaperMarginsChange={commitIncludePaperMargins}
+        />
         <ControlPanel
           schema={sketch.schema}
           params={params}

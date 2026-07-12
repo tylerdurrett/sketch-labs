@@ -25,9 +25,9 @@ export interface PaperSectionProps {
   /** Commit a canonical Plot Profile edit to the owning Studio session. */
   onChange: (profile: PlotProfile) => void;
   /** Whether physical plotter SVGs include the full paper extent. */
-  includePaperMargins?: boolean;
+  includePaperMargins: boolean;
   /** Update Studio's export preference without changing the Plot Profile. */
-  onIncludePaperMarginsChange?: (includePaperMargins: boolean) => void;
+  onIncludePaperMarginsChange: (includePaperMargins: boolean) => void;
 }
 
 /** Read the presentation-only unit preference without assuming storage is usable. */
@@ -89,7 +89,7 @@ function linkedInset(profile: PlotProfile): number | null {
 export function PaperSection({
   profile,
   onChange,
-  includePaperMargins = true,
+  includePaperMargins,
   onIncludePaperMarginsChange,
 }: PaperSectionProps) {
   const [displayUnit, setDisplayUnit] =
@@ -366,7 +366,7 @@ export function PaperSection({
             type="checkbox"
             checked={includePaperMargins}
             onChange={(event) =>
-              onIncludePaperMarginsChange?.(event.target.checked)
+              onIncludePaperMarginsChange(event.target.checked)
             }
           />
           <span>Include paper margins in plotter SVG</span>

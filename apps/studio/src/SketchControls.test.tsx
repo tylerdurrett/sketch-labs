@@ -39,6 +39,7 @@ const plotterExportCapture = vi.hoisted(() => ({
     scene: unknown;
     profile: PlotProfile;
     metadata: string | undefined;
+    options: { includePaperMargins?: boolean } | undefined;
   },
 }));
 
@@ -62,6 +63,7 @@ vi.mock("@harness/core", async (importActual) => {
         scene: args[0],
         profile: args[1],
         metadata: args[2],
+        options: args[3],
       };
       return actual.renderPlotterSVG(...args);
     },
@@ -306,6 +308,18 @@ function clickButton(el: HTMLElement, text: string): void {
   });
 }
 
+function paperMarginsCheckbox(el: HTMLElement): HTMLInputElement {
+  const checkbox = [
+    ...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+  ].find((input) =>
+    input.labels?.[0]?.textContent?.includes(
+      "Include paper margins in plotter SVG",
+    ),
+  );
+  if (checkbox === undefined) throw new Error("no paper margins checkbox");
+  return checkbox;
+}
+
 /**
  * Every primitive point of `scene` that falls OUTSIDE the canvas rectangle
  * `[0, 0, width, height]` (issue #237's acceptance predicate). The export-time
@@ -526,6 +540,52 @@ describe("SketchControls — Paper inspector integration (#248)", () => {
     expect(container.querySelector("details summary")?.textContent).toContain(
       "in",
     );
+  });
+
+  it("persists the export-only margin preference across a full unmount/remount without changing Scene inputs", () => {
+    autoFireOutlineComputed = false;
+    const generate = vi.fn(() => ({
+      space: { width: 100, height: 100 },
+      primitives: [],
+    }));
+    const firstSketch = {
+      ...sketchWith("a", { radius: numberSpec({ default: 10 }) }),
+      generate,
+    } as Parameters<typeof SketchControls>[0]["sketch"];
+    const el = mount(<SketchControls sketch={firstSketch} />);
+    const renderToggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => renderToggle.click());
+    act(() => lastOnOutlineComputed?.());
+    expect(renderToggle.textContent).toBe("Outline");
+    expect(renderToggle.disabled).toBe(false);
+    const profileBefore = lastProfile;
+    const profileValueBefore = structuredClone(lastProfile);
+    const frameBefore = lastCompositionFrame;
+
+    expect(paperMarginsCheckbox(el).checked).toBe(true);
+    act(() => paperMarginsCheckbox(el).click());
+
+    expect(paperMarginsCheckbox(el).checked).toBe(false);
+    expect(generate).not.toHaveBeenCalled();
+    expect(lastProfile).toBe(profileBefore);
+    expect(lastProfile).toEqual(profileValueBefore);
+    expect(lastCompositionFrame).toBe(frameBefore);
+    expect(renderToggle.textContent).toBe("Outline");
+    expect(renderToggle.disabled).toBe(false);
+
+    act(() => root!.unmount());
+    container!.remove();
+    root = null;
+    container = null;
+
+    const remounted = mount(
+      <SketchControls
+        sketch={sketchWith("b", { radius: numberSpec({ default: 20 }) })}
+      />,
+    );
+    expect(paperMarginsCheckbox(remounted).checked).toBe(false);
   });
 });
 
@@ -1501,11 +1561,12 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       scene: clipSceneToBounds(outlineScene(source)),
       profile,
       metadata: expect.any(String),
+      options: { includePaperMargins: true },
     });
 
     const svg = await blobText(downloadBlob.mock.calls[0]![0]);
     expect(svg).toContain(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="250mm" height="180mm" viewBox="0 0 250 180">',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="250mm" height="180mm" viewBox="0 0 250 180" data-paper-extent="paper">',
     );
     // 120×100 Scene → 180×150 mm drawable: 1.5×, placed at asymmetric
     // left/right insets 25/45 and top/bottom insets 15/15.
@@ -1527,6 +1588,33 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       locks: [],
       profile,
     });
+  });
+
+  it("forwards only the current export preference as the serializer fourth argument", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const generate = vi.fn(() => source);
+    const el = mount(
+      <SketchControls sketch={{ ...hlStaticSketch("circles"), generate }} />,
+    );
+
+    clickButton(el, "Export Hidden-line SVG");
+    const included = plotterExportCapture.current!;
+    const metadataBefore = included.metadata;
+    const sceneBefore = included.scene;
+    const profileBefore = structuredClone(included.profile);
+    expect(included.options).toEqual({ includePaperMargins: true });
+
+    act(() => paperMarginsCheckbox(el).click());
+    expect(generate).toHaveBeenCalledTimes(1);
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(plotterExportCapture.current?.options).toEqual({
+      includePaperMargins: false,
+    });
+    expect(plotterExportCapture.current?.scene).toEqual(sceneBefore);
+    expect(plotterExportCapture.current?.profile).toEqual(profileBefore);
+    expect(plotterExportCapture.current?.metadata).toBe(metadataBefore);
   });
 
   it("atomically scales the physical sheet via Preset reload while reusing the cached Outline Scene", async () => {
