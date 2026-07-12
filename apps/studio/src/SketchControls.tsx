@@ -40,6 +40,7 @@ import {
   type StudioEditState,
 } from "./editHistory";
 import {
+  detectHistoryShortcutPlatform,
   fieldOwnsHistoryShortcut,
   historyShortcutFor,
 } from "./historyShortcuts";
@@ -290,9 +291,10 @@ export function SketchControls({
   // active; once Enter/blur settles it, the same focused authored field may
   // traverse Studio history. Explicitly excluded text remains native always.
   useEffect(() => {
+    const shortcutPlatform = detectHistoryShortcutPlatform();
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.defaultPrevented) return;
-      const command = historyShortcutFor(event);
+      const command = historyShortcutFor(event, shortcutPlatform);
       if (command === null) return;
 
       const current = historyRef.current;

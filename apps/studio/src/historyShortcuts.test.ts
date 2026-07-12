@@ -2,46 +2,77 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  detectHistoryShortcutPlatform,
   fieldOwnsHistoryShortcut,
   historyShortcutFor,
 } from "./historyShortcuts";
 
 describe("Studio history shortcuts", () => {
-  it.each([
-    [{ key: "z", metaKey: true }, "undo"],
-    [{ key: "Z", metaKey: true, shiftKey: true }, "redo"],
-    [{ key: "z", ctrlKey: true }, "undo"],
-    [{ key: "z", ctrlKey: true, shiftKey: true }, "redo"],
-    [{ key: "y", ctrlKey: true }, "redo"],
-  ] as const)("maps $0 to $1", (chord, command) => {
-    expect(
-      historyShortcutFor({
-        ctrlKey: false,
-        metaKey: false,
-        shiftKey: false,
-        altKey: false,
-        ...chord,
-      }),
-    ).toBe(command);
+  const event = (
+    chord: Partial<
+      Pick<
+        KeyboardEvent,
+        "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey"
+      >
+    >,
+  ) => ({
+    key: "z",
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    ...chord,
   });
 
   it.each([
-    { key: "z" },
-    { key: "z", altKey: true, ctrlKey: true },
-    { key: "z", ctrlKey: true, metaKey: true },
-    { key: "y", metaKey: true },
-    { key: "y", ctrlKey: true, shiftKey: true },
-    { key: "x", ctrlKey: true },
-  ])("ignores unsupported chord $key", (chord) => {
+    [{ key: "z", metaKey: true }, "undo"],
+    [{ key: "Z", metaKey: true, shiftKey: true }, "redo"],
+  ] as const)("maps macOS $0 to $1", (chord, command) => {
+    expect(historyShortcutFor(event(chord), "mac")).toBe(command);
+  });
+
+  it.each([
+    [{ key: "z", ctrlKey: true }, "undo"],
+    [{ key: "z", ctrlKey: true, shiftKey: true }, "redo"],
+    [{ key: "y", ctrlKey: true }, "redo"],
+  ] as const)("maps non-macOS $0 to $1", (chord, command) => {
+    expect(historyShortcutFor(event(chord), "other")).toBe(command);
+  });
+
+  it.each([
+    ["mac", { key: "z", ctrlKey: true }],
+    ["mac", { key: "y", ctrlKey: true }],
+    ["mac", { key: "y", metaKey: true }],
+    ["other", { key: "z", metaKey: true }],
+    ["other", { key: "y", metaKey: true }],
+    ["other", { key: "z" }],
+    ["other", { key: "z", altKey: true, ctrlKey: true }],
+    ["other", { key: "z", ctrlKey: true, metaKey: true }],
+    ["other", { key: "y", ctrlKey: true, shiftKey: true }],
+    ["other", { key: "x", ctrlKey: true }],
+  ] as const)("ignores unsupported %s chord $1", (platform, chord) => {
+    expect(historyShortcutFor(event(chord), platform)).toBeNull();
+  });
+
+  it("prefers high-entropy platform data and falls back to navigator.platform", () => {
     expect(
-      historyShortcutFor({
-        ctrlKey: false,
-        metaKey: false,
-        shiftKey: false,
-        altKey: false,
-        ...chord,
+      detectHistoryShortcutPlatform({
+        platform: "Linux x86_64",
+        userAgentData: { platform: "macOS" },
       }),
-    ).toBeNull();
+    ).toBe("mac");
+    expect(
+      detectHistoryShortcutPlatform({ platform: "Win32" }),
+    ).toBe("other");
+    expect(
+      detectHistoryShortcutPlatform({ platform: "iPhone" }),
+    ).toBe("mac");
+    expect(
+      detectHistoryShortcutPlatform({
+        platform: "MacIntel",
+        userAgentData: { platform: "" },
+      }),
+    ).toBe("mac");
   });
 
   it.each([

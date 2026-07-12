@@ -270,6 +270,7 @@ const MINIMAL_PNG = Uint8Array.from([
 ]);
 
 beforeEach(() => {
+  vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
   // Sensible defaults so a mount's list-on-mount effect resolves quietly; the
   // save/reload tests override loadPreset/savePreset per case.
   listPresets.mockResolvedValue([]);
@@ -475,7 +476,8 @@ describe("SketchControls — seed axis wiring", () => {
 });
 
 describe("SketchControls — central edit-history integration", () => {
-  it("handles the platform chord matrix and prevents only available traversal", () => {
+  it("handles the non-macOS chord matrix and ignores Meta", () => {
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
     const el = mount(
       <SketchControls
         sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
@@ -491,13 +493,13 @@ describe("SketchControls — central edit-history integration", () => {
     act(() => input.blur());
 
     expect(pressHistoryShortcut(window, { metaKey: true }).defaultPrevented).toBe(
-      true,
+      false,
     );
-    expect(paramInput(el, "radius").value).toBe("10");
+    expect(paramInput(el, "radius").value).toBe("42");
     expect(
       pressHistoryShortcut(window, { metaKey: true, shiftKey: true })
         .defaultPrevented,
-    ).toBe(true);
+    ).toBe(false);
     expect(paramInput(el, "radius").value).toBe("42");
 
     expect(pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented).toBe(
@@ -528,6 +530,38 @@ describe("SketchControls — central edit-history integration", () => {
       pressHistoryShortcut(window, { key: "x", ctrlKey: true })
         .defaultPrevented,
     ).toBe(false);
+  });
+
+  it("handles the macOS chord matrix and ignores Ctrl including Ctrl+Y", () => {
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("MacIntel");
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    const input = paramInput(el, "radius");
+    act(() => input.focus());
+    setInput(input, "42");
+    act(() => input.blur());
+
+    expect(pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented).toBe(
+      false,
+    );
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(false);
+    expect(paramInput(el, "radius").value).toBe("42");
+
+    expect(pressHistoryShortcut(window, { metaKey: true }).defaultPrevented).toBe(
+      true,
+    );
+    expect(paramInput(el, "radius").value).toBe("10");
+    expect(
+      pressHistoryShortcut(window, { metaKey: true, shiftKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(paramInput(el, "radius").value).toBe("42");
   });
 
   it("yields to an active numeric edit, then traverses after that field settles", () => {

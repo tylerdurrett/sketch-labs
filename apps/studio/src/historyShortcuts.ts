@@ -1,4 +1,18 @@
 export type HistoryShortcut = "undo" | "redo";
+export type HistoryShortcutPlatform = "mac" | "other";
+
+type PlatformNavigator = Pick<Navigator, "platform"> & {
+  readonly userAgentData?: { readonly platform?: string };
+};
+
+/** Detect which modifier owns history shortcuts in the current browser. */
+export function detectHistoryShortcutPlatform(
+  browserNavigator: PlatformNavigator = navigator,
+): HistoryShortcutPlatform {
+  const platform =
+    browserNavigator.userAgentData?.platform || browserNavigator.platform;
+  return /^(?:mac|iphone|ipad|ipod)/i.test(platform) ? "mac" : "other";
+}
 
 /** Resolve the Studio history command represented by a platform shortcut. */
 export function historyShortcutFor(
@@ -6,12 +20,15 @@ export function historyShortcutFor(
     KeyboardEvent,
     "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey"
   >,
+  platform: HistoryShortcutPlatform,
 ): HistoryShortcut | null {
-  if (event.altKey || event.metaKey === event.ctrlKey) return null;
+  const primaryKey = platform === "mac" ? event.metaKey : event.ctrlKey;
+  const crossPlatformKey = platform === "mac" ? event.ctrlKey : event.metaKey;
+  if (event.altKey || !primaryKey || crossPlatformKey) return null;
 
   const key = event.key.toLowerCase();
   if (key === "z") return event.shiftKey ? "redo" : "undo";
-  if (key === "y" && event.ctrlKey && !event.shiftKey) return "redo";
+  if (key === "y" && platform === "other" && !event.shiftKey) return "redo";
   return null;
 }
 
