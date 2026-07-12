@@ -273,7 +273,7 @@ export function LiveCanvas({
   const captureRequestRef = useRef(fillCaptureRequest);
   const onFillCapturedRef = useRef(onFillCaptured);
   const inputRevisionRef = useRef(inputRevision);
-  const servedCaptureTokenRef = useRef<number | null>(null);
+  const servedCaptureTokensRef = useRef(new Set<number>());
 
   // Caller-owned preparation is keyed by the time-invariant determinism inputs
   // PLUS the Composition Frame. A prepared Sketch can retain immutable layout
@@ -412,7 +412,7 @@ export function LiveCanvas({
     const request = captureRequestRef.current;
     if (
       request === null ||
-      servedCaptureTokenRef.current === request.token ||
+      servedCaptureTokensRef.current.has(request.token) ||
       snapshot.renderMode !== "fill" ||
       snapshot.inputRevision !== request.inputRevision
     ) {
@@ -420,7 +420,7 @@ export function LiveCanvas({
     }
     const onCaptured = onFillCapturedRef.current;
     if (onCaptured === undefined) return;
-    servedCaptureTokenRef.current = request.token;
+    servedCaptureTokensRef.current.add(request.token);
     onCaptured({
       token: request.token,
       inputRevision: request.inputRevision,
@@ -470,9 +470,12 @@ export function LiveCanvas({
         inputRevision: inputRevisionRef.current,
       };
       displayedSceneRef.current = snapshot;
-      if (state.kind === "fill-held") displayedFillRef.current = snapshot;
+      if (state.kind === "fill-held") {
+        displayedFillRef.current = snapshot;
+        answerCapture(snapshot);
+      }
     },
-    [],
+    [answerCapture],
   );
 
   // Geometry-only changes repaint the exact displayed Scene. They never sample

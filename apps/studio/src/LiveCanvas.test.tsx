@@ -785,6 +785,42 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
     expect(onFillCaptured.mock.calls[0]?.[0].token).toBe(21);
   });
 
+  it("never serves the same token twice across an A → B → A request sequence", () => {
+    const { sketch } = animatedSketch({ duration: 10, mode: "loop" });
+    const onFillCaptured = vi.fn();
+    const params = {};
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        inputRevision={5}
+        onFillCaptured={onFillCaptured}
+      />,
+    );
+    tick(1000);
+
+    for (const token of [40, 41, 40]) {
+      act(() => {
+        root!.render(
+          <LiveCanvas
+            sketch={sketch}
+            params={params}
+            seed={1}
+            inputRevision={5}
+            fillCaptureRequest={{ token, inputRevision: 5 }}
+            onFillCaptured={onFillCaptured}
+          />,
+        );
+      });
+    }
+
+    expect(onFillCaptured).toHaveBeenCalledTimes(2);
+    expect(onFillCaptured.mock.calls.map(([capture]) => capture.token)).toEqual([
+      40, 41,
+    ]);
+  });
+
   it("does not answer a pending mismatched request after unmount", () => {
     const { sketch } = animatedSketch({ duration: 10, mode: "loop" });
     const onFillCaptured = vi.fn();
@@ -830,6 +866,34 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
       t: 2,
       renderMode: "fill",
     });
+  });
+
+  it("answers a matching request from a held Fill while animation is suspended", () => {
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const held: Scene = { space: { width: 100, height: 100 }, primitives: [] };
+    const onFillCaptured = vi.fn();
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        inputRevision={6}
+        fillCaptureRequest={{ token: 50, inputRevision: 6 }}
+        onFillCaptured={onFillCaptured}
+        renderState={{ kind: "fill-held", scene: held, t: 2.25 }}
+      />,
+    );
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(onFillCaptured).toHaveBeenCalledOnce();
+    expect(onFillCaptured).toHaveBeenCalledWith({
+      token: 50,
+      inputRevision: 6,
+      scene: held,
+      t: 2.25,
+    });
+    tick(9000);
+    expect(onFillCaptured).toHaveBeenCalledOnce();
   });
 
   it("paints a completed caller-supplied Outline atomically without sampling the Sketch", () => {
