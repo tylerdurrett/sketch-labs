@@ -3,6 +3,7 @@ import type {
   HiddenLineProgress,
   ParamSchema,
   Params,
+  PlotProfile,
   Primitive,
   Scene,
   Seed,
@@ -103,7 +104,7 @@ function copyParamValue(value: unknown, key: string): OutlineParamValue {
   throw new TypeError(`Outline parameter ${key} is not serializable`);
 }
 
-function copyScene(scene: Scene): ImmutableScene {
+function copyScene(scene: Scene | ImmutableScene): ImmutableScene {
   const primitives = scene.primitives.map((primitive) => {
     const copy: {
       points: ImmutablePoint[];
@@ -143,6 +144,26 @@ function copyScene(scene: Scene): ImmutableScene {
     copy.background = Object.freeze({ color: scene.background.color });
   }
   return Object.freeze(copy);
+}
+
+function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity {
+  return Object.freeze({
+    sketchId: identity.sketchId,
+    params: Object.freeze(
+      identity.params.map((entry) =>
+        Object.freeze({ key: entry.key, value: entry.value }),
+      ),
+    ),
+    seed: identity.seed,
+    sampledT: identity.sampledT,
+    compositionFrame: Object.freeze({
+      width: identity.compositionFrame.width,
+      height: identity.compositionFrame.height,
+    }),
+    tolerance: identity.tolerance,
+    includeFrame: identity.includeFrame,
+    sourceScene: copyScene(identity.sourceScene),
+  });
 }
 
 export function createOutlineComputeIdentity(
@@ -429,4 +450,306 @@ export function mutableScene(scene: ImmutableScene): Scene {
     result.background = { color: scene.background.color };
   }
   return result;
+}
+
+/** A defensive, immutable copy of the physical output profile captured at click time. */
+export interface ImmutablePlotProfile {
+  readonly width: number;
+  readonly height: number;
+  readonly insets: Readonly<PlotProfile["insets"]>;
+  readonly includeFrame: boolean;
+}
+
+/** A completed Outline Scene that may be reused by a later job with the same identity. */
+export interface CompletedOutline {
+  readonly identity: OutlineComputeIdentity;
+  readonly scene: ImmutableScene;
+}
+
+/**
+ * Every value needed to finish a hidden-line SVG export after the initiating
+ * click. Mutable Studio state is deliberately absent from this boundary.
+ */
+export interface HiddenLineExportSnapshot {
+  readonly identity: OutlineComputeIdentity;
+  readonly profile: ImmutablePlotProfile;
+  readonly metadata: string;
+  readonly includePaperMargins: boolean;
+  readonly filename: string;
+  readonly reusableOutline?: CompletedOutline;
+}
+
+export interface CreateHiddenLineExportSnapshotInput {
+  identity: OutlineComputeIdentity;
+  profile: PlotProfile;
+  metadata: string;
+  includePaperMargins: boolean;
+  filename: string;
+  reusableOutline?: Readonly<{
+    identity: OutlineComputeIdentity;
+    scene: Scene;
+  }>;
+}
+
+function copyProfile(profile: PlotProfile): ImmutablePlotProfile {
+  return Object.freeze({
+    width: profile.width,
+    height: profile.height,
+    insets: Object.freeze({
+      top: profile.insets.top,
+      right: profile.insets.right,
+      bottom: profile.insets.bottom,
+      left: profile.insets.left,
+    }),
+    includeFrame: profile.includeFrame,
+  });
+}
+
+function copyCompletedOutline(
+  candidate: CreateHiddenLineExportSnapshotInput["reusableOutline"],
+): CompletedOutline | undefined {
+  if (candidate === undefined) return undefined;
+  return Object.freeze({
+    identity: copyIdentity(candidate.identity),
+    scene: copyScene(candidate.scene),
+  });
+}
+
+/**
+ * Capture an export job without retaining references to live state. A supplied
+ * completed Outline is copied only when every geometry identity field matches;
+ * callers cannot accidentally reuse a merely similar Scene.
+ */
+export function createHiddenLineExportSnapshot(
+  input: CreateHiddenLineExportSnapshotInput,
+): HiddenLineExportSnapshot {
+  if (!isOutlineComputeIdentity(input.identity)) {
+    throw new TypeError("Hidden-line export identity is invalid");
+  }
+  const identity = copyIdentity(input.identity);
+  const matchingCandidate =
+    input.reusableOutline !== undefined &&
+    isOutlineComputeIdentity(input.reusableOutline.identity) &&
+    outlineComputeIdentitiesEqual(identity, input.reusableOutline.identity)
+      ? copyCompletedOutline(input.reusableOutline)
+      : undefined;
+  const snapshot: HiddenLineExportSnapshot = Object.freeze({
+    identity,
+    profile: copyProfile(input.profile),
+    metadata: input.metadata,
+    includePaperMargins: input.includePaperMargins,
+    filename: input.filename,
+    ...(matchingCandidate === undefined
+      ? {}
+      : { reusableOutline: matchingCandidate }),
+  });
+  if (!isHiddenLineExportSnapshot(snapshot)) {
+    throw new TypeError("Hidden-line export snapshot contains an invalid value");
+  }
+  return snapshot;
+}
+
+function isPlotProfile(value: unknown): value is ImmutablePlotProfile {
+  if (!isRecord(value) || !isRecord(value.insets)) return false;
+  const width = value.width;
+  const height = value.height;
+  const top = value.insets.top;
+  const right = value.insets.right;
+  const bottom = value.insets.bottom;
+  const left = value.insets.left;
+  return (
+    isFiniteNumber(width) &&
+    width > 0 &&
+    isFiniteNumber(height) &&
+    height > 0 &&
+    isFiniteNumber(top) &&
+    top >= 0 &&
+    isFiniteNumber(right) &&
+    right >= 0 &&
+    isFiniteNumber(bottom) &&
+    bottom >= 0 &&
+    isFiniteNumber(left) &&
+    left >= 0 &&
+    left + right < width &&
+    top + bottom < height &&
+    typeof value.includeFrame === "boolean"
+  );
+}
+
+export function isCompletedOutline(value: unknown): value is CompletedOutline {
+  return (
+    isRecord(value) &&
+    isOutlineComputeIdentity(value.identity) &&
+    isScene(value.scene)
+  );
+}
+
+export function isHiddenLineExportSnapshot(
+  value: unknown,
+): value is HiddenLineExportSnapshot {
+  if (
+    !isRecord(value) ||
+    !isOutlineComputeIdentity(value.identity) ||
+    !isPlotProfile(value.profile) ||
+    typeof value.metadata !== "string" ||
+    typeof value.includePaperMargins !== "boolean" ||
+    typeof value.filename !== "string" ||
+    value.filename.trim() === ""
+  ) {
+    return false;
+  }
+  if (!hasOwn(value, "reusableOutline")) return true;
+  return (
+    isCompletedOutline(value.reusableOutline) &&
+    outlineComputeIdentitiesEqual(
+      value.identity,
+      value.reusableOutline.identity,
+    )
+  );
+}
+
+export type HiddenLineJobKind = "preview" | "export";
+export type HiddenLineJobOwner = "outline-preview" | "hidden-line-export";
+
+interface HiddenLineJobEnvelope {
+  readonly jobId: number;
+  readonly identity: OutlineComputeIdentity;
+}
+
+interface HiddenLinePreviewEnvelope extends HiddenLineJobEnvelope {
+  readonly jobKind: "preview";
+  readonly owner: "outline-preview";
+}
+
+interface HiddenLineExportEnvelope extends HiddenLineJobEnvelope {
+  readonly jobKind: "export";
+  readonly owner: "hidden-line-export";
+}
+
+export interface HiddenLinePreviewRequest extends HiddenLinePreviewEnvelope {
+  readonly type: "preview";
+}
+
+export interface HiddenLineExportRequest {
+  readonly type: "export";
+  readonly jobKind: "export";
+  readonly owner: "hidden-line-export";
+  readonly jobId: number;
+  readonly snapshot: HiddenLineExportSnapshot;
+}
+
+export type HiddenLineWorkerRequest =
+  | HiddenLinePreviewRequest
+  | HiddenLineExportRequest;
+
+export type HiddenLineDerivationProgress =
+  | (HiddenLinePreviewEnvelope & {
+      readonly type: "derivation-progress";
+      readonly snapshot: HiddenLineProgress;
+    })
+  | (HiddenLineExportEnvelope & {
+      readonly type: "derivation-progress";
+      readonly snapshot: HiddenLineProgress;
+    });
+
+export interface HiddenLineFinalizing extends HiddenLineExportEnvelope {
+  readonly type: "finalizing";
+}
+
+export interface HiddenLinePreviewComplete extends HiddenLinePreviewEnvelope {
+  readonly type: "complete";
+  readonly scene: Scene;
+}
+
+export interface HiddenLineExportComplete extends HiddenLineExportEnvelope {
+  readonly type: "complete";
+  readonly svg: string;
+  readonly filename: string;
+  readonly completedOutline: CompletedOutline;
+}
+
+export type HiddenLineJobFailure =
+  | (HiddenLinePreviewEnvelope & {
+      readonly type: "failure";
+      readonly error: string;
+    })
+  | (HiddenLineExportEnvelope & {
+      readonly type: "failure";
+      readonly error: string;
+    });
+
+export type HiddenLineWorkerMessage =
+  | HiddenLineDerivationProgress
+  | HiddenLineFinalizing
+  | HiddenLinePreviewComplete
+  | HiddenLineExportComplete
+  | HiddenLineJobFailure;
+
+function isJobId(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+function hasMatchingJobKindAndOwner(
+  value: Record<string, unknown>,
+): value is Record<string, unknown> & {
+  jobKind: HiddenLineJobKind;
+  owner: HiddenLineJobOwner;
+} {
+  return (
+    (value.jobKind === "preview" && value.owner === "outline-preview") ||
+    (value.jobKind === "export" && value.owner === "hidden-line-export")
+  );
+}
+
+export function isHiddenLineWorkerRequest(
+  value: unknown,
+): value is HiddenLineWorkerRequest {
+  if (!isRecord(value) || !isJobId(value.jobId)) return false;
+  if (value.type === "preview") {
+    return (
+      value.jobKind === "preview" &&
+      value.owner === "outline-preview" &&
+      isOutlineComputeIdentity(value.identity)
+    );
+  }
+  return (
+    value.type === "export" &&
+    value.jobKind === "export" &&
+    value.owner === "hidden-line-export" &&
+    isHiddenLineExportSnapshot(value.snapshot)
+  );
+}
+
+export function isHiddenLineWorkerMessage(
+  value: unknown,
+): value is HiddenLineWorkerMessage {
+  if (
+    !isRecord(value) ||
+    !isJobId(value.jobId) ||
+    !isOutlineComputeIdentity(value.identity) ||
+    !hasMatchingJobKindAndOwner(value)
+  ) {
+    return false;
+  }
+  if (value.type === "derivation-progress") {
+    return isOutlineComputeProgress({
+      type: "progress",
+      jobId: value.jobId,
+      snapshot: value.snapshot,
+    });
+  }
+  if (value.type === "finalizing") return value.jobKind === "export";
+  if (value.type === "failure") return typeof value.error === "string";
+  if (value.type !== "complete") return false;
+  if (value.jobKind === "preview") return isScene(value.scene);
+  return (
+    typeof value.svg === "string" &&
+    typeof value.filename === "string" &&
+    value.filename.trim() !== "" &&
+    isCompletedOutline(value.completedOutline) &&
+    outlineComputeIdentitiesEqual(
+      value.identity,
+      value.completedOutline.identity,
+    )
+  );
 }
