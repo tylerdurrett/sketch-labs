@@ -92,6 +92,8 @@ function timeForElapsed(elapsedSeconds: number, time: TimeMetadata): number {
  * draw. The owner (SketchControls) reads them only from one-shot export handlers.
  */
 export interface LiveCanvasHandle {
+  /** Atomically read the retained record for the last committed canvas frame. */
+  captureDisplayedFrame(): DisplayedSceneSnapshot | null;
   /**
    * The live `<canvas>` element, or `null` before it mounts. Its backing store is
    * already DPR-sized by `sizeToBox`, so a `toBlob` snapshot is crisp by
@@ -374,6 +376,7 @@ export function LiveCanvas({
       getCanvas: () => canvasRef.current,
       getCurrentT: () => tRef.current,
       getDisplayedScene: () => displayedSceneRef.current,
+      captureDisplayedFrame: () => displayedSceneRef.current,
     }),
     [],
   );

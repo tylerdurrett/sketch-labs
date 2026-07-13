@@ -69,6 +69,7 @@ vi.mock("./presetsClient", () => ({
 
 vi.mock("./hiddenLineCoordinator", async () => {
   const { outlineScene } = await import("./outlineScene");
+  const { clipSceneToBounds, renderPlotterSVG } = await import("@harness/core");
   return {
     HiddenLineCoordinator: class {
       start(identity: import("./outlineComputeProtocol").OutlineComputeIdentity) {
@@ -85,6 +86,34 @@ vi.mock("./hiddenLineCoordinator", async () => {
               ),
             });
             return Promise.resolve();
+          },
+        };
+      }
+      startExport(
+        snapshot: import("./outlineComputeProtocol").HiddenLineExportSnapshot,
+      ) {
+        const scene = outlineScene(
+          snapshot.identity.sourceScene as Scene,
+          snapshot.identity.tolerance,
+          snapshot.identity.includeFrame,
+        );
+        const payload = {
+          status: "success" as const,
+          jobId: 1,
+          identity: snapshot.identity,
+          svg: renderPlotterSVG(
+            clipSceneToBounds(scene),
+            snapshot.profile as PlotProfile,
+            snapshot.metadata,
+            { includePaperMargins: snapshot.includePaperMargins },
+          ),
+          filename: snapshot.filename,
+          completedOutline: { identity: snapshot.identity, scene },
+        };
+        return {
+          then(resolve: (result: typeof payload) => void) {
+            resolve(payload);
+            return { catch() {} };
           },
         };
       }

@@ -12,12 +12,10 @@ import {
   plotDrawableAspectsEquivalent,
   plotDrawableRectangle,
   randomize,
-  renderPlotterSVG,
   renderToSVG,
   resolveOutputProfile,
   resolvePlotCompositionFrame,
   type Preset,
-  type Scene,
   type Sketch,
 } from "@harness/core";
 
@@ -46,23 +44,25 @@ import {
 } from "./historyShortcuts";
 import {
   LiveCanvas,
-  type DisplayedSceneSnapshot,
   type FillCapture,
   type LiveCanvasHandle,
   type LiveCanvasRenderState,
-  type RenderMode,
 } from "./LiveCanvas";
 import {
   HiddenLineCoordinator,
   type HiddenLineProgressUpdate,
 } from "./hiddenLineCoordinator";
-import { createOutlineComputeIdentity } from "./outlineComputeProtocol";
+import {
+  createHiddenLineExportSnapshot,
+  createOutlineComputeIdentity,
+  mutableScene,
+  outlineComputeIdentitiesEqual,
+} from "./outlineComputeProtocol";
 import {
   createOutlineSessionState,
   outlineSessionReducer,
   type OutlineSessionAction,
 } from "./outlineSession";
-import { outlineScene } from "./outlineScene";
 import { PaperSection } from "./PaperSection";
 import {
   readPlotterSvgIncludePaperMargins,
@@ -79,34 +79,6 @@ function formatOutlineEta(remainingMs: number): string {
   }
   const minutes = Math.ceil(seconds / 60);
   return `${minutes} ${minutes === 1 ? "minute" : "minutes"} remaining`;
-}
-
-/** Select the exact hidden-line export input, lazily falling back on a cache miss. */
-export function hiddenLineSceneForExport({
-  displayed,
-  currentT,
-  renderMode,
-  tolerance,
-  includeFrame,
-  generate,
-}: {
-  displayed: DisplayedSceneSnapshot | null;
-  currentT: number;
-  renderMode: RenderMode;
-  tolerance: number;
-  includeFrame: boolean;
-  generate: () => Scene;
-}): Scene {
-  const cacheMatches =
-    displayed !== null &&
-    displayed.t === currentT &&
-    displayed.renderMode === renderMode &&
-    displayed.tolerance === tolerance &&
-    displayed.includeFrame === includeFrame;
-  if (!cacheMatches) return outlineScene(generate(), tolerance, includeFrame);
-  return displayed.renderMode === "outline"
-    ? displayed.scene
-    : outlineScene(displayed.scene, tolerance, includeFrame);
 }
 
 /** Preset params are flat schema values; preserve identity when reload is equal. */
@@ -286,14 +258,14 @@ export function SketchControls({
   };
   const outlineBusy =
     outlineSession.capture !== null || outlineSession.active !== null;
+  const exportBusy = outlineSession.exportActive !== null;
+  const hiddenLineBusy = outlineBusy || exportBusy;
   // Capture and worker execution are one logical interval and share a token.
   // A replacement gets a fresh token so its quiet-period clock starts over.
   const outlineWorkToken =
     outlineSession.capture?.token ?? outlineSession.active?.token ?? null;
   const onHiddenLineBusyChangeRef = useRef(onHiddenLineBusyChange);
   onHiddenLineBusyChangeRef.current = onHiddenLineBusyChange;
-  const renderMode: RenderMode =
-    outlineSession.phase.kind === "outline" ? "outline" : "fill";
   const [revealedOutlineToken, setRevealedOutlineToken] = useState<number | null>(
     null,
   );
@@ -303,8 +275,8 @@ export function SketchControls({
   } | null>(null);
 
   useEffect(() => {
-    onHiddenLineBusyChangeRef.current?.(outlineBusy);
-  }, [outlineBusy]);
+    onHiddenLineBusyChangeRef.current?.(hiddenLineBusy);
+  }, [hiddenLineBusy]);
 
   useEffect(() => {
     setRevealedOutlineToken(null);
@@ -335,6 +307,12 @@ export function SketchControls({
     coordinatorRef.current?.cancel();
   };
 
+  const cancelOutlineCoordinator = (): void => {
+    if (outlineSessionRef.current.slot?.owner === "outline-preview") {
+      cancelCoordinator();
+    }
+  };
+
   const requestOutlineForCurrentInputs = (): void => {
     dispatchOutline({ type: "request-outline" });
   };
@@ -349,7 +327,7 @@ export function SketchControls({
     historyRef.current = next;
     const invalidated = outlineInputsChanged(current.present, next.present);
     if (invalidated) {
-      cancelCoordinator();
+      cancelOutlineCoordinator();
       dispatchOutline({ type: "inputs-changed", launch: launchOutline });
     }
     setHistory(next);
@@ -410,7 +388,7 @@ export function SketchControls({
     // Every authored transaction is a preview boundary even before its first
     // valid value: cancel stale work and paint live Fill while retaining intent
     // and the one exact-result cache for settlement.
-    cancelCoordinator();
+    cancelOutlineCoordinator();
     dispatchOutline({ type: "transaction-began" });
     updateHistory(beginEditTransaction, false);
   };
@@ -454,7 +432,7 @@ export function SketchControls({
   // LiveCanvas only paints the held Fill or atomically completed Outline.
   const toggleRenderMode = () => {
     if (outlineSessionRef.current.desired === "outline") {
-      cancelCoordinator();
+      cancelOutlineCoordinator();
       dispatchOutline({ type: "request-fill" });
     } else {
       requestOutlineForCurrentInputs();
@@ -671,67 +649,137 @@ export function SketchControls({
     downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "svg"));
   };
 
-  // Export the CURRENTLY DISPLAYED frame as a HIDDEN-LINE SVG — a plotter-ready
-  // variant of {@link exportSvg} that derives its stroke-only, occlusion-clipped
-  // Scene through the shared {@link outlineScene} processing seam BEFORE
-  // serialization. Routing through that ONE seam — the same processing
-  // LiveCanvas's outline preview consumes — is what makes preview == export true
-  // by construction (issue #220): the two paths cannot drift after sampling. It
-  // is the same one-shot click OUTSIDE the per-frame loop; the pass is heavy and
-  // on-demand only, so it runs HERE inside the handler — never in render or the
-  // live loop.
-  //
-  // Sampling still mirrors `exportSvg` exactly (same handle guard, time gating,
-  // displayed state, and reproduction envelope). Serialization deliberately
-  // differs: plotter output maps the clipped Scene through the active physical
-  // profile, while ordinary SVG remains on `renderToSVG`. The file keeps its
-  // `-hidden-line` variant segment and existing time-gated name.
+  // Capture exactly one retained displayed-frame record, then freeze the entire
+  // export envelope before handing it to the worker. No completion callback
+  // reads React state or the live canvas again.
   const exportHiddenLineSvg = () => {
-    if (outlineBusy) return;
+    if (hiddenLineBusy) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
-    const displayed = handle.getDisplayedScene();
-    const currentT = handle.getCurrentT();
-    const t = sketch.time === undefined ? undefined : currentT;
-    // Reuse only an atomic snapshot matching the current t/mode/tolerance. An
-    // outline snapshot is already the exact processed preview Scene; a fill
-    // snapshot is the exact displayed source fed through the shared seam here.
-    // A null/stale snapshot falls back to cold generation plus that same seam.
-    const hiddenLineScene = hiddenLineSceneForExport({
-      displayed,
-      currentT,
-      renderMode,
-      tolerance,
-      includeFrame: profile.includeFrame,
-      generate: () =>
-        sketch.generate(params, seed, t ?? 0, compositionFrame),
+    const displayed = handle.captureDisplayedFrame();
+    if (displayed === null) return;
+
+    const edit = historyRef.current.present;
+    const cachedOutline = outlineSessionRef.current.cache;
+    // A displayed Outline is processed geometry, never a derivation source. Its
+    // cache retains the immutable raw identity source for misses and is offered
+    // separately as an exact reuse candidate.
+    const sourceScene =
+      displayed.renderMode === "outline"
+        ? cachedOutline === null
+          ? undefined
+          : mutableScene(cachedOutline.identity.sourceScene)
+        : displayed.scene;
+    if (sourceScene === undefined) return;
+    const identity = createOutlineComputeIdentity({
+      sketchId: sketch.id,
+      schema: sketch.schema,
+      params: edit.params,
+      seed: edit.seed,
+      sampledT: displayed.t,
+      compositionFrame,
+      tolerance: displayed.tolerance,
+      includeFrame: displayed.includeFrame,
+      sourceScene,
     });
-    // Clip AFTER the hidden-line pass and BEFORE serialization (issue #237): the
-    // pass can emit stroke geometry beyond the canvas, so the clip is the last
-    // export-only stage that guarantees no plotted line escapes `space`. The clip
-    // stays out of `outlineScene` itself — that seam also feeds the live outline
-    // preview (LiveCanvas), and clipping must remain export-only.
-    const clipped = clipSceneToBounds(hiddenLineScene);
-    // Same reproduction envelope + active Plot Profile (#247) as the other exports.
+    const t = sketch.time === undefined ? undefined : displayed.t;
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
-      seed,
-      params,
-      locks,
+      seed: edit.seed,
+      params: edit.params,
+      locks: edit.locks,
       t,
-      profile,
+      profile: edit.profile,
     });
-    const svg = renderPlotterSVG(clipped, profile, metadata, {
-      includePaperMargins,
-    });
-    const blob = new Blob([svg], { type: "image/svg+xml" });
-    downloadBlob(
-      blob,
-      exportFilename(
-        { sketchId: sketch.id, seed, t, variant: "hidden-line" },
-        "svg",
-      ),
+    const filename = exportFilename(
+      { sketchId: sketch.id, seed: edit.seed, t, variant: "hidden-line" },
+      "svg",
     );
+    const snapshot = createHiddenLineExportSnapshot({
+      identity,
+      profile: edit.profile,
+      metadata,
+      includePaperMargins,
+      filename,
+      ...(displayed.renderMode === "outline" &&
+      cachedOutline !== null &&
+      displayed.scene === cachedOutline.scene &&
+      outlineComputeIdentitiesEqual(identity, cachedOutline.identity)
+        ? {
+            reusableOutline: {
+              identity: cachedOutline.identity,
+              scene: displayed.scene,
+            },
+          }
+        : {}),
+    });
+    const requested = dispatchOutline({ type: "request-export", snapshot });
+    const active = requested.exportActive;
+    if (active === null || active.snapshot !== snapshot) return;
+    const coordinator = coordinatorRef.current;
+    if (coordinator === null) {
+      dispatchOutline({
+        type: "export-failed",
+        token: active.token,
+        error: "Hidden-line export is unavailable",
+      });
+      return;
+    }
+
+    void coordinator
+      .startExport(snapshot, (update) => {
+        if (
+          update.phase === "finalizing" &&
+          outlineSessionRef.current.exportActive?.token === active.token
+        ) {
+          dispatchOutline({ type: "export-finalizing", token: active.token });
+        }
+      })
+      .then((result) => {
+        if (
+          coordinatorRef.current !== coordinator ||
+          outlineSessionRef.current.exportActive?.token !== active.token
+        ) {
+          return;
+        }
+        if (result.status === "success") {
+          dispatchOutline({
+            type: "export-succeeded",
+            token: active.token,
+            completedOutline: result.completedOutline,
+          });
+          downloadBlob(
+            new Blob([result.svg], { type: "image/svg+xml" }),
+            result.filename,
+          );
+        } else if (result.status === "cancelled") {
+          dispatchOutline({ type: "export-cancelled", token: active.token });
+        } else {
+          dispatchOutline({
+            type: "export-failed",
+            token: active.token,
+            error: result.error
+              .replace(/[\u0000-\u001f\u007f]/g, " ")
+              .slice(0, 160),
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        if (
+          coordinatorRef.current !== coordinator ||
+          outlineSessionRef.current.exportActive?.token !== active.token
+        ) {
+          return;
+        }
+        dispatchOutline({
+          type: "export-failed",
+          token: active.token,
+          error:
+            error instanceof Error
+              ? error.message.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 160)
+              : "Hidden-line export failed",
+        });
+      });
   };
 
   // TWO-REGION SHELL (#154): the canvas region (left) fills the remaining space
@@ -885,6 +933,7 @@ export function SketchControls({
             aria-busy={outlineBusy}
             aria-label="Toggle outline render mode"
             onClick={toggleRenderMode}
+            disabled={exportBusy}
           >
             {outlineSession.desired === "outline"
                 ? "Outline"
@@ -1006,7 +1055,7 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportHiddenLineSvg}
-            disabled={outlineBusy}
+            disabled={hiddenLineBusy}
           >
             Export Hidden-line SVG
           </Button>
