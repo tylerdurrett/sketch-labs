@@ -86,6 +86,81 @@ interface AABB {
   maxY: number
 }
 
+/**
+ * Fixed coefficients for the deterministic Hidden-line workload heuristic.
+ *
+ * These are deliberately unitless: elapsed time is learned from observed work
+ * throughput, not predicted here. Keep them stable so benchmark measurements
+ * and progress totals remain comparable between runs.
+ */
+export const HIDDEN_LINE_WORK_WEIGHTS = Object.freeze({
+  filledPrimitive: 8,
+  sourceSegment: 4,
+  overlappingPair: 16,
+  segmentEdgeComparison: 1,
+} as const)
+
+/** Deterministic inventory of the geometry work a Hidden-line pass will do. */
+export interface HiddenLineWorkload {
+  /** Filled, non-empty Primitives accepted by the pass. */
+  readonly filledPrimitiveCount: number
+  /** Consecutive source-outline segments, including implicit closing segments. */
+  readonly sourceSegmentCount: number
+  /** Painter-ordered nearer/farther AABB pairs accepted by the broad phase. */
+  readonly overlappingPairCount: number
+  /** Source segments × prepared occluder edges for every overlapping pair. */
+  readonly estimatedSegmentEdgeComparisons: number
+  /** Fixed weighted sum of the four inventory counts above. */
+  readonly totalWorkUnits: number
+}
+
+interface PlannedPrimitive {
+  primitive: Primitive
+  aabb: AABB
+  polygon: PreparedPolygon
+  outline: Polyline
+  occluders: PreparedPolygon[]
+}
+
+interface HiddenLinePlan {
+  filled: PlannedPrimitive[]
+  workload: HiddenLineWorkload
+}
+
+/** Immutable, serialization-friendly progress reported by the Hidden-line pass. */
+export interface HiddenLineProgress {
+  /** Weighted work completed so far. Always between zero and `totalWorkUnits`. */
+  readonly completedWorkUnits: number
+  /** Stable weighted total from the exact plan being executed. */
+  readonly totalWorkUnits: number
+  /** True only for the final snapshot. */
+  readonly terminal: boolean
+}
+
+/** Optional observation hook for coarse Hidden-line progress snapshots. */
+export type HiddenLineObserver = (progress: HiddenLineProgress) => void
+
+/** Options for {@link hiddenLinePass}. */
+export interface HiddenLinePassOptions {
+  /** Final-stage Douglas–Peucker simplification tolerance (default 0). */
+  readonly tolerance?: number
+  /** Receives immutable progress snapshots at filled-Primitive boundaries. */
+  readonly observer?: HiddenLineObserver
+}
+
+/** Add non-negative integers, saturating before precision would be lost. */
+function safeAdd(a: number, b: number): number {
+  return a > Number.MAX_SAFE_INTEGER - b ? Number.MAX_SAFE_INTEGER : a + b
+}
+
+/** Multiply non-negative integers, saturating before precision would be lost. */
+function safeMultiply(a: number, b: number): number {
+  if (a === 0 || b === 0) return 0
+  return a > Math.floor(Number.MAX_SAFE_INTEGER / b)
+    ? Number.MAX_SAFE_INTEGER
+    : a * b
+}
+
 /** Compute a Primitive's AABB from its points; null for empty geometry. */
 function computeAABB(points: Polyline): AABB | null {
   if (points.length === 0) return null
@@ -132,6 +207,88 @@ function outlineRing(primitive: Primitive): Polyline {
   return ring
 }
 
+/** Build the single deterministic inventory/execution plan used by the pass. */
+function createHiddenLinePlan(scene: Scene): HiddenLinePlan {
+  const filled: PlannedPrimitive[] = []
+  let sourceSegmentCount = 0
+
+  for (const primitive of scene.primitives) {
+    if (!primitive.fill) continue // decision (c): stroke-only inputs ignored
+    const aabb = computeAABB(primitive.points)
+    if (aabb === null) continue
+    const outline = outlineRing(primitive)
+    sourceSegmentCount = safeAdd(
+      sourceSegmentCount,
+      Math.max(0, outline.length - 1),
+    )
+    filled.push({
+      primitive,
+      aabb,
+      polygon: preparePolygon(primitive.points),
+      outline,
+      occluders: [],
+    })
+  }
+
+  let overlappingPairCount = 0
+  let estimatedSegmentEdgeComparisons = 0
+  for (let f = 0; f < filled.length; f++) {
+    const self = filled[f]!
+    const sourceSegments = Math.max(0, self.outline.length - 1)
+    if (sourceSegments === 0) continue
+    for (let g = f + 1; g < filled.length; g++) {
+      const other = filled[g]!
+      if (!aabbOverlap(self.aabb, other.aabb)) continue
+      self.occluders.push(other.polygon)
+      overlappingPairCount = safeAdd(overlappingPairCount, 1)
+      estimatedSegmentEdgeComparisons = safeAdd(
+        estimatedSegmentEdgeComparisons,
+        safeMultiply(sourceSegments, other.polygon.edges.length),
+      )
+    }
+  }
+
+  const weightedFilled = safeMultiply(
+    filled.length,
+    HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive,
+  )
+  const weightedSegments = safeMultiply(
+    sourceSegmentCount,
+    HIDDEN_LINE_WORK_WEIGHTS.sourceSegment,
+  )
+  const weightedPairs = safeMultiply(
+    overlappingPairCount,
+    HIDDEN_LINE_WORK_WEIGHTS.overlappingPair,
+  )
+  const weightedComparisons = safeMultiply(
+    estimatedSegmentEdgeComparisons,
+    HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
+  )
+  const totalWorkUnits = safeAdd(
+    safeAdd(weightedFilled, weightedSegments),
+    safeAdd(weightedPairs, weightedComparisons),
+  )
+  const workload = Object.freeze({
+    filledPrimitiveCount: filled.length,
+    sourceSegmentCount,
+    overlappingPairCount,
+    estimatedSegmentEdgeComparisons,
+    totalWorkUnits,
+  })
+
+  return { filled, workload }
+}
+
+/**
+ * Analyze a Scene using the exact filtering, closure, painter order, and AABB
+ * broad-phase rules used by {@link hiddenLinePass}. The returned summary is
+ * frozen and all fields are safe integers; exceptionally large derived counts
+ * saturate at `Number.MAX_SAFE_INTEGER` rather than losing integer precision.
+ */
+export function analyzeHiddenLineWorkload(scene: Scene): HiddenLineWorkload {
+  return createHiddenLinePlan(scene).workload
+}
+
 /**
  * Run the Hidden-line pass over a Scene.
  *
@@ -142,7 +299,9 @@ function outlineRing(primitive: Primitive): Polyline {
  *   stroke as the FINAL stage — the studio's tolerance knob feeds this so
  *   Outline-mode preview and hidden-line SVG export simplify identically. A
  *   tolerance of 0 is an identity no-op (survivors pass through unchanged), so
- *   output stays byte-identical to an un-simplified pass.
+ *   output stays byte-identical to an un-simplified pass. `observer` receives
+ *   frozen progress snapshots at coarse filled-Primitive boundaries; no
+ *   callbacks run in the segment-edge clipping loop.
  * @returns A NEW background-free, stroke-only Scene sharing `scene.space`: the
  *   occlusion-clipped outlines of the input's filled Primitives, emitted as
  *   black, fill-free OPEN Primitives, each preserving its source width and
@@ -150,48 +309,74 @@ function outlineRing(primitive: Primitive): Polyline {
  */
 export function hiddenLinePass(
   scene: Scene,
-  opts?: { tolerance?: number },
+  opts?: HiddenLinePassOptions,
 ): Scene {
   const tolerance = opts?.tolerance ?? 0
-  const { primitives } = scene
+  const plan = createHiddenLinePlan(scene)
+  const observer = opts?.observer
+  const totalWorkUnits = plan.workload.totalWorkUnits
+  let completedWorkUnits = 0
 
-  // Precompute each filled Primitive's index and AABB for the broad-phase.
-  const filled: {
-    index: number
-    primitive: Primitive
-    aabb: AABB
-    polygon: PreparedPolygon
-  }[] = []
-  for (let i = 0; i < primitives.length; i++) {
-    const primitive = primitives[i]!
-    if (!primitive.fill) continue // decision (c): stroke-only inputs ignored
-    const aabb = computeAABB(primitive.points)
-    if (aabb === null) continue
-    filled.push({
-      index: i,
-      primitive,
-      aabb,
-      polygon: preparePolygon(primitive.points),
-    })
+  const reportProgress = (terminal: boolean) => {
+    observer?.(
+      Object.freeze({ completedWorkUnits, totalWorkUnits, terminal }),
+    )
+  }
+
+  const completePrimitive = (
+    self: PlannedPrimitive,
+    primitiveIndex: number,
+  ) => {
+    if (!observer) return
+
+    const sourceSegments = Math.max(0, self.outline.length - 1)
+    let primitiveWorkUnits = safeAdd(
+      HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive,
+      safeMultiply(sourceSegments, HIDDEN_LINE_WORK_WEIGHTS.sourceSegment),
+    )
+    primitiveWorkUnits = safeAdd(
+      primitiveWorkUnits,
+      safeMultiply(
+        self.occluders.length,
+        HIDDEN_LINE_WORK_WEIGHTS.overlappingPair,
+      ),
+    )
+    for (const occluder of self.occluders) {
+      primitiveWorkUnits = safeAdd(
+        primitiveWorkUnits,
+        safeMultiply(
+          safeMultiply(sourceSegments, occluder.edges.length),
+          HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
+        ),
+      )
+    }
+    completedWorkUnits = Math.min(
+      totalWorkUnits,
+      safeAdd(completedWorkUnits, primitiveWorkUnits),
+    )
+    const terminal = primitiveIndex === plan.filled.length - 1
+    if (terminal) completedWorkUnits = totalWorkUnits
+    reportProgress(terminal)
   }
 
   const out: Primitive[] = []
 
-  for (let f = 0; f < filled.length; f++) {
-    const self = filled[f]!
-    const outline = outlineRing(self.primitive)
-    if (outline.length < 2) continue
-
-    // Broad-phase: nearer (higher-index) filled Primitives whose AABB overlaps.
-    const occluders: PreparedPolygon[] = []
-    for (let g = f + 1; g < filled.length; g++) {
-      const other = filled[g]!
-      if (aabbOverlap(self.aabb, other.aabb)) {
-        occluders.push(other.polygon)
-      }
+  for (
+    let primitiveIndex = 0;
+    primitiveIndex < plan.filled.length;
+    primitiveIndex++
+  ) {
+    const self = plan.filled[primitiveIndex]!
+    const { outline } = self
+    if (outline.length < 2) {
+      completePrimitive(self, primitiveIndex)
+      continue
     }
 
-    const survivors = subtractPreparedPolygonsFromPolyline(outline, occluders)
+    const survivors = subtractPreparedPolygonsFromPolyline(
+      outline,
+      self.occluders,
+    )
     const stroke: Stroke = self.primitive.stroke
       ? { color: 'black', width: self.primitive.stroke.width }
       : DEFAULT_STROKE
@@ -201,7 +386,12 @@ export function hiddenLinePass(
       // pass output stays byte-identical to an un-simplified run.
       out.push({ points: simplifyPath(survivor, tolerance), stroke })
     }
+
+    completePrimitive(self, primitiveIndex)
   }
+
+  // Empty Scenes still have an observable terminal state.
+  if (plan.filled.length === 0) reportProgress(true)
 
   return { space: scene.space, primitives: out }
 }

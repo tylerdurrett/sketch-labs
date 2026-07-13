@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { hiddenLinePass, type Scene } from "@harness/core";
 
@@ -78,5 +78,37 @@ describe("outlineScene processing seam", () => {
       ],
       stroke: { color: "black", width: 1 },
     });
+  });
+
+  it("forwards progress observation without changing output or frame ordering", () => {
+    const scene: Scene = {
+      space: { width: 12, height: 8 },
+      primitives: [
+        {
+          points: [
+            [1, 1],
+            [6, 1],
+            [3, 5],
+          ],
+          closed: true,
+          fill: { color: "tomato" },
+        },
+      ],
+    };
+    const observer = vi.fn();
+
+    const observed = outlineScene(scene, 0, true, observer);
+
+    expect(observed).toEqual(outlineScene(scene, 0, true));
+    expect(observer).toHaveBeenCalledWith(
+      expect.objectContaining({ terminal: true }),
+    );
+    expect(observed.primitives.at(-1)?.points).toEqual([
+      [0, 0],
+      [12, 0],
+      [12, 8],
+      [0, 8],
+      [0, 0],
+    ]);
   });
 });

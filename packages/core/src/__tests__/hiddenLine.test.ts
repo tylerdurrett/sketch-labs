@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_STROKE, hiddenLinePass } from '../hiddenLine'
+import {
+  DEFAULT_STROKE,
+  HIDDEN_LINE_WORK_WEIGHTS,
+  analyzeHiddenLineWorkload,
+  hiddenLinePass,
+} from '../hiddenLine'
 import { renderToCanvas, renderToSVG } from '../renderer'
 import type { Canvas2DContext } from '../renderer'
 import type { Primitive, Scene, Stroke } from '../scene'
@@ -38,6 +43,296 @@ function strictlyInside(
 ): boolean {
   return p[0] > x0 && p[0] < x1 && p[1] > y0 && p[1] < y1
 }
+
+describe('analyzeHiddenLineWorkload', () => {
+  it('distinguishes open outlines from implicit and explicitly repeated closure', () => {
+    const triangle: Polyline = [
+      [0, 0],
+      [20, 0],
+      [10, 20],
+    ]
+    const workloadFor = (primitive: Primitive) =>
+      analyzeHiddenLineWorkload({ space, primitives: [primitive] })
+
+    const open = workloadFor({ points: triangle, fill })
+    const implicitlyClosed = workloadFor({ points: triangle, closed: true, fill })
+    const explicitlyClosed = workloadFor({
+      points: [...triangle, [0, 0]],
+      closed: true,
+      fill,
+    })
+
+    expect(open.sourceSegmentCount).toBe(2)
+    expect(implicitlyClosed.sourceSegmentCount).toBe(3)
+    expect(explicitlyClosed.sourceSegmentCount).toBe(3)
+  })
+
+  it('counts accepted fills, implicit closure segments, overlap pairs, and comparisons', () => {
+    const openBack: Primitive = {
+      points: [
+        [0, 0],
+        [20, 0],
+        [20, 20],
+      ],
+      fill,
+    }
+    const closedMiddle = filledSquare(10, 10, 30, 30)
+    const disjointFront = filledSquare(60, 60, 80, 80)
+    const strokeOnly: Primitive = {
+      points: [
+        [0, 0],
+        [100, 100],
+      ],
+      stroke,
+    }
+    const emptyFill: Primitive = { points: [], fill }
+    const scene: Scene = {
+      space,
+      primitives: [openBack, strokeOnly, closedMiddle, emptyFill, disjointFront],
+    }
+
+    const workload = analyzeHiddenLineWorkload(scene)
+
+    // 3 accepted fills. Segment counts: open triangle 2 + each closed square 4.
+    // Only openBack→closedMiddle overlaps: 2 source segments × 4 polygon edges.
+    expect(workload).toEqual({
+      filledPrimitiveCount: 3,
+      sourceSegmentCount: 10,
+      overlappingPairCount: 1,
+      estimatedSegmentEdgeComparisons: 8,
+      totalWorkUnits:
+        3 * HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive +
+        10 * HIDDEN_LINE_WORK_WEIGHTS.sourceSegment +
+        HIDDEN_LINE_WORK_WEIGHTS.overlappingPair +
+        8 * HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
+    })
+  })
+
+  it('multiplies source segments by every prepared edge of a many-vertex occluder', () => {
+    const back = filledSquare(0, 0, 40, 40)
+    const front: Primitive = {
+      points: [
+        [10, 10],
+        [30, 10],
+        [40, 20],
+        [30, 30],
+        [10, 30],
+        [0, 20],
+      ],
+      closed: true,
+      fill,
+    }
+
+    const workload = analyzeHiddenLineWorkload({
+      space,
+      primitives: [back, front],
+    })
+
+    expect(workload).toEqual({
+      filledPrimitiveCount: 2,
+      sourceSegmentCount: 10,
+      overlappingPairCount: 1,
+      estimatedSegmentEdgeComparisons: 4 * 6,
+      totalWorkUnits:
+        2 * HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive +
+        10 * HIDDEN_LINE_WORK_WEIGHTS.sourceSegment +
+        HIDDEN_LINE_WORK_WEIGHTS.overlappingPair +
+        24 * HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
+    })
+  })
+
+  it('uses painter order when assigning the source side of an overlapping pair', () => {
+    const twoSegmentBack: Primitive = {
+      points: [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+      ],
+      fill,
+    }
+    const closedFront = filledSquare(0, 0, 20, 20)
+
+    const forward = analyzeHiddenLineWorkload({
+      space,
+      primitives: [twoSegmentBack, closedFront],
+    })
+    const reversed = analyzeHiddenLineWorkload({
+      space,
+      primitives: [closedFront, twoSegmentBack],
+    })
+
+    expect(forward.overlappingPairCount).toBe(1)
+    expect(reversed.overlappingPairCount).toBe(1)
+    expect(forward.estimatedSegmentEdgeComparisons).toBe(2 * 4)
+    expect(reversed.estimatedSegmentEdgeComparisons).toBe(4 * 3)
+  })
+
+  it('is deterministic, immutable, integer-safe, and does not mutate the Scene', () => {
+    const scene: Scene = {
+      space,
+      primitives: [filledSquare(0, 0, 20, 20), filledSquare(10, 10, 30, 30)],
+    }
+    const before = structuredClone(scene)
+
+    const first = analyzeHiddenLineWorkload(scene)
+    const second = analyzeHiddenLineWorkload(scene)
+
+    expect(first).toEqual(second)
+    expect(Object.isFrozen(first)).toBe(true)
+    expect(Object.isFrozen(HIDDEN_LINE_WORK_WEIGHTS)).toBe(true)
+    for (const value of Object.values(first)) {
+      expect(Number.isSafeInteger(value)).toBe(true)
+      expect(value).toBeGreaterThanOrEqual(0)
+    }
+    expect(scene).toEqual(before)
+  })
+})
+
+describe('hiddenLinePass — progress observation', () => {
+  function progressScene(): Scene {
+    return {
+      space,
+      primitives: [
+        filledSquare(0, 0, 40, 40),
+        filledSquare(20, 20, 60, 60),
+        filledSquare(70, 70, 90, 90),
+      ],
+    }
+  }
+
+  it.each([0, 1])(
+    'preserves the exact output with an observer at tolerance %s',
+    (tolerance) => {
+      const scene = progressScene()
+      const snapshots: unknown[] = []
+
+      const unobserved = hiddenLinePass(scene, { tolerance })
+      const observed = hiddenLinePass(scene, {
+        tolerance,
+        observer: (snapshot) => snapshots.push(snapshot),
+      })
+
+      expect(observed).toEqual(unobserved)
+      expect(snapshots.length).toBeGreaterThan(0)
+    },
+  )
+
+  it('reports immutable, monotonic, bounded progress against one stable total', () => {
+    const scene = progressScene()
+    const before = structuredClone(scene)
+    const workload = analyzeHiddenLineWorkload(scene)
+    const snapshots: Array<{
+      readonly completedWorkUnits: number
+      readonly totalWorkUnits: number
+      readonly terminal: boolean
+    }> = []
+
+    hiddenLinePass(scene, {
+      observer: (snapshot) => snapshots.push(snapshot),
+    })
+
+    expect(snapshots).toHaveLength(workload.filledPrimitiveCount)
+    expect(snapshots.every(Object.isFrozen)).toBe(true)
+    expect(new Set(snapshots.map((snapshot) => snapshot.totalWorkUnits))).toEqual(
+      new Set([workload.totalWorkUnits]),
+    )
+    for (let i = 0; i < snapshots.length; i++) {
+      const snapshot = snapshots[i]!
+      expect(snapshot.completedWorkUnits).toBeGreaterThan(0)
+      expect(snapshot.completedWorkUnits).toBeLessThanOrEqual(
+        snapshot.totalWorkUnits,
+      )
+      if (i > 0) {
+        expect(snapshot.completedWorkUnits).toBeGreaterThan(
+          snapshots[i - 1]!.completedWorkUnits,
+        )
+      }
+      expect(snapshot.terminal).toBe(i === snapshots.length - 1)
+    }
+    expect(snapshots.at(-1)).toEqual({
+      completedWorkUnits: workload.totalWorkUnits,
+      totalWorkUnits: workload.totalWorkUnits,
+      terminal: true,
+    })
+    expect(scene).toEqual(before)
+  })
+
+  it('reports terminal zero work for a Scene with no accepted fills', () => {
+    const snapshots: unknown[] = []
+    const scene: Scene = {
+      space,
+      primitives: [
+        { points: [], fill },
+        {
+          points: [
+            [0, 0],
+            [10, 10],
+          ],
+          stroke,
+        },
+      ],
+    }
+
+    const out = hiddenLinePass(scene, {
+      observer: (snapshot) => snapshots.push(snapshot),
+    })
+
+    expect(out).toEqual({ space, primitives: [] })
+    expect(snapshots).toEqual([
+      { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
+    ])
+    expect(Object.isFrozen(snapshots[0])).toBe(true)
+  })
+
+  it('accounts for a degenerate fill without emitting degenerate output', () => {
+    const scene: Scene = {
+      space,
+      primitives: [
+        filledSquare(0, 0, 20, 20),
+        { points: [[10, 10]], fill, stroke },
+      ],
+    }
+    const snapshots: Array<{
+      readonly completedWorkUnits: number
+      readonly totalWorkUnits: number
+      readonly terminal: boolean
+    }> = []
+    const totalWorkUnits = analyzeHiddenLineWorkload(scene).totalWorkUnits
+
+    const out = hiddenLinePass(scene, {
+      observer: (snapshot) => snapshots.push(snapshot),
+    })
+
+    expect(out.primitives).toEqual([
+      {
+        points: [
+          [0, 0],
+          [20, 0],
+          [20, 20],
+          [0, 20],
+          [0, 0],
+        ],
+        stroke,
+      },
+    ])
+    expect(snapshots).toHaveLength(2)
+    expect(snapshots[0]!.terminal).toBe(false)
+    expect(snapshots[1]).toEqual({
+      completedWorkUnits: totalWorkUnits,
+      totalWorkUnits,
+      terminal: true,
+    })
+  })
+
+  it('keeps omitted options and the existing tolerance-only option compatible', () => {
+    const scene = progressScene()
+
+    expect(hiddenLinePass(scene)).toEqual(hiddenLinePass(scene, {}))
+    expect(hiddenLinePass(scene, { tolerance: 1 })).toEqual(
+      hiddenLinePass(scene, { tolerance: 1, observer: undefined }),
+    )
+  })
+})
 
 describe('hiddenLinePass — occlusion correctness on external geometry', () => {
   it('drops an outline fully behind a nearer fill, keeps the front one intact', () => {

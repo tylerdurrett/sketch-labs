@@ -40,9 +40,24 @@ describe("outline worker entry", () => {
       data: { type: "compute", jobId: 3, identity },
     } as MessageEvent<unknown>);
 
-    expect(workerScope.postMessage).toHaveBeenCalledWith(
+    expect(workerScope.postMessage).toHaveBeenCalledTimes(2);
+    expect(workerScope.postMessage.mock.calls[0]?.[0]).toEqual({
+      type: "progress",
+      jobId: 3,
+      snapshot: {
+        completedWorkUnits: 0,
+        totalWorkUnits: 0,
+        terminal: true,
+      },
+    });
+    expect(workerScope.postMessage.mock.calls[1]?.[0]).toEqual(
       expect.objectContaining({ type: "success", jobId: 3 }),
     );
+    expect(Object.keys(workerScope.postMessage.mock.calls[0]?.[0])).toEqual([
+      "type",
+      "jobId",
+      "snapshot",
+    ]);
   });
 
   it("does not answer malformed messages", async () => {

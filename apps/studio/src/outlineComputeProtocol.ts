@@ -1,5 +1,6 @@
 import type {
   CoordinateSpace,
+  HiddenLineProgress,
   ParamSchema,
   Params,
   Primitive,
@@ -60,9 +61,20 @@ export interface OutlineComputeFailure {
   readonly error: string;
 }
 
+/** Compact, identity-free progress emitted while an Outline job is running. */
+export interface OutlineComputeProgress {
+  readonly type: "progress";
+  readonly jobId: number;
+  readonly snapshot: HiddenLineProgress;
+}
+
 export type OutlineComputeResponse =
   | OutlineComputeSuccess
   | OutlineComputeFailure;
+
+export type OutlineWorkerMessage =
+  | OutlineComputeProgress
+  | OutlineComputeResponse;
 
 interface CreateIdentityInput {
   sketchId: string;
@@ -278,6 +290,34 @@ export function isOutlineComputeResponse(
   }
   if (value.type === "success") return isScene(value.scene);
   return value.type === "failure" && typeof value.error === "string";
+}
+
+export function isOutlineComputeProgress(
+  value: unknown,
+): value is OutlineComputeProgress {
+  if (
+    !isRecord(value) ||
+    value.type !== "progress" ||
+    !Number.isSafeInteger(value.jobId) ||
+    (value.jobId as number) <= 0 ||
+    !isRecord(value.snapshot)
+  ) {
+    return false;
+  }
+  const completed = value.snapshot.completedWorkUnits;
+  const total = value.snapshot.totalWorkUnits;
+  const terminal = value.snapshot.terminal;
+  return (
+    typeof completed === "number" &&
+    Number.isSafeInteger(completed) &&
+    typeof total === "number" &&
+    Number.isSafeInteger(total) &&
+    completed >= 0 &&
+    total >= 0 &&
+    completed <= total &&
+    typeof terminal === "boolean" &&
+    (!terminal || completed === total)
+  );
 }
 
 function optionalStyleEqual(

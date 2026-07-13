@@ -61,6 +61,9 @@ const outlineJob = vi.hoisted(() => ({
   active: null as null | {
     identity: import("./outlineComputeProtocol").OutlineComputeIdentity;
     resolve: (result: unknown) => void;
+    observeProgress: ((
+      update: import("./hiddenLineCoordinator").HiddenLineProgressUpdate,
+    ) => void) | undefined;
   },
 }));
 
@@ -72,14 +75,19 @@ vi.mock("./hiddenLineCoordinator", () => ({
       outlineJob.coordinators += 1;
     }
 
-    start(identity: import("./outlineComputeProtocol").OutlineComputeIdentity) {
+    start(
+      identity: import("./outlineComputeProtocol").OutlineComputeIdentity,
+      observeProgress?: (
+        update: import("./hiddenLineCoordinator").HiddenLineProgressUpdate,
+      ) => void,
+    ) {
       if (this.disposed) {
         return Promise.reject(new Error("Hidden-line coordinator is disposed"));
       }
       outlineJob.starts += 1;
       return {
         then(resolve: (result: unknown) => void) {
-          outlineJob.active = { identity, resolve };
+          outlineJob.active = { identity, resolve, observeProgress };
           return Promise.resolve();
         },
       };
@@ -436,6 +444,31 @@ function clickButton(el: HTMLElement, text: string): void {
   if (button === undefined) throw new Error(`no button labelled ${text}`);
   act(() => {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+function reportOutlineProgress(
+  completedWorkUnits: number,
+  totalWorkUnits: number,
+  eta:
+    | { readonly kind: "estimating"; readonly revision: number }
+    | {
+        readonly kind: "remaining";
+        readonly revision: number;
+        readonly remainingMs: number;
+      } = { kind: "estimating", revision: 1 },
+): void {
+  const observe = outlineJob.active?.observeProgress;
+  if (observe === undefined) throw new Error("no active progress observer");
+  act(() => {
+    observe({
+      snapshot: {
+        completedWorkUnits,
+        totalWorkUnits,
+        terminal: completedWorkUnits === totalWorkUnits,
+      },
+      eta,
+    });
   });
 }
 
@@ -3270,11 +3303,95 @@ describe("SketchControls — background Outline session (#289)", () => {
       ).toBe(true);
       clickButton(el, "Cancel outline");
       expect(el.textContent).not.toContain("Cancel outline");
+      expect(el.querySelector("progress")).toBeNull();
       expect(
         el.querySelector<HTMLButtonElement>(
           'button[aria-label="Toggle outline render mode"]',
         )?.textContent,
       ).toBe("Fill");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not flash or delay the UI when Outline succeeds during the grace period", () => {
+    autoFireOutlineComputed = false;
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+      clickButton(el, "Fill");
+      act(() => lastOnOutlineComputed?.());
+      expect(canvasRenderMode(el)).toBe("outline");
+      expect(el.textContent).not.toContain("Cancel outline");
+
+      act(() => vi.advanceTimersByTime(750));
+      expect(el.textContent).not.toContain("Cancel outline");
+      expect(el.querySelector('progress[aria-label="Outline progress"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows native progress, integer percentage, and rolling ETA after reveal", () => {
+    autoFireOutlineComputed = false;
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+      clickButton(el, "Fill");
+      reportOutlineProgress(1, 4);
+      act(() => vi.advanceTimersByTime(750));
+
+      const progress = el.querySelector<HTMLProgressElement>(
+        'progress[aria-label="Outline progress"]',
+      )!;
+      expect(progress.value).toBe(1);
+      expect(progress.max).toBe(4);
+      expect(el.textContent).toContain("25%");
+      expect(el.textContent).toContain("Estimating time remaining…");
+      expect(
+        el
+          .querySelector('button[aria-label="Toggle outline render mode"]')
+          ?.getAttribute("aria-busy"),
+      ).toBe("true");
+
+      reportOutlineProgress(2, 4, {
+        kind: "remaining",
+        revision: 2,
+        remainingMs: 4_200,
+      });
+      expect(progress.value).toBe(2);
+      expect(progress.max).toBe(4);
+      expect(el.textContent).toContain("50%");
+      expect(el.textContent).toContain("5 seconds remaining");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("announces availability politely once without making every update a live status", () => {
+    autoFireOutlineComputed = false;
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+      clickButton(el, "Fill");
+      reportOutlineProgress(1, 3);
+      act(() => vi.advanceTimersByTime(750));
+
+      const statuses = el.querySelectorAll('[role="status"][aria-live="polite"]');
+      expect(statuses).toHaveLength(1);
+      expect(statuses[0]?.textContent).toContain("Outline processing");
+      expect(statuses[0]?.textContent).not.toContain("33%");
+      expect(statuses[0]?.textContent).not.toContain("Estimating");
+      expect(el.querySelector("progress")?.closest('[aria-live]')).toBeNull();
+
+      reportOutlineProgress(2, 3, {
+        kind: "remaining",
+        revision: 2,
+        remainingMs: 61_000,
+      });
+      expect(statuses[0]?.textContent).toContain("Outline processing");
+      expect(el.textContent).toContain("67%");
+      expect(el.textContent).toContain("2 minutes remaining");
     } finally {
       vi.useRealTimers();
     }
@@ -3314,29 +3431,114 @@ describe("SketchControls — background Outline session (#289)", () => {
     }
   });
 
+  it("resets progress on replacement and ignores callbacks from the stale token", () => {
+    autoFireOutlineComputed = false;
+    let randomValue = 0.1;
+    vi.spyOn(Math, "random").mockImplementation(() => (randomValue += 0.1));
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+      clickButton(el, "Fill");
+      const staleObserver = outlineJob.active!.observeProgress!;
+      reportOutlineProgress(1, 4);
+      act(() => vi.advanceTimersByTime(750));
+      expect(el.textContent).toContain("25%");
+
+      clickButton(el, "New seed");
+      expect(el.textContent).not.toContain("25%");
+      act(() => {
+        staleObserver({
+          snapshot: {
+            completedWorkUnits: 3,
+            totalWorkUnits: 4,
+            terminal: false,
+          },
+          eta: { kind: "remaining", revision: 2, remainingMs: 1_000 },
+        });
+        vi.advanceTimersByTime(750);
+      });
+      expect(el.textContent).not.toContain("75%");
+
+      reportOutlineProgress(1, 2);
+      expect(el.textContent).toContain("50%");
+      expect(
+        el.querySelector<HTMLProgressElement>("progress")?.max,
+      ).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears revealed progress on success and keyed remount", () => {
+    autoFireOutlineComputed = false;
+    vi.useFakeTimers();
+    try {
+      const el = mount(
+        <SketchControls key="a" sketch={sketchWith("a", {})} />,
+      );
+      clickButton(el, "Fill");
+      reportOutlineProgress(1, 2);
+      act(() => vi.advanceTimersByTime(750));
+      expect(el.textContent).toContain("50%");
+
+      act(() => lastOnOutlineComputed?.());
+      expect(el.querySelector("progress")).toBeNull();
+      expect(
+        el
+          .querySelector('button[aria-label="Toggle outline render mode"]')
+          ?.getAttribute("aria-busy"),
+      ).toBe("false");
+
+      act(() => {
+        root!.render(
+          <SketchControls key="b" sketch={sketchWith("b", {})} />,
+        );
+      });
+      expect(el.querySelector("progress")).toBeNull();
+      expect(el.textContent).not.toContain("50%");
+      expect(
+        el
+          .querySelector('button[aria-label="Toggle outline render mode"]')
+          ?.getAttribute("aria-busy"),
+      ).toBe("false");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows a sanitized recoverable failure while logging technical detail", () => {
     autoFireOutlineComputed = false;
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
-    clickButton(el, "Fill");
-    const active = outlineJob.active!;
-    act(() => {
-      outlineJob.active = null;
-      active.resolve({
-        status: "failure",
-        jobId: 1,
-        error: "geometry\u0000 exploded",
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+      clickButton(el, "Fill");
+      reportOutlineProgress(1, 2);
+      act(() => vi.advanceTimersByTime(750));
+      expect(el.querySelector("progress")).not.toBeNull();
+
+      const active = outlineJob.active!;
+      act(() => {
+        outlineJob.active = null;
+        active.resolve({
+          status: "failure",
+          jobId: 1,
+          error: "geometry\u0000 exploded",
+        });
       });
-    });
-    expect(el.querySelector('[role="alert"]')?.textContent).toContain(
-      "Outline failed: geometry  exploded",
-    );
-    const toggle = el.querySelector<HTMLButtonElement>(
-      'button[aria-label="Toggle outline render mode"]',
-    )!;
-    expect(toggle.textContent).toBe("Fill");
-    expect(toggle.disabled).toBe(false);
-    expect(consoleError).toHaveBeenCalled();
+      expect(el.querySelector("progress")).toBeNull();
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+        "Outline failed: geometry  exploded",
+      );
+      const toggle = el.querySelector<HTMLButtonElement>(
+        'button[aria-label="Toggle outline render mode"]',
+      )!;
+      expect(toggle.textContent).toBe("Fill");
+      expect(toggle.disabled).toBe(false);
+      expect(consoleError).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports the full active interval and clears it on keyed unmount", () => {

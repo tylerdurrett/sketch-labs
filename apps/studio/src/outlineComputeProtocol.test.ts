@@ -4,6 +4,7 @@ import type { ParamSchema, Scene } from "@harness/core";
 
 import {
   createOutlineComputeIdentity,
+  isOutlineComputeProgress,
   isOutlineComputeRequest,
   isOutlineComputeResponse,
   outlineComputeIdentitiesEqual,
@@ -146,6 +147,28 @@ describe("outline compute protocol guards", () => {
       }),
     ).toBe(true);
     expect(
+      isOutlineComputeProgress({
+        type: "progress",
+        jobId: 1,
+        snapshot: {
+          completedWorkUnits: 4,
+          totalWorkUnits: 10,
+          terminal: false,
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isOutlineComputeProgress({
+        type: "progress",
+        jobId: 1,
+        snapshot: {
+          completedWorkUnits: 0,
+          totalWorkUnits: 0,
+          terminal: true,
+        },
+      }),
+    ).toBe(true);
+    expect(
       isOutlineComputeResponse({
         type: "failure",
         jobId: 1,
@@ -164,4 +187,77 @@ describe("outline compute protocol guards", () => {
     "rejects malformed response %o",
     (candidate) => expect(isOutlineComputeResponse(candidate)).toBe(false),
   );
+
+  it.each([
+    null,
+    {},
+    { type: "progress", jobId: 0, snapshot: {} },
+    {
+      type: "progress",
+      jobId: 1.5,
+      snapshot: { completedWorkUnits: 0, totalWorkUnits: 1, terminal: false },
+    },
+    {
+      type: "progress",
+      jobId: 1,
+      snapshot: { completedWorkUnits: -1, totalWorkUnits: 1, terminal: false },
+    },
+    {
+      type: "progress",
+      jobId: 1,
+      snapshot: { completedWorkUnits: 2, totalWorkUnits: 1, terminal: false },
+    },
+    {
+      type: "progress",
+      jobId: 1,
+      snapshot: {
+        completedWorkUnits: 0.5,
+        totalWorkUnits: 1,
+        terminal: false,
+      },
+    },
+    {
+      type: "progress",
+      jobId: 1,
+      snapshot: {
+        completedWorkUnits: 1,
+        totalWorkUnits: 1.5,
+        terminal: false,
+      },
+    },
+    {
+      type: "progress",
+      jobId: 1,
+      snapshot: {
+        completedWorkUnits: Number.MAX_SAFE_INTEGER + 1,
+        totalWorkUnits: Number.MAX_SAFE_INTEGER + 1,
+        terminal: true,
+      },
+    },
+    {
+      type: "progress",
+      jobId: 1,
+      snapshot: {
+        completedWorkUnits: Number.NaN,
+        totalWorkUnits: 1,
+        terminal: false,
+      },
+    },
+    {
+      type: "progress",
+      jobId: 1,
+      snapshot: {
+        completedWorkUnits: 0,
+        totalWorkUnits: Infinity,
+        terminal: false,
+      },
+    },
+    {
+      type: "progress",
+      jobId: 1,
+      snapshot: { completedWorkUnits: 0, totalWorkUnits: 1, terminal: true },
+    },
+  ])("rejects malformed progress %o", (candidate) => {
+    expect(isOutlineComputeProgress(candidate)).toBe(false);
+  });
 });
