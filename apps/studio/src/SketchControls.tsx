@@ -396,12 +396,10 @@ export function SketchControls({
     transition: (current: EditHistory) => EditHistory,
   ): void => {
     updateHistory(transition, false);
-    // Settlement always resamples the final Fill. The reducer reuses an exact
-    // cache identity without occupying the worker slot; changed inputs start
-    // exactly one job, while previews above launch none.
-    if (outlineSessionRef.current.desired === "outline") {
-      requestOutlineForCurrentInputs();
-    }
+    // Settlement belongs to the session reducer: outside export it resamples the
+    // final Fill exactly once; during export it retains only a deferred request,
+    // which the export terminal action releases after relinquishing the slot.
+    dispatchOutline({ type: "transaction-settled" });
   };
   const commitTransaction = (): void => settleTransaction(commitEditTransaction);
   const cancelTransaction = (): void => settleTransaction(cancelEditTransaction);

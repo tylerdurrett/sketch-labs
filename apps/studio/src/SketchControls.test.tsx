@@ -3118,7 +3118,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     expect(downloadBlob).not.toHaveBeenCalled();
   });
 
-  it("releases export ownership before launching one deferred Outline with latest inputs", async () => {
+  it("settles a transactional edit during export before launching one latest Outline", async () => {
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
     fakeFillCaptureScene = source;
     const el = mount(<SketchControls sketch={hlStaticSketch("deferred")} />);
@@ -3134,9 +3134,13 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     outlineJob.exportMode = "pending";
     clickButton(el, "Export Hidden-line SVG");
 
-    clickButton(el, "New seed");
-    const latestSeed = Number(
-      (el.querySelector("#sketch-seed") as HTMLInputElement).value,
+    const radius = paramInput(el, "radius");
+    act(() => radius.focus());
+    setInput(radius, "14");
+    act(() =>
+      radius.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      ),
     );
     expect(outlineJob.starts).toBe(startsBeforeExport);
 
@@ -3145,7 +3149,10 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       await Promise.resolve();
     });
     expect(outlineJob.starts).toBe(startsBeforeExport + 1);
-    expect(outlineJob.lastIdentity?.seed).toBe(latestSeed);
+    expect(outlineJob.lastIdentity?.params).toContainEqual({
+      key: "radius",
+      value: 14,
+    });
   });
 });
 
