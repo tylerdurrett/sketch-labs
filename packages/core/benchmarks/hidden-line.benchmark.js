@@ -198,12 +198,12 @@ function denseOverlapScene() {
 
 /**
  * Build isolated pairs whose AABBs always overlap. The first triangle occupies
- * x+y <= 10; its partner is either identical (an actual intersection) or
- * shifted by (6, 6), where the overlapping AABB corner contains no geometry.
- * This varies narrow-phase intersection density without changing any A1 count.
+ * x+y <= 10; its partner is shifted by (3, 3) for two proper edge crossings,
+ * or by (6, 6), where the overlapping AABB corner contains no geometry. This
+ * varies narrow-phase intersection density without changing any A1 count.
  */
 function intersectionScene(intersectingPairCount) {
-  return pairedTriangles(8, (pair) => (pair < intersectingPairCount ? 0 : 6))
+  return pairedTriangles(8, (pair) => (pair < intersectingPairCount ? 3 : 6))
 }
 
 function scalingCase(family, label, scene) {
@@ -340,6 +340,10 @@ describe('hidden-line performance feedback loop', () => {
     const intersectionWorkloads = families[3].cases.map(({ workload }) => workload)
     expect(intersectionWorkloads[1]).toEqual(intersectionWorkloads[0])
     expect(intersectionWorkloads[2]).toEqual(intersectionWorkloads[0])
+    const intersectionOutputs = families[3].cases.map(({ scene }) =>
+      sceneChecksum(hiddenLinePass(scene, { tolerance: 0 })),
+    )
+    expect(new Set(intersectionOutputs).size).toBe(intersectionOutputs.length)
 
     const timings = measureCases(
       samples,
