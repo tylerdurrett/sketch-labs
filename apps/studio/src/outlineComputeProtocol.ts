@@ -487,7 +487,7 @@ export interface CreateHiddenLineExportSnapshotInput {
   filename: string;
   reusableOutline?: Readonly<{
     identity: OutlineComputeIdentity;
-    scene: Scene;
+    scene: Scene | ImmutableScene;
   }>;
 }
 
@@ -744,6 +744,7 @@ export function isHiddenLineWorkerMessage(
   if (value.jobKind === "preview") return isScene(value.scene);
   return (
     typeof value.svg === "string" &&
+    value.svg.trim() !== "" &&
     typeof value.filename === "string" &&
     value.filename.trim() !== "" &&
     isCompletedOutline(value.completedOutline) &&

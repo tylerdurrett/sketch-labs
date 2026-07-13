@@ -81,6 +81,38 @@ function snapshot(
   });
 }
 
+const identityMismatches: ReadonlyArray<
+  readonly [string, (copy: Record<string, any>) => void]
+> = [
+  ["params", (copy) => {
+    copy.params[0].value = 4;
+  }],
+  ["seed", (copy) => {
+    copy.seed = 43;
+  }],
+  ["sampled time", (copy) => {
+    copy.sampledT = 1.5;
+  }],
+  [
+    "Composition Frame",
+    (copy) => {
+      copy.compositionFrame.width = 101;
+    },
+  ],
+  ["tolerance", (copy) => {
+    copy.tolerance = 0.75;
+  }],
+  ["includeFrame", (copy) => {
+    copy.includeFrame = false;
+  }],
+  [
+    "source Scene",
+    (copy) => {
+      copy.sourceScene.primitives[0].points[0][0] = 2;
+    },
+  ],
+];
+
 describe("hidden-line export snapshot", () => {
   it("deeply copies and freezes every mutable capture and candidate", () => {
     const liveIdentity = identity();
@@ -129,6 +161,37 @@ describe("hidden-line export snapshot", () => {
     });
     expect(aspectMiss.reusableOutline).toBeUndefined();
   });
+
+  it("accepts a prior immutable protocol completion as the next candidate", () => {
+    const first = snapshot();
+    const prior: CompletedOutline = first.reusableOutline!;
+    const next = snapshot({ reusableOutline: prior });
+
+    expect(next.reusableOutline).toEqual(prior);
+    expect(next.reusableOutline).not.toBe(prior);
+    expect(next.reusableOutline?.scene).not.toBe(prior.scene);
+    expect(isHiddenLineExportSnapshot(next)).toBe(true);
+  });
+
+  it.each(identityMismatches)(
+    "omits a reusable Outline on a %s mismatch",
+    (_, mutate) => {
+      const requested = identity();
+      const candidateIdentity = structuredClone(requested) as Record<
+        string,
+        any
+      >;
+      mutate(candidateIdentity);
+
+      const captured = snapshot({
+        identity: requested,
+        reusableOutline: completed(
+          candidateIdentity as unknown as OutlineComputeIdentity,
+        ),
+      });
+      expect(captured.reusableOutline).toBeUndefined();
+    },
+  );
 
   it.each([
     null,
@@ -264,6 +327,26 @@ describe("hidden-line worker protocol", () => {
       jobId: 1,
       identity: currentIdentity,
       svg: "<svg/>",
+    },
+    {
+      type: "complete",
+      jobKind: "export",
+      owner: "hidden-line-export",
+      jobId: 2,
+      identity: currentIdentity,
+      svg: "",
+      filename: "out.svg",
+      completedOutline,
+    },
+    {
+      type: "complete",
+      jobKind: "export",
+      owner: "hidden-line-export",
+      jobId: 2,
+      identity: currentIdentity,
+      svg: " \n\t ",
+      filename: "out.svg",
+      completedOutline,
     },
     {
       type: "complete",
