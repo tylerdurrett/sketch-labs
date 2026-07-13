@@ -12,7 +12,9 @@ import {
   type HiddenLineExportSnapshot,
   type HiddenLineWorkerRequest,
   type OutlineComputeIdentity,
+  type OutlineComputeRequest,
 } from "./outlineComputeProtocol";
+import { handleOutlineWorkerMessage } from "./outlineWorkerRuntime";
 
 const source: Scene = {
   space: { width: 20, height: 20 },
@@ -47,11 +49,11 @@ function identity(amount = 1): OutlineComputeIdentity {
 }
 
 class FakeWorker implements OutlineWorkerPort {
-  request: HiddenLineWorkerRequest | null = null;
+  request: HiddenLineWorkerRequest | OutlineComputeRequest | null = null;
   readonly terminate = vi.fn();
   private readonly listeners = new Map<string, Array<(event: any) => void>>();
 
-  postMessage(message: HiddenLineWorkerRequest): void {
+  postMessage(message: HiddenLineWorkerRequest | OutlineComputeRequest): void {
     this.request = message;
   }
 
@@ -67,13 +69,37 @@ class FakeWorker implements OutlineWorkerPort {
   }
 }
 
+class RuntimeBackedWorker implements OutlineWorkerPort {
+  readonly terminate = vi.fn();
+  private readonly listeners = new Map<string, Array<(event: any) => void>>();
+
+  postMessage(message: HiddenLineWorkerRequest | OutlineComputeRequest): void {
+    const response = handleOutlineWorkerMessage(
+      message,
+      undefined,
+      (progress) => this.emitMessage(progress),
+    );
+    if (response !== null) this.emitMessage(response);
+  }
+
+  addEventListener(type: string, listener: (event: any) => void): void {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  private emitMessage(data: unknown): void {
+    for (const listener of this.listeners.get("message") ?? []) {
+      listener({ data });
+    }
+  }
+}
+
 function successfulResponse(worker: FakeWorker, scene: Scene = source) {
   const request = worker.request!;
-  if (request.type !== "preview") throw new Error("Expected preview request");
+  if (request.type !== "compute") throw new Error("Expected compute request");
   return {
-    type: "complete" as const,
-    jobKind: request.jobKind,
-    owner: request.owner,
+    type: "success" as const,
     jobId: request.jobId,
     identity: request.identity,
     scene,
@@ -88,7 +114,14 @@ function progressResponse(
 ) {
   const request = worker.request!;
   const requestIdentity =
-    request.type === "preview" ? request.identity : request.snapshot.identity;
+    request.type === "export" ? request.snapshot.identity : request.identity;
+  if (request.type === "compute") {
+    return {
+      type: "progress" as const,
+      jobId: request.jobId,
+      snapshot: { completedWorkUnits, totalWorkUnits, terminal },
+    };
+  }
   return {
     type: "derivation-progress" as const,
     jobKind: request.jobKind,
@@ -143,12 +176,7 @@ describe("HiddenLineCoordinator", () => {
 
     expect(coordinator.busy).toBe(true);
     expect(factory).toHaveBeenCalledOnce();
-    expect(worker.request).toMatchObject({
-      type: "preview",
-      jobKind: "preview",
-      owner: "outline-preview",
-      jobId: 1,
-    });
+    expect(worker.request).toMatchObject({ type: "compute", jobId: 1 });
     await expect(coordinator.start(identity(2))).rejects.toThrow(
       "already active",
     );
@@ -162,6 +190,23 @@ describe("HiddenLineCoordinator", () => {
     expect(coordinator.busy).toBe(false);
   });
 
+  it("completes a preview through the production worker runtime protocol", async () => {
+    const worker = new RuntimeBackedWorker();
+    const updates = vi.fn();
+    const coordinator = new HiddenLineCoordinator(() => worker);
+
+    await expect(
+      coordinator.startOutline(identity(), updates),
+    ).resolves.toMatchObject({
+      status: "success",
+      jobId: 1,
+      identity: identity(),
+      scene: expect.objectContaining({ space: source.space }),
+    });
+    expect(coordinator.busy).toBe(false);
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
   it("ignores well-formed stale ids and identities until the current result arrives", async () => {
     const worker = new FakeWorker();
     const coordinator = new HiddenLineCoordinator(() => worker);
@@ -172,8 +217,6 @@ describe("HiddenLineCoordinator", () => {
     worker.emit("message", { ...current, identity: identity(2) });
     worker.emit("message", {
       type: "failure",
-      jobKind: current.jobKind,
-      owner: current.owner,
       jobId: current.jobId,
       identity: identity(2),
       error: "stale failure",

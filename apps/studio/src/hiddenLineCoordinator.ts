@@ -3,6 +3,8 @@ import type { HiddenLineProgress, Scene } from "@harness/core";
 import { createOutlineWorker } from "./createOutlineWorker";
 import {
   isHiddenLineWorkerMessage,
+  isOutlineComputeProgress,
+  isOutlineComputeResponse,
   outlineComputeIdentitiesEqual,
   type CompletedOutline,
   type HiddenLineExportSnapshot,
@@ -10,6 +12,7 @@ import {
   type HiddenLineJobOwner,
   type HiddenLineWorkerRequest,
   type OutlineComputeIdentity,
+  type OutlineComputeRequest,
 } from "./outlineComputeProtocol";
 import {
   createRollingEtaEstimator,
@@ -53,7 +56,7 @@ export type HiddenLineExportResult =
 type HiddenLineJobResult = HiddenLineComputeResult | HiddenLineExportResult;
 
 export interface OutlineWorkerPort {
-  postMessage(message: HiddenLineWorkerRequest): void;
+  postMessage(message: HiddenLineWorkerRequest | OutlineComputeRequest): void;
   terminate(): void;
   addEventListener(
     type: "message",
@@ -147,10 +150,8 @@ export class HiddenLineCoordinator {
     identity: OutlineComputeIdentity,
     observeProgress?: HiddenLineProgressObserver,
   ): Promise<HiddenLineComputeResult> {
-    const request = (jobId: number): HiddenLineWorkerRequest => ({
-      type: "preview",
-      jobKind: "preview",
-      owner: "outline-preview",
+    const request = (jobId: number): OutlineComputeRequest => ({
+      type: "compute",
       jobId,
       identity,
     });
@@ -197,7 +198,9 @@ export class HiddenLineCoordinator {
   private startJob(
     jobKind: HiddenLineJobKind,
     identity: OutlineComputeIdentity,
-    createRequest: (jobId: number) => HiddenLineWorkerRequest,
+    createRequest: (
+      jobId: number,
+    ) => HiddenLineWorkerRequest | OutlineComputeRequest,
     observeProgress:
       | HiddenLineProgressObserver
       | HiddenLineExportProgressObserver
@@ -239,6 +242,36 @@ export class HiddenLineCoordinator {
 
       worker.addEventListener("message", (event) => {
         if (this.active !== active) return;
+        if (active.jobKind === "preview") {
+          if (isOutlineComputeProgress(event.data)) {
+            if (event.data.jobId === active.jobId) {
+              this.reportProgress(active, event.data.snapshot);
+            }
+            return;
+          }
+          if (isOutlineComputeResponse(event.data)) {
+            if (
+              event.data.jobId !== active.jobId ||
+              !outlineComputeIdentitiesEqual(
+                event.data.identity,
+                active.identity,
+              )
+            ) {
+              return;
+            }
+            if (event.data.type === "failure") {
+              this.fail(active, event.data.error);
+            } else {
+              this.finish(active, {
+                status: "success",
+                jobId,
+                identity,
+                scene: event.data.scene,
+              });
+            }
+            return;
+          }
+        }
         if (!isHiddenLineWorkerMessage(event.data)) {
           this.fail(active, "Outline worker returned an invalid response");
           return;
