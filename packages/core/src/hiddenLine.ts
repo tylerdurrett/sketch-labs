@@ -86,6 +86,60 @@ interface AABB {
   maxY: number
 }
 
+/**
+ * Fixed coefficients for the deterministic Hidden-line workload heuristic.
+ *
+ * These are deliberately unitless: elapsed time is learned from observed work
+ * throughput, not predicted here. Keep them stable so benchmark measurements
+ * and progress totals remain comparable between runs.
+ */
+export const HIDDEN_LINE_WORK_WEIGHTS = Object.freeze({
+  filledPrimitive: 8,
+  sourceSegment: 4,
+  overlappingPair: 16,
+  segmentEdgeComparison: 1,
+} as const)
+
+/** Deterministic inventory of the geometry work a Hidden-line pass will do. */
+export interface HiddenLineWorkload {
+  /** Filled, non-empty Primitives accepted by the pass. */
+  readonly filledPrimitiveCount: number
+  /** Consecutive source-outline segments, including implicit closing segments. */
+  readonly sourceSegmentCount: number
+  /** Painter-ordered nearer/farther AABB pairs accepted by the broad phase. */
+  readonly overlappingPairCount: number
+  /** Source segments × prepared occluder edges for every overlapping pair. */
+  readonly estimatedSegmentEdgeComparisons: number
+  /** Fixed weighted sum of the four inventory counts above. */
+  readonly totalWorkUnits: number
+}
+
+interface PlannedPrimitive {
+  primitive: Primitive
+  aabb: AABB
+  polygon: PreparedPolygon
+  outline: Polyline
+  occluders: PreparedPolygon[]
+}
+
+interface HiddenLinePlan {
+  filled: PlannedPrimitive[]
+  workload: HiddenLineWorkload
+}
+
+/** Add non-negative integers, saturating before precision would be lost. */
+function safeAdd(a: number, b: number): number {
+  return a > Number.MAX_SAFE_INTEGER - b ? Number.MAX_SAFE_INTEGER : a + b
+}
+
+/** Multiply non-negative integers, saturating before precision would be lost. */
+function safeMultiply(a: number, b: number): number {
+  if (a === 0 || b === 0) return 0
+  return a > Math.floor(Number.MAX_SAFE_INTEGER / b)
+    ? Number.MAX_SAFE_INTEGER
+    : a * b
+}
+
 /** Compute a Primitive's AABB from its points; null for empty geometry. */
 function computeAABB(points: Polyline): AABB | null {
   if (points.length === 0) return null
@@ -132,6 +186,88 @@ function outlineRing(primitive: Primitive): Polyline {
   return ring
 }
 
+/** Build the single deterministic inventory/execution plan used by the pass. */
+function createHiddenLinePlan(scene: Scene): HiddenLinePlan {
+  const filled: PlannedPrimitive[] = []
+  let sourceSegmentCount = 0
+
+  for (const primitive of scene.primitives) {
+    if (!primitive.fill) continue // decision (c): stroke-only inputs ignored
+    const aabb = computeAABB(primitive.points)
+    if (aabb === null) continue
+    const outline = outlineRing(primitive)
+    sourceSegmentCount = safeAdd(
+      sourceSegmentCount,
+      Math.max(0, outline.length - 1),
+    )
+    filled.push({
+      primitive,
+      aabb,
+      polygon: preparePolygon(primitive.points),
+      outline,
+      occluders: [],
+    })
+  }
+
+  let overlappingPairCount = 0
+  let estimatedSegmentEdgeComparisons = 0
+  for (let f = 0; f < filled.length; f++) {
+    const self = filled[f]!
+    const sourceSegments = Math.max(0, self.outline.length - 1)
+    if (sourceSegments === 0) continue
+    for (let g = f + 1; g < filled.length; g++) {
+      const other = filled[g]!
+      if (!aabbOverlap(self.aabb, other.aabb)) continue
+      self.occluders.push(other.polygon)
+      overlappingPairCount = safeAdd(overlappingPairCount, 1)
+      estimatedSegmentEdgeComparisons = safeAdd(
+        estimatedSegmentEdgeComparisons,
+        safeMultiply(sourceSegments, other.polygon.edges.length),
+      )
+    }
+  }
+
+  const weightedFilled = safeMultiply(
+    filled.length,
+    HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive,
+  )
+  const weightedSegments = safeMultiply(
+    sourceSegmentCount,
+    HIDDEN_LINE_WORK_WEIGHTS.sourceSegment,
+  )
+  const weightedPairs = safeMultiply(
+    overlappingPairCount,
+    HIDDEN_LINE_WORK_WEIGHTS.overlappingPair,
+  )
+  const weightedComparisons = safeMultiply(
+    estimatedSegmentEdgeComparisons,
+    HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
+  )
+  const totalWorkUnits = safeAdd(
+    safeAdd(weightedFilled, weightedSegments),
+    safeAdd(weightedPairs, weightedComparisons),
+  )
+  const workload = Object.freeze({
+    filledPrimitiveCount: filled.length,
+    sourceSegmentCount,
+    overlappingPairCount,
+    estimatedSegmentEdgeComparisons,
+    totalWorkUnits,
+  })
+
+  return { filled, workload }
+}
+
+/**
+ * Analyze a Scene using the exact filtering, closure, painter order, and AABB
+ * broad-phase rules used by {@link hiddenLinePass}. The returned summary is
+ * frozen and all fields are safe integers; exceptionally large derived counts
+ * saturate at `Number.MAX_SAFE_INTEGER` rather than losing integer precision.
+ */
+export function analyzeHiddenLineWorkload(scene: Scene): HiddenLineWorkload {
+  return createHiddenLinePlan(scene).workload
+}
+
 /**
  * Run the Hidden-line pass over a Scene.
  *
@@ -153,45 +289,18 @@ export function hiddenLinePass(
   opts?: { tolerance?: number },
 ): Scene {
   const tolerance = opts?.tolerance ?? 0
-  const { primitives } = scene
-
-  // Precompute each filled Primitive's index and AABB for the broad-phase.
-  const filled: {
-    index: number
-    primitive: Primitive
-    aabb: AABB
-    polygon: PreparedPolygon
-  }[] = []
-  for (let i = 0; i < primitives.length; i++) {
-    const primitive = primitives[i]!
-    if (!primitive.fill) continue // decision (c): stroke-only inputs ignored
-    const aabb = computeAABB(primitive.points)
-    if (aabb === null) continue
-    filled.push({
-      index: i,
-      primitive,
-      aabb,
-      polygon: preparePolygon(primitive.points),
-    })
-  }
+  const plan = createHiddenLinePlan(scene)
 
   const out: Primitive[] = []
 
-  for (let f = 0; f < filled.length; f++) {
-    const self = filled[f]!
-    const outline = outlineRing(self.primitive)
+  for (const self of plan.filled) {
+    const { outline } = self
     if (outline.length < 2) continue
 
-    // Broad-phase: nearer (higher-index) filled Primitives whose AABB overlaps.
-    const occluders: PreparedPolygon[] = []
-    for (let g = f + 1; g < filled.length; g++) {
-      const other = filled[g]!
-      if (aabbOverlap(self.aabb, other.aabb)) {
-        occluders.push(other.polygon)
-      }
-    }
-
-    const survivors = subtractPreparedPolygonsFromPolyline(outline, occluders)
+    const survivors = subtractPreparedPolygonsFromPolyline(
+      outline,
+      self.occluders,
+    )
     const stroke: Stroke = self.primitive.stroke
       ? { color: 'black', width: self.primitive.stroke.width }
       : DEFAULT_STROKE

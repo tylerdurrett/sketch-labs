@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_STROKE, hiddenLinePass } from '../hiddenLine'
+import {
+  DEFAULT_STROKE,
+  HIDDEN_LINE_WORK_WEIGHTS,
+  analyzeHiddenLineWorkload,
+  hiddenLinePass,
+} from '../hiddenLine'
 import { renderToCanvas, renderToSVG } from '../renderer'
 import type { Canvas2DContext } from '../renderer'
 import type { Primitive, Scene, Stroke } from '../scene'
@@ -38,6 +43,95 @@ function strictlyInside(
 ): boolean {
   return p[0] > x0 && p[0] < x1 && p[1] > y0 && p[1] < y1
 }
+
+describe('analyzeHiddenLineWorkload', () => {
+  it('counts accepted fills, implicit closure segments, overlap pairs, and comparisons', () => {
+    const openBack: Primitive = {
+      points: [
+        [0, 0],
+        [20, 0],
+        [20, 20],
+      ],
+      fill,
+    }
+    const closedMiddle = filledSquare(10, 10, 30, 30)
+    const disjointFront = filledSquare(60, 60, 80, 80)
+    const strokeOnly: Primitive = {
+      points: [
+        [0, 0],
+        [100, 100],
+      ],
+      stroke,
+    }
+    const emptyFill: Primitive = { points: [], fill }
+    const scene: Scene = {
+      space,
+      primitives: [openBack, strokeOnly, closedMiddle, emptyFill, disjointFront],
+    }
+
+    const workload = analyzeHiddenLineWorkload(scene)
+
+    // 3 accepted fills. Segment counts: open triangle 2 + each closed square 4.
+    // Only openBack→closedMiddle overlaps: 2 source segments × 4 polygon edges.
+    expect(workload).toEqual({
+      filledPrimitiveCount: 3,
+      sourceSegmentCount: 10,
+      overlappingPairCount: 1,
+      estimatedSegmentEdgeComparisons: 8,
+      totalWorkUnits:
+        3 * HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive +
+        10 * HIDDEN_LINE_WORK_WEIGHTS.sourceSegment +
+        HIDDEN_LINE_WORK_WEIGHTS.overlappingPair +
+        8 * HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
+    })
+  })
+
+  it('uses painter order when assigning the source side of an overlapping pair', () => {
+    const twoSegmentBack: Primitive = {
+      points: [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+      ],
+      fill,
+    }
+    const closedFront = filledSquare(0, 0, 20, 20)
+
+    const forward = analyzeHiddenLineWorkload({
+      space,
+      primitives: [twoSegmentBack, closedFront],
+    })
+    const reversed = analyzeHiddenLineWorkload({
+      space,
+      primitives: [closedFront, twoSegmentBack],
+    })
+
+    expect(forward.overlappingPairCount).toBe(1)
+    expect(reversed.overlappingPairCount).toBe(1)
+    expect(forward.estimatedSegmentEdgeComparisons).toBe(2 * 4)
+    expect(reversed.estimatedSegmentEdgeComparisons).toBe(4 * 3)
+  })
+
+  it('is deterministic, immutable, integer-safe, and does not mutate the Scene', () => {
+    const scene: Scene = {
+      space,
+      primitives: [filledSquare(0, 0, 20, 20), filledSquare(10, 10, 30, 30)],
+    }
+    const before = structuredClone(scene)
+
+    const first = analyzeHiddenLineWorkload(scene)
+    const second = analyzeHiddenLineWorkload(scene)
+
+    expect(first).toEqual(second)
+    expect(Object.isFrozen(first)).toBe(true)
+    expect(Object.isFrozen(HIDDEN_LINE_WORK_WEIGHTS)).toBe(true)
+    for (const value of Object.values(first)) {
+      expect(Number.isSafeInteger(value)).toBe(true)
+      expect(value).toBeGreaterThanOrEqual(0)
+    }
+    expect(scene).toEqual(before)
+  })
+})
 
 describe('hiddenLinePass — occlusion correctness on external geometry', () => {
   it('drops an outline fully behind a nearer fill, keeps the front one intact', () => {
