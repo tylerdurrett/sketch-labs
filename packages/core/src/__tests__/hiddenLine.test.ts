@@ -188,6 +188,112 @@ describe('analyzeHiddenLineWorkload', () => {
   })
 })
 
+describe('hiddenLinePass — progress observation', () => {
+  function progressScene(): Scene {
+    return {
+      space,
+      primitives: [
+        filledSquare(0, 0, 40, 40),
+        filledSquare(20, 20, 60, 60),
+        filledSquare(70, 70, 90, 90),
+      ],
+    }
+  }
+
+  it.each([0, 1])(
+    'preserves the exact output with an observer at tolerance %s',
+    (tolerance) => {
+      const scene = progressScene()
+      const snapshots: unknown[] = []
+
+      const unobserved = hiddenLinePass(scene, { tolerance })
+      const observed = hiddenLinePass(scene, {
+        tolerance,
+        observer: (snapshot) => snapshots.push(snapshot),
+      })
+
+      expect(observed).toEqual(unobserved)
+      expect(snapshots.length).toBeGreaterThan(0)
+    },
+  )
+
+  it('reports immutable, monotonic, bounded progress against one stable total', () => {
+    const scene = progressScene()
+    const before = structuredClone(scene)
+    const workload = analyzeHiddenLineWorkload(scene)
+    const snapshots: Array<{
+      readonly completedWorkUnits: number
+      readonly totalWorkUnits: number
+      readonly terminal: boolean
+    }> = []
+
+    hiddenLinePass(scene, {
+      observer: (snapshot) => snapshots.push(snapshot),
+    })
+
+    expect(snapshots).toHaveLength(workload.filledPrimitiveCount)
+    expect(snapshots.every(Object.isFrozen)).toBe(true)
+    expect(new Set(snapshots.map((snapshot) => snapshot.totalWorkUnits))).toEqual(
+      new Set([workload.totalWorkUnits]),
+    )
+    for (let i = 0; i < snapshots.length; i++) {
+      const snapshot = snapshots[i]!
+      expect(snapshot.completedWorkUnits).toBeGreaterThan(0)
+      expect(snapshot.completedWorkUnits).toBeLessThanOrEqual(
+        snapshot.totalWorkUnits,
+      )
+      if (i > 0) {
+        expect(snapshot.completedWorkUnits).toBeGreaterThan(
+          snapshots[i - 1]!.completedWorkUnits,
+        )
+      }
+      expect(snapshot.terminal).toBe(i === snapshots.length - 1)
+    }
+    expect(snapshots.at(-1)).toEqual({
+      completedWorkUnits: workload.totalWorkUnits,
+      totalWorkUnits: workload.totalWorkUnits,
+      terminal: true,
+    })
+    expect(scene).toEqual(before)
+  })
+
+  it('reports terminal zero work for a Scene with no accepted fills', () => {
+    const snapshots: unknown[] = []
+    const scene: Scene = {
+      space,
+      primitives: [
+        { points: [], fill },
+        {
+          points: [
+            [0, 0],
+            [10, 10],
+          ],
+          stroke,
+        },
+      ],
+    }
+
+    const out = hiddenLinePass(scene, {
+      observer: (snapshot) => snapshots.push(snapshot),
+    })
+
+    expect(out).toEqual({ space, primitives: [] })
+    expect(snapshots).toEqual([
+      { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
+    ])
+    expect(Object.isFrozen(snapshots[0])).toBe(true)
+  })
+
+  it('keeps omitted options and the existing tolerance-only option compatible', () => {
+    const scene = progressScene()
+
+    expect(hiddenLinePass(scene)).toEqual(hiddenLinePass(scene, {}))
+    expect(hiddenLinePass(scene, { tolerance: 1 })).toEqual(
+      hiddenLinePass(scene, { tolerance: 1, observer: undefined }),
+    )
+  })
+})
+
 describe('hiddenLinePass — occlusion correctness on external geometry', () => {
   it('drops an outline fully behind a nearer fill, keeps the front one intact', () => {
     // A (back, index 0) sits fully inside B (front, index 1) which covers it.

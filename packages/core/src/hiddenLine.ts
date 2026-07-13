@@ -127,6 +127,27 @@ interface HiddenLinePlan {
   workload: HiddenLineWorkload
 }
 
+/** Immutable, serialization-friendly progress reported by the Hidden-line pass. */
+export interface HiddenLineProgress {
+  /** Weighted work completed so far. Always between zero and `totalWorkUnits`. */
+  readonly completedWorkUnits: number
+  /** Stable weighted total from the exact plan being executed. */
+  readonly totalWorkUnits: number
+  /** True only for the final snapshot. */
+  readonly terminal: boolean
+}
+
+/** Optional observation hook for coarse Hidden-line progress snapshots. */
+export type HiddenLineObserver = (progress: HiddenLineProgress) => void
+
+/** Options for {@link hiddenLinePass}. */
+export interface HiddenLinePassOptions {
+  /** Final-stage Douglas–Peucker simplification tolerance (default 0). */
+  readonly tolerance?: number
+  /** Receives immutable progress snapshots at filled-Primitive boundaries. */
+  readonly observer?: HiddenLineObserver
+}
+
 /** Add non-negative integers, saturating before precision would be lost. */
 function safeAdd(a: number, b: number): number {
   return a > Number.MAX_SAFE_INTEGER - b ? Number.MAX_SAFE_INTEGER : a + b
@@ -278,7 +299,9 @@ export function analyzeHiddenLineWorkload(scene: Scene): HiddenLineWorkload {
  *   stroke as the FINAL stage — the studio's tolerance knob feeds this so
  *   Outline-mode preview and hidden-line SVG export simplify identically. A
  *   tolerance of 0 is an identity no-op (survivors pass through unchanged), so
- *   output stays byte-identical to an un-simplified pass.
+ *   output stays byte-identical to an un-simplified pass. `observer` receives
+ *   frozen progress snapshots at coarse filled-Primitive boundaries; no
+ *   callbacks run in the segment-edge clipping loop.
  * @returns A NEW background-free, stroke-only Scene sharing `scene.space`: the
  *   occlusion-clipped outlines of the input's filled Primitives, emitted as
  *   black, fill-free OPEN Primitives, each preserving its source width and
@@ -286,16 +309,29 @@ export function analyzeHiddenLineWorkload(scene: Scene): HiddenLineWorkload {
  */
 export function hiddenLinePass(
   scene: Scene,
-  opts?: { tolerance?: number },
+  opts?: HiddenLinePassOptions,
 ): Scene {
   const tolerance = opts?.tolerance ?? 0
   const plan = createHiddenLinePlan(scene)
+  const observer = opts?.observer
+  const totalWorkUnits = plan.workload.totalWorkUnits
+  let completedWorkUnits = 0
+
+  const reportProgress = (terminal: boolean) => {
+    observer?.(
+      Object.freeze({ completedWorkUnits, totalWorkUnits, terminal }),
+    )
+  }
 
   const out: Primitive[] = []
 
-  for (const self of plan.filled) {
+  for (
+    let primitiveIndex = 0;
+    primitiveIndex < plan.filled.length;
+    primitiveIndex++
+  ) {
+    const self = plan.filled[primitiveIndex]!
     const { outline } = self
-    if (outline.length < 2) continue
 
     const survivors = subtractPreparedPolygonsFromPolyline(
       outline,
@@ -310,7 +346,41 @@ export function hiddenLinePass(
       // pass output stays byte-identical to an un-simplified run.
       out.push({ points: simplifyPath(survivor, tolerance), stroke })
     }
+
+    if (observer) {
+      const sourceSegments = Math.max(0, self.outline.length - 1)
+      let primitiveWorkUnits = safeAdd(
+        HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive,
+        safeMultiply(sourceSegments, HIDDEN_LINE_WORK_WEIGHTS.sourceSegment),
+      )
+      primitiveWorkUnits = safeAdd(
+        primitiveWorkUnits,
+        safeMultiply(
+          self.occluders.length,
+          HIDDEN_LINE_WORK_WEIGHTS.overlappingPair,
+        ),
+      )
+      for (const occluder of self.occluders) {
+        primitiveWorkUnits = safeAdd(
+          primitiveWorkUnits,
+          safeMultiply(
+            safeMultiply(sourceSegments, occluder.edges.length),
+            HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
+          ),
+        )
+      }
+      completedWorkUnits = Math.min(
+        totalWorkUnits,
+        safeAdd(completedWorkUnits, primitiveWorkUnits),
+      )
+      const terminal = primitiveIndex === plan.filled.length - 1
+      if (terminal) completedWorkUnits = totalWorkUnits
+      reportProgress(terminal)
+    }
   }
+
+  // Empty Scenes still have an observable terminal state.
+  if (plan.filled.length === 0) reportProgress(true)
 
   return { space: scene.space, primitives: out }
 }
