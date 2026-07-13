@@ -323,6 +323,42 @@ export function hiddenLinePass(
     )
   }
 
+  const completePrimitive = (
+    self: PlannedPrimitive,
+    primitiveIndex: number,
+  ) => {
+    if (!observer) return
+
+    const sourceSegments = Math.max(0, self.outline.length - 1)
+    let primitiveWorkUnits = safeAdd(
+      HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive,
+      safeMultiply(sourceSegments, HIDDEN_LINE_WORK_WEIGHTS.sourceSegment),
+    )
+    primitiveWorkUnits = safeAdd(
+      primitiveWorkUnits,
+      safeMultiply(
+        self.occluders.length,
+        HIDDEN_LINE_WORK_WEIGHTS.overlappingPair,
+      ),
+    )
+    for (const occluder of self.occluders) {
+      primitiveWorkUnits = safeAdd(
+        primitiveWorkUnits,
+        safeMultiply(
+          safeMultiply(sourceSegments, occluder.edges.length),
+          HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
+        ),
+      )
+    }
+    completedWorkUnits = Math.min(
+      totalWorkUnits,
+      safeAdd(completedWorkUnits, primitiveWorkUnits),
+    )
+    const terminal = primitiveIndex === plan.filled.length - 1
+    if (terminal) completedWorkUnits = totalWorkUnits
+    reportProgress(terminal)
+  }
+
   const out: Primitive[] = []
 
   for (
@@ -332,6 +368,10 @@ export function hiddenLinePass(
   ) {
     const self = plan.filled[primitiveIndex]!
     const { outline } = self
+    if (outline.length < 2) {
+      completePrimitive(self, primitiveIndex)
+      continue
+    }
 
     const survivors = subtractPreparedPolygonsFromPolyline(
       outline,
@@ -347,36 +387,7 @@ export function hiddenLinePass(
       out.push({ points: simplifyPath(survivor, tolerance), stroke })
     }
 
-    if (observer) {
-      const sourceSegments = Math.max(0, self.outline.length - 1)
-      let primitiveWorkUnits = safeAdd(
-        HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive,
-        safeMultiply(sourceSegments, HIDDEN_LINE_WORK_WEIGHTS.sourceSegment),
-      )
-      primitiveWorkUnits = safeAdd(
-        primitiveWorkUnits,
-        safeMultiply(
-          self.occluders.length,
-          HIDDEN_LINE_WORK_WEIGHTS.overlappingPair,
-        ),
-      )
-      for (const occluder of self.occluders) {
-        primitiveWorkUnits = safeAdd(
-          primitiveWorkUnits,
-          safeMultiply(
-            safeMultiply(sourceSegments, occluder.edges.length),
-            HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
-          ),
-        )
-      }
-      completedWorkUnits = Math.min(
-        totalWorkUnits,
-        safeAdd(completedWorkUnits, primitiveWorkUnits),
-      )
-      const terminal = primitiveIndex === plan.filled.length - 1
-      if (terminal) completedWorkUnits = totalWorkUnits
-      reportProgress(terminal)
-    }
+    completePrimitive(self, primitiveIndex)
   }
 
   // Empty Scenes still have an observable terminal state.

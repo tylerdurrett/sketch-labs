@@ -284,6 +284,46 @@ describe('hiddenLinePass — progress observation', () => {
     expect(Object.isFrozen(snapshots[0])).toBe(true)
   })
 
+  it('accounts for a degenerate fill without emitting degenerate output', () => {
+    const scene: Scene = {
+      space,
+      primitives: [
+        filledSquare(0, 0, 20, 20),
+        { points: [[10, 10]], fill, stroke },
+      ],
+    }
+    const snapshots: Array<{
+      readonly completedWorkUnits: number
+      readonly totalWorkUnits: number
+      readonly terminal: boolean
+    }> = []
+    const totalWorkUnits = analyzeHiddenLineWorkload(scene).totalWorkUnits
+
+    const out = hiddenLinePass(scene, {
+      observer: (snapshot) => snapshots.push(snapshot),
+    })
+
+    expect(out.primitives).toEqual([
+      {
+        points: [
+          [0, 0],
+          [20, 0],
+          [20, 20],
+          [0, 20],
+          [0, 0],
+        ],
+        stroke,
+      },
+    ])
+    expect(snapshots).toHaveLength(2)
+    expect(snapshots[0]!.terminal).toBe(false)
+    expect(snapshots[1]).toEqual({
+      completedWorkUnits: totalWorkUnits,
+      totalWorkUnits,
+      terminal: true,
+    })
+  })
+
   it('keeps omitted options and the existing tolerance-only option compatible', () => {
     const scene = progressScene()
 
