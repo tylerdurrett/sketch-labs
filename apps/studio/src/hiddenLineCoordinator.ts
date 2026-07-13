@@ -1,12 +1,18 @@
-import type { Scene } from "@harness/core";
+import type { HiddenLineProgress, Scene } from "@harness/core";
 
 import { createOutlineWorker } from "./createOutlineWorker";
 import {
+  isOutlineComputeProgress,
   isOutlineComputeResponse,
   outlineComputeIdentitiesEqual,
   type OutlineComputeIdentity,
   type OutlineComputeRequest,
 } from "./outlineComputeProtocol";
+import {
+  createRollingEtaEstimator,
+  type RollingEtaEstimate,
+  type RollingEtaEstimator,
+} from "./rollingEta";
 
 export type HiddenLineComputeResult =
   | {
@@ -32,13 +38,28 @@ export interface OutlineWorkerPort {
 }
 
 export type OutlineWorkerFactory = () => OutlineWorkerPort;
+export type MonotonicClock = () => number;
+
+export interface HiddenLineProgressUpdate {
+  readonly snapshot: HiddenLineProgress;
+  readonly eta: RollingEtaEstimate;
+}
+
+export type HiddenLineProgressObserver = (
+  update: HiddenLineProgressUpdate,
+) => void;
 
 interface ActiveJob {
   jobId: number;
   identity: OutlineComputeIdentity;
   worker: OutlineWorkerPort;
   resolve: (result: HiddenLineComputeResult) => void;
+  observeProgress: HiddenLineProgressObserver | undefined;
+  eta: RollingEtaEstimator;
+  lastProgress: HiddenLineProgress | null;
 }
+
+const defaultClock: MonotonicClock = () => performance.now();
 
 function eventDetail(event: Event): string {
   const message = (event as Event & { message?: unknown }).message;
@@ -61,13 +82,17 @@ export class HiddenLineCoordinator {
 
   constructor(
     private readonly workerFactory: OutlineWorkerFactory = createOutlineWorker,
+    private readonly clock: MonotonicClock = defaultClock,
   ) {}
 
   get busy(): boolean {
     return this.active !== null;
   }
 
-  start(identity: OutlineComputeIdentity): Promise<HiddenLineComputeResult> {
+  start(
+    identity: OutlineComputeIdentity,
+    observeProgress?: HiddenLineProgressObserver,
+  ): Promise<HiddenLineComputeResult> {
     if (this.disposed) {
       return Promise.reject(new Error("Hidden-line coordinator is disposed"));
     }
@@ -88,11 +113,25 @@ export class HiddenLineCoordinator {
     }
 
     return new Promise((resolve) => {
-      const active: ActiveJob = { jobId, identity, worker, resolve };
+      const active: ActiveJob = {
+        jobId,
+        identity,
+        worker,
+        resolve,
+        observeProgress,
+        eta: createRollingEtaEstimator(),
+        lastProgress: null,
+      };
       this.active = active;
 
       worker.addEventListener("message", (event) => {
         if (this.active !== active) return;
+        if (isOutlineComputeProgress(event.data)) {
+          if (event.data.jobId === jobId) {
+            this.reportProgress(active, event.data.snapshot);
+          }
+          return;
+        }
         if (!isOutlineComputeResponse(event.data)) {
           this.fail(active, "Outline worker returned an invalid response");
           return;
@@ -128,7 +167,9 @@ export class HiddenLineCoordinator {
       } catch (error) {
         this.fail(
           active,
-          error instanceof Error ? error.message : "Outline worker could not start",
+          error instanceof Error
+            ? error.message
+            : "Outline worker could not start",
         );
       }
     });
@@ -156,6 +197,29 @@ export class HiddenLineCoordinator {
           ? "Outline computation failed"
           : error.slice(0, 500),
     });
+  }
+
+  private reportProgress(
+    active: ActiveJob,
+    candidate: HiddenLineProgress,
+  ): void {
+    const previous = active.lastProgress;
+    if (
+      previous !== null &&
+      (candidate.totalWorkUnits !== previous.totalWorkUnits ||
+        candidate.completedWorkUnits <= previous.completedWorkUnits)
+    ) {
+      return;
+    }
+
+    const snapshot = { ...candidate };
+    active.lastProgress = snapshot;
+    const eta = active.eta.observe({
+      timestampMs: this.clock(),
+      completedWork: snapshot.completedWorkUnits,
+      totalWork: snapshot.totalWorkUnits,
+    });
+    active.observeProgress?.({ snapshot, eta });
   }
 
   private finish(active: ActiveJob, result: HiddenLineComputeResult): void {
