@@ -45,6 +45,28 @@ function strictlyInside(
 }
 
 describe('analyzeHiddenLineWorkload', () => {
+  it('distinguishes open outlines from implicit and explicitly repeated closure', () => {
+    const triangle: Polyline = [
+      [0, 0],
+      [20, 0],
+      [10, 20],
+    ]
+    const workloadFor = (primitive: Primitive) =>
+      analyzeHiddenLineWorkload({ space, primitives: [primitive] })
+
+    const open = workloadFor({ points: triangle, fill })
+    const implicitlyClosed = workloadFor({ points: triangle, closed: true, fill })
+    const explicitlyClosed = workloadFor({
+      points: [...triangle, [0, 0]],
+      closed: true,
+      fill,
+    })
+
+    expect(open.sourceSegmentCount).toBe(2)
+    expect(implicitlyClosed.sourceSegmentCount).toBe(3)
+    expect(explicitlyClosed.sourceSegmentCount).toBe(3)
+  })
+
   it('counts accepted fills, implicit closure segments, overlap pairs, and comparisons', () => {
     const openBack: Primitive = {
       points: [
@@ -83,6 +105,39 @@ describe('analyzeHiddenLineWorkload', () => {
         10 * HIDDEN_LINE_WORK_WEIGHTS.sourceSegment +
         HIDDEN_LINE_WORK_WEIGHTS.overlappingPair +
         8 * HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
+    })
+  })
+
+  it('multiplies source segments by every prepared edge of a many-vertex occluder', () => {
+    const back = filledSquare(0, 0, 40, 40)
+    const front: Primitive = {
+      points: [
+        [10, 10],
+        [30, 10],
+        [40, 20],
+        [30, 30],
+        [10, 30],
+        [0, 20],
+      ],
+      closed: true,
+      fill,
+    }
+
+    const workload = analyzeHiddenLineWorkload({
+      space,
+      primitives: [back, front],
+    })
+
+    expect(workload).toEqual({
+      filledPrimitiveCount: 2,
+      sourceSegmentCount: 10,
+      overlappingPairCount: 1,
+      estimatedSegmentEdgeComparisons: 4 * 6,
+      totalWorkUnits:
+        2 * HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive +
+        10 * HIDDEN_LINE_WORK_WEIGHTS.sourceSegment +
+        HIDDEN_LINE_WORK_WEIGHTS.overlappingPair +
+        24 * HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
     })
   })
 
