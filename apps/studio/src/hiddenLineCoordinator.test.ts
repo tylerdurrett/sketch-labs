@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ParamSchema, Scene } from "@harness/core";
+import type { ParamSchema, PlotProfile, Scene } from "@harness/core";
 
 import {
   HiddenLineCoordinator,
@@ -8,9 +8,13 @@ import {
 } from "./hiddenLineCoordinator";
 import {
   createOutlineComputeIdentity,
+  createHiddenLineExportSnapshot,
+  type HiddenLineExportSnapshot,
+  type HiddenLineWorkerRequest,
   type OutlineComputeIdentity,
   type OutlineComputeRequest,
 } from "./outlineComputeProtocol";
+import { handleOutlineWorkerMessage } from "./outlineWorkerRuntime";
 
 const source: Scene = {
   space: { width: 20, height: 20 },
@@ -45,11 +49,11 @@ function identity(amount = 1): OutlineComputeIdentity {
 }
 
 class FakeWorker implements OutlineWorkerPort {
-  request: OutlineComputeRequest | null = null;
+  request: HiddenLineWorkerRequest | OutlineComputeRequest | null = null;
   readonly terminate = vi.fn();
   private readonly listeners = new Map<string, Array<(event: any) => void>>();
 
-  postMessage(message: OutlineComputeRequest): void {
+  postMessage(message: HiddenLineWorkerRequest | OutlineComputeRequest): void {
     this.request = message;
   }
 
@@ -65,8 +69,35 @@ class FakeWorker implements OutlineWorkerPort {
   }
 }
 
+class RuntimeBackedWorker implements OutlineWorkerPort {
+  readonly terminate = vi.fn();
+  private readonly listeners = new Map<string, Array<(event: any) => void>>();
+
+  postMessage(message: HiddenLineWorkerRequest | OutlineComputeRequest): void {
+    const response = handleOutlineWorkerMessage(
+      message,
+      undefined,
+      (progress) => this.emitMessage(progress),
+    );
+    if (response !== null) this.emitMessage(response);
+  }
+
+  addEventListener(type: string, listener: (event: any) => void): void {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  private emitMessage(data: unknown): void {
+    for (const listener of this.listeners.get("message") ?? []) {
+      listener({ data });
+    }
+  }
+}
+
 function successfulResponse(worker: FakeWorker, scene: Scene = source) {
   const request = worker.request!;
+  if (request.type !== "compute") throw new Error("Expected compute request");
   return {
     type: "success" as const,
     jobId: request.jobId,
@@ -81,10 +112,58 @@ function progressResponse(
   totalWorkUnits = 100,
   terminal = false,
 ) {
+  const request = worker.request!;
+  const requestIdentity =
+    request.type === "export" ? request.snapshot.identity : request.identity;
+  if (request.type === "compute") {
+    return {
+      type: "progress" as const,
+      jobId: request.jobId,
+      snapshot: { completedWorkUnits, totalWorkUnits, terminal },
+    };
+  }
   return {
-    type: "progress" as const,
-    jobId: worker.request!.jobId,
+    type: "derivation-progress" as const,
+    jobKind: request.jobKind,
+    owner: request.owner,
+    jobId: request.jobId,
+    identity: requestIdentity,
     snapshot: { completedWorkUnits, totalWorkUnits, terminal },
+  };
+}
+
+const exportProfile: PlotProfile = {
+  width: 200,
+  height: 160,
+  insets: { top: 10, right: 10, bottom: 10, left: 10 },
+  includeFrame: false,
+};
+
+function exportSnapshot(amount = 1): HiddenLineExportSnapshot {
+  return createHiddenLineExportSnapshot({
+    identity: identity(amount),
+    profile: exportProfile,
+    metadata: "metadata",
+    includePaperMargins: true,
+    filename: "test-hidden-line.svg",
+  });
+}
+
+function exportResponse(worker: FakeWorker) {
+  const request = worker.request!;
+  if (request.type !== "export") throw new Error("Expected export request");
+  return {
+    type: "complete" as const,
+    jobKind: request.jobKind,
+    owner: request.owner,
+    jobId: request.jobId,
+    identity: request.snapshot.identity,
+    svg: "<svg/>",
+    filename: request.snapshot.filename,
+    completedOutline: {
+      identity: request.snapshot.identity,
+      scene: source,
+    },
   };
 }
 
@@ -109,6 +188,23 @@ describe("HiddenLineCoordinator", () => {
     });
     expect(worker.terminate).toHaveBeenCalledOnce();
     expect(coordinator.busy).toBe(false);
+  });
+
+  it("completes a preview through the production worker runtime protocol", async () => {
+    const worker = new RuntimeBackedWorker();
+    const updates = vi.fn();
+    const coordinator = new HiddenLineCoordinator(() => worker);
+
+    await expect(
+      coordinator.startOutline(identity(), updates),
+    ).resolves.toMatchObject({
+      status: "success",
+      jobId: 1,
+      identity: identity(),
+      scene: expect.objectContaining({ space: source.space }),
+    });
+    expect(coordinator.busy).toBe(false);
+    expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
   it("ignores well-formed stale ids and identities until the current result arrives", async () => {
@@ -281,6 +377,152 @@ describe("HiddenLineCoordinator", () => {
     });
   });
 
+  it("shares one slot across preview and export with stable kind and owner", async () => {
+    const worker = new FakeWorker();
+    const coordinator = new HiddenLineCoordinator(() => worker);
+    const result = coordinator.startExport(exportSnapshot());
+
+    expect(worker.request).toMatchObject({
+      type: "export",
+      jobKind: "export",
+      owner: "hidden-line-export",
+      jobId: 1,
+    });
+    await expect(coordinator.startOutline(identity(2))).rejects.toThrow(
+      "already active",
+    );
+    await expect(coordinator.startExport(exportSnapshot(2))).rejects.toThrow(
+      "already active",
+    );
+
+    const request = worker.request!;
+    if (request.type !== "export") throw new Error("Expected export request");
+    worker.emit("message", {
+      type: "complete",
+      jobKind: "preview",
+      owner: "outline-preview",
+      jobId: request.jobId,
+      identity: request.snapshot.identity,
+      scene: source,
+    });
+    expect(coordinator.busy).toBe(true);
+    expect(worker.terminate).not.toHaveBeenCalled();
+
+    worker.emit("message", exportResponse(worker));
+    await expect(result).resolves.toMatchObject({
+      status: "success",
+      svg: "<svg/>",
+      filename: "test-hidden-line.svg",
+      completedOutline: { identity: request.snapshot.identity },
+    });
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it("reports export derivation ETA then holds a cancelable slot through finalization", async () => {
+    const worker = new FakeWorker();
+    let now = 0;
+    const updates = vi.fn();
+    const coordinator = new HiddenLineCoordinator(
+      () => worker,
+      () => now,
+    );
+    const result = coordinator.startExport(exportSnapshot(), updates);
+
+    worker.emit("message", progressResponse(worker, 20));
+    now = 1_000;
+    worker.emit("message", progressResponse(worker, 40));
+    expect(updates).toHaveBeenLastCalledWith({
+      phase: "derivation",
+      snapshot: {
+        completedWorkUnits: 40,
+        totalWorkUnits: 100,
+        terminal: false,
+      },
+      eta: { kind: "remaining", revision: 2, remainingMs: 3_000 },
+    });
+
+    const request = worker.request!;
+    if (request.type !== "export") throw new Error("Expected export request");
+    const finalizing = {
+      type: "finalizing" as const,
+      jobKind: request.jobKind,
+      owner: request.owner,
+      jobId: request.jobId,
+      identity: request.snapshot.identity,
+    };
+    worker.emit("message", finalizing);
+    worker.emit("message", finalizing);
+    worker.emit("message", progressResponse(worker, 100, 100, true));
+    expect(updates).toHaveBeenLastCalledWith({ phase: "finalizing" });
+    expect(updates).toHaveBeenCalledTimes(3);
+    expect(coordinator.busy).toBe(true);
+    expect(coordinator.cancel()).toBe(true);
+    await expect(result).resolves.toEqual({ status: "cancelled", jobId: 1 });
+    expect(worker.terminate).toHaveBeenCalledOnce();
+
+    worker.emit("message", exportResponse(worker));
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it("ignores stale export identity and job responses without releasing the slot", async () => {
+    const worker = new FakeWorker();
+    const coordinator = new HiddenLineCoordinator(() => worker);
+    const result = coordinator.startExport(exportSnapshot());
+    const current = exportResponse(worker);
+    const staleIdentity = identity(2);
+
+    worker.emit("message", { ...current, jobId: current.jobId + 1 });
+    worker.emit("message", {
+      ...current,
+      identity: staleIdentity,
+      completedOutline: { identity: staleIdentity, scene: source },
+    });
+    worker.emit("message", {
+      type: "failure",
+      jobKind: current.jobKind,
+      owner: current.owner,
+      jobId: current.jobId,
+      identity: staleIdentity,
+      error: "stale failure",
+    });
+    expect(coordinator.busy).toBe(true);
+    expect(worker.terminate).not.toHaveBeenCalled();
+
+    worker.emit("message", current);
+    await expect(result).resolves.toMatchObject({ status: "success" });
+  });
+
+  it("recovers with a fresh worker after an export failure and releases each worker once", async () => {
+    const firstWorker = new FakeWorker();
+    const secondWorker = new FakeWorker();
+    const workers = [firstWorker, secondWorker];
+    const coordinator = new HiddenLineCoordinator(() => workers.shift()!);
+    const first = coordinator.startExport(exportSnapshot());
+    const request = firstWorker.request!;
+    if (request.type !== "export") throw new Error("Expected export request");
+    firstWorker.emit("message", {
+      type: "failure",
+      jobKind: request.jobKind,
+      owner: request.owner,
+      jobId: request.jobId,
+      identity: request.snapshot.identity,
+      error: "serialization failed",
+    });
+    firstWorker.emit("message", null);
+    await expect(first).resolves.toEqual({
+      status: "failure",
+      jobId: 1,
+      error: "serialization failed",
+    });
+    expect(firstWorker.terminate).toHaveBeenCalledOnce();
+
+    const second = coordinator.startOutline(identity(2));
+    secondWorker.emit("message", successfulResponse(secondWorker));
+    secondWorker.emit("message", successfulResponse(secondWorker));
+    await expect(second).resolves.toMatchObject({ status: "success", jobId: 2 });
+    expect(secondWorker.terminate).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["malformed message", "message", null, "invalid response"],
     ["worker error", "error", new Event("error"), "worker failed"],
@@ -320,8 +562,10 @@ describe("HiddenLineCoordinator", () => {
     const result = coordinator.start(identity());
     worker.emit("message", {
       type: "failure",
+      jobKind: "preview",
+      owner: "outline-preview",
       jobId: worker.request!.jobId,
-      identity: worker.request!.identity,
+      identity: identity(),
       error: "geometry failed",
     });
     await expect(result).resolves.toEqual({

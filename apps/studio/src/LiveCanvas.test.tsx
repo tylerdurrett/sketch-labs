@@ -872,6 +872,25 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
     });
   });
 
+  it("captures animated Scene and t from one retained displayed-frame record", () => {
+    const { sketch } = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    const handle = createRef<LiveCanvasHandle>();
+    mount(
+      <LiveCanvas handleRef={handle} sketch={sketch} params={{ value: 0 }} seed={1} />,
+    );
+
+    tick(1250);
+    const first = handle.current!.captureDisplayedFrame()!;
+    expect(first.t).toBe(1.25);
+    expect(first.scene.primitives[0]?.points[0]?.[0]).toBe(2.25);
+
+    tick(2750);
+    const second = handle.current!.captureDisplayedFrame()!;
+    expect(second.t).toBe(2.75);
+    expect(second.scene.primitives[0]?.points[0]?.[0]).toBe(3.75);
+    expect(first.t).toBe(1.25);
+  });
+
   it("answers a matching request from a held Fill while animation is suspended", () => {
     const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
     const held: Scene = { space: { width: 100, height: 100 }, primitives: [] };
