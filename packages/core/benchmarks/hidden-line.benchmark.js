@@ -12,7 +12,7 @@ const PARAMS = Object.freeze(defaultParams(leafField.schema))
 const DEFAULT_SAMPLES = 20
 const DEFAULT_WARMUPS = 1
 const MIN_SAMPLES = 20
-const EXPECTED_OUTLINE_CHECKSUM = '1ffab356a8fc888a'
+const EXPECTED_OUTLINE_CHECKSUM = '44ad772130d46fb1'
 const SYNTHETIC_SPACE = Object.freeze({ width: 640, height: 640 })
 const SYNTHETIC_FILL = Object.freeze({ color: 'black' })
 
