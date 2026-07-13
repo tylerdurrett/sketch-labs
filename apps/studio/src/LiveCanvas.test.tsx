@@ -140,55 +140,6 @@ function lastDrawnT(generate: { mock: { calls: unknown[][] } }): number {
   return calls[calls.length - 1]![2] as number;
 }
 
-// --- render-mode fixtures (#219) --------------------------------------------
-// TWO overlapping FILLED squares in painter's order (the same shape the
-// SketchControls hidden-line export test uses): the nearer square covers part of
-// the farther one, so `hiddenLinePass` MUST clip part of the farther outline. The
-// two are FILL-ONLY, so the real @harness/core renderer paints them via `fill()`
-// in fill mode; the pass rewrites them to STROKE-ONLY primitives, so outline mode
-// paints via `stroke()` and never `fill()`. That fill-vs-stroke split is the
-// observable that proves — through the REAL pass and REAL renderer, no mock —
-// whether the export-only pass ran for a given draw.
-const OVERLAP_SCENE = {
-  space: { width: 100, height: 100 },
-  primitives: [
-    {
-      points: [
-        [0, 0],
-        [40, 0],
-        [40, 40],
-        [0, 40],
-      ],
-      closed: true,
-      fill: { color: "tomato" },
-    },
-    {
-      points: [
-        [20, 0],
-        [60, 0],
-        [60, 40],
-        [20, 40],
-      ],
-      closed: true,
-      fill: { color: "steelblue" },
-    },
-  ],
-} as unknown as Scene;
-
-/** A Sketch (static or animated) whose `generate` yields {@link OVERLAP_SCENE}. */
-function overlapSketch(time: TimeMetadata | undefined) {
-  const generate = vi.fn(
-    (_p: unknown, _s: unknown, _t: number): Scene => OVERLAP_SCENE,
-  );
-  const sketch = {
-    id: "overlap",
-    name: "Overlap",
-    schema: {},
-    time,
-    generate,
-  } as unknown as Sketch;
-  return { sketch, generate };
-}
 
 /**
  * An inert 2D-context stub that COUNTS each method call by name (so `fill` and
@@ -244,26 +195,6 @@ function tick(ms: number): void {
   });
 }
 
-/**
- * Flush pending rAF callbacks WITHOUT advancing the clock, draining nested
- * generations — the #228 outline pass is deferred behind a DOUBLE rAF (the outer
- * frame only schedules the inner one; the pass runs in the inner). Bounded so a
- * self-rescheduling loop can't spin forever: outline-mode tests suspend the live
- * rAF loop, so a couple of generations always drains to empty.
- */
-function flushRaf(): void {
-  act(() => {
-    for (
-      let generation = 0;
-      generation < 5 && rafCallbacks.length > 0;
-      generation++
-    ) {
-      const due = rafCallbacks;
-      rafCallbacks = [];
-      for (const cb of due) cb(now);
-    }
-  });
-}
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -437,93 +368,6 @@ describe("LiveCanvas transport — scrubbing pauses & sets t (AC2)", () => {
 });
 
 describe("LiveCanvas caller-owned frame preparation", () => {
-  it("invalidates the displayed Scene before deferred outline recomputes", () => {
-    const { ctx } = recordingContext();
-    useRecordingContext(ctx);
-    const handle = createRef<LiveCanvasHandle>();
-    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
-    const firstParams = { value: 3 };
-
-    mount(
-      <LiveCanvas
-        handleRef={handle}
-        sketch={prepared.sketch}
-        params={firstParams}
-        seed={2}
-        renderMode="fill"
-      />,
-    );
-    tick(1000);
-    expect(handle.current?.getDisplayedScene()).toMatchObject({
-      t: 1,
-      renderMode: "fill",
-      tolerance: 0,
-    });
-
-    act(() => {
-      root!.render(
-        <LiveCanvas
-          handleRef={handle}
-          sketch={prepared.sketch}
-          params={firstParams}
-          seed={2}
-          renderMode="outline"
-        />,
-      );
-    });
-    // The old fill Scene is unavailable throughout the double-rAF window.
-    expect(handle.current?.getDisplayedScene()).toBeNull();
-    flushRaf();
-    expect(handle.current?.getDisplayedScene()).toMatchObject({
-      t: 1,
-      renderMode: "outline",
-      tolerance: 0,
-    });
-
-    act(() => {
-      root!.render(
-        <LiveCanvas
-          handleRef={handle}
-          sketch={prepared.sketch}
-          params={{ value: 8 }}
-          seed={2}
-          renderMode="outline"
-          tolerance={2}
-        />,
-      );
-    });
-    // Input/tolerance changes invalidate atomically before their deferred pass.
-    expect(handle.current?.getDisplayedScene()).toBeNull();
-    flushRaf();
-    expect(handle.current?.getDisplayedScene()).toMatchObject({
-      t: 1,
-      renderMode: "outline",
-      tolerance: 2,
-    });
-  });
-
-  it("feeds outline processing from the retained prepared sampler, never cold generate", () => {
-    const { ctx, counts } = recordingContext();
-    useRecordingContext(ctx);
-    const prepared = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
-
-    mount(
-      <LiveCanvas
-        sketch={prepared.sketch}
-        params={{ value: 3 }}
-        seed={2}
-        renderMode="outline"
-      />,
-    );
-    flushRaf();
-
-    expect(prepared.prepare).toHaveBeenCalledTimes(1);
-    expect(prepared.samplers[0]).toHaveBeenCalledTimes(1);
-    expect(prepared.samplers[0]).toHaveBeenCalledWith(0);
-    expect(prepared.generate).not.toHaveBeenCalled();
-    expect(counts.stroke ?? 0).toBeGreaterThan(0);
-  });
-
   it("prepares once per sketch/params/seed and continues the same clock after invalidation", () => {
     const firstParams = { value: 1 };
     const secondParams = { value: 4 };
@@ -766,7 +610,7 @@ describe("LiveCanvas full-sheet preview chrome (#248)", () => {
         seed={1}
         profile={asymmetricProfile}
         compositionFrame={compositionFrame}
-        renderMode="fill"
+        renderState={{ kind: "fill-live" }}
       />,
     );
     const sheet = el.querySelector(".plot-sheet");
@@ -781,7 +625,11 @@ describe("LiveCanvas full-sheet preview chrome (#248)", () => {
           seed={1}
           profile={asymmetricProfile}
           compositionFrame={compositionFrame}
-          renderMode="outline"
+          renderState={{
+            kind: "outline",
+            scene: { space: compositionFrame, primitives: [] },
+            t: 0,
+          }}
         />,
       );
     });
@@ -836,444 +684,366 @@ describe("LiveCanvas transport — one-shot range/clamp via synthetic fixture (A
   });
 });
 
-describe("LiveCanvas render mode — outline runs the Hidden-line pass on demand (#219)", () => {
-  it("fill draws fills; outline draws the stroke-only result; toggling recomputes on demand (AC1)", () => {
-    const { ctx, counts, reset } = recordingContext();
-    useRecordingContext(ctx);
-    const { sketch } = overlapSketch(undefined); // static
+describe("LiveCanvas worker handoff contract (#289)", () => {
+  it("answers a matching Fill request immediately and only once across later frames", () => {
+    const { sketch } = animatedSketch({ duration: 10, mode: "loop" });
+    const onFillCaptured = vi.fn();
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        inputRevision={7}
+        onFillCaptured={onFillCaptured}
+      />,
+    );
+    tick(1000);
 
-    // Fill mode: the two FILLED squares are painted as FILLS, never stroked (the
-    // export-only pass did NOT run). The `fillRect` background is a separate key.
-    mount(<LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />);
-    expect(counts.fill ?? 0).toBeGreaterThan(0);
-    expect(counts.stroke ?? 0).toBe(0);
-
-    // Toggle to outline: the pass runs ON DEMAND for this redraw — the fills are
-    // rewritten to stroke-only geometry, so the draw strokes and never fills.
-    reset();
     act(() => {
       root!.render(
-        <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="outline" />,
+        <LiveCanvas
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          inputRevision={7}
+          fillCaptureRequest={{ token: 11, inputRevision: 7 }}
+          onFillCaptured={onFillCaptured}
+        />,
       );
     });
-    // #228: the outline pass is deferred one frame; flush it before asserting.
-    flushRaf();
-    expect(counts.stroke ?? 0).toBeGreaterThan(0);
-    expect(counts.fill ?? 0).toBe(0);
 
-    // Toggle back to fill: fills again, the pass no longer runs.
-    reset();
-    act(() => {
-      root!.render(
-        <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />,
-      );
-    });
-    expect(counts.fill ?? 0).toBeGreaterThan(0);
-    expect(counts.stroke ?? 0).toBe(0);
+    expect(onFillCaptured).toHaveBeenCalledTimes(1);
+    expect(onFillCaptured).toHaveBeenCalledWith(
+      expect.objectContaining({ token: 11, inputRevision: 7, t: 1 }),
+    );
+    tick(2000);
+    tick(3000);
+    expect(onFillCaptured).toHaveBeenCalledTimes(1);
   });
 
-  it("repaints a cached outline after a same-aspect profile layout resize without deriving it again", () => {
-    const { ctx, counts, reset } = recordingContext();
-    useRecordingContext(ctx);
-    const { sketch, generate } = overlapSketch(undefined);
+  it("waits past an old revision and answers from the next matching Fill draw", () => {
+    const { sketch } = animatedSketch({ duration: 10, mode: "loop" });
+    const onFillCaptured = vi.fn();
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{ value: 1 }}
+        seed={1}
+        inputRevision={1}
+        onFillCaptured={onFillCaptured}
+      />,
+    );
+    tick(1000);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={{ value: 2 }}
+          seed={1}
+          inputRevision={2}
+          fillCaptureRequest={{ token: 12, inputRevision: 2 }}
+          onFillCaptured={onFillCaptured}
+        />,
+      );
+    });
+    expect(onFillCaptured).not.toHaveBeenCalled();
+    tick(1500);
+    expect(onFillCaptured).toHaveBeenCalledOnce();
+    expect(onFillCaptured.mock.calls[0]?.[0]).toMatchObject({
+      token: 12,
+      inputRevision: 2,
+      t: 1.5,
+    });
+  });
+
+  it("only answers the newest request and never answers a wrong revision", () => {
+    const { sketch } = animatedSketch({ duration: 10, mode: "loop" });
+    const onFillCaptured = vi.fn();
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        inputRevision={3}
+        fillCaptureRequest={{ token: 20, inputRevision: 4 }}
+        onFillCaptured={onFillCaptured}
+      />,
+    );
+    tick(1000);
+    expect(onFillCaptured).not.toHaveBeenCalled();
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          inputRevision={3}
+          fillCaptureRequest={{ token: 21, inputRevision: 3 }}
+          onFillCaptured={onFillCaptured}
+        />,
+      );
+    });
+    expect(onFillCaptured).toHaveBeenCalledTimes(1);
+    expect(onFillCaptured.mock.calls[0]?.[0].token).toBe(21);
+  });
+
+  it("never serves the same token twice across an A → B → A request sequence", () => {
+    const { sketch } = animatedSketch({ duration: 10, mode: "loop" });
+    const onFillCaptured = vi.fn();
     const params = {};
-    const onOutlineComputed = vi.fn();
-    let boxSize = 100;
-    vi.spyOn(
-      HTMLCanvasElement.prototype,
-      "getBoundingClientRect",
-    ).mockImplementation(
-      () =>
-        ({
-          width: boxSize,
-          height: boxSize,
-        }) as DOMRect,
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        inputRevision={5}
+        onFillCaptured={onFillCaptured}
+      />,
+    );
+    tick(1000);
+
+    for (const token of [40, 41, 40]) {
+      act(() => {
+        root!.render(
+          <LiveCanvas
+            sketch={sketch}
+            params={params}
+            seed={1}
+            inputRevision={5}
+            fillCaptureRequest={{ token, inputRevision: 5 }}
+            onFillCaptured={onFillCaptured}
+          />,
+        );
+      });
+    }
+
+    expect(onFillCaptured).toHaveBeenCalledTimes(2);
+    expect(onFillCaptured.mock.calls.map(([capture]) => capture.token)).toEqual([
+      40, 41,
+    ]);
+  });
+
+  it("does not answer a pending mismatched request after unmount", () => {
+    const { sketch } = animatedSketch({ duration: 10, mode: "loop" });
+    const onFillCaptured = vi.fn();
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        inputRevision={1}
+        fillCaptureRequest={{ token: 30, inputRevision: 2 }}
+        onFillCaptured={onFillCaptured}
+      />,
+    );
+    act(() => root!.unmount());
+    root = null;
+    tick(1000);
+    expect(onFillCaptured).not.toHaveBeenCalled();
+  });
+
+  it("freezes an exact held Fill Scene and t without advancing animation", () => {
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const handle = createRef<LiveCanvasHandle>();
+    mount(<LiveCanvas handleRef={handle} sketch={sketch} params={{}} seed={1} />);
+    tick(2000);
+    const captured = handle.current!.getDisplayedScene()!;
+    const draws = generate.mock.calls.length;
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          renderState={{ kind: "fill-held", scene: captured.scene, t: captured.t }}
+        />,
+      );
+    });
+    tick(8000);
+    expect(generate).toHaveBeenCalledTimes(draws);
+    expect(handle.current?.getDisplayedScene()).toMatchObject({
+      scene: captured.scene,
+      t: 2,
+      renderMode: "fill",
+    });
+  });
+
+  it("captures animated Scene and t from one retained displayed-frame record", () => {
+    const { sketch } = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    const handle = createRef<LiveCanvasHandle>();
+    mount(
+      <LiveCanvas handleRef={handle} sketch={sketch} params={{ value: 0 }} seed={1} />,
     );
 
-    const initialProfile = HARNESS_FALLBACK_PLOT_PROFILE;
-    const sameAspectProfile: PlotProfile = {
-      width: 200,
-      height: 200,
-      insets: { top: 20, right: 20, bottom: 20, left: 20 },
-      includeFrame: true,
+    tick(1250);
+    const first = handle.current!.captureDisplayedFrame()!;
+    expect(first.t).toBe(1.25);
+    expect(first.scene.primitives[0]?.points[0]?.[0]).toBe(2.25);
+
+    tick(2750);
+    const second = handle.current!.captureDisplayedFrame()!;
+    expect(second.t).toBe(2.75);
+    expect(second.scene.primitives[0]?.points[0]?.[0]).toBe(3.75);
+    expect(first.t).toBe(1.25);
+  });
+
+  it("answers a matching request from a held Fill while animation is suspended", () => {
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const held: Scene = { space: { width: 100, height: 100 }, primitives: [] };
+    const onFillCaptured = vi.fn();
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        inputRevision={6}
+        fillCaptureRequest={{ token: 50, inputRevision: 6 }}
+        onFillCaptured={onFillCaptured}
+        renderState={{ kind: "fill-held", scene: held, t: 2.25 }}
+      />,
+    );
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(onFillCaptured).toHaveBeenCalledOnce();
+    expect(onFillCaptured).toHaveBeenCalledWith({
+      token: 50,
+      inputRevision: 6,
+      scene: held,
+      t: 2.25,
+    });
+    tick(9000);
+    expect(onFillCaptured).toHaveBeenCalledOnce();
+  });
+
+  it("paints a completed caller-supplied Outline atomically without sampling the Sketch", () => {
+    const { ctx, counts } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const outline: Scene = {
+      space: { width: 100, height: 100 },
+      primitives: [{ points: [[0, 0], [50, 50]], stroke: { color: "black", width: 1 } }],
     };
+    const handle = createRef<LiveCanvasHandle>();
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        renderState={{ kind: "outline", scene: outline, t: 4 }}
+      />,
+    );
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(counts.stroke ?? 0).toBeGreaterThan(0);
+    expect(handle.current?.getDisplayedScene()).toMatchObject({
+      scene: outline,
+      t: 4,
+      renderMode: "outline",
+    });
+  });
+
+  it("replaces held Fill with a completed Outline without an empty snapshot", () => {
+    const { sketch } = animatedSketch({ duration: 10, mode: "loop" });
+    const fill: Scene = { space: { width: 100, height: 100 }, primitives: [] };
+    const outline: Scene = {
+      space: fill.space,
+      primitives: [
+        {
+          points: [[0, 0], [10, 10]],
+          stroke: { color: "black", width: 1 },
+        },
+      ],
+    };
+    const handle = createRef<LiveCanvasHandle>();
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        renderState={{ kind: "fill-held", scene: fill, t: 3 }}
+      />,
+    );
+    expect(handle.current?.getDisplayedScene()?.scene).toBe(fill);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          renderState={{ kind: "outline", scene: outline, t: 3 }}
+        />,
+      );
+    });
+    expect(handle.current?.getDisplayedScene()).not.toBeNull();
+    expect(handle.current?.getDisplayedScene()?.scene).toBe(outline);
+  });
+
+  it("repaints supplied geometry on resize without deriving or replacing it", () => {
+    const { ctx, counts, reset } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const supplied: Scene = {
+      space: { width: 100, height: 100 },
+      primitives: [{ points: [[0, 0], [10, 10]], stroke: { color: "black", width: 1 } }],
+    };
+    let boxSize = 100;
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => ({ width: boxSize, height: boxSize }) as DOMRect,
+    );
     const el = mount(
       <LiveCanvas
         sketch={sketch}
-        params={params}
+        params={{}}
         seed={1}
-        profile={initialProfile}
-        renderMode="outline"
-        onOutlineComputed={onOutlineComputed}
+        renderState={{ kind: "outline", scene: supplied, t: 5 }}
       />,
     );
-    flushRaf();
-
-    const canvas = canvasEl(el);
-    expect(generate).toHaveBeenCalledTimes(1);
-    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
-    expect(canvas.width).toBe(100);
-
-    // Linked-inset magnitude changes update the sheet layout but keep the
-    // drawable aspect square. Model the resulting smaller drawable CSS box,
-    // then fire the real component's ResizeObserver callback.
     reset();
-    act(() => {
-      root!.render(
-        <LiveCanvas
-          sketch={sketch}
-          params={params}
-          seed={1}
-          profile={sameAspectProfile}
-          renderMode="outline"
-          onOutlineComputed={onOutlineComputed}
-        />,
-      );
-    });
-    expect(
-      el
-        .querySelector<HTMLElement>(".plot-sheet")
-        ?.style.getPropertyValue("--plot-inset-top"),
-    ).toBe("10%");
-    boxSize = 80;
+    boxSize = 200;
     act(() => fireResizeObserver?.());
 
-    // Backing pixels and rendered strokes refresh from the cached processed
-    // Scene. No new generate/hidden-line derivation or compute signal occurs.
-    expect(canvas.width).toBe(80);
+    expect(canvasEl(el).width).toBe(200);
     expect(counts.stroke ?? 0).toBeGreaterThan(0);
-    expect(generate).toHaveBeenCalledTimes(1);
-    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
+    expect(generate).not.toHaveBeenCalled();
   });
 
-  it("invalidates and rebuilds Outline when includeFrame changes at the same drawable aspect", () => {
-    const { ctx } = recordingContext();
-    useRecordingContext(ctx);
-    const { sketch, generate } = overlapSketch(undefined);
-    const handle = createRef<LiveCanvasHandle>();
-    const onOutlineComputed = vi.fn();
-    const withoutFrame: PlotProfile = {
-      ...HARNESS_FALLBACK_PLOT_PROFILE,
-      includeFrame: false,
-    };
-
-    mount(
-      <LiveCanvas
-        handleRef={handle}
-        sketch={sketch}
-        params={{}}
-        seed={1}
-        profile={withoutFrame}
-        renderMode="outline"
-        onOutlineComputed={onOutlineComputed}
-      />,
-    );
-    flushRaf();
-    const first = handle.current?.getDisplayedScene();
-    expect(first?.includeFrame).toBe(false);
-    expect(generate).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      root!.render(
-        <LiveCanvas
-          handleRef={handle}
-          sketch={sketch}
-          params={{}}
-          seed={1}
-          profile={HARNESS_FALLBACK_PLOT_PROFILE}
-          renderMode="outline"
-          onOutlineComputed={onOutlineComputed}
-        />,
-      );
-    });
-
-    expect(handle.current?.getDisplayedScene()).toBeNull();
-    flushRaf();
-    const rebuilt = handle.current?.getDisplayedScene();
-    expect(rebuilt?.includeFrame).toBe(true);
-    expect(rebuilt?.scene.primitives).toHaveLength(
-      (first?.scene.primitives.length ?? 0) + 1,
-    );
-    expect(rebuilt?.scene.primitives.at(-1)?.points).toEqual([
-      [0, 0],
-      [100, 0],
-      [100, 100],
-      [0, 100],
-      [0, 0],
-    ]);
-    expect(generate).toHaveBeenCalledTimes(2);
-    expect(onOutlineComputed).toHaveBeenCalledTimes(2);
-  });
-
-  it("updates Fill's snapshot identity without regenerating or repainting", () => {
-    const { ctx, counts, reset } = recordingContext();
-    useRecordingContext(ctx);
-    const { sketch, generate } = animatedSketch(undefined);
-    const handle = createRef<LiveCanvasHandle>();
+  it("returns from held Fill to the live clock at the frozen time", () => {
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
     const params = {};
-    const withoutFrame: PlotProfile = {
-      ...HARNESS_FALLBACK_PLOT_PROFILE,
-      includeFrame: false,
-    };
-
-    mount(
-      <LiveCanvas
-        handleRef={handle}
-        sketch={sketch}
-        params={params}
-        seed={1}
-        profile={withoutFrame}
-        renderMode="fill"
-      />,
-    );
-    const displayed = handle.current?.getDisplayedScene()?.scene;
-    expect(generate).toHaveBeenCalledTimes(1);
-    reset();
+    mount(<LiveCanvas sketch={sketch} params={params} seed={1} />);
+    tick(2000);
+    const heldScene = generate.mock.results.at(-1)?.value as Scene;
 
     act(() => {
       root!.render(
         <LiveCanvas
-          handleRef={handle}
           sketch={sketch}
           params={params}
           seed={1}
-          profile={HARNESS_FALLBACK_PLOT_PROFILE}
-          renderMode="fill"
+          renderState={{ kind: "fill-held", scene: heldScene, t: 2 }}
         />,
       );
     });
-
-    expect(generate).toHaveBeenCalledTimes(1);
-    expect(counts.fill ?? 0).toBe(0);
-    expect(counts.stroke ?? 0).toBe(0);
-    expect(handle.current?.getDisplayedScene()).toMatchObject({
-      scene: displayed,
-      renderMode: "fill",
-      includeFrame: true,
+    tick(3000);
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={params}
+          seed={1}
+          renderState={{ kind: "fill-live" }}
+        />,
+      );
     });
-  });
-
-  it("the rAF fill loop NEVER runs the pass — every animated frame stays a fill (AC2/AC3)", () => {
-    const { ctx, counts, reset } = recordingContext();
-    useRecordingContext(ctx);
-    const { sketch, generate } = overlapSketch({ duration: 4, mode: "loop" });
-
-    mount(<LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />);
-
-    // Drive many rAF frames; every one must draw FILLS and never the stroke-only
-    // pass output. A single `stroke()` here would mean the pass leaked into the
-    // live loop — the invariant this asserts it never does.
-    reset();
-    for (const ms of [500, 1000, 1500, 2000, 2500]) tick(ms);
-    // The loop advanced (frames were drawn) and stayed fill throughout.
+    tick(3500);
     expect(lastDrawnT(generate)).toBeCloseTo(2.5, 5);
-    expect(counts.fill ?? 0).toBeGreaterThan(0);
-    expect(counts.stroke ?? 0).toBe(0);
-  });
-
-  it("outline mode SUSPENDS the live loop and draws the stroke-only outline once, on demand (AC2)", () => {
-    const { ctx, counts, reset } = recordingContext();
-    useRecordingContext(ctx);
-    const { sketch } = overlapSketch({ duration: 4, mode: "loop" });
-
-    // An ANIMATED Sketch mounted in outline mode: the on-demand redraw path runs
-    // the pass (stroke-only, no fills)...
-    mount(
-      <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="outline" />,
-    );
-    // #228: the outline pass is deferred one frame; flush it before asserting.
-    flushRaf();
-    expect(counts.stroke ?? 0).toBeGreaterThan(0);
-    expect(counts.fill ?? 0).toBe(0);
-
-    // ...and the rAF loop is SUSPENDED — no frame was scheduled, so advancing the
-    // clock draws nothing at all (the pass cannot run per frame because the loop
-    // that would call `drawFrame` never starts).
-    reset();
-    tick(1000);
-    tick(2000);
-    expect(counts.stroke ?? 0).toBe(0);
-    expect(counts.fill ?? 0).toBe(0);
-  });
-
-  it("an outline→fill round-trip while playing PRESERVES t — the clock continues, never snapping to 0 (#223)", () => {
-    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
-    mount(<LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />);
-
-    // Playing in fill: advance the live loop to t = 2.
-    tick(2000);
-    expect(lastDrawnT(generate)).toBeCloseTo(2, 5);
-
-    // Flip to outline (which SUSPENDS the loop) and straight back to fill, WITHOUT
-    // advancing the wall clock. The render-mode-change sync must carry the frozen
-    // t = 2 into resumeTRef so the loop effect's baseline recapture continues from
-    // there when it re-runs on the flip back to fill.
-    act(() => {
-      root!.render(
-        <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="outline" />,
-      );
-    });
-    act(() => {
-      root!.render(
-        <LiveCanvas sketch={sketch} params={{}} seed={1} renderMode="fill" />,
-      );
-    });
-
-    // Advance 0.5s past the flip. Continuous playback ⇒ t = 2 + 0.5 = 2.5. The
-    // pre-fix bug left resumeTRef at 0 (never synced on a mode flip), so the
-    // baseline restarted from the flip moment and this tick would read ~0.5 — a
-    // snap back toward 0. Asserting t ≈ 2.5 (and > 2) pins the continuation.
-    tick(2500);
-    expect(lastDrawnT(generate)).toBeCloseTo(2.5, 5);
-    expect(lastDrawnT(generate)).toBeGreaterThan(2);
-  });
-
-  it("fires onOutlineComputed AFTER the deferred outline pass, never for a fill draw (AC1/AC3, #228)", () => {
-    const { ctx, counts } = recordingContext();
-    useRecordingContext(ctx);
-    const { sketch } = overlapSketch(undefined); // static
-    const onOutlineComputed = vi.fn();
-
-    // Fill mount: the synchronous fill path draws and never signals a compute —
-    // the owner keeps its render toggle in the idle (not "Computing…") state.
-    mount(
-      <LiveCanvas
-        sketch={sketch}
-        params={{}}
-        seed={1}
-        renderMode="fill"
-        onOutlineComputed={onOutlineComputed}
-      />,
-    );
-    expect(onOutlineComputed).not.toHaveBeenCalled();
-
-    // Flip to outline: the pass is deferred, so nothing has drawn or signalled
-    // yet. The owner's "Computing…" affordance (set synchronously at the trigger)
-    // is what covers this gap — LiveCanvas only signals when the draw lands.
-    act(() => {
-      root!.render(
-        <LiveCanvas
-          sketch={sketch}
-          params={{}}
-          seed={1}
-          renderMode="outline"
-          onOutlineComputed={onOutlineComputed}
-        />,
-      );
-    });
-    expect(counts.stroke ?? 0).toBe(0);
-    expect(onOutlineComputed).not.toHaveBeenCalled();
-
-    // The deferred frames fire: the pass strokes, THEN the "computed" signal lands
-    // so the owner can clear its "Computing…" affordance.
-    flushRaf();
-    expect(counts.stroke ?? 0).toBeGreaterThan(0);
-    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
-  });
-
-  it("signals onOutlineComputed again after a param settle WHILE in outline (AC2, #228)", () => {
-    const { ctx } = recordingContext();
-    useRecordingContext(ctx);
-    const { sketch } = overlapSketch(undefined);
-    const onOutlineComputed = vi.fn();
-
-    mount(
-      <LiveCanvas
-        sketch={sketch}
-        params={{ a: 1 }}
-        seed={1}
-        renderMode="outline"
-        onOutlineComputed={onOutlineComputed}
-      />,
-    );
-    flushRaf(); // settle the initial outline draw
-    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
-
-    // A param change while STILL in outline re-triggers a deferred pass...
-    act(() => {
-      root!.render(
-        <LiveCanvas
-          sketch={sketch}
-          params={{ a: 2 }}
-          seed={1}
-          renderMode="outline"
-          onOutlineComputed={onOutlineComputed}
-        />,
-      );
-    });
-    // ...not signalled until it actually draws.
-    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
-    flushRaf();
-    expect(onOutlineComputed).toHaveBeenCalledTimes(2);
-  });
-
-  it("a tolerance change WHILE in outline re-runs the on-demand pass (#232)", () => {
-    const { ctx } = recordingContext();
-    useRecordingContext(ctx);
-    const { sketch } = overlapSketch(undefined);
-    const onOutlineComputed = vi.fn();
-
-    mount(
-      <LiveCanvas
-        sketch={sketch}
-        params={{ a: 1 }}
-        seed={1}
-        renderMode="outline"
-        tolerance={0}
-        onOutlineComputed={onOutlineComputed}
-      />,
-    );
-    flushRaf(); // settle the initial outline draw
-    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
-
-    // Bumping the studio tolerance knob (nothing else changed) must re-trigger a
-    // deferred pass so the simplification is recomputed and repainted...
-    act(() => {
-      root!.render(
-        <LiveCanvas
-          sketch={sketch}
-          params={{ a: 1 }}
-          seed={1}
-          renderMode="outline"
-          tolerance={5}
-          onOutlineComputed={onOutlineComputed}
-        />,
-      );
-    });
-    // ...not signalled until it actually draws.
-    expect(onOutlineComputed).toHaveBeenCalledTimes(1);
-    flushRaf();
-    expect(onOutlineComputed).toHaveBeenCalledTimes(2);
-  });
-
-  it("rapid successive outline triggers supersede the pending pass — passes never stack (AC5, #228)", () => {
-    const { ctx } = recordingContext();
-    useRecordingContext(ctx);
-    const { sketch } = overlapSketch(undefined);
-
-    mount(<LiveCanvas sketch={sketch} params={{ v: 1 }} seed={1} renderMode="fill" />);
-    // Fill mount schedules no rAF (static fill is synchronous).
-    expect(rafCallbacks.length).toBe(0);
-
-    // First outline trigger schedules exactly one deferred pass.
-    act(() => {
-      root!.render(
-        <LiveCanvas sketch={sketch} params={{ v: 1 }} seed={1} renderMode="outline" />,
-      );
-    });
-    expect(rafCallbacks.length).toBe(1);
-
-    // A second trigger before the frame fires cancels the first and schedules a
-    // fresh one — still exactly one pending pass, not two (no stacking).
-    act(() => {
-      root!.render(
-        <LiveCanvas sketch={sketch} params={{ v: 2 }} seed={1} renderMode="outline" />,
-      );
-    });
-    expect(rafCallbacks.length).toBe(1);
-
-    // Flushing runs that single pass and leaves nothing pending.
-    flushRaf();
-    expect(rafCallbacks.length).toBe(0);
   });
 });

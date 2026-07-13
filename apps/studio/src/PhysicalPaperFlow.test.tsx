@@ -67,6 +67,64 @@ vi.mock("./presetsClient", () => ({
   savePreset: (preset: Preset) => presetClient.save(preset),
 }));
 
+vi.mock("./hiddenLineCoordinator", async () => {
+  const { outlineScene } = await import("./outlineScene");
+  const { clipSceneToBounds, renderPlotterSVG } = await import("@harness/core");
+  return {
+    HiddenLineCoordinator: class {
+      start(identity: import("./outlineComputeProtocol").OutlineComputeIdentity) {
+        return {
+          then(resolve: (result: unknown) => void) {
+            resolve({
+              status: "success",
+              jobId: 1,
+              identity,
+              scene: outlineScene(
+                identity.sourceScene as Scene,
+                identity.tolerance,
+                identity.includeFrame,
+              ),
+            });
+            return Promise.resolve();
+          },
+        };
+      }
+      startExport(
+        snapshot: import("./outlineComputeProtocol").HiddenLineExportSnapshot,
+      ) {
+        const scene = outlineScene(
+          snapshot.identity.sourceScene as Scene,
+          snapshot.identity.tolerance,
+          snapshot.identity.includeFrame,
+        );
+        const payload = {
+          status: "success" as const,
+          jobId: 1,
+          identity: snapshot.identity,
+          svg: renderPlotterSVG(
+            clipSceneToBounds(scene),
+            snapshot.profile as PlotProfile,
+            snapshot.metadata,
+            { includePaperMargins: snapshot.includePaperMargins },
+          ),
+          filename: snapshot.filename,
+          completedOutline: { identity: snapshot.identity, scene },
+        };
+        return {
+          then(resolve: (result: typeof payload) => void) {
+            resolve(payload);
+            return { catch() {} };
+          },
+        };
+      }
+      cancel() {
+        return false;
+      }
+      dispose() {}
+    },
+  };
+});
+
 const downloadBlob = vi.hoisted(() => vi.fn<[Blob, string], void>());
 vi.mock("./downloadBlob", () => ({ downloadBlob }));
 
@@ -431,7 +489,7 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
     expect(generate.mock.calls.at(-1)![3]).toBe(originalFrame);
   });
 
-  it("keeps PNG unavailable while an aspect-changing Outline rebuild is deferred", async () => {
+  it("keeps PNG usable while an aspect-changing Outline job holds the prior Fill", async () => {
     const { sketch, generate } = testSketch(A4_PROFILE);
     const el = mount(sketch);
     await flushPromises();
@@ -449,23 +507,23 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
       (button) => button.textContent === "Export PNG",
     )!;
 
-    // Profile metadata has committed, but the two-rAF Outline rebuild has not.
-    // The stale drawable pixels cannot be snapshotted during this interval.
-    expect(pngButton.disabled).toBe(true);
+    // Ordinary snapshots remain available; only competing hidden-line actions
+    // are excluded by the one-slot coordinator.
+    expect(pngButton.disabled).toBe(false);
     expect(
       el.querySelector<HTMLButtonElement>(
         'button[aria-label="Toggle outline render mode"]',
       )?.textContent,
-    ).toBe("Computing…");
+    ).toBe("Outline");
     act(() => pngButton.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-    expect(pngSnapshotCount).toBe(0);
-    expect(generate).toHaveBeenCalledTimes(callsBeforeEdit);
+    expect(pngSnapshotCount).toBe(1);
+    expect(generate.mock.calls.length).toBeGreaterThan(callsBeforeEdit);
 
     flushRaf();
     expect(generate.mock.calls.length).toBeGreaterThan(callsBeforeEdit);
     expect(pngButton.disabled).toBe(false);
     clickButton(el, "Export PNG");
-    expect(pngSnapshotCount).toBe(1);
+    expect(pngSnapshotCount).toBe(2);
   });
 });
 

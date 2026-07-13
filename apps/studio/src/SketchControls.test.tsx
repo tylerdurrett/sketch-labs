@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { act, useEffect, useImperativeHandle, type Ref } from "react";
+import {
+  act,
+  StrictMode,
+  useEffect,
+  useImperativeHandle,
+  type Ref,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +17,7 @@ import {
   HARNESS_FALLBACK_PLOT_PROFILE,
   hiddenLinePass,
   leafField,
+  renderPlotterSVG,
   resolvePlotCompositionFrame,
   type ParamSchema,
   type CoordinateSpace,
@@ -23,8 +30,9 @@ import type {
   DisplayedSceneSnapshot,
   LiveCanvasHandle,
 } from "./LiveCanvas";
+import { mutableScene } from "./outlineComputeProtocol";
 import { outlineScene } from "./outlineScene";
-import { hiddenLineSceneForExport, SketchControls } from "./SketchControls";
+import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
 
 // Preview == export seam probe (issue #220): capture the Scene the export path
@@ -47,6 +55,174 @@ const historyCapture = vi.hoisted(() => ({
   atomic: [] as { before: EditHistory; after: EditHistory }[],
   transactionCommits: [] as { before: EditHistory; after: EditHistory }[],
   cancels: [] as { before: EditHistory; after: EditHistory }[],
+}));
+const outlineJob = vi.hoisted(() => ({
+  coordinators: 0,
+  disposals: 0,
+  starts: 0,
+  active: null as null | {
+    identity: import("./outlineComputeProtocol").OutlineComputeIdentity;
+    resolve: (result: unknown) => void;
+    observeProgress: ((
+      update: import("./hiddenLineCoordinator").HiddenLineProgressUpdate,
+    ) => void) | undefined;
+  },
+  lastIdentity: null as import("./outlineComputeProtocol").OutlineComputeIdentity | null,
+  lastCompletedScene: null as DisplayedSceneSnapshot["scene"] | null,
+  exportStarts: 0,
+  exportDerivations: 0,
+  exportFinalizations: 0,
+  lastExportSnapshot:
+    null as import("./outlineComputeProtocol").HiddenLineExportSnapshot | null,
+  exportMode: "success" as "success" | "pending" | "failure",
+  pendingExport: null as null | {
+    snapshot: import("./outlineComputeProtocol").HiddenLineExportSnapshot;
+    reportProgress: (
+      completedWorkUnits: number,
+      totalWorkUnits: number,
+      eta: import("./rollingEta").RollingEtaEstimate,
+    ) => void;
+    finalize: () => void;
+    succeed: () => void;
+    fail: (detail?: string) => void;
+    cancel: () => void;
+  },
+}));
+
+vi.mock("./hiddenLineCoordinator", () => ({
+  HiddenLineCoordinator: class {
+    private disposed = false;
+
+    constructor() {
+      outlineJob.coordinators += 1;
+    }
+
+    start(
+      identity: import("./outlineComputeProtocol").OutlineComputeIdentity,
+      observeProgress?: (
+        update: import("./hiddenLineCoordinator").HiddenLineProgressUpdate,
+      ) => void,
+    ) {
+      if (this.disposed) {
+        return Promise.reject(new Error("Hidden-line coordinator is disposed"));
+      }
+      outlineJob.starts += 1;
+      outlineJob.lastIdentity = identity;
+      return {
+        then(resolve: (result: unknown) => void) {
+          outlineJob.active = { identity, resolve, observeProgress };
+          return Promise.resolve();
+        },
+      };
+    }
+    startExport(
+      snapshot: import("./outlineComputeProtocol").HiddenLineExportSnapshot,
+      observeProgress?: (
+        update: import("./hiddenLineCoordinator").HiddenLineExportProgressUpdate,
+      ) => void,
+    ) {
+      if (this.disposed) {
+        return Promise.reject(new Error("Hidden-line coordinator is disposed"));
+      }
+      outlineJob.exportStarts += 1;
+      outlineJob.lastExportSnapshot = snapshot;
+      if (snapshot.reusableOutline === undefined) {
+        outlineJob.exportDerivations += 1;
+      }
+      const processed =
+        snapshot.reusableOutline === undefined
+          ? outlineScene(
+              snapshot.identity
+                .sourceScene as unknown as Parameters<typeof outlineScene>[0],
+              snapshot.identity.tolerance,
+              snapshot.identity.includeFrame,
+            )
+          : mutableScene(snapshot.reusableOutline.scene);
+      const clipped = clipSceneToBounds(processed);
+      outlineJob.exportFinalizations += 1;
+      const payload = {
+        status: "success" as const,
+        jobId: 1,
+        identity: snapshot.identity,
+        svg: renderPlotterSVG(
+          clipped,
+          snapshot.profile as PlotProfile,
+          snapshot.metadata,
+          { includePaperMargins: snapshot.includePaperMargins },
+        ),
+        filename: snapshot.filename,
+        completedOutline: {
+          identity: snapshot.identity,
+          scene: processed,
+        },
+      };
+      if (outlineJob.exportMode === "pending") {
+        return new Promise((resolve) => {
+          outlineJob.pendingExport = {
+            snapshot,
+            reportProgress: (completedWorkUnits, totalWorkUnits, eta) =>
+              observeProgress?.({
+                phase: "derivation",
+                snapshot: {
+                  completedWorkUnits,
+                  totalWorkUnits,
+                  terminal: completedWorkUnits === totalWorkUnits,
+                },
+                eta,
+              }),
+            finalize: () => observeProgress?.({ phase: "finalizing" }),
+            succeed: () => {
+              outlineJob.pendingExport = null;
+              resolve(payload);
+            },
+            fail: (detail = "test failure") => {
+              outlineJob.pendingExport = null;
+              resolve({ status: "failure", jobId: 1, error: detail });
+            },
+            cancel: () => {
+              outlineJob.pendingExport = null;
+              resolve({ status: "cancelled", jobId: 1 });
+            },
+          };
+        });
+      }
+      observeProgress?.({ phase: "finalizing" });
+      if (outlineJob.exportMode === "failure") {
+        const failure = { status: "failure" as const, jobId: 1, error: "test failure" };
+        return {
+          then(resolve: (result: typeof failure) => void) {
+            resolve(failure);
+            return { catch() {} };
+          },
+        };
+      }
+      return {
+        then(resolve: (result: typeof payload) => void) {
+          resolve(payload);
+          return { catch() {} };
+        },
+      };
+    }
+    cancel() {
+      if (outlineJob.pendingExport !== null) {
+        const pending = outlineJob.pendingExport;
+        outlineJob.pendingExport = null;
+        pending.cancel();
+        return true;
+      }
+      const active = outlineJob.active;
+      if (active === null) return false;
+      outlineJob.active = null;
+      active.resolve({ status: "cancelled", jobId: 1 });
+      return true;
+    }
+    dispose() {
+      if (this.disposed) return;
+      this.disposed = true;
+      outlineJob.disposals += 1;
+      this.cancel();
+    }
+  },
 }));
 
 // Probe both SVG serializers while delegating to their real implementations, so
@@ -113,6 +289,7 @@ let fakeCanvasToBlob: HTMLCanvasElement["toBlob"];
 let fakeCurrentT = 0;
 // Atomic displayed-Scene snapshot exposed by the mocked LiveCanvas handle.
 let fakeDisplayedScene: DisplayedSceneSnapshot | null = null;
+let fakeFillCaptureScene: DisplayedSceneSnapshot["scene"] | null = null;
 // #228: the real LiveCanvas signals `onOutlineComputed` when an outline pass has
 // drawn, which the owner uses to clear its "Computing…" affordance. The mock
 // records the latest callback so a test can drive that signal BY HAND (to observe
@@ -131,45 +308,94 @@ let lastProfile: PlotProfile | null = null;
 // receives AND drive the PNG export without polyfilling the whole canvas stack.
 vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
+    sketch,
+    params,
     seed,
-    renderMode,
+    renderState,
     tolerance,
     compositionFrame,
     profile,
     handleRef,
-    onOutlineComputed,
+    inputRevision = 0,
+    fillCaptureRequest,
+    onFillCaptured,
   }: {
+    sketch: Parameters<typeof SketchControls>[0]["sketch"];
+    params: Record<string, unknown>;
     seed: Seed;
-    renderMode?: string;
+    renderState?: { kind: string; scene?: unknown; t?: number };
     tolerance?: number;
     compositionFrame: CoordinateSpace;
     profile: PlotProfile;
     handleRef?: Ref<LiveCanvasHandle>;
-    onOutlineComputed?: () => void;
+    inputRevision?: number;
+    fillCaptureRequest?: { token: number; inputRevision: number } | null;
+    onFillCaptured?: (capture: unknown) => void;
   }) => {
+    const capturedFrame = (): DisplayedSceneSnapshot =>
+      fakeDisplayedScene ?? {
+        scene: sketch.generate(params, seed, fakeCurrentT, compositionFrame),
+        t: fakeCurrentT,
+        renderMode: "fill",
+        tolerance: tolerance ?? 0,
+        includeFrame: profile.includeFrame,
+        inputRevision,
+      };
     useImperativeHandle(handleRef, () => ({
       getCanvas: () =>
         ({ toBlob: fakeCanvasToBlob }) as unknown as HTMLCanvasElement,
       getCurrentT: () => fakeCurrentT,
       getDisplayedScene: () => fakeDisplayedScene,
+      captureDisplayedFrame: capturedFrame,
     }));
-    lastOnOutlineComputed = onOutlineComputed ?? null;
+    lastOnOutlineComputed = () => {
+      const active = outlineJob.active;
+      if (active === null) return;
+      outlineJob.active = null;
+      const scene = outlineScene(
+        active.identity.sourceScene as unknown as Parameters<typeof outlineScene>[0],
+        active.identity.tolerance,
+        active.identity.includeFrame,
+      );
+      outlineJob.lastCompletedScene = scene;
+      active.resolve({
+        status: "success",
+        jobId: 1,
+        identity: active.identity,
+        scene,
+      });
+    };
     lastCompositionFrame = compositionFrame;
     lastProfile = profile;
     // Model the outline pass finishing: fire the "computed" signal after each
     // outline render so the owner's busy label clears (unless a test opts out to
     // observe the intermediate "Computing…" state itself).
     useEffect(() => {
-      if (renderMode === "outline" && autoFireOutlineComputed) {
-        onOutlineComputed?.();
+      if (fillCaptureRequest !== null && fillCaptureRequest !== undefined) {
+        onFillCaptured?.({
+          ...fillCaptureRequest,
+          scene:
+            fakeFillCaptureScene ?? {
+              space: compositionFrame,
+              primitives: [],
+            },
+          t: fakeCurrentT,
+        });
+      }
+    }, [fillCaptureRequest?.token]);
+    useEffect(() => {
+      if (outlineJob.active !== null && autoFireOutlineComputed) {
+        lastOnOutlineComputed?.();
       }
     });
     return (
       <div
         data-testid="canvas-seed"
-        data-render-mode={String(renderMode)}
+        data-render-mode={renderState?.kind === "outline" ? "outline" : "fill"}
+        data-render-state={renderState?.kind ?? "fill-live"}
         data-tolerance={String(tolerance)}
         data-include-frame={String(profile.includeFrame)}
+        data-input-revision={String(inputRevision)}
       >
         {String(seed)}
       </div>
@@ -240,6 +466,15 @@ function mount(node: React.ReactElement): HTMLDivElement {
   return container;
 }
 
+/** The render mode SketchControls fed the mocked LiveCanvas this render. */
+function canvasRenderMode(el: HTMLElement): string | null {
+  return (
+    el
+      .querySelector('[data-testid="canvas-seed"]')
+      ?.getAttribute("data-render-mode") ?? null
+  );
+}
+
 /** Big-endian 4-byte encoding of an unsigned 32-bit integer. */
 function uint32BE(value: number): number[] {
   return [
@@ -270,6 +505,18 @@ const MINIMAL_PNG = Uint8Array.from([
 ]);
 
 beforeEach(() => {
+  outlineJob.coordinators = 0;
+  outlineJob.disposals = 0;
+  outlineJob.starts = 0;
+  outlineJob.exportStarts = 0;
+  outlineJob.exportDerivations = 0;
+  outlineJob.exportFinalizations = 0;
+  outlineJob.lastExportSnapshot = null;
+  outlineJob.exportMode = "success";
+  outlineJob.pendingExport = null;
+  outlineJob.active = null;
+  outlineJob.lastIdentity = null;
+  outlineJob.lastCompletedScene = null;
   vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
   // Sensible defaults so a mount's list-on-mount effect resolves quietly; the
   // save/reload tests override loadPreset/savePreset per case.
@@ -281,6 +528,7 @@ beforeEach(() => {
   // cases. The blob is a real minimal PNG so the metadata byte-splice succeeds.
   fakeCurrentT = 0;
   fakeDisplayedScene = null;
+  fakeFillCaptureScene = null;
   // #228: default to auto-firing the outline "computed" signal so the busy label
   // clears on its own; the label test opts out to observe "Computing…".
   lastOnOutlineComputed = null;
@@ -344,6 +592,31 @@ function clickButton(el: HTMLElement, text: string): void {
   if (button === undefined) throw new Error(`no button labelled ${text}`);
   act(() => {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+function reportOutlineProgress(
+  completedWorkUnits: number,
+  totalWorkUnits: number,
+  eta:
+    | { readonly kind: "estimating"; readonly revision: number }
+    | {
+        readonly kind: "remaining";
+        readonly revision: number;
+        readonly remainingMs: number;
+      } = { kind: "estimating", revision: 1 },
+): void {
+  const observe = outlineJob.active?.observeProgress;
+  if (observe === undefined) throw new Error("no active progress observer");
+  act(() => {
+    observe({
+      snapshot: {
+        completedWorkUnits,
+        totalWorkUnits,
+        terminal: completedWorkUnits === totalWorkUnits,
+      },
+      eta,
+    });
   });
 }
 
@@ -638,7 +911,7 @@ describe("SketchControls — central edit-history integration", () => {
     ).toBe("0");
     expect(renderToggle.getAttribute("aria-pressed")).toBe("true");
     expect(paperMarginsCheckbox(el).checked).toBe(false);
-    expect(renderToggle.textContent).toBe("Computing…");
+    expect(renderToggle.textContent).toBe("Outline");
   });
 
   it("routes lock toggle, Randomize, New seed, and frame toggle as named atomic commands", () => {
@@ -1001,7 +1274,7 @@ describe("SketchControls — central edit-history integration", () => {
     });
   });
 
-  it("re-invalidates Outline when cancel restores a changed profile aspect", () => {
+  it("shows live Fill for a changed transaction and reuses exact cache on cancel", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -1015,9 +1288,11 @@ describe("SketchControls — central edit-history integration", () => {
     )!;
 
     act(() => width.focus());
+    expect(canvasRenderMode(el)).toBe("fill");
     setInput(width, "300");
-    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.textContent).toBe("Outline");
     expect(lastCompositionFrame).not.toBe(initialFrame);
+    expect(outlineJob.starts).toBe(1);
     act(() => lastOnOutlineComputed?.());
 
     act(() =>
@@ -1028,12 +1303,14 @@ describe("SketchControls — central edit-history integration", () => {
 
     expect(lastProfile?.width).toBe(200);
     expect(lastCompositionFrame).toEqual(initialFrame);
-    expect(toggle.textContent).toBe("Computing…");
+    expect(toggle.textContent).toBe("Outline");
+    expect(canvasRenderMode(el)).toBe("outline");
+    expect(outlineJob.starts).toBe(1);
     expect(historyCapture.cancels).toHaveLength(1);
     expect(historyCapture.cancels[0]!.after.past).toHaveLength(0);
   });
 
-  it("restores a same-aspect profile preview without invalidating Outline", () => {
+  it("shows live Fill during a same-identity edit and restores exact cache on cancel", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -1041,12 +1318,19 @@ describe("SketchControls — central edit-history integration", () => {
     )!;
     act(() => toggle.click());
     act(() => lastOnOutlineComputed?.());
+    expect(outlineJob.starts).toBe(1);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-render-state",
+      ),
+    ).toBe("outline");
     const initialFrame = lastCompositionFrame;
     const margin = el.querySelector<HTMLInputElement>(
       'input[aria-label="Linked paper margin (mm)"]',
     )!;
 
     act(() => margin.focus());
+    expect(canvasRenderMode(el)).toBe("fill");
     setInput(margin, "20");
     expect(lastProfile?.insets).toEqual({
       top: 20,
@@ -1056,6 +1340,12 @@ describe("SketchControls — central edit-history integration", () => {
     });
     expect(lastCompositionFrame).toBe(initialFrame);
     expect(toggle.textContent).toBe("Outline");
+    expect(outlineJob.starts).toBe(1);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-render-state",
+      ),
+    ).toBe("fill-live");
 
     act(() =>
       margin.dispatchEvent(
@@ -1071,7 +1361,47 @@ describe("SketchControls — central edit-history integration", () => {
     });
     expect(lastCompositionFrame).toBe(initialFrame);
     expect(toggle.textContent).toBe("Outline");
+    expect(outlineJob.starts).toBe(1);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-render-state",
+      ),
+    ).toBe("outline");
     expect(historyCapture.cancels).toHaveLength(1);
+  });
+
+  it("shows live Fill for an invalid draft and restores exact cache on settle", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+    act(() => toggle.click());
+    act(() => lastOnOutlineComputed?.());
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    act(() => width.focus());
+    setInput(width, "");
+    expect(outlineJob.starts).toBe(1);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-render-state",
+      ),
+    ).toBe("fill-live");
+
+    act(() =>
+      width.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+    );
+    expect(outlineJob.starts).toBe(1);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-render-state",
+      ),
+    ).toBe("outline");
   });
 });
 
@@ -1911,8 +2241,8 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
         "data-include-frame",
       ),
     ).toBe("false");
-    expect(toggle.textContent).toBe("Computing…");
-    expect(toggle.disabled).toBe(true);
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
   });
 
   it("restores includeFrame from a Preset and recomputes the visible Outline", async () => {
@@ -1949,8 +2279,8 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(el.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(
       false,
     );
-    expect(toggle.textContent).toBe("Computing…");
-    expect(toggle.disabled).toBe(true);
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
   });
 
   it("marks Outline recomputing only when a committed paper edit changes drawable aspect", () => {
@@ -1982,8 +2312,8 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(lastCompositionFrame).toEqual(
       resolvePlotCompositionFrame(lastProfile!),
     );
-    expect(toggle.textContent).toBe("Computing…");
-    expect(toggle.disabled).toBe(true);
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
   });
 });
 
@@ -2205,56 +2535,6 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
   };
 
-  it("returns a matching displayed outline by identity without invoking fallback", () => {
-    const processed = outlineScene(
-      hlScene as unknown as DisplayedSceneSnapshot["scene"],
-    );
-    const generate = vi.fn();
-
-    expect(
-      hiddenLineSceneForExport({
-        displayed: {
-          scene: processed,
-          t: 2.5,
-          renderMode: "outline",
-          tolerance: 3,
-          includeFrame: false,
-        },
-        currentT: 2.5,
-        renderMode: "outline",
-        tolerance: 3,
-        includeFrame: false,
-        generate,
-      }),
-    ).toBe(processed);
-    expect(generate).not.toHaveBeenCalled();
-  });
-
-  it("rejects a displayed Scene whose composition-frame identity is stale", () => {
-    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
-    const withoutFrame = outlineScene(source, 0, false);
-    const generate = vi.fn(() => source);
-
-    const selected = hiddenLineSceneForExport({
-      displayed: {
-        scene: withoutFrame,
-        t: 0,
-        renderMode: "outline",
-        tolerance: 0,
-        includeFrame: false,
-      },
-      currentT: 0,
-      renderMode: "outline",
-      tolerance: 0,
-      includeFrame: true,
-      generate,
-    });
-
-    expect(generate).toHaveBeenCalledTimes(1);
-    expect(selected).toEqual(outlineScene(source, 0, true));
-    expect(selected).not.toBe(withoutFrame);
-  });
-
   function blobText(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -2314,7 +2594,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     };
     const source = {
       space: { width: 120, height: 100 },
-      background: "papayawhip",
+      background: { color: "papayawhip" },
       primitives: [
         {
           points: [
@@ -2416,9 +2696,11 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       (el.querySelector("#sketch-seed") as HTMLInputElement).value,
     );
 
+    fakeFillCaptureScene = source;
     clickButton(el, "Fill");
+    generate.mockClear();
     fakeDisplayedScene = {
-      scene: processed,
+      scene: outlineJob.lastCompletedScene!,
       t: 0,
       renderMode: "outline",
       tolerance: 0,
@@ -2464,7 +2746,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     const secondSvg = await blobText(downloadBlob.mock.calls[1]![0]);
 
     expect(generate).not.toHaveBeenCalled();
-    expect(fakeDisplayedScene?.scene).toBe(processed);
+    expect(fakeDisplayedScene?.scene).toEqual(processed);
     expect(processed).toEqual(processedBefore);
     expect(firstScene).toEqual(secondScene);
     expect(plotterExportCapture.current?.profile).toEqual(doubledProfile);
@@ -2501,9 +2783,11 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     const sketch = { ...base, generate };
     const el = mount(<SketchControls sketch={sketch} />);
 
+    fakeFillCaptureScene = source;
     clickButton(el, "Fill");
+    generate.mockClear();
     fakeDisplayedScene = {
-      scene: processed,
+      scene: outlineJob.lastCompletedScene!,
       t: 0,
       renderMode: "outline",
       tolerance: 0,
@@ -2539,6 +2823,56 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     );
   });
 
+  it("reuses a Fill-mode export cache, still finalizes, and derives after a static input mismatch", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const el = mount(<SketchControls sketch={hlStaticSketch("fill-cache")} />);
+    fakeDisplayedScene = {
+      scene: source,
+      t: 0,
+      renderMode: "fill",
+      tolerance: 0,
+      includeFrame: true,
+    };
+
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(1);
+    expect(outlineJob.exportFinalizations).toBe(1);
+
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(1);
+    expect(outlineJob.exportFinalizations).toBe(2);
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(outlineJob.lastExportSnapshot?.identity.sourceScene).toEqual(source);
+
+    setInput(paramInput(el, "radius"), "14");
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(2);
+    expect(outlineJob.exportFinalizations).toBe(3);
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeUndefined();
+  });
+
+  it("reuses an animated Fill frame only at the identical sampled time", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const el = mount(<SketchControls sketch={hlTimedSketch("timed-cache")} />);
+    fakeDisplayedScene = {
+      scene: source,
+      t: 2.5,
+      renderMode: "fill",
+      tolerance: 0,
+      includeFrame: true,
+    };
+
+    clickButton(el, "Export Hidden-line SVG");
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(1);
+    expect(outlineJob.exportFinalizations).toBe(2);
+
+    fakeDisplayedScene = { ...fakeDisplayedScene, t: 2.75 };
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(2);
+    expect(outlineJob.exportFinalizations).toBe(3);
+  });
+
   it("falls back to exact cold generation when no displayed Scene is cached", () => {
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
     const base = hlStaticSketch("circles");
@@ -2553,7 +2887,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     );
   });
 
-  it("rejects a stale displayed Scene and falls back to exact cold generation", () => {
+  it("uses one atomic displayed record without comparing a separately read time", () => {
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
     const base = hlStaticSketch("circles");
     const generate = vi.fn(() => source);
@@ -2569,9 +2903,9 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     clickButton(el, "Export Hidden-line SVG");
 
-    expect(generate).toHaveBeenCalledTimes(1);
+    expect(generate).not.toHaveBeenCalled();
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(source, 0, true)),
+      clipSceneToBounds(outlineScene(fakeDisplayedScene.scene, 0, true)),
     );
   });
 
@@ -2831,6 +3165,339 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // ...and after the clip, every path point lies within [0,0,width,height].
     expect(outOfBoundsPoints(exported, width, height)).toEqual([]);
   });
+  it("freezes click-time inputs and downloads exactly once only after success", async () => {
+    outlineJob.exportMode = "pending";
+    const el = mount(<SketchControls sketch={hlStaticSketch("atomic")} />);
+    const seedAtClick = Number(paramInput(el, "radius").value) === 10
+      ? Number((el.querySelector("#sketch-seed") as HTMLInputElement).value)
+      : -1;
+
+    clickButton(el, "Export Hidden-line SVG");
+    const pending = outlineJob.pendingExport!;
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(pending.snapshot.identity.params).toContainEqual({ key: "radius", value: 10 });
+
+    clickButton(el, "New seed");
+    pending.succeed();
+    pending.succeed();
+    await flush();
+
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(pending.snapshot.metadata)).toMatchObject({
+      seed: seedAtClick,
+      params: { radius: 10 },
+    });
+  });
+
+  it("downloads nothing for failure or a completion made stale by unmount", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    outlineJob.exportMode = "failure";
+    let el = mount(<SketchControls sketch={hlStaticSketch("failure")} />);
+    clickButton(el, "Export Hidden-line SVG");
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(el.querySelector('[role="status"]')).toBeNull();
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+      "Export failed: test failure",
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      "Hidden-line export failed",
+      "test failure",
+    );
+    expect(
+      [...el.querySelectorAll("button")].find(
+        (button) => button.textContent === "Export Hidden-line SVG",
+      )?.disabled,
+    ).toBe(false);
+
+    outlineJob.exportMode = "pending";
+    act(() => root!.unmount());
+    root = null;
+    container?.remove();
+    container = null;
+    el = mount(<SketchControls sketch={hlStaticSketch("stale")} />);
+    clickButton(el, "Export Hidden-line SVG");
+    const pending = outlineJob.pendingExport!;
+    act(() => root!.unmount());
+    root = null;
+    pending.succeed();
+    await flush();
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("settles a transactional edit during export before launching one latest Outline", async () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    fakeFillCaptureScene = source;
+    const el = mount(<SketchControls sketch={hlStaticSketch("deferred")} />);
+    clickButton(el, "Fill");
+    const startsBeforeExport = outlineJob.starts;
+    fakeDisplayedScene = {
+      scene: outlineScene(source, 0, true),
+      t: 0,
+      renderMode: "outline",
+      tolerance: 0,
+      includeFrame: true,
+    };
+    outlineJob.exportMode = "pending";
+    clickButton(el, "Export Hidden-line SVG");
+
+    const radius = paramInput(el, "radius");
+    act(() => radius.focus());
+    setInput(radius, "14");
+    act(() =>
+      radius.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      ),
+    );
+    expect(outlineJob.starts).toBe(startsBeforeExport);
+
+    await act(async () => {
+      outlineJob.pendingExport!.succeed();
+      await Promise.resolve();
+    });
+    expect(outlineJob.starts).toBe(startsBeforeExport + 1);
+    expect(outlineJob.lastIdentity?.params).toContainEqual({
+      key: "radius",
+      value: 14,
+    });
+  });
+
+  it.each(["success", "cancel", "failure"] as const)(
+    "keeps a completed Outline displayed after export %s when no edit occurs",
+    async (terminal) => {
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+      fakeFillCaptureScene = source;
+      const el = mount(
+        <SketchControls sketch={hlStaticSketch(`settle-${terminal}`)} />,
+      );
+      clickButton(el, "Fill");
+      expect(canvasRenderMode(el)).toBe("outline");
+      const previewStarts = outlineJob.starts;
+      fakeDisplayedScene = {
+        scene: outlineJob.lastCompletedScene!,
+        t: 0,
+        renderMode: "outline",
+        tolerance: 0,
+        includeFrame: true,
+      };
+      outlineJob.exportMode = "pending";
+
+      clickButton(el, "Export Hidden-line SVG");
+      expect(canvasRenderMode(el)).toBe("outline");
+      expect(outlineJob.starts).toBe(previewStarts);
+
+      if (terminal === "success") outlineJob.pendingExport!.succeed();
+      else if (terminal === "failure") outlineJob.pendingExport!.fail();
+      else clickButton(el, "Cancel export");
+      await flush();
+
+      expect(canvasRenderMode(el)).toBe("outline");
+      expect(outlineJob.starts).toBe(previewStarts);
+      expect(outlineJob.pendingExport).toBeNull();
+      consoleError.mockRestore();
+    },
+  );
+
+  it("keeps export status quiet through 749ms, then shows derivation progress and ETA", () => {
+    outlineJob.exportMode = "pending";
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={hlStaticSketch("progress")} />);
+      clickButton(el, "Export Hidden-line SVG");
+      const pending = outlineJob.pendingExport!;
+      act(() =>
+        pending.reportProgress(1, 4, { kind: "estimating", revision: 1 }),
+      );
+
+      expect(el.textContent).toContain("Cancel export");
+      expect(el.querySelector('[role="status"]')).toBeNull();
+      expect(el.querySelector('progress[aria-label="Hidden-line export progress"]')).toBeNull();
+      act(() => vi.advanceTimersByTime(749));
+      expect(el.textContent).not.toContain("25%");
+
+      act(() => vi.advanceTimersByTime(1));
+      const progress = el.querySelector<HTMLProgressElement>(
+        'progress[aria-label="Hidden-line export progress"]',
+      )!;
+      expect(progress.value).toBe(1);
+      expect(progress.max).toBe(4);
+      expect(el.textContent).toContain("25%");
+      expect(el.textContent).toContain("Estimating time remaining…");
+      expect(el.querySelectorAll('[role="status"][aria-live="polite"]')).toHaveLength(1);
+      expect(progress.closest("[aria-live]")).toBeNull();
+
+      act(() =>
+        pending.reportProgress(3, 4, {
+          kind: "remaining",
+          revision: 2,
+          remainingMs: 4_200,
+        }),
+      );
+      expect(
+        el.querySelector<HTMLProgressElement>(
+          'progress[aria-label="Hidden-line export progress"]',
+        )?.value,
+      ).toBe(3);
+      expect(el.textContent).toContain("75%");
+      expect(el.textContent).toContain("5 seconds remaining");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows exact non-percentaged finalizing status, including immediate Outline reuse", () => {
+    outlineJob.exportMode = "pending";
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={hlStaticSketch("finalizing")} />);
+      clickButton(el, "Export Hidden-line SVG");
+      const pending = outlineJob.pendingExport!;
+      act(() => {
+        pending.reportProgress(4, 4, {
+          kind: "remaining",
+          revision: 2,
+          remainingMs: 0,
+        });
+        pending.finalize();
+      });
+      expect(el.textContent).not.toContain("Preparing SVG…");
+
+      act(() => vi.advanceTimersByTime(750));
+      expect(el.textContent).toContain("Preparing SVG…");
+      expect(el.textContent).not.toContain("100%");
+      expect(
+        el.querySelector('progress[aria-label="Hidden-line export progress"]'),
+      ).toBeNull();
+      expect(el.textContent).toContain("Cancel export");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels silently during derivation and finalizing, then gives a later job a fresh timer", async () => {
+    outlineJob.exportMode = "pending";
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={hlStaticSketch("cancel")} />);
+      clickButton(el, "Export Hidden-line SVG");
+      act(() =>
+        outlineJob.pendingExport!.reportProgress(1, 2, {
+          kind: "estimating",
+          revision: 1,
+        }),
+      );
+      act(() => vi.advanceTimersByTime(749));
+      clickButton(el, "Cancel export");
+      await flush();
+      expect(downloadBlob).not.toHaveBeenCalled();
+      expect(el.textContent).not.toContain("Export failed");
+      expect(el.textContent).not.toContain("Cancel export");
+
+      clickButton(el, "Export Hidden-line SVG");
+      const finalizing = outlineJob.pendingExport!;
+      act(() => finalizing.finalize());
+      act(() => vi.advanceTimersByTime(1));
+      expect(el.textContent).not.toContain("Preparing SVG…");
+      act(() => vi.advanceTimersByTime(749));
+      expect(el.textContent).toContain("Preparing SVG…");
+      clickButton(el, "Cancel export");
+      await flush();
+
+      expect(downloadBlob).not.toHaveBeenCalled();
+      expect(el.querySelector('[role="alert"]')).toBeNull();
+      expect(el.textContent).not.toContain("Preparing SVG…");
+      expect(
+        [...el.querySelectorAll("button")].find(
+          (button) => button.textContent === "Export Hidden-line SVG",
+        )?.disabled,
+      ).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("downloads fast success without a status flash and clears its timer", async () => {
+    outlineJob.exportMode = "pending";
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={hlStaticSketch("fast")} />);
+      clickButton(el, "Export Hidden-line SVG");
+      act(() => vi.advanceTimersByTime(749));
+      await act(async () => {
+        outlineJob.pendingExport!.succeed();
+        await Promise.resolve();
+      });
+      expect(downloadBlob).toHaveBeenCalledTimes(1);
+      expect(el.querySelector('[role="status"]')).toBeNull();
+
+      act(() => vi.advanceTimersByTime(1_000));
+      expect(el.textContent).not.toContain("Preparing SVG…");
+      expect(
+        el.querySelector('progress[aria-label="Hidden-line export progress"]'),
+      ).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("logs technical export failures, renders safe detail, and restores the action matrix", async () => {
+    outlineJob.exportMode = "pending";
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      const el = mount(
+        <SketchControls
+          sketch={hlStaticSketch("failure-ui")}
+          onToggleCollapse={() => {}}
+        />,
+      );
+      clickButton(el, "Export Hidden-line SVG");
+
+      const byText = (text: string) =>
+        [...el.querySelectorAll("button")].find(
+          (button) => button.textContent === text,
+        )!;
+      expect(byText("Export Hidden-line SVG").disabled).toBe(true);
+      expect(
+        el.querySelector<HTMLButtonElement>(
+          'button[aria-label="Toggle outline render mode"]',
+        )?.disabled,
+      ).toBe(true);
+      expect(byText("Export PNG").disabled).toBe(false);
+      expect(byText("Export SVG").disabled).toBe(false);
+      expect(byText("New seed").disabled).toBe(false);
+      expect(
+        el.querySelector<HTMLButtonElement>('button[aria-label="Hide inspector"]')
+          ?.disabled,
+      ).toBe(false);
+
+      act(() => vi.advanceTimersByTime(750));
+      await act(async () => {
+        outlineJob.pendingExport!.fail("geometry\u0000 exploded");
+        await Promise.resolve();
+      });
+      expect(downloadBlob).not.toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalledWith(
+        "Hidden-line export failed",
+        "geometry\u0000 exploded",
+      );
+      expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+        "Export failed: geometry  exploded",
+      );
+      expect(byText("Export Hidden-line SVG").disabled).toBe(false);
+      expect(
+        el.querySelector<HTMLButtonElement>(
+          'button[aria-label="Toggle outline render mode"]',
+        )?.disabled,
+      ).toBe(false);
+      expect(byText("Export PNG").disabled).toBe(false);
+      expect(byText("Export SVG").disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("SketchControls — PNG export wiring", () => {
@@ -2940,12 +3607,6 @@ describe("SketchControls — PNG export wiring", () => {
 });
 
 describe("SketchControls — render-mode toggle wiring (#219)", () => {
-  /** The render mode SketchControls fed the (mocked) LiveCanvas this render. */
-  const canvasRenderMode = (el: HTMLElement): string | null =>
-    el
-      .querySelector('[data-testid="canvas-seed"]')
-      ?.getAttribute("data-render-mode") ?? null;
-
   const toggleEl = (el: HTMLElement): HTMLButtonElement => {
     const btn = el.querySelector<HTMLButtonElement>(
       'button[aria-label="Toggle outline render mode"]',
@@ -2983,7 +3644,7 @@ describe("SketchControls — render-mode toggle wiring (#219)", () => {
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("shows 'Computing…' (disabled) the instant Fill→Outline is clicked, until the pass signals done (#228)", () => {
+  it("keeps the Fill preview and toggle usable during the quiet Outline interval", () => {
     // Opt out of the auto-clear so the intermediate busy state is observable: the
     // real pass runs asynchronously, so the label must read "Computing…" from the
     // click's own commit until LiveCanvas signals `onOutlineComputed`.
@@ -3003,10 +3664,10 @@ describe("SketchControls — render-mode toggle wiring (#219)", () => {
     act(() => {
       toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(toggle.textContent).toBe("Computing…");
-    expect(toggle.disabled).toBe(true);
+    expect(toggle.textContent).toBe("Outline");
+    expect(toggle.disabled).toBe(false);
     expect(toggle.getAttribute("aria-busy")).toBe("true");
-    expect(canvasRenderMode(el)).toBe("outline");
+    expect(canvasRenderMode(el)).toBe("fill");
 
     // The pass finishes → LiveCanvas signals done → the label settles on "Outline"
     // and the control re-enables.
@@ -3040,5 +3701,344 @@ describe("SketchControls — render-mode toggle wiring (#219)", () => {
     expect(paramInput(el, "radius").value).toBe(radiusBefore);
     expect(historyCapture.atomic).toHaveLength(0);
     expect(historyCapture.transactionCommits).toHaveLength(0);
+  });
+});
+
+describe("SketchControls — background Outline session (#289)", () => {
+  it("creates a live coordinator after StrictMode rehearsal and disposes each lifetime", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(
+      <StrictMode>
+        <SketchControls sketch={sketchWith("a", {})} />
+      </StrictMode>,
+    );
+
+    expect(outlineJob.coordinators).toBe(2);
+    expect(outlineJob.disposals).toBe(1);
+    clickButton(el, "Fill");
+    expect(outlineJob.starts).toBe(1);
+    act(() => lastOnOutlineComputed?.());
+    expect(canvasRenderMode(el)).toBe("outline");
+    expect(el.textContent).not.toContain("Outline failed");
+
+    act(() => root!.unmount());
+    root = null;
+    expect(outlineJob.disposals).toBe(2);
+  });
+
+  it("cancels at edit begin, launches no preview jobs, and starts one final changed job", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", { radius: numberSpec({ default: 10 }) })}
+      />,
+    );
+    clickButton(el, "Fill");
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.active).not.toBeNull();
+
+    const radius = paramInput(el, "radius");
+    act(() => radius.focus());
+    setInput(radius, "42");
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.active).toBeNull();
+    expect(canvasRenderMode(el)).toBe("fill");
+    expect(
+      el
+        .querySelector('[data-testid="canvas-seed"]')
+        ?.getAttribute("data-render-state"),
+    ).toBe("fill-live");
+
+    act(() =>
+      radius.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      ),
+    );
+    expect(outlineJob.starts).toBe(2);
+    expect(canvasRenderMode(el)).toBe("fill");
+    act(() => lastOnOutlineComputed?.());
+    expect(canvasRenderMode(el)).toBe("outline");
+  });
+
+  it("reveals Cancel outline only after the 750ms quiet period and keeps ordinary actions usable", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    vi.useFakeTimers();
+    try {
+      clickButton(el, "Fill");
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(749));
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(1));
+      expect(el.textContent).toContain("Cancel outline");
+      expect(
+        [...el.querySelectorAll("button")].find((button) =>
+          button.textContent?.includes("Export PNG"),
+        )?.disabled,
+      ).toBe(false);
+      expect(
+        [...el.querySelectorAll("button")].find((button) =>
+          button.textContent?.includes("Export SVG"),
+        )?.disabled,
+      ).toBe(false);
+      expect(
+        [...el.querySelectorAll("button")].find((button) =>
+          button.textContent?.includes("Export Hidden-line SVG"),
+        )?.disabled,
+      ).toBe(true);
+      clickButton(el, "Cancel outline");
+      expect(el.textContent).not.toContain("Cancel outline");
+      expect(el.querySelector("progress")).toBeNull();
+      expect(
+        el.querySelector<HTMLButtonElement>(
+          'button[aria-label="Toggle outline render mode"]',
+        )?.textContent,
+      ).toBe("Fill");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not flash or delay the UI when Outline succeeds during the grace period", () => {
+    autoFireOutlineComputed = false;
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+      clickButton(el, "Fill");
+      act(() => lastOnOutlineComputed?.());
+      expect(canvasRenderMode(el)).toBe("outline");
+      expect(el.textContent).not.toContain("Cancel outline");
+
+      act(() => vi.advanceTimersByTime(750));
+      expect(el.textContent).not.toContain("Cancel outline");
+      expect(el.querySelector('progress[aria-label="Outline progress"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows native progress, integer percentage, and rolling ETA after reveal", () => {
+    autoFireOutlineComputed = false;
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+      clickButton(el, "Fill");
+      reportOutlineProgress(1, 4);
+      act(() => vi.advanceTimersByTime(750));
+
+      const progress = el.querySelector<HTMLProgressElement>(
+        'progress[aria-label="Outline progress"]',
+      )!;
+      expect(progress.value).toBe(1);
+      expect(progress.max).toBe(4);
+      expect(el.textContent).toContain("25%");
+      expect(el.textContent).toContain("Estimating time remaining…");
+      expect(
+        el
+          .querySelector('button[aria-label="Toggle outline render mode"]')
+          ?.getAttribute("aria-busy"),
+      ).toBe("true");
+
+      reportOutlineProgress(2, 4, {
+        kind: "remaining",
+        revision: 2,
+        remainingMs: 4_200,
+      });
+      expect(progress.value).toBe(2);
+      expect(progress.max).toBe(4);
+      expect(el.textContent).toContain("50%");
+      expect(el.textContent).toContain("5 seconds remaining");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("announces availability politely once without making every update a live status", () => {
+    autoFireOutlineComputed = false;
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+      clickButton(el, "Fill");
+      reportOutlineProgress(1, 3);
+      act(() => vi.advanceTimersByTime(750));
+
+      const statuses = el.querySelectorAll('[role="status"][aria-live="polite"]');
+      expect(statuses).toHaveLength(1);
+      expect(statuses[0]?.textContent).toContain("Outline processing");
+      expect(statuses[0]?.textContent).not.toContain("33%");
+      expect(statuses[0]?.textContent).not.toContain("Estimating");
+      expect(el.querySelector("progress")?.closest('[aria-live]')).toBeNull();
+
+      reportOutlineProgress(2, 3, {
+        kind: "remaining",
+        revision: 2,
+        remainingMs: 61_000,
+      });
+      expect(statuses[0]?.textContent).toContain("Outline processing");
+      expect(el.textContent).toContain("67%");
+      expect(el.textContent).toContain("2 minutes remaining");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("restarts the quiet period for replacements before and after reveal", () => {
+    autoFireOutlineComputed = false;
+    let randomValue = 0.1;
+    vi.spyOn(Math, "random").mockImplementation(() => {
+      randomValue += 0.1;
+      return randomValue;
+    });
+    const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+    vi.useFakeTimers();
+    try {
+      clickButton(el, "Fill");
+      expect(outlineJob.starts).toBe(1);
+      act(() => vi.advanceTimersByTime(749));
+      clickButton(el, "New seed");
+      expect(outlineJob.starts).toBe(2);
+      act(() => vi.advanceTimersByTime(1));
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(748));
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(1));
+      expect(el.textContent).toContain("Cancel outline");
+
+      clickButton(el, "New seed");
+      expect(outlineJob.starts).toBe(3);
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(749));
+      expect(el.textContent).not.toContain("Cancel outline");
+      act(() => vi.advanceTimersByTime(1));
+      expect(el.textContent).toContain("Cancel outline");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resets progress on replacement and ignores callbacks from the stale token", () => {
+    autoFireOutlineComputed = false;
+    let randomValue = 0.1;
+    vi.spyOn(Math, "random").mockImplementation(() => (randomValue += 0.1));
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+      clickButton(el, "Fill");
+      const staleObserver = outlineJob.active!.observeProgress!;
+      reportOutlineProgress(1, 4);
+      act(() => vi.advanceTimersByTime(750));
+      expect(el.textContent).toContain("25%");
+
+      clickButton(el, "New seed");
+      expect(el.textContent).not.toContain("25%");
+      act(() => {
+        staleObserver({
+          snapshot: {
+            completedWorkUnits: 3,
+            totalWorkUnits: 4,
+            terminal: false,
+          },
+          eta: { kind: "remaining", revision: 2, remainingMs: 1_000 },
+        });
+        vi.advanceTimersByTime(750);
+      });
+      expect(el.textContent).not.toContain("75%");
+
+      reportOutlineProgress(1, 2);
+      expect(el.textContent).toContain("50%");
+      expect(
+        el.querySelector<HTMLProgressElement>("progress")?.max,
+      ).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears revealed progress on success and keyed remount", () => {
+    autoFireOutlineComputed = false;
+    vi.useFakeTimers();
+    try {
+      const el = mount(
+        <SketchControls key="a" sketch={sketchWith("a", {})} />,
+      );
+      clickButton(el, "Fill");
+      reportOutlineProgress(1, 2);
+      act(() => vi.advanceTimersByTime(750));
+      expect(el.textContent).toContain("50%");
+
+      act(() => lastOnOutlineComputed?.());
+      expect(el.querySelector("progress")).toBeNull();
+      expect(
+        el
+          .querySelector('button[aria-label="Toggle outline render mode"]')
+          ?.getAttribute("aria-busy"),
+      ).toBe("false");
+
+      act(() => {
+        root!.render(
+          <SketchControls key="b" sketch={sketchWith("b", {})} />,
+        );
+      });
+      expect(el.querySelector("progress")).toBeNull();
+      expect(el.textContent).not.toContain("50%");
+      expect(
+        el
+          .querySelector('button[aria-label="Toggle outline render mode"]')
+          ?.getAttribute("aria-busy"),
+      ).toBe("false");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a sanitized recoverable failure while logging technical detail", () => {
+    autoFireOutlineComputed = false;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
+      clickButton(el, "Fill");
+      reportOutlineProgress(1, 2);
+      act(() => vi.advanceTimersByTime(750));
+      expect(el.querySelector("progress")).not.toBeNull();
+
+      const active = outlineJob.active!;
+      act(() => {
+        outlineJob.active = null;
+        active.resolve({
+          status: "failure",
+          jobId: 1,
+          error: "geometry\u0000 exploded",
+        });
+      });
+      expect(el.querySelector("progress")).toBeNull();
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+        "Outline failed: geometry  exploded",
+      );
+      const toggle = el.querySelector<HTMLButtonElement>(
+        'button[aria-label="Toggle outline render mode"]',
+      )!;
+      expect(toggle.textContent).toBe("Fill");
+      expect(toggle.disabled).toBe(false);
+      expect(consoleError).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports the full active interval and clears it on keyed unmount", () => {
+    autoFireOutlineComputed = false;
+    const changes: boolean[] = [];
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("a", {})}
+        onHiddenLineBusyChange={(busy) => changes.push(busy)}
+      />,
+    );
+    clickButton(el, "Fill");
+    expect(changes.at(-1)).toBe(true);
+    act(() => root!.unmount());
+    root = null;
+    expect(changes.at(-1)).toBe(false);
   });
 });
