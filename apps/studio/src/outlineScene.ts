@@ -1,4 +1,9 @@
-import { DEFAULT_STROKE, hiddenLinePass, type Scene } from "@harness/core";
+import {
+  DEFAULT_STROKE,
+  hiddenLinePass,
+  type HiddenLineObserver,
+  type Scene,
+} from "@harness/core";
 
 /**
  * The SINGLE preview == export seam (issue #220, feature #4).
@@ -33,8 +38,12 @@ export function outlineScene(
   scene: Scene,
   tolerance = 0,
   includeFrame = false,
+  observer?: HiddenLineObserver,
 ): Scene {
-  const outlined = hiddenLinePass(scene, { tolerance });
+  const outlined = hiddenLinePass(
+    scene,
+    observer === undefined ? { tolerance } : { tolerance, observer },
+  );
   if (!includeFrame) return outlined;
 
   const { width, height } = outlined.space;
