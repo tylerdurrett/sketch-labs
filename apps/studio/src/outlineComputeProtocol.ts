@@ -308,8 +308,10 @@ export function isOutlineComputeProgress(
   const total = value.snapshot.totalWorkUnits;
   const terminal = value.snapshot.terminal;
   return (
-    isFiniteNumber(completed) &&
-    isFiniteNumber(total) &&
+    typeof completed === "number" &&
+    Number.isSafeInteger(completed) &&
+    typeof total === "number" &&
+    Number.isSafeInteger(total) &&
     completed >= 0 &&
     total >= 0 &&
     completed <= total &&

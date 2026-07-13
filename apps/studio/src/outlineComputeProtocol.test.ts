@@ -211,6 +211,33 @@ describe("outline compute protocol guards", () => {
       type: "progress",
       jobId: 1,
       snapshot: {
+        completedWorkUnits: 0.5,
+        totalWorkUnits: 1,
+        terminal: false,
+      },
+    },
+    {
+      type: "progress",
+      jobId: 1,
+      snapshot: {
+        completedWorkUnits: 1,
+        totalWorkUnits: 1.5,
+        terminal: false,
+      },
+    },
+    {
+      type: "progress",
+      jobId: 1,
+      snapshot: {
+        completedWorkUnits: Number.MAX_SAFE_INTEGER + 1,
+        totalWorkUnits: Number.MAX_SAFE_INTEGER + 1,
+        terminal: true,
+      },
+    },
+    {
+      type: "progress",
+      jobId: 1,
+      snapshot: {
         completedWorkUnits: Number.NaN,
         totalWorkUnits: 1,
         terminal: false,
