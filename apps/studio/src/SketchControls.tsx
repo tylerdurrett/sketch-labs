@@ -52,7 +52,10 @@ import {
   type LiveCanvasRenderState,
   type RenderMode,
 } from "./LiveCanvas";
-import { HiddenLineCoordinator } from "./hiddenLineCoordinator";
+import {
+  HiddenLineCoordinator,
+  type HiddenLineProgressUpdate,
+} from "./hiddenLineCoordinator";
 import { createOutlineComputeIdentity } from "./outlineComputeProtocol";
 import {
   createOutlineSessionState,
@@ -68,6 +71,15 @@ import {
 import { PresetControls } from "./PresetControls";
 import { SeedControl } from "./SeedControl";
 import { SimplifyControl } from "./SimplifyControl";
+
+function formatOutlineEta(remainingMs: number): string {
+  const seconds = Math.max(1, Math.ceil(remainingMs / 1_000));
+  if (seconds < 60) {
+    return `${seconds} ${seconds === 1 ? "second" : "seconds"} remaining`;
+  }
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} ${minutes === 1 ? "minute" : "minutes"} remaining`;
+}
 
 /** Select the exact hidden-line export input, lazily falling back on a cache miss. */
 export function hiddenLineSceneForExport({
@@ -285,6 +297,10 @@ export function SketchControls({
   const [revealedOutlineToken, setRevealedOutlineToken] = useState<number | null>(
     null,
   );
+  const [outlineProgress, setOutlineProgress] = useState<{
+    readonly token: number;
+    readonly update: HiddenLineProgressUpdate;
+  } | null>(null);
 
   useEffect(() => {
     onHiddenLineBusyChangeRef.current?.(outlineBusy);
@@ -292,6 +308,7 @@ export function SketchControls({
 
   useEffect(() => {
     setRevealedOutlineToken(null);
+    setOutlineProgress(null);
     if (outlineWorkToken === null) return;
     const timer = window.setTimeout(
       () => setRevealedOutlineToken(outlineWorkToken),
@@ -484,7 +501,13 @@ export function SketchControls({
     const coordinator = coordinatorRef.current;
     if (coordinator === null) return;
     void coordinator
-      .start(identity)
+      .start(identity, (update) => {
+        // Worker callbacks can already be queued when a job is replaced. The
+        // session token, rather than coordinator/job identity alone, owns UI
+        // progress so an old worker can never repaint a newer request.
+        if (outlineSessionRef.current.active?.token !== capture.token) return;
+        setOutlineProgress({ token: capture.token, update });
+      })
       .then((result) => {
         if (coordinatorRef.current !== coordinator) return;
         if (result.status === "success") {
@@ -869,7 +892,10 @@ export function SketchControls({
           </Button>
         </div>
         {revealedOutlineToken === outlineWorkToken && outlineBusy ? (
-          <div role="status" aria-live="polite" className="text-sm text-muted-foreground">
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p role="status" aria-live="polite" className="sr-only">
+              Outline processing. Progress and cancellation controls are available.
+            </p>
             <Button
               type="button"
               variant="outline"
@@ -881,6 +907,44 @@ export function SketchControls({
             >
               Cancel outline
             </Button>
+            {outlineProgress?.token === outlineWorkToken ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <progress
+                    aria-label="Outline progress"
+                    className="min-w-0 flex-1"
+                    value={outlineProgress.update.snapshot.completedWorkUnits}
+                    max={outlineProgress.update.snapshot.totalWorkUnits}
+                  />
+                  <span className="shrink-0 tabular-nums">
+                    {outlineProgress.update.snapshot.totalWorkUnits === 0
+                      ? 100
+                      : Math.round(
+                          (outlineProgress.update.snapshot.completedWorkUnits /
+                            outlineProgress.update.snapshot.totalWorkUnits) *
+                            100,
+                        )}
+                    %
+                  </span>
+                </div>
+                <p>
+                  {outlineProgress.update.eta.kind === "estimating"
+                    ? "Estimating time remaining…"
+                    : formatOutlineEta(outlineProgress.update.eta.remainingMs)}
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <progress
+                    aria-label="Outline progress"
+                    className="min-w-0 flex-1"
+                  />
+                  <span className="shrink-0 tabular-nums">0%</span>
+                </div>
+                <p>Estimating time remaining…</p>
+              </>
+            )}
           </div>
         ) : null}
         {outlineSession.failure !== null ? (
