@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, useImperativeHandle, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import type { LiveCanvasHandle } from "./LiveCanvas";
 
 /**
  * Focus-retention coverage for the App-owned Sketch switcher (#165).
@@ -26,9 +27,53 @@ import { App } from "./App";
   true;
 
 vi.mock("./LiveCanvas", () => ({
-  LiveCanvas: ({ params }: { params: Readonly<Record<string, unknown>> }) => (
-    <div data-testid="canvas" data-params={JSON.stringify(params)} />
-  ),
+  LiveCanvas: ({
+    params,
+    handleRef,
+  }: {
+    params: Readonly<Record<string, unknown>>;
+    handleRef?: Ref<LiveCanvasHandle>;
+  }) => {
+    useImperativeHandle(handleRef, () => ({
+      getCanvas: () => null,
+      getCurrentT: () => 0,
+      getDisplayedScene: () => null,
+      captureDisplayedFrame: () => ({
+        scene: { space: { width: 100, height: 100 }, primitives: [] },
+        t: 0,
+        renderMode: "fill" as const,
+        tolerance: 0,
+        includeFrame: true,
+        inputRevision: 0,
+      }),
+    }));
+    return <div data-testid="canvas" data-params={JSON.stringify(params)} />;
+  },
+}));
+
+const exportJob = vi.hoisted(() => ({
+  resolve: null as null | ((result: {
+    status: "cancelled";
+    jobId: number;
+  }) => void),
+}));
+
+vi.mock("./hiddenLineCoordinator", () => ({
+  HiddenLineCoordinator: class {
+    startExport() {
+      return new Promise((resolve) => {
+        exportJob.resolve = resolve;
+      });
+    }
+    cancel() {
+      exportJob.resolve?.({ status: "cancelled", jobId: 1 });
+      exportJob.resolve = null;
+      return true;
+    }
+    dispose() {
+      this.cancel();
+    }
+  },
 }));
 
 let container: HTMLDivElement | null = null;
@@ -51,6 +96,7 @@ afterEach(() => {
   container = null;
   root = null;
   vi.clearAllMocks();
+  exportJob.resolve = null;
 });
 
 /** The switcher's trigger button, resolved fresh each call (it is remounted). */
@@ -217,6 +263,33 @@ describe("App — hidden-line navigation guard (#289)", () => {
     );
 
     act(() => outlineToggle.click());
+    expect(trigger().disabled).toBe(false);
+  });
+
+  it("guards navigation for an export while inspector collapse remains available", async () => {
+    mountApp();
+    const exportButton = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Export Hidden-line SVG",
+    ) as HTMLButtonElement;
+    act(() => exportButton.click());
+
+    expect(trigger().disabled).toBe(true);
+    const collapse = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Hide inspector"]',
+    )!;
+    expect(collapse.disabled).toBe(false);
+    act(() => collapse.click());
+    expect(document.querySelector("#inspector")?.hasAttribute("hidden")).toBe(
+      true,
+    );
+
+    const cancel = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Cancel export",
+    ) as HTMLButtonElement;
+    await act(async () => {
+      cancel.click();
+      await Promise.resolve();
+    });
     expect(trigger().disabled).toBe(false);
   });
 });

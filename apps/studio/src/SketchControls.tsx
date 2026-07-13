@@ -81,6 +81,10 @@ function formatOutlineEta(remainingMs: number): string {
   return `${minutes} ${minutes === 1 ? "minute" : "minutes"} remaining`;
 }
 
+function safeExportFailureDetail(detail: string): string {
+  return detail.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 160);
+}
+
 /** Preset params are flat schema values; preserve identity when reload is equal. */
 function sameParams(
   left: Readonly<Record<string, unknown>>,
@@ -273,6 +277,14 @@ export function SketchControls({
     readonly token: number;
     readonly update: HiddenLineProgressUpdate;
   } | null>(null);
+  const exportWorkToken = outlineSession.exportActive?.token ?? null;
+  const [revealedExportToken, setRevealedExportToken] = useState<number | null>(
+    null,
+  );
+  const [exportProgress, setExportProgress] = useState<{
+    readonly token: number;
+    readonly update: HiddenLineProgressUpdate;
+  } | null>(null);
 
   useEffect(() => {
     onHiddenLineBusyChangeRef.current?.(hiddenLineBusy);
@@ -288,6 +300,17 @@ export function SketchControls({
     );
     return () => window.clearTimeout(timer);
   }, [outlineWorkToken]);
+
+  useEffect(() => {
+    setRevealedExportToken(null);
+    setExportProgress(null);
+    if (exportWorkToken === null) return;
+    const timer = window.setTimeout(
+      () => setRevealedExportToken(exportWorkToken),
+      750,
+    );
+    return () => window.clearTimeout(timer);
+  }, [exportWorkToken]);
 
   useEffect(() => {
     // The coordinator's lifetime matches this effect, not the render-retained
@@ -716,6 +739,10 @@ export function SketchControls({
     if (active === null || active.snapshot !== snapshot) return;
     const coordinator = coordinatorRef.current;
     if (coordinator === null) {
+      console.error(
+        "Hidden-line export failed",
+        "Hidden-line export is unavailable",
+      );
       dispatchOutline({
         type: "export-failed",
         token: active.token,
@@ -726,11 +753,13 @@ export function SketchControls({
 
     void coordinator
       .startExport(snapshot, (update) => {
-        if (
-          update.phase === "finalizing" &&
-          outlineSessionRef.current.exportActive?.token === active.token
-        ) {
+        if (outlineSessionRef.current.exportActive?.token !== active.token) {
+          return;
+        }
+        if (update.phase === "finalizing") {
           dispatchOutline({ type: "export-finalizing", token: active.token });
+        } else {
+          setExportProgress({ token: active.token, update });
         }
       })
       .then((result) => {
@@ -753,12 +782,11 @@ export function SketchControls({
         } else if (result.status === "cancelled") {
           dispatchOutline({ type: "export-cancelled", token: active.token });
         } else {
+          console.error("Hidden-line export failed", result.error);
           dispatchOutline({
             type: "export-failed",
             token: active.token,
-            error: result.error
-              .replace(/[\u0000-\u001f\u007f]/g, " ")
-              .slice(0, 160),
+            error: safeExportFailureDetail(result.error),
           });
         }
       })
@@ -769,15 +797,22 @@ export function SketchControls({
         ) {
           return;
         }
+        const detail =
+          error instanceof Error ? error.message : "Hidden-line export failed";
+        console.error("Hidden-line export failed", detail);
         dispatchOutline({
           type: "export-failed",
           token: active.token,
-          error:
-            error instanceof Error
-              ? error.message.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 160)
-              : "Hidden-line export failed",
+          error: safeExportFailureDetail(detail),
         });
       });
+  };
+
+  const cancelExport = (): void => {
+    const active = outlineSessionRef.current.exportActive;
+    if (active === null) return;
+    cancelCoordinator();
+    dispatchOutline({ type: "export-cancelled", token: active.token });
   };
 
   // TWO-REGION SHELL (#154): the canvas region (left) fills the remaining space
@@ -1047,16 +1082,88 @@ export function SketchControls({
           >
             Export SVG
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="flex-1"
-            onClick={exportHiddenLineSvg}
-            disabled={hiddenLineBusy}
-          >
-            Export Hidden-line SVG
-          </Button>
+          <div className="basis-full space-y-2">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                onClick={exportHiddenLineSvg}
+                disabled={hiddenLineBusy}
+              >
+                Export Hidden-line SVG
+              </Button>
+              {exportBusy ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={cancelExport}
+                >
+                  Cancel export
+                </Button>
+              ) : null}
+            </div>
+            {revealedExportToken === exportWorkToken && exportBusy ? (
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p role="status" aria-live="polite" className="sr-only">
+                  Hidden-line export processing. Progress and cancellation
+                  controls are available.
+                </p>
+                {outlineSession.exportActive?.phase === "finalizing" ? (
+                  <p>Preparing SVG…</p>
+                ) : exportProgress?.token === exportWorkToken ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <progress
+                        aria-label="Hidden-line export progress"
+                        className="min-w-0 flex-1"
+                        value={exportProgress.update.snapshot.completedWorkUnits}
+                        max={exportProgress.update.snapshot.totalWorkUnits}
+                      />
+                      <span className="shrink-0 tabular-nums">
+                        {exportProgress.update.snapshot.totalWorkUnits === 0
+                          ? 100
+                          : Math.round(
+                              (exportProgress.update.snapshot.completedWorkUnits /
+                                exportProgress.update.snapshot.totalWorkUnits) *
+                                100,
+                            )}
+                        %
+                      </span>
+                    </div>
+                    <p>
+                      {exportProgress.update.eta.kind === "estimating"
+                        ? "Estimating time remaining…"
+                        : formatOutlineEta(
+                            exportProgress.update.eta.remainingMs,
+                          )}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <progress
+                        aria-label="Hidden-line export progress"
+                        className="min-w-0 flex-1"
+                      />
+                      <span className="shrink-0 tabular-nums">0%</span>
+                    </div>
+                    <p>Estimating time remaining…</p>
+                  </>
+                )}
+              </div>
+            ) : null}
+            {outlineSession.exportFailure !== null ? (
+              <p role="alert" className="text-sm text-destructive">
+                <strong>Export failed</strong>
+                {outlineSession.exportFailure === ""
+                  ? null
+                  : `: ${outlineSession.exportFailure}`}
+              </p>
+            ) : null}
+          </div>
         </div>
       </aside>
     </div>
