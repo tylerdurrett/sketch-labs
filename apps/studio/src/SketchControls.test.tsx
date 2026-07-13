@@ -30,6 +30,7 @@ import type {
   DisplayedSceneSnapshot,
   LiveCanvasHandle,
 } from "./LiveCanvas";
+import { mutableScene } from "./outlineComputeProtocol";
 import { outlineScene } from "./outlineScene";
 import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
@@ -69,6 +70,10 @@ const outlineJob = vi.hoisted(() => ({
   lastIdentity: null as import("./outlineComputeProtocol").OutlineComputeIdentity | null,
   lastCompletedScene: null as DisplayedSceneSnapshot["scene"] | null,
   exportStarts: 0,
+  exportDerivations: 0,
+  exportFinalizations: 0,
+  lastExportSnapshot:
+    null as import("./outlineComputeProtocol").HiddenLineExportSnapshot | null,
   exportMode: "success" as "success" | "pending" | "failure",
   pendingExport: null as null | {
     snapshot: import("./outlineComputeProtocol").HiddenLineExportSnapshot;
@@ -120,12 +125,21 @@ vi.mock("./hiddenLineCoordinator", () => ({
         return Promise.reject(new Error("Hidden-line coordinator is disposed"));
       }
       outlineJob.exportStarts += 1;
-      const processed = outlineScene(
-        snapshot.identity.sourceScene as unknown as Parameters<typeof outlineScene>[0],
-        snapshot.identity.tolerance,
-        snapshot.identity.includeFrame,
-      );
+      outlineJob.lastExportSnapshot = snapshot;
+      if (snapshot.reusableOutline === undefined) {
+        outlineJob.exportDerivations += 1;
+      }
+      const processed =
+        snapshot.reusableOutline === undefined
+          ? outlineScene(
+              snapshot.identity
+                .sourceScene as unknown as Parameters<typeof outlineScene>[0],
+              snapshot.identity.tolerance,
+              snapshot.identity.includeFrame,
+            )
+          : mutableScene(snapshot.reusableOutline.scene);
       const clipped = clipSceneToBounds(processed);
+      outlineJob.exportFinalizations += 1;
       const payload = {
         status: "success" as const,
         jobId: 1,
@@ -157,10 +171,18 @@ vi.mock("./hiddenLineCoordinator", () => ({
                 eta,
               }),
             finalize: () => observeProgress?.({ phase: "finalizing" }),
-            succeed: () => resolve(payload),
-            fail: (detail = "test failure") =>
-              resolve({ status: "failure", jobId: 1, error: detail }),
-            cancel: () => resolve({ status: "cancelled", jobId: 1 }),
+            succeed: () => {
+              outlineJob.pendingExport = null;
+              resolve(payload);
+            },
+            fail: (detail = "test failure") => {
+              outlineJob.pendingExport = null;
+              resolve({ status: "failure", jobId: 1, error: detail });
+            },
+            cancel: () => {
+              outlineJob.pendingExport = null;
+              resolve({ status: "cancelled", jobId: 1 });
+            },
           };
         });
       }
@@ -487,6 +509,9 @@ beforeEach(() => {
   outlineJob.disposals = 0;
   outlineJob.starts = 0;
   outlineJob.exportStarts = 0;
+  outlineJob.exportDerivations = 0;
+  outlineJob.exportFinalizations = 0;
+  outlineJob.lastExportSnapshot = null;
   outlineJob.exportMode = "success";
   outlineJob.pendingExport = null;
   outlineJob.active = null;
@@ -2798,6 +2823,56 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     );
   });
 
+  it("reuses a Fill-mode export cache, still finalizes, and derives after a static input mismatch", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const el = mount(<SketchControls sketch={hlStaticSketch("fill-cache")} />);
+    fakeDisplayedScene = {
+      scene: source,
+      t: 0,
+      renderMode: "fill",
+      tolerance: 0,
+      includeFrame: true,
+    };
+
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(1);
+    expect(outlineJob.exportFinalizations).toBe(1);
+
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(1);
+    expect(outlineJob.exportFinalizations).toBe(2);
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(outlineJob.lastExportSnapshot?.identity.sourceScene).toEqual(source);
+
+    setInput(paramInput(el, "radius"), "14");
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(2);
+    expect(outlineJob.exportFinalizations).toBe(3);
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeUndefined();
+  });
+
+  it("reuses an animated Fill frame only at the identical sampled time", () => {
+    const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+    const el = mount(<SketchControls sketch={hlTimedSketch("timed-cache")} />);
+    fakeDisplayedScene = {
+      scene: source,
+      t: 2.5,
+      renderMode: "fill",
+      tolerance: 0,
+      includeFrame: true,
+    };
+
+    clickButton(el, "Export Hidden-line SVG");
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(1);
+    expect(outlineJob.exportFinalizations).toBe(2);
+
+    fakeDisplayedScene = { ...fakeDisplayedScene, t: 2.75 };
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(2);
+    expect(outlineJob.exportFinalizations).toBe(3);
+  });
+
   it("falls back to exact cold generation when no displayed Scene is cached", () => {
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
     const base = hlStaticSketch("circles");
@@ -3185,6 +3260,45 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       value: 14,
     });
   });
+
+  it.each(["success", "cancel", "failure"] as const)(
+    "keeps a completed Outline displayed after export %s when no edit occurs",
+    async (terminal) => {
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
+      fakeFillCaptureScene = source;
+      const el = mount(
+        <SketchControls sketch={hlStaticSketch(`settle-${terminal}`)} />,
+      );
+      clickButton(el, "Fill");
+      expect(canvasRenderMode(el)).toBe("outline");
+      const previewStarts = outlineJob.starts;
+      fakeDisplayedScene = {
+        scene: outlineJob.lastCompletedScene!,
+        t: 0,
+        renderMode: "outline",
+        tolerance: 0,
+        includeFrame: true,
+      };
+      outlineJob.exportMode = "pending";
+
+      clickButton(el, "Export Hidden-line SVG");
+      expect(canvasRenderMode(el)).toBe("outline");
+      expect(outlineJob.starts).toBe(previewStarts);
+
+      if (terminal === "success") outlineJob.pendingExport!.succeed();
+      else if (terminal === "failure") outlineJob.pendingExport!.fail();
+      else clickButton(el, "Cancel export");
+      await flush();
+
+      expect(canvasRenderMode(el)).toBe("outline");
+      expect(outlineJob.starts).toBe(previewStarts);
+      expect(outlineJob.pendingExport).toBeNull();
+      consoleError.mockRestore();
+    },
+  );
 
   it("keeps export status quiet through 749ms, then shows derivation progress and ETA", () => {
     outlineJob.exportMode = "pending";

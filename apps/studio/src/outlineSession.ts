@@ -172,6 +172,9 @@ function finishExport(
   if (settled.desired !== "outline") {
     return { ...settled, deferredOutline: null };
   }
+  if (settled.deferredOutline === null) {
+    return settled;
+  }
   if (settled.transactionOpen) {
     return deferOutline(settled);
   }
@@ -210,9 +213,11 @@ export function outlineSessionReducer(
     case "request-export": {
       if (state.slot !== null) return state;
       const token = state.nextExportToken;
+      const preservesCompletedOutline =
+        state.desired === "outline" && state.phase.kind === "outline";
       return {
         ...state,
-        phase: { kind: "fill-live" },
+        phase: preservesCompletedOutline ? state.phase : { kind: "fill-live" },
         nextExportToken: token + 1,
         capture: null,
         active: null,
@@ -224,7 +229,7 @@ export function outlineSessionReducer(
         },
         exportFailure: null,
         deferredOutline:
-          state.desired === "outline"
+          state.desired === "outline" && !preservesCompletedOutline
             ? { inputRevision: state.inputRevision }
             : null,
       };

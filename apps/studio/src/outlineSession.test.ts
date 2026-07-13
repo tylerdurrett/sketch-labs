@@ -340,6 +340,93 @@ describe("outlineSessionReducer", () => {
     });
   });
 
+  it.each([
+    ["success", "export-succeeded"],
+    ["cancel", "export-cancelled"],
+    ["failure", "export-failed"],
+  ] as const)(
+    "preserves a displayed completed Outline after export %s without another capture",
+    (_label, terminal) => {
+      const complete = completedSession();
+      const exporting = outlineSessionReducer(complete, {
+        type: "request-export",
+        snapshot: exportSnapshot(),
+      });
+
+      expect(exporting.phase).toBe(complete.phase);
+      expect(exporting.deferredOutline).toBeNull();
+
+      const settled = outlineSessionReducer(
+        exporting,
+        terminal === "export-succeeded"
+          ? {
+              type: terminal,
+              token: exporting.exportActive!.token,
+              completedOutline: { identity: identity(), scene: outline },
+            }
+          : terminal === "export-failed"
+            ? {
+                type: terminal,
+                token: exporting.exportActive!.token,
+                error: "safe detail",
+              }
+            : { type: terminal, token: exporting.exportActive!.token },
+      );
+
+      expect(settled.phase).toBe(complete.phase);
+      expect(settled.capture).toBeNull();
+      expect(settled.deferredOutline).toBeNull();
+      expect(settled.slot).toBeNull();
+    },
+  );
+
+  it.each([
+    ["success", "export-succeeded"],
+    ["cancel", "export-cancelled"],
+    ["failure", "export-failed"],
+  ] as const)(
+    "releases exactly one latest invalidated Outline after export %s",
+    (_label, terminal) => {
+      const exporting = outlineSessionReducer(completedSession(), {
+        type: "request-export",
+        snapshot: exportSnapshot(),
+      });
+      const firstEdit = outlineSessionReducer(exporting, {
+        type: "inputs-changed",
+        launch: true,
+      });
+      const latestEdit = outlineSessionReducer(firstEdit, {
+        type: "inputs-changed",
+        launch: true,
+      });
+      const nextTokenBeforeSettlement = latestEdit.nextToken;
+
+      const settled = outlineSessionReducer(
+        latestEdit,
+        terminal === "export-succeeded"
+          ? {
+              type: terminal,
+              token: exporting.exportActive!.token,
+              completedOutline: { identity: identity(), scene: outline },
+            }
+          : terminal === "export-failed"
+            ? {
+                type: terminal,
+                token: exporting.exportActive!.token,
+                error: "safe detail",
+              }
+            : { type: terminal, token: exporting.exportActive!.token },
+      );
+
+      expect(settled.capture).toEqual({
+        token: nextTokenBeforeSettlement,
+        inputRevision: latestEdit.inputRevision,
+      });
+      expect(settled.nextToken).toBe(nextTokenBeforeSettlement + 1);
+      expect(settled.deferredOutline).toBeNull();
+    },
+  );
+
   it("preserves the sole completed cache on export cancel/failure and ignores stale settlement", () => {
     const complete = completedSession();
     const exporting = outlineSessionReducer(complete, {
@@ -360,7 +447,7 @@ describe("outlineSessionReducer", () => {
     });
     expect(failed.cache).toBe(complete.cache);
     expect(failed.exportFailure).toBe("safe detail");
-    expect(failed.capture?.inputRevision).toBe(failed.inputRevision);
+    expect(failed.capture).toBeNull();
 
     const fillExport = outlineSessionReducer(
       outlineSessionReducer(failed, { type: "request-fill" }),

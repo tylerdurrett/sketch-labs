@@ -722,14 +722,12 @@ export function SketchControls({
       metadata,
       includePaperMargins,
       filename,
-      ...(displayed.renderMode === "outline" &&
-      cachedOutline !== null &&
-      displayed.scene === cachedOutline.scene &&
+      ...(cachedOutline !== null &&
       outlineComputeIdentitiesEqual(identity, cachedOutline.identity)
         ? {
             reusableOutline: {
               identity: cachedOutline.identity,
-              scene: displayed.scene,
+              scene: cachedOutline.scene,
             },
           }
         : {}),
