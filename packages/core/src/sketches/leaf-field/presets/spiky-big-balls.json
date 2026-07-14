@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "sketch": "leaf-field",
+  "name": "spiky-big-balls",
+  "seed": 2560415341646168,
+  "params": {
+    "fieldPhase": 0.06297522558962143,
+    "fieldScale": 1.8080483494194692,
+    "turbulence": 1.8262778659297179,
+    "octaves": 2,
+    "density": 65.52395433298508,
+    "leafScale": 347.19445689880587,
+    "leafSizeVariance": 30.090638461399234,
+    "leafSlenderness": 4.886486997901129,
+    "leafSlendernessVariance": 0.49396971403245105,
+    "variation": 0.1125286398168488,
+    "sphereCount": 3,
+    "sphereRadiusMin": 235.98915956655455,
+    "sphereRadiusMax": 209.65923836693304,
+    "sphereDepth": 0.6307009812752584,
+    "backgroundColor": "#ffffff",
+    "discColor": "#ffffff",
+    "discStrokeColor": "#000000",
+    "leafColor": "#ffffff",
+    "leafStrokeColor": "#000000"
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "sketch": "leaf-field",
+  "name": "fur",
+  "seed": 2560415341646168,
+  "params": {
+    "fieldPhase": 0.12890045247929305,
+    "fieldScale": 0.05411200188651247,
+    "turbulence": 1.9750222158288941,
+    "octaves": 4,
+    "density": 25.426630063357834,
+    "leafScale": 219.54560030824837,
+    "leafSizeVariance": 19.791099330161053,
+    "leafSlenderness": 4.776554169692793,
+    "leafSlendernessVariance": 2.568240252400792,
+    "variation": 0.47045067895995607,
+    "sphereCount": 17,
+    "sphereRadiusMin": 263.5488551350966,
+    "sphereRadiusMax": 110.75734999179798,
+    "sphereDepth": 0.462,
+    "backgroundColor": "#ffffff",
+    "discColor": "#ffffff",
+    "discStrokeColor": "#000000",
+    "leafColor": "#ffffff",
+    "leafStrokeColor": "#000000"
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true
+  }
+}
