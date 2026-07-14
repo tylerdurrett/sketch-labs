@@ -31,3 +31,11 @@ describe("full-sheet preview geometry CSS", () => {
     expect(drawable).toMatch(/left:\s*var\(--plot-inset-left/);
   });
 });
+
+describe("viewport scroll ownership", () => {
+  it("contains absolutely positioned inspector content inside its scrollport", () => {
+    const inspector = declarations(".inspector");
+
+    expect(inspector).toMatch(/position:\s*relative/);
+  });
+});

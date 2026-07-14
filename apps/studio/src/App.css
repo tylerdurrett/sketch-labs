@@ -110,6 +110,8 @@
  * vertically on overflow, independent of the canvas region.
  */
 .inspector {
+  /* Keep absolute `sr-only` descendants inside this scrollport. */
+  position: relative;
   flex: 0 0 320px;
   width: 320px;
   height: 100%;
