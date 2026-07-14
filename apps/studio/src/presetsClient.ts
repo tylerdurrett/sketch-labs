@@ -22,29 +22,6 @@ const API_PREFIX = "/__api/presets";
 const STATIC_PREFIX = "/sketches";
 
 /**
- * Lowercase-slug rule, MIRRORED from the dev middleware's `isValidName` (#62):
- * alphanumeric start, then alphanumeric / hyphen / underscore. Mirrored rather
- * than imported because that copy lives in `presetsPlugin.ts`, a Node-importing
- * module (`node:fs/promises`) that cannot be pulled into the browser bundle.
- * Core does not export it.
- */
-const SAFE_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
-
-/** Max length of a sketch id / preset name, matching the middleware (#62). */
-const MAX_NAME_LENGTH = 100;
-
-/**
- * Validate a preset name as a filesystem-safe slug — the inline-validation rule
- * the studio's name field enforces. NO silent slugify: an invalid name is
- * rejected, never rewritten. Same rule the write endpoint re-checks server-side.
- */
-export function isValidName(name: string): boolean {
-  return (
-    name.length > 0 && name.length <= MAX_NAME_LENGTH && SAFE_NAME_RE.test(name)
-  );
-}
-
-/**
  * List a sketch's saved Preset names, sorted (the middleware sorts).
  *
  * `GET /__api/presets/{id}` → `string[]`. A sketch that has never been saved

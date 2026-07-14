@@ -417,8 +417,6 @@ const listPresets = vi.fn<[string], Promise<string[]>>();
 const loadPreset = vi.fn<[string, string], Promise<Preset>>();
 const savePreset = vi.fn<[Preset], Promise<void>>();
 vi.mock("./presetsClient", () => ({
-  // isValidName must stay REAL so the name field validates as in production.
-  isValidName: (name: string) => /^[a-z0-9][a-z0-9_-]*$/.test(name),
   listPresets: (id: string) => listPresets(id),
   loadPreset: (id: string, name: string) => loadPreset(id, name),
   savePreset: (preset: Preset) => savePreset(preset),
@@ -1868,14 +1866,14 @@ describe("SketchControls — preset save/reload wiring", () => {
 
     setInput(
       el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
-      "Not A Slug",
+      "bad/name",
     );
     // Inline hint shown; Save is disabled and clicking it is a no-op. The hint
     // is the only alert in this invalid-name scenario (no error <p> renders), so
     // a class-independent role + hint-text match pins it.
     const hint = el.querySelector('p[role="alert"]');
     expect(hint).not.toBeNull();
-    expect(hint?.textContent).toContain("Name must be a lowercase slug");
+    expect(hint?.textContent).toContain("use only a-z");
     const save = [...el.querySelectorAll("button")].find(
       (b) => b.textContent === "Save",
     ) as HTMLButtonElement;
