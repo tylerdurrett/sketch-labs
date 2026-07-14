@@ -60,7 +60,6 @@ const presetClient = vi.hoisted(() => ({
 }));
 
 vi.mock("./presetsClient", () => ({
-  isValidName: (name: string) => /^[a-z0-9][a-z0-9_-]*$/.test(name),
   listPresets: () => presetClient.list(),
   loadPreset: (sketchId: string, name: string) =>
     presetClient.load(sketchId, name),

@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { makePreset, type Preset } from "@harness/core";
 
 import {
-  isValidName,
   listPresets,
   loadPreset,
   savePreset,
@@ -48,17 +47,6 @@ function samplePreset(name: string): Preset {
     new Set(["count"]),
   );
 }
-
-describe("presetsClient — isValidName", () => {
-  it("mirrors the lowercase-slug rule", () => {
-    expect(isValidName("warm-1")).toBe(true);
-    expect(isValidName("a_b")).toBe(true);
-    expect(isValidName("Warm")).toBe(false);
-    expect(isValidName("../escape")).toBe(false);
-    expect(isValidName("has space")).toBe(false);
-    expect(isValidName("")).toBe(false);
-  });
-});
 
 describe("presetsClient — listPresets", () => {
   it("GETs the dev list route and returns the sorted names", async () => {

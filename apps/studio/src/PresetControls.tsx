@@ -10,11 +10,12 @@ import {
 
 import { Button } from "./components/ui/button";
 import {
-  isValidName,
-  listPresets,
-  loadPreset,
-  savePreset,
-} from "./presetsClient";
+  isValidPresetName,
+  MAX_PRESET_NAME_LENGTH,
+  updatePresetNameDraft,
+  type PresetNameDraft,
+} from "./presetName";
+import { listPresets, loadPreset, savePreset } from "./presetsClient";
 
 /**
  * Props for {@link PresetControls}.
@@ -54,9 +55,10 @@ export interface PresetControlsProps {
  * a preset picker + Reload button driven by the sketch's saved-name list.
  *
  * SAVE builds the record from the live state (`makePreset`), POSTs it via the
- * client, and refreshes the list so the new name appears. An INVALID name is
- * rejected inline (no silent slugify); a name already in the fetched list
- * prompts confirm-before-overwrite.
+ * client, and refreshes the list so the new name appears. ASCII uppercase and
+ * whitespace are normalized visibly while unsupported characters remain for
+ * inline validation; a name already in the fetched list prompts
+ * confirm-before-overwrite.
  *
  * RELOAD reads the chosen preset as a static file and hands it to {@link
  * onReload} — the owner does the schema-authoritative reconcile + hydration.
@@ -72,7 +74,10 @@ export function PresetControls({
   profile,
   onReload,
 }: PresetControlsProps) {
-  const [name, setName] = useState("");
+  const [nameDraft, setNameDraft] = useState<PresetNameDraft>({
+    value: "",
+    whitespaceRunEnds: [],
+  });
   const [names, setNames] = useState<string[]>([]);
   const [selected, setSelected] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +92,8 @@ export function PresetControls({
 
   useEffect(refreshNames, [sketchId]);
 
-  const nameValid = isValidName(name);
+  const name = nameDraft.value;
+  const nameValid = isValidPresetName(name);
 
   const onSave = () => {
     if (!nameValid) return;
@@ -125,7 +131,12 @@ export function PresetControls({
           placeholder="preset name"
           aria-label="preset name"
           value={name}
-          onChange={(event) => setName(event.target.value)}
+          onChange={(event) => {
+            const browserValue = event.target.value;
+            setNameDraft((draft) =>
+              updatePresetNameDraft(draft, browserValue),
+            );
+          }}
         />
         <Button
           type="button"
@@ -142,8 +153,8 @@ export function PresetControls({
           className="m-0 text-sm text-muted-foreground"
           role="alert"
         >
-          Name must be a lowercase slug: a-z, 0-9, hyphen or underscore (no
-          spaces or uppercase).
+          Name must start with a-z or 0-9, be at most {MAX_PRESET_NAME_LENGTH}
+          characters, and use only a-z, 0-9, hyphen, or underscore.
         </p>
       )}
       <div className="flex items-center gap-2">

@@ -9,7 +9,6 @@ import type { Preset } from "@harness/core";
 import {
   handlePresetRequest,
   handleStaticRequest,
-  isValidName,
 } from "./presetsPlugin";
 
 /**
@@ -223,10 +222,20 @@ describe("presetsPlugin handlers", () => {
     expect(res.headersSent).toBe(false);
   });
 
-  it("isValidName enforces the lowercase-slug rule", () => {
-    expect(isValidName("warm-1")).toBe(true);
-    expect(isValidName("Warm")).toBe(false);
-    expect(isValidName("../escape")).toBe(false);
-    expect(isValidName("")).toBe(false);
+  it("rejects overlong sketch ids and preset names at the server boundary", async () => {
+    const maxLengthName = "a".repeat(100);
+    const accepted = await post(root, SKETCH, samplePreset(maxLengthName));
+    expect(accepted.status).toBe(200);
+
+    const overlongName = "a".repeat(101);
+    const rejectedName = await post(
+      root,
+      SKETCH,
+      samplePreset(overlongName),
+    );
+    expect(rejectedName.status).toBe(400);
+
+    const rejectedSketch = await list(root, overlongName);
+    expect(rejectedSketch.status).toBe(400);
   });
 });

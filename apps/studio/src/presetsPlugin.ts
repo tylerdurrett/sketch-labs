@@ -32,6 +32,8 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import type { Connect, Plugin } from "vite";
 
+import { isValidPresetName } from "./presetName";
+
 /** URL prefix all preset middleware routes live under. */
 const API_PREFIX = "/__api/presets/";
 
@@ -45,26 +47,8 @@ const STATIC_PREFIX = "/sketches/";
 /** Cap on request body size (1 MB) to prevent abuse. */
 const MAX_BODY_BYTES = 1_048_576;
 
-/** Cap on a sketch id / preset name length. */
-const MAX_NAME_LENGTH = 100;
-
-/**
- * Lowercase-slug rule: alphanumeric start, then alphanumeric / hyphen /
- * underscore. Forbidding dots, slashes, and backslashes prevents path
- * traversal. This is the same rule CONTEXT.md/#8 pin on a Preset's
- * `name`/filename stem and on a sketch id.
- */
-const SAFE_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
-
 /** Reused for Content-Length byte counts (node-free, no `Buffer`). */
 const utf8 = new TextEncoder();
-
-/** Validate a sketch id or preset name for safe filesystem use. */
-export function isValidName(name: string): boolean {
-  return (
-    name.length > 0 && name.length <= MAX_NAME_LENGTH && SAFE_NAME_RE.test(name)
-  );
-}
 
 /** The `res` half of a Connect middleware — node's `http.ServerResponse`. */
 type ServerResponse = Parameters<Connect.SimpleHandleFunction>[1];
@@ -185,7 +169,7 @@ async function handleWrite(
   }
 
   const name = (parsed as { name?: unknown }).name;
-  if (typeof name !== "string" || !isValidName(name)) {
+  if (typeof name !== "string" || !isValidPresetName(name)) {
     sendError(res, 400, "Invalid preset name");
     return;
   }
@@ -226,7 +210,7 @@ export async function handlePresetRequest(
   }
 
   const id = segments[0] ?? "";
-  if (!isValidName(id)) {
+  if (!isValidPresetName(id)) {
     sendError(res, 400, "Invalid sketch id");
     return;
   }
@@ -328,7 +312,11 @@ export async function handleStaticRequest(
     return;
   }
   const name = file.slice(0, -".json".length);
-  if (id === undefined || !isValidName(id) || !isValidName(name)) {
+  if (
+    id === undefined ||
+    !isValidPresetName(id) ||
+    !isValidPresetName(name)
+  ) {
     next();
     return;
   }
