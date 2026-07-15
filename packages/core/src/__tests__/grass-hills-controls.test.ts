@@ -71,6 +71,38 @@ function midpointBendRatio({ points }: Primitive): number {
   return (midpointX - rootX) / (tipX - rootX)
 }
 
+function shapeInvariants(scene: Scene): number[][] {
+  const projection = {
+    frame: FRAME,
+    horizonHeight: BASE_PARAMS.horizonHeight,
+    depthFalloff: BASE_PARAMS.depthFalloff,
+  }
+
+  return blades(scene)
+    .map((primitive) => {
+      const length = bladeLength(primitive)
+      const root = primitive.points[0]!
+      const tip = primitive.points[16]!
+      return [
+        length / grassScaleAtY(root[1], projection),
+        bladeWidth(primitive) / length,
+        (tip[0] - root[0]) / length,
+        midpointBendRatio(primitive),
+      ].map((value) => Number(value.toFixed(8)))
+    })
+    .sort((a, b) => {
+      for (let index = 0; index < a.length; index++) {
+        const difference = a[index]! - b[index]!
+        if (difference !== 0) return difference
+      }
+      return 0
+    })
+}
+
+function invariantValues(invariants: number[][], index: number): number[] {
+  return invariants.map((values) => values[index]!).sort((a, b) => a - b)
+}
+
 describe('grass-hills control sensitivity', () => {
   it('uses bladeDensity to change rendered root count, identity, and placement', () => {
     const sparse = render({ bladeDensity: 0.25 })
@@ -185,12 +217,15 @@ describe('grass-hills control sensitivity', () => {
 
 describe('grass-hills control workflow contracts', () => {
   it('randomizes every unlocked Grass/Wind number, honors locks and integer rules, and skips colors', () => {
-    const locks = new Set(['depthFalloff'])
+    const locks = new Set(['depthFalloff', 'bladeLength'])
     const randomized = randomize(grassHills.schema, BASE_PARAMS, locks, () => 0.37)
 
     for (const key of [
+      'horizonHeight',
+      'ridgeScale',
+      'ridgeAmplitude',
+      'terrainDrift',
       'bladeDensity',
-      'bladeLength',
       'bladeLengthVariance',
       'bladeWidth',
       'stiffnessVariance',
@@ -200,6 +235,7 @@ describe('grass-hills control workflow contracts', () => {
       expect(randomized[key]).toBe(spec.min + 0.37 * (spec.max - spec.min))
     }
     expect(randomized.depthFalloff).toBe(BASE_PARAMS.depthFalloff)
+    expect(randomized.bladeLength).toBe(BASE_PARAMS.bladeLength)
     expect(randomized.hillCount).toBe(
       Math.round(
         grassHills.schema.hillCount.min +
@@ -228,14 +264,23 @@ describe('grass-hills control workflow contracts', () => {
     expect(pathMetadata(render({ [key]: color }))).toEqual(pathMetadata(render()))
   })
 
-  it('re-seeding changes both roots and root-relative blade variation', () => {
-    const first = render({}, 'seed-a')
-    const reseeded = render({}, 'seed-b')
+  it('re-seeding changes both roots and root-keyed blade variation', () => {
+    const liveVariation = {
+      bladeLengthVariance: 12,
+      stiffnessVariance: 1,
+      windLean: 0.7,
+    }
+    const first = render(liveVariation, 'seed-a')
+    const reseeded = render(liveVariation, 'seed-b')
+    const firstInvariants = shapeInvariants(first)
+    const reseededInvariants = shapeInvariants(reseeded)
 
     expect(roots(reseeded)).not.toEqual(roots(first))
-    expect(relativeBladeGeometry(reseeded)).not.toEqual(
-      relativeBladeGeometry(first),
-    )
+    for (let invariant = 0; invariant < 4; invariant++) {
+      expect(invariantValues(reseededInvariants, invariant)).not.toEqual(
+        invariantValues(firstInvariants, invariant),
+      )
+    }
   })
 
   it('keeps warm, cold, and arbitrary-t static generation equal', () => {
