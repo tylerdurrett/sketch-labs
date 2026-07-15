@@ -13,6 +13,8 @@ import { benchmarkCandidate as stratified7 } from './exact-stratified-7.js'
 import { HISTORICAL_BASELINE } from './fixtures.js'
 
 const BASE_PAYLOAD = HISTORICAL_BASELINE.payload
+const CURRENT_RIDGE_POINTS = 134
+const CURRENT_BASELINE_POINTS = 14_540
 
 function payload({ hillCount = 1, bladeCount = 24 } = {}) {
   return {
@@ -192,6 +194,55 @@ describe('Grass Hills exact filled-blade candidates', () => {
     },
   )
 
+  it('matches the current 33-point baseline inventory and authored styles', () => {
+    const result = sampleExactComposition(
+      prepare('poisson', 'detailed-33', {
+        hillCount: 10,
+        bladeCount: 400,
+      }),
+      BASE_PAYLOAD.t,
+    )
+    const blades = result.scene.primitives.filter(
+      (primitive) => primitive.closed === true,
+    )
+    const hills = result.scene.primitives.filter(
+      (primitive) => primitive.closed !== true,
+    )
+    const pointCount = result.scene.primitives.reduce(
+      (count, primitive) => count + primitive.points.length,
+      0,
+    )
+
+    expect(result.scene.background).toEqual({
+      color: BASE_PAYLOAD.params.backgroundColor,
+    })
+    expect(hills).toHaveLength(10)
+    expect(blades).toHaveLength(400)
+    expect(result.scene.primitives).toHaveLength(410)
+    expect(
+      hills.every((hill) => hill.points.length === CURRENT_RIDGE_POINTS),
+    ).toBe(true)
+    expect(
+      hills.every(
+        (hill) =>
+          hill.fill?.color === BASE_PAYLOAD.params.hillColor &&
+          hill.stroke?.color === BASE_PAYLOAD.params.hillStrokeColor &&
+          hill.stroke?.width === 2,
+      ),
+    ).toBe(true)
+    expect(
+      blades.every(
+        (blade) =>
+          blade.points.length === 33 &&
+          blade.fill?.color === BASE_PAYLOAD.params.bladeColor &&
+          blade.stroke?.color === BASE_PAYLOAD.params.bladeStrokeColor &&
+          blade.stroke?.width === 2,
+      ),
+    ).toBe(true)
+    expect(pointCount).toBe(10 * CURRENT_RIDGE_POINTS + 400 * 33)
+    expect(pointCount).toBe(CURRENT_BASELINE_POINTS)
+  })
+
   it('exposes all four candidates through the common M2 protocol interface', () => {
     const candidates = [poisson33, poisson7, stratified33, stratified7]
     expect(candidates.map((candidate) => candidate.id)).toEqual([
@@ -216,7 +267,10 @@ describe('Grass Hills exact filled-blade candidates', () => {
     expect(
       stratified7.inspect({ value: sampled, payload: fixture }),
     ).toMatchObject({
-      inventory: { primitiveCount: 9, pointCount: 8 * 7 + 262 },
+      inventory: {
+        primitiveCount: 9,
+        pointCount: 8 * 7 + CURRENT_RIDGE_POINTS,
+      },
       rootCount: 8,
       identity: {
         rootStrategy: 'stratified',

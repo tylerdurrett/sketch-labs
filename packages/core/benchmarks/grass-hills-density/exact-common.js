@@ -13,9 +13,9 @@ import { sceneInventory } from './metrics.js'
 const CANONICAL_ROOT_CAPACITY = 10_000
 const POISSON_RADIUS = 0.0065
 const STRATIFIED_SIDE = 100
-const RIDGE_SAMPLES = 256
-const HILL_STROKE_WIDTH = 1.5
-const BLADE_STROKE_WIDTH = 1
+const RIDGE_SAMPLES = 128
+const HILL_STROKE_WIDTH = 2
+const BLADE_STROKE_WIDTH = 2
 
 export const EXACT_ROOT_STRATEGIES = Object.freeze(['poisson', 'stratified'])
 export const EXACT_BLADE_GEOMETRIES = Object.freeze(['detailed-33', 'simple-7'])
