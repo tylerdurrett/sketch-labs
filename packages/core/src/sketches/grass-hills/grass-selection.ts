@@ -37,7 +37,7 @@ export function bladeCountForDensity(bladeDensity: number): number {
 }
 
 /**
- * Apportion the full-composition count by continuous inverse-scale depth
+ * Apportion the full-composition count by continuous inverse-scale-squared depth
  * weight.
  *
  * Sequential highest averages (D'Hondt) is deliberate. It emits an exact total
@@ -54,11 +54,7 @@ export function allocateGrassRootCounts(
     return Object.freeze(depths.map(() => 0))
   }
 
-  // A hill band's physical height already contracts with perspective. One
-  // inverse-scale factor keeps normalized horizontal spacing continuous across
-  // adjacent bands; projectGrassRoot supplies the second, continuous factor
-  // inside each physical mask through its pinned 1 / scale^2 inverse CDF.
-  const weights = depths.map((depth) => 1 / canonicalScale(depth))
+  const weights = depths.map((depth) => 1 / canonicalScale(depth) ** 2)
   const counts = depths.map(() => 0)
 
   for (let awarded = 0; awarded < targetCount; awarded++) {

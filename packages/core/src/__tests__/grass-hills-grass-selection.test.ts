@@ -46,12 +46,12 @@ describe('grass-hills composition density mapping', () => {
     )
 
     expect(counts).toEqual([
-      1_903, 1_502, 1_241, 1_057, 921, 815, 732, 663, 607, 559,
+      3_094, 1_928, 1_316, 955, 724, 568, 457, 376, 315, 267,
     ])
     expect(counts.reduce((sum, count) => sum + count, 0)).toBe(10_000)
     expect(counts[0]! / counts.at(-1)!).toBeCloseTo(
-      (1 / canonicalScale(bands[0]!.depth)) /
-        (1 / canonicalScale(bands.at(-1)!.depth)),
+      (1 / canonicalScale(bands[0]!.depth) ** 2) /
+        (1 / canonicalScale(bands.at(-1)!.depth) ** 2),
       1,
     )
   })

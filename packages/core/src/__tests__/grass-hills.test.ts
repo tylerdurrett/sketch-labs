@@ -747,9 +747,9 @@ describe('grass-hills hidden-line workload inventory', () => {
     expect(analyzeHiddenLineWorkload(bounded)).toEqual({
       filledPrimitiveCount: 30,
       sourceSegmentCount: 1_970,
-      overlappingPairCount: 135,
-      estimatedSegmentEdgeComparisons: 1_196_293,
-      totalWorkUnits: 1_206_573,
+      overlappingPairCount: 102,
+      estimatedSegmentEdgeComparisons: 1_051_557,
+      totalWorkUnits: 1_061_309,
     })
   })
 

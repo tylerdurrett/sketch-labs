@@ -52,6 +52,26 @@ describe('grass-hills stable-cell canonical roots', () => {
     )
   })
 
+  it('spreads a low priority prefix across the canonical hill', () => {
+    const prefix = scatterGrassRoots({
+      seed: 'low-prefix-coverage',
+      hillKey: '9/10',
+    }).slice(0, 40)
+
+    expect(Math.max(...prefix.map(({ u }) => u))).toBeGreaterThan(0.85)
+    expect(Math.min(...prefix.map(({ u }) => u))).toBeLessThan(0.15)
+    expect(Math.max(...prefix.map(({ v }) => v))).toBeGreaterThan(0.85)
+    expect(Math.min(...prefix.map(({ v }) => v))).toBeLessThan(0.15)
+    for (const [uSide, vSide] of [
+      [(u: number) => u < 0.5, (v: number) => v < 0.5],
+      [(u: number) => u >= 0.5, (v: number) => v < 0.5],
+      [(u: number) => u < 0.5, (v: number) => v >= 0.5],
+      [(u: number) => u >= 0.5, (v: number) => v >= 0.5],
+    ] as const) {
+      expect(prefix.some(({ u, v }) => uSide(u) && vSide(v))).toBe(true)
+    }
+  })
+
   it('prepares the full canonical bank in linear generation plus one sort', () => {
     const started = performance.now()
     const roots = scatterGrassRoots({ seed: 'performance', hillKey: '9/10' })

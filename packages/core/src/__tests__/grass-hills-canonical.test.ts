@@ -388,7 +388,9 @@ describe('grass-hills continuous perspective acceptance', () => {
 
           expect(evaluated).toBeGreaterThanOrEqual(hillCount)
           expect(ratio).toBeGreaterThanOrEqual(0.75)
-          expect(ratio).toBeLessThanOrEqual(1.33)
+          // The adopted inverse-square inter-hill allocation deliberately
+          // concentrates more roots in distant bands than the retired cap.
+          expect(ratio).toBeLessThanOrEqual(1.5)
         }
       }
     }
