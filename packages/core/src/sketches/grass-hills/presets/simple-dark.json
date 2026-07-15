@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "sketch": "grass-hills",
+  "name": "simple-dark",
+  "seed": 6889123681891199,
+  "params": {
+    "hillCount": 229,
+    "horizonHeight": 0.34471479823474493,
+    "depthFalloff": 2.606772620747534,
+    "ridgeScale": 0.7199511577370382,
+    "ridgeAmplitude": 1.8920292375043752,
+    "terrainDrift": 4.360489390231087,
+    "backgroundColor": "#ffffff",
+    "hillColor": "#ffffff",
+    "hillStrokeColor": "#000000"
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true
+  }
+}
