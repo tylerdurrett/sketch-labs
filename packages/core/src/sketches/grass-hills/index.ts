@@ -30,7 +30,7 @@
  * ascending root-y order lets lower blades cover higher ones before the next,
  * nearer hill covers the whole group.
  *
- * CLOSED SILHOUETTES / PHYSICAL PALETTE: blades are prepared from the private
+ * CLOSED SILHOUETTES / PHYSICAL PALETTE: blades are traced by the private
  * tapered-outline generator and emitted as closed, filled-and-stroked shapes —
  * never single stroked lines. The background, hill fills, and blade fills
  * default to paper white; authored hill and blade contours default to black.
@@ -39,12 +39,12 @@
  * STATIC / DETERMINISTIC / PREPARED: there is no `time` metadata. All terrain
  * randomness comes from the explicit Seed, with no clock reads, `Math.random`,
  * or accumulated state. `definePreparedSketch` resolves parameters and builds
- * immutable ridge, root, variation, and blade geometry once per
- * `(params, seed, frame)`. Its sampler intentionally ignores `t` and copies
- * that geometry into fresh Scene-owned arrays and styles on every call, so warm
- * and cold generation are identical and callers cannot mutate a later frame
- * through an earlier Scene. `windLean` is a static signed bend in this slice;
- * animated gust and wave controls layer onto it later.
+ * immutable ridge geometry plus sorted root/variation/shape descriptors once
+ * per `(params, seed, frame)`. Its sampler intentionally ignores `t` for now,
+ * but traces each descriptor's current static lean into fresh Scene-owned blade
+ * points and styles on every call. This keeps warm and cold generation
+ * identical, isolates callers from later samples, and leaves the sampling-time
+ * deformation boundary ready for animated gust and wave controls.
  */
 
 import { createScene } from '../../scene'
@@ -58,7 +58,11 @@ import {
 import { colorParam, numberParam } from '../sketch-util'
 import { blade } from './blade'
 import { layoutHillBands } from './depth'
-import { buildGrassBlades, resolveMaximumUnscaledBladeLength } from './grass'
+import {
+  buildGrassBlades,
+  resolveMaximumUnscaledBladeLength,
+  type GrassBladeDescriptor,
+} from './grass'
 import { createGrassHillMask } from './grass-placement'
 import { scatterGrassRoots } from './grass-scatter'
 import { selectGrassRoots } from './grass-selection'
@@ -130,13 +134,9 @@ const schema = {
 
 type PreparedPoint = readonly [number, number]
 
-interface PreparedBlade {
-  readonly points: ReadonlyArray<PreparedPoint>
-}
-
 interface PreparedHill {
   readonly ridge: ReadonlyArray<PreparedPoint>
-  readonly blades: ReadonlyArray<PreparedBlade>
+  readonly blades: ReadonlyArray<GrassBladeDescriptor>
 }
 
 export const grassHills = definePreparedSketch({
@@ -236,18 +236,7 @@ export const grassHills = definePreparedSketch({
           ridge: Object.freeze(
             ridge.points.map(([x, y]) => Object.freeze([x, y] as const)),
           ),
-          blades: Object.freeze(
-            descriptors.map((descriptor) => {
-              const [rootX, rootY] = descriptor.projected
-              return Object.freeze({
-                points: Object.freeze(
-                  blade(descriptor.shape).map(([x, y]) =>
-                    Object.freeze([x + rootX, y + rootY] as const),
-                  ),
-                ),
-              })
-            }),
-          ),
+          blades: Object.freeze(descriptors),
         })
       }),
     )
@@ -265,9 +254,13 @@ export const grassHills = definePreparedSketch({
           },
         )
 
-        for (const preparedBlade of hill.blades) {
+        for (const descriptor of hill.blades) {
+          const [rootX, rootY] = descriptor.projected
           builder.addPath(
-            preparedBlade.points.map(([x, y]) => [x, y]),
+            blade(descriptor.shape).map(([x, y]) => [
+              x + rootX,
+              y + rootY,
+            ]),
             {
               closed: true,
               fill: { color: bladeColor },

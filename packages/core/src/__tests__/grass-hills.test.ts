@@ -471,7 +471,7 @@ describe('grass-hills preparation and determinism', () => {
     )
   })
 
-  it('returns fresh Scene-owned containers and resists caller mutation', () => {
+  it('retraces blades into fresh Scene-owned containers and resists caller mutation', () => {
     const sample = grassHills.prepare(params, 'isolated', WIDE)
     const first = sample(0)
     const pristine = sample(1)
@@ -502,6 +502,7 @@ describe('grass-hills preparation and determinism', () => {
     firstBlade.points[0]![0] = Number.NaN
     firstBlade.fill!.color = '#000000'
     firstBlade.stroke!.width = 999
+    firstBlade.points.splice(0)
     first.primitives.reverse()
 
     expect(sample(2)).toEqual(pristine)
