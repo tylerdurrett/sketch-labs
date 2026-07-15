@@ -95,8 +95,8 @@ describe('grass-hills ridge baselines', () => {
 
   it('keeps clearances and local band heights positive at supported extremes', () => {
     // These broad bounds cover the intended schema envelope for later blocks:
-    // 1-128 hills, a top-edge-to-low horizon, and gentle-to-strong falloff.
-    const hillCounts = [1, 128]
+    // 1-256 hills, a top-edge-to-low horizon, and gentle-to-strong falloff.
+    const hillCounts = [1, 256]
     const horizonHeights = [0, 0.9]
     const depthFalloffs = [0.25, 4]
     const frames = [resolveCompositionFrame(1 / 3), resolveCompositionFrame(3)]

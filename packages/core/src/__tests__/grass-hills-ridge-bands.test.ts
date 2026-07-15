@@ -96,7 +96,7 @@ describe('grass-hills ridge-band geometry', () => {
   })
 
   it('stays finite at supported extremes', () => {
-    const hillCounts = [1, 128]
+    const hillCounts = [1, 256]
     const horizonHeights = [0, 0.9]
     const depthFalloffs = [0.25, 4]
     const frames = [resolveCompositionFrame(1 / 3), resolveCompositionFrame(3)]
@@ -157,13 +157,13 @@ describe('grass-hills ridge-band geometry', () => {
       frame: settings.frame,
       bands,
       terrainAt: () => -1,
-      ridgeAmplitude: 10,
+      ridgeAmplitude: 25,
       ridgeSamples: RIDGE_SAMPLES,
     })
     const baselineY = bands[0]!.baselineY
 
     expect(ridgeline(high[0]!)[0]![1] - baselineY).toBe(
-      10 * (ridgeline(low[0]!)[0]![1] - baselineY),
+      25 * (ridgeline(low[0]!)[0]![1] - baselineY),
     )
   })
 
@@ -174,7 +174,7 @@ describe('grass-hills ridge-band geometry', () => {
       frame: settings.frame,
       bands,
       terrainAt: () => 1,
-      ridgeAmplitude: 10,
+      ridgeAmplitude: 25,
       ridgeSamples: RIDGE_SAMPLES,
     })
 

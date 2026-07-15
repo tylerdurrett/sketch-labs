@@ -56,7 +56,7 @@ describe('grass-hills Sketch contract', () => {
       hillCount: {
         kind: 'number',
         min: 1,
-        max: 128,
+        max: 256,
         default: 50,
         step: 1,
         integer: true,
@@ -85,7 +85,7 @@ describe('grass-hills Sketch contract', () => {
       ridgeAmplitude: {
         kind: 'number',
         min: 0,
-        max: 10,
+        max: 25,
         default: 0.8,
         step: 0.01,
       },
@@ -300,11 +300,11 @@ describe('grass-hills public geometry acceptance', () => {
     (_label, horizonHeight, depthFalloff, ridgeScale, terrainDrift) => {
       const scene = grassHills.generate(
         {
-          hillCount: 128,
+          hillCount: 256,
           horizonHeight,
           depthFalloff,
           ridgeScale,
-          ridgeAmplitude: 10,
+          ridgeAmplitude: 25,
           terrainDrift,
         },
         'public-extremes',
@@ -323,7 +323,7 @@ describe('grass-hills public geometry acceptance', () => {
 
   it('survives the real outline and bounds pipeline as visible open ridgelines only', () => {
     const source = grassHills.generate(
-      { horizonHeight: 0.25, ridgeAmplitude: 10 },
+      { horizonHeight: 0.25, ridgeAmplitude: 25 },
       'outline-acceptance',
       0,
       WIDE,
@@ -357,7 +357,7 @@ describe('grass-hills public geometry acceptance', () => {
 
   it('serializes the processed Scene as path-only plotter geometry with no frame or closure chord', () => {
     const source = grassHills.generate(
-      { hillCount: 5, ridgeAmplitude: 10 },
+      { hillCount: 5, ridgeAmplitude: 25 },
       'plotter-acceptance',
       0,
       WIDE,

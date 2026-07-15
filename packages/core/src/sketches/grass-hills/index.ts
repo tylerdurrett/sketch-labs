@@ -66,7 +66,7 @@ const HILL_STROKE_WIDTH = 2
  */
 const schema = {
   /** Number of full-width hill bands. Whole-number domain. */
-  hillCount: { kind: 'number', min: 1, max: 128, default: 50, step: 1, integer: true },
+  hillCount: { kind: 'number', min: 1, max: 256, default: 50, step: 1, integer: true },
   /** Horizon y as a top-origin fraction of the Composition Frame height. */
   horizonHeight: { kind: 'number', min: 0, max: 0.9, default: 0.25, step: 0.01 },
   /** Perspective exponent; values above one compress distant ridge spacing. */
@@ -74,7 +74,7 @@ const schema = {
   /** Horizontal fBm frequency in features across the frame. */
   ridgeScale: { kind: 'number', min: 0.25, max: 12, default: 3.5, step: 0.05 },
   /** Nominal relief as a fraction of each band's local height. */
-  ridgeAmplitude: { kind: 'number', min: 0, max: 10, default: 0.8, step: 0.01 },
+  ridgeAmplitude: { kind: 'number', min: 0, max: 25, default: 0.8, step: 0.01 },
   /** Travel through the shared terrain field from foreground to horizon. */
   terrainDrift: { kind: 'number', min: 0, max: 8, default: 1.25, step: 0.05 },
   /** Whole-surface paper color. */
