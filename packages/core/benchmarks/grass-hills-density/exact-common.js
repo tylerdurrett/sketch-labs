@@ -8,7 +8,8 @@ import {
 import { buildRidgeBands } from '../../src/sketches/grass-hills/ridge-bands.ts'
 import { layoutHillBands } from '../../src/sketches/grass-hills/depth.ts'
 import { createTerrainField } from '../../src/sketches/grass-hills/terrain.ts'
-import { sceneInventory } from './metrics.js'
+import { collectSceneMetrics } from './metrics.js'
+import { exactSpatialHiddenLinePass } from './exact-spatial-hidden-line.js'
 
 const CANONICAL_ROOT_CAPACITY = 10_000
 const POISSON_RADIUS = 0.0065
@@ -414,10 +415,21 @@ export function createExactBenchmarkCandidate({
     inspect({ value, payload }) {
       const resolved =
         typeof value === 'function' ? value(payload.t ?? 0) : value
+      const processed = exactSpatialHiddenLinePass(resolved.scene)
       return {
-        inventory: sceneInventory(resolved.scene),
+        ...collectSceneMetrics(resolved.scene, {
+          profile: payload.profile,
+          roots: resolved.roots,
+          nibWidthSceneUnits: payload.pen.nibWidthSceneUnits,
+          clearanceSampling: payload.metrics.clearanceSampling,
+          processing: {
+            scene: processed.scene,
+            durationMs: processed.durationMs,
+          },
+        }),
         rootCount: resolved.roots.length,
         identity: resolved.identity,
+        exactSpatialHiddenLine: processed.stats,
       }
     },
   })

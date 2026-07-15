@@ -267,15 +267,20 @@ describe('Grass Hills exact filled-blade candidates', () => {
     expect(
       stratified7.inspect({ value: sampled, payload: fixture }),
     ).toMatchObject({
-      inventory: {
+      source: {
         primitiveCount: 9,
         pointCount: 8 * 7 + CURRENT_RIDGE_POINTS,
       },
+      processing: { kind: 'supplied' },
       rootCount: 8,
       identity: {
         rootStrategy: 'stratified',
         bladeGeometry: 'simple-7',
         hillKeys: ['1/2'],
+      },
+      exactSpatialHiddenLine: {
+        contract:
+          'exact-painter-order/uniform-aabb-grid/production-polygon-clip',
       },
     })
   })
