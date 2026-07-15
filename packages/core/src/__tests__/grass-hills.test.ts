@@ -7,6 +7,9 @@ import { renderPlotterSVG } from '../plotterSvg'
 import type { CoordinateSpace, Scene } from '../scene'
 import { randomize } from '../sketch'
 import { grassHills } from '../sketches/grass-hills'
+import { layoutHillBands } from '../sketches/grass-hills/depth'
+import { buildRidgeBands } from '../sketches/grass-hills/ridge-bands'
+import { createTerrainField } from '../sketches/grass-hills/terrain'
 
 const SQUARE: CoordinateSpace = { width: 1000, height: 1000 }
 const WIDE: CoordinateSpace = { width: 1600, height: 900 }
@@ -18,10 +21,26 @@ const SCHEMA_KEYS = [
   'ridgeScale',
   'ridgeAmplitude',
   'terrainDrift',
+  'bladeDensity',
+  'bladeLength',
+  'bladeLengthVariance',
+  'bladeWidth',
+  'stiffnessVariance',
+  'windLean',
   'backgroundColor',
   'hillColor',
   'hillStrokeColor',
+  'bladeColor',
+  'bladeStrokeColor',
 ]
+
+function hills(scene: Scene) {
+  return scene.primitives.filter(({ closed }) => closed === false)
+}
+
+function blades(scene: Scene) {
+  return scene.primitives.filter(({ closed }) => closed === true)
+}
 
 function geometry(scene: Scene): Array<Array<[number, number]>> {
   return scene.primitives.map((primitive) =>
@@ -34,7 +53,7 @@ function pathGeometry(scene: Scene) {
 }
 
 function ridgelinePoints(scene: Scene): Array<Array<[number, number]>> {
-  return scene.primitives.map((primitive) => primitive.points.slice(0, -3))
+  return hills(scene).map((primitive) => primitive.points.slice(0, -3))
 }
 
 function isFrameEdgeSegment(
@@ -50,7 +69,7 @@ function isFrameEdgeSegment(
 }
 
 describe('grass-hills Sketch contract', () => {
-  it('declares the flat Terrain-then-Colors schema with physical defaults', () => {
+  it('declares the flat Terrain-Grass-Colors schema with physical defaults', () => {
     expect(Object.keys(grassHills.schema)).toEqual(SCHEMA_KEYS)
     expect(grassHills.schema).toEqual({
       hillCount: {
@@ -96,9 +115,53 @@ describe('grass-hills Sketch contract', () => {
         default: 1.25,
         step: 0.05,
       },
+      bladeDensity: {
+        kind: 'number',
+        min: 0.25,
+        max: 2,
+        default: 1,
+        step: 0.05,
+      },
+      bladeLength: {
+        kind: 'number',
+        min: 4,
+        max: 80,
+        default: 28,
+        step: 1,
+      },
+      bladeLengthVariance: {
+        kind: 'number',
+        min: 0,
+        max: 40,
+        default: 8,
+        step: 1,
+      },
+      bladeWidth: {
+        kind: 'number',
+        min: 0.5,
+        max: 12,
+        default: 3,
+        step: 0.1,
+      },
+      stiffnessVariance: {
+        kind: 'number',
+        min: 0,
+        max: 1,
+        default: 0.25,
+        step: 0.05,
+      },
+      windLean: {
+        kind: 'number',
+        min: -1,
+        max: 1,
+        default: 0,
+        step: 0.05,
+      },
       backgroundColor: { kind: 'color', default: '#ffffff' },
       hillColor: { kind: 'color', default: '#ffffff' },
       hillStrokeColor: { kind: 'color', default: '#000000' },
+      bladeColor: { kind: 'color', default: '#ffffff' },
+      bladeStrokeColor: { kind: 'color', default: '#000000' },
     })
     expect(grassHills.schema.hillCount.integer).toBe(true)
     expect(grassHills.time).toBeUndefined()
@@ -113,12 +176,17 @@ describe('grass-hills Sketch contract', () => {
     expect(scene.space).toEqual(frame)
     expect(scene.space).not.toBe(frame)
     expect(scene.background).toEqual({ color: '#ffffff' })
-    expect(scene.primitives).toHaveLength(50)
+    expect(hills(scene)).toHaveLength(50)
+    expect(blades(scene).length).toBeGreaterThan(0)
   })
 
-  it('uses hillCount as the primitive count', () => {
-    expect(grassHills.generate({ hillCount: 1 }, 'count', 0, SQUARE).primitives).toHaveLength(1)
-    expect(grassHills.generate({ hillCount: 37 }, 'count', 0, SQUARE).primitives).toHaveLength(37)
+  it('uses hillCount as the open ridge-ring count', () => {
+    expect(
+      hills(grassHills.generate({ hillCount: 1 }, 'count', 0, SQUARE)),
+    ).toHaveLength(1)
+    expect(
+      hills(grassHills.generate({ hillCount: 37 }, 'count', 0, SQUARE)),
+    ).toHaveLength(37)
   })
 
   it('emits filled and stroked explicit rings with open path metadata', () => {
@@ -135,7 +203,7 @@ describe('grass-hills Sketch contract', () => {
     )
 
     expect(scene.background).toEqual({ color: '#f7f3e8' })
-    for (const primitive of scene.primitives) {
+    for (const primitive of hills(scene)) {
       expect(primitive.fill).toEqual({ color: '#88aa55' })
       expect(primitive.stroke).toEqual({ color: '#102010', width: 2 })
       expect(primitive.closed).toBe(false)
@@ -147,6 +215,50 @@ describe('grass-hills Sketch contract', () => {
     }
   })
 
+  it('emits each hill before closed blades sorted by root y then x', () => {
+    const scene = grassHills.generate(
+      {
+        hillCount: 4,
+        ridgeAmplitude: 0,
+        bladeColor: '#ddeeaa',
+        bladeStrokeColor: '#203010',
+      },
+      'blade-order',
+      0,
+      WIDE,
+    )
+    let hillGroups = 0
+    let roots: Array<[number, number]> = []
+
+    const assertSortedRoots = () => {
+      for (let index = 1; index < roots.length; index++) {
+        const [previousX, previousY] = roots[index - 1]!
+        const [x, y] = roots[index]!
+        expect(y > previousY || (y === previousY && x >= previousX)).toBe(true)
+      }
+    }
+
+    for (const primitive of scene.primitives) {
+      if (primitive.closed === false) {
+        if (hillGroups > 0) assertSortedRoots()
+        hillGroups++
+        roots = []
+        continue
+      }
+
+      expect(hillGroups).toBeGreaterThan(0)
+      expect(primitive.closed).toBe(true)
+      expect(primitive.fill).toEqual({ color: '#ddeeaa' })
+      expect(primitive.stroke).toEqual({ color: '#203010', width: 2 })
+      expect(primitive.points.at(-1)).toEqual(primitive.points[0])
+      roots.push([...primitive.points[0]!] as [number, number])
+    }
+
+    assertSortedRoots()
+    expect(hillGroups).toBe(4)
+    expect(blades(scene).length).toBeGreaterThan(0)
+  })
+
   it('preserves far-to-near painter order', () => {
     const scene = grassHills.generate(
       { hillCount: 8, ridgeAmplitude: 0 },
@@ -154,7 +266,7 @@ describe('grass-hills Sketch contract', () => {
       0,
       SQUARE,
     )
-    const baselineYs = scene.primitives.map((primitive) => primitive.points[0]![1])
+    const baselineYs = hills(scene).map((primitive) => primitive.points[0]![1])
 
     for (let index = 1; index < baselineYs.length; index++) {
       expect(baselineYs[index]).toBeGreaterThan(baselineYs[index - 1]!)
@@ -170,9 +282,17 @@ describe('grass-hills preparation and determinism', () => {
     ridgeScale: 4.25,
     ridgeAmplitude: 0.72,
     terrainDrift: 2.1,
+    bladeDensity: 1,
+    bladeLength: 28,
+    bladeLengthVariance: 8,
+    bladeWidth: 3,
+    stiffnessVariance: 0.25,
+    windLean: 0.2,
     backgroundColor: '#faf7ed',
     hillColor: '#8ea769',
     hillStrokeColor: '#172211',
+    bladeColor: '#dce8bd',
+    bladeStrokeColor: '#26351b',
   }
 
   it('makes warm and cold generation byte-identical', () => {
@@ -227,8 +347,10 @@ describe('grass-hills preparation and determinism', () => {
     ['backgroundColor', '#010203'],
     ['hillColor', '#aabbcc'],
     ['hillStrokeColor', '#ddeeff'],
+    ['bladeColor', '#112233'],
+    ['bladeStrokeColor', '#445566'],
   ] as const)(
-    'keeps points and open-path metadata byte-identical when only %s changes',
+    'keeps points and path metadata byte-identical when only %s changes',
     (key, color) => {
       const base = grassHills.generate(params, 'colors', 0, WIDE)
       const recolored = grassHills.generate(
@@ -252,6 +374,12 @@ describe('grass-hills preparation and determinism', () => {
       'ridgeScale',
       'ridgeAmplitude',
       'terrainDrift',
+      'bladeDensity',
+      'bladeLength',
+      'bladeLengthVariance',
+      'bladeWidth',
+      'stiffnessVariance',
+      'windLean',
     ] as const) {
       expect(randomized[key]).not.toBe(params[key])
     }
@@ -260,12 +388,41 @@ describe('grass-hills preparation and determinism', () => {
     expect(randomized.backgroundColor).toBe(params.backgroundColor)
     expect(randomized.hillColor).toBe(params.hillColor)
     expect(randomized.hillStrokeColor).toBe(params.hillStrokeColor)
+    expect(randomized.bladeColor).toBe(params.bladeColor)
+    expect(randomized.bladeStrokeColor).toBe(params.bladeStrokeColor)
+  })
+
+  it('keeps the original terrain geometry for the same terrain inputs and seed', () => {
+    const seed = 'terrain-stream'
+    const scene = grassHills.generate(params, seed, 0, WIDE)
+    const projection = {
+      frame: WIDE,
+      horizonHeight: params.horizonHeight,
+      depthFalloff: params.depthFalloff,
+    }
+    const bands = layoutHillBands(params.hillCount, projection)
+    const expected = buildRidgeBands({
+      frame: WIDE,
+      bands,
+      terrainAt: createTerrainField(seed, {
+        ridgeScale: params.ridgeScale,
+        terrainDrift: params.terrainDrift,
+      }),
+      ridgeAmplitude: params.ridgeAmplitude,
+      ridgeSamples: 128,
+    })
+
+    expect(hills(scene).map(({ points }) => points)).toEqual(
+      expected.map(({ points }) => points),
+    )
   })
 
   it('returns fresh Scene-owned containers and resists caller mutation', () => {
     const sample = grassHills.prepare(params, 'isolated', WIDE)
     const first = sample(0)
     const pristine = sample(1)
+    const firstBlade = blades(first)[0]!
+    const pristineBlade = blades(pristine)[0]!
 
     expect(first).toEqual(pristine)
     expect(first).not.toBe(pristine)
@@ -277,12 +434,20 @@ describe('grass-hills preparation and determinism', () => {
     expect(first.primitives[0]!.points[0]).not.toBe(pristine.primitives[0]!.points[0])
     expect(first.primitives[0]!.fill).not.toBe(pristine.primitives[0]!.fill)
     expect(first.primitives[0]!.stroke).not.toBe(pristine.primitives[0]!.stroke)
+    expect(firstBlade).not.toBe(pristineBlade)
+    expect(firstBlade.points).not.toBe(pristineBlade.points)
+    expect(firstBlade.points[0]).not.toBe(pristineBlade.points[0])
+    expect(firstBlade.fill).not.toBe(pristineBlade.fill)
+    expect(firstBlade.stroke).not.toBe(pristineBlade.stroke)
 
     first.space.width = -1
     first.background!.color = '#000000'
     first.primitives[0]!.points[0]![0] = Number.NaN
     first.primitives[0]!.fill!.color = '#000000'
     first.primitives[0]!.stroke!.width = 999
+    firstBlade.points[0]![0] = Number.NaN
+    firstBlade.fill!.color = '#000000'
+    firstBlade.stroke!.width = 999
     first.primitives.reverse()
 
     expect(sample(2)).toEqual(pristine)
@@ -321,9 +486,9 @@ describe('grass-hills public geometry acceptance', () => {
     },
   )
 
-  it('survives the real outline and bounds pipeline as visible open ridgelines only', () => {
+  it('survives the real outline and bounds pipeline as visible open linework', () => {
     const source = grassHills.generate(
-      { horizonHeight: 0.25, ridgeAmplitude: 25 },
+      { hillCount: 5, horizonHeight: 0.25, ridgeAmplitude: 25 },
       'outline-acceptance',
       0,
       WIDE,
@@ -336,7 +501,6 @@ describe('grass-hills public geometry acceptance', () => {
       expect(primitive.fill).toBeUndefined()
       expect(primitive.closed).not.toBe(true)
       expect(primitive.points.length).toBeGreaterThan(1)
-      expect(primitive.points.at(-1)).not.toEqual(primitive.points[0])
       expect(
         primitive.points.every(
           ([x, y]) => x >= 0 && x <= WIDE.width && y >= 0 && y <= WIDE.height,
