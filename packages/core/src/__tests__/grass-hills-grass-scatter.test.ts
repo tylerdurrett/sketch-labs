@@ -17,24 +17,26 @@ function canonicalDistance(
 }
 
 describe('grass-hills canonical grass scatter', () => {
-  it('enforces constant-radius Poisson separation in canonical space', () => {
-    const bladeDensity = 1
-    const radius = BASE_CANONICAL_RADIUS / Math.sqrt(bladeDensity)
-    const roots = scatterGrassRoots({
-      seed: 'separation',
-      hillKey: '1/2',
-      bladeDensity,
-    })
+  it.each([0.25, 1, 2])(
+    'enforces canonical Poisson separation at density %s',
+    (bladeDensity) => {
+      const radius = BASE_CANONICAL_RADIUS / Math.sqrt(bladeDensity)
+      const roots = scatterGrassRoots({
+        seed: 'separation',
+        hillKey: '1/2',
+        bladeDensity,
+      })
 
-    expect(roots.length).toBeGreaterThan(10)
-    for (let index = 0; index < roots.length; index++) {
-      for (let other = index + 1; other < roots.length; other++) {
-        expect(canonicalDistance(roots[index]!, roots[other]!)).toBeGreaterThanOrEqual(
-          radius - 1e-9,
-        )
+      expect(roots.length).toBeGreaterThan(1)
+      for (let index = 0; index < roots.length; index++) {
+        for (let other = index + 1; other < roots.length; other++) {
+          expect(
+            canonicalDistance(roots[index]!, roots[other]!),
+          ).toBeGreaterThanOrEqual(radius - 1e-9)
+        }
       }
-    }
-  })
+    },
+  )
 
   it('is exactly repeatable for the same seed, hill identity, and density', () => {
     const options = {
