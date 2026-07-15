@@ -176,6 +176,13 @@ generic CLI from `packages/core` with `--mode=screen` and the
 result record includes the complete commands for both the Node campaign and
 actual-Canvas browser pass.
 
+The finalist-only Y3b full campaign is recorded in
+[`results/simplified-full-2026-07-15.md`](results/simplified-full-2026-07-15.md).
+Its compact summary, verbatim raw protocol envelope, and checksum-pinned SVG
+handoff manifest are adjacent. Three jobs completed the fixed `full` sample plan;
+full 25k and 50k remain explicit timeout censors. The result does not silently
+reduce samples or imply production adoption.
+
 ## Timing and memory contract
 
 Protocol version 1 reports three disjoint phase slots:
