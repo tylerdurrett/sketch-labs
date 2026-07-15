@@ -28,6 +28,7 @@ function sourceScene(): Scene {
           [30, 40],
         ],
         stroke: { color: "black", width: 1 },
+        hiddenLineRole: "source",
       },
     ],
   };
@@ -111,6 +112,12 @@ const identityMismatches: ReadonlyArray<
       copy.sourceScene.primitives[0].points[0][0] = 2;
     },
   ],
+  [
+    "source/occluder role",
+    (copy) => {
+      copy.sourceScene.primitives[0].hiddenLineRole = "both";
+    },
+  ],
 ];
 
 describe("hidden-line export snapshot", () => {
@@ -133,6 +140,12 @@ describe("hidden-line export snapshot", () => {
     expect(captured.profile.insets.left).toBe(10);
     expect(captured.reusableOutline?.scene.space.width).toBe(100);
     expect(captured.reusableOutline?.scene.primitives[0]?.points[0]?.[0]).toBe(1);
+    expect(captured.identity.sourceScene.primitives[0]?.hiddenLineRole).toBe(
+      "source",
+    );
+    expect(
+      captured.reusableOutline?.scene.primitives[0]?.hiddenLineRole,
+    ).toBe("source");
     expect(captured.identity).not.toBe(liveIdentity);
     expect(captured.reusableOutline?.identity).not.toBe(liveIdentity);
     expect(Object.isFrozen(captured)).toBe(true);

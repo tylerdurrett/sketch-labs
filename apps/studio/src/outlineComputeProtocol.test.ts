@@ -7,6 +7,7 @@ import {
   isOutlineComputeProgress,
   isOutlineComputeRequest,
   isOutlineComputeResponse,
+  mutableScene,
   outlineComputeIdentitiesEqual,
   type OutlineComputeIdentity,
 } from "./outlineComputeProtocol";
@@ -29,6 +30,7 @@ const scene: Scene = {
       closed: true,
       fill: { color: "red" },
       stroke: { color: "blue", width: 2 },
+      hiddenLineRole: "occluder",
     },
     {
       points: [
@@ -36,6 +38,7 @@ const scene: Scene = {
         [90, 20],
       ],
       stroke: { color: "black", width: 1 },
+      hiddenLineRole: "source",
     },
   ],
 };
@@ -79,6 +82,8 @@ describe("outline compute identity", () => {
     scene.primitives[0]!.points[0]![0] = 999;
     expect(snapshot.sourceScene.space.width).toBe(100);
     expect(snapshot.sourceScene.primitives[0]?.points[0]?.[0]).toBe(1);
+    expect(snapshot.sourceScene.primitives[0]?.hiddenLineRole).toBe("occluder");
+    expect(snapshot.sourceScene.primitives[1]?.hiddenLineRole).toBe("source");
     scene.space.width = 100;
     scene.primitives[0]!.points[0]![0] = 1;
   });
@@ -106,6 +111,8 @@ describe("outline compute identity", () => {
       (copy) => (copy.sourceScene.primitives[0].stroke.color = "black"),
       (copy) => (copy.sourceScene.primitives[0].stroke.width = 3),
       (copy) => delete copy.sourceScene.primitives[0].stroke,
+      (copy) => (copy.sourceScene.primitives[0].hiddenLineRole = "both"),
+      (copy) => delete copy.sourceScene.primitives[0].hiddenLineRole,
       (copy) => (copy.sourceScene.primitives[0].points[0][0] = 1 + Number.EPSILON),
       (copy) => (copy.sourceScene.primitives[0].points[0][1] = 3),
       (copy) => copy.sourceScene.primitives[0].points.push([9, 9]),
@@ -129,6 +136,19 @@ describe("outline compute identity", () => {
       ),
     ).toBe(false);
     expect(outlineComputeIdentitiesEqual(original, identity())).toBe(true);
+  });
+
+  it("restores source and occluder roles without inventing omitted fields", () => {
+    const restored = mutableScene(identity().sourceScene);
+    const omitted = changed((copy) => {
+      delete copy.sourceScene.primitives[1].hiddenLineRole;
+    });
+
+    expect(restored.primitives[0]?.hiddenLineRole).toBe("occluder");
+    expect(restored.primitives[1]?.hiddenLineRole).toBe("source");
+    expect(
+      "hiddenLineRole" in mutableScene(omitted.sourceScene).primitives[1]!,
+    ).toBe(false);
   });
 });
 
@@ -182,6 +202,29 @@ describe("outline compute protocol guards", () => {
     "rejects malformed request %o",
     (candidate) => expect(isOutlineComputeRequest(candidate)).toBe(false),
   );
+
+  it("rejects unknown hidden-line roles in requests and response Scenes", () => {
+    const malformedRequest = structuredClone({
+      type: "compute",
+      jobId: 1,
+      identity: identity(),
+    }) as Record<string, any>;
+    malformedRequest.identity.sourceScene.primitives[0].hiddenLineRole =
+      "grass-mask";
+
+    const malformedScene = structuredClone(scene) as Record<string, any>;
+    malformedScene.primitives[0].hiddenLineRole = "grass-mask";
+
+    expect(isOutlineComputeRequest(malformedRequest)).toBe(false);
+    expect(
+      isOutlineComputeResponse({
+        type: "success",
+        jobId: 1,
+        identity: identity(),
+        scene: malformedScene,
+      }),
+    ).toBe(false);
+  });
 
   it.each([null, {}, { type: "success" }, { type: "failure", error: 4 }])(
     "rejects malformed response %o",
