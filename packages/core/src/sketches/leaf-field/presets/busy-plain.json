@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "sketch": "leaf-field",
+  "name": "busy-plain",
+  "seed": 1309692099296419,
+  "params": {
+    "fieldPhase": 0.9420685020814717,
+    "fieldScale": 3.9600142425408023,
+    "turbulence": 2.6652539910254833,
+    "octaves": 4,
+    "density": 40.9519948310298,
+    "leafScale": 49.14993531403636,
+    "leafSizeVariance": 139.28325120807358,
+    "leafSlenderness": 5.783488159679342,
+    "leafSlendernessVariance": 1.538875284784311,
+    "variation": 0.8622617476076182,
+    "sphereCount": 0,
+    "sphereRadiusMin": 353.14419119033323,
+    "sphereRadiusMax": 236.52015612008353,
+    "sphereDepth": 0.8204023700886924,
+    "backgroundColor": "#ffffff",
+    "discColor": "#ffffff",
+    "discStrokeColor": "#000000",
+    "leafColor": "#ffffff",
+    "leafStrokeColor": "#000000"
+  },
+  "locks": [
+    "sphereCount"
+  ],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true
+  }
+}
