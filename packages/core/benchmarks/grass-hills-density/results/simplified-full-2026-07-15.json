@@ -1,0 +1,657 @@
+{
+  "recordedAt": "2026-07-15",
+  "candidate": {
+    "id": "simplified-stroke-tufts",
+    "representation": "open six-point blades/stable five-member tufts",
+    "occluderMode": "hill-and-clump",
+    "densityMode": "plotter-lod"
+  },
+  "evidence": {
+    "campaignRaw": {
+      "file": "simplified-full-2026-07-15.campaign-raw.json",
+      "contract": "verbatim full-mode envelope with every timing/memory sample and collector result"
+    },
+    "artifactManifest": {
+      "file": "simplified-full-2026-07-15.svg-manifest.json",
+      "contract": "checksums and inventories for reproducible /tmp fill/Outline SVGs"
+    }
+  },
+  "campaign": {
+    "protocolVersion": 1,
+    "mode": "full",
+    "policy": {
+      "timeoutMs": 600000,
+      "memoryMiB": 2048,
+      "samples": {
+        "preparation": 20,
+        "cold": 20,
+        "warm": 60,
+        "warmups": 3
+      }
+    },
+    "resultCount": 5,
+    "completedCount": 3,
+    "censoredCount": 2
+  },
+  "results": [
+    {
+      "fixtureId": "one-hill-5000",
+      "status": "ok",
+      "phaseTimingMs": {
+        "preparation": {
+          "sampleCount": 20,
+          "min": 2219.627292000001,
+          "median": 2236.8180834999985,
+          "max": 2290.530458000001
+        },
+        "cold": {
+          "sampleCount": 20,
+          "min": 2266.0388749999984,
+          "median": 2295.9797290000024,
+          "max": 2661.632083000004
+        },
+        "warm": {
+          "sampleCount": 60,
+          "min": 32.754707999993116,
+          "median": 35.285666999996465,
+          "max": 51.54945900000166
+        }
+      },
+      "maxRssBytes": 248397824,
+      "representativeMetrics": {
+        "representation": {
+          "kind": "open-centerline-blades/stable-tuft-metadata",
+          "bladeCount": 5000,
+          "tuftCount": 1000,
+          "tuftMemberCount": 5000,
+          "pointsPerBlade": 6,
+          "occluderMode": "hill-and-clump",
+          "densityMode": "plotter-lod",
+          "hillOccluderCount": 1,
+          "clumpOccluderCount": 1000,
+          "processedRootCount": 4863,
+          "previewExportShareProcessedScene": true
+        },
+        "source": {
+          "primitiveCount": 5000,
+          "pointCount": 30000,
+          "checksum": "4d84d096c90f1be0b1d081bc6b377a6dd65db700409f3bc6d15c009a0dc4719f",
+          "serializedBytes": 1520482,
+          "geometryBytes": 1112422
+        },
+        "canvas": {
+          "measurement": "counting-canvas-structural-submission-only",
+          "scope": "whole-frame",
+          "includesRasterization": false,
+          "pixelWidth": 1000,
+          "pixelHeight": 1000,
+          "submissionMs": 1.1762920000037411,
+          "calls": {
+            "save": 1,
+            "restore": 1,
+            "beginPath": 5000,
+            "moveTo": 5000,
+            "lineTo": 25000,
+            "closePath": 0,
+            "fill": 0,
+            "stroke": 5000,
+            "setTransform": 2,
+            "fillRect": 1,
+            "clearRect": 0
+          }
+        },
+        "referenceHiddenLineWorkload": {
+          "filledPrimitiveCount": 0,
+          "sourceSegmentCount": 0,
+          "overlappingPairCount": 0,
+          "estimatedSegmentEdgeComparisons": 0,
+          "totalWorkUnits": 0
+        },
+        "processing": {
+          "kind": "supplied",
+          "durationMs": 30.374958000000333,
+          "processed": {
+            "primitiveCount": 2950,
+            "pointCount": 14548,
+            "checksum": "5a1fb74ae8d486af03d8878fb07f75011e706cc26272e547cc69993c5194cf97",
+            "serializedBytes": 779377,
+            "geometryBytes": 538712
+          }
+        },
+        "boundsClip": {
+          "durationMs": 1.4600829999981215,
+          "clipped": {
+            "primitiveCount": 2950,
+            "pointCount": 14548,
+            "checksum": "5a1fb74ae8d486af03d8878fb07f75011e706cc26272e547cc69993c5194cf97",
+            "serializedBytes": 779377,
+            "geometryBytes": 538712
+          }
+        },
+        "svgSerialization": {
+          "durationMs": 4.668999999994412,
+          "bytes": 466184,
+          "pathCount": 2950
+        },
+        "plotter": {
+          "durationMs": 5.57520900000236,
+          "svgBytes": 458431,
+          "pathCount": 2950
+        },
+        "physicalSpacing": {
+          "millimetersPerSceneUnit": 0.18,
+          "nibWidthSceneUnits": 1.6666666666666667,
+          "nibWidthMillimeters": 0.3,
+          "roots": {
+            "sampleCount": 4863,
+            "min": 0.30244230969043046,
+            "p05": 0.3951611502380744,
+            "p50": 0.939502837507083,
+            "p95": 2.013198144551122,
+            "max": 4.887425483164505
+          },
+          "clearances": {
+            "contract": "exact-nib-collisions/capped-deterministic-nearest-sampling",
+            "sampling": {
+              "method": "deterministic-even-segment-index/capped-spatial-search",
+              "maxSegments": 4096,
+              "maxSearchNibWidths": 8,
+              "totalSegmentCount": 11598,
+              "sampledSegmentCount": 4096,
+              "segmentCoverage": 0.3531643386790826,
+              "resolvedSegmentCount": 4049,
+              "censoredSegmentCount": 47,
+              "totalPathCount": 2950,
+              "sampledPathCount": 2640,
+              "pathCoverage": 0.8949152542372881,
+              "resolvedPathCount": 2622
+            },
+            "paths": {
+              "millimeters": {
+                "sampleCount": 2622,
+                "min": 0.0005966380959687712,
+                "p05": 0.047970737892298415,
+                "p50": 0.3398487887507917,
+                "p95": 1.0630777534597717,
+                "max": 2.3945954219830137
+              },
+              "nibWidths": {
+                "sampleCount": 2622,
+                "min": 0.001988793653229237,
+                "p05": 0.15990245964099473,
+                "p50": 1.1328292958359725,
+                "p95": 3.543592511532572,
+                "max": 7.981984739943379
+              }
+            },
+            "segments": {
+              "millimeters": {
+                "sampleCount": 4049,
+                "min": 0.0005966380959687712,
+                "p05": 0.05926545785640655,
+                "p50": 0.39722550064827655,
+                "p95": 1.24911347484607,
+                "max": 2.3997650814980274
+              },
+              "nibWidths": {
+                "sampleCount": 4049,
+                "min": 0.001988793653229237,
+                "p05": 0.19755152618802185,
+                "p50": 1.3240850021609218,
+                "p95": 4.163711582820233,
+                "max": 7.999216938326757
+              }
+            },
+            "collisions": {
+              "threshold": "centerline-distance-lte-one-nib-width",
+              "segmentPairCount": 4493,
+              "pathPairCount": 903,
+              "collidingSegmentCount": 4198,
+              "collidingPathCount": 1443,
+              "candidatePairChecks": 669178
+            },
+            "spatial": {
+              "cellSizeSceneUnits": 6.666666666666667,
+              "occupiedBaseCellCount": 6783,
+              "occupiedCollisionCellCount": 12535,
+              "collisionCandidatePairChecks": 669178,
+              "nearestCandidateChecks": 219611
+            }
+          }
+        }
+      },
+      "runtime": {
+        "pid": 89726,
+        "node": "v23.9.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "hostname": "Tdogss-MacBook-Pro.local",
+        "osRelease": "24.6.0",
+        "cpuModel": "Apple M2 Max",
+        "logicalCpuCount": 12,
+        "totalMemoryBytes": 68719476736,
+        "freeMemoryBytesAtCapture": 912113664
+      }
+    },
+    {
+      "fixtureId": "one-hill-10000",
+      "status": "ok",
+      "phaseTimingMs": {
+        "preparation": {
+          "sampleCount": 20,
+          "min": 4461.610457999996,
+          "median": 4478.917416999999,
+          "max": 4496.183958000001
+        },
+        "cold": {
+          "sampleCount": 20,
+          "min": 4569.144124999992,
+          "median": 4607.903082999997,
+          "max": 4656.794959000021
+        },
+        "warm": {
+          "sampleCount": 60,
+          "min": 75.21233300000313,
+          "median": 77.46612500000629,
+          "max": 102.83816700000898
+        }
+      },
+      "maxRssBytes": 274300928,
+      "representativeMetrics": {
+        "representation": {
+          "kind": "open-centerline-blades/stable-tuft-metadata",
+          "bladeCount": 10000,
+          "tuftCount": 2000,
+          "tuftMemberCount": 10000,
+          "pointsPerBlade": 6,
+          "occluderMode": "hill-and-clump",
+          "densityMode": "plotter-lod",
+          "hillOccluderCount": 1,
+          "clumpOccluderCount": 2000,
+          "processedRootCount": 9338,
+          "previewExportShareProcessedScene": true
+        },
+        "source": {
+          "primitiveCount": 10000,
+          "pointCount": 60000,
+          "checksum": "67b1d1f4a9ceaf8027c0dc3cec6731f240d467cf35138ae45dad68aafc773f7f",
+          "serializedBytes": 3052417,
+          "geometryBytes": 2236368
+        },
+        "canvas": {
+          "measurement": "counting-canvas-structural-submission-only",
+          "scope": "whole-frame",
+          "includesRasterization": false,
+          "pixelWidth": 1000,
+          "pixelHeight": 1000,
+          "submissionMs": 1.7744589999783784,
+          "calls": {
+            "save": 1,
+            "restore": 1,
+            "beginPath": 10000,
+            "moveTo": 10000,
+            "lineTo": 50000,
+            "closePath": 0,
+            "fill": 0,
+            "stroke": 10000,
+            "setTransform": 2,
+            "fillRect": 1,
+            "clearRect": 0
+          }
+        },
+        "referenceHiddenLineWorkload": {
+          "filledPrimitiveCount": 0,
+          "sourceSegmentCount": 0,
+          "overlappingPairCount": 0,
+          "estimatedSegmentEdgeComparisons": 0,
+          "totalWorkUnits": 0
+        },
+        "processing": {
+          "kind": "supplied",
+          "durationMs": 71.68945800000802,
+          "processed": {
+            "primitiveCount": 3441,
+            "pointCount": 13947,
+            "checksum": "f2afd1ec20f5c71caf2ba4df0ab47f02efab91983b77636728c13c327d0a2dc6",
+            "serializedBytes": 799854,
+            "geometryBytes": 519159
+          }
+        },
+        "boundsClip": {
+          "durationMs": 1.0517500000132713,
+          "clipped": {
+            "primitiveCount": 3441,
+            "pointCount": 13947,
+            "checksum": "f2afd1ec20f5c71caf2ba4df0ab47f02efab91983b77636728c13c327d0a2dc6",
+            "serializedBytes": 799854,
+            "geometryBytes": 519159
+          }
+        },
+        "svgSerialization": {
+          "durationMs": 5.030334000010043,
+          "bytes": 487387,
+          "pathCount": 3441
+        },
+        "plotter": {
+          "durationMs": 5.063125000015134,
+          "svgBytes": 480922,
+          "pathCount": 3441
+        },
+        "physicalSpacing": {
+          "millimetersPerSceneUnit": 0.18,
+          "nibWidthSceneUnits": 1.6666666666666667,
+          "nibWidthMillimeters": 0.3,
+          "roots": {
+            "sampleCount": 9338,
+            "min": 0.30001677617676803,
+            "p05": 0.3498509466498964,
+            "p50": 0.7280934938685123,
+            "p95": 1.4880828416075174,
+            "max": 3.3985835020970585
+          },
+          "clearances": {
+            "contract": "exact-nib-collisions/capped-deterministic-nearest-sampling",
+            "sampling": {
+              "method": "deterministic-even-segment-index/capped-spatial-search",
+              "maxSegments": 4096,
+              "maxSearchNibWidths": 8,
+              "totalSegmentCount": 10506,
+              "sampledSegmentCount": 4096,
+              "segmentCoverage": 0.3898724538359033,
+              "resolvedSegmentCount": 4064,
+              "censoredSegmentCount": 32,
+              "totalPathCount": 3441,
+              "sampledPathCount": 2791,
+              "pathCoverage": 0.8111014240046498,
+              "resolvedPathCount": 2772
+            },
+            "paths": {
+              "millimeters": {
+                "sampleCount": 2772,
+                "min": 0.001544514897893805,
+                "p05": 0.05373248862177661,
+                "p50": 0.3270221721731195,
+                "p95": 1.1017459793514044,
+                "max": 2.381150087356056
+              },
+              "nibWidths": {
+                "sampleCount": 2772,
+                "min": 0.00514838299297935,
+                "p05": 0.17910829540592202,
+                "p50": 1.0900739072437318,
+                "p95": 3.672486597838015,
+                "max": 7.93716695785352
+              }
+            },
+            "segments": {
+              "millimeters": {
+                "sampleCount": 4064,
+                "min": 0.001544514897893805,
+                "p05": 0.06103479382326313,
+                "p50": 0.3762900940923305,
+                "p95": 1.232185553844137,
+                "max": 2.3851024357922825
+              },
+              "nibWidths": {
+                "sampleCount": 4064,
+                "min": 0.00514838299297935,
+                "p05": 0.2034493127442104,
+                "p50": 1.2543003136411015,
+                "p95": 4.107285179480456,
+                "max": 7.9503414526409415
+              }
+            },
+            "collisions": {
+              "threshold": "centerline-distance-lte-one-nib-width",
+              "segmentPairCount": 4312,
+              "pathPairCount": 1147,
+              "collidingSegmentCount": 4164,
+              "collidingPathCount": 1745,
+              "candidatePairChecks": 635234
+            },
+            "spatial": {
+              "cellSizeSceneUnits": 6.666666666666667,
+              "occupiedBaseCellCount": 6262,
+              "occupiedCollisionCellCount": 11745,
+              "collisionCandidatePairChecks": 635234,
+              "nearestCandidateChecks": 219598
+            }
+          }
+        }
+      },
+      "runtime": {
+        "pid": 2529,
+        "node": "v23.9.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "hostname": "Tdogss-MacBook-Pro.local",
+        "osRelease": "24.6.0",
+        "cpuModel": "Apple M2 Max",
+        "logicalCpuCount": 12,
+        "totalMemoryBytes": 68719476736,
+        "freeMemoryBytesAtCapture": 952025088
+      }
+    },
+    {
+      "fixtureId": "full-10000",
+      "status": "ok",
+      "phaseTimingMs": {
+        "preparation": {
+          "sampleCount": 20,
+          "min": 4473.450917000002,
+          "median": 4496.960729,
+          "max": 4576.949000000008
+        },
+        "cold": {
+          "sampleCount": 20,
+          "min": 4650.1786250000005,
+          "median": 4674.611666500015,
+          "max": 4708.037125000003
+        },
+        "warm": {
+          "sampleCount": 60,
+          "min": 143.84479199998896,
+          "median": 151.327354500012,
+          "max": 173.54662500001723
+        }
+      },
+      "maxRssBytes": 276201472,
+      "representativeMetrics": {
+        "representation": {
+          "kind": "open-centerline-blades/stable-tuft-metadata",
+          "bladeCount": 10000,
+          "tuftCount": 2004,
+          "tuftMemberCount": 10000,
+          "pointsPerBlade": 6,
+          "occluderMode": "hill-and-clump",
+          "densityMode": "plotter-lod",
+          "hillOccluderCount": 10,
+          "clumpOccluderCount": 2004,
+          "processedRootCount": 7630,
+          "previewExportShareProcessedScene": true
+        },
+        "source": {
+          "primitiveCount": 10000,
+          "pointCount": 60000,
+          "checksum": "ff6c84622849ab4e84ae03f912d34ecc0d19dd3fd3c4392cf959de2f7b0ad15a",
+          "serializedBytes": 3035664,
+          "geometryBytes": 2218251
+        },
+        "canvas": {
+          "measurement": "counting-canvas-structural-submission-only",
+          "scope": "whole-frame",
+          "includesRasterization": false,
+          "pixelWidth": 1000,
+          "pixelHeight": 1000,
+          "submissionMs": 1.8070410000218544,
+          "calls": {
+            "save": 1,
+            "restore": 1,
+            "beginPath": 10000,
+            "moveTo": 10000,
+            "lineTo": 50000,
+            "closePath": 0,
+            "fill": 0,
+            "stroke": 10000,
+            "setTransform": 2,
+            "fillRect": 1,
+            "clearRect": 0
+          }
+        },
+        "referenceHiddenLineWorkload": {
+          "filledPrimitiveCount": 0,
+          "sourceSegmentCount": 0,
+          "overlappingPairCount": 0,
+          "estimatedSegmentEdgeComparisons": 0,
+          "totalWorkUnits": 0
+        },
+        "processing": {
+          "kind": "supplied",
+          "durationMs": 167.86445799999638,
+          "processed": {
+            "primitiveCount": 4892,
+            "pointCount": 22350,
+            "checksum": "42f78ee192e97077a93211e3507eb3536dacf2135e10ad2e04cec2668e894ad4",
+            "serializedBytes": 1213272,
+            "geometryBytes": 813617
+          }
+        },
+        "boundsClip": {
+          "durationMs": 1.4065840000112075,
+          "clipped": {
+            "primitiveCount": 4892,
+            "pointCount": 22350,
+            "checksum": "42f78ee192e97077a93211e3507eb3536dacf2135e10ad2e04cec2668e894ad4",
+            "serializedBytes": 1213272,
+            "geometryBytes": 813617
+          }
+        },
+        "svgSerialization": {
+          "durationMs": 8.012500000011642,
+          "bytes": 734747,
+          "pathCount": 4892
+        },
+        "plotter": {
+          "durationMs": 7.46316700000898,
+          "svgBytes": 715244,
+          "pathCount": 4892
+        },
+        "physicalSpacing": {
+          "millimetersPerSceneUnit": 0.18,
+          "nibWidthSceneUnits": 1.6666666666666667,
+          "nibWidthMillimeters": 0.3,
+          "roots": {
+            "sampleCount": 7630,
+            "min": 0.30001085186308785,
+            "p05": 0.31484254903903724,
+            "p50": 0.4604990955971738,
+            "p95": 0.9909042693128531,
+            "max": 5.112019721197701
+          },
+          "clearances": {
+            "contract": "exact-nib-collisions/capped-deterministic-nearest-sampling",
+            "sampling": {
+              "method": "deterministic-even-segment-index/capped-spatial-search",
+              "maxSegments": 4096,
+              "maxSearchNibWidths": 8,
+              "totalSegmentCount": 17458,
+              "sampledSegmentCount": 4096,
+              "segmentCoverage": 0.23462023141253294,
+              "resolvedSegmentCount": 4093,
+              "censoredSegmentCount": 3,
+              "totalPathCount": 4892,
+              "sampledPathCount": 3643,
+              "pathCoverage": 0.7446852003270646,
+              "resolvedPathCount": 3640
+            },
+            "paths": {
+              "millimeters": {
+                "sampleCount": 3640,
+                "min": 0.002007156955278333,
+                "p05": 0.08751624576205586,
+                "p50": 0.3923963520166535,
+                "p95": 0.9356448761203933,
+                "max": 2.1110958977955465
+              },
+              "nibWidths": {
+                "sampleCount": 3640,
+                "min": 0.00669052318426111,
+                "p05": 0.29172081920685283,
+                "p50": 1.3079878400555116,
+                "p95": 3.118816253734644,
+                "max": 7.036986325985154
+              }
+            },
+            "segments": {
+              "millimeters": {
+                "sampleCount": 4093,
+                "min": 0.002007156955278333,
+                "p05": 0.08608933137918029,
+                "p50": 0.3960653095417342,
+                "p95": 0.9508373258803772,
+                "max": 2.1818910273031276
+              },
+              "nibWidths": {
+                "sampleCount": 4093,
+                "min": 0.00669052318426111,
+                "p05": 0.28696443793060095,
+                "p50": 1.3202176984724474,
+                "p95": 3.1694577529345906,
+                "max": 7.272970091010425
+              }
+            },
+            "collisions": {
+              "threshold": "centerline-distance-lte-one-nib-width",
+              "segmentPairCount": 6103,
+              "pathPairCount": 1043,
+              "collidingSegmentCount": 5733,
+              "collidingPathCount": 1834,
+              "candidatePairChecks": 1308696
+            },
+            "spatial": {
+              "cellSizeSceneUnits": 6.666666666666667,
+              "occupiedBaseCellCount": 8339,
+              "occupiedCollisionCellCount": 14478,
+              "collisionCandidatePairChecks": 1308696,
+              "nearestCandidateChecks": 307202
+            }
+          }
+        }
+      },
+      "runtime": {
+        "pid": 25550,
+        "node": "v23.9.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "hostname": "Tdogss-MacBook-Pro.local",
+        "osRelease": "24.6.0",
+        "cpuModel": "Apple M2 Max",
+        "logicalCpuCount": 12,
+        "totalMemoryBytes": 68719476736,
+        "freeMemoryBytesAtCapture": 388235264
+      }
+    },
+    {
+      "fixtureId": "full-25000",
+      "status": "censored",
+      "censor": {
+        "kind": "timeout",
+        "reason": "child exceeded 600000 ms",
+        "elapsedMs": 600010.8737499999,
+        "exitCode": null,
+        "signal": "SIGKILL"
+      }
+    },
+    {
+      "fixtureId": "full-50000",
+      "status": "censored",
+      "censor": {
+        "kind": "timeout",
+        "reason": "child exceeded 600000 ms",
+        "elapsedMs": 600009.3611669999,
+        "exitCode": null,
+        "signal": "SIGKILL"
+      }
+    }
+  ]
+}

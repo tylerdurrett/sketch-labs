@@ -34,6 +34,58 @@ function drawMany({ kind = 'fill', iterations = 30 } = {}) {
   return samples
 }
 
+async function loadScene(kind, file, expectedSha256) {
+  const response = await fetch(file)
+  if (!response.ok) throw new Error(`failed to load ${file}: ${response.status}`)
+  const serialized = await response.text()
+  const actualSha256 = await sha256(serialized)
+  if (expectedSha256 !== undefined && actualSha256 !== expectedSha256) {
+    throw new Error(
+      `${kind} Scene checksum mismatch: expected ${expectedSha256}, received ${actualSha256}`,
+    )
+  }
+  scenes[kind] = JSON.parse(serialized)
+  return {
+    kind,
+    sha256: actualSha256,
+    bytes: new TextEncoder().encode(serialized).byteLength,
+    primitiveCount: scenes[kind].primitives.length,
+  }
+}
+
+async function screenScenes(manifestFile, { redraws = 12 } = {}) {
+  const response = await fetch(manifestFile)
+  if (!response.ok) {
+    throw new Error(`failed to load ${manifestFile}: ${response.status}`)
+  }
+  const manifest = await response.json()
+  const observations = []
+
+  for (const [kind, fixture] of Object.entries(manifest.scenes)) {
+    const loadStarted = performance.now()
+    const loaded = await loadScene(
+      kind,
+      new URL(fixture.file, new URL(manifestFile, location.href)).href,
+      fixture.sha256,
+    )
+    const loadMs = performance.now() - loadStarted
+    const firstDrawMs = draw(kind)
+    const redrawSamplesMs = drawMany({ kind, iterations: redraws })
+    observations.push({
+      ...loaded,
+      pointCount: fixture.pointCount,
+      loadMs,
+      firstDrawMs,
+      redrawSamplesMs,
+    })
+  }
+  return {
+    machine,
+    canvas: { width: canvas.width, height: canvas.height },
+    observations,
+  }
+}
+
 const firstSubmissionMs = draw('fill')
 const machine = {
   userAgent: navigator.userAgent,
@@ -48,14 +100,39 @@ const machine = {
 globalThis.__GRASS_HILLS_DENSITY_BENCHMARK__ = Object.freeze({
   canvas,
   context,
-  scenes: Object.freeze(scenes),
+  scenes,
   fixtures: BROWSER_SCENE_FIXTURES,
   machine: Object.freeze(machine),
   draw,
   drawMany,
+  loadScene,
+  screenScenes,
 })
 
-status.textContent = JSON.stringify({ firstSubmissionMs, machine }, null, 2)
+const query = new URLSearchParams(location.search)
+const manifestFile = query.get('manifest')
+const sceneId = query.get('scene')
+if (manifestFile !== null && sceneId !== null) {
+  const response = await fetch(manifestFile)
+  if (!response.ok) {
+    throw new Error(`failed to load ${manifestFile}: ${response.status}`)
+  }
+  const fixture = (await response.json()).scenes[sceneId]
+  if (fixture === undefined) throw new Error(`unknown screen Scene ${sceneId}`)
+  const loaded = await loadScene(
+    sceneId,
+    new URL(fixture.file, new URL(manifestFile, location.href)).href,
+    fixture.sha256,
+  )
+  const selectedSubmissionMs = draw(sceneId)
+  status.textContent = JSON.stringify(
+    { selectedSubmissionMs, loaded, machine },
+    null,
+    2,
+  )
+} else {
+  status.textContent = JSON.stringify({ firstSubmissionMs, machine }, null, 2)
+}
 
 async function sha256(value) {
   const bytes = new TextEncoder().encode(value)

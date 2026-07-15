@@ -2,8 +2,8 @@
 
 This directory owns the isolated benchmark infrastructure for issue #305: the
 subprocess protocol, literal workload manifest, reusable metric collectors, and
-an explicit browser profiling seam. It contains no dense-grass candidate
-algorithm or production Studio instrumentation.
+an explicit browser profiling seam. Dense-grass candidate algorithms remain
+isolated here and do not add production Sketch or Studio instrumentation.
 
 Every candidate × fixture pair runs in a fresh Node child. The parent runs jobs
 serially, applies a wall-clock deadline, polls RSS against the mode's hard
@@ -142,6 +142,65 @@ Then invoke `cli.js` with the config and explicit mode flags shown above. The
 fresh worker imports only the completed bundle before taking any phase memory
 snapshot; Vite/esbuild never runs in the measured child. Rebuild whenever the
 candidate, collector, or imported core source changes.
+
+## Simplified source-stroke candidate
+
+[`simplified-candidate.js`](simplified-candidate.js) keeps dense six-point open
+blade strokes separate from benchmark-only coarse masks. Its optional fixture
+configuration is:
+
+```js
+simplified: {
+  occluderMode: 'hill-only', // or 'hill-and-clump'
+  densityMode: 'same-density', // or 'plotter-lod'
+}
+```
+
+Hill and clump polygons participate only in stroke subtraction and are never
+emitted into the processed Scene. `same-density` sends every source root through
+that pass. `plotter-lod` keeps the denser live/full-color source Scene but sends
+an append-only, priority-ordered subset to the processed Outline Scene. The
+subset enforces the manifest's pinned 0.30 mm fineliner width (1.6666666666666667
+Scene units) between retained roots. The candidate supplies that one processed
+Scene and its measured duration to the collector; Outline preview and export
+therefore refer to identical geometry rather than independently rerunning the
+approximation.
+
+Production adoption would require explicit seams that this benchmark does not
+add:
+
+- Grass Hills preparation would expose stable source-stroke descriptors plus
+  hill/clump mask inputs to an on-demand, representation-specific processor.
+- The Outline owner would cache one processed stroke-only Scene and give that
+  same value to preview and plotter export, while normal preview could retain
+  the denser source Scene.
+- The active physical pen profile would reach deterministic LOD selection; the
+  0.30 mm campaign threshold must not become an implicit global Scene rule.
+
+No production Scene, generic Hidden-line pass, Studio wiring, or renderer API is
+changed by this candidate.
+
+The bounded Y3a comparison of its four processing variants is recorded in
+[`results/simplified-screen-2026-07-15.md`](results/simplified-screen-2026-07-15.md),
+with its compact summary plus verbatim raw campaign and browser envelopes in the
+adjacent JSON files. The screen uses only the historical baseline and one-hill
+5k fixtures under the pinned `screen` policy. It selects `hill-and-clump` +
+`plotter-lod` as the sole simplified finalist; that is not a full-matrix or
+production-adoption decision.
+
+To rerun it, bundle `simplified-candidate.js`, set
+`GRASS_HILLS_SIMPLIFIED_BUNDLE_URL` to the generated file URL, and invoke the
+generic CLI from `packages/core` with `--mode=screen` and the
+`./benchmarks/grass-hills-density/simplified-screen-config.js` config. The
+result record includes the complete commands for both the Node campaign and
+actual-Canvas browser pass.
+
+The finalist-only Y3b full campaign is recorded in
+[`results/simplified-full-2026-07-15.md`](results/simplified-full-2026-07-15.md).
+Its compact summary, verbatim raw protocol envelope, and checksum-pinned SVG
+handoff manifest are adjacent. Three jobs completed the fixed `full` sample plan;
+full 25k and 50k remain explicit timeout censors. The result does not silently
+reduce samples or imply production adoption.
 
 ## Timing and memory contract
 
