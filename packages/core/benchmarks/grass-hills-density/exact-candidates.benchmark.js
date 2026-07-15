@@ -10,6 +10,7 @@ import { benchmarkCandidate as poisson33 } from './exact-poisson-33.js'
 import { benchmarkCandidate as poisson7 } from './exact-poisson-7.js'
 import { benchmarkCandidate as stratified33 } from './exact-stratified-33.js'
 import { benchmarkCandidate as stratified7 } from './exact-stratified-7.js'
+import { EXACT_FINALIST } from './exact-selection.js'
 import { HISTORICAL_BASELINE } from './fixtures.js'
 
 const BASE_PAYLOAD = HISTORICAL_BASELINE.payload
@@ -283,6 +284,21 @@ describe('Grass Hills exact filled-blade candidates', () => {
           'exact-painter-order/uniform-aabb-grid/production-polygon-clip',
       },
     })
+  })
+
+  it('pins exactly one evidence-backed exact finalist', () => {
+    const candidates = [poisson33, poisson7, stratified33, stratified7]
+    expect(EXACT_FINALIST).toEqual({
+      candidateId: 'exact-stratified-7',
+      rootStrategy: 'stratified',
+      bladeGeometry: 'simple-7',
+      evidence: '../grass-hills-density-results.md#x3a-exact-filled-screen',
+    })
+    expect(
+      candidates.filter(
+        (candidate) => candidate.id === EXACT_FINALIST.candidateId,
+      ),
+    ).toEqual([stratified7])
   })
 })
 
