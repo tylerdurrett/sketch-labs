@@ -95,8 +95,8 @@ describe('grass-hills ridge-band geometry', () => {
     })
   })
 
-  it('stays finite and inside the sky and bottom boundaries at supported extremes', () => {
-    const hillCounts = [1, 64]
+  it('stays finite at supported extremes', () => {
+    const hillCounts = [1, 128]
     const horizonHeights = [0, 0.9]
     const depthFalloffs = [0.25, 4]
     const frames = [resolveCompositionFrame(1 / 3), resolveCompositionFrame(3)]
@@ -106,14 +106,12 @@ describe('grass-hills ridge-band geometry', () => {
         for (const horizonHeight of horizonHeights) {
           for (const depthFalloff of depthFalloffs) {
             const settings = projection({ frame, horizonHeight, depthFalloff })
-            const { polygons } = geometry(settings, hillCount, 1)
+            const { polygons } = geometry(settings, hillCount, 10)
 
             for (const polygon of polygons) {
               for (const [x, y] of ridgeline(polygon)) {
                 expect(Number.isFinite(x)).toBe(true)
                 expect(Number.isFinite(y)).toBe(true)
-                expect(y).toBeGreaterThan(horizonY(settings))
-                expect(y).toBeLessThan(frame.height)
               }
             }
           }
@@ -122,28 +120,7 @@ describe('grass-hills ridge-band geometry', () => {
     }
   })
 
-  it('keeps adjacent ridges strictly ordered under alternating worst-case relief', () => {
-    const settings = projection({ horizonHeight: 0.1, depthFalloff: 3 })
-    const bands = layoutHillBands(16, settings)
-    const depthIndex = new Map(bands.map((band, index) => [band.depth, index]))
-    const polygons = buildRidgeBands({
-      frame: settings.frame,
-      bands,
-      terrainAt: (_x, depth) => (depthIndex.get(depth)! % 2 === 0 ? -1 : 1),
-      ridgeAmplitude: 1,
-      ridgeSamples: RIDGE_SAMPLES,
-    })
-
-    for (let bandIndex = 1; bandIndex < polygons.length; bandIndex++) {
-      const far = ridgeline(polygons[bandIndex - 1]!)
-      const near = ridgeline(polygons[bandIndex]!)
-      for (let sample = 0; sample < far.length; sample++) {
-        expect(far[sample]![1]).toBeLessThan(near[sample]![1])
-      }
-    }
-  })
-
-  it('clamps out-of-range terrain before applying symmetric safe relief', () => {
+  it('clamps out-of-range terrain before applying high relief', () => {
     const settings = projection()
     const bands = layoutHillBands(1, settings)
     const high = buildRidgeBands({
@@ -164,6 +141,62 @@ describe('grass-hills ridge-band geometry', () => {
 
     expect(ridgeline(high[0]!)[0]![1]).toBe(bands[0]!.baselineY - amplitude)
     expect(ridgeline(low[0]!)[0]![1]).toBe(bands[0]!.baselineY + amplitude)
+  })
+
+  it('scales relief beyond the former maximum', () => {
+    const settings = projection()
+    const bands = layoutHillBands(1, settings)
+    const low = buildRidgeBands({
+      frame: settings.frame,
+      bands,
+      terrainAt: () => -1,
+      ridgeAmplitude: 1,
+      ridgeSamples: RIDGE_SAMPLES,
+    })
+    const high = buildRidgeBands({
+      frame: settings.frame,
+      bands,
+      terrainAt: () => -1,
+      ridgeAmplitude: 10,
+      ridgeSamples: RIDGE_SAMPLES,
+    })
+    const baselineY = bands[0]!.baselineY
+
+    expect(ridgeline(high[0]!)[0]![1] - baselineY).toBe(
+      10 * (ridgeline(low[0]!)[0]![1] - baselineY),
+    )
+  })
+
+  it('allows a tall mountain to rise naturally above the horizon', () => {
+    const settings = projection()
+    const bands = layoutHillBands(1, settings)
+    const [mountain] = buildRidgeBands({
+      frame: settings.frame,
+      bands,
+      terrainAt: () => 1,
+      ridgeAmplitude: 10,
+      ridgeSamples: RIDGE_SAMPLES,
+    })
+
+    expect(ridgeline(mountain!)[0]![1]).toBeLessThan(horizonY(settings))
+  })
+
+  it('does not let a distant valley displace a nearer ridge', () => {
+    const settings = projection()
+    const bands = layoutHillBands(2, settings)
+    const depthIndex = new Map(bands.map((band, index) => [band.depth, index]))
+    const [distant, near] = buildRidgeBands({
+      frame: settings.frame,
+      bands,
+      terrainAt: (_x, depth) => (depthIndex.get(depth) === 0 ? -1 : 1),
+      ridgeAmplitude: 0.5,
+      ridgeSamples: RIDGE_SAMPLES,
+    })
+    const expectedNearY =
+      bands[1]!.baselineY - ridgeBandAmplitude(bands[1]!, 0.5)
+
+    expect(ridgeline(near!)[0]![1]).toBe(expectedNearY)
+    expect(ridgeline(near!)[0]![1]).toBeLessThan(ridgeline(distant!)[0]![1])
   })
 
   it('puts sampled endpoints, vertical sides, and the bottom closure off-frame', () => {
@@ -217,28 +250,37 @@ describe('grass-hills ridge-band geometry', () => {
     expect(sourcePath).not.toMatch(/ Z(?=")/)
 
     const clipped = clipSceneToBounds(source)
-    expect(clipped.primitives).toHaveLength(1)
-    const [clippedRidge] = clipped.primitives
-    expect(clippedRidge!.closed).toBe(false)
-    expect(clippedRidge!.points[0]![0]).toBe(0)
-    expect(clippedRidge!.points.at(-1)![0]).toBe(settings.frame.width)
-    expect(clippedRidge!.points.every(([, y]) => y < settings.frame.height)).toBe(
-      true,
-    )
+    expect(clipped.primitives.length).toBeGreaterThan(0)
+    for (const clippedRidge of clipped.primitives) {
+      expect(clippedRidge.closed).toBe(false)
+      expect(
+        clippedRidge.points.every(
+          ([x, y]) =>
+            x >= 0 &&
+            x <= settings.frame.width &&
+            y >= 0 &&
+            y <= settings.frame.height,
+        ),
+      ).toBe(true)
+    }
 
-    const [clippedPath] = renderToSVG(
+    const clippedPaths = renderToSVG(
       clipped,
       undefined,
       'transparent',
     ).match(/<path\b[^>]*>/g)!
-    expect(clippedPath).not.toMatch(/ Z(?=")/)
+    expect(clippedPaths).toHaveLength(clipped.primitives.length)
+    expect(clippedPaths.every((path) => !/ Z(?=")/.test(path))).toBe(true)
 
     // The Outline path uses the same explicit source ring as its fill boundary,
-    // then reaches the renderer as one fill-free open ridgeline as intended.
+    // then reaches the renderer as fill-free open ridgeline segments. A tall
+    // mountain may exit and re-enter the frame, legitimately splitting it.
     const outline = clipSceneToBounds(hiddenLinePass(source))
-    expect(outline.primitives).toHaveLength(1)
-    expect(outline.primitives[0]!.fill).toBeUndefined()
-    expect(outline.primitives[0]!.closed).toBeUndefined()
+    expect(outline.primitives.length).toBeGreaterThan(0)
+    for (const primitive of outline.primitives) {
+      expect(primitive.fill).toBeUndefined()
+      expect(primitive.closed).toBeUndefined()
+    }
     expect(renderToSVG(outline, undefined, 'transparent')).not.toMatch(
       /<path\b[^>]*d="[^"]* Z"/,
     )

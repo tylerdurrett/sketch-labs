@@ -56,8 +56,8 @@ describe('grass-hills Sketch contract', () => {
       hillCount: {
         kind: 'number',
         min: 1,
-        max: 64,
-        default: 12,
+        max: 128,
+        default: 50,
         step: 1,
         integer: true,
       },
@@ -85,7 +85,7 @@ describe('grass-hills Sketch contract', () => {
       ridgeAmplitude: {
         kind: 'number',
         min: 0,
-        max: 1,
+        max: 10,
         default: 0.8,
         step: 0.01,
       },
@@ -113,7 +113,7 @@ describe('grass-hills Sketch contract', () => {
     expect(scene.space).toEqual(frame)
     expect(scene.space).not.toBe(frame)
     expect(scene.background).toEqual({ color: '#ffffff' })
-    expect(scene.primitives).toHaveLength(12)
+    expect(scene.primitives).toHaveLength(50)
   })
 
   it('uses hillCount as the primitive count', () => {
@@ -296,15 +296,15 @@ describe('grass-hills public geometry acceptance', () => {
     ['maximum horizon and minimum falloff', 0.9, 0.25, 12, 8],
     ['maximum horizon and falloff', 0.9, 4, 0.25, 0],
   ])(
-    'keeps generated ridges below the sky and strictly ordered at %s',
+    'keeps generated ridge geometry finite at %s',
     (_label, horizonHeight, depthFalloff, ridgeScale, terrainDrift) => {
       const scene = grassHills.generate(
         {
-          hillCount: 64,
+          hillCount: 128,
           horizonHeight,
           depthFalloff,
           ridgeScale,
-          ridgeAmplitude: 1,
+          ridgeAmplitude: 10,
           terrainDrift,
         },
         'public-extremes',
@@ -312,31 +312,23 @@ describe('grass-hills public geometry acceptance', () => {
         WIDE,
       )
       const ridges = ridgelinePoints(scene)
-      const horizon = WIDE.height * horizonHeight
 
       for (const ridge of ridges) {
-        expect(ridge.every(([, y]) => y > horizon)).toBe(true)
-      }
-      for (let ridgeIndex = 1; ridgeIndex < ridges.length; ridgeIndex++) {
-        const far = ridges[ridgeIndex - 1]!
-        const near = ridges[ridgeIndex]!
-        expect(near).toHaveLength(far.length)
-        for (let pointIndex = 0; pointIndex < far.length; pointIndex++) {
-          expect(near[pointIndex]![1]).toBeGreaterThan(far[pointIndex]![1])
-        }
+        expect(
+          ridge.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y)),
+        ).toBe(true)
       }
     },
   )
 
   it('survives the real outline and bounds pipeline as visible open ridgelines only', () => {
     const source = grassHills.generate(
-      { hillCount: 12, horizonHeight: 0.25, ridgeAmplitude: 1 },
+      { horizonHeight: 0.25, ridgeAmplitude: 10 },
       'outline-acceptance',
       0,
       WIDE,
     )
     const outline = clipSceneToBounds(hiddenLinePass(source))
-    const horizon = WIDE.height * 0.25
 
     expect(outline.primitives.length).toBeGreaterThan(0)
     for (const primitive of outline.primitives) {
@@ -345,7 +337,11 @@ describe('grass-hills public geometry acceptance', () => {
       expect(primitive.closed).not.toBe(true)
       expect(primitive.points.length).toBeGreaterThan(1)
       expect(primitive.points.at(-1)).not.toEqual(primitive.points[0])
-      expect(primitive.points.every(([, y]) => y >= horizon)).toBe(true)
+      expect(
+        primitive.points.every(
+          ([x, y]) => x >= 0 && x <= WIDE.width && y >= 0 && y <= WIDE.height,
+        ),
+      ).toBe(true)
 
       const frameEdgeSegments = []
       for (let index = 1; index < primitive.points.length; index++) {
@@ -361,7 +357,7 @@ describe('grass-hills public geometry acceptance', () => {
 
   it('serializes the processed Scene as path-only plotter geometry with no frame or closure chord', () => {
     const source = grassHills.generate(
-      { hillCount: 5, ridgeAmplitude: 1 },
+      { hillCount: 5, ridgeAmplitude: 10 },
       'plotter-acceptance',
       0,
       WIDE,

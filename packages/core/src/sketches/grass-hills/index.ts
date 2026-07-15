@@ -1,6 +1,6 @@
 /**
- * The "grass-hills" Sketch — a static landscape of full-width hill bands,
- * layered in far-to-near painter's order beneath an explicit horizon.
+ * The "grass-hills" Sketch — a static landscape of full-width hill bands whose
+ * baselines recede toward a horizon in far-to-near painter's order.
  *
  * DEPTH / SHARED TERRAIN: `hillCount`, `horizonHeight`, and `depthFalloff`
  * place successively larger bands from the horizon toward the foreground. All
@@ -9,11 +9,12 @@
  * landscape moves between depths. Relief scales with each band's local height,
  * so distant ridges flatten with the same perspective cue as their spacing.
  *
- * SAFE RIDGES / PAINTER ORDER: ridge relief is capped to 0.45 of both adjacent
- * clearances by the geometry pass. Even neighboring ridges moving directly
- * toward one another therefore retain a gap. Bands are prepared and emitted
- * far-to-near, so every nearer fill naturally covers the lower part of the band
- * behind it without z-indices or domain data leaking into the Scene.
+ * UNBOUNDED RELIEF / PAINTER ORDER: ridge relief is a direct multiple of each
+ * band's local height. Every ridge follows the shared terrain independently, so
+ * high amplitudes can carry mountains above the horizon or valleys below the
+ * frame without a distant profile deforming a nearer one. Bands are prepared
+ * and emitted far-to-near; nearer fills, rather than geometry clamps, naturally
+ * occlude the lower parts of the terrain behind them.
  *
  * EXPORT-SAFE RINGS: every hill is a filled ring whose first and last ridge
  * samples, vertical sides, and bottom edge sit beyond the frame. The first point
@@ -65,7 +66,7 @@ const HILL_STROKE_WIDTH = 2
  */
 const schema = {
   /** Number of full-width hill bands. Whole-number domain. */
-  hillCount: { kind: 'number', min: 1, max: 64, default: 12, step: 1, integer: true },
+  hillCount: { kind: 'number', min: 1, max: 128, default: 50, step: 1, integer: true },
   /** Horizon y as a top-origin fraction of the Composition Frame height. */
   horizonHeight: { kind: 'number', min: 0, max: 0.9, default: 0.25, step: 0.01 },
   /** Perspective exponent; values above one compress distant ridge spacing. */
@@ -73,7 +74,7 @@ const schema = {
   /** Horizontal fBm frequency in features across the frame. */
   ridgeScale: { kind: 'number', min: 0.25, max: 12, default: 3.5, step: 0.05 },
   /** Nominal relief as a fraction of each band's local height. */
-  ridgeAmplitude: { kind: 'number', min: 0, max: 1, default: 0.8, step: 0.01 },
+  ridgeAmplitude: { kind: 'number', min: 0, max: 10, default: 0.8, step: 0.01 },
   /** Travel through the shared terrain field from foreground to horizon. */
   terrainDrift: { kind: 'number', min: 0, max: 8, default: 1.25, step: 0.05 },
   /** Whole-surface paper color. */

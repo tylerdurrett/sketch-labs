@@ -2,9 +2,6 @@ import type { CoordinateSpace, Primitive } from '../../scene'
 import type { HillBandDepth } from './depth'
 import type { TerrainField } from './terrain'
 
-/** Fraction of each neighboring clearance a ridge may consume. */
-export const SAFE_CLEARANCE = 0.45
-
 /** Inputs for the pure ridge-band geometry pass. */
 export interface RidgeBandGeometryOptions {
   /** Coordinate space the polygons cover. */
@@ -20,21 +17,16 @@ export interface RidgeBandGeometryOptions {
 }
 
 /**
- * Resolve nominal ridge relief against the space available on both sides.
+ * Resolve ridge relief as a direct multiple of the band's local height.
  *
- * The same amplitude applies above and below the baseline. Reserving 55% of
- * each clearance means even two adjacent ridges moving directly toward one
- * another retain a strict gap.
+ * No neighboring ridge or frame boundary limits this value. Each profile stays
+ * independent; draw order and filled polygons provide the actual occlusion.
  */
 export function ridgeBandAmplitude(
   band: HillBandDepth,
   ridgeAmplitude: number,
 ): number {
-  return Math.min(
-    ridgeAmplitude * band.localBandHeight,
-    SAFE_CLEARANCE * band.upperClearance,
-    SAFE_CLEARANCE * band.lowerClearance,
-  )
+  return ridgeAmplitude * band.localBandHeight
 }
 
 /**
@@ -58,9 +50,10 @@ export function buildRidgeBands({
   ridgeSamples,
 }: RidgeBandGeometryOptions): Primitive[] {
   const sampleSpacing = frame.width / ridgeSamples
-  const bottomY =
-    frame.height +
-    Math.max(sampleSpacing, frame.height / Math.max(1, bands.length + 1))
+  const closureMargin = Math.max(
+    sampleSpacing,
+    frame.height / Math.max(1, bands.length + 1),
+  )
 
   return bands.map((band) => {
     const amplitude = ridgeBandAmplitude(band, ridgeAmplitude)
@@ -77,6 +70,8 @@ export function buildRidgeBands({
     }
 
     // Keep both closing sides vertical and wholly outside the frame.
+    const bottomY =
+      Math.max(frame.height, ...points.map(([, y]) => y)) + closureMargin
     const leftX = points[0]![0]
     const rightX = points.at(-1)![0]
     const first = points[0]!
