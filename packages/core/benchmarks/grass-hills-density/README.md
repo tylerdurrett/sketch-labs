@@ -2,8 +2,8 @@
 
 This directory owns the isolated benchmark infrastructure for issue #305: the
 subprocess protocol, literal workload manifest, reusable metric collectors, and
-an explicit browser profiling seam. It contains no dense-grass candidate
-algorithm or production Studio instrumentation.
+an explicit browser profiling seam. Dense-grass candidate algorithms remain
+isolated here and do not add production Sketch or Studio instrumentation.
 
 Every candidate × fixture pair runs in a fresh Node child. The parent runs jobs
 serially, applies a wall-clock deadline, polls RSS against the mode's hard

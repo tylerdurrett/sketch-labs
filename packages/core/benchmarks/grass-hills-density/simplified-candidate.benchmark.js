@@ -155,7 +155,7 @@ describe('simplified dense-grass candidate', () => {
       60,
       prepared.hills.map((hill) => hill.band),
     )
-    expect(counts).toEqual([35, 16, 9])
+    expect(counts).toEqual([36, 16, 8])
     expect(counts.reduce((total, count) => total + count, 0)).toBe(60)
     expect(counts[0]).toBeGreaterThan(counts[1])
     expect(counts[1]).toBeGreaterThan(counts[2])
@@ -189,6 +189,44 @@ describe('simplified dense-grass candidate', () => {
     expect(new Set(scales.map((scale) => scale.toFixed(6))).size).toBeGreaterThan(
       20,
     )
+  })
+
+  it('keeps every multi-hill root nested as the global count increases', () => {
+    let previous = benchmarkCandidate.generate(
+      payload({ bladeCount: 1, hillCount: 4 }),
+      0,
+    )
+    let count26
+    let count27
+
+    for (let bladeCount = 2; bladeCount <= 80; bladeCount++) {
+      const current = benchmarkCandidate.generate(
+        payload({ bladeCount, hillCount: 4 }),
+        0,
+      )
+      const currentKeys = new Set(
+        current.blades.map((blade) => blade.identity.rootKey),
+      )
+
+      expect(current.blades).toHaveLength(bladeCount)
+      for (const blade of previous.blades) {
+        expect(currentKeys.has(blade.identity.rootKey)).toBe(true)
+      }
+      if (bladeCount === 26) count26 = current
+      if (bladeCount === 27) count27 = current
+      previous = current
+    }
+
+    const hillCounts = (result) =>
+      ['4/5', '3/5', '2/5', '1/5'].map(
+        (hillKey) =>
+          result.blades.filter((blade) => blade.identity.hillKey === hillKey)
+            .length,
+      )
+    // Largest remainder drops the nearest hill from three roots to two here.
+    // Highest averages instead adds one root while retaining every member.
+    expect(hillCounts(count26)).toEqual([14, 6, 4, 2])
+    expect(hillCounts(count27)).toEqual([14, 7, 4, 2])
   })
 
   it('reprojects shared roots when hill count changes without changing identity or rolls', () => {

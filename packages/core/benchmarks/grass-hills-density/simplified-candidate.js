@@ -172,24 +172,25 @@ export function sampleSimplifiedCandidate(prepared, t) {
 
 /**
  * Give each hill an exact count, weighted continuously by projected blade area.
- * Largest-remainder allocation makes ties deterministic and preserves totals.
+ * Sequential highest averages makes the allocation house-monotone: increasing
+ * the requested total by one always adds one root and can never remove a root
+ * from another hill. Equal priorities resolve toward the farther hill.
  */
 export function allocateBladeCounts(totalCount, bands) {
   requireNonNegativeInteger(totalCount, 'totalCount')
   if (bands.length === 0) return Object.freeze([])
 
   const weights = bands.map(({ depth }) => 1 / grassScaleAtDepth(depth) ** 2)
-  const totalWeight = weights.reduce((total, weight) => total + weight, 0)
-  const exact = weights.map((weight) => (totalCount * weight) / totalWeight)
-  const counts = exact.map(Math.floor)
-  const remaining =
-    totalCount - counts.reduce((total, count) => total + count, 0)
-  const remainderOrder = exact
-    .map((value, index) => ({ index, remainder: value - counts[index] }))
-    .sort((a, b) => b.remainder - a.remainder || a.index - b.index)
+  const counts = bands.map(() => 0)
 
-  for (let index = 0; index < remaining; index++) {
-    counts[remainderOrder[index].index] += 1
+  for (let allocated = 0; allocated < totalCount; allocated++) {
+    let bestIndex = 0
+    for (let index = 1; index < bands.length; index++) {
+      const priority = weights[index] / (counts[index] + 1)
+      const bestPriority = weights[bestIndex] / (counts[bestIndex] + 1)
+      if (priority > bestPriority) bestIndex = index
+    }
+    counts[bestIndex] += 1
   }
   return Object.freeze(counts)
 }
