@@ -161,6 +161,20 @@ add:
 No production Scene, generic Hidden-line pass, Studio wiring, or renderer API is
 changed by this candidate.
 
+The bounded Y3a comparison of its four processing variants is recorded in
+[`results/simplified-screen-2026-07-15.md`](results/simplified-screen-2026-07-15.md),
+with complete machine-readable evidence in the adjacent JSON. The screen uses
+only the historical baseline and one-hill 5k fixtures under the pinned `screen`
+policy. It selects `hill-and-clump` + `plotter-lod` as the sole simplified
+finalist; that is not a full-matrix or production-adoption decision.
+
+To rerun it, bundle `simplified-candidate.js`, set
+`GRASS_HILLS_SIMPLIFIED_BUNDLE_URL` to the generated file URL, and invoke the
+generic CLI from `packages/core` with `--mode=screen` and the
+`./benchmarks/grass-hills-density/simplified-screen-config.js` config. The
+result record includes the complete commands for both the Node campaign and
+actual-Canvas browser pass.
+
 ## Timing and memory contract
 
 Protocol version 1 reports three disjoint phase slots:
