@@ -124,6 +124,43 @@ fresh worker imports only the completed bundle before taking any phase memory
 snapshot; Vite/esbuild never runs in the measured child. Rebuild whenever the
 candidate, collector, or imported core source changes.
 
+## Simplified source-stroke candidate
+
+[`simplified-candidate.js`](simplified-candidate.js) keeps dense six-point open
+blade strokes separate from benchmark-only coarse masks. Its optional fixture
+configuration is:
+
+```js
+simplified: {
+  occluderMode: 'hill-only', // or 'hill-and-clump'
+  densityMode: 'same-density', // or 'plotter-lod'
+}
+```
+
+Hill and clump polygons participate only in stroke subtraction and are never
+emitted into the processed Scene. `same-density` sends every source root through
+that pass. `plotter-lod` keeps the denser live/full-color source Scene but sends
+an append-only, priority-ordered subset to the processed Outline Scene. The
+subset enforces the manifest's pinned 0.30 mm fineliner width (1.6666666666666667
+Scene units) between retained roots. The candidate supplies that one processed
+Scene and its measured duration to the collector; Outline preview and export
+therefore refer to identical geometry rather than independently rerunning the
+approximation.
+
+Production adoption would require explicit seams that this benchmark does not
+add:
+
+- Grass Hills preparation would expose stable source-stroke descriptors plus
+  hill/clump mask inputs to an on-demand, representation-specific processor.
+- The Outline owner would cache one processed stroke-only Scene and give that
+  same value to preview and plotter export, while normal preview could retain
+  the denser source Scene.
+- The active physical pen profile would reach deterministic LOD selection; the
+  0.30 mm campaign threshold must not become an implicit global Scene rule.
+
+No production Scene, generic Hidden-line pass, Studio wiring, or renderer API is
+changed by this candidate.
+
 ## Timing and memory contract
 
 Protocol version 1 reports three disjoint phase slots:

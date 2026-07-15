@@ -11,6 +11,11 @@ import {
 import { buildRidgeBands } from '../../src/sketches/grass-hills/ridge-bands.ts'
 import { createTerrainField } from '../../src/sketches/grass-hills/terrain.ts'
 import { collectSceneMetrics } from './metrics.js'
+import {
+  processSimplifiedStrokes,
+  SIMPLIFIED_DENSITY_MODES,
+  SIMPLIFIED_OCCLUDER_MODES,
+} from './simplified-processing.js'
 
 export const SIMPLIFIED_CANDIDATE_ID = 'simplified-stroke-tufts'
 export const SIMPLIFIED_BLADE_POINT_COUNT = 6
@@ -25,7 +30,8 @@ const TAU = 2 * Math.PI
  * Every visible blade remains one open, six-point centerline. Tufts are stable
  * preparation metadata rather than joined Scene paths: joining distinct roots
  * would add false connector marks to SVG and plotter output. This candidate
- * deliberately performs no hidden-line removal, coarse occlusion, or LOD.
+ * The benchmark-local processing pass compares coarse masks and plotter LOD;
+ * none of those candidate decisions alter the production Scene or HLR.
  */
 export const benchmarkCandidate = Object.freeze({
   id: SIMPLIFIED_CANDIDATE_ID,
@@ -42,6 +48,9 @@ export const benchmarkCandidate = Object.freeze({
     for (const primitive of result.scene.primitives) {
       pointCount += primitive.points.length
     }
+    for (const primitive of result.processing.scene.primitives) {
+      pointCount += primitive.points.length
+    }
     return pointCount + result.roots.length + result.tufts.length
   },
   inspect({ value, payload }) {
@@ -56,16 +65,25 @@ export const benchmarkCandidate = Object.freeze({
           0,
         ),
         pointsPerBlade: SIMPLIFIED_BLADE_POINT_COUNT,
+        occluderMode: result.processing.evidence.occluders.mode,
+        densityMode: result.processing.evidence.lod.mode,
+        hillOccluderCount:
+          result.processing.evidence.occluders.hillCount,
+        clumpOccluderCount:
+          result.processing.evidence.occluders.clumpCount,
+        processedRootCount: result.processing.roots.length,
+        previewExportShareProcessedScene:
+          result.processing.previewScene === result.processing.exportScene,
       },
       ...collectSceneMetrics(result.scene, {
         profile: payload.profile,
-        roots: result.roots,
+        roots: result.processing.roots,
         nibWidthSceneUnits: payload.pen.nibWidthSceneUnits,
         clearanceSampling: payload.metrics.clearanceSampling,
-        // The identity callback records the cost and output of this candidate's
-        // intentionally unobscured stroke representation without invoking the
-        // generic filled-primitive hidden-line pass.
-        processing: { run: (source) => source },
+        processing: {
+          scene: result.processing.scene,
+          durationMs: result.processing.durationMs,
+        },
         pixelWidth: payload.frame.width,
         pixelHeight: payload.frame.height,
       }),
@@ -82,7 +100,8 @@ export function prepareSimplifiedCandidate(payload) {
     depthFalloff: params.depthFalloff,
   })
   const bands = layoutHillBands(request.hillCount, projection)
-  const counts = allocateBladeCounts(request.bladeCount, bands)
+  const allocation = buildAllocationPlan(request.bladeCount, bands)
+  const counts = allocation.counts
   const terrainAt = createTerrainField(seed, {
     ridgeScale: params.ridgeScale,
     terrainDrift: params.terrainDrift,
@@ -113,12 +132,25 @@ export function prepareSimplifiedCandidate(payload) {
       maxUnscaledBladeLength: maximumLength,
     })
     const blades = roots.map((root) =>
-      resolveBladeDescriptor({ seed, params, band, mask, root }),
+      resolveBladeDescriptor({
+        seed,
+        params,
+        band,
+        mask,
+        root,
+        lodRank: allocation.ranks[hillIndex][root.ordinal],
+      }),
     )
     const painterOrder = [...blades].sort(compareBladePainterOrder)
 
     return Object.freeze({
       band: Object.freeze({ ...band }),
+      hillIndex,
+      ridge: Object.freeze({
+        points: Object.freeze(
+          ridges[hillIndex].points.map((point) => Object.freeze([...point])),
+        ),
+      }),
       blades: Object.freeze(blades),
       painterOrder: Object.freeze(painterOrder),
       tufts: buildTufts(band.hillKey, blades),
@@ -129,6 +161,12 @@ export function prepareSimplifiedCandidate(payload) {
     frame: Object.freeze({ width: frame.width, height: frame.height }),
     backgroundColor: params.backgroundColor,
     bladeStrokeColor: params.bladeStrokeColor,
+    processing: Object.freeze({
+      occluderMode: payload.simplified?.occluderMode ?? 'hill-only',
+      densityMode: payload.simplified?.densityMode ?? 'same-density',
+      millimetersPerSceneUnit: payload.pen.millimetersPerSceneUnit,
+      nibWidthSceneUnits: payload.pen.nibWidthSceneUnits,
+    }),
     hills: Object.freeze(hills),
   })
 }
@@ -141,28 +179,58 @@ export function sampleSimplifiedCandidate(prepared, t) {
   const roots = []
   const blades = []
   const tufts = []
+  const sourceEntries = []
 
   for (const hill of prepared.hills) {
     blades.push(...hill.blades)
     tufts.push(...hill.tufts)
     for (const descriptor of hill.painterOrder) {
       roots.push(descriptor.projected)
-      primitives.push({
+      const primitive = {
         points: simplifiedBladePoints(descriptor, t),
         closed: false,
         stroke: {
           color: prepared.bladeStrokeColor,
           width: descriptor.shape.width,
         },
+      }
+      primitives.push(primitive)
+      sourceEntries.push({
+        primitive,
+        descriptor,
+        hillIndex: hill.hillIndex,
+        rootKey: descriptor.identity.rootKey,
+        tuftKey: descriptor.identity.tuftKey,
       })
     }
   }
 
+  const scene = {
+    space: { ...prepared.frame },
+    primitives,
+    background: { color: prepared.backgroundColor },
+  }
+  const processingStarted = performance.now()
+  const processed = processSimplifiedStrokes({
+    sourceScene: scene,
+    sourceEntries,
+    hillRidges: prepared.hills.map((hill) => hill.ridge),
+    ...prepared.processing,
+  })
+  const durationMs = performance.now() - processingStarted
+  const processedRootKeys = new Set(processed.evidence.lod.includedRootKeys)
+
   return {
-    scene: {
-      space: { ...prepared.frame },
-      primitives,
-      background: { color: prepared.backgroundColor },
+    scene,
+    processing: {
+      scene: processed.scene,
+      durationMs,
+      evidence: processed.evidence,
+      roots: sourceEntries
+        .filter((entry) => processedRootKeys.has(entry.rootKey))
+        .map((entry) => entry.descriptor.projected),
+      previewScene: processed.scene,
+      exportScene: processed.scene,
     },
     roots,
     blades,
@@ -177,11 +245,18 @@ export function sampleSimplifiedCandidate(prepared, t) {
  * from another hill. Equal priorities resolve toward the farther hill.
  */
 export function allocateBladeCounts(totalCount, bands) {
+  return buildAllocationPlan(totalCount, bands).counts
+}
+
+function buildAllocationPlan(totalCount, bands) {
   requireNonNegativeInteger(totalCount, 'totalCount')
-  if (bands.length === 0) return Object.freeze([])
+  if (bands.length === 0) {
+    return Object.freeze({ counts: Object.freeze([]), ranks: Object.freeze([]) })
+  }
 
   const weights = bands.map(({ depth }) => 1 / grassScaleAtDepth(depth) ** 2)
   const counts = bands.map(() => 0)
+  const ranks = bands.map(() => [])
 
   for (let allocated = 0; allocated < totalCount; allocated++) {
     let bestIndex = 0
@@ -190,9 +265,13 @@ export function allocateBladeCounts(totalCount, bands) {
       const bestPriority = weights[bestIndex] / (counts[bestIndex] + 1)
       if (priority > bestPriority) bestIndex = index
     }
+    ranks[bestIndex][counts[bestIndex]] = allocated
     counts[bestIndex] += 1
   }
-  return Object.freeze(counts)
+  return Object.freeze({
+    counts: Object.freeze(counts),
+    ranks: Object.freeze(ranks.map((hillRanks) => Object.freeze(hillRanks))),
+  })
 }
 
 /**
@@ -250,7 +329,7 @@ export function simplifiedBladePoints(descriptor, _t) {
   return points
 }
 
-function resolveBladeDescriptor({ seed, params, band, mask, root }) {
+function resolveBladeDescriptor({ seed, params, band, mask, root, lodRank }) {
   const random = createRandom(`${seed}-simplified-blade-${root.rootKey}`)
   const rolls = Object.freeze({
     length: random.value(),
@@ -283,6 +362,12 @@ function resolveBladeDescriptor({ seed, params, band, mask, root }) {
     canonical: Object.freeze({ u: root.u, v: root.v }),
     projected,
     rolls,
+    lod: Object.freeze({
+      rank: lodRank,
+      tieBreak: createRandom(
+        `${seed}-simplified-lod-${root.rootKey}`,
+      ).value(),
+    }),
     shape: Object.freeze({
       length: unscaledLength * scale,
       width: unscaledWidth * scale,
@@ -349,6 +434,24 @@ function validatePayload(payload) {
   requirePositiveFinite(payload.frame?.height, 'frame.height')
   requirePositiveInteger(payload.request?.hillCount, 'request.hillCount')
   requirePositiveInteger(payload.request?.bladeCount, 'request.bladeCount')
+  requirePositiveFinite(
+    payload.pen?.millimetersPerSceneUnit,
+    'pen.millimetersPerSceneUnit',
+  )
+  requirePositiveFinite(
+    payload.pen?.nibWidthSceneUnits,
+    'pen.nibWidthSceneUnits',
+  )
+  requireOptionalMode(
+    payload.simplified?.occluderMode,
+    SIMPLIFIED_OCCLUDER_MODES,
+    'simplified.occluderMode',
+  )
+  requireOptionalMode(
+    payload.simplified?.densityMode,
+    SIMPLIFIED_DENSITY_MODES,
+    'simplified.densityMode',
+  )
 
   for (const name of [
     'horizonHeight',
@@ -383,6 +486,12 @@ function requireNonNegativeInteger(value, name) {
 function requirePositiveInteger(value, name) {
   requireNonNegativeInteger(value, name)
   if (value === 0) throw new RangeError(`${name} must be positive`)
+}
+
+function requireOptionalMode(value, allowed, name) {
+  if (value !== undefined && !allowed.includes(value)) {
+    throw new RangeError(`${name} must be one of ${allowed.join(', ')}`)
+  }
 }
 
 function signed(value) {

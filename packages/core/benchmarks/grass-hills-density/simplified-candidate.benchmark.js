@@ -60,9 +60,15 @@ describe('simplified dense-grass candidate', () => {
       tuftCount: 1,
       tuftMemberCount: 4,
       pointsPerBlade: 6,
+      occluderMode: 'hill-only',
+      densityMode: 'same-density',
+      hillOccluderCount: 1,
+      clumpOccluderCount: 0,
+      processedRootCount: 4,
+      previewExportShareProcessedScene: true,
     })
     expect(metrics.processing).toMatchObject({
-      kind: 'measured-callback',
+      kind: 'supplied',
       processed: { primitiveCount: 4, pointCount: 24 },
     })
 
@@ -97,7 +103,12 @@ describe('simplified dense-grass candidate', () => {
     const first = benchmarkCandidate.generate(fixture, 0)
     const second = benchmarkCandidate.generate(fixture, 0)
 
-    expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+    expect(second.scene).toEqual(first.scene)
+    expect(second.processing.scene).toEqual(first.processing.scene)
+    expect(second.processing.evidence).toEqual(first.processing.evidence)
+    expect(second.roots).toEqual(first.roots)
+    expect(second.blades).toEqual(first.blades)
+    expect(second.tufts).toEqual(first.tufts)
     expect(first.scene.primitives).toHaveLength(17)
     expect(first.blades).toHaveLength(17)
     expect(first.roots).toHaveLength(17)
