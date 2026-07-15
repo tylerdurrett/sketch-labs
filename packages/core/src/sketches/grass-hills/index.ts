@@ -22,15 +22,15 @@
  * deliberate metadata: export clipping can discard those off-frame closure
  * edges without synthesizing a visible frame-edge stroke chord.
  *
- * GRASS / CANONICAL STABILITY: every hill owns a canonical Poisson root field
- * keyed by its reduced depth identity. Selection and the four per-blade rolls
- * stay in that hill-local space, so a shared hill retains its arrangement and
- * variation when `hillCount` changes. Only the final projection follows the
- * count-dependent terrain mask. Each hill is emitted before its blades, whose
- * ascending root-y order lets lower blades cover higher ones before the next,
- * nearer hill covers the whole group.
+ * GRASS / CANONICAL STABILITY: every hill owns a canonical 100 x 100 stable-cell
+ * root bank keyed by its reduced depth identity. Priority-prefix selection and
+ * the four per-blade rolls stay in that hill-local space, so a shared hill
+ * retains its arrangement and variation when `hillCount` changes. Only the
+ * final projection follows the count-dependent terrain mask. Each hill is
+ * emitted before its blades, whose ascending root-y order lets lower blades
+ * cover higher ones before the next, nearer hill covers the whole group.
  *
- * DENSE ARCHITECTURE DECISION (#305; NOT YET THE PRODUCTION PATH): the approved
+ * DENSE ARCHITECTURE DECISION (#305; FOUNDATION LANDED): the approved
  * full-composition target is 10,000 descriptors from a seeded 100×100
  * stratified bank per stable hill identity. Fill uses curved seven-point closed
  * blades. On-demand Outline/plot derives curved six-point spines from those same
@@ -76,7 +76,10 @@ import {
 } from './grass'
 import { createGrassHillMask } from './grass-placement'
 import { scatterGrassRoots } from './grass-scatter'
-import { selectGrassRoots } from './grass-selection'
+import {
+  allocateGrassRootCounts,
+  selectGrassRoots,
+} from './grass-selection'
 import { buildRidgeBands } from './ridge-bands'
 import { createTerrainField } from './terrain'
 
@@ -113,7 +116,7 @@ const schema = {
   ridgeAmplitude: { kind: 'number', min: 0, max: 25, default: 0.8, step: 0.01 },
   /** Travel through the shared terrain field from foreground to horizon. */
   terrainDrift: { kind: 'number', min: 0, max: 8, default: 1.25, step: 0.05 },
-  /** Relative canonical root density on every hill. */
+  /** Relative density: 0 is off and 2 is the adopted 10,000-blade scene. */
   bladeDensity: { kind: 'number', min: 0, max: 2, default: 1, step: 0.05 },
   /** Nominal foreground blade length in Composition Frame units. */
   bladeLength: { kind: 'number', min: 4, max: 80, default: 28, step: 1 },
@@ -200,20 +203,19 @@ export const grassHills = definePreparedSketch({
       bladeLength,
       bladeLengthVariance,
     )
+    const rootCounts = allocateGrassRootCounts(
+      bands.map(({ depth }) => depth),
+      bladeDensity,
+    )
     const preparedHills: ReadonlyArray<PreparedHill> = Object.freeze(
       bands.map((band, hillIndex) => {
         const ridge = ridges[hillIndex]!
-        const candidates = scatterGrassRoots({
-          seed,
-          hillKey: band.hillKey,
-          bladeDensity,
-        })
-        const roots = selectGrassRoots({
-          seed,
-          depth: band.depth,
-          bladeDensity,
-          candidates,
-        })
+        const count = rootCounts[hillIndex]!
+        const candidates =
+          count === 0
+            ? Object.freeze([])
+            : scatterGrassRoots({ seed, hillKey: band.hillKey })
+        const roots = selectGrassRoots({ count, candidates })
         const mask = createGrassHillMask({
           frame,
           projection,

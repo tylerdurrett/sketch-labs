@@ -22,13 +22,16 @@ import {
   scatterGrassRoots,
   type GrassRootCandidate,
 } from '../sketches/grass-hills/grass-scatter'
-import { selectGrassRoots } from '../sketches/grass-hills/grass-selection'
+import {
+  allocateGrassRootCounts,
+  selectGrassRoots,
+} from '../sketches/grass-hills/grass-selection'
 import { buildRidgeBands } from '../sketches/grass-hills/ridge-bands'
 import { createTerrainField } from '../sketches/grass-hills/terrain'
 
 const FRAME: CoordinateSpace = { width: 1_600, height: 1_000 }
 const SEED = 'canonical-acceptance'
-const BLADE_DENSITY = 1
+const BLADE_DENSITY = 0.1
 const SHAPE = {
   bladeLength: 28,
   bladeLengthVariance: 8,
@@ -80,18 +83,19 @@ function prepareHills({
     SHAPE.bladeLength,
     SHAPE.bladeLengthVariance,
   )
+  const rootCounts = allocateGrassRootCounts(
+    bands.map(({ depth }) => depth),
+    BLADE_DENSITY,
+  )
 
   const hills = bands.map((band, index): PreparedHill => {
     const ridge = ridges[index]!
     const candidates = scatterGrassRoots({
       seed,
       hillKey: band.hillKey,
-      bladeDensity: BLADE_DENSITY,
     })
     const roots = selectGrassRoots({
-      seed,
-      depth: band.depth,
-      bladeDensity: BLADE_DENSITY,
+      count: rootCounts[index]!,
       candidates,
     })
     const mask = createGrassHillMask({
@@ -205,11 +209,12 @@ describe('grass-hills canonical count stability', () => {
       expect(canonicalRows(atSeven.candidates)).toEqual(
         canonicalRows(atThree.candidates),
       )
-      expect(atSeven.roots.map(({ rootKey }) => rootKey)).toEqual(
-        atThree.roots.map(({ rootKey }) => rootKey),
+      const sharedCount = Math.min(atSeven.roots.length, atThree.roots.length)
+      expect(atSeven.roots.slice(0, sharedCount)).toEqual(
+        atThree.roots.slice(0, sharedCount),
       )
 
-      for (const bladeAtThree of atThree.blades) {
+      for (const bladeAtThree of atThree.blades.slice(0, sharedCount)) {
         const bladeAtSeven = atSeven.blades.find(
           ({ identity }) =>
             identity.rootKey === bladeAtThree.identity.rootKey,

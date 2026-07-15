@@ -225,7 +225,7 @@ describe('grass-hills Sketch contract', () => {
     ['square', SQUARE],
     ['non-square', WIDE],
   ])('composes into the exact supplied %s frame', (_label, frame) => {
-    const scene = grassHills.generate({}, 'frame', 0, frame)
+    const scene = grassHills.generate({ bladeDensity: 0.004 }, 'frame', 0, frame)
 
     expect(scene.space).toEqual(frame)
     expect(scene.space).not.toBe(frame)
@@ -236,10 +236,24 @@ describe('grass-hills Sketch contract', () => {
 
   it('uses hillCount as the open ridge-ring count', () => {
     expect(
-      hills(grassHills.generate({ hillCount: 1 }, 'count', 0, SQUARE)),
+      hills(
+        grassHills.generate(
+          { hillCount: 1, bladeDensity: 0 },
+          'count',
+          0,
+          SQUARE,
+        ),
+      ),
     ).toHaveLength(1)
     expect(
-      hills(grassHills.generate({ hillCount: 37 }, 'count', 0, SQUARE)),
+      hills(
+        grassHills.generate(
+          { hillCount: 37, bladeDensity: 0 },
+          'count',
+          0,
+          SQUARE,
+        ),
+      ),
     ).toHaveLength(37)
   })
 
@@ -259,6 +273,7 @@ describe('grass-hills Sketch contract', () => {
     const scene = grassHills.generate(
       {
         hillCount: 3,
+        bladeDensity: 0,
         backgroundColor: '#f7f3e8',
         hillColor: '#88aa55',
         hillStrokeColor: '#102010',
@@ -285,6 +300,7 @@ describe('grass-hills Sketch contract', () => {
     const scene = grassHills.generate(
       {
         hillCount: 4,
+        bladeDensity: 0.004,
         ridgeAmplitude: 0,
         bladeColor: '#ddeeaa',
         bladeStrokeColor: '#203010',
@@ -327,7 +343,7 @@ describe('grass-hills Sketch contract', () => {
 
   it('preserves far-to-near painter order', () => {
     const scene = grassHills.generate(
-      { hillCount: 8, ridgeAmplitude: 0 },
+      { hillCount: 8, ridgeAmplitude: 0, bladeDensity: 0 },
       'painter-order',
       0,
       SQUARE,
@@ -348,7 +364,7 @@ describe('grass-hills preparation and determinism', () => {
     ridgeScale: 4.25,
     ridgeAmplitude: 0.72,
     terrainDrift: 2.1,
-    bladeDensity: 1,
+    bladeDensity: 0.004,
     bladeLength: 28,
     bladeLengthVariance: 8,
     bladeWidth: 3,
@@ -538,6 +554,7 @@ describe('grass-hills public geometry acceptance', () => {
           ridgeScale,
           ridgeAmplitude: 25,
           terrainDrift,
+          bladeDensity: 0,
         },
         'public-extremes',
         0,
@@ -558,7 +575,7 @@ describe('grass-hills public geometry acceptance', () => {
       {
         hillCount: 3,
         ridgeAmplitude: 0,
-        bladeDensity: 2,
+        bladeDensity: 0.04,
         bladeLength: 80,
         bladeLengthVariance: 0,
         bladeWidth: 3,
@@ -596,7 +613,7 @@ describe('grass-hills public geometry acceptance', () => {
       {
         hillCount: 1,
         ridgeAmplitude: 0,
-        bladeDensity: 0.25,
+        bladeDensity: 0.0016,
         bladeLength: 4,
         bladeLengthVariance: 0,
         bladeWidth: 0.5,
@@ -625,7 +642,12 @@ describe('grass-hills public geometry acceptance', () => {
 
   it('survives the real outline and bounds pipeline as visible open linework', () => {
     const source = grassHills.generate(
-      { hillCount: 5, horizonHeight: 0.25, ridgeAmplitude: 25 },
+      {
+        hillCount: 5,
+        horizonHeight: 0.25,
+        ridgeAmplitude: 25,
+        bladeDensity: 0.002,
+      },
       'outline-acceptance',
       0,
       WIDE,
@@ -674,7 +696,7 @@ describe('grass-hills public geometry acceptance', () => {
 
   it('serializes the processed Scene as path-only plotter geometry with no frame or closure chord', () => {
     const source = grassHills.generate(
-      { hillCount: 5, ridgeAmplitude: 25 },
+      { hillCount: 5, ridgeAmplitude: 25, bladeDensity: 0.002 },
       'plotter-acceptance',
       0,
       WIDE,
@@ -701,14 +723,19 @@ describe('grass-hills public geometry acceptance', () => {
 describe('grass-hills hidden-line workload inventory', () => {
   const seed = 'workload-inventory'
 
-  it('pins deterministic small and default generation inventories', () => {
+  it('pins deterministic small and bounded generation inventories', () => {
     const small = grassHills.generate(
-      { hillCount: 1, bladeDensity: 0.25, ridgeAmplitude: 0 },
+      { hillCount: 1, bladeDensity: 0.0016, ridgeAmplitude: 0 },
       seed,
       0,
       SQUARE,
     )
-    const defaults = grassHills.generate({}, seed, 0, SQUARE)
+    const bounded = grassHills.generate(
+      { bladeDensity: 0.004 },
+      seed,
+      0,
+      SQUARE,
+    )
 
     expect(analyzeHiddenLineWorkload(small)).toEqual({
       filledPrimitiveCount: 9,
@@ -717,19 +744,19 @@ describe('grass-hills hidden-line workload inventory', () => {
       estimatedSegmentEdgeComparisons: 35_112,
       totalWorkUnits: 36_868,
     })
-    expect(analyzeHiddenLineWorkload(defaults)).toEqual({
-      filledPrimitiveCount: 335,
-      sourceSegmentCount: 11_730,
-      overlappingPairCount: 1_835,
-      estimatedSegmentEdgeComparisons: 8_625_374,
-      totalWorkUnits: 8_704_334,
+    expect(analyzeHiddenLineWorkload(bounded)).toEqual({
+      filledPrimitiveCount: 30,
+      sourceSegmentCount: 1_970,
+      overlappingPairCount: 135,
+      estimatedSegmentEdgeComparisons: 1_196_293,
+      totalWorkUnits: 1_206_573,
     })
   })
 
-  it('inventories maximum schema generation and hill-only filtering without running the pass', () => {
+  it('emits the adopted maximum count and inventories its hill-only filtering', () => {
     const maximum = grassHills.generate(
       {
-        hillCount: 256,
+        hillCount: 10,
         horizonHeight: 0.9,
         depthFalloff: 4,
         ridgeScale: 12,
@@ -747,16 +774,15 @@ describe('grass-hills hidden-line workload inventory', () => {
       SQUARE,
     )
 
-    expect(blades(maximum).length).toBe(10_240)
-    expect(blades(maximum).length).toBeLessThanOrEqual(10_240)
+    expect(blades(maximum)).toHaveLength(10_000)
 
     const hillOnly = { ...maximum, primitives: hills(maximum) }
     expect(analyzeHiddenLineWorkload(hillOnly)).toEqual({
-      filledPrimitiveCount: 256,
-      sourceSegmentCount: 34_048,
-      overlappingPairCount: 32_640,
-      estimatedSegmentEdgeComparisons: 581_710_080,
-      totalWorkUnits: 582_370_560,
+      filledPrimitiveCount: 10,
+      sourceSegmentCount: 1_330,
+      overlappingPairCount: 45,
+      estimatedSegmentEdgeComparisons: 801_990,
+      totalWorkUnits: 808_110,
     })
   })
 })

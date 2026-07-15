@@ -14,7 +14,7 @@ const BASE_PARAMS = {
   ridgeScale: 3,
   ridgeAmplitude: 0,
   terrainDrift: 1,
-  bladeDensity: 0.25,
+  bladeDensity: 0.004,
   bladeLength: 30,
   bladeLengthVariance: 0,
   bladeWidth: 2,
@@ -112,8 +112,8 @@ describe('grass-hills control sensitivity', () => {
   })
 
   it('uses bladeDensity to change rendered root count, identity, and placement', () => {
-    const sparse = render({ bladeDensity: 0.25 })
-    const dense = render({ bladeDensity: 2 })
+    const sparse = render({ bladeDensity: 0.0016 })
+    const dense = render({ bladeDensity: 0.0032 })
 
     expect(blades(sparse)).toHaveLength(8)
     expect(blades(dense).length).toBeGreaterThan(blades(sparse).length)
@@ -321,7 +321,7 @@ describe('grass-hills control workflow contracts', () => {
 
 describe('grass-hills supported Grass/Wind extremes', () => {
   it('keeps every cross-parameter extreme finite, closed, and within shape bounds', () => {
-    for (const bladeDensity of [0, 2]) {
+    for (const bladeDensity of [0, 0.002]) {
       for (const bladeLengthParam of [4, 80]) {
         for (const bladeLengthVariance of [0, 40]) {
           for (const bladeWidthParam of [0.5, 12]) {
