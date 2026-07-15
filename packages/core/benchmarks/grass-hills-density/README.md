@@ -202,6 +202,19 @@ handoff manifest are adjacent. Three jobs completed the fixed `full` sample plan
 full 25k and 50k remain explicit timeout censors. The result does not silently
 reduce samples or imply production adoption.
 
+## Architecture decision and approved reference
+
+[`architecture-decision.md`](architecture-decision.md) records the issue-305
+decision after comparing both full finalists and a bounded shared-root revision.
+The adopted fixture is full-composition 10k. Its checksum-pinned Fill and
+Outline live with the sketch under `src/sketches/grass-hills/reference/`;
+[`decision-reference.js`](decision-reference.js) is the isolated reproduction
+implementation and `decision-reference.benchmark.js` guards byte determinism.
+
+The reference generator is benchmark-only. It records the contract that later
+production blocks must implement; it does not change the current Sketch,
+generic Hidden-line pass, Studio, or renderer APIs.
+
 ## Timing and memory contract
 
 Protocol version 1 reports three disjoint phase slots:

@@ -30,6 +30,17 @@
  * ascending root-y order lets lower blades cover higher ones before the next,
  * nearer hill covers the whole group.
  *
+ * DENSE ARCHITECTURE DECISION (#305; NOT YET THE PRODUCTION PATH): the approved
+ * full-composition target is 10,000 descriptors from a seeded 100×100
+ * stratified bank per stable hill identity. Fill uses curved seven-point closed
+ * blades. On-demand Outline/plot derives curved six-point spines from those same
+ * descriptors, applies a tool-width deterministic LOD plus nearer-hill masks,
+ * retains visible ridges, and gives one processed Scene to preview and SVG.
+ * Blade-to-blade Outline occlusion is intentionally perceptual, and plot density
+ * may be lower than Fill density. The pinned reference and implementation
+ * boundary live under `reference/` and the issue-305 benchmark decision; later
+ * implementation blocks must land this contract before wind work can consume it.
+ *
  * CLOSED SILHOUETTES / PHYSICAL PALETTE: blades are traced by the private
  * tapered-outline generator and emitted as closed, filled-and-stroked shapes —
  * never single stroked lines. The background, hill fills, and blade fills
