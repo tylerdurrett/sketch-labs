@@ -36,6 +36,11 @@ function selectedKeys(
 }
 
 describe('grass-hills selection cap', () => {
+  it('selects no roots at zero density', () => {
+    expect(hillCap(0, 0)).toBe(0)
+    expect(hillCap(1, 0)).toBe(0)
+  })
+
   it('keeps at least forty blades on every default-layout hill at maximum density', () => {
     const bands = layoutHillBands(10, {
       frame: { height: 1_000 },

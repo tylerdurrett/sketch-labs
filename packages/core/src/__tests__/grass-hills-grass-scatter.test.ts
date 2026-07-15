@@ -161,8 +161,19 @@ describe('grass-hills canonical grass scatter', () => {
     expect(roots.every(Object.isFrozen)).toBe(true)
   })
 
-  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
-    'rejects non-positive or non-finite density %s',
+  it('returns a frozen empty field at zero density', () => {
+    const roots = scatterGrassRoots({
+      seed: 'zero-density',
+      hillKey: '1/2',
+      bladeDensity: 0,
+    })
+
+    expect(roots).toEqual([])
+    expect(Object.isFrozen(roots)).toBe(true)
+  })
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects negative or non-finite density %s',
     (bladeDensity) => {
       expect(() =>
         scatterGrassRoots({
@@ -170,7 +181,7 @@ describe('grass-hills canonical grass scatter', () => {
           hillKey: '1/2',
           bladeDensity,
         }),
-      ).toThrow(/bladeDensity must be a finite positive number/)
+      ).toThrow(/bladeDensity must be a finite non-negative number/)
     },
   )
 })

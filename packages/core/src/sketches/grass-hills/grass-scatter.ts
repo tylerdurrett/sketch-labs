@@ -9,7 +9,7 @@ export interface GrassRootScatterOptions {
   seed: Seed
   /** Reduced rational depth identity supplied by the hill layout. */
   hillKey: string
-  /** Relative areal density. Must be finite and positive. */
+  /** Relative areal density. Zero returns an empty field. */
   bladeDensity: number
 }
 
@@ -42,9 +42,10 @@ export function scatterGrassRoots({
   hillKey,
   bladeDensity,
 }: GrassRootScatterOptions): readonly GrassRootCandidate[] {
-  if (!Number.isFinite(bladeDensity) || bladeDensity <= 0) {
-    throw new RangeError('bladeDensity must be a finite positive number')
+  if (!Number.isFinite(bladeDensity) || bladeDensity < 0) {
+    throw new RangeError('bladeDensity must be a finite non-negative number')
   }
+  if (bladeDensity === 0) return Object.freeze([])
 
   const canonicalRadius = BASE_CANONICAL_RADIUS / Math.sqrt(bladeDensity)
   const points = samplePoissonDisk({

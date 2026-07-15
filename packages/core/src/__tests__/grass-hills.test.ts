@@ -171,7 +171,7 @@ describe('grass-hills Sketch contract', () => {
       },
       bladeDensity: {
         kind: 'number',
-        min: 0.25,
+        min: 0,
         max: 2,
         default: 1,
         step: 0.05,
@@ -241,6 +241,18 @@ describe('grass-hills Sketch contract', () => {
     expect(
       hills(grassHills.generate({ hillCount: 37 }, 'count', 0, SQUARE)),
     ).toHaveLength(37)
+  })
+
+  it('renders literally no blades when bladeDensity is zero', () => {
+    const scene = grassHills.generate(
+      { hillCount: 10, bladeDensity: 0 },
+      'zero-density',
+      0,
+      SQUARE,
+    )
+
+    expect(hills(scene)).toHaveLength(10)
+    expect(blades(scene)).toHaveLength(0)
   })
 
   it('emits filled and stroked explicit rings with open path metadata', () => {
@@ -420,7 +432,7 @@ describe('grass-hills preparation and determinism', () => {
 
   it('randomizes unlocked numeric schema fields while preserving locks, integer count, and colors', () => {
     const locks = new Set(['depthFalloff'])
-    const randomized = randomize(grassHills.schema, params, locks, () => 0.5)
+    const randomized = randomize(grassHills.schema, params, locks, () => 0.37)
 
     for (const key of [
       'hillCount',

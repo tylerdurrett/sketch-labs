@@ -37,6 +37,7 @@ export function canonicalScale(depth: number): number {
  * bounded independently and preserves count-stable hill selection.
  */
 export function hillCap(depth: number, bladeDensity: number): number {
+  if (bladeDensity === 0) return 0
   const rawCap = (BASE_HILL_CAP * bladeDensity) / canonicalScale(depth)
   return Math.max(MIN_HILL_CAP, Math.min(MAX_HILL_CAP, Math.round(rawCap)))
 }

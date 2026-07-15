@@ -104,6 +104,13 @@ function invariantValues(invariants: number[][], index: number): number[] {
 }
 
 describe('grass-hills control sensitivity', () => {
+  it('uses zero bladeDensity as a literal off switch', () => {
+    const scene = render({ bladeDensity: 0 })
+
+    expect(hills(scene)).toHaveLength(1)
+    expect(blades(scene)).toHaveLength(0)
+  })
+
   it('uses bladeDensity to change rendered root count, identity, and placement', () => {
     const sparse = render({ bladeDensity: 0.25 })
     const dense = render({ bladeDensity: 2 })
@@ -314,7 +321,7 @@ describe('grass-hills control workflow contracts', () => {
 
 describe('grass-hills supported Grass/Wind extremes', () => {
   it('keeps every cross-parameter extreme finite, closed, and within shape bounds', () => {
-    for (const bladeDensity of [0.25, 2]) {
+    for (const bladeDensity of [0, 2]) {
       for (const bladeLengthParam of [4, 80]) {
         for (const bladeLengthVariance of [0, 40]) {
           for (const bladeWidthParam of [0.5, 12]) {
@@ -328,6 +335,11 @@ describe('grass-hills supported Grass/Wind extremes', () => {
                   stiffnessVariance,
                   windLean,
                 })
+
+                if (bladeDensity === 0) {
+                  expect(blades(scene)).toHaveLength(0)
+                  continue
+                }
 
                 expect(blades(scene).length).toBeGreaterThan(0)
                 for (const primitive of blades(scene)) {
