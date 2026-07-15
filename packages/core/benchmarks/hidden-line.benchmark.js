@@ -5,14 +5,17 @@ import { DEFAULT_COMPOSITION_FRAME } from '../src/compositionFrame'
 import { analyzeHiddenLineWorkload, hiddenLinePass } from '../src/hiddenLine'
 import { renderToSVG } from '../src/renderer'
 import { defaultParams } from '../src/sketch'
+import { grassHills } from '../src/sketches/grass-hills'
 import { leafField } from '../src/sketches/leaf-field'
 
 const SEED = 12345
-const PARAMS = Object.freeze(defaultParams(leafField.schema))
+const LEAF_FIELD_PARAMS = Object.freeze(defaultParams(leafField.schema))
+const GRASS_HILLS_PARAMS = Object.freeze(defaultParams(grassHills.schema))
 const DEFAULT_SAMPLES = 20
 const DEFAULT_WARMUPS = 1
 const MIN_SAMPLES = 20
-const EXPECTED_OUTLINE_CHECKSUM = '44ad772130d46fb1'
+const EXPECTED_LEAF_FIELD_OUTLINE_CHECKSUM = '44ad772130d46fb1'
+const EXPECTED_GRASS_HILLS_OUTLINE_CHECKSUM = '1d6e1ddc0edeef9d'
 const SYNTHETIC_SPACE = Object.freeze({ width: 640, height: 640 })
 const SYNTHETIC_FILL = Object.freeze({ color: 'black' })
 
@@ -127,6 +130,75 @@ function report(label, result, samples) {
   )
 }
 
+function benchmarkSketch(
+  { label, sketch, params, expectedOutlineChecksum },
+  samples,
+  warmups,
+) {
+  const source = sketch.generate(params, SEED, 0, DEFAULT_COMPOSITION_FRAME)
+  const outline = hiddenLinePass(source, { tolerance: 0 })
+  const clipped = clipSceneToBounds(outline)
+  const outlineChecksum = sceneChecksum(outline)
+  const sourceCounts = sceneCounts(source)
+  const outlineCounts = sceneCounts(outline)
+  if (expectedOutlineChecksum !== undefined) {
+    expect(outlineChecksum).toBe(expectedOutlineChecksum)
+  }
+
+  const timings = measureCases(samples, warmups, [
+    {
+      name: 'generation',
+      operation: () => {
+        const scene = sketch.generate(params, SEED, 0, DEFAULT_COMPOSITION_FRAME)
+        return scene.primitives.length + scene.primitives[0].points[0][0]
+      },
+    },
+    {
+      name: 'hiddenLinePass',
+      operation: () => {
+        const result = hiddenLinePass(source, { tolerance: 0 })
+        return result.primitives.length + result.primitives[0].points[0][0]
+      },
+    },
+    {
+      name: 'boundsClip',
+      operation: () => {
+        const result = clipSceneToBounds(outline)
+        return result.primitives.length + result.primitives[0].points[0][0]
+      },
+    },
+    {
+      name: 'svgSerialization',
+      operation: () => renderToSVG(clipped).length,
+    },
+    {
+      name: 'wholeExportPipeline',
+      operation: () => {
+        const generated = sketch.generate(
+          params,
+          SEED,
+          0,
+          DEFAULT_COMPOSITION_FRAME,
+        )
+        const processed = hiddenLinePass(generated, { tolerance: 0 })
+        return renderToSVG(clipSceneToBounds(processed)).length
+      },
+    },
+  ])
+
+  console.log(`\n${label} hidden-line benchmark`)
+  console.log(`runtime                           ${process.version} ${process.platform}/${process.arch}`)
+  console.log(`seed                              ${SEED}`)
+  console.log(`source                            ${sourceCounts.primitives} primitives, ${sourceCounts.points} points`)
+  console.log(`outline                           ${outlineCounts.primitives} primitives, ${outlineCounts.points} points`)
+  console.log(`outline checksum                  ${outlineChecksum}`)
+  report('generation', timings.generation, samples)
+  report('Hidden-line pass', timings.hiddenLinePass, samples)
+  report('bounds clip', timings.boundsClip, samples)
+  report('SVG serialization', timings.svgSerialization, samples)
+  report('whole export pipeline', timings.wholeExportPipeline, samples)
+}
+
 function regularPolygon(centerX, centerY, radius, vertices, rotation = 0) {
   return {
     closed: true,
@@ -233,64 +305,23 @@ function reportOverhead(label, unobserved, observed) {
 }
 
 describe('hidden-line performance feedback loop', () => {
-  it('reports pinned, exact-output phase and end-to-end timings', () => {
+  it.each([
+    {
+      label: 'Leaf Field',
+      sketch: leafField,
+      params: LEAF_FIELD_PARAMS,
+      expectedOutlineChecksum: EXPECTED_LEAF_FIELD_OUTLINE_CHECKSUM,
+    },
+    {
+      label: 'Grass Hills',
+      sketch: grassHills,
+      params: GRASS_HILLS_PARAMS,
+      expectedOutlineChecksum: EXPECTED_GRASS_HILLS_OUTLINE_CHECKSUM,
+    },
+  ])('reports $label phase and end-to-end timings', (fixture) => {
     const samples = readPositiveInteger('HIDDEN_LINE_BENCH_SAMPLES', DEFAULT_SAMPLES, MIN_SAMPLES)
     const warmups = readPositiveInteger('HIDDEN_LINE_BENCH_WARMUPS', DEFAULT_WARMUPS, 0)
-    const source = leafField.generate(PARAMS, SEED, 0, DEFAULT_COMPOSITION_FRAME)
-    const outline = hiddenLinePass(source, { tolerance: 0 })
-    const clipped = clipSceneToBounds(outline)
-    const expectedChecksum = sceneChecksum(outline)
-    const sourceCounts = sceneCounts(source)
-    const outlineCounts = sceneCounts(outline)
-    expect(expectedChecksum).toBe(EXPECTED_OUTLINE_CHECKSUM)
-
-    const timings = measureCases(samples, warmups, [
-      {
-        name: 'generation',
-        operation: () => {
-          const scene = leafField.generate(PARAMS, SEED, 0, DEFAULT_COMPOSITION_FRAME)
-          return scene.primitives.length + scene.primitives[0].points[0][0]
-        },
-      },
-      {
-        name: 'hiddenLinePass',
-        operation: () => {
-          const result = hiddenLinePass(source, { tolerance: 0 })
-          return result.primitives.length + result.primitives[0].points[0][0]
-        },
-      },
-      {
-        name: 'boundsClip',
-        operation: () => {
-          const result = clipSceneToBounds(outline)
-          return result.primitives.length + result.primitives[0].points[0][0]
-        },
-      },
-      {
-        name: 'svgSerialization',
-        operation: () => renderToSVG(clipped).length,
-      },
-      {
-        name: 'wholeExportPipeline',
-        operation: () => {
-          const generated = leafField.generate(PARAMS, SEED, 0, DEFAULT_COMPOSITION_FRAME)
-          const processed = hiddenLinePass(generated, { tolerance: 0 })
-          return renderToSVG(clipSceneToBounds(processed)).length
-        },
-      },
-    ])
-
-    console.log('\nHidden-line benchmark')
-    console.log(`runtime                           ${process.version} ${process.platform}/${process.arch}`)
-    console.log(`seed                              ${SEED}`)
-    console.log(`source                            ${sourceCounts.primitives} primitives, ${sourceCounts.points} points`)
-    console.log(`outline                           ${outlineCounts.primitives} primitives, ${outlineCounts.points} points`)
-    console.log(`outline checksum                  ${expectedChecksum}`)
-    report('generation', timings.generation, samples)
-    report('Hidden-line pass', timings.hiddenLinePass, samples)
-    report('bounds clip', timings.boundsClip, samples)
-    report('SVG serialization', timings.svgSerialization, samples)
-    report('whole export pipeline', timings.wholeExportPipeline, samples)
+    benchmarkSketch(fixture, samples, warmups)
   })
 
   it('reports controlled synthetic scaling fixtures beside workload inventory', () => {

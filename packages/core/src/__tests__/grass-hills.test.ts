@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import { clipSceneToBounds } from '../clipToBounds'
-import { hiddenLinePass } from '../hiddenLine'
+import { analyzeHiddenLineWorkload, hiddenLinePass } from '../hiddenLine'
 import type { PlotProfile } from '../plotProfile'
 import { renderPlotterSVG } from '../plotterSvg'
 import type { CoordinateSpace, Scene } from '../scene'
 import { randomize } from '../sketch'
 import { grassHills } from '../sketches/grass-hills'
 import { layoutHillBands } from '../sketches/grass-hills/depth'
+import { ridgelineYAtX } from '../sketches/grass-hills/grass-placement'
 import { buildRidgeBands } from '../sketches/grass-hills/ridge-bands'
 import { createTerrainField } from '../sketches/grass-hills/terrain'
 
@@ -66,6 +67,59 @@ function isFrameEdgeSegment(
     (start[0] === frame.width && end[0] === frame.width) ||
     (start[1] === frame.height && end[1] === frame.height)
   )
+}
+
+type Segment = [[number, number], [number, number]]
+
+function segmentParameter(
+  [x, y]: [number, number],
+  [[startX, startY], [endX, endY]]: Segment,
+): number {
+  const dx = endX - startX
+  const dy = endY - startY
+  return Math.abs(dx) >= Math.abs(dy)
+    ? (x - startX) / dx
+    : (y - startY) / dy
+}
+
+function isCollinear(
+  [x, y]: [number, number],
+  [[startX, startY], [endX, endY]]: Segment,
+): boolean {
+  const dx = endX - startX
+  const dy = endY - startY
+  const cross = (x - startX) * dy - (y - startY) * dx
+  return Math.abs(cross) <= 1e-8 * Math.max(1, Math.hypot(dx, dy))
+}
+
+/** Exact output segments and contiguous collinear fragments both count. */
+function outputCoversSegment(scene: Scene, source: Segment): boolean {
+  const intervals: Array<[number, number]> = []
+
+  for (const primitive of scene.primitives) {
+    for (let index = 1; index < primitive.points.length; index++) {
+      const start = primitive.points[index - 1]!
+      const end = primitive.points[index]!
+      if (!isCollinear(start, source) || !isCollinear(end, source)) continue
+      const low = Math.max(
+        0,
+        Math.min(segmentParameter(start, source), segmentParameter(end, source)),
+      )
+      const high = Math.min(
+        1,
+        Math.max(segmentParameter(start, source), segmentParameter(end, source)),
+      )
+      if (high >= low) intervals.push([low, high])
+    }
+  }
+
+  intervals.sort((a, b) => a[0] - b[0])
+  let coveredThrough = 0
+  for (const [low, high] of intervals) {
+    if (low > coveredThrough + 1e-8) break
+    coveredThrough = Math.max(coveredThrough, high)
+  }
+  return coveredThrough >= 1 - 1e-8
 }
 
 describe('grass-hills Sketch contract', () => {
@@ -486,6 +540,76 @@ describe('grass-hills public geometry acceptance', () => {
     },
   )
 
+  it('builds a fuzzy silhouette with ridge-crossing tips in every dense hill group', () => {
+    const source = grassHills.generate(
+      {
+        hillCount: 3,
+        ridgeAmplitude: 0,
+        bladeDensity: 2,
+        bladeLength: 80,
+        bladeLengthVariance: 0,
+        bladeWidth: 3,
+        stiffnessVariance: 0,
+        windLean: 0,
+      },
+      'dense-silhouette',
+      0,
+      SQUARE,
+    )
+    let currentRidge = source.primitives[0]!
+    let hillIndex = -1
+    const crossingsByHill = [0, 0, 0]
+
+    for (const primitive of source.primitives) {
+      if (primitive.closed === false) {
+        currentRidge = primitive
+        hillIndex++
+        continue
+      }
+
+      const root = primitive.points[0]!
+      const tip = primitive.points[(primitive.points.length - 1) / 2]!
+      const ridgeY = ridgelineYAtX(currentRidge, root[0])
+      if (root[1] > ridgeY && tip[1] < ridgeY) crossingsByHill[hillIndex]++
+    }
+
+    expect(crossingsByHill).toHaveLength(3)
+    expect(crossingsByHill.every((count) => count >= 2)).toBe(true)
+    expect(crossingsByHill.reduce((sum, count) => sum + count, 0)).toBeGreaterThanOrEqual(8)
+  })
+
+  it('preserves a known interior segment from the final unoccluded blade', () => {
+    const source = grassHills.generate(
+      {
+        hillCount: 1,
+        ridgeAmplitude: 0,
+        bladeDensity: 0.25,
+        bladeLength: 4,
+        bladeLengthVariance: 0,
+        bladeWidth: 0.5,
+        stiffnessVariance: 0,
+        windLean: 0,
+      },
+      'surviving-blade',
+      0,
+      SQUARE,
+    )
+    const finalBlade = source.primitives.at(-1)!
+    const segment: Segment = [finalBlade.points[5]!, finalBlade.points[6]!]
+
+    expect(finalBlade.closed).toBe(true)
+    expect(finalBlade.fill).toBeDefined()
+    expect(source.primitives.at(-1)).toBe(finalBlade)
+    expect(
+      segment.every(
+        ([x, y]) => x > 0 && x < SQUARE.width && y > 0 && y < SQUARE.height,
+      ),
+    ).toBe(true)
+
+    const output = clipSceneToBounds(hiddenLinePass(source, { tolerance: 0 }))
+    expect(outputCoversSegment(output, segment)).toBe(true)
+  })
+
   it('survives the real outline and bounds pipeline as visible open linework', () => {
     const source = grassHills.generate(
       { hillCount: 5, horizonHeight: 0.25, ridgeAmplitude: 25 },
@@ -495,7 +619,23 @@ describe('grass-hills public geometry acceptance', () => {
     )
     const outline = clipSceneToBounds(hiddenLinePass(source))
 
+    expect(
+      source.primitives.some((primitive) =>
+        primitive.points.some(
+          ([x, y]) => x < 0 || x > WIDE.width || y < 0 || y > WIDE.height,
+        ),
+      ),
+    ).toBe(true)
     expect(outline.primitives.length).toBeGreaterThan(0)
+    expect(outline.background).toBeUndefined()
+    expect(
+      outline.primitives.some((primitive) =>
+        primitive.points.some(
+          ([x, y]) =>
+            x === 0 || x === WIDE.width || y === 0 || y === WIDE.height,
+        ),
+      ),
+    ).toBe(true)
     for (const primitive of outline.primitives) {
       expect(primitive.stroke).toBeDefined()
       expect(primitive.fill).toBeUndefined()
@@ -542,5 +682,75 @@ describe('grass-hills public geometry acceptance', () => {
     expect(paths.every((path) => !/\bZ\b/.test(path))).toBe(true)
     expect(svg).not.toMatch(/<(?:rect|line|polyline|polygon|circle|ellipse)\b/)
     expect(svg).not.toContain(source.background!.color)
+  })
+})
+
+describe('grass-hills hidden-line workload inventory', () => {
+  const seed = 'workload-inventory'
+
+  it('pins deterministic small and default generation inventories', () => {
+    const small = grassHills.generate(
+      { hillCount: 1, bladeDensity: 0.25, ridgeAmplitude: 0 },
+      seed,
+      0,
+      SQUARE,
+    )
+    const defaults = grassHills.generate({}, seed, 0, SQUARE)
+
+    expect(analyzeHiddenLineWorkload(small)).toEqual({
+      filledPrimitiveCount: 5,
+      sourceSegmentCount: 261,
+      overlappingPairCount: 4,
+      estimatedSegmentEdgeComparisons: 17_556,
+      totalWorkUnits: 18_704,
+    })
+    expect(analyzeHiddenLineWorkload(defaults)).toEqual({
+      filledPrimitiveCount: 444,
+      sourceSegmentCount: 19_258,
+      overlappingPairCount: 9_242,
+      estimatedSegmentEdgeComparisons: 56_888_273,
+      totalWorkUnits: 57_116_729,
+    })
+  })
+
+  it('inventories maximum schema generation and hill-only filtering without running the pass', () => {
+    const maximum = grassHills.generate(
+      {
+        hillCount: 256,
+        horizonHeight: 0.9,
+        depthFalloff: 4,
+        ridgeScale: 12,
+        ridgeAmplitude: 25,
+        terrainDrift: 8,
+        bladeDensity: 2,
+        bladeLength: 80,
+        bladeLengthVariance: 40,
+        bladeWidth: 12,
+        stiffnessVariance: 1,
+        windLean: 1,
+      },
+      seed,
+      0,
+      SQUARE,
+    )
+
+    expect(blades(maximum).length).toBe(2_670)
+    expect(blades(maximum).length).toBeLessThanOrEqual(4_096)
+    expect(analyzeHiddenLineWorkload(maximum)).toEqual({
+      filledPrimitiveCount: 2_926,
+      sourceSegmentCount: 119_488,
+      overlappingPairCount: 743_392,
+      estimatedSegmentEdgeComparisons: 2_458_641_139,
+      totalWorkUnits: 2_471_036_771,
+    })
+
+    const hillOnly = { ...maximum, primitives: hills(maximum) }
+    expect(analyzeHiddenLineWorkload(hillOnly)).toEqual({
+      filledPrimitiveCount: 256,
+      sourceSegmentCount: 34_048,
+      overlappingPairCount: 32_640,
+      estimatedSegmentEdgeComparisons: 581_710_080,
+      totalWorkUnits: 582_370_560,
+    })
   })
 })
