@@ -104,12 +104,13 @@ The rAF cadence is an observed headless scheduling result, not a 60 fps claim.
 Only the steady-state 180-rAF draw distribution had both its median and p95
 below 4 ms. Resize and Fill/Outline interaction were one-off submissions of
 approximately 2.0–4.6 ms in the recorded revised run, and a separate independent
-resize observation reached approximately 6.2 ms. These observations establish
-no universal Canvas ceiling; interaction submissions may exceed 4 ms. The
-negative heap delta reflects collection and is evidence of no retained-growth
-signal in that run, not an allocation bound. Earlier fresh stock-finalist runs
-similarly recorded no isolated long tasks. Temporary browser Scenes, captures,
-servers, and heap probes are not durable artifacts.
+run observed a 5.3 ms 680 px Fill resize submission; that run's 6.2 ms value was
+the maximum among its 180 rAF Fill samples, not a resize. These observations
+establish no universal Canvas ceiling; interaction and steady-state submissions
+may exceed 4 ms. The negative heap delta reflects collection and is evidence of
+no retained-growth signal in that run, not an allocation bound. Earlier fresh
+stock-finalist runs similarly recorded no isolated long tasks. Temporary browser
+Scenes, captures, servers, and heap probes are not durable artifacts.
 
 The plotter LOD enforces a minimum root separation of one nib
 (`1.6666666666666667` Scene units = `0.30 mm`) before hill masking. Every
