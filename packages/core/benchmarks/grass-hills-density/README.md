@@ -78,6 +78,25 @@ node benchmarks/grass-hills-density/cli.js --mode=screen --config=./candidate-co
 node benchmarks/grass-hills-density/cli.js --mode=full --confirm-long-campaign --config=./candidate-config.js
 ```
 
+## Exact filled-blade prototypes
+
+The four bundle-ready `exact-{poisson,stratified}-{33,7}.js` entries compare a
+fixed-capacity smaller-radius Poisson root field with jittered stable cells, and
+the current 33-point filled blade with a seven-point filled blade. They share
+the protocol interface above and return explicit source roots for the physical
+spacing collectors.
+
+Their supplied processing Scene comes from the benchmark-local exact spatial
+Hidden-line prototype. It replaces only the quadratic Primitive AABB scan with
+a uniform grid: painter order, exact AABB acceptance, production polygon
+preparation/subtraction, and production final simplification remain
+authoritative. Long, non-finite, or over-cap AABBs take a conservative overflow
+path. `exactSpatialHiddenLine` evidence reports plan/index/subtraction time,
+index heap delta and structural byte estimate, occupied cells/references,
+overflow count, grid candidate pairs, accepted overlapping pairs, and estimated
+segment-edge comparisons. This is isolated benchmark evidence, not a production
+Hidden-line or spatial-index change.
+
 ## Candidate bundle boundary
 
 Campaign workers are deliberately plain Node processes. Core source is

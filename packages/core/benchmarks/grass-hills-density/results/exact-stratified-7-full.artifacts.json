@@ -1,0 +1,214 @@
+{
+  "schemaVersion": 1,
+  "candidateId": "exact-stratified-7",
+  "capturedOn": "2026-07-15",
+  "artifactDirectory": "/tmp/issue-305-x3b-exact-stratified-7",
+  "bundle": {
+    "path": "/tmp/issue-305-x3b-exact-stratified-7/candidate.mjs",
+    "bytes": 129925,
+    "sha256": "9c7fc7b769d549f7d3ecd7e385c6bb44c5ad1cfdfc881d590c96396c50ea7e85"
+  },
+  "reproduction": {
+    "command": "node packages/core/benchmarks/grass-hills-density/exact-finalist-full.js",
+    "workingDirectory": "repository root",
+    "mode": "full",
+    "confirmation": "run-grass-hills-density-long-campaign"
+  },
+  "artifacts": [
+    {
+      "fixtureId": "one-hill-5000",
+      "sourceSceneChecksum": "99624b23a81d67fa967a03e8234c0f1aa440c70fe80e6a434bbadc717a451e2b",
+      "fillSceneChecksum": "29b7a413647622f0a6f71e712c019772ecec456d020e182909168f1b656c42b2",
+      "outlineSceneChecksum": "40e4d1676f670c618d6be5727305d22f387daf08af946f8ed01d1821691a5cf4",
+      "fillSvg": {
+        "path": "/tmp/issue-305-x3b-exact-stratified-7/one-hill-5000.fill.svg",
+        "bytes": 986739,
+        "sha256": "0dbbc6bf62c7f1cb944a6bb4ea630f0e5ca9fe570fcdd4f1cb988fb18447ed60"
+      },
+      "outlineSvg": {
+        "path": "/tmp/issue-305-x3b-exact-stratified-7/one-hill-5000.outline.svg",
+        "bytes": 1036061,
+        "sha256": "347c8e18ec4691bae827c73147ec450264549c43874f992b418e02f76ad662cf"
+      },
+      "processingDurationMs": 105.18833299999824,
+      "exactSpatialHiddenLine": {
+        "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+        "filledPrimitiveCount": 5001,
+        "allPainterPairCount": 12502500,
+        "broadPhaseCandidatePairCount": 29667,
+        "overlappingPairCount": 9116,
+        "estimatedSegmentEdgeComparisons": 4827872,
+        "timings": {
+          "planBuildMs": 29.349291999998968,
+          "indexBuildMs": 2.6080000000074506,
+          "subtractionMs": 73.06579200000851
+        },
+        "index": {
+          "cellSize": 14.084507042253522,
+          "occupiedCellCount": 3030,
+          "indexedReferenceCount": 14607,
+          "overflowPrimitiveCount": 1,
+          "maxCellsPerPrimitive": 4096,
+          "heapDeltaBytes": 2863704,
+          "estimatedBytes": 310784
+        }
+      }
+    },
+    {
+      "fixtureId": "one-hill-10000",
+      "sourceSceneChecksum": "570bbf67ca9af0299397c2fcef05e03eff87feae801c17bb7a343cc2194661be",
+      "fillSceneChecksum": "6808f7c1843d90d31e48da206f7d23cd0e6761df9a4b92860c5249d7f2694151",
+      "outlineSceneChecksum": "23f1b0917e2a38fa14f995a9eb858e710ea56c593965aee5a304558acaabdea4",
+      "fillSvg": {
+        "path": "/tmp/issue-305-x3b-exact-stratified-7/one-hill-10000.fill.svg",
+        "bytes": 1970563,
+        "sha256": "49af0e2cd07c23d518a229b3de767be61d2842f09eccecc6edc9431abe0218f5"
+      },
+      "outlineSvg": {
+        "path": "/tmp/issue-305-x3b-exact-stratified-7/one-hill-10000.outline.svg",
+        "bytes": 2128732,
+        "sha256": "cb620125b6a1a5f4b497e6018ace209c2884ef934e4c6aff15a686fcafeb6416"
+      },
+      "processingDurationMs": 158.07925000000978,
+      "exactSpatialHiddenLine": {
+        "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+        "filledPrimitiveCount": 10001,
+        "allPainterPairCount": 50005000,
+        "broadPhaseCandidatePairCount": 77895,
+        "overlappingPairCount": 26211,
+        "estimatedSegmentEdgeComparisons": 9990862,
+        "timings": {
+          "planBuildMs": 46.41187500001979,
+          "indexBuildMs": 5.713374999992084,
+          "subtractionMs": 105.8876670000027
+        },
+        "index": {
+          "cellSize": 9.900990099009901,
+          "occupiedCellCount": 6218,
+          "indexedReferenceCount": 38457,
+          "overflowPrimitiveCount": 1,
+          "maxCellsPerPrimitive": 4096,
+          "heapDeltaBytes": 458856,
+          "estimatedBytes": 705616
+        }
+      }
+    },
+    {
+      "fixtureId": "full-10000",
+      "sourceSceneChecksum": "489dcfabe22b546fb71c5a2e952392efcdac4e56b3594d378b582719aebffdb2",
+      "fillSceneChecksum": "837ef7f50647874ece43bb591b036d57b2510d2ba0fc374af79a2cbb0f29c976",
+      "outlineSceneChecksum": "e8f521c328464d8af49a860eb1f7b5077fd65d63ae73b0ad913173a875d77e92",
+      "fillSvg": {
+        "path": "/tmp/issue-305-x3b-exact-stratified-7/full-10000.fill.svg",
+        "bytes": 1991653,
+        "sha256": "e8762f80589bd8a3bbdb876b3f6093624359e1cebbeda61da1043f7dd4f16d4a"
+      },
+      "outlineSvg": {
+        "path": "/tmp/issue-305-x3b-exact-stratified-7/full-10000.outline.svg",
+        "bytes": 2081063,
+        "sha256": "4ebe505938ce3bc4bfdded32300f93bc0bb4d4b597f0c3bebbaa13942b306e63"
+      },
+      "processingDurationMs": 363.51162499998463,
+      "exactSpatialHiddenLine": {
+        "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+        "filledPrimitiveCount": 10010,
+        "allPainterPairCount": 50095045,
+        "broadPhaseCandidatePairCount": 141635,
+        "overlappingPairCount": 71325,
+        "estimatedSegmentEdgeComparisons": 57156832,
+        "timings": {
+          "planBuildMs": 31.706458000000566,
+          "indexBuildMs": 4.476124999986496,
+          "subtractionMs": 327.2947920000006
+        },
+        "index": {
+          "cellSize": 9.900990099009901,
+          "occupiedCellCount": 8665,
+          "indexedReferenceCount": 37244,
+          "overflowPrimitiveCount": 9,
+          "maxCellsPerPrimitive": 4096,
+          "heapDeltaBytes": 5540840,
+          "estimatedBytes": 852584
+        }
+      }
+    },
+    {
+      "fixtureId": "full-25000",
+      "sourceSceneChecksum": "8c705bec2017a76391b0c8fac0c6227b2d9686d4d48c92a49e9e2788f5edb8ef",
+      "fillSceneChecksum": "64c1da733cea91f06e0c10801c275e7d0aa376bf01339a26f6a4f6c468d2cc0d",
+      "outlineSceneChecksum": "2ab3b5133a02e7c4b68217c49ef11f95ae46eb6fc33a49d3d51ef05e9dbf4c5a",
+      "fillSvg": {
+        "path": "/tmp/issue-305-x3b-exact-stratified-7/full-25000.fill.svg",
+        "bytes": 4943320,
+        "sha256": "a2a5f6fe463d9950d411499f9a88def02f9863a46ca6332017f3918e3a4b072f"
+      },
+      "outlineSvg": {
+        "path": "/tmp/issue-305-x3b-exact-stratified-7/full-25000.outline.svg",
+        "bytes": 5138248,
+        "sha256": "3d3a822b59546a8e3a04af3d3fefdcc9f0b52b122a37195ada752519ee8bf18a"
+      },
+      "processingDurationMs": 1359.5624169999792,
+      "exactSpatialHiddenLine": {
+        "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+        "filledPrimitiveCount": 25010,
+        "allPainterPairCount": 312737545,
+        "broadPhaseCandidatePairCount": 460164,
+        "overlappingPairCount": 217707,
+        "estimatedSegmentEdgeComparisons": 143389552,
+        "timings": {
+          "planBuildMs": 175.87537500000326,
+          "indexBuildMs": 18.102582999999868,
+          "subtractionMs": 1165.5107080000162
+        },
+        "index": {
+          "cellSize": 6.289308176100629,
+          "occupiedCellCount": 19018,
+          "indexedReferenceCount": 128625,
+          "overflowPrimitiveCount": 10,
+          "maxCellsPerPrimitive": 4096,
+          "heapDeltaBytes": 5287312,
+          "estimatedBytes": 2246232
+        }
+      }
+    },
+    {
+      "fixtureId": "full-50000",
+      "sourceSceneChecksum": "d7ea5b01957f6923cfe91a2b12381cef1fbe38a56e7faab76f9d145c9828125e",
+      "fillSceneChecksum": "3fd8037bfd248e820b5b802d9b76051a64329f37235841436ba923129635eb18",
+      "outlineSceneChecksum": "d42b6c72726665a1d20ecfda60c2fa220b08dc5b53aefc8a3101c0e37a467a60",
+      "fillSvg": {
+        "path": "/tmp/issue-305-x3b-exact-stratified-7/full-50000.fill.svg",
+        "bytes": 9862598,
+        "sha256": "9cd622fba72356db5a97fa748b1a6da5e9c0b81493d9bb50446638a1b9bb10e9"
+      },
+      "outlineSvg": {
+        "path": "/tmp/issue-305-x3b-exact-stratified-7/full-50000.outline.svg",
+        "bytes": 9565243,
+        "sha256": "435df17268b2881961faa5606bcd7c2711fd94a0474ac30c02e9779a320c0374"
+      },
+      "processingDurationMs": 4440.242834000004,
+      "exactSpatialHiddenLine": {
+        "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+        "filledPrimitiveCount": 50010,
+        "allPainterPairCount": 1250475045,
+        "broadPhaseCandidatePairCount": 1153235,
+        "overlappingPairCount": 563899,
+        "estimatedSegmentEdgeComparisons": 291328892,
+        "timings": {
+          "planBuildMs": 198.2410830000008,
+          "indexBuildMs": 41.851124999986496,
+          "subtractionMs": 4200.0763330000045
+        },
+        "index": {
+          "cellSize": 4.464285714285714,
+          "occupiedCellCount": 37938,
+          "indexedReferenceCount": 370590,
+          "overflowPrimitiveCount": 10,
+          "maxCellsPerPrimitive": 4096,
+          "heapDeltaBytes": 19017640,
+          "estimatedBytes": 5392832
+        }
+      }
+    }
+  ]
+}
