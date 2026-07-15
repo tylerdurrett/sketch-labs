@@ -38,6 +38,20 @@ describe('grass-hills blade', () => {
     }
   })
 
+  it('keeps every point finite at the largest finite width', () => {
+    const outline = blade({ ...baseShape, width: Number.MAX_VALUE })
+
+    expect(outline[0]).toEqual([0, 0])
+    expect(outline.at(-1)).toEqual(outline[0])
+    expect(outline.find(([, y]) => y === -baseShape.length)).toEqual([
+      0,
+      -baseShape.length,
+    ])
+    for (const point of outline) {
+      expect(point.every(Number.isFinite)).toBe(true)
+    }
+  })
+
   it('tapers both flanks into one shared apex', () => {
     const outline = blade(baseShape)
     const apexes = outline.filter(([, y]) => y === -baseShape.length)

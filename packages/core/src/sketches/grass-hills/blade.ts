@@ -69,7 +69,7 @@ export function blade(shape: BladeShape): Polyline {
     const y = -length * t
     // A parabolic profile is exactly zero at both ends, reaches the requested
     // full width halfway up, and remains non-negative between them.
-    const halfWidth = (width / 2) * 4 * t * (1 - t)
+    const halfWidth = width * (2 * t * (1 - t))
 
     rightFlank.push([spineX + halfWidth, y])
     leftFlank.push([spineX - halfWidth, y])
