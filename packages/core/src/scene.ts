@@ -54,6 +54,25 @@ export interface Stroke {
 }
 
 /**
+ * A Primitive's role in generic Hidden-line processing.
+ *
+ * The role is optional so existing Scenes retain their original contract:
+ * filled Primitives are both emitted outline sources and occluders, while
+ * stroke-only Primitives are ignored. An explicit role lets a Sketch author a
+ * different plot representation without making the Hidden-line pass aware of
+ * that Sketch's domain:
+ *
+ * - `source` emits the Primitive's path after nearer occluders are subtracted.
+ * - `occluder` uses a filled Primitive as a clipping polygon but emits no path.
+ * - `both` opts into both behaviours explicitly.
+ *
+ * Occlusion still requires a fill. Consequently `occluder` on a Primitive
+ * without `fill` has no effect, while `source` works for either filled or
+ * stroke-only geometry.
+ */
+export type HiddenLineRole = 'source' | 'occluder' | 'both'
+
+/**
  * The coordinate space a {@link Scene}'s geometry lives in.
  *
  * A Scene's Primitives are expressed in this space; a Scene Renderer maps it onto
@@ -93,6 +112,13 @@ export interface Primitive {
   fill?: Fill
   /** Outline stroke, if the geometry should be stroked. */
   stroke?: Stroke
+  /**
+   * Optional source/occluder intent for the Hidden-line pass.
+   *
+   * Omitted preserves the legacy role inferred from `fill`; see
+   * {@link HiddenLineRole}.
+   */
+  hiddenLineRole?: HiddenLineRole
 }
 
 /**
@@ -151,7 +177,12 @@ export interface SceneBuilder {
    */
   addPath(
     points: Polyline,
-    style: { fill?: Fill; stroke?: Stroke; closed?: boolean },
+    style: {
+      fill?: Fill
+      stroke?: Stroke
+      closed?: boolean
+      hiddenLineRole?: HiddenLineRole
+    },
   ): SceneBuilder
   /** Finalize and return the assembled Scene. */
   build(): Scene
@@ -186,6 +217,9 @@ export function createScene(
       if (style.closed !== undefined) primitive.closed = style.closed
       if (style.fill !== undefined) primitive.fill = style.fill
       if (style.stroke !== undefined) primitive.stroke = style.stroke
+      if (style.hiddenLineRole !== undefined) {
+        primitive.hiddenLineRole = style.hiddenLineRole
+      }
       primitives.push(primitive)
       return builder
     },
