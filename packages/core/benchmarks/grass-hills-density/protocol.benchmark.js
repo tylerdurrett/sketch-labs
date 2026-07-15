@@ -1,5 +1,12 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
 import { describe, expect, it } from 'vitest'
 
+import { bundleCandidate } from './candidate-bundle.js'
+import { parseBundleArgs } from './bundle-cli.js'
 import { parseCampaignArgs } from './cli.js'
 import {
   LONG_CAMPAIGN_CONFIRMATION,
@@ -198,6 +205,85 @@ describe('Grass Hills density campaign protocol', () => {
         retainedBytes: 64 * 1024 * 1024,
       })
     }
+  })
+
+  it('bundles metrics and core TypeScript imports for the plain Node worker', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'grass-hills-candidate-'))
+    const outputPath = join(directory, 'candidate.mjs')
+    try {
+      await bundleCandidate({
+        entryPath: fileURLToPath(
+          new URL('./worker-import-candidate.js', import.meta.url),
+        ),
+        outputPath,
+      })
+      const bundled = readFileSync(outputPath, 'utf8')
+      expect(bundled).toContain('bundled-core-import')
+      expect(bundled).not.toContain("from '../../src/clip")
+
+      const campaign = await runCampaign({
+        jobs: [
+          job({
+            candidate: {
+              id: 'bundled-core-import',
+              moduleUrl: pathToFileURL(outputPath).href,
+            },
+          }),
+        ],
+      })
+      expect(campaign.results[0]).toMatchObject({
+        status: 'ok',
+        phases: {
+          preparation: {
+            samples: [
+              {
+                metrics: {
+                  inventory: { primitiveCount: 1, pointCount: 2 },
+                },
+              },
+            ],
+          },
+          cold: {
+            samples: [
+              {
+                metrics: {
+                  inventory: { primitiveCount: 1, pointCount: 2 },
+                },
+              },
+            ],
+          },
+          warm: {
+            samples: [
+              {
+                metrics: {
+                  inventory: { primitiveCount: 1, pointCount: 2 },
+                },
+              },
+            ],
+          },
+        },
+      })
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps candidate bundle paths explicit and refuses in-place output', async () => {
+    expect(() => parseBundleArgs([])).toThrow(/--entry/)
+    expect(() => parseBundleArgs(['--entry=x'])).toThrow(/--out/)
+    expect(() =>
+      parseBundleArgs(['--entry=x', '--out=x.mjs', '--mode=full']),
+    ).toThrow(/unknown/)
+    await expect(
+      bundleCandidate({
+        entryPath: fileURLToPath(
+          new URL('./worker-import-candidate.js', import.meta.url),
+        ),
+        outputPath: fileURLToPath(
+          new URL('./worker-import-candidate.js', import.meta.url),
+        ),
+      }),
+    ).rejects.toThrow(/differ/)
   })
 
   it('turns candidate exceptions into structured censored results', async () => {

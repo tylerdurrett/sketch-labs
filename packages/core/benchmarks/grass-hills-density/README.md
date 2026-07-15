@@ -78,6 +78,52 @@ node benchmarks/grass-hills-density/cli.js --mode=screen --config=./candidate-co
 node benchmarks/grass-hills-density/cli.js --mode=full --confirm-long-campaign --config=./candidate-config.js
 ```
 
+## Candidate bundle boundary
+
+Campaign workers are deliberately plain Node processes. Core source is
+TypeScript with extensionless internal imports, so a source candidate that
+directly imports `metrics.js` or `src/*.ts` is not a valid `moduleUrl`: Vitest and
+Vite transform that graph during tests/browser builds, while Node correctly
+fails it. Do not add a runtime loader to the worker; its transform service,
+module graph, and retained allocations would become part of every measured
+heap/RSS baseline.
+
+Bundle each candidate before constructing campaign jobs. From the repository
+root, using the locked package-local Vite toolchain:
+
+```sh
+node packages/core/benchmarks/grass-hills-density/bundle-cli.js \
+  --entry=packages/core/benchmarks/grass-hills-density/my-candidate.js \
+  --out=/tmp/grass-hills-my-candidate.mjs
+```
+
+The bundler runs Vite SSR in the orchestration process, inlines the candidate,
+collector, core TypeScript, and non-Node dependencies into one plain ESM file,
+and leaves Node builtins external. It refuses a missing entry, an in-place
+output, or a non-`.mjs` output. It neither starts a campaign nor changes mode,
+timeout, memory, legacy-complexity, or long-campaign confirmation policy.
+
+Point the plain-JavaScript config at that artifact:
+
+```js
+import { pathToFileURL } from 'node:url'
+import { DENSITY_FIXTURES } from './benchmarks/grass-hills-density/fixtures.js'
+
+export const jobs = [{
+  candidate: {
+    id: 'my-candidate',
+    moduleUrl: pathToFileURL('/tmp/grass-hills-my-candidate.mjs').href,
+    complexity: 'linear',
+  },
+  fixture: DENSITY_FIXTURES[1],
+}]
+```
+
+Then invoke `cli.js` with the config and explicit mode flags shown above. The
+fresh worker imports only the completed bundle before taking any phase memory
+snapshot; Vite/esbuild never runs in the measured child. Rebuild whenever the
+candidate, collector, or imported core source changes.
+
 ## Timing and memory contract
 
 Protocol version 1 reports three disjoint phase slots:
