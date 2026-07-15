@@ -3,9 +3,9 @@ import type { Seed } from '../../sketch'
 import { grassScaleAtDepth } from './depth'
 import type { GrassRootCandidate } from './grass-scatter'
 
-const BASE_HILL_CAP = 4
+const BASE_HILL_CAP = 20
 const MIN_HILL_CAP = 4
-const MAX_HILL_CAP = 16
+const MAX_HILL_CAP = 40
 
 /** Inputs that select a bounded, evenly distributed subset for one hill. */
 export interface GrassRootSelectionOptions {
@@ -32,12 +32,12 @@ export function canonicalScale(depth: number): number {
  * Bound one hill's selected roots while increasing detail toward the horizon.
  *
  * `Math.round` is deliberate: JavaScript rounds exact positive half-steps
- * toward +Infinity. The result is clamped so a 256-hill composition can never
- * select more than 4,096 roots before projection and blade construction.
+ * toward +Infinity. Density is linear so the schema maximum retains at least
+ * forty roots per hill, while the per-hill clamp keeps extreme hill counts
+ * bounded independently and preserves count-stable hill selection.
  */
 export function hillCap(depth: number, bladeDensity: number): number {
-  const rawCap =
-    (BASE_HILL_CAP * Math.sqrt(bladeDensity)) / canonicalScale(depth)
+  const rawCap = (BASE_HILL_CAP * bladeDensity) / canonicalScale(depth)
   return Math.max(MIN_HILL_CAP, Math.min(MAX_HILL_CAP, Math.round(rawCap)))
 }
 

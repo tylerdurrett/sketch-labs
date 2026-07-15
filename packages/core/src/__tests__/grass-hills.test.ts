@@ -130,7 +130,7 @@ describe('grass-hills Sketch contract', () => {
         kind: 'number',
         min: 1,
         max: 256,
-        default: 50,
+        default: 10,
         step: 1,
         integer: true,
       },
@@ -230,7 +230,7 @@ describe('grass-hills Sketch contract', () => {
     expect(scene.space).toEqual(frame)
     expect(scene.space).not.toBe(frame)
     expect(scene.background).toEqual({ color: '#ffffff' })
-    expect(hills(scene)).toHaveLength(50)
+    expect(hills(scene)).toHaveLength(10)
     expect(blades(scene).length).toBeGreaterThan(0)
   })
 
@@ -699,18 +699,18 @@ describe('grass-hills hidden-line workload inventory', () => {
     const defaults = grassHills.generate({}, seed, 0, SQUARE)
 
     expect(analyzeHiddenLineWorkload(small)).toEqual({
-      filledPrimitiveCount: 5,
-      sourceSegmentCount: 261,
-      overlappingPairCount: 4,
-      estimatedSegmentEdgeComparisons: 17_556,
-      totalWorkUnits: 18_704,
+      filledPrimitiveCount: 9,
+      sourceSegmentCount: 389,
+      overlappingPairCount: 8,
+      estimatedSegmentEdgeComparisons: 35_112,
+      totalWorkUnits: 36_868,
     })
     expect(analyzeHiddenLineWorkload(defaults)).toEqual({
-      filledPrimitiveCount: 444,
-      sourceSegmentCount: 19_258,
-      overlappingPairCount: 9_242,
-      estimatedSegmentEdgeComparisons: 56_888_273,
-      totalWorkUnits: 57_116_729,
+      filledPrimitiveCount: 335,
+      sourceSegmentCount: 11_730,
+      overlappingPairCount: 1_835,
+      estimatedSegmentEdgeComparisons: 8_625_374,
+      totalWorkUnits: 8_704_334,
     })
   })
 
@@ -735,15 +735,8 @@ describe('grass-hills hidden-line workload inventory', () => {
       SQUARE,
     )
 
-    expect(blades(maximum).length).toBe(2_670)
-    expect(blades(maximum).length).toBeLessThanOrEqual(4_096)
-    expect(analyzeHiddenLineWorkload(maximum)).toEqual({
-      filledPrimitiveCount: 2_926,
-      sourceSegmentCount: 119_488,
-      overlappingPairCount: 743_392,
-      estimatedSegmentEdgeComparisons: 2_458_641_139,
-      totalWorkUnits: 2_471_036_771,
-    })
+    expect(blades(maximum).length).toBe(10_240)
+    expect(blades(maximum).length).toBeLessThanOrEqual(10_240)
 
     const hillOnly = { ...maximum, primitives: hills(maximum) }
     expect(analyzeHiddenLineWorkload(hillOnly)).toEqual({

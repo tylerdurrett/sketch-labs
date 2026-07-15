@@ -108,7 +108,7 @@ describe('grass-hills control sensitivity', () => {
     const sparse = render({ bladeDensity: 0.25 })
     const dense = render({ bladeDensity: 2 })
 
-    expect(blades(sparse)).toHaveLength(4)
+    expect(blades(sparse)).toHaveLength(8)
     expect(blades(dense).length).toBeGreaterThan(blades(sparse).length)
     expect(roots(dense)).not.toEqual(roots(sparse))
     expect(relativeBladeGeometry(dense).slice(0, 4)).not.toEqual(

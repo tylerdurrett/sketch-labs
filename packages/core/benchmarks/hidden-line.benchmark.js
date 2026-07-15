@@ -15,7 +15,7 @@ const DEFAULT_SAMPLES = 20
 const DEFAULT_WARMUPS = 1
 const MIN_SAMPLES = 20
 const EXPECTED_LEAF_FIELD_OUTLINE_CHECKSUM = '44ad772130d46fb1'
-const EXPECTED_GRASS_HILLS_OUTLINE_CHECKSUM = '1d6e1ddc0edeef9d'
+const EXPECTED_GRASS_HILLS_OUTLINE_CHECKSUM = '4ed96b144a7d527a'
 const SYNTHETIC_SPACE = Object.freeze({ width: 640, height: 640 })
 const SYNTHETIC_FILL = Object.freeze({ color: 'black' })
 

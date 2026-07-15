@@ -88,7 +88,7 @@ const schema = {
     kind: 'number',
     min: 1,
     max: 256,
-    default: 50,
+    default: 10,
     step: 1,
     integer: true,
   },

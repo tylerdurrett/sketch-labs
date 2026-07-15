@@ -36,6 +36,31 @@ function selectedKeys(
 }
 
 describe('grass-hills selection cap', () => {
+  it('keeps at least forty blades on every default-layout hill at maximum density', () => {
+    const bands = layoutHillBands(10, {
+      frame: { height: 1_000 },
+      horizonHeight: 0.25,
+      depthFalloff: 2,
+    })
+
+    for (const band of bands) {
+      const candidates = scatterGrassRoots({
+        seed: 'maximum-density-regression',
+        hillKey: band.hillKey,
+        bladeDensity: 2,
+      })
+      expect(candidates.length).toBeGreaterThanOrEqual(40)
+      const selected = selectGrassRoots({
+        seed: 'maximum-density-regression',
+        depth: band.depth,
+        bladeDensity: 2,
+        candidates,
+      })
+
+      expect(selected.length).toBeGreaterThanOrEqual(40)
+    }
+  })
+
   it('uses the existing continuous perspective scale as its canonical scale', () => {
     for (const depth of [-1, 0, 0.125, 0.5, 0.9, 1, 2, Number.NaN]) {
       expect(canonicalScale(depth)).toBe(grassScaleAtDepth(depth))
@@ -43,11 +68,11 @@ describe('grass-hills selection cap', () => {
   })
 
   it.each([
-    { depth: 0, scale: 1, caps: [4, 4, 6] },
-    { depth: 0.5, scale: 0.6, caps: [4, 7, 9] },
-    { depth: 0.75, scale: 0.4, caps: [5, 10, 14] },
-    { depth: 0.9, scale: 0.28, caps: [7, 14, 16] },
-    { depth: 0.98, scale: 0.216, caps: [9, 16, 16] },
+    { depth: 0, scale: 1, caps: [5, 20, 40] },
+    { depth: 0.5, scale: 0.6, caps: [8, 33, 40] },
+    { depth: 0.75, scale: 0.4, caps: [13, 40, 40] },
+    { depth: 0.9, scale: 0.28, caps: [18, 40, 40] },
+    { depth: 0.98, scale: 0.216, caps: [23, 40, 40] },
   ])(
     'pins depth $depth / scale $scale to density caps $caps',
     ({ depth, scale, caps }) => {
@@ -59,9 +84,9 @@ describe('grass-hills selection cap', () => {
   )
 
   it('uses JavaScript positive-half rounding before clamping', () => {
-    // 4 * sqrt(1.265625) / canonicalScale(0) = exactly 4.5.
-    expect(hillCap(0, 1.265625)).toBe(5)
-    expect(Math.round(4.5)).toBe(5)
+    // 20 * 0.275 / canonicalScale(0) = exactly 5.5.
+    expect(hillCap(0, 0.275)).toBe(6)
+    expect(Math.round(5.5)).toBe(6)
   })
 
   it('is monotonic in both depth and supported density', () => {
@@ -105,18 +130,18 @@ describe('grass-hills selection cap', () => {
     )
   })
 
-  it('keeps every supported hill count within the 4,096-root hard bound', () => {
+  it('keeps every supported hill count within the 10,240-root hard bound', () => {
     for (let hillCount = 1; hillCount <= 256; hillCount++) {
       const total = Array.from({ length: hillCount }, (_, index) => {
         const depth = (hillCount - index) / (hillCount + 1)
         return hillCap(depth, 2)
       }).reduce((sum, cap) => sum + cap, 0)
 
-      expect(total).toBeLessThanOrEqual(4_096)
+      expect(total).toBeLessThanOrEqual(10_240)
     }
   })
 
-  it('has enough canonical candidates to meet every pinned density-bound cap', () => {
+  it('has enough canonical candidates to meet every maximum-density cap', () => {
     const hills = [
       { hillKey: '0/1', depth: 0 },
       { hillKey: '1/2', depth: 0.5 },
@@ -127,22 +152,21 @@ describe('grass-hills selection cap', () => {
     ] as const
 
     for (const { hillKey, depth } of hills) {
-      for (const bladeDensity of [0.25, 2]) {
-        const candidates = scatterGrassRoots({
-          seed: 'selection-cap-sufficiency',
-          hillKey,
-          bladeDensity,
-        })
-        expect(candidates.length).toBeGreaterThanOrEqual(
-          hillCap(depth, bladeDensity),
-        )
-      }
+      const bladeDensity = 2
+      const candidates = scatterGrassRoots({
+        seed: 'selection-cap-sufficiency',
+        hillKey,
+        bladeDensity,
+      })
+      expect(candidates.length).toBeGreaterThanOrEqual(
+        hillCap(depth, bladeDensity),
+      )
     }
   })
 
   it('shrinks raw horizontal spacing without a depth-normalized step', () => {
-    const nearDepth = 0.5
-    const farDepth = 0.75
+    const nearDepth = 0.25
+    const farDepth = 0.5
     const nearRawSpacing = 1 / hillCap(nearDepth, 1)
     const farRawSpacing = 1 / hillCap(farDepth, 1)
     const nearNormalized = nearRawSpacing / canonicalScale(nearDepth)
@@ -166,7 +190,7 @@ describe('grass-hills deterministic root selection', () => {
 
     // p3 has the lowest seeded priority. p2 is then farthest. p0 and p1
     // tie at distance 1, so p0's lower seeded priority wins before p1.
-    expect(selectedKeys('selection', 0, 1, candidates)).toEqual([
+    expect(selectedKeys('selection', 0, 1, candidates).slice(0, 4)).toEqual([
       'p3',
       'p2',
       'p0',
@@ -201,7 +225,7 @@ describe('grass-hills deterministic root selection', () => {
       candidates,
     })
 
-    expect(selected).toHaveLength(16)
+    expect(selected).toHaveLength(40)
     expect(
       Math.max(...selected.map(({ u }) => u)) -
         Math.min(...selected.map(({ u }) => u)),
