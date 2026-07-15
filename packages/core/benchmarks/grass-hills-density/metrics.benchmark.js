@@ -5,6 +5,7 @@ import {
   collectCanvasSubmission,
   collectMachineMetadata,
   collectSceneMetrics,
+  pathClearanceMetrics,
   sceneChecksum,
   sceneInventory,
   spacingPercentiles,
@@ -108,11 +109,16 @@ describe('Grass Hills density metric collectors', () => {
     })
   })
 
-  it('collects the complete export pipeline and physical spacing in millimeters', () => {
-    const metrics = collectSceneMetrics(scene, { profile: PROFILE })
+  it('collects the complete export pipeline and explicit physical roots', () => {
+    const metrics = collectSceneMetrics(scene, {
+      profile: PROFILE,
+      roots: [[0, 0], [20, 0]],
+      nibWidthSceneUnits: PHYSICAL_TARGET.nibWidthSceneUnits,
+    })
     expect(metrics.source).toMatchObject({ primitiveCount: 2, pointCount: 8 })
-    expect(metrics.hiddenLine.workload.totalWorkUnits).toBeGreaterThan(0)
-    expect(metrics.hiddenLine.durationMs).toBeGreaterThanOrEqual(0)
+    expect(metrics.referenceHiddenLineWorkload.totalWorkUnits).toBeGreaterThan(0)
+    expect(metrics.processing.kind).toBe('core-hidden-line')
+    expect(metrics.processing.durationMs).toBeGreaterThanOrEqual(0)
     expect(metrics.boundsClip.durationMs).toBeGreaterThanOrEqual(0)
     expect(metrics.svgSerialization.pathCount).toBeGreaterThan(0)
     expect(metrics.svgSerialization.bytes).toBeGreaterThan(0)
@@ -121,8 +127,99 @@ describe('Grass Hills density metric collectors', () => {
     expect(metrics.physicalSpacing.millimetersPerSceneUnit).toBe(0.18)
     expect(metrics.physicalSpacing.roots.sampleCount).toBe(2)
     for (const name of ['min', 'p50', 'p95', 'max']) {
-      expect(metrics.physicalSpacing.roots[name]).toBeCloseTo(0.9, 14)
+      expect(metrics.physicalSpacing.roots[name]).toBeCloseTo(3.6, 14)
     }
+    expect(metrics.physicalSpacing.nibWidthMillimeters).toBeCloseTo(0.3, 14)
+  })
+
+  it('retains candidate-supplied open stroke/tuft processing geometry', () => {
+    const supplied = {
+      space: scene.space,
+      primitives: [
+        { points: [[0, 0], [10, 0]], stroke: { color: 'black', width: 1 } },
+        { points: [[0, 2], [10, 2]], stroke: { color: 'black', width: 1 } },
+      ],
+    }
+    const metrics = collectSceneMetrics(scene, {
+      profile: PROFILE,
+      roots: [[0, 0], [0, 2]],
+      nibWidthSceneUnits: PHYSICAL_TARGET.nibWidthSceneUnits,
+      processing: { scene: supplied, durationMs: 12.5 },
+    })
+
+    expect(metrics.processing).toMatchObject({
+      kind: 'supplied',
+      durationMs: 12.5,
+      processed: { primitiveCount: 2, pointCount: 4 },
+    })
+    expect(metrics.boundsClip.clipped).toMatchObject({
+      primitiveCount: 2,
+      pointCount: 4,
+    })
+    expect(metrics.plotter.pathCount).toBe(2)
+    expect(metrics.physicalSpacing.clearances.paths.millimeters.p50).toBeCloseTo(
+      0.36,
+      14,
+    )
+    expect(metrics.physicalSpacing.clearances.paths.collisionCount).toBe(0)
+    expect(metrics.physicalSpacing.clearances.collisionPairs).toEqual({
+      segmentPairCount: 0,
+      pathPairCount: 0,
+    })
+  })
+
+  it('measures a candidate processing callback instead of replacing it', () => {
+    let calls = 0
+    const metrics = collectSceneMetrics(scene, {
+      profile: PROFILE,
+      nibWidthSceneUnits: PHYSICAL_TARGET.nibWidthSceneUnits,
+      processing: {
+        run(source) {
+          calls += 1
+          return {
+            space: source.space,
+            primitives: [
+              { points: [[1, 1], [2, 2]], stroke: { color: 'black', width: 1 } },
+            ],
+          }
+        },
+      },
+    })
+
+    expect(calls).toBe(1)
+    expect(metrics.processing.kind).toBe('measured-callback')
+    expect(metrics.processing.durationMs).toBeGreaterThanOrEqual(0)
+    expect(metrics.processing.processed).toMatchObject({
+      primitiveCount: 1,
+      pointCount: 2,
+    })
+  })
+
+  it('measures exact path and segment clearance with nib collisions', () => {
+    const strokes = {
+      space: { width: 1000, height: 1000 },
+      primitives: [
+        { points: [[0, 0], [10, 0]], stroke: { color: 'black', width: 1 } },
+        { points: [[0, 1], [10, 1]], stroke: { color: 'black', width: 1 } },
+        { points: [[5, -2], [5, 3]], stroke: { color: 'black', width: 1 } },
+      ],
+    }
+    const clearance = pathClearanceMetrics(strokes, 0.18, 1.6666666666666667)
+
+    expect(clearance.paths.millimeters).toMatchObject({
+      sampleCount: 3,
+      min: 0,
+      p50: 0,
+      p95: 0,
+      max: 0,
+    })
+    expect(clearance.paths.nibWidths.p50).toBe(0)
+    expect(clearance.paths.collisionCount).toBe(3)
+    expect(clearance.segments.collisionCount).toBe(3)
+    expect(clearance.collisionPairs).toEqual({
+      segmentPairCount: 3,
+      pathPairCount: 3,
+    })
   })
 
   it('uses exact nearest-neighbor percentiles and captures machine identity', () => {

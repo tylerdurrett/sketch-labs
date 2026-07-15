@@ -26,6 +26,29 @@ const OK_CANDIDATE_URL = `data:text/javascript,${encodeURIComponent(`
   }
 `)}`
 
+const ALLOCATING_INSPECTOR_URL = `data:text/javascript,${encodeURIComponent(`
+  let inspectionStarted = false
+  let retained
+  function assertMeasuring() {
+    if (inspectionStarted) throw new Error('measured operation ran after inspection')
+  }
+  export const benchmarkCandidate = {
+    id: 'allocating-inspector',
+    complexity: 'linear',
+    prepare(payload) {
+      assertMeasuring()
+      return (t) => { assertMeasuring(); return payload.base + t }
+    },
+    generate(payload, t) { assertMeasuring(); return payload.base + t },
+    guard(value) { return value },
+    inspect({ phase }) {
+      inspectionStarted = true
+      retained ??= Buffer.alloc(64 * 1024 * 1024, 1)
+      return { phase, retainedBytes: retained.byteLength }
+    },
+  }
+`)}`
+
 function job(overrides = {}) {
   return {
     candidate: {
@@ -137,7 +160,7 @@ describe('Grass Hills density campaign protocol', () => {
     expect(result.runtime.totalMemoryBytes).toBeGreaterThan(0)
   })
 
-  it('inspects only the first measured value in each explicit multi-sample phase', async () => {
+  it('attaches one out-of-band inspection to each explicit multi-sample phase', async () => {
     const campaign = await runCampaign({ mode: 'screen', jobs: [job()] })
     const result = campaign.results[0]
 
@@ -151,6 +174,29 @@ describe('Grass Hills density campaign protocol', () => {
           .slice(1)
           .every((sample) => sample.metrics === undefined),
       ).toBe(true)
+    }
+  })
+
+  it('runs a retained 64 MiB inspector only after every measured operation', async () => {
+    const campaign = await runCampaign({
+      mode: 'screen',
+      jobs: [
+        job({
+          candidate: {
+            id: 'allocating-inspector',
+            moduleUrl: ALLOCATING_INSPECTOR_URL,
+          },
+        }),
+      ],
+    })
+    const result = campaign.results[0]
+
+    expect(result.status).toBe('ok')
+    for (const [phase, measurement] of Object.entries(result.phases)) {
+      expect(measurement.samples[0].metrics).toEqual({
+        phase,
+        retainedBytes: 64 * 1024 * 1024,
+      })
     }
   })
 

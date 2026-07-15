@@ -62,12 +62,13 @@ export const benchmarkCandidate = {
 
 `prepare` must return a callable varying-time sampler. `guard` must return a
 finite, non-zero number so a candidate cannot benchmark omitted work. The runner
-does not interpret candidate results or fixture payloads. `inspect` is optional;
-the worker calls it once for the first measured value in each phase and records
-its return value as `sample.metrics`. Inspection is outside the operation timer
-and memory snapshots, so export evidence cannot inflate prep/cold/warm
-measurements. For preparation, `value` is the retained sampler; for cold/warm it
-is the generated value.
+does not interpret candidate results or fixture payloads. `inspect` is optional.
+Only after every prep/cold/warm sample and memory snapshot is complete, the
+worker materializes fresh preparation/cold/warm values, then inspects each and
+records the return value on that phase's first `sample.metrics`. No measured
+operation runs after inspection starts, so a collector's retained allocations
+cannot become a later phase's heap/RSS/maxRSS baseline. For preparation, `value`
+is a fresh sampler; for cold/warm it is a fresh generated value.
 
 Invoke the generic CLI with the package directory as the current directory:
 
@@ -105,14 +106,26 @@ set, and physical profile. The 200 × 200 mm paper with 10 mm insets supplies a
 therefore 1.6666666666666667 Scene units. Requested counts are evidence targets,
 not claims about the current implementation.
 
-[`metrics.js`](metrics.js) collects source/outline/clipped primitive and point
-counts, SHA-256 checksums, serialized and geometry byte sizes, Hidden-line
-workload/time, bounds clipping, ordinary SVG and plotter SVG time/bytes/path
-counts, and nearest root/path-start spacing percentiles in physical millimeters.
+[`metrics.js`](metrics.js) collects source/processed/clipped primitive and point
+counts, SHA-256 checksums, serialized and geometry byte sizes, the generic
+Hidden-line workload reference, candidate processing time, bounds clipping,
+ordinary SVG and plotter SVG time/bytes/path counts, explicit-root spacing, and
+exact inter-path segment clearance in physical millimeters and nib widths.
 Its Canvas metric invokes core's actual `drawSceneFitted` through a counting
 port; the result is explicitly structural JS submission only and excludes
 rasterization, compositor, and GPU completion. Heap/RSS comes from the protocol
 worker. Both the worker and collector capture machine/runtime metadata.
+
+Candidates pass their root coordinates explicitly; the collector never guesses
+roots from closed shapes or path starts. They may let the collector measure
+core's Hidden-line pass, supply `{ processing: { scene, durationMs } }` for an
+already-measured custom Outline/LOD result, or supply
+`{ processing: { run(source) { ... } } }` for a callback timed by the collector.
+The supplied processed Scene is what clipping and both serializers consume, so
+open stroke/tuft representations are not silently replaced by generic filled
+Primitive Hidden-line output. `nibWidthSceneUnits` is also explicit; the fixture
+manifest pins it to 1.6666666666666667 (0.30 mm), and clearance reports include
+per-path/per-segment percentiles plus collision counts at that nib width.
 
 ## Explicit browser seam
 

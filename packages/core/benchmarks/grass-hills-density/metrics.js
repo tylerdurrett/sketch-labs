@@ -57,15 +57,27 @@ export function collectCanvasSubmission(
 /** Collect every durable Node-side structural/export metric for one Scene. */
 export function collectSceneMetrics(
   scene,
-  { profile, pixelWidth = 1000, pixelHeight = 1000, tolerance = 0 },
+  {
+    profile,
+    roots = [],
+    nibWidthSceneUnits,
+    processing,
+    pixelWidth = 1000,
+    pixelHeight = 1000,
+    tolerance = 0,
+  },
 ) {
+  if (!Number.isFinite(nibWidthSceneUnits) || nibWidthSceneUnits <= 0) {
+    throw new Error('nibWidthSceneUnits must be a finite positive number')
+  }
   const source = sceneInventory(scene)
   const canvas = collectCanvasSubmission(scene, { pixelWidth, pixelHeight })
-  const hiddenLineWorkload = analyzeHiddenLineWorkload(scene)
-
-  const hiddenLine = timed(() => hiddenLinePass(scene, { tolerance }))
-  const outline = sceneInventory(hiddenLine.value)
-  const boundsClip = timed(() => clipSceneToBounds(hiddenLine.value))
+  // This is a structural reference inventory for the generic core pass. A
+  // supplied candidate processor is not assumed to perform this work.
+  const referenceHiddenLineWorkload = analyzeHiddenLineWorkload(scene)
+  const processed = resolveProcessing(scene, processing, tolerance)
+  const processedInventory = sceneInventory(processed.scene)
+  const boundsClip = timed(() => clipSceneToBounds(processed.scene))
   const clipped = sceneInventory(boundsClip.value)
   const svgSerialization = timed(() => renderToSVG(boundsClip.value))
   const plotterSerialization = timed(() =>
@@ -78,10 +90,11 @@ export function collectSceneMetrics(
   return {
     source,
     canvas,
-    hiddenLine: {
-      workload: hiddenLineWorkload,
-      durationMs: hiddenLine.durationMs,
-      outline,
+    referenceHiddenLineWorkload,
+    processing: {
+      kind: processed.kind,
+      durationMs: processed.durationMs,
+      processed: processedInventory,
     },
     boundsClip: {
       durationMs: boundsClip.durationMs,
@@ -99,20 +112,57 @@ export function collectSceneMetrics(
     },
     physicalSpacing: {
       millimetersPerSceneUnit,
-      roots: spacingPercentiles(
-        scene.primitives
-          .filter((primitive) => primitive.closed === true)
-          .map((primitive) => primitive.points[0])
-          .filter((point) => point !== undefined),
+      nibWidthSceneUnits,
+      nibWidthMillimeters: nibWidthSceneUnits * millimetersPerSceneUnit,
+      // Root identity is representation-specific. Candidates must supply roots
+      // explicitly; no closed-Primitive or path-start heuristic is used.
+      roots: spacingPercentiles(roots, millimetersPerSceneUnit),
+      clearances: pathClearanceMetrics(
+        boundsClip.value,
         millimetersPerSceneUnit,
-      ),
-      paths: spacingPercentiles(
-        boundsClip.value.primitives
-          .map((primitive) => primitive.points[0])
-          .filter((point) => point !== undefined),
-        millimetersPerSceneUnit,
+        nibWidthSceneUnits,
       ),
     },
+  }
+}
+
+/**
+ * Exact nearest clearance between centerline segments belonging to different
+ * processed paths. Returns both per-segment and per-path distributions; path
+ * clearance is the smallest clearance of any segment on that path.
+ */
+export function pathClearanceMetrics(
+  scene,
+  millimetersPerSceneUnit,
+  nibWidthSceneUnits,
+) {
+  const segments = sceneSegments(scene)
+  const segmentClearances = exactSegmentClearances(segments)
+  const collisionPairs = countCollisionPairs(segments, nibWidthSceneUnits)
+  const pathClearances = Array.from(
+    { length: scene.primitives.length },
+    () => Number.POSITIVE_INFINITY,
+  )
+  for (let index = 0; index < segments.length; index++) {
+    const pathIndex = segments[index].pathIndex
+    pathClearances[pathIndex] = Math.min(
+      pathClearances[pathIndex],
+      segmentClearances[index],
+    )
+  }
+
+  return {
+    paths: clearanceSummary(
+      pathClearances,
+      millimetersPerSceneUnit,
+      nibWidthSceneUnits,
+    ),
+    segments: clearanceSummary(
+      segmentClearances,
+      millimetersPerSceneUnit,
+      nibWidthSceneUnits,
+    ),
+    collisionPairs,
   }
 }
 
@@ -172,6 +222,229 @@ export function spacingPercentiles(points, scale = 1) {
     p95: percentile(distances, 0.95),
     max: distances[distances.length - 1],
   }
+}
+
+function resolveProcessing(scene, processing, tolerance) {
+  if (processing === undefined) {
+    const measured = timed(() => hiddenLinePass(scene, { tolerance }))
+    return {
+      kind: 'core-hidden-line',
+      scene: measured.value,
+      durationMs: measured.durationMs,
+    }
+  }
+  if (processing?.scene !== undefined) {
+    if (typeof processing.run === 'function') {
+      throw new Error('processing must provide either scene or run, not both')
+    }
+    if (
+      processing.durationMs !== undefined &&
+      (!Number.isFinite(processing.durationMs) || processing.durationMs < 0)
+    ) {
+      throw new Error('processing.durationMs must be finite and non-negative')
+    }
+    return {
+      kind: 'supplied',
+      scene: processing.scene,
+      durationMs: processing.durationMs ?? null,
+    }
+  }
+  if (typeof processing?.run === 'function') {
+    const measured = timed(() => processing.run(scene))
+    return {
+      kind: 'measured-callback',
+      scene: measured.value,
+      durationMs: measured.durationMs,
+    }
+  }
+  throw new Error('processing must provide a processed scene or run callback')
+}
+
+function sceneSegments(scene) {
+  const segments = []
+  for (let pathIndex = 0; pathIndex < scene.primitives.length; pathIndex++) {
+    const primitive = scene.primitives[pathIndex]
+    for (let index = 1; index < primitive.points.length; index++) {
+      segments.push(
+        segment(
+          pathIndex,
+          primitive.points[index - 1],
+          primitive.points[index],
+        ),
+      )
+    }
+    if (
+      primitive.closed === true &&
+      primitive.points.length > 2 &&
+      !samePoint(
+        primitive.points[0],
+        primitive.points[primitive.points.length - 1],
+      )
+    ) {
+      segments.push(
+        segment(
+          pathIndex,
+          primitive.points[primitive.points.length - 1],
+          primitive.points[0],
+        ),
+      )
+    }
+  }
+  return segments.sort((a, b) => a.minX - b.minX || a.maxX - b.maxX)
+}
+
+function exactSegmentClearances(segments) {
+  const nearest = Array.from(
+    { length: segments.length },
+    () => Number.POSITIVE_INFINITY,
+  )
+  const prefixMaxX = []
+  for (let index = 0; index < segments.length; index++) {
+    prefixMaxX[index] = Math.max(
+      prefixMaxX[index - 1] ?? -Infinity,
+      segments[index].maxX,
+    )
+  }
+
+  for (let index = 0; index < segments.length; index++) {
+    const current = segments[index]
+    for (let left = index - 1; left >= 0; left--) {
+      if (current.minX - prefixMaxX[left] >= nearest[index]) break
+      const other = segments[left]
+      if (other.pathIndex === current.pathIndex) continue
+      nearest[index] = Math.min(nearest[index], segmentDistance(current, other))
+    }
+    for (let right = index + 1; right < segments.length; right++) {
+      const other = segments[right]
+      if (other.minX - current.maxX >= nearest[index]) break
+      if (other.pathIndex === current.pathIndex) continue
+      nearest[index] = Math.min(nearest[index], segmentDistance(current, other))
+    }
+  }
+  return nearest
+}
+
+function countCollisionPairs(segments, nibWidthSceneUnits) {
+  let segmentPairCount = 0
+  const pathPairs = new Set()
+  for (let index = 0; index < segments.length; index++) {
+    const current = segments[index]
+    for (let right = index + 1; right < segments.length; right++) {
+      const other = segments[right]
+      if (other.minX - current.maxX > nibWidthSceneUnits) break
+      if (other.pathIndex === current.pathIndex) continue
+      if (segmentDistance(current, other) > nibWidthSceneUnits) continue
+      segmentPairCount += 1
+      pathPairs.add(
+        current.pathIndex < other.pathIndex
+          ? `${current.pathIndex}:${other.pathIndex}`
+          : `${other.pathIndex}:${current.pathIndex}`,
+      )
+    }
+  }
+  return { segmentPairCount, pathPairCount: pathPairs.size }
+}
+
+function clearanceSummary(values, millimetersPerSceneUnit, nibWidthSceneUnits) {
+  const finite = values.filter(Number.isFinite)
+  const collisions = finite.filter((value) => value <= nibWidthSceneUnits).length
+  return {
+    millimeters: numberPercentiles(
+      finite.map((value) => value * millimetersPerSceneUnit),
+    ),
+    nibWidths: numberPercentiles(
+      finite.map((value) => value / nibWidthSceneUnits),
+    ),
+    collisionCount: collisions,
+    collisionFraction: finite.length === 0 ? null : collisions / finite.length,
+  }
+}
+
+function numberPercentiles(values) {
+  if (values.length === 0) return emptyPercentiles()
+  values.sort((a, b) => a - b)
+  return {
+    sampleCount: values.length,
+    min: values[0],
+    p05: percentile(values, 0.05),
+    p50: percentile(values, 0.5),
+    p95: percentile(values, 0.95),
+    max: values[values.length - 1],
+  }
+}
+
+function segment(pathIndex, a, b) {
+  return {
+    pathIndex,
+    a,
+    b,
+    minX: Math.min(a[0], b[0]),
+    maxX: Math.max(a[0], b[0]),
+  }
+}
+
+function segmentDistance(first, second) {
+  if (segmentsIntersect(first.a, first.b, second.a, second.b)) return 0
+  return Math.min(
+    pointSegmentDistance(first.a, second.a, second.b),
+    pointSegmentDistance(first.b, second.a, second.b),
+    pointSegmentDistance(second.a, first.a, first.b),
+    pointSegmentDistance(second.b, first.a, first.b),
+  )
+}
+
+function segmentsIntersect(a, b, c, d) {
+  const abC = cross(a, b, c)
+  const abD = cross(a, b, d)
+  const cdA = cross(c, d, a)
+  const cdB = cross(c, d, b)
+  if (
+    ((abC > 0 && abD < 0) || (abC < 0 && abD > 0)) &&
+    ((cdA > 0 && cdB < 0) || (cdA < 0 && cdB > 0))
+  ) {
+    return true
+  }
+  return (
+    (abC === 0 && onSegment(a, b, c)) ||
+    (abD === 0 && onSegment(a, b, d)) ||
+    (cdA === 0 && onSegment(c, d, a)) ||
+    (cdB === 0 && onSegment(c, d, b))
+  )
+}
+
+function pointSegmentDistance(point, a, b) {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  const denominator = dx * dx + dy * dy
+  if (denominator === 0) return Math.hypot(point[0] - a[0], point[1] - a[1])
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / denominator,
+    ),
+  )
+  return Math.hypot(point[0] - (a[0] + t * dx), point[1] - (a[1] + t * dy))
+}
+
+function cross(a, b, point) {
+  return (
+    (b[0] - a[0]) * (point[1] - a[1]) -
+    (b[1] - a[1]) * (point[0] - a[0])
+  )
+}
+
+function onSegment(a, b, point) {
+  return (
+    point[0] >= Math.min(a[0], b[0]) &&
+    point[0] <= Math.max(a[0], b[0]) &&
+    point[1] >= Math.min(a[1], b[1]) &&
+    point[1] <= Math.max(a[1], b[1])
+  )
+}
+
+function samePoint(a, b) {
+  return a[0] === b[0] && a[1] === b[1]
 }
 
 function timed(operation) {

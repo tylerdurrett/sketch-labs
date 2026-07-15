@@ -53,6 +53,11 @@ async function executeRequest(request) {
     samples.warm,
     samples.warmups,
   )
+  attachInspectionMetrics(candidate, fixture.payload, {
+    preparation,
+    cold,
+    warm,
+  })
   const processors = cpus()
 
   return {
@@ -112,27 +117,18 @@ function measurePreparation(candidate, payload, sampleCount, warmups) {
   for (let index = 0; index < warmups; index++) {
     requireSampler(candidate.prepare(payload))
   }
-  return measureSamples(
-    sampleCount,
-    () => {
-      const sampler = requireSampler(candidate.prepare(payload))
-      return { guard: 1, value: sampler }
-    },
-    inspector(candidate, payload, 'preparation'),
-  )
+  return measureSamples(sampleCount, () => {
+    requireSampler(candidate.prepare(payload))
+    return 1
+  })
 }
 
 function measureCold(candidate, payload, sampleCount, warmups) {
   for (let index = 0; index < warmups; index++) {
     guard(candidate, candidate.generate(payload, 0))
   }
-  return measureSamples(
-    sampleCount,
-    () => {
-      const value = candidate.generate(payload, 0)
-      return { guard: guard(candidate, value), value }
-    },
-    inspector(candidate, payload, 'cold'),
+  return measureSamples(sampleCount, () =>
+    guard(candidate, candidate.generate(payload, 0)),
   )
 }
 
@@ -141,17 +137,12 @@ function measureWarm(candidate, payload, sampleCount, warmups) {
   for (let index = 0; index < warmups; index++) {
     guard(candidate, sample(varyingTime(index)))
   }
-  return measureSamples(
-    sampleCount,
-    (index) => {
-      const value = sample(varyingTime(index + warmups))
-      return { guard: guard(candidate, value), value }
-    },
-    inspector(candidate, payload, 'warm'),
+  return measureSamples(sampleCount, (index) =>
+    guard(candidate, sample(varyingTime(index + warmups))),
   )
 }
 
-function measureSamples(sampleCount, operation, inspect) {
+function measureSamples(sampleCount, operation) {
   const measured = []
   let guardTotal = 0
 
@@ -159,11 +150,11 @@ function measureSamples(sampleCount, operation, inspect) {
     globalThis.gc()
     const before = memorySnapshot()
     const start = performance.now()
-    const result = operation(index)
+    const value = operation(index)
     const durationMs = performance.now() - start
     const after = memorySnapshot()
-    guardTotal += result.guard
-    const sample = {
+    guardTotal += value
+    measured.push({
       durationMs,
       memory: {
         before,
@@ -172,16 +163,7 @@ function measureSamples(sampleCount, operation, inspect) {
         rssDeltaBytes: after.rssBytes - before.rssBytes,
         maxRssDeltaBytes: after.maxRssBytes - before.maxRssBytes,
       },
-    }
-    // Inspect only the first measured value for each phase. It is deliberately
-    // outside both the operation timer and its before/after memory snapshots:
-    // collectors may run expensive export evidence without contaminating the
-    // preparation/cold/warm measurement they annotate.
-    if (index === 0 && inspect !== undefined) {
-      const metrics = inspect(result.value)
-      if (metrics !== undefined) sample.metrics = metrics
-    }
-    measured.push(sample)
+    })
   }
 
   if (!Number.isFinite(guardTotal) || guardTotal === 0) {
@@ -190,9 +172,25 @@ function measureSamples(sampleCount, operation, inspect) {
   return { samples: measured, guard: guardTotal }
 }
 
-function inspector(candidate, payload, phase) {
-  if (candidate.inspect === undefined) return undefined
-  return (value) => candidate.inspect({ phase, value, payload })
+function attachInspectionMetrics(candidate, payload, phases) {
+  if (candidate.inspect === undefined) return
+
+  // Materialize every inspection input before invoking any inspector. Candidate
+  // collectors may retain large allocations or mutate module-local state; no
+  // preparation/cold/warm operation or memory snapshot may run after the first
+  // inspection begins.
+  const prepared = requireSampler(candidate.prepare(payload))
+  const warmSampler = requireSampler(candidate.prepare(payload))
+  const values = {
+    preparation: prepared,
+    cold: candidate.generate(payload, 0),
+    warm: warmSampler(varyingTime(0)),
+  }
+
+  for (const phase of ['preparation', 'cold', 'warm']) {
+    const metrics = candidate.inspect({ phase, value: values[phase], payload })
+    if (metrics !== undefined) phases[phase].samples[0].metrics = metrics
+  }
 }
 
 function memorySnapshot() {
