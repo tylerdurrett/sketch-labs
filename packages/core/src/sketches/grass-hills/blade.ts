@@ -1,4 +1,3 @@
-import { clamp } from '../../math'
 import type { Point, Polyline } from '../../types'
 
 /**
@@ -14,7 +13,7 @@ export interface BladeShape {
   width: number
   /** Signed tip deflection as a fraction of length; positive leans toward +x. */
   lean: number
-  /** Bend resistance in [0, 1]; higher values keep more of the blade upright. */
+  /** Bend resistance in [1, 4]; higher values keep more of the blade upright. */
   stiffness: number
 }
 
@@ -46,14 +45,19 @@ export function blade(shape: BladeShape): Polyline {
   requirePositiveFinite(length, 'length')
   requirePositiveFinite(width, 'width')
   if (!Number.isFinite(lean)) throw new RangeError('lean must be finite')
-  if (!Number.isFinite(stiffness)) throw new RangeError('stiffness must be finite')
+  if (!Number.isFinite(stiffness) || stiffness < 1 || stiffness > 4) {
+    throw new RangeError('stiffness must be a finite number in [1, 4]')
+  }
 
   const tipOffset = lean * length
   if (!Number.isFinite(tipOffset)) {
     throw new RangeError('lean and length must produce a finite tip offset')
   }
 
-  const bendExponent = 2 + 4 * clamp(stiffness, 0, 1)
+  // The supported stiffness range maps continuously to exponents 2..5. Every
+  // value retains zero slope at the root; higher values defer more of the bend
+  // toward the tip without changing the requested total tip deflection.
+  const bendExponent = stiffness + 1
   const rightFlank: Point[] = []
   const leftFlank: Point[] = []
 

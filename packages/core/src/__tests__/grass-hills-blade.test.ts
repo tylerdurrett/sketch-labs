@@ -8,7 +8,7 @@ const baseShape: BladeShape = {
   length: 100,
   width: 12,
   lean: 0,
-  stiffness: 0.5,
+  stiffness: 2.5,
 }
 
 interface FlankStation {
@@ -97,19 +97,36 @@ describe('grass-hills blade', () => {
     expect(centerX(left.at(-1)!)).toBeCloseTo(-35)
   })
 
-  it('uses stiffness to hold the lower and middle blade nearer upright', () => {
+  it('delays bend progressively across the supported stiffness range', () => {
     const flexible = flankStations(
-      blade({ ...baseShape, lean: 0.5, stiffness: 0 }),
+      blade({ ...baseShape, lean: 0.5, stiffness: 1 }),
+    )
+    const medium = flankStations(
+      blade({ ...baseShape, lean: 0.5, stiffness: 2.5 }),
     )
     const stiff = flankStations(
-      blade({ ...baseShape, lean: 0.5, stiffness: 1 }),
+      blade({ ...baseShape, lean: 0.5, stiffness: 4 }),
     )
     const middle = Math.floor(flexible.length / 2)
     const centerX = ({ right, left }: FlankStation) => (right[0] + left[0]) / 2
 
+    expect(centerX(flexible[middle]!)).toBeGreaterThan(centerX(medium[middle]!))
+    expect(centerX(medium[middle]!)).toBeGreaterThan(centerX(stiff[middle]!))
     expect(centerX(stiff[middle]!)).toBeLessThan(centerX(flexible[middle]!))
     expect(centerX(stiff[1]!)).toBeLessThan(centerX(flexible[1]!))
+    expect(centerX(medium.at(-1)!)).toBeCloseTo(centerX(flexible.at(-1)!), 12)
     expect(centerX(stiff.at(-1)!)).toBeCloseTo(centerX(flexible.at(-1)!), 12)
+  })
+
+  it('supports stiffness endpoints and rejects values outside [1, 4]', () => {
+    expect(() => blade({ ...baseShape, stiffness: 1 })).not.toThrow()
+    expect(() => blade({ ...baseShape, stiffness: 4 })).not.toThrow()
+    expect(() => blade({ ...baseShape, stiffness: 1 - Number.EPSILON })).toThrow(
+      RangeError,
+    )
+    expect(() =>
+      blade({ ...baseShape, stiffness: 4 + Number.EPSILON * 4 }),
+    ).toThrow(RangeError)
   })
 
   it('rejects dimensions or bend inputs that cannot produce finite geometry', () => {
