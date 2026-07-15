@@ -28,13 +28,13 @@
     "sphereCount"
   ],
   "profile": {
-    "width": 200,
-    "height": 200,
+    "width": 142.24,
+    "height": 209.804,
     "insets": {
-      "top": 10,
-      "right": 10,
-      "bottom": 10,
-      "left": 10
+      "top": 7.619999999999999,
+      "right": 7.619999999999999,
+      "bottom": 7.619999999999999,
+      "left": 7.619999999999999
     },
     "includeFrame": true
   }
