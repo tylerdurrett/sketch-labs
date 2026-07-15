@@ -1,5 +1,7 @@
 import type { CoordinateSpace } from '../../scene'
 
+const MIN_GRASS_SCALE = 0.2
+
 /** The frame and knobs that define the grass-hills perspective projection. */
 export interface HillDepthProjection {
   /** Only vertical extent participates; a full Composition Frame is accepted. */
@@ -12,6 +14,8 @@ export interface HillDepthProjection {
 
 /** Perspective information for one ridge band, ordered far-to-near. */
 export interface HillBandDepth {
+  /** Reduced rational identity for this canonical depth (for example, `3/4`). */
+  hillKey: string
   /** Normalized depth: 0 is the foreground/bottom and 1 is the horizon. */
   depth: number
   /** Screen-space y coordinate of the ridge's unperturbed baseline. */
@@ -49,6 +53,42 @@ export function yToDepth(y: number, projection: HillDepthProjection): number {
   return 1 - normalizedY ** (1 / projection.depthFalloff)
 }
 
+/** Resolve a canonical depth into the continuous perspective scale for grass. */
+export function grassScaleAtDepth(depth: number): number {
+  const boundedDepth = clampFinite(depth, 0, 1)
+
+  return MIN_GRASS_SCALE + (1 - MIN_GRASS_SCALE) * (1 - boundedDepth)
+}
+
+/** Resolve a screen-space root y into the continuous perspective scale for grass. */
+export function grassScaleAtY(
+  y: number,
+  projection: HillDepthProjection,
+): number {
+  const horizon = horizonY(projection)
+  const boundedY = clampFinite(y, horizon, projection.frame.height)
+
+  return grassScaleAtDepth(yToDepth(boundedY, projection))
+}
+
+function clampFinite(value: number, min: number, max: number): number {
+  return Number.isNaN(value) ? min : Math.max(min, Math.min(max, value))
+}
+
+function greatestCommonDivisor(a: number, b: number): number {
+  while (b !== 0) {
+    const remainder = a % b
+    a = b
+    b = remainder
+  }
+  return a
+}
+
+function hillKey(numerator: number, denominator: number): string {
+  const divisor = greatestCommonDivisor(numerator, denominator)
+  return `${numerator / divisor}/${denominator / divisor}`
+}
+
 /**
  * Place evenly sampled depth values strictly between horizon and foreground.
  *
@@ -62,12 +102,18 @@ export function layoutHillBands(
   projection: HillDepthProjection,
 ): HillBandDepth[] {
   const baselines = Array.from({ length: hillCount }, (_, index) => {
-    const depth = (hillCount - index) / (hillCount + 1)
-    return { depth, baselineY: depthToY(depth, projection) }
+    const numerator = hillCount - index
+    const denominator = hillCount + 1
+    const depth = numerator / denominator
+    return {
+      hillKey: hillKey(numerator, denominator),
+      depth,
+      baselineY: depthToY(depth, projection),
+    }
   })
   const horizon = horizonY(projection)
 
-  return baselines.map(({ depth, baselineY }, index) => {
+  return baselines.map(({ hillKey, depth, baselineY }, index) => {
     const upperBoundary = index === 0 ? horizon : baselines[index - 1]!.baselineY
     const lowerBoundary =
       index === baselines.length - 1
@@ -76,6 +122,7 @@ export function layoutHillBands(
     const lowerClearance = lowerBoundary - baselineY
 
     return {
+      hillKey,
       depth,
       baselineY,
       upperClearance: baselineY - upperBoundary,
