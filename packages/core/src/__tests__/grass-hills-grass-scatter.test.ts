@@ -1,187 +1,84 @@
+import { performance } from 'node:perf_hooks'
+
 import { describe, expect, it } from 'vitest'
 
-import { samplePoissonDisk } from '../poisson'
 import { layoutHillBands } from '../sketches/grass-hills/depth'
-import {
-  scatterGrassRoots,
-  type GrassRootCandidate,
-} from '../sketches/grass-hills/grass-scatter'
+import { scatterGrassRoots } from '../sketches/grass-hills/grass-scatter'
 
-const BASE_CANONICAL_RADIUS = 0.12
+describe('grass-hills stable-cell canonical roots', () => {
+  it('builds one finite jittered root in every cell of the adopted 100 x 100 bank', () => {
+    const roots = scatterGrassRoots({ seed: 12345, hillKey: '1/2' })
 
-function canonicalDistance(
-  a: GrassRootCandidate,
-  b: GrassRootCandidate,
-): number {
-  return Math.hypot(a.u - b.u, a.v - b.v)
-}
-
-describe('grass-hills canonical grass scatter', () => {
-  it.each([0.25, 1, 2])(
-    'enforces canonical Poisson separation at density %s',
-    (bladeDensity) => {
-      const radius = BASE_CANONICAL_RADIUS / Math.sqrt(bladeDensity)
-      const roots = scatterGrassRoots({
-        seed: 'separation',
-        hillKey: '1/2',
-        bladeDensity,
-      })
-
-      expect(roots.length).toBeGreaterThan(1)
-      for (let index = 0; index < roots.length; index++) {
-        for (let other = index + 1; other < roots.length; other++) {
-          expect(
-            canonicalDistance(roots[index]!, roots[other]!),
-          ).toBeGreaterThanOrEqual(radius - 1e-9)
-        }
-      }
-    },
-  )
-
-  it('is exactly repeatable for the same seed, hill identity, and density', () => {
-    const options = {
-      seed: 42,
-      hillKey: '3/4',
-      bladeDensity: 1.25,
-    } as const
-
-    expect(scatterGrassRoots(options)).toEqual(scatterGrassRoots(options))
-  })
-
-  it('uses the pinned canonical radius and hill-local root seed', () => {
-    const bladeDensity = 1.25
-    const radius = BASE_CANONICAL_RADIUS / Math.sqrt(bladeDensity)
-    const expected = samplePoissonDisk({
-      width: 1,
-      height: 1,
-      radius: () => radius,
-      minRadius: radius,
-      seed: 'canonical-grass-roots-1/2',
-    })
-    const roots = scatterGrassRoots({
-      seed: 'canonical',
-      hillKey: '1/2',
-      bladeDensity,
-    })
-
-    expect(roots.map(({ u, v }) => [u, v])).toEqual(expected)
-  })
-
-  it('re-seeding reshuffles the canonical root field', () => {
-    const options = { hillKey: '2/3', bladeDensity: 1 } as const
-
-    expect(scatterGrassRoots({ ...options, seed: 'seed-a' })).not.toEqual(
-      scatterGrassRoots({ ...options, seed: 'seed-b' }),
-    )
-  })
-
-  it('increases root count as density increases', () => {
-    const low = scatterGrassRoots({
-      seed: 'density-response',
-      hillKey: '1/2',
-      bladeDensity: 0.25,
-    })
-    const high = scatterGrassRoots({
-      seed: 'density-response',
-      hillKey: '1/2',
-      bladeDensity: 2,
-    })
-
-    expect(high.length).toBeGreaterThan(low.length)
-  })
-
-  it('defines ordinals from the unfiltered sampler order and keys from hill identity', () => {
-    const roots = scatterGrassRoots({
-      seed: 'identity',
-      hillKey: '3/5',
-      bladeDensity: 1,
-    })
-
+    expect(roots).toHaveLength(10_000)
+    expect(new Set(roots.map(({ rootKey }) => rootKey)).size).toBe(10_000)
     expect(roots.map(({ ordinal }) => ordinal)).toEqual(
-      Array.from({ length: roots.length }, (_, ordinal) => ordinal),
+      Array.from({ length: 10_000 }, (_, ordinal) => ordinal),
     )
-    expect(roots.map(({ rootKey }) => rootKey)).toEqual(
-      roots.map((_, ordinal) => `3/5:${ordinal}`),
-    )
-  })
-
-  it('keeps a shared reduced hill identity independent of hill count', () => {
-    const projection = {
-      frame: { height: 1000 },
-      horizonHeight: 0.25,
-      depthFalloff: 2,
+    for (const { u, v, rootKey } of roots) {
+      expect(u).toBeGreaterThanOrEqual(0)
+      expect(u).toBeLessThan(1)
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThan(1)
+      expect(rootKey).toMatch(/^1\/2:cell:\d{1,2},\d{1,2}$/)
     }
-    const countThree = layoutHillBands(3, projection)
-    const countSeven = layoutHillBands(7, projection)
-    const sharedKey = '1/2'
-    const keyAtThree = countThree.find(({ hillKey }) => hillKey === sharedKey)?.hillKey
-    const keyAtSeven = countSeven.find(({ hillKey }) => hillKey === sharedKey)?.hillKey
-
-    expect(keyAtThree).toBe(sharedKey)
-    expect(keyAtSeven).toBe(sharedKey)
-
-    const sharedOptions = {
-      seed: 'count-independent',
-      bladeDensity: 1,
-    } as const
-    expect(
-      scatterGrassRoots({ ...sharedOptions, hillKey: keyAtThree! }),
-    ).toEqual(scatterGrassRoots({ ...sharedOptions, hillKey: keyAtSeven! }))
-  })
-
-  it.each([0.25, 2])(
-    'returns finite in-bounds roots at supported density %s',
-    (bladeDensity) => {
-      const roots = scatterGrassRoots({
-        seed: 'supported-extremes',
-        hillKey: '1/4',
-        bladeDensity,
-      })
-
-      expect(roots.length).toBeGreaterThan(0)
-      for (const root of roots) {
-        expect(Number.isFinite(root.u)).toBe(true)
-        expect(Number.isFinite(root.v)).toBe(true)
-        expect(root.u).toBeGreaterThanOrEqual(0)
-        expect(root.u).toBeLessThan(1)
-        expect(root.v).toBeGreaterThanOrEqual(0)
-        expect(root.v).toBeLessThan(1)
-      }
-    },
-  )
-
-  it('returns a frozen candidate collection', () => {
-    const roots = scatterGrassRoots({
-      seed: 'immutable',
-      hillKey: '1/2',
-      bladeDensity: 1,
-    })
-
     expect(Object.isFrozen(roots)).toBe(true)
     expect(roots.every(Object.isFrozen)).toBe(true)
   })
 
-  it('returns a frozen empty field at zero density', () => {
-    const roots = scatterGrassRoots({
-      seed: 'zero-density',
-      hillKey: '1/2',
-      bladeDensity: 0,
-    })
+  it('is repeatable and keeps a reduced hill identity independent of hill count', () => {
+    const projection = {
+      frame: { height: 1_000 },
+      horizonHeight: 0.25,
+      depthFalloff: 2,
+    }
+    expect(
+      layoutHillBands(3, projection).some(({ hillKey }) => hillKey === '1/2'),
+    ).toBe(true)
+    expect(
+      layoutHillBands(7, projection).some(({ hillKey }) => hillKey === '1/2'),
+    ).toBe(true)
 
-    expect(roots).toEqual([])
-    expect(Object.isFrozen(roots)).toBe(true)
+    const options = { seed: 'count-independent', hillKey: '1/2' } as const
+    expect(scatterGrassRoots(options)).toEqual(scatterGrassRoots(options))
   })
 
-  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
-    'rejects negative or non-finite density %s',
-    (bladeDensity) => {
-      expect(() =>
-        scatterGrassRoots({
-          seed: 'invalid-density',
-          hillKey: '1/2',
-          bladeDensity,
-        }),
-      ).toThrow(/bladeDensity must be a finite non-negative number/)
-    },
-  )
+  it('re-seeding changes priority order and jitter without changing cell identities', () => {
+    const first = scatterGrassRoots({ seed: 'seed-a', hillKey: '2/3' })
+    const reseeded = scatterGrassRoots({ seed: 'seed-b', hillKey: '2/3' })
+
+    expect(reseeded).not.toEqual(first)
+    expect(new Set(reseeded.map(({ rootKey }) => rootKey))).toEqual(
+      new Set(first.map(({ rootKey }) => rootKey)),
+    )
+  })
+
+  it('spreads a low priority prefix across the canonical hill', () => {
+    const prefix = scatterGrassRoots({
+      seed: 'low-prefix-coverage',
+      hillKey: '9/10',
+    }).slice(0, 40)
+
+    expect(Math.max(...prefix.map(({ u }) => u))).toBeGreaterThan(0.85)
+    expect(Math.min(...prefix.map(({ u }) => u))).toBeLessThan(0.15)
+    expect(Math.max(...prefix.map(({ v }) => v))).toBeGreaterThan(0.85)
+    expect(Math.min(...prefix.map(({ v }) => v))).toBeLessThan(0.15)
+    for (const [uSide, vSide] of [
+      [(u: number) => u < 0.5, (v: number) => v < 0.5],
+      [(u: number) => u >= 0.5, (v: number) => v < 0.5],
+      [(u: number) => u < 0.5, (v: number) => v >= 0.5],
+      [(u: number) => u >= 0.5, (v: number) => v >= 0.5],
+    ] as const) {
+      expect(prefix.some(({ u, v }) => uSide(u) && vSide(v))).toBe(true)
+    }
+  })
+
+  it('prepares the full canonical bank in linear generation plus one sort', () => {
+    const started = performance.now()
+    const roots = scatterGrassRoots({ seed: 'performance', hillKey: '9/10' })
+
+    expect(roots).toHaveLength(10_000)
+    // A generous regression guard: the retired quadratic selector took work
+    // proportional to selected roots squared at dense counts.
+    expect(performance.now() - started).toBeLessThan(2_000)
+  })
 })

@@ -1,16 +1,13 @@
-import { samplePoissonDisk } from '../../poisson'
 import type { Seed } from '../../sketch'
 
-/** Poisson spacing at the neutral blade-density setting. */
-const BASE_CANONICAL_RADIUS = 0.12
+/** One stable cell per root at the adopted per-hill canonical capacity. */
+const STRATIFIED_SIDE = 100
 
-/** Inputs that determine one hill's canonical, count-independent root field. */
+/** Inputs that determine one hill's count-independent canonical root bank. */
 export interface GrassRootScatterOptions {
   seed: Seed
   /** Reduced rational depth identity supplied by the hill layout. */
   hillKey: string
-  /** Relative areal density. Zero returns an empty field. */
-  bladeDensity: number
 }
 
 /**
@@ -22,48 +19,84 @@ export interface GrassRootScatterOptions {
 export interface GrassRootCandidate {
   readonly u: number
   readonly v: number
-  /** Identity-preserving index in the completed canonical sampler output. */
+  /** Rank in the hill's stable priority order. */
   readonly ordinal: number
-  /** Stable per-hill identity used to seed later per-blade variation. */
+  /** Stable per-hill cell identity used to seed later per-blade variation. */
   readonly rootKey: string
 }
 
+interface PrioritizedRoot {
+  readonly u: number
+  readonly v: number
+  readonly rootKey: string
+  readonly cellOrdinal: number
+  readonly priority: number
+}
+
 /**
- * Sample a stable canonical root field for one reduced-depth hill identity.
+ * Build the adopted 100 x 100 stable-cell bank for one reduced hill identity.
  *
- * Sampling happens entirely in a fixed unit square. Neither terrain geometry
- * nor hill count participates, so the same reduced `hillKey` retains the same
- * candidates when the set of visible bands changes. The completed Poisson
- * array is mapped without filtering: its array index is the canonical ordinal.
- * Count-dependent selection and projection belong to the composition layer.
+ * Every cell owns independent jitter and priority streams. Sorting once by
+ * priority turns every requested density into a prefix operation: increasing
+ * density never moves or removes an existing root, and no quadratic farthest-
+ * point pass is needed. Terrain geometry and hill count do not participate.
  */
 export function scatterGrassRoots({
   seed,
   hillKey,
-  bladeDensity,
 }: GrassRootScatterOptions): readonly GrassRootCandidate[] {
-  if (!Number.isFinite(bladeDensity) || bladeDensity < 0) {
-    throw new RangeError('bladeDensity must be a finite non-negative number')
+  const roots: PrioritizedRoot[] = []
+
+  for (let row = 0; row < STRATIFIED_SIDE; row++) {
+    for (let column = 0; column < STRATIFIED_SIDE; column++) {
+      const cellKey = `${column},${row}`
+      const jitter = stableRandom(
+        `${seed}-exact-stratified-root-${hillKey}-${cellKey}`,
+      )
+      roots.push({
+        u: (column + jitter.value()) / STRATIFIED_SIDE,
+        v: (row + jitter.value()) / STRATIFIED_SIDE,
+        rootKey: `${hillKey}:cell:${cellKey}`,
+        cellOrdinal: row * STRATIFIED_SIDE + column,
+        priority: stableRandom(
+          `${seed}-exact-stratified-priority-${hillKey}-${cellKey}`,
+        ).value(),
+      })
+    }
   }
-  if (bladeDensity === 0) return Object.freeze([])
 
-  const canonicalRadius = BASE_CANONICAL_RADIUS / Math.sqrt(bladeDensity)
-  const points = samplePoissonDisk({
-    width: 1,
-    height: 1,
-    radius: () => canonicalRadius,
-    minRadius: canonicalRadius,
-    seed: `${seed}-grass-roots-${hillKey}`,
-  })
-
+  roots.sort(
+    (a, b) => a.priority - b.priority || a.cellOrdinal - b.cellOrdinal,
+  )
   return Object.freeze(
-    points.map(([u, v], ordinal) =>
-      Object.freeze({
-        u,
-        v,
-        ordinal,
-        rootKey: `${hillKey}:${ordinal}`,
-      }),
+    roots.map(({ u, v, rootKey }, ordinal) =>
+      Object.freeze({ u, v, rootKey, ordinal }),
     ),
   )
+}
+
+/**
+ * Small deterministic generator for the large canonical bank.
+ *
+ * `createRandom` intentionally constructs noise fields as well as a scalar
+ * stream. Stable cells need only two scalar rolls, so using that broader helper
+ * 20,000 times per hill would dominate preparation without changing output.
+ * This FNV-1a seeded Mulberry32 stream is pinned by the decision prototype.
+ */
+function stableRandom(seed: string): { value(): number } {
+  let state = 2_166_136_261
+  for (let index = 0; index < seed.length; index++) {
+    state ^= seed.charCodeAt(index)
+    state = Math.imul(state, 16_777_619)
+  }
+
+  return {
+    value() {
+      state = (state + 0x6d2b79f5) | 0
+      let mixed = state
+      mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1)
+      mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61)
+      return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296
+    },
+  }
 }

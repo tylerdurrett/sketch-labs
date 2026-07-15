@@ -1,115 +1,90 @@
-import { createRandom } from '../../random'
-import type { Seed } from '../../sketch'
 import { grassScaleAtDepth } from './depth'
 import type { GrassRootCandidate } from './grass-scatter'
 
-const BASE_HILL_CAP = 20
-const MIN_HILL_CAP = 4
-const MAX_HILL_CAP = 40
+/** Adopted maximum full-composition density from the issue-305 decision. */
+export const ADOPTED_BLADE_COUNT = 10_000
 
-/** Inputs that select a bounded, evenly distributed subset for one hill. */
+/** Public relative-density value that maps to the adopted blade count. */
+export const MAX_BLADE_DENSITY = 2
+
+/** Inputs that select one nested canonical prefix. */
 export interface GrassRootSelectionOptions {
-  seed: Seed
-  /** Canonical hill depth: 0 is foreground and 1 is the horizon. */
-  depth: number
-  /** Relative areal density. */
-  bladeDensity: number
+  /** Count already apportioned to this hill before terrain reprojection. */
+  count: number
   /** The completed, deterministic canonical scatter for this hill. */
   candidates: readonly GrassRootCandidate[]
 }
 
-interface PrioritizedCandidate {
-  readonly candidate: GrassRootCandidate
-  readonly priority: number
-}
-
-/** The perspective scale used for count-independent canonical selection. */
+/** The perspective scale used for continuous depth weighting. */
 export function canonicalScale(depth: number): number {
   return grassScaleAtDepth(depth)
 }
 
-/**
- * Bound one hill's selected roots while increasing detail toward the horizon.
- *
- * `Math.round` is deliberate: JavaScript rounds exact positive half-steps
- * toward +Infinity. Density is linear so the schema maximum retains at least
- * forty roots per hill, while the per-hill clamp keeps extreme hill counts
- * bounded independently and preserves count-stable hill selection.
- */
-export function hillCap(depth: number, bladeDensity: number): number {
-  if (bladeDensity === 0) return 0
-  const rawCap = (BASE_HILL_CAP * bladeDensity) / canonicalScale(depth)
-  return Math.max(MIN_HILL_CAP, Math.min(MAX_HILL_CAP, Math.round(rawCap)))
-}
-
-/**
- * Select a deterministic blue-noise subset from one completed hill scatter.
- *
- * A root-local seeded priority chooses the first root without depending on
- * candidate iteration or any other hill. Each later root is the candidate
- * farthest from its nearest already-selected neighbour in canonical `(u, v)`
- * space. Seeded priority, then canonical ordinal, resolve exact distance ties.
- */
-export function selectGrassRoots({
-  seed,
-  depth,
-  bladeDensity,
-  candidates,
-}: GrassRootSelectionOptions): readonly GrassRootCandidate[] {
-  const remaining: PrioritizedCandidate[] = candidates.map((candidate) => ({
-    candidate,
-    priority: createRandom(
-      `${seed}-grass-priority-${candidate.rootKey}`,
-    ).value(),
-  }))
-  const targetCount = Math.min(hillCap(depth, bladeDensity), remaining.length)
-  const selected: GrassRootCandidate[] = []
-
-  while (selected.length < targetCount) {
-    let bestIndex = 0
-    let bestDistance = selected.length === 0 ? Infinity : -Infinity
-
-    for (let index = 0; index < remaining.length; index++) {
-      const contender = remaining[index]!
-      const distance = minimumDistance(contender.candidate, selected)
-      const best = remaining[bestIndex]!
-
-      if (
-        distance > bestDistance ||
-        (distance === bestDistance &&
-          comparePriority(contender, best) < 0)
-      ) {
-        bestIndex = index
-        bestDistance = distance
-      }
-    }
-
-    selected.push(remaining[bestIndex]!.candidate)
-    remaining.splice(bestIndex, 1)
-  }
-
-  return Object.freeze(selected)
-}
-
-function minimumDistance(
-  candidate: GrassRootCandidate,
-  selected: readonly GrassRootCandidate[],
-): number {
-  if (selected.length === 0) return Infinity
-
-  let minimum = Infinity
-  for (const existing of selected) {
-    minimum = Math.min(
-      minimum,
-      Math.hypot(candidate.u - existing.u, candidate.v - existing.v),
+/** Map the public relative scalar onto the adopted full-composition target. */
+export function bladeCountForDensity(bladeDensity: number): number {
+  if (
+    !Number.isFinite(bladeDensity) ||
+    bladeDensity < 0 ||
+    bladeDensity > MAX_BLADE_DENSITY
+  ) {
+    throw new RangeError(
+      `bladeDensity must be between 0 and ${MAX_BLADE_DENSITY}`,
     )
   }
-  return minimum
+  return Math.round(
+    (bladeDensity / MAX_BLADE_DENSITY) * ADOPTED_BLADE_COUNT,
+  )
 }
 
-function comparePriority(
-  a: PrioritizedCandidate,
-  b: PrioritizedCandidate,
-): number {
-  return a.priority - b.priority || a.candidate.ordinal - b.candidate.ordinal
+/**
+ * Apportion the full-composition count by continuous inverse-scale-squared depth
+ * weight.
+ *
+ * Sequential highest averages (D'Hondt) is deliberate. It emits an exact total
+ * and is house-monotone: increasing density awards one additional root at a
+ * time without taking roots away from another hill. Far-to-near input order is
+ * the stable final tie-break.
+ */
+export function allocateGrassRootCounts(
+  depths: readonly number[],
+  bladeDensity: number,
+): readonly number[] {
+  const targetCount = bladeCountForDensity(bladeDensity)
+  if (depths.length === 0 || targetCount === 0) {
+    return Object.freeze(depths.map(() => 0))
+  }
+
+  const weights = depths.map((depth) => 1 / canonicalScale(depth) ** 2)
+  const counts = depths.map(() => 0)
+
+  for (let awarded = 0; awarded < targetCount; awarded++) {
+    let winner = 0
+    let bestQuotient = weights[0]! / (counts[0]! + 1)
+    for (let index = 1; index < weights.length; index++) {
+      const quotient = weights[index]! / (counts[index]! + 1)
+      if (quotient > bestQuotient) {
+        winner = index
+        bestQuotient = quotient
+      }
+    }
+    counts[winner] = counts[winner]! + 1
+  }
+
+  return Object.freeze(counts)
+}
+
+/** Select the already-prioritized prefix allocated to one hill. */
+export function selectGrassRoots({
+  count,
+  candidates,
+}: GrassRootSelectionOptions): readonly GrassRootCandidate[] {
+  if (!Number.isInteger(count) || count < 0) {
+    throw new RangeError('root count must be a non-negative integer')
+  }
+  if (count > candidates.length) {
+    throw new RangeError(
+      `root count ${count} exceeds canonical capacity ${candidates.length}`,
+    )
+  }
+  return Object.freeze(candidates.slice(0, count))
 }
