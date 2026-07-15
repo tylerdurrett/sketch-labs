@@ -74,6 +74,35 @@ The Canvas number measures traversal and submission through the injected
 `Canvas2DContext` port using a counting context. It does not include a browser's
 rasterization, compositor, or GPU flush; use a browser profile for those costs.
 
+## Grass Hills density baseline
+
+Run the opt-in smoke benchmark for the historical maximum-density Grass Hills
+scene with the package-local Vitest binary:
+
+```sh
+packages/core/node_modules/.bin/vitest run --config packages/core/vitest.grass-hills-density-benchmark.config.ts
+```
+
+Or, from an environment where workspace scripts are allowed:
+
+```sh
+pnpm --filter @harness/core benchmark:grass-hills-density
+```
+
+The fixture pins its seed, time, Composition Frame, and every parameter as
+literals. It asserts 10 hills, 400 blades, 410 Scene primitives, 14,540 source
+points, and the literal fixture's reproducible 11,584,278 deterministic
+Hidden-line work units. The initial runner is smoke-only: it executes cold
+generation and Hidden-line processing once and prints diagnostic local timings,
+rather than claiming statistically meaningful performance results.
+
+The original measurement machine observed approximately 248 ms cold generation
+and approximately 44 ms Hidden-line processing. Those timings are historical
+observations, not budgets or SLAs. The durable record and protocol notes live in
+[`packages/core/benchmarks/grass-hills-density-results.md`](packages/core/benchmarks/grass-hills-density-results.md),
+including the issue body's unreproducible 11,372,294-work-unit observation and
+the evidence-based distinction from the executable fixture.
+
 ## Layout
 
 - `packages/core` — headless engine, Scene IR, renderers, Sketches
