@@ -1,9 +1,13 @@
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const nodePath = argument('node')
 const browserPath = argument('browser')
-const campaign = JSON.parse(readFileSync(nodePath, 'utf8'))
-const browserEnvelope = JSON.parse(readFileSync(browserPath, 'utf8'))
+const outputDirectory = optionalArgument('out-dir')
+const campaignSource = readFileSync(nodePath, 'utf8')
+const browserSource = readFileSync(browserPath, 'utf8')
+const campaign = JSON.parse(campaignSource)
+const browserEnvelope = JSON.parse(browserSource)
 if (browserEnvelope.success !== true) throw new Error('browser screening failed')
 const browser = browserEnvelope.result
 const browserByKind = new Map(
@@ -83,9 +87,29 @@ const results = campaign.results.map((result) => {
     },
   }
 })
+const selectedResult = results.find(
+  (result) =>
+    result.fixtureId === 'one-hill-5000--hill-and-clump--plotter-lod',
+)
+if (selectedResult === undefined) {
+  throw new Error('missing selected screen result')
+}
 
+const recordedAt = '2026-07-15'
 const report = {
-  recordedAt: '2026-07-15',
+  recordedAt,
+  evidence: {
+    campaignRaw: {
+      file: `simplified-screen-${recordedAt}.campaign-raw.json`,
+      contract:
+        'verbatim protocol envelope with every timing/memory sample and collector result',
+    },
+    browserRaw: {
+      file: `simplified-screen-${recordedAt}.browser-raw.json`,
+      contract:
+        'verbatim Chrome envelope with every load, first draw, and redraw sample',
+    },
+  },
   campaign: {
     protocolVersion: campaign.protocolVersion,
     mode: campaign.mode,
@@ -115,13 +139,34 @@ const report = {
       'all baseline and one-hill 5k screen jobs completed inside the pinned 90 second/1 GiB policy',
       'the one-hill 5k processed Scene retains the grass-covered hill silhouette with 2,950 paths instead of 5,000',
       'deterministic LOD raises retained-root minimum spacing from 0.038 mm to 0.302 mm, above the pinned 0.30 mm nib',
-      'actual 1000x1000 Canvas redraw median is about 0.6 ms for the processed 5k Scene',
+      `actual 1000x1000 Canvas redraw median is about ${selectedResult.browser.processed.redrawMedianMs.toFixed(1)} ms for the processed 5k Scene`,
       'clump processing costs about 34 ms, but generation preparation remains the dominant roughly 2.3 second operation',
     ],
   },
 }
 
-process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
+const reportSource = `${JSON.stringify(report, null, 2)}\n`
+if (outputDirectory === undefined) {
+  process.stdout.write(reportSource)
+} else {
+  const directory = resolve(outputDirectory)
+  mkdirSync(directory, { recursive: true })
+  const outputs = {
+    summary: resolve(directory, `simplified-screen-${recordedAt}.json`),
+    campaign: resolve(
+      directory,
+      `simplified-screen-${recordedAt}.campaign-raw.json`,
+    ),
+    browser: resolve(
+      directory,
+      `simplified-screen-${recordedAt}.browser-raw.json`,
+    ),
+  }
+  writeFileSync(outputs.summary, reportSource)
+  writeFileSync(outputs.campaign, campaignSource)
+  writeFileSync(outputs.browser, browserSource)
+  process.stdout.write(`${JSON.stringify(outputs, null, 2)}\n`)
+}
 
 function argument(name) {
   const prefix = `--${name}=`
@@ -130,6 +175,13 @@ function argument(name) {
   )
   if (!value) throw new Error(`${prefix}<path> is required`)
   return value
+}
+
+function optionalArgument(name) {
+  const prefix = `--${name}=`
+  return process.argv
+    .find((item) => item.startsWith(prefix))
+    ?.slice(prefix.length)
 }
 
 function median(values) {

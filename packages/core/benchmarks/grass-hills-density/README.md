@@ -163,10 +163,11 @@ changed by this candidate.
 
 The bounded Y3a comparison of its four processing variants is recorded in
 [`results/simplified-screen-2026-07-15.md`](results/simplified-screen-2026-07-15.md),
-with complete machine-readable evidence in the adjacent JSON. The screen uses
-only the historical baseline and one-hill 5k fixtures under the pinned `screen`
-policy. It selects `hill-and-clump` + `plotter-lod` as the sole simplified
-finalist; that is not a full-matrix or production-adoption decision.
+with its compact summary plus verbatim raw campaign and browser envelopes in the
+adjacent JSON files. The screen uses only the historical baseline and one-hill
+5k fixtures under the pinned `screen` policy. It selects `hill-and-clump` +
+`plotter-lod` as the sole simplified finalist; that is not a full-matrix or
+production-adoption decision.
 
 To rerun it, bundle `simplified-candidate.js`, set
 `GRASS_HILLS_SIMPLIFIED_BUNDLE_URL` to the generated file URL, and invoke the
