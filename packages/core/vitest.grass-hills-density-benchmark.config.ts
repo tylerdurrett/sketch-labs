@@ -4,7 +4,10 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   test: {
-    include: ['benchmarks/grass-hills-density.benchmark.js'],
+    include: [
+      'benchmarks/grass-hills-density.benchmark.js',
+      'benchmarks/grass-hills-density/**/*.benchmark.js',
+    ],
     pool: 'forks',
     poolOptions: {
       forks: {

@@ -96,6 +96,13 @@ Hidden-line work units. The initial runner is smoke-only: it executes cold
 generation and Hidden-line processing once and prints diagnostic local timings,
 rather than claiming statistically meaningful performance results.
 
+The benchmark-local campaign subprocess protocol is documented in
+[`packages/core/benchmarks/grass-hills-density/README.md`](packages/core/benchmarks/grass-hills-density/README.md).
+Its generic CLI is also smoke-only by default; screen/full/adopted modes require
+explicit flags, and long finalist/adopted campaigns require an additional
+confirmation flag. Candidate implementations and fixture manifests arrive in
+later issue #305 work.
+
 The original measurement machine observed approximately 248 ms cold generation
 and approximately 44 ms Hidden-line processing. Those timings are historical
 observations, not budgets or SLAs. The durable record and protocol notes live in
