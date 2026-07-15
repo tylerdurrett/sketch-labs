@@ -130,5 +130,8 @@ function argument(name) {
 
 function median(values) {
   const sorted = [...values].sort((left, right) => left - right)
-  return sorted[Math.floor(sorted.length / 2)]
+  const upper = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0
+    ? (sorted[upper - 1] + sorted[upper]) / 2
+    : sorted[upper]
 }

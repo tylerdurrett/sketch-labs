@@ -136,6 +136,22 @@ describe('simplified Grass Hills full result', () => {
         (candidate) => candidate.fixtureId === result.fixtureId,
       )
       expect(summarized.representativeMetrics).toEqual(metrics)
+      for (const [phaseName, phase] of Object.entries(result.phases)) {
+        const durations = phase.samples.map((sample) => sample.durationMs)
+        expect(summarized.phaseTimingMs[phaseName]).toEqual({
+          sampleCount: durations.length,
+          min: Math.min(...durations),
+          median: conventionalMedian(durations),
+          max: Math.max(...durations),
+        })
+      }
+      expect(summarized.maxRssBytes).toBe(
+        Math.max(
+          ...Object.values(result.phases).flatMap((phase) =>
+            phase.samples.map((sample) => sample.memory.after.maxRssBytes),
+          ),
+        ),
+      )
     }
   })
 
@@ -220,6 +236,14 @@ function inventory() {
     serializedBytes: expect.any(Number),
     geometryBytes: expect.any(Number),
   }
+}
+
+function conventionalMedian(values) {
+  const sorted = [...values].sort((left, right) => left - right)
+  const upper = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0
+    ? (sorted[upper - 1] + sorted[upper]) / 2
+    : sorted[upper]
 }
 
 function readResult(file) {

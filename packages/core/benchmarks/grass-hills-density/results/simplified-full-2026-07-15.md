@@ -26,8 +26,9 @@ and inventories are in
 No sample count was reduced. The timeout kills occurred at 600,010.874 ms and
 600,009.361 ms with `SIGKILL`. A killed worker cannot return a trustworthy
 partial phase payload, so those jobs retain the censor record rather than
-inventing or reusing partial measurements. Neither job approached the 2 GiB
-RSS ceiling before its timeout.
+inventing or reusing partial measurements. The 2 GiB memory ceiling was not
+observed exceeded or tripped; the censor envelopes retain no RSS proximity
+evidence for those killed workers.
 
 ## Completed results
 
@@ -38,9 +39,9 @@ counts remain exact at one nib width.
 
 | Fixture | Prep | Cold | Warm | Max RSS MiB | Custom process | Source paths | Outline paths | Root min mm | Colliding path pairs | Segment coverage | Path coverage |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| one-hill 5k | 2239.0 | 2296.3 | 35.3 | 236.9 | 30.4 | 5000 | 2950 | 0.3024 | 903 | 35.3% | 89.5% |
-| one-hill 10k | 4479.8 | 4608.6 | 77.5 | 261.6 | 71.7 | 10000 | 3441 | 0.3000 | 1147 | 39.0% | 81.1% |
-| full 10k | 4498.0 | 4674.6 | 151.4 | 263.4 | 167.9 | 10000 | 4892 | 0.3000 | 1043 | 23.5% | 74.5% |
+| one-hill 5k | 2236.8 | 2296.0 | 35.3 | 236.9 | 30.4 | 5000 | 2950 | 0.3024 | 903 | 35.3% | 89.5% |
+| one-hill 10k | 4478.9 | 4607.9 | 77.5 | 261.6 | 71.7 | 10000 | 3441 | 0.3000 | 1147 | 39.0% | 81.1% |
+| full 10k | 4497.0 | 4674.6 | 151.3 | 263.4 | 167.9 | 10000 | 4892 | 0.3000 | 1043 | 23.5% | 74.5% |
 
 All three completed jobs contain exactly 20/20/60 samples. The raw envelope
 also retains per-sample before/after heap, RSS and maxRSS snapshots; complete
