@@ -1,5 +1,6 @@
 import type {
   CoordinateSpace,
+  HiddenLineRole,
   HiddenLineProgress,
   ParamSchema,
   Params,
@@ -23,6 +24,7 @@ export interface ImmutablePrimitive {
   readonly closed?: boolean;
   readonly fill?: Readonly<{ color: string }>;
   readonly stroke?: Readonly<{ color: string; width: number }>;
+  readonly hiddenLineRole?: HiddenLineRole;
 }
 
 export interface ImmutableScene {
@@ -111,6 +113,7 @@ function copyScene(scene: Scene | ImmutableScene): ImmutableScene {
       closed?: boolean;
       fill?: Readonly<{ color: string }>;
       stroke?: Readonly<{ color: string; width: number }>;
+      hiddenLineRole?: HiddenLineRole;
     } = {
       points: primitive.points.map(
         ([x, y]) => Object.freeze([x, y]) as ImmutablePoint,
@@ -125,6 +128,12 @@ function copyScene(scene: Scene | ImmutableScene): ImmutableScene {
         color: primitive.stroke.color,
         width: primitive.stroke.width,
       });
+    }
+    if (
+      hasOwn(primitive, "hiddenLineRole") &&
+      primitive.hiddenLineRole !== undefined
+    ) {
+      copy.hiddenLineRole = primitive.hiddenLineRole;
     }
     Object.freeze(copy.points);
     return Object.freeze(copy);
@@ -201,6 +210,10 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function isHiddenLineRole(value: unknown): value is HiddenLineRole {
+  return value === "source" || value === "occluder" || value === "both";
+}
+
 function isScene(value: unknown): value is Scene {
   if (!isRecord(value) || !isRecord(value.space)) return false;
   if (
@@ -234,6 +247,12 @@ function isScene(value: unknown): value is Scene {
     if (
       hasOwn(candidate, "fill") &&
       (!isRecord(candidate.fill) || typeof candidate.fill.color !== "string")
+    ) {
+      return false;
+    }
+    if (
+      hasOwn(candidate, "hiddenLineRole") &&
+      !isHiddenLineRole(candidate.hiddenLineRole)
     ) {
       return false;
     }
@@ -376,6 +395,9 @@ function sceneEqual(left: ImmutableScene, right: ImmutableScene): boolean {
       other === undefined ||
       hasOwn(primitive, "closed") !== hasOwn(other, "closed") ||
       !Object.is(primitive.closed, other.closed) ||
+      hasOwn(primitive, "hiddenLineRole") !==
+        hasOwn(other, "hiddenLineRole") ||
+      !Object.is(primitive.hiddenLineRole, other.hiddenLineRole) ||
       primitive.points.length !== other.points.length ||
       !optionalStyleEqual(
         primitive as unknown as Record<string, unknown>,
@@ -442,6 +464,9 @@ export function mutableScene(scene: ImmutableScene): Scene {
           color: primitive.stroke.color,
           width: primitive.stroke.width,
         };
+      }
+      if (primitive.hiddenLineRole !== undefined) {
+        copy.hiddenLineRole = primitive.hiddenLineRole;
       }
       return copy;
     }),

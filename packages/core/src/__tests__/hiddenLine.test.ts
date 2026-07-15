@@ -7,6 +7,7 @@ import {
 } from '../hiddenLine'
 import { renderToCanvas, renderToSVG } from '../renderer'
 import type { Canvas2DContext } from '../renderer'
+import { createScene } from '../scene'
 import type { Primitive, Scene, Stroke } from '../scene'
 import type { Point, Polyline } from '../types'
 
@@ -539,6 +540,251 @@ describe('hiddenLinePass — Scene wiring decisions', () => {
   })
 })
 
+describe('hiddenLinePass — explicit source and occluder roles', () => {
+  function strokeSource(y = 20): Primitive {
+    return {
+      points: [
+        [0, y],
+        [50, y],
+      ],
+      stroke: { color: '#338833', width: 2 },
+      hiddenLineRole: 'source',
+    }
+  }
+
+  function mask(): Primitive {
+    return {
+      ...filledSquare(20, 10, 30, 30),
+      hiddenLineRole: 'occluder',
+    }
+  }
+
+  it('clips a stroke source exactly and does not emit the filled occluder', () => {
+    const source = strokeSource()
+    const occluder = mask()
+    const scene: Scene = { space, primitives: [source, occluder] }
+    const before = structuredClone(scene)
+
+    const out = hiddenLinePass(scene)
+
+    expect(out).toEqual({
+      space,
+      primitives: [
+        {
+          points: [
+            [0, 20],
+            [20, 20],
+          ],
+          stroke: { color: 'black', width: 2 },
+        },
+        {
+          points: [
+            [30, 20],
+            [50, 20],
+          ],
+          stroke: { color: 'black', width: 2 },
+        },
+      ],
+    })
+    expect(out.primitives).not.toContainEqual(
+      expect.objectContaining({ points: occluder.points }),
+    )
+    expect(scene).toEqual(before)
+  })
+
+  it('accepts roles through the generic Scene builder', () => {
+    const scene = createScene(space)
+      .addPath(strokeSource().points, {
+        stroke: { color: '#338833', width: 2 },
+        hiddenLineRole: 'source',
+      })
+      .addPath(mask().points, {
+        closed: true,
+        fill,
+        hiddenLineRole: 'occluder',
+      })
+      .build()
+
+    expect(hiddenLinePass(scene).primitives.map(({ points }) => points)).toEqual([
+      [
+        [0, 20],
+        [20, 20],
+      ],
+      [
+        [30, 20],
+        [50, 20],
+      ],
+    ])
+  })
+
+  it('preserves painter order: an earlier occluder cannot hide a later source', () => {
+    const source = strokeSource()
+
+    expect(
+      hiddenLinePass({ space, primitives: [mask(), source] }).primitives,
+    ).toEqual([
+      {
+        points: source.points,
+        stroke: { color: 'black', width: 2 },
+      },
+    ])
+  })
+
+  it('clips interleaved sources only by their own nearer occluders', () => {
+    const fartherSource = strokeSource(20)
+    const firstMask: Primitive = {
+      ...filledSquare(10, 10, 20, 30),
+      hiddenLineRole: 'occluder',
+    }
+    const nearerSource = strokeSource(40)
+    const secondMask: Primitive = {
+      ...filledSquare(30, 10, 40, 50),
+      hiddenLineRole: 'occluder',
+    }
+
+    const out = hiddenLinePass({
+      space,
+      primitives: [fartherSource, firstMask, nearerSource, secondMask],
+    })
+
+    expect(out.primitives.map(({ points }) => points)).toEqual([
+      [
+        [0, 20],
+        [10, 20],
+      ],
+      [
+        [20, 20],
+        [30, 20],
+      ],
+      [
+        [40, 20],
+        [50, 20],
+      ],
+      [
+        [0, 40],
+        [30, 40],
+      ],
+      [
+        [40, 40],
+        [50, 40],
+      ],
+    ])
+  })
+
+  it('lets source-only fills emit without occluding geometry behind them', () => {
+    const back = strokeSource(15)
+    const sourceOnlyFill: Primitive = {
+      ...filledSquare(10, 10, 40, 20),
+      hiddenLineRole: 'source',
+    }
+
+    const out = hiddenLinePass({
+      space,
+      primitives: [back, sourceOnlyFill],
+    })
+
+    expect(out.primitives[0]).toEqual({
+      points: back.points,
+      stroke: { color: 'black', width: 2 },
+    })
+    expect(out.primitives[1]!.points).toEqual([
+      [10, 10],
+      [40, 10],
+      [40, 20],
+      [10, 20],
+      [10, 10],
+    ])
+  })
+
+  it('keeps legacy defaults byte-compatible with explicit both roles', () => {
+    const legacy: Scene = {
+      space,
+      primitives: [
+        filledSquare(0, 0, 30, 30),
+        filledSquare(20, 20, 50, 50),
+      ],
+    }
+    const explicit: Scene = {
+      space,
+      primitives: legacy.primitives.map((primitive) => ({
+        ...primitive,
+        hiddenLineRole: 'both',
+      })),
+    }
+
+    expect(hiddenLinePass(explicit)).toEqual(hiddenLinePass(legacy))
+    expect(analyzeHiddenLineWorkload(explicit)).toEqual(
+      analyzeHiddenLineWorkload(legacy),
+    )
+  })
+
+  it('accounts for source, mask, pair, comparisons, and progress exactly', () => {
+    const scene: Scene = { space, primitives: [strokeSource(), mask()] }
+    const snapshots: Array<{
+      readonly completedWorkUnits: number
+      readonly totalWorkUnits: number
+      readonly terminal: boolean
+    }> = []
+    const expected = {
+      filledPrimitiveCount: 1,
+      sourceSegmentCount: 1,
+      overlappingPairCount: 1,
+      estimatedSegmentEdgeComparisons: 4,
+      totalWorkUnits:
+        HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive +
+        HIDDEN_LINE_WORK_WEIGHTS.sourceSegment +
+        HIDDEN_LINE_WORK_WEIGHTS.overlappingPair +
+        4 * HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
+    }
+
+    expect(analyzeHiddenLineWorkload(scene)).toEqual(expected)
+    hiddenLinePass(scene, {
+      observer: (snapshot) => snapshots.push(snapshot),
+    })
+    expect(snapshots).toEqual([
+      {
+        completedWorkUnits:
+          HIDDEN_LINE_WORK_WEIGHTS.sourceSegment +
+          HIDDEN_LINE_WORK_WEIGHTS.overlappingPair +
+          4 * HIDDEN_LINE_WORK_WEIGHTS.segmentEdgeComparison,
+        totalWorkUnits: expected.totalWorkUnits,
+        terminal: false,
+      },
+      {
+        completedWorkUnits: expected.totalWorkUnits,
+        totalWorkUnits: expected.totalWorkUnits,
+        terminal: true,
+      },
+    ])
+    expect(snapshots.every(Object.isFrozen)).toBe(true)
+  })
+
+  it('reports filled mask preparation even when no source is emitted', () => {
+    const snapshots: unknown[] = []
+    const scene: Scene = { space, primitives: [mask()] }
+
+    expect(analyzeHiddenLineWorkload(scene)).toEqual({
+      filledPrimitiveCount: 1,
+      sourceSegmentCount: 0,
+      overlappingPairCount: 0,
+      estimatedSegmentEdgeComparisons: 0,
+      totalWorkUnits: HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive,
+    })
+    expect(
+      hiddenLinePass(scene, {
+        observer: (snapshot) => snapshots.push(snapshot),
+      }),
+    ).toEqual({ space, primitives: [] })
+    expect(snapshots).toEqual([
+      {
+        completedWorkUnits: HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive,
+        totalWorkUnits: HIDDEN_LINE_WORK_WEIGHTS.filledPrimitive,
+        terminal: true,
+      },
+    ])
+  })
+})
+
 /** A recording {@link Canvas2DContext} stub — logs method calls, no real DOM. */
 function createRecordingContext(): Canvas2DContext & { calls: string[] } {
   const calls: string[] = []
@@ -586,6 +832,35 @@ describe('hiddenLinePass — output is consumable unchanged by the renderers', (
     renderToCanvas(ctx, out)
     expect(ctx.calls).toContain('stroke')
     expect(ctx.calls).not.toContain('fill')
+  })
+
+  it('reuses one hybrid processed Scene for Canvas and SVG', () => {
+    const processed = hiddenLinePass({
+      space,
+      primitives: [
+        {
+          points: [
+            [0, 20],
+            [50, 20],
+          ],
+          stroke,
+          hiddenLineRole: 'source',
+        },
+        {
+          ...filledSquare(20, 10, 30, 30),
+          hiddenLineRole: 'occluder',
+        },
+      ],
+    })
+    const before = structuredClone(processed)
+    const ctx = createRecordingContext()
+
+    renderToCanvas(ctx, processed)
+    const svg = renderToSVG(processed)
+
+    expect(ctx.calls.filter((call) => call === 'stroke')).toHaveLength(2)
+    expect(svg.match(/<path /g)).toHaveLength(2)
+    expect(processed).toEqual(before)
   })
 })
 
