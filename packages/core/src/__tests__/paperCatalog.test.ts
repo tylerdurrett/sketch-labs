@@ -24,9 +24,10 @@ const ZERO_INSETS: PlotInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 const PROFILE_KEYS = ['height', 'includeFrame', 'insets', 'width']
 
 describe('STANDARD_PAPERS catalog', () => {
-  it('covers the seven standard formats in portrait millimeters (AC4)', () => {
+  it('covers the eight standard formats in portrait millimeters (AC4)', () => {
     expect(STANDARD_PAPERS).toEqual({
       square: { width: 200, height: 200 },
+      sketchbook: { width: 142.24, height: 209.804 },
       a2: { width: 420, height: 594 },
       a3: { width: 297, height: 420 },
       a4: { width: 210, height: 297 },
@@ -36,10 +37,11 @@ describe('STANDARD_PAPERS catalog', () => {
     })
   })
 
-  it('lists exactly the seven standard names in UI order', () => {
-    expect(STANDARD_PAPER_NAMES).toHaveLength(7)
+  it('lists exactly the eight standard names in UI order', () => {
+    expect(STANDARD_PAPER_NAMES).toHaveLength(8)
     expect([...STANDARD_PAPER_NAMES]).toEqual([
       'square',
+      'sketchbook',
       'a2',
       'a3',
       'a4',
@@ -47,6 +49,13 @@ describe('STANDARD_PAPERS catalog', () => {
       'letter',
       'tabloid',
     ])
+  })
+
+  it('stores the sketchbook inch dimensions as canonical millimeters', () => {
+    expect(STANDARD_PAPERS.sketchbook.width).toBe(142.24)
+    expect(STANDARD_PAPERS.sketchbook.height).toBe(209.804)
+    expect(STANDARD_PAPERS.sketchbook.width / MM_PER_INCH).toBeCloseTo(5.6)
+    expect(STANDARD_PAPERS.sketchbook.height / MM_PER_INCH).toBeCloseTo(8.26)
   })
 
   it('stores every format in portrait orientation (width <= height)', () => {

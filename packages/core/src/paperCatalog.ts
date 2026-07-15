@@ -18,8 +18,8 @@
  * value, so its rationale lives in this header rather than in any one sketch, and
  * it needs no ADR of its own — ADR-0007):
  *
- * - The catalog is millimeter-canonical, stored in PORTRAIT orientation. The seven
- *   supported formats (square, A2–A5, letter, tabloid) live in
+ * - The catalog is millimeter-canonical, stored in PORTRAIT orientation. The eight
+ *   supported formats (square, Sketchbook, A2–A5, letter, tabloid) live in
  *   {@link STANDARD_PAPERS} as
  *   `width <= height` millimeter rectangles. This supersedes the earlier
  *   centimeter catalog that carried orientation as an argument — the whole domain
@@ -80,6 +80,7 @@ export type PaperOrientation = 'portrait' | 'landscape'
  */
 export const STANDARD_PAPER_NAMES = [
   'square',
+  'sketchbook',
   'a2',
   'a3',
   'a4',
@@ -95,13 +96,14 @@ export type StandardPaperName = (typeof STANDARD_PAPER_NAMES)[number]
  * The standard paper catalog, in canonical millimeters and PORTRAIT orientation
  * (`width <= height`).
  *
- * These are the seven supported formats expressed in millimeters: the Harness's
- * square default, the ISO A-series A2–A5, and US letter and tabloid. Landscape
- * dimensions are derived by transposing width and height on demand; they are not
- * stored.
+ * These are the eight supported formats expressed in millimeters: the Harness's
+ * square default, a 5.6 × 8.26 inch sketchbook, the ISO A-series A2–A5, and US
+ * letter and tabloid. Landscape dimensions are derived by transposing width and
+ * height on demand; they are not stored.
  */
 export const STANDARD_PAPERS: Record<StandardPaperName, PlotRectangle> = {
   square: { width: 200, height: 200 },
+  sketchbook: { width: 142.24, height: 209.804 },
   a2: { width: 420, height: 594 },
   a3: { width: 297, height: 420 },
   a4: { width: 210, height: 297 },

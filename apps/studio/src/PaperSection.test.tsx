@@ -570,6 +570,29 @@ describe("PaperSection", () => {
     });
   });
 
+  it("applies the Sketchbook dimensions while preserving the active margin", () => {
+    const onChange = vi.fn();
+    const current: PlotProfile = {
+      ...profile,
+      insets: {
+        top: 10.0076,
+        right: 10.0076,
+        bottom: 10.0076,
+        left: 10.0076,
+      },
+    };
+    const { el } = mount(onChange, current);
+
+    selectFormat(el, "sketchbook");
+
+    expect(onChange).toHaveBeenCalledWith({
+      width: 142.24,
+      height: 209.804,
+      insets: current.insets,
+      includeFrame: false,
+    });
+  });
+
   it("treats Custom as a derived no-op that preserves the current dimensions", () => {
     const onChange = vi.fn();
     const { el } = mount(onChange);
