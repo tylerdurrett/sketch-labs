@@ -1,8 +1,9 @@
 # Grass Hills density campaign protocol
 
-This directory owns the benchmark-only subprocess protocol for issue #305. It
-does not contain candidate algorithms, fixture manifests, result collectors, or
-browser measurements; those plug into this boundary in later work.
+This directory owns the isolated benchmark infrastructure for issue #305: the
+subprocess protocol, literal workload manifest, reusable metric collectors, and
+an explicit browser profiling seam. It contains no dense-grass candidate
+algorithm or production Studio instrumentation.
 
 Every candidate × fixture pair runs in a fresh Node child. The parent runs jobs
 serially, applies a wall-clock deadline, polls RSS against the mode's hard
@@ -55,12 +56,18 @@ export const benchmarkCandidate = {
   prepare(payload) { return (t) => samplePreparedFrame(payload, t) },
   generate(payload, t) { return generateColdFrame(payload, t) },
   guard(result) { return finiteNonZeroWorkGuard(result) },
+  inspect({ phase, value, payload }) { return collectEvidence(value, payload) },
 }
 ```
 
 `prepare` must return a callable varying-time sampler. `guard` must return a
 finite, non-zero number so a candidate cannot benchmark omitted work. The runner
-does not interpret candidate results or fixture payloads.
+does not interpret candidate results or fixture payloads. `inspect` is optional;
+the worker calls it once for the first measured value in each phase and records
+its return value as `sample.metrics`. Inspection is outside the operation timer
+and memory snapshots, so export evidence cannot inflate prep/cold/warm
+measurements. For preparation, `value` is the retained sampler; for cold/warm it
+is the generated value.
 
 Invoke the generic CLI with the package directory as the current directory:
 
@@ -87,3 +94,48 @@ are bytes; Node's KiB `resourceUsage().maxRSS` value is multiplied by 1,024.
 Each sample records before/after snapshots plus signed heap/RSS/maxRSS deltas.
 `maxRSS` is a process-lifetime high-water mark, so its delta means “this sample
 set a new child-process high-water mark,” not an isolated per-phase peak.
+
+## Literal workload manifest and collectors
+
+[`fixtures.js`](fixtures.js) pins six requests: the historical 10-hill/400-blade
+baseline, one-hill 5k and 10k targets, and full-composition 10k, 25k, and 50k
+targets. Every request repeats the seed, frame, time, complete Grass Hills param
+set, and physical profile. The 200 × 200 mm paper with 10 mm insets supplies a
+180 × 180 mm drawable region: 0.18 mm per Scene unit. A 0.30 mm fineliner is
+therefore 1.6666666666666667 Scene units. Requested counts are evidence targets,
+not claims about the current implementation.
+
+[`metrics.js`](metrics.js) collects source/outline/clipped primitive and point
+counts, SHA-256 checksums, serialized and geometry byte sizes, Hidden-line
+workload/time, bounds clipping, ordinary SVG and plotter SVG time/bytes/path
+counts, and nearest root/path-start spacing percentiles in physical millimeters.
+Its Canvas metric invokes core's actual `drawSceneFitted` through a counting
+port; the result is explicitly structural JS submission only and excludes
+rasterization, compositor, and GPU completion. Heap/RSS comes from the protocol
+worker. Both the worker and collector capture machine/runtime metadata.
+
+## Explicit browser seam
+
+The benchmark-local Vite page loads checksum-pinned serialized fill and Outline
+Scene JSON and passes either Scene to core's actual `drawSceneFitted` on a real
+browser Canvas2D context. Start it explicitly from the repository root:
+
+```sh
+apps/studio/node_modules/.bin/vite --config packages/core/benchmarks/grass-hills-density/browser/vite.config.js
+```
+
+Nothing starts it from normal tests, package scripts, or Studio. In Chrome
+DevTools, use `__GRASS_HILLS_DENSITY_BENCHMARK__.draw('fill')`,
+`.draw('outline')`, or `.drawMany({ kind: 'fill', iterations: 30 })` as stable
+profiling hooks. These submission durations are not raster/compositor evidence;
+Chrome tracing owns that later measurement.
+
+The committed fixture artifacts are intentionally compact JSON. To regenerate
+them after a deliberate baseline change, run the dedicated benchmark test once
+with `UPDATE_GRASS_HILLS_BROWSER_FIXTURES=1`, inspect the files, and update the
+two SHA-256 literals in `browser/fixture-manifest.js`. A normal run only verifies
+the pinned bytes.
+
+```sh
+UPDATE_GRASS_HILLS_BROWSER_FIXTURES=1 packages/core/node_modules/.bin/vitest run --config packages/core/vitest.grass-hills-density-benchmark.config.ts packages/core/benchmarks/grass-hills-density/browser-fixtures.benchmark.js
+```

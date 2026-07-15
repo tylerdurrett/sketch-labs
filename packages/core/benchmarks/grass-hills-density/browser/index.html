@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grass Hills density browser seam</title>
+    <style>
+      html, body { margin: 0; background: #ddd; font: 14px system-ui; }
+      main { display: grid; gap: 12px; padding: 12px; }
+      canvas { width: min(90vmin, 1000px); height: min(90vmin, 1000px); background: white; }
+      pre { margin: 0; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <canvas id="surface" width="1000" height="1000"></canvas>
+      <pre id="status">loading pinned Scene fixtures…</pre>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

@@ -1,3 +1,4 @@
+import { cpus, freemem, hostname, release, totalmem } from 'node:os'
 import { performance } from 'node:perf_hooks'
 
 import { PROTOCOL_VERSION } from './protocol.js'
@@ -52,6 +53,7 @@ async function executeRequest(request) {
     samples.warm,
     samples.warmups,
   )
+  const processors = cpus()
 
   return {
     protocolVersion: PROTOCOL_VERSION,
@@ -66,6 +68,12 @@ async function executeRequest(request) {
       node: process.version,
       platform: process.platform,
       arch: process.arch,
+      hostname: hostname(),
+      osRelease: release(),
+      cpuModel: processors[0]?.model ?? 'unknown',
+      logicalCpuCount: processors.length,
+      totalMemoryBytes: totalmem(),
+      freeMemoryBytesAtCapture: freemem(),
     },
     phases: { preparation, cold, warm },
   }
@@ -90,24 +98,41 @@ function validateCandidate(candidate, descriptor) {
       throw new Error(`candidate ${descriptor.id} must implement ${operation}()`)
     }
   }
+  if (
+    candidate.inspect !== undefined &&
+    typeof candidate.inspect !== 'function'
+  ) {
+    throw new Error(
+      `candidate ${descriptor.id} inspect must be a function when present`,
+    )
+  }
 }
 
 function measurePreparation(candidate, payload, sampleCount, warmups) {
   for (let index = 0; index < warmups; index++) {
     requireSampler(candidate.prepare(payload))
   }
-  return measureSamples(sampleCount, () => {
-    requireSampler(candidate.prepare(payload))
-    return 1
-  })
+  return measureSamples(
+    sampleCount,
+    () => {
+      const sampler = requireSampler(candidate.prepare(payload))
+      return { guard: 1, value: sampler }
+    },
+    inspector(candidate, payload, 'preparation'),
+  )
 }
 
 function measureCold(candidate, payload, sampleCount, warmups) {
   for (let index = 0; index < warmups; index++) {
     guard(candidate, candidate.generate(payload, 0))
   }
-  return measureSamples(sampleCount, () =>
-    guard(candidate, candidate.generate(payload, 0)),
+  return measureSamples(
+    sampleCount,
+    () => {
+      const value = candidate.generate(payload, 0)
+      return { guard: guard(candidate, value), value }
+    },
+    inspector(candidate, payload, 'cold'),
   )
 }
 
@@ -116,12 +141,17 @@ function measureWarm(candidate, payload, sampleCount, warmups) {
   for (let index = 0; index < warmups; index++) {
     guard(candidate, sample(varyingTime(index)))
   }
-  return measureSamples(sampleCount, (index) =>
-    guard(candidate, sample(varyingTime(index + warmups))),
+  return measureSamples(
+    sampleCount,
+    (index) => {
+      const value = sample(varyingTime(index + warmups))
+      return { guard: guard(candidate, value), value }
+    },
+    inspector(candidate, payload, 'warm'),
   )
 }
 
-function measureSamples(sampleCount, operation) {
+function measureSamples(sampleCount, operation, inspect) {
   const measured = []
   let guardTotal = 0
 
@@ -129,11 +159,11 @@ function measureSamples(sampleCount, operation) {
     globalThis.gc()
     const before = memorySnapshot()
     const start = performance.now()
-    const value = operation(index)
+    const result = operation(index)
     const durationMs = performance.now() - start
     const after = memorySnapshot()
-    guardTotal += value
-    measured.push({
+    guardTotal += result.guard
+    const sample = {
       durationMs,
       memory: {
         before,
@@ -142,13 +172,27 @@ function measureSamples(sampleCount, operation) {
         rssDeltaBytes: after.rssBytes - before.rssBytes,
         maxRssDeltaBytes: after.maxRssBytes - before.maxRssBytes,
       },
-    })
+    }
+    // Inspect only the first measured value for each phase. It is deliberately
+    // outside both the operation timer and its before/after memory snapshots:
+    // collectors may run expensive export evidence without contaminating the
+    // preparation/cold/warm measurement they annotate.
+    if (index === 0 && inspect !== undefined) {
+      const metrics = inspect(result.value)
+      if (metrics !== undefined) sample.metrics = metrics
+    }
+    measured.push(sample)
   }
 
   if (!Number.isFinite(guardTotal) || guardTotal === 0) {
     throw new Error(`benchmark work guard failed: ${guardTotal}`)
   }
   return { samples: measured, guard: guardTotal }
+}
+
+function inspector(candidate, payload, phase) {
+  if (candidate.inspect === undefined) return undefined
+  return (value) => candidate.inspect({ phase, value, payload })
 }
 
 function memorySnapshot() {

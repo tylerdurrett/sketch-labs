@@ -89,8 +89,9 @@ Or, from an environment where workspace scripts are allowed:
 pnpm --filter @harness/core benchmark:grass-hills-density
 ```
 
-The fixture pins its seed, time, Composition Frame, and every parameter as
-literals. It asserts 10 hills, 400 blades, 410 Scene primitives, 14,540 source
+The literal manifest pins each fixture's seed, time, Composition Frame, complete
+parameter set, plot profile, and pen geometry. The baseline asserts 10 hills,
+400 blades, 410 Scene primitives, 14,540 source
 points, and the literal fixture's reproducible 11,584,278 deterministic
 Hidden-line work units. The initial runner is smoke-only: it executes cold
 generation and Hidden-line processing once and prints diagnostic local timings,
@@ -100,8 +101,10 @@ The benchmark-local campaign subprocess protocol is documented in
 [`packages/core/benchmarks/grass-hills-density/README.md`](packages/core/benchmarks/grass-hills-density/README.md).
 Its generic CLI is also smoke-only by default; screen/full/adopted modes require
 explicit flags, and long finalist/adopted campaigns require an additional
-confirmation flag. Candidate implementations and fixture manifests arrive in
-later issue #305 work.
+confirmation flag. The same directory documents the 5k–50k request manifest,
+reusable structural/export collectors, and explicit checksum-pinned real-browser
+Canvas seam. Candidate algorithms and production Studio evidence remain later
+issue #305 work.
 
 The original measurement machine observed approximately 248 ms cold generation
 and approximately 44 ms Hidden-line processing. Those timings are historical

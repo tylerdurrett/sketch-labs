@@ -2,33 +2,18 @@ import { describe, expect, it } from 'vitest'
 
 import { analyzeHiddenLineWorkload, hiddenLinePass } from '../src/hiddenLine'
 import { grassHills } from '../src/sketches/grass-hills'
+import { HISTORICAL_BASELINE } from './grass-hills-density/fixtures.js'
 
 // This historical maximum-density fixture is deliberately literal. In
 // particular, do not derive its params or frame from mutable application
 // defaults: this smoke benchmark must keep measuring the workload recorded at
 // the start of issue #305 even when Grass Hills evolves.
-const BASELINE_SEED = 12345
-const BASELINE_TIME = 0
-const BASELINE_FRAME = Object.freeze({ width: 1000, height: 1000 })
-const BASELINE_PARAMS = Object.freeze({
-  hillCount: 10,
-  horizonHeight: 0.25,
-  depthFalloff: 2,
-  ridgeScale: 3.5,
-  ridgeAmplitude: 0.8,
-  terrainDrift: 1.25,
-  bladeDensity: 2,
-  bladeLength: 28,
-  bladeLengthVariance: 8,
-  bladeWidth: 3,
-  stiffnessVariance: 0.25,
-  windLean: 0,
-  backgroundColor: '#ffffff',
-  hillColor: '#ffffff',
-  hillStrokeColor: '#000000',
-  bladeColor: '#ffffff',
-  bladeStrokeColor: '#000000',
-})
+const {
+  seed: BASELINE_SEED,
+  t: BASELINE_TIME,
+  frame: BASELINE_FRAME,
+  params: BASELINE_PARAMS,
+} = HISTORICAL_BASELINE.payload
 
 const EXPECTED_HILLS = 10
 const EXPECTED_BLADES = 400

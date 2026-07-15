@@ -19,6 +19,10 @@ const OK_CANDIDATE_URL = `data:text/javascript,${encodeURIComponent(`
     },
     generate(payload, t) { return [payload.base + t, payload.base] },
     guard(result) { return result[0] + result[1] },
+    inspect({ phase, value, payload }) {
+      const resolved = typeof value === 'function' ? value(0) : value
+      return { phase, base: payload.base, pointCount: resolved.length }
+    },
   }
 `)}`
 
@@ -112,6 +116,13 @@ describe('Grass Hills density campaign protocol', () => {
     expect(result.phases.preparation.samples).toHaveLength(1)
     expect(result.phases.cold.samples).toHaveLength(1)
     expect(result.phases.warm.samples).toHaveLength(1)
+    expect(result.phases.preparation.samples[0].metrics).toEqual({
+      phase: 'preparation',
+      base: 2,
+      pointCount: 2,
+    })
+    expect(result.phases.cold.samples[0].metrics.phase).toBe('cold')
+    expect(result.phases.warm.samples[0].metrics.phase).toBe('warm')
     expect(secondResult.status).toBe('ok')
     expect(secondResult.runtime.pid).not.toBe(result.runtime.pid)
     for (const phase of Object.values(result.phases)) {
@@ -120,6 +131,26 @@ describe('Grass Hills density campaign protocol', () => {
       expect(sample.memory.before.heapUsedBytes).toBeGreaterThan(0)
       expect(sample.memory.after.rssBytes).toBeGreaterThan(0)
       expect(sample.memory.after.maxRssBytes).toBeGreaterThan(0)
+    }
+    expect(result.runtime.cpuModel).toEqual(expect.any(String))
+    expect(result.runtime.logicalCpuCount).toBeGreaterThan(0)
+    expect(result.runtime.totalMemoryBytes).toBeGreaterThan(0)
+  })
+
+  it('inspects only the first measured value in each explicit multi-sample phase', async () => {
+    const campaign = await runCampaign({ mode: 'screen', jobs: [job()] })
+    const result = campaign.results[0]
+
+    expect(result.phases.preparation.samples).toHaveLength(3)
+    expect(result.phases.cold.samples).toHaveLength(3)
+    expect(result.phases.warm.samples).toHaveLength(12)
+    for (const phase of Object.values(result.phases)) {
+      expect(phase.samples[0].metrics).toBeDefined()
+      expect(
+        phase.samples
+          .slice(1)
+          .every((sample) => sample.metrics === undefined),
+      ).toBe(true)
     }
   })
 
