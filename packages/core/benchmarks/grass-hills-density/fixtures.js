@@ -21,6 +21,11 @@ export const PHYSICAL_TARGET = deepFreeze({
   nibWidthSceneUnits: 1.6666666666666667,
 })
 
+export const CLEARANCE_SAMPLING_POLICY = deepFreeze({
+  maxSegments: 4_096,
+  maxSearchNibWidths: 8,
+})
+
 const BASE_PARAMS = {
   hillCount: 10,
   horizonHeight: 0.25,
@@ -60,6 +65,12 @@ function fixture(id, scale, hillCount, requestedBladeCount) {
         millimetersPerSceneUnit: 0.18,
         finelinerMillimeters: 0.3,
         nibWidthSceneUnits: 1.6666666666666667,
+      },
+      metrics: {
+        clearanceSampling: {
+          maxSegments: 4_096,
+          maxSearchNibWidths: 8,
+        },
       },
       request: { hillCount, bladeCount: requestedBladeCount },
     },

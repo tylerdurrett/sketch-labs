@@ -110,7 +110,7 @@ not claims about the current implementation.
 counts, SHA-256 checksums, serialized and geometry byte sizes, the generic
 Hidden-line workload reference, candidate processing time, bounds clipping,
 ordinary SVG and plotter SVG time/bytes/path counts, explicit-root spacing, and
-exact inter-path segment clearance in physical millimeters and nib widths.
+spatial inter-path clearance evidence in physical millimeters and nib widths.
 Its Canvas metric invokes core's actual `drawSceneFitted` through a counting
 port; the result is explicitly structural JS submission only and excludes
 rasterization, compositor, and GPU completion. Heap/RSS comes from the protocol
@@ -124,8 +124,24 @@ already-measured custom Outline/LOD result, or supply
 The supplied processed Scene is what clipping and both serializers consume, so
 open stroke/tuft representations are not silently replaced by generic filled
 Primitive Hidden-line output. `nibWidthSceneUnits` is also explicit; the fixture
-manifest pins it to 1.6666666666666667 (0.30 mm), and clearance reports include
-per-path/per-segment percentiles plus collision counts at that nib width.
+manifest pins it to 1.6666666666666667 (0.30 mm).
+
+Collision accounting is exact at the nib threshold. Segments are traversed
+through a uniform grid whose cells are four nib widths wide; collision occupancy
+expands one cell, then exact segment distance confirms each candidate. A
+deterministic owner cell prevents duplicate pair counts. Long ridges occupy cells
+along their length rather than forcing every grass segment into one global
+x-overlap sweep.
+
+Nearest-clearance percentiles are deliberately resource-bounded rather than
+misrepresented as an all-pairs exact measurement. The literal manifest pins an
+even segment-index sample of at most 4,096 segments and an eight-nib spatial
+search cap. Reports label this contract, record segment/path coverage, and count
+search-censored samples separately; resolved distances receive per-segment and
+sampled-path millimeter/nib percentiles. Exact segment-pair/path-pair and
+colliding-segment/path counts remain separate from the capped sample. Candidates
+should pass `payload.metrics.clearanceSampling` into `collectSceneMetrics` so a
+result records the manifest policy it used.
 
 ## Explicit browser seam
 

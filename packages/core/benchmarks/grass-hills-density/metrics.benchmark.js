@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { DENSITY_FIXTURES, PHYSICAL_TARGET } from './fixtures.js'
 import {
+  CLEARANCE_SAMPLING_POLICY,
+  DENSITY_FIXTURES,
+  PHYSICAL_TARGET,
+} from './fixtures.js'
+import {
+  DEFAULT_CLEARANCE_SAMPLING,
   collectCanvasSubmission,
   collectMachineMetadata,
   collectSceneMetrics,
@@ -42,6 +47,7 @@ describe('Grass Hills density fixture manifest', () => {
       nibWidthSceneUnits: 1.6666666666666667,
     })
     expect(PHYSICAL_TARGET.nibWidthSceneUnits * 0.18).toBeCloseTo(0.3, 14)
+    expect(DEFAULT_CLEARANCE_SAMPLING).toEqual(CLEARANCE_SAMPLING_POLICY)
     for (const fixture of DENSITY_FIXTURES) {
       expect(fixture.payload).toMatchObject({
         seed: 12345,
@@ -53,6 +59,7 @@ describe('Grass Hills density fixture manifest', () => {
           finelinerMillimeters: 0.3,
           nibWidthSceneUnits: 1.6666666666666667,
         },
+        metrics: { clearanceSampling: CLEARANCE_SAMPLING_POLICY },
       })
       expect(Object.keys(fixture.payload.params)).toHaveLength(17)
     }
@@ -161,10 +168,11 @@ describe('Grass Hills density metric collectors', () => {
       0.36,
       14,
     )
-    expect(metrics.physicalSpacing.clearances.paths.collisionCount).toBe(0)
-    expect(metrics.physicalSpacing.clearances.collisionPairs).toEqual({
+    expect(metrics.physicalSpacing.clearances.collisions).toMatchObject({
       segmentPairCount: 0,
       pathPairCount: 0,
+      collidingSegmentCount: 0,
+      collidingPathCount: 0,
     })
   })
 
@@ -214,12 +222,82 @@ describe('Grass Hills density metric collectors', () => {
       max: 0,
     })
     expect(clearance.paths.nibWidths.p50).toBe(0)
-    expect(clearance.paths.collisionCount).toBe(3)
-    expect(clearance.segments.collisionCount).toBe(3)
-    expect(clearance.collisionPairs).toEqual({
+    expect(clearance.collisions).toMatchObject({
       segmentPairCount: 3,
       pathPairCount: 3,
+      collidingSegmentCount: 3,
+      collidingPathCount: 3,
     })
+  })
+
+  it('reports capped nearest samples as censored instead of exact', () => {
+    const separated = {
+      space: { width: 100, height: 100 },
+      primitives: [
+        { points: [[0, 0], [10, 0]], stroke: { color: 'black', width: 1 } },
+        { points: [[0, 10], [10, 10]], stroke: { color: 'black', width: 1 } },
+      ],
+    }
+    const clearance = pathClearanceMetrics(separated, 0.18, 1, {
+      maxSegments: 10,
+      maxSearchNibWidths: 2,
+    })
+
+    expect(clearance.sampling).toMatchObject({
+      sampledSegmentCount: 2,
+      resolvedSegmentCount: 0,
+      censoredSegmentCount: 2,
+    })
+    expect(clearance.segments.millimeters.sampleCount).toBe(0)
+    expect(clearance.collisions.segmentPairCount).toBe(0)
+  })
+
+  it('keeps a full-width ridge plus 50k five-point blades practical and nonquadratic', () => {
+    const policy = { maxSegments: 512, maxSearchNibWidths: 4 }
+    const fourThousand = pathClearanceMetrics(
+      longRidgeScene(4_000),
+      0.18,
+      PHYSICAL_TARGET.nibWidthSceneUnits,
+      policy,
+    )
+    const started = performance.now()
+    const fiftyThousand = pathClearanceMetrics(
+      longRidgeScene(50_000),
+      0.18,
+      PHYSICAL_TARGET.nibWidthSceneUnits,
+      policy,
+    )
+    const elapsedMs = performance.now() - started
+
+    expect(fiftyThousand.collisions.segmentPairCount).toBe(50_000)
+    expect(fiftyThousand.collisions.pathPairCount).toBe(50_000)
+    expect(
+      fiftyThousand.spatial.collisionCandidatePairChecks /
+        fourThousand.spatial.collisionCandidatePairChecks,
+    ).toBeLessThan(14)
+    expect(elapsedMs).toBeLessThan(8_000)
+    expect(fiftyThousand.sampling).toMatchObject({
+      maxSegments: 512,
+      totalSegmentCount: 200_001,
+      sampledSegmentCount: 512,
+      censoredSegmentCount: 0,
+    })
+
+    expect(
+      pathClearanceMetrics(
+        longRidgeScene(400),
+        0.18,
+        PHYSICAL_TARGET.nibWidthSceneUnits,
+        policy,
+      ),
+    ).toEqual(
+      pathClearanceMetrics(
+        longRidgeScene(400),
+        0.18,
+        PHYSICAL_TARGET.nibWidthSceneUnits,
+        policy,
+      ),
+    )
   })
 
   it('uses exact nearest-neighbor percentiles and captures machine identity', () => {
@@ -240,3 +318,20 @@ describe('Grass Hills density metric collectors', () => {
     })
   })
 })
+
+function longRidgeScene(bladeCount) {
+  const spacing = 2
+  return {
+    space: { width: bladeCount * spacing, height: 10 },
+    primitives: [
+      {
+        points: [[0, 0], [bladeCount * spacing, 0]],
+        stroke: { color: 'black', width: 1 },
+      },
+      ...Array.from({ length: bladeCount }, (_, index) => ({
+        points: [0.5, 2, 3, 4, 5].map((y) => [index * spacing + 1, y]),
+        stroke: { color: 'black', width: 1 },
+      })),
+    ],
+  }
+}

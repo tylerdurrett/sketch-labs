@@ -9,6 +9,11 @@ import {
 import { renderPlotterSVG } from '../../src/plotterSvg.ts'
 import { drawSceneFitted, renderToSVG } from '../../src/renderer.ts'
 
+export const DEFAULT_CLEARANCE_SAMPLING = Object.freeze({
+  maxSegments: 4_096,
+  maxSearchNibWidths: 8,
+})
+
 /** SHA-256 of the exact compact JSON serialization used by fixture artifacts. */
 export function sceneChecksum(scene) {
   return createHash('sha256').update(JSON.stringify(scene)).digest('hex')
@@ -61,6 +66,7 @@ export function collectSceneMetrics(
     profile,
     roots = [],
     nibWidthSceneUnits,
+    clearanceSampling = DEFAULT_CLEARANCE_SAMPLING,
     processing,
     pixelWidth = 1000,
     pixelHeight = 1000,
@@ -121,48 +127,59 @@ export function collectSceneMetrics(
         boundsClip.value,
         millimetersPerSceneUnit,
         nibWidthSceneUnits,
+        clearanceSampling,
       ),
     },
   }
 }
 
 /**
- * Exact nearest clearance between centerline segments belonging to different
- * processed paths. Returns both per-segment and per-path distributions; path
- * clearance is the smallest clearance of any segment on that path.
+ * Exact nib-threshold collisions plus deterministic capped nearest-clearance
+ * sampling between centerline segments belonging to different processed paths.
  */
 export function pathClearanceMetrics(
   scene,
   millimetersPerSceneUnit,
   nibWidthSceneUnits,
+  sampling = DEFAULT_CLEARANCE_SAMPLING,
 ) {
+  validateClearanceSampling(sampling)
   const segments = sceneSegments(scene)
-  const segmentClearances = exactSegmentClearances(segments)
-  const collisionPairs = countCollisionPairs(segments, nibWidthSceneUnits)
-  const pathClearances = Array.from(
-    { length: scene.primitives.length },
-    () => Number.POSITIVE_INFINITY,
+  const spatial = buildSegmentSpatialIndex(segments, nibWidthSceneUnits)
+  const collisions = exactNibCollisions(
+    segments,
+    spatial.collisionCells,
+    nibWidthSceneUnits,
   )
-  for (let index = 0; index < segments.length; index++) {
-    const pathIndex = segments[index].pathIndex
-    pathClearances[pathIndex] = Math.min(
-      pathClearances[pathIndex],
-      segmentClearances[index],
-    )
-  }
+  const nearest = sampleNearestClearances(
+    segments,
+    spatial.baseCells,
+    spatial.cellSize,
+    nibWidthSceneUnits,
+    sampling,
+  )
 
   return {
-    paths: clearanceSummary(
-      pathClearances,
+    contract: 'exact-nib-collisions/capped-deterministic-nearest-sampling',
+    sampling: nearest.sampling,
+    paths: clearancePercentiles(
+      nearest.pathClearances,
       millimetersPerSceneUnit,
       nibWidthSceneUnits,
     ),
-    segments: clearanceSummary(
-      segmentClearances,
+    segments: clearancePercentiles(
+      nearest.segmentClearances,
       millimetersPerSceneUnit,
       nibWidthSceneUnits,
     ),
-    collisionPairs,
+    collisions,
+    spatial: {
+      cellSizeSceneUnits: spatial.cellSize,
+      occupiedBaseCellCount: spatial.baseCells.size,
+      occupiedCollisionCellCount: spatial.collisionCells.size,
+      collisionCandidatePairChecks: collisions.candidatePairChecks,
+      nearestCandidateChecks: nearest.candidateChecks,
+    },
   }
 }
 
@@ -290,74 +307,275 @@ function sceneSegments(scene) {
       )
     }
   }
-  return segments.sort((a, b) => a.minX - b.minX || a.maxX - b.maxX)
+  return segments
 }
 
-function exactSegmentClearances(segments) {
-  const nearest = Array.from(
-    { length: segments.length },
-    () => Number.POSITIVE_INFINITY,
-  )
-  const prefixMaxX = []
+function validateClearanceSampling(sampling) {
+  if (!Number.isSafeInteger(sampling.maxSegments) || sampling.maxSegments <= 0) {
+    throw new Error('clearanceSampling.maxSegments must be a positive integer')
+  }
+  if (
+    !Number.isFinite(sampling.maxSearchNibWidths) ||
+    sampling.maxSearchNibWidths <= 0
+  ) {
+    throw new Error(
+      'clearanceSampling.maxSearchNibWidths must be finite and positive',
+    )
+  }
+}
+
+function buildSegmentSpatialIndex(segments, nibWidthSceneUnits) {
+  const cellSize = nibWidthSceneUnits * 4
+  const baseCells = new Map()
+  const collisionCells = new Map()
+  const collisionExpansion = Math.ceil(nibWidthSceneUnits / cellSize)
+
   for (let index = 0; index < segments.length; index++) {
-    prefixMaxX[index] = Math.max(
-      prefixMaxX[index - 1] ?? -Infinity,
-      segments[index].maxX,
+    const current = segments[index]
+    current.baseCells = traceSegmentCells(current, cellSize)
+    current.collisionCells = expandCells(
+      current.baseCells,
+      collisionExpansion,
+    )
+    current.collisionCellKeys = new Set(
+      current.collisionCells.map((cell) => cell.key),
+    )
+    addToCells(baseCells, current.baseCells, index)
+    addToCells(collisionCells, current.collisionCells, index)
+  }
+  return { cellSize, baseCells, collisionCells }
+}
+
+function exactNibCollisions(
+  segments,
+  collisionCells,
+  nibWidthSceneUnits,
+) {
+  let segmentPairCount = 0
+  const pathPairs = new Set()
+  const collidingSegments = new Set()
+  const collidingPaths = new Set()
+  let candidatePairChecks = 0
+
+  for (const [cellKey, indices] of collisionCells) {
+    for (let left = 0; left < indices.length; left++) {
+      const firstIndex = indices[left]
+      const first = segments[firstIndex]
+      for (let right = left + 1; right < indices.length; right++) {
+        const secondIndex = indices[right]
+        const second = segments[secondIndex]
+        if (first.pathIndex === second.pathIndex) continue
+        candidatePairChecks += 1
+        if (segmentDistance(first, second) > nibWidthSceneUnits) continue
+        if (collisionOwnerCell(first, second) !== cellKey) continue
+
+        segmentPairCount += 1
+        collidingSegments.add(firstIndex)
+        collidingSegments.add(secondIndex)
+        collidingPaths.add(first.pathIndex)
+        collidingPaths.add(second.pathIndex)
+        pathPairs.add(
+          first.pathIndex < second.pathIndex
+            ? `${first.pathIndex}:${second.pathIndex}`
+            : `${second.pathIndex}:${first.pathIndex}`,
+        )
+      }
+    }
+  }
+
+  return {
+    threshold: 'centerline-distance-lte-one-nib-width',
+    segmentPairCount,
+    pathPairCount: pathPairs.size,
+    collidingSegmentCount: collidingSegments.size,
+    collidingPathCount: collidingPaths.size,
+    candidatePairChecks,
+  }
+}
+
+function sampleNearestClearances(
+  segments,
+  baseCells,
+  cellSize,
+  nibWidthSceneUnits,
+  sampling,
+) {
+  const sampledIndices = evenlySpacedIndices(
+    segments.length,
+    sampling.maxSegments,
+  )
+  const capSceneUnits = sampling.maxSearchNibWidths * nibWidthSceneUnits
+  const cellRadius = Math.ceil(capSceneUnits / cellSize) + 1
+  const segmentClearances = []
+  const pathClearanceByIndex = new Map()
+  const sampledPaths = new Set()
+  let censoredSegmentCount = 0
+  let candidateChecks = 0
+
+  for (const index of sampledIndices) {
+    const current = segments[index]
+    sampledPaths.add(current.pathIndex)
+    const candidates = new Set()
+    for (const cell of current.baseCells) {
+      for (let dx = -cellRadius; dx <= cellRadius; dx++) {
+        for (let dy = -cellRadius; dy <= cellRadius; dy++) {
+          const entries =
+            baseCells.get(cellKey(cell.x + dx, cell.y + dy)) ?? []
+          for (const candidate of entries) {
+            candidates.add(candidate)
+          }
+        }
+      }
+    }
+
+    let nearest = Number.POSITIVE_INFINITY
+    for (const candidate of candidates) {
+      const other = segments[candidate]
+      if (candidate === index || other.pathIndex === current.pathIndex) continue
+      candidateChecks += 1
+      nearest = Math.min(nearest, segmentDistance(current, other))
+    }
+    if (nearest > capSceneUnits) {
+      censoredSegmentCount += 1
+      continue
+    }
+    segmentClearances.push(nearest)
+    pathClearanceByIndex.set(
+      current.pathIndex,
+      Math.min(pathClearanceByIndex.get(current.pathIndex) ?? Infinity, nearest),
     )
   }
 
-  for (let index = 0; index < segments.length; index++) {
-    const current = segments[index]
-    for (let left = index - 1; left >= 0; left--) {
-      if (current.minX - prefixMaxX[left] >= nearest[index]) break
-      const other = segments[left]
-      if (other.pathIndex === current.pathIndex) continue
-      nearest[index] = Math.min(nearest[index], segmentDistance(current, other))
-    }
-    for (let right = index + 1; right < segments.length; right++) {
-      const other = segments[right]
-      if (other.minX - current.maxX >= nearest[index]) break
-      if (other.pathIndex === current.pathIndex) continue
-      nearest[index] = Math.min(nearest[index], segmentDistance(current, other))
-    }
+  const totalPathCount = new Set(segments.map((item) => item.pathIndex)).size
+  return {
+    segmentClearances,
+    pathClearances: [...pathClearanceByIndex.values()],
+    candidateChecks,
+    sampling: {
+      method: 'deterministic-even-segment-index/capped-spatial-search',
+      maxSegments: sampling.maxSegments,
+      maxSearchNibWidths: sampling.maxSearchNibWidths,
+      totalSegmentCount: segments.length,
+      sampledSegmentCount: sampledIndices.length,
+      segmentCoverage:
+        segments.length === 0 ? 0 : sampledIndices.length / segments.length,
+      resolvedSegmentCount: segmentClearances.length,
+      censoredSegmentCount,
+      totalPathCount,
+      sampledPathCount: sampledPaths.size,
+      pathCoverage:
+        totalPathCount === 0 ? 0 : sampledPaths.size / totalPathCount,
+      resolvedPathCount: pathClearanceByIndex.size,
+    },
   }
-  return nearest
 }
 
-function countCollisionPairs(segments, nibWidthSceneUnits) {
-  let segmentPairCount = 0
-  const pathPairs = new Set()
-  for (let index = 0; index < segments.length; index++) {
-    const current = segments[index]
-    for (let right = index + 1; right < segments.length; right++) {
-      const other = segments[right]
-      if (other.minX - current.maxX > nibWidthSceneUnits) break
-      if (other.pathIndex === current.pathIndex) continue
-      if (segmentDistance(current, other) > nibWidthSceneUnits) continue
-      segmentPairCount += 1
-      pathPairs.add(
-        current.pathIndex < other.pathIndex
-          ? `${current.pathIndex}:${other.pathIndex}`
-          : `${other.pathIndex}:${current.pathIndex}`,
-      )
-    }
-  }
-  return { segmentPairCount, pathPairCount: pathPairs.size }
-}
-
-function clearanceSummary(values, millimetersPerSceneUnit, nibWidthSceneUnits) {
-  const finite = values.filter(Number.isFinite)
-  const collisions = finite.filter((value) => value <= nibWidthSceneUnits).length
+function clearancePercentiles(
+  values,
+  millimetersPerSceneUnit,
+  nibWidthSceneUnits,
+) {
   return {
     millimeters: numberPercentiles(
-      finite.map((value) => value * millimetersPerSceneUnit),
+      values.map((value) => value * millimetersPerSceneUnit),
     ),
     nibWidths: numberPercentiles(
-      finite.map((value) => value / nibWidthSceneUnits),
+      values.map((value) => value / nibWidthSceneUnits),
     ),
-    collisionCount: collisions,
-    collisionFraction: finite.length === 0 ? null : collisions / finite.length,
   }
+}
+
+function evenlySpacedIndices(total, limit) {
+  const count = Math.min(total, limit)
+  if (count === 0) return []
+  if (count === total) return Array.from({ length: total }, (_, index) => index)
+  if (count === 1) return [0]
+  return Array.from({ length: count }, (_, index) =>
+    Math.floor((index * (total - 1)) / (count - 1)),
+  )
+}
+
+function traceSegmentCells(current, cellSize) {
+  let x = Math.floor(current.a[0] / cellSize)
+  let y = Math.floor(current.a[1] / cellSize)
+  const endX = Math.floor(current.b[0] / cellSize)
+  const endY = Math.floor(current.b[1] / cellSize)
+  const dx = current.b[0] - current.a[0]
+  const dy = current.b[1] - current.a[1]
+  const stepX = Math.sign(dx)
+  const stepY = Math.sign(dy)
+  const deltaX = stepX === 0 ? Infinity : cellSize / Math.abs(dx)
+  const deltaY = stepY === 0 ? Infinity : cellSize / Math.abs(dy)
+  let maxX =
+    stepX === 0
+      ? Infinity
+      : ((stepX > 0 ? (x + 1) * cellSize : x * cellSize) - current.a[0]) / dx
+  let maxY =
+    stepY === 0
+      ? Infinity
+      : ((stepY > 0 ? (y + 1) * cellSize : y * cellSize) - current.a[1]) / dy
+  const cells = [gridCell(x, y)]
+
+  while (x !== endX || y !== endY) {
+    if (maxX < maxY) {
+      x += stepX
+      maxX += deltaX
+    } else if (maxY < maxX) {
+      y += stepY
+      maxY += deltaY
+    } else {
+      x += stepX
+      y += stepY
+      maxX += deltaX
+      maxY += deltaY
+    }
+    cells.push(gridCell(x, y))
+  }
+  return cells
+}
+
+function expandCells(cells, radius) {
+  const expanded = new Map()
+  for (const cell of cells) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        const value = gridCell(cell.x + dx, cell.y + dy)
+        expanded.set(value.key, value)
+      }
+    }
+  }
+  return [...expanded.values()]
+}
+
+function addToCells(index, cells, segmentIndex) {
+  for (const cell of cells) {
+    const entries = index.get(cell.key)
+    if (entries === undefined) index.set(cell.key, [segmentIndex])
+    else entries.push(segmentIndex)
+  }
+}
+
+function collisionOwnerCell(first, second) {
+  const primary =
+    first.collisionCells.length < second.collisionCells.length
+      ? first
+      : first.collisionCells.length > second.collisionCells.length
+        ? second
+        : first.pathIndex <= second.pathIndex
+          ? first
+          : second
+  const other = primary === first ? second : first
+  return primary.collisionCells.find((cell) =>
+    other.collisionCellKeys.has(cell.key),
+  )?.key
+}
+
+function gridCell(x, y) {
+  return { x, y, key: cellKey(x, y) }
+}
+
+function cellKey(x, y) {
+  return `${x}:${y}`
 }
 
 function numberPercentiles(values) {
@@ -374,13 +592,7 @@ function numberPercentiles(values) {
 }
 
 function segment(pathIndex, a, b) {
-  return {
-    pathIndex,
-    a,
-    b,
-    minX: Math.min(a[0], b[0]),
-    maxX: Math.max(a[0], b[0]),
-  }
+  return { pathIndex, a, b }
 }
 
 function segmentDistance(first, second) {
