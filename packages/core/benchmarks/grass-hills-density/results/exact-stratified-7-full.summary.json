@@ -1,0 +1,1924 @@
+{
+  "schemaVersion": 1,
+  "candidateId": "exact-stratified-7",
+  "capturedOn": "2026-07-15",
+  "campaignDurationMs": 247534.831083,
+  "protocolVersion": 1,
+  "mode": "full",
+  "policy": {
+    "timeoutMs": 600000,
+    "memoryMiB": 2048,
+    "samples": {
+      "preparation": 20,
+      "cold": 20,
+      "warm": 60,
+      "warmups": 3
+    }
+  },
+  "artifactManifest": "results/exact-stratified-7-full.artifacts.json",
+  "rawResult": "results/exact-stratified-7-full.raw.json",
+  "results": [
+    {
+      "candidateId": "exact-stratified-7",
+      "fixtureId": "one-hill-5000",
+      "status": "ok",
+      "runtime": {
+        "pid": 60149,
+        "node": "v23.9.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "hostname": "Tdogss-MacBook-Pro.local",
+        "osRelease": "24.6.0",
+        "cpuModel": "Apple M2 Max",
+        "logicalCpuCount": 12,
+        "totalMemoryBytes": 68719476736,
+        "freeMemoryBytesAtCapture": 2379595776
+      },
+      "phases": {
+        "preparation": {
+          "sampleCount": 20,
+          "durationMs": {
+            "min": 14.170375000000007,
+            "p05": 15.632701449999999,
+            "median": 16.69429200000002,
+            "p95": 21.595277100000004,
+            "max": 21.743042000000003
+          },
+          "heapUsedAfterBytes": {
+            "min": 14675808,
+            "p05": 23848901.6,
+            "median": 26935928,
+            "p95": 28212095.6,
+            "max": 28450728
+          },
+          "rssAfterBytes": {
+            "min": 100876288,
+            "p05": 100938547.2,
+            "median": 108118016,
+            "p95": 108414566.4,
+            "max": 108445696
+          },
+          "maxRssAfterBytes": {
+            "min": 100892672,
+            "p05": 100986060.8,
+            "median": 108118016,
+            "p95": 108414566.4,
+            "max": 108445696
+          },
+          "heapUsedDeltaBytes": {
+            "min": 6104376,
+            "p05": 15212086.8,
+            "median": 18307168,
+            "p95": 19567471.6,
+            "max": 19788320
+          },
+          "rssDeltaBytes": {
+            "min": 0,
+            "p05": 0,
+            "median": 40960,
+            "p95": 2355200.0000000005,
+            "max": 2899968
+          }
+        },
+        "cold": {
+          "sampleCount": 20,
+          "durationMs": {
+            "min": 20.376875000000155,
+            "p05": 20.828282699999995,
+            "median": 22.25066700000002,
+            "p95": 27.11057740000001,
+            "max": 27.11125000000004
+          },
+          "heapUsedAfterBytes": {
+            "min": 15829576,
+            "p05": 17575303.6,
+            "median": 24250212,
+            "p95": 27679766.8,
+            "max": 28058376
+          },
+          "rssAfterBytes": {
+            "min": 136855552,
+            "p05": 136886681.6,
+            "median": 142180352,
+            "p95": 144928768,
+            "max": 145162240
+          },
+          "maxRssAfterBytes": {
+            "min": 136888320,
+            "p05": 137012838.4,
+            "median": 142180352,
+            "p95": 144928768,
+            "max": 145162240
+          },
+          "heapUsedDeltaBytes": {
+            "min": 10705768,
+            "p05": 12453190.4,
+            "median": 19135268,
+            "p95": 22589513.6,
+            "max": 22959056
+          },
+          "rssDeltaBytes": {
+            "min": 0,
+            "p05": 0,
+            "median": 32768,
+            "p95": 2172518.4000000004,
+            "max": 2981888
+          }
+        },
+        "warm": {
+          "sampleCount": 60,
+          "durationMs": {
+            "min": 2.7910839999999553,
+            "p05": 2.8967214999998987,
+            "median": 3.3034790000000385,
+            "p95": 3.896764300000109,
+            "max": 4.061333000000104
+          },
+          "heapUsedAfterBytes": {
+            "min": 24617504,
+            "p05": 24642312.8,
+            "median": 24841716,
+            "p95": 25003115.2,
+            "max": 25102872
+          },
+          "rssAfterBytes": {
+            "min": 145244160,
+            "p05": 145244160,
+            "median": 145932288,
+            "p95": 147701760,
+            "max": 147701760
+          },
+          "maxRssAfterBytes": {
+            "min": 145260544,
+            "p05": 145260544,
+            "median": 145932288,
+            "p95": 147701760,
+            "max": 147701760
+          },
+          "heapUsedDeltaBytes": {
+            "min": 15865128,
+            "p05": 15880261.6,
+            "median": 16069376,
+            "p95": 16219752,
+            "max": 16350336
+          },
+          "rssDeltaBytes": {
+            "min": 0,
+            "p05": 0,
+            "median": 0,
+            "p95": 169574.39999999967,
+            "max": 409600
+          }
+        }
+      },
+      "metrics": {
+        "source": {
+          "primitiveCount": 5001,
+          "pointCount": 35134,
+          "checksum": "99624b23a81d67fa967a03e8234c0f1aa440c70fe80e6a434bbadc717a451e2b",
+          "serializedBytes": 1806099,
+          "geometryBytes": 1350922
+        },
+        "canvas": {
+          "measurement": "counting-canvas-structural-submission-only",
+          "scope": "whole-frame",
+          "includesRasterization": false,
+          "pixelWidth": 1000,
+          "pixelHeight": 1000,
+          "submissionMs": 1.1811250000000655,
+          "calls": {
+            "save": 1,
+            "restore": 1,
+            "beginPath": 5001,
+            "moveTo": 5001,
+            "lineTo": 30133,
+            "closePath": 5000,
+            "fill": 5001,
+            "stroke": 5001,
+            "setTransform": 2,
+            "fillRect": 1,
+            "clearRect": 0
+          }
+        },
+        "referenceHiddenLineWorkload": {
+          "filledPrimitiveCount": 5001,
+          "sourceSegmentCount": 30133,
+          "overlappingPairCount": 9116,
+          "estimatedSegmentEdgeComparisons": 4827872,
+          "totalWorkUnits": 5134268
+        },
+        "processing": {
+          "kind": "supplied",
+          "durationMs": 70.00591699999995,
+          "processed": {
+            "primitiveCount": 6139,
+            "pointCount": 36058,
+            "checksum": "ed7d5d0c5d1c467b6b535f9b1b304694bc46558cf8aaa343c80fffd41b8da8fc",
+            "serializedBytes": 1683561,
+            "geometryBytes": 1388837
+          }
+        },
+        "boundsClip": {
+          "durationMs": 1.8361660000000484,
+          "clipped": {
+            "primitiveCount": 6147,
+            "pointCount": 36059,
+            "checksum": "40e4d1676f670c618d6be5727305d22f387daf08af946f8ed01d1821691a5cf4",
+            "serializedBytes": 1683800,
+            "geometryBytes": 1388692
+          }
+        },
+        "svgSerialization": {
+          "durationMs": 12.023957999999766,
+          "bytes": 1036061,
+          "pathCount": 6147
+        },
+        "plotter": {
+          "durationMs": 11.217791999999918,
+          "svgBytes": 1030001,
+          "pathCount": 6147
+        },
+        "physicalSpacing": {
+          "millimetersPerSceneUnit": 0.18,
+          "nibWidthSceneUnits": 1.6666666666666667,
+          "nibWidthMillimeters": 0.3,
+          "roots": {
+            "sampleCount": 5000,
+            "min": 0.034942662413785255,
+            "p05": 0.32559186723437583,
+            "p50": 0.9589830418818764,
+            "p95": 2.0257182547653536,
+            "max": 4.222279266598349
+          },
+          "clearances": {
+            "contract": "exact-nib-collisions/capped-deterministic-nearest-sampling",
+            "sampling": {
+              "method": "deterministic-even-segment-index/capped-spatial-search",
+              "maxSegments": 4096,
+              "maxSearchNibWidths": 8,
+              "totalSegmentCount": 29912,
+              "sampledSegmentCount": 4096,
+              "segmentCoverage": 0.13693500936079164,
+              "resolvedSegmentCount": 4095,
+              "censoredSegmentCount": 1,
+              "totalPathCount": 6147,
+              "sampledPathCount": 4096,
+              "pathCoverage": 0.6663413047014805,
+              "resolvedPathCount": 4095
+            },
+            "paths": {
+              "millimeters": {
+                "sampleCount": 4095,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.11335851178757869,
+                "p95": 0.8188205386210526,
+                "max": 2.381240384473821
+              },
+              "nibWidths": {
+                "sampleCount": 4095,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.37786170595859564,
+                "p95": 2.7294017954035086,
+                "max": 7.93746794824607
+              }
+            },
+            "segments": {
+              "millimeters": {
+                "sampleCount": 4095,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.11335851178757869,
+                "p95": 0.8188205386210526,
+                "max": 2.381240384473821
+              },
+              "nibWidths": {
+                "sampleCount": 4095,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.37786170595859564,
+                "p95": 2.7294017954035086,
+                "max": 7.93746794824607
+              }
+            },
+            "collisions": {
+              "threshold": "centerline-distance-lte-one-nib-width",
+              "segmentPairCount": 38226,
+              "pathPairCount": 8562,
+              "collidingSegmentCount": 21124,
+              "collidingPathCount": 5592,
+              "candidatePairChecks": 5502209
+            },
+            "spatial": {
+              "cellSizeSceneUnits": 6.666666666666667,
+              "occupiedBaseCellCount": 11282,
+              "occupiedCollisionCellCount": 14253,
+              "collisionCandidatePairChecks": 5502209,
+              "nearestCandidateChecks": 646347
+            }
+          }
+        },
+        "rootCount": 5000,
+        "identity": {
+          "rootStrategy": "stratified",
+          "bladeGeometry": "simple-7",
+          "hillKeys": [
+            "1/2"
+          ],
+          "rootKeyCount": 5000,
+          "rootKeysSha256": "074fa33ce2bef756aa9ab1d039aac3c9fe2ccda146982cabb331c25526b5b591",
+          "rootKeysEvidence": "results/exact-stratified-7-full.raw.json"
+        },
+        "exactSpatialHiddenLine": {
+          "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+          "filledPrimitiveCount": 5001,
+          "allPainterPairCount": 12502500,
+          "broadPhaseCandidatePairCount": 29667,
+          "overlappingPairCount": 9116,
+          "estimatedSegmentEdgeComparisons": 4827872,
+          "timings": {
+            "planBuildMs": 16.465958000000228,
+            "indexBuildMs": 17.164458000000195,
+            "subtractionMs": 36.331125000000156
+          },
+          "index": {
+            "cellSize": 14.084507042253522,
+            "occupiedCellCount": 3030,
+            "indexedReferenceCount": 14607,
+            "overflowPrimitiveCount": 1,
+            "maxCellsPerPrimitive": 4096,
+            "heapDeltaBytes": -78706088,
+            "estimatedBytes": 310784
+          }
+        }
+      },
+      "artifacts": {
+        "fixtureId": "one-hill-5000",
+        "sourceSceneChecksum": "99624b23a81d67fa967a03e8234c0f1aa440c70fe80e6a434bbadc717a451e2b",
+        "fillSceneChecksum": "29b7a413647622f0a6f71e712c019772ecec456d020e182909168f1b656c42b2",
+        "outlineSceneChecksum": "40e4d1676f670c618d6be5727305d22f387daf08af946f8ed01d1821691a5cf4",
+        "fillSvg": {
+          "path": "/tmp/issue-305-x3b-exact-stratified-7/one-hill-5000.fill.svg",
+          "bytes": 986739,
+          "sha256": "0dbbc6bf62c7f1cb944a6bb4ea630f0e5ca9fe570fcdd4f1cb988fb18447ed60"
+        },
+        "outlineSvg": {
+          "path": "/tmp/issue-305-x3b-exact-stratified-7/one-hill-5000.outline.svg",
+          "bytes": 1036061,
+          "sha256": "347c8e18ec4691bae827c73147ec450264549c43874f992b418e02f76ad662cf"
+        },
+        "processingDurationMs": 105.18833299999824,
+        "exactSpatialHiddenLine": {
+          "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+          "filledPrimitiveCount": 5001,
+          "allPainterPairCount": 12502500,
+          "broadPhaseCandidatePairCount": 29667,
+          "overlappingPairCount": 9116,
+          "estimatedSegmentEdgeComparisons": 4827872,
+          "timings": {
+            "planBuildMs": 29.349291999998968,
+            "indexBuildMs": 2.6080000000074506,
+            "subtractionMs": 73.06579200000851
+          },
+          "index": {
+            "cellSize": 14.084507042253522,
+            "occupiedCellCount": 3030,
+            "indexedReferenceCount": 14607,
+            "overflowPrimitiveCount": 1,
+            "maxCellsPerPrimitive": 4096,
+            "heapDeltaBytes": 2863704,
+            "estimatedBytes": 310784
+          }
+        }
+      }
+    },
+    {
+      "candidateId": "exact-stratified-7",
+      "fixtureId": "one-hill-10000",
+      "status": "ok",
+      "runtime": {
+        "pid": 60537,
+        "node": "v23.9.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "hostname": "Tdogss-MacBook-Pro.local",
+        "osRelease": "24.6.0",
+        "cpuModel": "Apple M2 Max",
+        "logicalCpuCount": 12,
+        "totalMemoryBytes": 68719476736,
+        "freeMemoryBytesAtCapture": 2237841408
+      },
+      "phases": {
+        "preparation": {
+          "sampleCount": 20,
+          "durationMs": {
+            "min": 23.47116699999998,
+            "p05": 23.90523815000001,
+            "median": 25.672875500000004,
+            "p95": 30.15475804999997,
+            "max": 32.82520899999997
+          },
+          "heapUsedAfterBytes": {
+            "min": 29453608,
+            "p05": 29572411.2,
+            "median": 30470936,
+            "p95": 32121897.6,
+            "max": 32408448
+          },
+          "rssAfterBytes": {
+            "min": 114769920,
+            "p05": 115003392,
+            "median": 119980032,
+            "p95": 120685363.2,
+            "max": 120700928
+          },
+          "maxRssAfterBytes": {
+            "min": 114769920,
+            "p05": 115034521.6,
+            "median": 119980032,
+            "p95": 120685363.2,
+            "max": 120700928
+          },
+          "heapUsedDeltaBytes": {
+            "min": 17253888,
+            "p05": 17320350,
+            "median": 18254400,
+            "p95": 19942041.2,
+            "max": 20147264
+          },
+          "rssDeltaBytes": {
+            "min": 0,
+            "p05": 0,
+            "median": 40960,
+            "p95": 909312.0000000006,
+            "max": 1687552
+          }
+        },
+        "cold": {
+          "sampleCount": 20,
+          "durationMs": {
+            "min": 32.083291000000145,
+            "p05": 32.12251935000014,
+            "median": 34.74868749999996,
+            "p95": 37.78531635000003,
+            "max": 38.718374999999924
+          },
+          "heapUsedAfterBytes": {
+            "min": 22008880,
+            "p05": 23422495.2,
+            "median": 26244028,
+            "p95": 37298964,
+            "max": 37302080
+          },
+          "rssAfterBytes": {
+            "min": 145047552,
+            "p05": 145078681.6,
+            "median": 151576576,
+            "p95": 154877952,
+            "max": 154877952
+          },
+          "maxRssAfterBytes": {
+            "min": 145047552,
+            "p05": 145078681.6,
+            "median": 151576576,
+            "p95": 154877952,
+            "max": 154877952
+          },
+          "heapUsedDeltaBytes": {
+            "min": 16893832,
+            "p05": 18320017.6,
+            "median": 21131420,
+            "p95": 32173653.2,
+            "max": 32178312
+          },
+          "rssDeltaBytes": {
+            "min": 0,
+            "p05": 0,
+            "median": 8192,
+            "p95": 2016051.2000000004,
+            "max": 2654208
+          }
+        },
+        "warm": {
+          "sampleCount": 60,
+          "durationMs": {
+            "min": 5.289541999999983,
+            "p05": 5.334808049999992,
+            "median": 5.481270499999937,
+            "p95": 6.898382699999865,
+            "max": 8.986041999999998
+          },
+          "heapUsedAfterBytes": {
+            "min": 27771968,
+            "p05": 27773390,
+            "median": 27783300,
+            "p95": 28463760.8,
+            "max": 29234832
+          },
+          "rssAfterBytes": {
+            "min": 155271168,
+            "p05": 155598848,
+            "median": 155598848,
+            "p95": 155598848,
+            "max": 155598848
+          },
+          "maxRssAfterBytes": {
+            "min": 155271168,
+            "p05": 155598848,
+            "median": 155598848,
+            "p95": 155598848,
+            "max": 155598848
+          },
+          "heapUsedDeltaBytes": {
+            "min": 15420696,
+            "p05": 15420696,
+            "median": 15420800,
+            "p95": 16124449.2,
+            "max": 16863736
+          },
+          "rssDeltaBytes": {
+            "min": 0,
+            "p05": 0,
+            "median": 0,
+            "p95": 0,
+            "max": 81920
+          }
+        }
+      },
+      "metrics": {
+        "source": {
+          "primitiveCount": 10001,
+          "pointCount": 70134,
+          "checksum": "570bbf67ca9af0299397c2fcef05e03eff87feae801c17bb7a343cc2194661be",
+          "serializedBytes": 3607929,
+          "geometryBytes": 2697752
+        },
+        "canvas": {
+          "measurement": "counting-canvas-structural-submission-only",
+          "scope": "whole-frame",
+          "includesRasterization": false,
+          "pixelWidth": 1000,
+          "pixelHeight": 1000,
+          "submissionMs": 2.0467500000004293,
+          "calls": {
+            "save": 1,
+            "restore": 1,
+            "beginPath": 10001,
+            "moveTo": 10001,
+            "lineTo": 60133,
+            "closePath": 10000,
+            "fill": 10001,
+            "stroke": 10001,
+            "setTransform": 2,
+            "fillRect": 1,
+            "clearRect": 0
+          }
+        },
+        "referenceHiddenLineWorkload": {
+          "filledPrimitiveCount": 10001,
+          "sourceSegmentCount": 60133,
+          "overlappingPairCount": 26211,
+          "estimatedSegmentEdgeComparisons": 9990862,
+          "totalWorkUnits": 10730778
+        },
+        "processing": {
+          "kind": "supplied",
+          "durationMs": 179.73583299999973,
+          "processed": {
+            "primitiveCount": 13381,
+            "pointCount": 71689,
+            "checksum": "cfa18738ce19d137cbc2649cff62773f7b136a18999ba4dbc4f85b31ca8ba02a",
+            "serializedBytes": 3407032,
+            "geometryBytes": 2764692
+          }
+        },
+        "boundsClip": {
+          "durationMs": 4.9854999999997744,
+          "clipped": {
+            "primitiveCount": 13397,
+            "pointCount": 71690,
+            "checksum": "23f1b0917e2a38fa14f995a9eb858e710ea56c593965aee5a304558acaabdea4",
+            "serializedBytes": 3407366,
+            "geometryBytes": 2764258
+          }
+        },
+        "svgSerialization": {
+          "durationMs": 23.462125000000015,
+          "bytes": 2128732,
+          "pathCount": 13397
+        },
+        "plotter": {
+          "durationMs": 39.60020799999984,
+          "svgBytes": 2120228,
+          "pathCount": 13397
+        },
+        "physicalSpacing": {
+          "millimetersPerSceneUnit": 0.18,
+          "nibWidthSceneUnits": 1.6666666666666667,
+          "nibWidthMillimeters": 0.3,
+          "roots": {
+            "sampleCount": 10000,
+            "min": 0.031153267027940666,
+            "p05": 0.23487824690335968,
+            "p50": 0.7109063595149488,
+            "p95": 1.4519346636721642,
+            "max": 3.339254455585941
+          },
+          "clearances": {
+            "contract": "exact-nib-collisions/capped-deterministic-nearest-sampling",
+            "sampling": {
+              "method": "deterministic-even-segment-index/capped-spatial-search",
+              "maxSegments": 4096,
+              "maxSearchNibWidths": 8,
+              "totalSegmentCount": 58293,
+              "sampledSegmentCount": 4096,
+              "segmentCoverage": 0.07026572658809806,
+              "resolvedSegmentCount": 4096,
+              "censoredSegmentCount": 0,
+              "totalPathCount": 13397,
+              "sampledPathCount": 4096,
+              "pathCoverage": 0.30574009106516387,
+              "resolvedPathCount": 4096
+            },
+            "paths": {
+              "millimeters": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.01986069020287899,
+                "p95": 0.4251702781965551,
+                "max": 1.7528671688768243
+              },
+              "nibWidths": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.06620230067626331,
+                "p95": 1.4172342606551838,
+                "max": 5.842890562922748
+              }
+            },
+            "segments": {
+              "millimeters": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.01986069020287899,
+                "p95": 0.4251702781965551,
+                "max": 1.7528671688768243
+              },
+              "nibWidths": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.06620230067626331,
+                "p95": 1.4172342606551838,
+                "max": 5.842890562922748
+              }
+            },
+            "collisions": {
+              "threshold": "centerline-distance-lte-one-nib-width",
+              "segmentPairCount": 131919,
+              "pathPairCount": 30737,
+              "collidingSegmentCount": 52469,
+              "collidingPathCount": 13197,
+              "candidatePairChecks": 19625113
+            },
+            "spatial": {
+              "cellSizeSceneUnits": 6.666666666666667,
+              "occupiedBaseCellCount": 13122,
+              "occupiedCollisionCellCount": 14531,
+              "collisionCandidatePairChecks": 19625113,
+              "nearestCandidateChecks": 1216402
+            }
+          }
+        },
+        "rootCount": 10000,
+        "identity": {
+          "rootStrategy": "stratified",
+          "bladeGeometry": "simple-7",
+          "hillKeys": [
+            "1/2"
+          ],
+          "rootKeyCount": 10000,
+          "rootKeysSha256": "d45a21dbb6ebfca50de3fef643fd04e9ac083e43dd6a216aa43e555ed19f5080",
+          "rootKeysEvidence": "results/exact-stratified-7-full.raw.json"
+        },
+        "exactSpatialHiddenLine": {
+          "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+          "filledPrimitiveCount": 10001,
+          "allPainterPairCount": 50005000,
+          "broadPhaseCandidatePairCount": 77895,
+          "overlappingPairCount": 26211,
+          "estimatedSegmentEdgeComparisons": 9990862,
+          "timings": {
+            "planBuildMs": 54.07899999999972,
+            "indexBuildMs": 4.569833999999901,
+            "subtractionMs": 121.04050000000007
+          },
+          "index": {
+            "cellSize": 9.900990099009901,
+            "occupiedCellCount": 6218,
+            "indexedReferenceCount": 38457,
+            "overflowPrimitiveCount": 1,
+            "maxCellsPerPrimitive": 4096,
+            "heapDeltaBytes": 4844256,
+            "estimatedBytes": 705616
+          }
+        }
+      },
+      "artifacts": {
+        "fixtureId": "one-hill-10000",
+        "sourceSceneChecksum": "570bbf67ca9af0299397c2fcef05e03eff87feae801c17bb7a343cc2194661be",
+        "fillSceneChecksum": "6808f7c1843d90d31e48da206f7d23cd0e6761df9a4b92860c5249d7f2694151",
+        "outlineSceneChecksum": "23f1b0917e2a38fa14f995a9eb858e710ea56c593965aee5a304558acaabdea4",
+        "fillSvg": {
+          "path": "/tmp/issue-305-x3b-exact-stratified-7/one-hill-10000.fill.svg",
+          "bytes": 1970563,
+          "sha256": "49af0e2cd07c23d518a229b3de767be61d2842f09eccecc6edc9431abe0218f5"
+        },
+        "outlineSvg": {
+          "path": "/tmp/issue-305-x3b-exact-stratified-7/one-hill-10000.outline.svg",
+          "bytes": 2128732,
+          "sha256": "cb620125b6a1a5f4b497e6018ace209c2884ef934e4c6aff15a686fcafeb6416"
+        },
+        "processingDurationMs": 158.07925000000978,
+        "exactSpatialHiddenLine": {
+          "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+          "filledPrimitiveCount": 10001,
+          "allPainterPairCount": 50005000,
+          "broadPhaseCandidatePairCount": 77895,
+          "overlappingPairCount": 26211,
+          "estimatedSegmentEdgeComparisons": 9990862,
+          "timings": {
+            "planBuildMs": 46.41187500001979,
+            "indexBuildMs": 5.713374999992084,
+            "subtractionMs": 105.8876670000027
+          },
+          "index": {
+            "cellSize": 9.900990099009901,
+            "occupiedCellCount": 6218,
+            "indexedReferenceCount": 38457,
+            "overflowPrimitiveCount": 1,
+            "maxCellsPerPrimitive": 4096,
+            "heapDeltaBytes": 458856,
+            "estimatedBytes": 705616
+          }
+        }
+      }
+    },
+    {
+      "candidateId": "exact-stratified-7",
+      "fixtureId": "full-10000",
+      "status": "ok",
+      "runtime": {
+        "pid": 61780,
+        "node": "v23.9.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "hostname": "Tdogss-MacBook-Pro.local",
+        "osRelease": "24.6.0",
+        "cpuModel": "Apple M2 Max",
+        "logicalCpuCount": 12,
+        "totalMemoryBytes": 68719476736,
+        "freeMemoryBytesAtCapture": 2071068672
+      },
+      "phases": {
+        "preparation": {
+          "sampleCount": 20,
+          "durationMs": {
+            "min": 97.68883300000016,
+            "p05": 98.34429404999999,
+            "median": 148.40816649999988,
+            "p95": 205.30378299999998,
+            "max": 220.14420799999994
+          },
+          "heapUsedAfterBytes": {
+            "min": 41721816,
+            "p05": 44351461.6,
+            "median": 46871584,
+            "p95": 48640870.4,
+            "max": 49971600
+          },
+          "rssAfterBytes": {
+            "min": 135217152,
+            "p05": 135372800,
+            "median": 140402688,
+            "p95": 147159449.6,
+            "max": 147439616
+          },
+          "maxRssAfterBytes": {
+            "min": 135217152,
+            "p05": 135372800,
+            "median": 140402688,
+            "p95": 147159449.6,
+            "max": 147439616
+          },
+          "heapUsedDeltaBytes": {
+            "min": 29364672,
+            "p05": 31969435.2,
+            "median": 34496468,
+            "p95": 36253302.800000004,
+            "max": 37623408
+          },
+          "rssDeltaBytes": {
+            "min": 0,
+            "p05": 0,
+            "median": 40960,
+            "p95": 2812313.6,
+            "max": 3014656
+          }
+        },
+        "cold": {
+          "sampleCount": 20,
+          "durationMs": {
+            "min": 113.82558399999925,
+            "p05": 114.03668160000025,
+            "median": 116.46914599999991,
+            "p95": 122.09535899999996,
+            "max": 122.83208400000058
+          },
+          "heapUsedAfterBytes": {
+            "min": 30098160,
+            "p05": 30753416.8,
+            "median": 33809396,
+            "p95": 35502351.6,
+            "max": 35812424
+          },
+          "rssAfterBytes": {
+            "min": 162824192,
+            "p05": 164676403.2,
+            "median": 170401792,
+            "p95": 171311104,
+            "max": 171311104
+          },
+          "maxRssAfterBytes": {
+            "min": 163184640,
+            "p05": 164694425.6,
+            "median": 170401792,
+            "p95": 171311104,
+            "max": 171311104
+          },
+          "heapUsedDeltaBytes": {
+            "min": 22303008,
+            "p05": 25697016,
+            "median": 29594944,
+            "p95": 31292167.2,
+            "max": 31614544
+          },
+          "rssDeltaBytes": {
+            "min": 0,
+            "p05": 0,
+            "median": 40960,
+            "p95": 1700659.2000000002,
+            "max": 1949696
+          }
+        },
+        "warm": {
+          "sampleCount": 60,
+          "durationMs": {
+            "min": 7.436209000000417,
+            "p05": 7.960810400000719,
+            "median": 8.83429150000029,
+            "p95": 9.607399999999597,
+            "max": 9.999665999999706
+          },
+          "heapUsedAfterBytes": {
+            "min": 27265032,
+            "p05": 27320502.4,
+            "median": 28676916,
+            "p95": 29477721.2,
+            "max": 36190976
+          },
+          "rssAfterBytes": {
+            "min": 173211648,
+            "p05": 174324121.6,
+            "median": 175284224,
+            "p95": 175636480,
+            "max": 175685632
+          },
+          "maxRssAfterBytes": {
+            "min": 173211648,
+            "p05": 174324121.6,
+            "median": 175300608,
+            "p95": 175636480,
+            "max": 175685632
+          },
+          "heapUsedDeltaBytes": {
+            "min": 15673744,
+            "p05": 15727152,
+            "median": 17082888,
+            "p95": 17895658.8,
+            "max": 17950720
+          },
+          "rssDeltaBytes": {
+            "min": 0,
+            "p05": 0,
+            "median": 0,
+            "p95": 230195.19999999995,
+            "max": 720896
+          }
+        }
+      },
+      "metrics": {
+        "source": {
+          "primitiveCount": 10010,
+          "pointCount": 71340,
+          "checksum": "489dcfabe22b546fb71c5a2e952392efcdac4e56b3594d378b582719aebffdb2",
+          "serializedBytes": 3650377,
+          "geometryBytes": 2739372
+        },
+        "canvas": {
+          "measurement": "counting-canvas-structural-submission-only",
+          "scope": "whole-frame",
+          "includesRasterization": false,
+          "pixelWidth": 1000,
+          "pixelHeight": 1000,
+          "submissionMs": 2.0794169999990118,
+          "calls": {
+            "save": 1,
+            "restore": 1,
+            "beginPath": 10010,
+            "moveTo": 10010,
+            "lineTo": 61330,
+            "closePath": 10000,
+            "fill": 10010,
+            "stroke": 10010,
+            "setTransform": 2,
+            "fillRect": 1,
+            "clearRect": 0
+          }
+        },
+        "referenceHiddenLineWorkload": {
+          "filledPrimitiveCount": 10010,
+          "sourceSegmentCount": 61330,
+          "overlappingPairCount": 71325,
+          "estimatedSegmentEdgeComparisons": 57156832,
+          "totalWorkUnits": 58623432
+        },
+        "processing": {
+          "kind": "supplied",
+          "durationMs": 382.19841599999927,
+          "processed": {
+            "primitiveCount": 13298,
+            "pointCount": 69591,
+            "checksum": "450a31304b18d27ee8c3e708b2f0a219adf9497004c1c84ddfff64f3360039c4",
+            "serializedBytes": 3319689,
+            "geometryBytes": 2681333
+          }
+        },
+        "boundsClip": {
+          "durationMs": 4.836916000000201,
+          "clipped": {
+            "primitiveCount": 13299,
+            "pointCount": 69508,
+            "checksum": "e8f521c328464d8af49a860eb1f7b5077fd65d63ae73b0ad913173a875d77e92",
+            "serializedBytes": 3316804,
+            "geometryBytes": 2678400
+          }
+        },
+        "svgSerialization": {
+          "durationMs": 23.13524999999936,
+          "bytes": 2081063,
+          "pathCount": 13299
+        },
+        "plotter": {
+          "durationMs": 40.347083999999086,
+          "svgBytes": 2057107,
+          "pathCount": 13299
+        },
+        "physicalSpacing": {
+          "millimetersPerSceneUnit": 0.18,
+          "nibWidthSceneUnits": 1.6666666666666667,
+          "nibWidthMillimeters": 0.3,
+          "roots": {
+            "sampleCount": 10000,
+            "min": 0.007564957655181301,
+            "p05": 0.18073930266473331,
+            "p50": 0.6697151097524385,
+            "p95": 1.639855182234894,
+            "max": 3.7657905991526537
+          },
+          "clearances": {
+            "contract": "exact-nib-collisions/capped-deterministic-nearest-sampling",
+            "sampling": {
+              "method": "deterministic-even-segment-index/capped-spatial-search",
+              "maxSegments": 4096,
+              "maxSearchNibWidths": 8,
+              "totalSegmentCount": 56209,
+              "sampledSegmentCount": 4096,
+              "segmentCoverage": 0.07287089256168941,
+              "resolvedSegmentCount": 4096,
+              "censoredSegmentCount": 0,
+              "totalPathCount": 13299,
+              "sampledPathCount": 4096,
+              "pathCoverage": 0.3079930821866306,
+              "resolvedPathCount": 4096
+            },
+            "paths": {
+              "millimeters": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.037094907511619,
+                "p95": 0.6324696637318615,
+                "max": 1.8159999486553389
+              },
+              "nibWidths": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.12364969170539666,
+                "p95": 2.1082322124395385,
+                "max": 6.053333162184463
+              }
+            },
+            "segments": {
+              "millimeters": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.037094907511619,
+                "p95": 0.6324696637318615,
+                "max": 1.8159999486553389
+              },
+              "nibWidths": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0.12364969170539666,
+                "p95": 2.1082322124395385,
+                "max": 6.053333162184463
+              }
+            },
+            "collisions": {
+              "threshold": "centerline-distance-lte-one-nib-width",
+              "segmentPairCount": 119761,
+              "pathPairCount": 28417,
+              "collidingSegmentCount": 45796,
+              "collidingPathCount": 12814,
+              "candidatePairChecks": 16350944
+            },
+            "spatial": {
+              "cellSizeSceneUnits": 6.666666666666667,
+              "occupiedBaseCellCount": 14973,
+              "occupiedCollisionCellCount": 17415,
+              "collisionCandidatePairChecks": 16350944,
+              "nearestCandidateChecks": 1064837
+            }
+          }
+        },
+        "rootCount": 10000,
+        "identity": {
+          "rootStrategy": "stratified",
+          "bladeGeometry": "simple-7",
+          "hillKeys": [
+            "10/11",
+            "9/11",
+            "8/11",
+            "7/11",
+            "6/11",
+            "5/11",
+            "4/11",
+            "3/11",
+            "2/11",
+            "1/11"
+          ],
+          "rootKeyCount": 10000,
+          "rootKeysSha256": "b26d453a2225c08ac17a784c8bf9dfd52db964bdd4bfc0c57dfbcabfe3f097ab",
+          "rootKeysEvidence": "results/exact-stratified-7-full.raw.json"
+        },
+        "exactSpatialHiddenLine": {
+          "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+          "filledPrimitiveCount": 10010,
+          "allPainterPairCount": 50095045,
+          "broadPhaseCandidatePairCount": 141635,
+          "overlappingPairCount": 71325,
+          "estimatedSegmentEdgeComparisons": 57156832,
+          "timings": {
+            "planBuildMs": 57.031708000000435,
+            "indexBuildMs": 5.325250000001688,
+            "subtractionMs": 319.79975000000013
+          },
+          "index": {
+            "cellSize": 9.900990099009901,
+            "occupiedCellCount": 8665,
+            "indexedReferenceCount": 37244,
+            "overflowPrimitiveCount": 9,
+            "maxCellsPerPrimitive": 4096,
+            "heapDeltaBytes": 5694032,
+            "estimatedBytes": 852584
+          }
+        }
+      },
+      "artifacts": {
+        "fixtureId": "full-10000",
+        "sourceSceneChecksum": "489dcfabe22b546fb71c5a2e952392efcdac4e56b3594d378b582719aebffdb2",
+        "fillSceneChecksum": "837ef7f50647874ece43bb591b036d57b2510d2ba0fc374af79a2cbb0f29c976",
+        "outlineSceneChecksum": "e8f521c328464d8af49a860eb1f7b5077fd65d63ae73b0ad913173a875d77e92",
+        "fillSvg": {
+          "path": "/tmp/issue-305-x3b-exact-stratified-7/full-10000.fill.svg",
+          "bytes": 1991653,
+          "sha256": "e8762f80589bd8a3bbdb876b3f6093624359e1cebbeda61da1043f7dd4f16d4a"
+        },
+        "outlineSvg": {
+          "path": "/tmp/issue-305-x3b-exact-stratified-7/full-10000.outline.svg",
+          "bytes": 2081063,
+          "sha256": "4ebe505938ce3bc4bfdded32300f93bc0bb4d4b597f0c3bebbaa13942b306e63"
+        },
+        "processingDurationMs": 363.51162499998463,
+        "exactSpatialHiddenLine": {
+          "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+          "filledPrimitiveCount": 10010,
+          "allPainterPairCount": 50095045,
+          "broadPhaseCandidatePairCount": 141635,
+          "overlappingPairCount": 71325,
+          "estimatedSegmentEdgeComparisons": 57156832,
+          "timings": {
+            "planBuildMs": 31.706458000000566,
+            "indexBuildMs": 4.476124999986496,
+            "subtractionMs": 327.2947920000006
+          },
+          "index": {
+            "cellSize": 9.900990099009901,
+            "occupiedCellCount": 8665,
+            "indexedReferenceCount": 37244,
+            "overflowPrimitiveCount": 9,
+            "maxCellsPerPrimitive": 4096,
+            "heapDeltaBytes": 5540840,
+            "estimatedBytes": 852584
+          }
+        }
+      }
+    },
+    {
+      "candidateId": "exact-stratified-7",
+      "fixtureId": "full-25000",
+      "status": "ok",
+      "runtime": {
+        "pid": 63180,
+        "node": "v23.9.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "hostname": "Tdogss-MacBook-Pro.local",
+        "osRelease": "24.6.0",
+        "cpuModel": "Apple M2 Max",
+        "logicalCpuCount": 12,
+        "totalMemoryBytes": 68719476736,
+        "freeMemoryBytesAtCapture": 1651048448
+      },
+      "phases": {
+        "preparation": {
+          "sampleCount": 20,
+          "durationMs": {
+            "min": 114.67670900000002,
+            "p05": 115.21084650000002,
+            "median": 119.301333,
+            "p95": 126.6930601,
+            "max": 127.3599999999999
+          },
+          "heapUsedAfterBytes": {
+            "min": 59704928,
+            "p05": 59782410,
+            "median": 72230940,
+            "p95": 73977475.6,
+            "max": 74216336
+          },
+          "rssAfterBytes": {
+            "min": 148504576,
+            "p05": 149080473.6,
+            "median": 156983296,
+            "p95": 159989760,
+            "max": 159989760
+          },
+          "maxRssAfterBytes": {
+            "min": 148504576,
+            "p05": 149080473.6,
+            "median": 156983296,
+            "p95": 159989760,
+            "max": 159989760
+          },
+          "heapUsedDeltaBytes": {
+            "min": 36514928,
+            "p05": 36587644.8,
+            "median": 49036996,
+            "p95": 50827628,
+            "max": 51064064
+          },
+          "rssDeltaBytes": {
+            "min": 0,
+            "p05": 0,
+            "median": 32768,
+            "p95": 2380595.2,
+            "max": 2785280
+          }
+        },
+        "cold": {
+          "sampleCount": 20,
+          "durationMs": {
+            "min": 155.01020800000015,
+            "p05": 155.05054404999993,
+            "median": 162.3816039999997,
+            "p95": 176.48736905000007,
+            "max": 205.4733329999999
+          },
+          "heapUsedAfterBytes": {
+            "min": 47317744,
+            "p05": 48017118.8,
+            "median": 58606752,
+            "p95": 63914090.4,
+            "max": 63988920
+          },
+          "rssAfterBytes": {
+            "min": 192692224,
+            "p05": 192692224,
+            "median": 198893568,
+            "p95": 202948608,
+            "max": 202948608
+          },
+          "maxRssAfterBytes": {
+            "min": 192692224,
+            "p05": 192692224,
+            "median": 198893568,
+            "p95": 202948608,
+            "max": 202948608
+          },
+          "heapUsedDeltaBytes": {
+            "min": 43118312,
+            "p05": 43832468.8,
+            "median": 54402380,
+            "p95": 59699023.2,
+            "max": 59775920
+          },
+          "rssDeltaBytes": {
+            "min": 1425408,
+            "p05": 1425408,
+            "median": 1556480,
+            "p95": 3235020.8000000007,
+            "max": 4308992
+          }
+        },
+        "warm": {
+          "sampleCount": 60,
+          "durationMs": {
+            "min": 19.88341600000058,
+            "p05": 20.588653550000437,
+            "median": 21.653646000000208,
+            "p95": 23.09742944999989,
+            "max": 23.19433299999946
+          },
+          "heapUsedAfterBytes": {
+            "min": 53169536,
+            "p05": 56585158.4,
+            "median": 57598856,
+            "p95": 57793025.2,
+            "max": 58164008
+          },
+          "rssAfterBytes": {
+            "min": 202997760,
+            "p05": 203111628.8,
+            "median": 205504512,
+            "p95": 205832192,
+            "max": 205832192
+          },
+          "maxRssAfterBytes": {
+            "min": 203898880,
+            "p05": 203898880,
+            "median": 205504512,
+            "p95": 205832192,
+            "max": 205832192
+          },
+          "heapUsedDeltaBytes": {
+            "min": 30811360,
+            "p05": 34209136,
+            "median": 35226392,
+            "p95": 35414142,
+            "max": 35777000
+          },
+          "rssDeltaBytes": {
+            "min": 1425408,
+            "p05": 1425408,
+            "median": 1425408,
+            "p95": 1524531.2,
+            "max": 2326528
+          }
+        }
+      },
+      "metrics": {
+        "source": {
+          "primitiveCount": 25010,
+          "pointCount": 176340,
+          "checksum": "8c705bec2017a76391b0c8fac0c6227b2d9686d4d48c92a49e9e2788f5edb8ef",
+          "serializedBytes": 9068823,
+          "geometryBytes": 6792818
+        },
+        "canvas": {
+          "measurement": "counting-canvas-structural-submission-only",
+          "scope": "whole-frame",
+          "includesRasterization": false,
+          "pixelWidth": 1000,
+          "pixelHeight": 1000,
+          "submissionMs": 5.387500000000728,
+          "calls": {
+            "save": 1,
+            "restore": 1,
+            "beginPath": 25010,
+            "moveTo": 25010,
+            "lineTo": 151330,
+            "closePath": 25000,
+            "fill": 25010,
+            "stroke": 25010,
+            "setTransform": 2,
+            "fillRect": 1,
+            "clearRect": 0
+          }
+        },
+        "referenceHiddenLineWorkload": {
+          "filledPrimitiveCount": 25010,
+          "sourceSegmentCount": 151330,
+          "overlappingPairCount": 217707,
+          "estimatedSegmentEdgeComparisons": 143389552,
+          "totalWorkUnits": 147678264
+        },
+        "processing": {
+          "kind": "supplied",
+          "durationMs": 1393.0623750000013,
+          "processed": {
+            "primitiveCount": 35004,
+            "pointCount": 164666,
+            "checksum": "1941a2b6be7890b5ea4959778bec82ae6aecfdf3f317c2d3521a1755a45671f6",
+            "serializedBytes": 8051445,
+            "geometryBytes": 6371201
+          }
+        },
+        "boundsClip": {
+          "durationMs": 14.548666999999114,
+          "clipped": {
+            "primitiveCount": 35023,
+            "pointCount": 164584,
+            "checksum": "2ab3b5133a02e7c4b68217c49ef11f95ae46eb6fc33a49d3d51ef05e9dbf4c5a",
+            "serializedBytes": 8048835,
+            "geometryBytes": 6367679
+          }
+        },
+        "svgSerialization": {
+          "durationMs": 67.62199999999939,
+          "bytes": 5138248,
+          "pathCount": 35023
+        },
+        "plotter": {
+          "durationMs": 57.663791000002675,
+          "svgBytes": 5089724,
+          "pathCount": 35023
+        },
+        "physicalSpacing": {
+          "millimetersPerSceneUnit": 0.18,
+          "nibWidthSceneUnits": 1.6666666666666667,
+          "nibWidthMillimeters": 0.3,
+          "roots": {
+            "sampleCount": 25000,
+            "min": 0.004037480875532148,
+            "p05": 0.12149180230356466,
+            "p50": 0.4334101556175025,
+            "p95": 1.0381490324440694,
+            "max": 2.279684682908107
+          },
+          "clearances": {
+            "contract": "exact-nib-collisions/capped-deterministic-nearest-sampling",
+            "sampling": {
+              "method": "deterministic-even-segment-index/capped-spatial-search",
+              "maxSegments": 4096,
+              "maxSearchNibWidths": 8,
+              "totalSegmentCount": 129561,
+              "sampledSegmentCount": 4096,
+              "segmentCoverage": 0.03161445187980951,
+              "resolvedSegmentCount": 4096,
+              "censoredSegmentCount": 0,
+              "totalPathCount": 35023,
+              "sampledPathCount": 4096,
+              "pathCoverage": 0.11695171744282329,
+              "resolvedPathCount": 4096
+            },
+            "paths": {
+              "millimeters": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0,
+                "p95": 0.23854394334048185,
+                "max": 0.9159240926397806
+              },
+              "nibWidths": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0,
+                "p95": 0.7951464778016061,
+                "max": 3.0530803087992684
+              }
+            },
+            "segments": {
+              "millimeters": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0,
+                "p95": 0.23854394334048185,
+                "max": 0.9159240926397806
+              },
+              "nibWidths": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0,
+                "p95": 0.7951464778016061,
+                "max": 3.0530803087992684
+              }
+            },
+            "collisions": {
+              "threshold": "centerline-distance-lte-one-nib-width",
+              "segmentPairCount": 534047,
+              "pathPairCount": 126988,
+              "collidingSegmentCount": 125708,
+              "collidingPathCount": 34980,
+              "candidatePairChecks": 81994876
+            },
+            "spatial": {
+              "cellSizeSceneUnits": 6.666666666666667,
+              "occupiedBaseCellCount": 16813,
+              "occupiedCollisionCellCount": 17569,
+              "collisionCandidatePairChecks": 81994876,
+              "nearestCandidateChecks": 2415196
+            }
+          }
+        },
+        "rootCount": 25000,
+        "identity": {
+          "rootStrategy": "stratified",
+          "bladeGeometry": "simple-7",
+          "hillKeys": [
+            "10/11",
+            "9/11",
+            "8/11",
+            "7/11",
+            "6/11",
+            "5/11",
+            "4/11",
+            "3/11",
+            "2/11",
+            "1/11"
+          ],
+          "rootKeyCount": 25000,
+          "rootKeysSha256": "73fb3798f593309601ab58e1cac9fb58937d48344024ff4525da263fef445cf4",
+          "rootKeysEvidence": "results/exact-stratified-7-full.raw.json"
+        },
+        "exactSpatialHiddenLine": {
+          "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+          "filledPrimitiveCount": 25010,
+          "allPainterPairCount": 312737545,
+          "broadPhaseCandidatePairCount": 460164,
+          "overlappingPairCount": 217707,
+          "estimatedSegmentEdgeComparisons": 143389552,
+          "timings": {
+            "planBuildMs": 147.2112500000003,
+            "indexBuildMs": 15.98420900000201,
+            "subtractionMs": 1229.819958
+          },
+          "index": {
+            "cellSize": 6.289308176100629,
+            "occupiedCellCount": 19018,
+            "indexedReferenceCount": 128625,
+            "overflowPrimitiveCount": 10,
+            "maxCellsPerPrimitive": 4096,
+            "heapDeltaBytes": 8841128,
+            "estimatedBytes": 2246232
+          }
+        }
+      },
+      "artifacts": {
+        "fixtureId": "full-25000",
+        "sourceSceneChecksum": "8c705bec2017a76391b0c8fac0c6227b2d9686d4d48c92a49e9e2788f5edb8ef",
+        "fillSceneChecksum": "64c1da733cea91f06e0c10801c275e7d0aa376bf01339a26f6a4f6c468d2cc0d",
+        "outlineSceneChecksum": "2ab3b5133a02e7c4b68217c49ef11f95ae46eb6fc33a49d3d51ef05e9dbf4c5a",
+        "fillSvg": {
+          "path": "/tmp/issue-305-x3b-exact-stratified-7/full-25000.fill.svg",
+          "bytes": 4943320,
+          "sha256": "a2a5f6fe463d9950d411499f9a88def02f9863a46ca6332017f3918e3a4b072f"
+        },
+        "outlineSvg": {
+          "path": "/tmp/issue-305-x3b-exact-stratified-7/full-25000.outline.svg",
+          "bytes": 5138248,
+          "sha256": "3d3a822b59546a8e3a04af3d3fefdcc9f0b52b122a37195ada752519ee8bf18a"
+        },
+        "processingDurationMs": 1359.5624169999792,
+        "exactSpatialHiddenLine": {
+          "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+          "filledPrimitiveCount": 25010,
+          "allPainterPairCount": 312737545,
+          "broadPhaseCandidatePairCount": 460164,
+          "overlappingPairCount": 217707,
+          "estimatedSegmentEdgeComparisons": 143389552,
+          "timings": {
+            "planBuildMs": 175.87537500000326,
+            "indexBuildMs": 18.102582999999868,
+            "subtractionMs": 1165.5107080000162
+          },
+          "index": {
+            "cellSize": 6.289308176100629,
+            "occupiedCellCount": 19018,
+            "indexedReferenceCount": 128625,
+            "overflowPrimitiveCount": 10,
+            "maxCellsPerPrimitive": 4096,
+            "heapDeltaBytes": 5287312,
+            "estimatedBytes": 2246232
+          }
+        }
+      }
+    },
+    {
+      "candidateId": "exact-stratified-7",
+      "fixtureId": "full-50000",
+      "status": "ok",
+      "runtime": {
+        "pid": 67402,
+        "node": "v23.9.0",
+        "platform": "darwin",
+        "arch": "arm64",
+        "hostname": "Tdogss-MacBook-Pro.local",
+        "osRelease": "24.6.0",
+        "cpuModel": "Apple M2 Max",
+        "logicalCpuCount": 12,
+        "totalMemoryBytes": 68719476736,
+        "freeMemoryBytesAtCapture": 691290112
+      },
+      "phases": {
+        "preparation": {
+          "sampleCount": 20,
+          "durationMs": {
+            "min": 164.24225,
+            "p05": 165.7270202,
+            "median": 196.26699999999994,
+            "p95": 217.74251814999994,
+            "max": 224.58445900000015
+          },
+          "heapUsedAfterBytes": {
+            "min": 77504656,
+            "p05": 77618785.2,
+            "median": 83141956,
+            "p95": 94692975.2,
+            "max": 102614136
+          },
+          "rssAfterBytes": {
+            "min": 184221696,
+            "p05": 185373491.2,
+            "median": 199917568,
+            "p95": 201883648,
+            "max": 201883648
+          },
+          "maxRssAfterBytes": {
+            "min": 184221696,
+            "p05": 185373491.2,
+            "median": 200065024,
+            "p95": 201883648,
+            "max": 201883648
+          },
+          "heapUsedDeltaBytes": {
+            "min": 37233720,
+            "p05": 37344680,
+            "median": 42774788,
+            "p95": 53541078.00000001,
+            "max": 61461152
+          },
+          "rssDeltaBytes": {
+            "min": 0,
+            "p05": 0,
+            "median": 196608,
+            "p95": 5712281.600000005,
+            "max": 13074432
+          }
+        },
+        "cold": {
+          "sampleCount": 20,
+          "durationMs": {
+            "min": 247.44037500000013,
+            "p05": 248.27004135000055,
+            "median": 253.32535349999944,
+            "p95": 272.0356556500005,
+            "max": 282.6564589999998
+          },
+          "heapUsedAfterBytes": {
+            "min": 81924824,
+            "p05": 82818257.2,
+            "median": 84634744,
+            "p95": 98055697.2,
+            "max": 98144336
+          },
+          "rssAfterBytes": {
+            "min": 279019520,
+            "p05": 280684953.6,
+            "median": 287170560,
+            "p95": 290018099.2,
+            "max": 290111488
+          },
+          "maxRssAfterBytes": {
+            "min": 279019520,
+            "p05": 280684953.6,
+            "median": 287170560,
+            "p95": 290018099.2,
+            "max": 290111488
+          },
+          "heapUsedDeltaBytes": {
+            "min": 77728080,
+            "p05": 78627882,
+            "median": 80433892,
+            "p95": 93852862,
+            "max": 93940528
+          },
+          "rssDeltaBytes": {
+            "min": 2408448,
+            "p05": 2641920,
+            "median": 2768896,
+            "p95": 4528537.6000000015,
+            "max": 6832128
+          }
+        },
+        "warm": {
+          "sampleCount": 60,
+          "durationMs": {
+            "min": 44.69445900000028,
+            "p05": 45.058849700001154,
+            "median": 46.32289600000058,
+            "p95": 48.735931900001376,
+            "max": 52.152916999999434
+          },
+          "heapUsedAfterBytes": {
+            "min": 87023136,
+            "p05": 87167008.4,
+            "median": 87554896,
+            "p95": 88079503.2,
+            "max": 91245224
+          },
+          "rssAfterBytes": {
+            "min": 290177024,
+            "p05": 290897920,
+            "median": 291749888,
+            "p95": 292519936,
+            "max": 292519936
+          },
+          "maxRssAfterBytes": {
+            "min": 290996224,
+            "p05": 290996224,
+            "median": 291749888,
+            "p95": 292519936,
+            "max": 292519936
+          },
+          "heapUsedDeltaBytes": {
+            "min": 46657936,
+            "p05": 46799746,
+            "median": 47182288,
+            "p95": 47705703.6,
+            "max": 50885232
+          },
+          "rssDeltaBytes": {
+            "min": 2654208,
+            "p05": 2654208,
+            "median": 2654208,
+            "p95": 2892595.1999999993,
+            "max": 3375104
+          }
+        }
+      },
+      "metrics": {
+        "source": {
+          "primitiveCount": 50010,
+          "pointCount": 351340,
+          "checksum": "d7ea5b01957f6923cfe91a2b12381cef1fbe38a56e7faab76f9d145c9828125e",
+          "serializedBytes": 18098653,
+          "geometryBytes": 13547648
+        },
+        "canvas": {
+          "measurement": "counting-canvas-structural-submission-only",
+          "scope": "whole-frame",
+          "includesRasterization": false,
+          "pixelWidth": 1000,
+          "pixelHeight": 1000,
+          "submissionMs": 8.318333000002895,
+          "calls": {
+            "save": 1,
+            "restore": 1,
+            "beginPath": 50010,
+            "moveTo": 50010,
+            "lineTo": 301330,
+            "closePath": 50000,
+            "fill": 50010,
+            "stroke": 50010,
+            "setTransform": 2,
+            "fillRect": 1,
+            "clearRect": 0
+          }
+        },
+        "referenceHiddenLineWorkload": {
+          "filledPrimitiveCount": 50010,
+          "sourceSegmentCount": 301330,
+          "overlappingPairCount": 563899,
+          "estimatedSegmentEdgeComparisons": 291328892,
+          "totalWorkUnits": 301956676
+        },
+        "processing": {
+          "kind": "supplied",
+          "durationMs": 5088.894708999993,
+          "processed": {
+            "primitiveCount": 68216,
+            "pointCount": 296895,
+            "checksum": "264f97c33fb3cfa93fe5c7e76222bf83f1d4bc622203573b06e1d03e5af68fe3",
+            "serializedBytes": 14783261,
+            "geometryBytes": 11508841
+          }
+        },
+        "boundsClip": {
+          "durationMs": 93.45429100000183,
+          "clipped": {
+            "primitiveCount": 68244,
+            "pointCount": 296758,
+            "checksum": "d42b6c72726665a1d20ecfda60c2fa220b08dc5b53aefc8a3101c0e37a467a60",
+            "serializedBytes": 14778011,
+            "geometryBytes": 11502247
+          }
+        },
+        "svgSerialization": {
+          "durationMs": 212.03283399999782,
+          "bytes": 9565243,
+          "pathCount": 68244
+        },
+        "plotter": {
+          "durationMs": 202.6814999999915,
+          "svgBytes": 9491899,
+          "pathCount": 68244
+        },
+        "physicalSpacing": {
+          "millimetersPerSceneUnit": 0.18,
+          "nibWidthSceneUnits": 1.6666666666666667,
+          "nibWidthMillimeters": 0.3,
+          "roots": {
+            "sampleCount": 50000,
+            "min": 0.004037480875532148,
+            "p05": 0.0931770432501541,
+            "p50": 0.3154880635595086,
+            "p95": 0.7374687462302943,
+            "max": 1.6555768101063084
+          },
+          "clearances": {
+            "contract": "exact-nib-collisions/capped-deterministic-nearest-sampling",
+            "sampling": {
+              "method": "deterministic-even-segment-index/capped-spatial-search",
+              "maxSegments": 4096,
+              "maxSearchNibWidths": 8,
+              "totalSegmentCount": 228514,
+              "sampledSegmentCount": 4096,
+              "segmentCoverage": 0.017924503531512294,
+              "resolvedSegmentCount": 4096,
+              "censoredSegmentCount": 0,
+              "totalPathCount": 68244,
+              "sampledPathCount": 4096,
+              "pathCoverage": 0.06001992849188207,
+              "resolvedPathCount": 4096
+            },
+            "paths": {
+              "millimeters": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0,
+                "p95": 0.0926082393701477,
+                "max": 0.4426573866681805
+              },
+              "nibWidths": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0,
+                "p95": 0.30869413123382566,
+                "max": 1.4755246222272684
+              }
+            },
+            "segments": {
+              "millimeters": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0,
+                "p95": 0.0926082393701477,
+                "max": 0.4426573866681805
+              },
+              "nibWidths": {
+                "sampleCount": 4096,
+                "min": 0,
+                "p05": 0,
+                "p50": 0,
+                "p95": 0.30869413123382566,
+                "max": 1.4755246222272684
+              }
+            },
+            "collisions": {
+              "threshold": "centerline-distance-lte-one-nib-width",
+              "segmentPairCount": 1462805,
+              "pathPairCount": 356685,
+              "collidingSegmentCount": 228045,
+              "collidingPathCount": 68244,
+              "candidatePairChecks": 242802642
+            },
+            "spatial": {
+              "cellSizeSceneUnits": 6.666666666666667,
+              "occupiedBaseCellCount": 17000,
+              "occupiedCollisionCellCount": 17617,
+              "collisionCandidatePairChecks": 242802642,
+              "nearestCandidateChecks": 4191156
+            }
+          }
+        },
+        "rootCount": 50000,
+        "identity": {
+          "rootStrategy": "stratified",
+          "bladeGeometry": "simple-7",
+          "hillKeys": [
+            "10/11",
+            "9/11",
+            "8/11",
+            "7/11",
+            "6/11",
+            "5/11",
+            "4/11",
+            "3/11",
+            "2/11",
+            "1/11"
+          ],
+          "rootKeyCount": 50000,
+          "rootKeysSha256": "31b91c10b81be75cffb8601f065b74a1236725a8bc353ea3d0646deb85c8a9bd",
+          "rootKeysEvidence": "results/exact-stratified-7-full.raw.json"
+        },
+        "exactSpatialHiddenLine": {
+          "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+          "filledPrimitiveCount": 50010,
+          "allPainterPairCount": 1250475045,
+          "broadPhaseCandidatePairCount": 1153235,
+          "overlappingPairCount": 563899,
+          "estimatedSegmentEdgeComparisons": 291328892,
+          "timings": {
+            "planBuildMs": 429.2463330000028,
+            "indexBuildMs": 52.34387499999866,
+            "subtractionMs": 4607.254874999999
+          },
+          "index": {
+            "cellSize": 4.464285714285714,
+            "occupiedCellCount": 37938,
+            "indexedReferenceCount": 370590,
+            "overflowPrimitiveCount": 10,
+            "maxCellsPerPrimitive": 4096,
+            "heapDeltaBytes": 12923880,
+            "estimatedBytes": 5392832
+          }
+        }
+      },
+      "artifacts": {
+        "fixtureId": "full-50000",
+        "sourceSceneChecksum": "d7ea5b01957f6923cfe91a2b12381cef1fbe38a56e7faab76f9d145c9828125e",
+        "fillSceneChecksum": "3fd8037bfd248e820b5b802d9b76051a64329f37235841436ba923129635eb18",
+        "outlineSceneChecksum": "d42b6c72726665a1d20ecfda60c2fa220b08dc5b53aefc8a3101c0e37a467a60",
+        "fillSvg": {
+          "path": "/tmp/issue-305-x3b-exact-stratified-7/full-50000.fill.svg",
+          "bytes": 9862598,
+          "sha256": "9cd622fba72356db5a97fa748b1a6da5e9c0b81493d9bb50446638a1b9bb10e9"
+        },
+        "outlineSvg": {
+          "path": "/tmp/issue-305-x3b-exact-stratified-7/full-50000.outline.svg",
+          "bytes": 9565243,
+          "sha256": "435df17268b2881961faa5606bcd7c2711fd94a0474ac30c02e9779a320c0374"
+        },
+        "processingDurationMs": 4440.242834000004,
+        "exactSpatialHiddenLine": {
+          "contract": "exact-painter-order/uniform-aabb-grid/production-polygon-clip",
+          "filledPrimitiveCount": 50010,
+          "allPainterPairCount": 1250475045,
+          "broadPhaseCandidatePairCount": 1153235,
+          "overlappingPairCount": 563899,
+          "estimatedSegmentEdgeComparisons": 291328892,
+          "timings": {
+            "planBuildMs": 198.2410830000008,
+            "indexBuildMs": 41.851124999986496,
+            "subtractionMs": 4200.0763330000045
+          },
+          "index": {
+            "cellSize": 4.464285714285714,
+            "occupiedCellCount": 37938,
+            "indexedReferenceCount": 370590,
+            "overflowPrimitiveCount": 10,
+            "maxCellsPerPrimitive": 4096,
+            "heapDeltaBytes": 19017640,
+            "estimatedBytes": 5392832
+          }
+        }
+      }
+    }
+  ]
+}

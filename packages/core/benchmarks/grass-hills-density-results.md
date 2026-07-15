@@ -142,3 +142,52 @@ than either Poisson variant, and better p50/p95 root spacing than Poisson. Its
 below the 0.30 mm nib; this is an explicit local-collision tradeoff, not omitted
 evidence. The observed exact index, export path count, and peak RSS remain
 tractable at 5k, so no second exact finalist is retained.
+
+## X3b sole-finalist full matrix
+
+On 2026-07-15, `exact-stratified-7` alone ran the five dense fixtures under the
+unchanged M2 `full` policy: a 600-second/2-GiB child limit, 20 preparation
+samples, 20 cold samples, 60 warm samples, and 3 warmups. The serial campaign
+finished in 247.53 seconds on Node v23.9.0, Darwin arm64, an Apple M2 Max with
+12 logical CPUs and 64 GiB physical memory. All five jobs completed and none
+was censored. Timings below are milliseconds; phase values are medians and peak
+RSS is the greatest after-sample RSS observed across all three phases.
+
+| Fixture | Status | Prepare | Cold | Warm | Exact processing | Peak RSS MiB | Plotter paths |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| one-hill-5000 | complete | 16.69 | 22.25 | 3.30 | 70.01 | 140.86 | 6,147 |
+| one-hill-10000 | complete | 25.67 | 34.75 | 5.48 | 179.74 | 148.39 | 13,397 |
+| full-10000 | complete | 148.41 | 116.47 | 8.83 | 382.20 | 167.55 | 13,299 |
+| full-25000 | complete | 119.30 | 162.38 | 21.65 | 1,393.06 | 196.30 | 35,023 |
+| full-50000 | complete | 196.27 | 253.33 | 46.32 | 5,088.89 | 278.97 | 68,244 |
+
+The committed [raw result](grass-hills-density/results/exact-stratified-7-full.raw.json)
+retains every sample, memory snapshot, runtime/machine field, full root/hill
+identity inventory, checksum, Hidden-line/index metric, clip/export metric, and
+physical-spacing distribution. The compact [summary](grass-hills-density/results/exact-stratified-7-full.summary.json)
+retains phase timing and memory distributions plus all numeric structural,
+processing, Hidden-line/index, clipping, Canvas, SVG, plotter, spacing, runtime,
+and machine evidence. Its root inventories are represented by count and
+SHA-256 and point back to the complete raw evidence instead of duplicating up
+to 50,000 keys per row.
+
+For the downstream fill-versus-Outline decision, the run also generated a
+clipped source-fill SVG and an exact-Hidden-line clipped Outline SVG for every
+fixture. The ten SVGs occupy about 38 MiB at the stable directory
+`/tmp/issue-305-x3b-exact-stratified-7`; their exact paths, byte counts, scene
+checksums, SVG SHA-256 checksums, exact-index evidence, and regeneration command
+are pinned in the committed [artifact manifest](grass-hills-density/results/exact-stratified-7-full.artifacts.json).
+They are decision artifacts only and make no production renderer or candidate
+change.
+
+Reproduce the full campaign and all artifacts from the repository root:
+
+```sh
+node packages/core/benchmarks/grass-hills-density/exact-finalist-full.js
+```
+
+To rebuild only the compact summary from the committed complete evidence:
+
+```sh
+node packages/core/benchmarks/grass-hills-density/exact-finalist-full.js --summary-only
+```
