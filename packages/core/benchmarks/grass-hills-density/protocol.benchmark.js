@@ -150,6 +150,33 @@ describe('Grass Hills density campaign protocol', () => {
     )
   })
 
+  it('reaps a successful child even when the candidate retains an active handle', async () => {
+    const activeHandleUrl = `data:text/javascript,${encodeURIComponent(`
+      setInterval(() => {}, 1_000)
+      export const benchmarkCandidate = {
+        id: 'active-handle', complexity: 'linear',
+        prepare(payload) { return (t) => payload.base + t },
+        generate(payload, t) { return payload.base + t },
+        guard(value) { return value },
+      }
+    `)}`
+    const started = performance.now()
+    const campaign = await runCampaign({
+      jobs: [
+        job({
+          candidate: { id: 'active-handle', moduleUrl: activeHandleUrl },
+        }),
+      ],
+    })
+
+    expect(campaign.results[0]).toMatchObject({
+      status: 'ok',
+      candidateId: 'active-handle',
+      fixtureId: 'tiny-fixture',
+    })
+    expect(performance.now() - started).toBeLessThan(5_000)
+  })
+
   it.each(['timeout', 'oom', 'child-error'])(
     'uses the durable censored schema for %s termination',
     (kind) => {

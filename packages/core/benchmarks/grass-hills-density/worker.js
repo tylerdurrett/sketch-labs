@@ -190,7 +190,11 @@ function errorReason(error) {
 
 function sendAndExit(message) {
   if (typeof process.send !== 'function') process.exit(1)
-  process.send(message, () => {
-    process.disconnect()
+  process.send(message, (error) => {
+    // The IPC callback runs after Node has handed the complete message to the
+    // channel. Exit explicitly at that point so candidate-owned timers,
+    // sockets, or other active handles cannot turn a valid result into a later
+    // parent-side timeout.
+    process.exit(error ? 1 : 0)
   })
 }
