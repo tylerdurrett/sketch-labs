@@ -1,0 +1,3 @@
+# Shading strategies consume source-independent fields
+
+Reusable **Shading Strategies** consume resolution-independent **Tone Field** and **Shading Mask** samplers in Composition Frame coordinates and return geometry, leaving photographs, gradients, and procedural shapes to source-side adapters and leaving Scene styling, layering, and occlusion to the consuming Sketch. We rejected raster-buffer-specific strategy APIs because they couple algorithms to pixel resolution and decoding, and rejected a Scene-to-Scene shading pass because desired tone and permission are source data rather than existing Scene geometry; the separate field contracts also preserve soft permission independently of target darkness.
