@@ -53,11 +53,15 @@
  * the legacy sparse closed-blade Hidden-line path remains a debug fallback, not
  * an automatic downgrade for this dense source.
  *
- * CLOSED SILHOUETTES / PHYSICAL PALETTE: blades are traced by the private
- * tapered-outline generator and emitted as closed, filled-and-stroked shapes —
- * never single stroked lines. The background, hill fills, and blade fills
- * default to paper white; authored hill and blade contours default to black.
- * All five colors are tunable without participating in geometry or RNG.
+ * BLADE SILHOUETTES / PHYSICAL PALETTE: blades are traced by the private
+ * tapered-outline generator as filled-and-stroked shapes — never single stroked
+ * lines. Every outline explicitly repeats its root. Default geometry retains
+ * `closed: true` for exact compatibility; active foreground zoom uses open path
+ * metadata so bounds clipping cannot synthesize a new last-to-first stroke
+ * across a clipped blade. The explicit root closure keeps the uncut fill and
+ * contour unchanged. The background, hill fills, and blade fills default to
+ * paper white; authored hill and blade contours default to black. All five
+ * colors are tunable without participating in geometry or RNG.
  *
  * STATIC / DETERMINISTIC / PREPARED: there is no `time` metadata. All terrain
  * randomness comes from the explicit Seed, with no clock reads, `Math.random`,
@@ -180,6 +184,7 @@ interface PreparedGrassHills {
   readonly hillStrokeColor: string
   readonly bladeColor: string
   readonly bladeStrokeColor: string
+  readonly bladePathsClosed: boolean
   readonly hills: ReadonlyArray<PreparedHill>
 }
 
@@ -327,6 +332,7 @@ function prepareGrassHills(
     hillStrokeColor,
     bladeColor,
     bladeStrokeColor,
+    bladePathsClosed: foregroundZoom === 1,
     hills,
   })
 }
@@ -355,7 +361,7 @@ function sampleGrassHills(prepared: PreparedGrassHills, _t: number): Scene {
       builder.addPath(
         blade(descriptor.shape).map(([x, y]) => [x + rootX, y + rootY]),
         {
-          closed: true,
+          closed: prepared.bladePathsClosed,
           fill: { color: prepared.bladeColor },
           stroke: {
             color: prepared.bladeStrokeColor,

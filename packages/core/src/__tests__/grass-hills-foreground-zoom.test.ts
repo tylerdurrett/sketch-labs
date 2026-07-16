@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CoordinateSpace } from '../scene'
 import type { GrassBladeDescriptor } from '../sketches/grass-hills/grass'
 import {
   applyForegroundZoom,

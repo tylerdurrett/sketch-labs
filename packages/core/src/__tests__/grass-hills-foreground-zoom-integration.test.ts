@@ -49,10 +49,14 @@ function expectSceneTransform(
   expect(zoomed.space).toEqual(base.space)
   expect(zoomed.background).toEqual(base.background)
   expect(zoomed.primitives).toHaveLength(base.primitives.length)
-  for (let primitiveIndex = 0; primitiveIndex < base.primitives.length; primitiveIndex++) {
+  for (
+    let primitiveIndex = 0;
+    primitiveIndex < base.primitives.length;
+    primitiveIndex++
+  ) {
     const before = base.primitives[primitiveIndex]!
     const after = zoomed.primitives[primitiveIndex]!
-    expect(after.closed).toBe(before.closed)
+    expect(after.closed).toBe(before.closed === true ? false : before.closed)
     expect(after.fill).toEqual(before.fill)
     expect(after.stroke).toEqual(before.stroke)
     expect(after.points).toHaveLength(before.points.length)
@@ -72,7 +76,7 @@ function expectSceneTransform(
 }
 
 function blades(scene: Scene): Primitive[] {
-  return scene.primitives.filter(({ closed }) => closed === true)
+  return scene.primitives.filter(({ points }) => points.length === 7)
 }
 
 function role(scene: Scene, value: Primitive['hiddenLineRole']): Primitive[] {
@@ -93,7 +97,19 @@ function isFrameEdgeSegment(
   )
 }
 
-function expectClippedWithoutFrameEdges(
+function drawableSegments(
+  primitive: Primitive,
+): Array<readonly [readonly [number, number], readonly [number, number]]> {
+  const segments = primitive.points.slice(1).map(
+    (end, index) => [primitive.points[index]!, end] as const,
+  )
+  if (primitive.closed === true && primitive.points.length > 1) {
+    segments.push([primitive.points.at(-1)!, primitive.points[0]!])
+  }
+  return segments
+}
+
+function expectClippedWithoutClosureOrFrameEdges(
   scene: Scene,
   frame: CoordinateSpace,
 ): void {
@@ -104,22 +120,26 @@ function expectClippedWithoutFrameEdges(
         ([x, y]) => x >= 0 && x <= frame.width && y >= 0 && y <= frame.height,
       ),
     ).toBe(true)
-    for (let index = 1; index < primitive.points.length; index++) {
-      expect(
-        isFrameEdgeSegment(
-          primitive.points[index - 1]!,
-          primitive.points[index]!,
-          frame,
-        ),
-      ).toBe(false)
+    if (primitive.closed === true) {
+      expect(primitive.points.at(-1)).toEqual(primitive.points[0])
+    }
+    for (const [start, end] of drawableSegments(primitive)) {
+      expect(isFrameEdgeSegment(start, end, frame)).toBe(false)
     }
   }
 }
 
-function lodDescriptor(
-  x: number,
-  ordinal: number,
-): GrassBladeDescriptor {
+function crossesBoundary(
+  primitive: Primitive,
+  isOutside: (point: readonly [number, number]) => boolean,
+): boolean {
+  return (
+    primitive.points.some(isOutside) &&
+    primitive.points.some((point) => !isOutside(point))
+  )
+}
+
+function lodDescriptor(x: number, ordinal: number): GrassBladeDescriptor {
   return {
     identity: { hillKey: '1/1', rootKey: `root-${ordinal}`, ordinal },
     canonical: { u: x, v: 0 },
@@ -138,7 +158,12 @@ describe('grass-hills foreground zoom integration', () => {
     'keeps omitted and explicit default Fill/Outline bytes identical in a %s frame',
     (_label, frame) => {
       const { foregroundZoom: _omitted, ...legacyParams } = PARAMS
-      const legacyFill = grassHills.generate(legacyParams, 'default-zoom', 7, frame)
+      const legacyFill = grassHills.generate(
+        legacyParams,
+        'default-zoom',
+        7,
+        frame,
+      )
       const explicitFill = grassHills.generate(
         { ...legacyParams, foregroundZoom: 1 },
         'default-zoom',
@@ -196,6 +221,8 @@ describe('grass-hills foreground zoom integration', () => {
     )
 
     expectSceneTransform(base, zoomed, WIDE, HORIZON_HEIGHT, ZOOM)
+    expect(blades(base).every(({ closed }) => closed === true)).toBe(true)
+    expect(blades(zoomed).every(({ closed }) => closed === false)).toBe(true)
     expect(zoomed.primitives.map(({ stroke }) => stroke?.width)).toEqual(
       base.primitives.map(({ stroke }) => stroke?.width),
     )
@@ -250,7 +277,11 @@ describe('grass-hills foreground zoom integration', () => {
     const params = {
       ...PARAMS,
       foregroundZoom: 2,
-      bladeDensity: 0.002,
+      hillCount: 4,
+      bladeDensity: 0.04,
+      bladeLength: 80,
+      bladeWidth: 12,
+      windLean: 1,
     }
     const fill = grassHills.generate(params, 'zoom-clipping', 0, WIDE)
     const outlineSource = grassHills.generateOutlineSource!(
@@ -261,11 +292,18 @@ describe('grass-hills foreground zoom integration', () => {
       TARGET,
     )
 
+    const fillBlades = blades(fill)
     expect(
-      fill.primitives.some(({ points }) =>
-        points.some(
-          ([x, y]) => x < 0 || x > WIDE.width || y < 0 || y > WIDE.height,
-        ),
+      fillBlades.some((blade) => crossesBoundary(blade, ([x]) => x < 0)),
+    ).toBe(true)
+    expect(
+      fillBlades.some((blade) =>
+        crossesBoundary(blade, ([x]) => x > WIDE.width),
+      ),
+    ).toBe(true)
+    expect(
+      fillBlades.some((blade) =>
+        crossesBoundary(blade, ([, y]) => y > WIDE.height),
       ),
     ).toBe(true)
     expect(
@@ -276,12 +314,16 @@ describe('grass-hills foreground zoom integration', () => {
       ),
     ).toBe(true)
 
-    expectClippedWithoutFrameEdges(clipSceneToBounds(fill), WIDE)
+    const clippedFill = clipSceneToBounds(fill)
+    expect(clippedFill.primitives.every(({ closed }) => closed !== true)).toBe(
+      true,
+    )
+    expectClippedWithoutClosureOrFrameEdges(clippedFill, WIDE)
     const outline = clipSceneToBounds(
       hiddenLinePass(outlineSource, { tolerance: 0 }),
     )
     expect(outline.primitives.every(({ fill }) => fill === undefined)).toBe(true)
     expect(outline.primitives.every(({ closed }) => closed !== true)).toBe(true)
-    expectClippedWithoutFrameEdges(outline, WIDE)
+    expectClippedWithoutClosureOrFrameEdges(outline, WIDE)
   })
 })
