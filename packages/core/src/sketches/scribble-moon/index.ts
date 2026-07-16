@@ -1,0 +1,204 @@
+/**
+ * Scribble Moon's current authored vector representation.
+ *
+ * The smooth procedural target in `source.ts` is reference data, not artwork.
+ * Fill therefore contains only a sparse set of black vector contours derived
+ * from the same fixed layout: the moon, its craters and inner contours, a halo,
+ * a broken ring, and two satellites. The structural builder is intentionally
+ * separate from `generate`; a later Shading Strategy may append Seeded Scribble
+ * paths without making these identifying contours depend on Seed.
+ */
+
+import { createScene } from '../../scene'
+import type { CoordinateSpace, Scene } from '../../scene'
+import type {
+  NumberParamSpec,
+  Params,
+  Seed,
+  StatelessSketch,
+} from '../../sketch'
+import type { Point, Polyline } from '../../types'
+import { numberParam } from '../sketch-util'
+import {
+  pointOnCircle,
+  pointOnEllipseArc,
+  TAU,
+  type ScribbleMoonArc,
+  type ScribbleMoonCircle,
+  type ScribbleMoonEllipseArc,
+} from './geometry'
+import {
+  createScribbleMoonLayout,
+  createScribbleMoonSource,
+} from './source'
+
+export * from './geometry'
+export * from './source'
+
+const FULL_CIRCLE_SEGMENTS = 72
+
+/** The complete Scribble Moon source-control surface. */
+export const scribbleMoonSchema = {
+  /** Direction of the sphere's projected light, in degrees. */
+  lightAngle: {
+    kind: 'number',
+    min: 0,
+    max: 360,
+    default: 25,
+    step: 1,
+  },
+  /** Width of the transition between the lit and dark hemispheres. */
+  terminatorSoftness: {
+    kind: 'number',
+    min: 0,
+    max: 1,
+    default: 0.4,
+    step: 0.01,
+  },
+  /** Separation between light and dark target tones. */
+  toneContrast: {
+    kind: 'number',
+    min: 0,
+    max: 1,
+    default: 0.55,
+    step: 0.01,
+  },
+  /** Width of the inward permission transition at authored boundaries. */
+  maskFeather: {
+    kind: 'number',
+    min: 0,
+    max: 1,
+    default: 0.5,
+    step: 0.01,
+  },
+} satisfies Record<string, NumberParamSpec>
+
+function circlePath(
+  circle: ScribbleMoonCircle,
+  segments = FULL_CIRCLE_SEGMENTS,
+): Polyline {
+  const points: Point[] = []
+  for (let index = 0; index < segments; index += 1) {
+    const point = pointOnCircle(circle, (index / segments) * TAU)
+    points.push([point[0], point[1]])
+  }
+  return points
+}
+
+function segmentCount(startAngle: number, endAngle: number): number {
+  return Math.max(
+    4,
+    Math.ceil(
+      (Math.abs(endAngle - startAngle) / TAU) * FULL_CIRCLE_SEGMENTS,
+    ),
+  )
+}
+
+function circleArcPath(arc: ScribbleMoonArc): Polyline {
+  const segments = segmentCount(arc.startAngle, arc.endAngle)
+  const points: Point[] = []
+  for (let index = 0; index <= segments; index += 1) {
+    const progress = index / segments
+    const angle = arc.startAngle + (arc.endAngle - arc.startAngle) * progress
+    const point = pointOnCircle(arc, angle)
+    points.push([point[0], point[1]])
+  }
+  return points
+}
+
+function ellipseArcPath(arc: ScribbleMoonEllipseArc): Polyline {
+  const segments = segmentCount(arc.startAngle, arc.endAngle)
+  const points: Point[] = []
+  for (let index = 0; index <= segments; index += 1) {
+    const progress = index / segments
+    const angle = arc.startAngle + (arc.endAngle - arc.startAngle) * progress
+    const point = pointOnEllipseArc(arc, angle)
+    points.push([point[0], point[1]])
+  }
+  return points
+}
+
+/**
+ * Build Scribble Moon's fixed identifying contours.
+ *
+ * This helper deliberately accepts only the Composition Frame. In particular,
+ * Seed and the four tonal controls cannot move, add, or remove these paths.
+ */
+export function createScribbleMoonStructuralScene(
+  frame: CoordinateSpace,
+): Scene {
+  const layout = createScribbleMoonLayout(frame)
+  const builder = createScene(frame)
+  const stroke = { color: 'black', width: layout.unit * 0.0015 }
+  const fineStroke = { color: 'black', width: layout.unit * 0.0011 }
+
+  // Broadest context first, then the sphere and its identifying surface marks.
+  builder.addPath(circlePath(layout.halo), {
+    closed: true,
+    stroke: fineStroke,
+  })
+  for (const segment of layout.brokenRingSegments) {
+    builder.addPath(ellipseArcPath(segment), {
+      closed: false,
+      stroke,
+    })
+  }
+  for (const satellite of layout.satellites) {
+    builder.addPath(circlePath(satellite, 24), {
+      closed: true,
+      stroke,
+    })
+  }
+  builder.addPath(circlePath(layout.sphere), {
+    closed: true,
+    stroke,
+  })
+  for (const crater of layout.craters) {
+    builder.addPath(circlePath(crater, 32), {
+      closed: true,
+      stroke: fineStroke,
+    })
+  }
+  for (const contour of layout.structuralContours) {
+    builder.addPath(circleArcPath(contour), {
+      closed: false,
+      stroke: fineStroke,
+    })
+  }
+
+  return builder.build()
+}
+
+/** A static authored moon whose procedural target is available diagnostically. */
+export const scribbleMoon: StatelessSketch = {
+  id: 'scribble-moon',
+  name: 'Scribble Moon',
+  schema: scribbleMoonSchema,
+  generateToneSource(params: Params, frame: CoordinateSpace) {
+    return createScribbleMoonSource(
+      {
+        lightAngle: numberParam(params, scribbleMoonSchema, 'lightAngle'),
+        terminatorSoftness: numberParam(
+          params,
+          scribbleMoonSchema,
+          'terminatorSoftness',
+        ),
+        toneContrast: numberParam(
+          params,
+          scribbleMoonSchema,
+          'toneContrast',
+        ),
+        maskFeather: numberParam(params, scribbleMoonSchema, 'maskFeather'),
+      },
+      frame,
+    )
+  },
+  generate(
+    _params: Params,
+    _seed: Seed,
+    _t: number,
+    frame: CoordinateSpace,
+  ): Scene {
+    return createScribbleMoonStructuralScene(frame)
+  },
+}
