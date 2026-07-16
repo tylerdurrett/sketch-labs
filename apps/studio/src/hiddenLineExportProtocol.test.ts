@@ -259,7 +259,6 @@ describe("hidden-line worker protocol", () => {
         jobKind: "preview",
         owner: "outline-preview",
         jobId: 1,
-        identity: currentIdentity,
         snapshot: {
           completedWorkUnits: 1,
           totalWorkUnits: 2,
@@ -273,7 +272,6 @@ describe("hidden-line worker protocol", () => {
         jobKind: "export",
         owner: "hidden-line-export",
         jobId: 2,
-        identity: currentIdentity,
       }),
     ).toBe(true);
     expect(
@@ -326,7 +324,6 @@ describe("hidden-line worker protocol", () => {
       jobKind: "preview",
       owner: "outline-preview",
       jobId: 1,
-      identity: currentIdentity,
     },
     {
       type: "complete",
@@ -381,7 +378,6 @@ describe("hidden-line worker protocol", () => {
       jobKind: "export",
       owner: "hidden-line-export",
       jobId: 2,
-      identity: currentIdentity,
       snapshot: {
         completedWorkUnits: 3,
         totalWorkUnits: 2,

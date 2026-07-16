@@ -279,8 +279,7 @@ export class HiddenLineCoordinator {
         if (
           event.data.jobId !== active.jobId ||
           event.data.jobKind !== active.jobKind ||
-          event.data.owner !== active.owner ||
-          !outlineComputeIdentitiesEqual(event.data.identity, active.identity)
+          event.data.owner !== active.owner
         ) {
           return;
         }
@@ -290,6 +289,11 @@ export class HiddenLineCoordinator {
         }
         if (event.data.type === "finalizing") {
           this.reportFinalizing(active);
+          return;
+        }
+        if (
+          !outlineComputeIdentitiesEqual(event.data.identity, active.identity)
+        ) {
           return;
         }
         if (event.data.type === "failure") {

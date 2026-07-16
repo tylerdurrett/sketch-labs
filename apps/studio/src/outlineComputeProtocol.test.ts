@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { ParamSchema, Scene } from "@harness/core";
 
 import {
+  createHiddenLineExportSnapshot,
   createOutlineComputeIdentity,
+  isHiddenLineWorkerMessage,
   isOutlineComputeProgress,
   isOutlineComputeRequest,
   isOutlineComputeResponse,
@@ -404,5 +406,110 @@ describe("outline compute protocol guards", () => {
     },
   ])("rejects malformed progress %o", (candidate) => {
     expect(isOutlineComputeProgress(candidate)).toBe(false);
+  });
+
+  it("accepts only exact, identity-free hidden-line status envelopes", () => {
+    const progress = {
+      type: "derivation-progress",
+      jobKind: "export",
+      owner: "hidden-line-export",
+      jobId: 4,
+      snapshot: {
+        completedWorkUnits: 2,
+        totalWorkUnits: 10,
+        terminal: false,
+      },
+    };
+    const finalizing = {
+      type: "finalizing",
+      jobKind: "export",
+      owner: "hidden-line-export",
+      jobId: 4,
+    };
+
+    expect(isHiddenLineWorkerMessage(progress)).toBe(true);
+    expect(isHiddenLineWorkerMessage(finalizing)).toBe(true);
+    expect(Object.keys(progress)).toEqual([
+      "type",
+      "jobKind",
+      "owner",
+      "jobId",
+      "snapshot",
+    ]);
+    expect(Object.keys(finalizing)).toEqual([
+      "type",
+      "jobKind",
+      "owner",
+      "jobId",
+    ]);
+    expect("identity" in progress).toBe(false);
+    expect("identity" in finalizing).toBe(false);
+
+    for (const malformed of [
+      { ...progress, identity: identity() },
+      { ...progress, sourceScene: scene },
+      { ...progress, extra: true },
+      { ...progress, jobKind: "preview" },
+      { ...progress, owner: "outline-preview" },
+      { ...progress, snapshot: { ...progress.snapshot, extra: true } },
+      { ...progress, snapshot: { ...progress.snapshot, terminal: true } },
+      { ...finalizing, identity: identity() },
+      { ...finalizing, sourceScene: scene },
+      { ...finalizing, jobKind: "preview", owner: "outline-preview" },
+      { ...finalizing, extra: true },
+    ]) {
+      expect(isHiddenLineWorkerMessage(malformed)).toBe(false);
+    }
+  });
+
+  it("retains full exact identity validation on hidden-line terminal messages", () => {
+    const current = identity();
+    const snapshot = createHiddenLineExportSnapshot({
+      identity: current,
+      profile: {
+        width: 100,
+        height: 80,
+        insets: { top: 5, right: 5, bottom: 5, left: 5 },
+        includeFrame: false,
+      },
+      metadata: "test",
+      includePaperMargins: true,
+      filename: "test.svg",
+    });
+    const complete = {
+      type: "complete",
+      jobKind: "export",
+      owner: "hidden-line-export",
+      jobId: 4,
+      identity: snapshot.identity,
+      svg: "<svg/>",
+      filename: snapshot.filename,
+      completedOutline: { identity: snapshot.identity, scene },
+    };
+    const failure = {
+      type: "failure",
+      jobKind: "export",
+      owner: "hidden-line-export",
+      jobId: 4,
+      identity: snapshot.identity,
+      error: "failed",
+    };
+
+    expect(isHiddenLineWorkerMessage(complete)).toBe(true);
+    expect(isHiddenLineWorkerMessage(failure)).toBe(true);
+    expect(
+      isHiddenLineWorkerMessage({
+        ...complete,
+        identity: changed((copy) => {
+          copy.sourceScene.primitives[0].points[0][0] = 999;
+        }),
+      }),
+    ).toBe(false);
+    expect(
+      isHiddenLineWorkerMessage({
+        ...failure,
+        identity: { ...snapshot.identity, sourceScene: null },
+      }),
+    ).toBe(false);
   });
 });

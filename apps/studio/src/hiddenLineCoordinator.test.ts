@@ -113,8 +113,6 @@ function progressResponse(
   terminal = false,
 ) {
   const request = worker.request!;
-  const requestIdentity =
-    request.type === "export" ? request.snapshot.identity : request.identity;
   if (request.type === "compute") {
     return {
       type: "progress" as const,
@@ -127,7 +125,6 @@ function progressResponse(
     jobKind: request.jobKind,
     owner: request.owner,
     jobId: request.jobId,
-    identity: requestIdentity,
     snapshot: { completedWorkUnits, totalWorkUnits, terminal },
   };
 }
@@ -448,7 +445,6 @@ describe("HiddenLineCoordinator", () => {
       jobKind: request.jobKind,
       owner: request.owner,
       jobId: request.jobId,
-      identity: request.snapshot.identity,
     };
     worker.emit("message", finalizing);
     worker.emit("message", finalizing);
@@ -489,6 +485,64 @@ describe("HiddenLineCoordinator", () => {
     expect(worker.terminate).not.toHaveBeenCalled();
 
     worker.emit("message", current);
+    await expect(result).resolves.toMatchObject({ status: "success" });
+  });
+
+  it("routes compact export status by id, kind, and owner without touching legacy identity", async () => {
+    const worker = new FakeWorker();
+    const base = exportSnapshot();
+    let sourceSceneReads = 0;
+    const instrumentedIdentity = new Proxy(base.identity, {
+      get(target, property, receiver) {
+        if (property === "sourceScene") sourceSceneReads++;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const snapshot = {
+      ...base,
+      identity: instrumentedIdentity,
+    } as HiddenLineExportSnapshot;
+    const updates = vi.fn();
+    const coordinator = new HiddenLineCoordinator(() => worker);
+    const result = coordinator.startExport(snapshot, updates);
+    const current = progressResponse(worker, 10);
+
+    worker.emit("message", { ...current, jobId: current.jobId + 1 });
+    worker.emit("message", {
+      ...current,
+      jobKind: "preview",
+      owner: "outline-preview",
+    });
+    worker.emit("message", current);
+    worker.emit("message", {
+      type: "finalizing",
+      jobKind: "export",
+      owner: "hidden-line-export",
+      jobId: current.jobId,
+    });
+
+    expect(updates).toHaveBeenCalledTimes(2);
+    expect(updates).toHaveBeenLastCalledWith({ phase: "finalizing" });
+    expect(sourceSceneReads).toBe(0);
+
+    const terminal = exportResponse(worker);
+    const mismatchedIdentity = structuredClone(
+      base.identity,
+    ) as OutlineComputeIdentity;
+    if (mismatchedIdentity.sourceKind !== "legacy-scene") {
+      throw new Error("expected legacy identity");
+    }
+    (mismatchedIdentity.sourceScene.primitives[0]!.points[0] as [number, number])[0] =
+      999;
+    worker.emit("message", {
+      ...terminal,
+      identity: mismatchedIdentity,
+      completedOutline: { identity: mismatchedIdentity, scene: source },
+    });
+    expect(sourceSceneReads).toBeGreaterThan(0);
+    expect(coordinator.busy).toBe(true);
+
+    worker.emit("message", terminal);
     await expect(result).resolves.toMatchObject({ status: "success" });
   });
 
