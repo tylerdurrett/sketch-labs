@@ -9,7 +9,9 @@ import {
   isOutlineComputeResponse,
   mutableScene,
   outlineComputeIdentitiesEqual,
+  type LegacyOutlineComputeIdentity,
   type OutlineComputeIdentity,
+  type SpecializedOutlineComputeIdentity,
 } from "./outlineComputeProtocol";
 
 const schema: ParamSchema = {
@@ -43,7 +45,7 @@ const scene: Scene = {
   ],
 };
 
-function identity(): OutlineComputeIdentity {
+function identity(): LegacyOutlineComputeIdentity {
   return createOutlineComputeIdentity({
     sketchId: "triangles",
     schema,
@@ -57,7 +59,7 @@ function identity(): OutlineComputeIdentity {
   });
 }
 
-function targetedIdentity(): OutlineComputeIdentity {
+function targetedIdentity(): SpecializedOutlineComputeIdentity {
   return createOutlineComputeIdentity({
     sketchId: "triangles",
     schema,
@@ -67,7 +69,6 @@ function targetedIdentity(): OutlineComputeIdentity {
     compositionFrame: { width: 120, height: 90 },
     tolerance: 0.25,
     includeFrame: true,
-    sourceScene: scene,
     outlineTarget: {
       toolWidthMillimeters: 0.3,
       millimetersPerSceneUnit: 0.18,
@@ -77,10 +78,10 @@ function targetedIdentity(): OutlineComputeIdentity {
 
 function changed(
   update: (copy: Record<string, any>) => void,
-): OutlineComputeIdentity {
+): LegacyOutlineComputeIdentity {
   const copy = structuredClone(identity()) as Record<string, any>;
   update(copy);
-  return copy as unknown as OutlineComputeIdentity;
+  return copy as unknown as LegacyOutlineComputeIdentity;
 }
 
 describe("outline compute identity", () => {
@@ -164,6 +165,8 @@ describe("outline compute identity", () => {
     changedMapping.outlineTarget.millimetersPerSceneUnit = 0.2;
 
     expect(Object.isFrozen(target.outlineTarget)).toBe(true);
+    expect(target.sourceKind).toBe("specialized-sketch");
+    expect("sourceScene" in target).toBe(false);
     expect(outlineComputeIdentitiesEqual(target, targetedIdentity())).toBe(true);
     expect(
       outlineComputeIdentitiesEqual(
@@ -260,11 +263,37 @@ describe("outline compute protocol guards", () => {
           compositionFrame: { width: 100, height: 80 },
           tolerance: 0,
           includeFrame: false,
-          sourceScene: scene,
           outlineTarget,
         }),
       ).toThrow(/Outline compute identity contains an invalid value/);
     }
+  });
+
+  it("rejects identities that mix legacy and specialized sources", () => {
+    const mixedSpecialized = structuredClone(targetedIdentity()) as unknown as Record<
+      string,
+      unknown
+    >;
+    mixedSpecialized.sourceScene = scene;
+    const mixedLegacy = structuredClone(identity()) as unknown as Record<
+      string,
+      unknown
+    >;
+    mixedLegacy.outlineTarget = {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    };
+
+    expect(isOutlineComputeRequest({
+      type: "compute",
+      jobId: 1,
+      identity: mixedSpecialized,
+    })).toBe(false);
+    expect(isOutlineComputeRequest({
+      type: "compute",
+      jobId: 1,
+      identity: mixedLegacy,
+    })).toBe(false);
   });
 
   it("rejects unknown hidden-line roles in requests and response Scenes", () => {

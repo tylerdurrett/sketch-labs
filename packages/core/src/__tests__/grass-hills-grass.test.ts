@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import { clamp, lerp } from '../math'
-import { createRandom } from '../random'
 import {
   grassScaleAtY,
   type HillDepthProjection,
@@ -13,6 +12,7 @@ import {
 } from '../sketches/grass-hills/grass'
 import type { GrassHillMask } from '../sketches/grass-hills/grass-placement'
 import type { GrassRootCandidate } from '../sketches/grass-hills/grass-scatter'
+import { createStableScalarRandom } from '../sketches/grass-hills/stable-random'
 
 const PROJECTION: HillDepthProjection = {
   frame: { height: 100 },
@@ -68,7 +68,7 @@ function build(
 describe('grass blade descriptors', () => {
   it('uses exactly four root-local draws in length, width, stiffness, lean order', () => {
     const [descriptor] = build({ roots: [ROOTS[0]!] })
-    const random = createRandom('seed-a-grass-blade-2/3:3')
+    const random = createStableScalarRandom('seed-a-grass-blade-2/3:3')
     const lengthRoll = random.value()
     const widthRoll = random.value()
     const stiffnessRoll = random.value()
@@ -147,7 +147,7 @@ describe('grass blade descriptors', () => {
       mask: fixedMask(100),
     })
 
-    const random = createRandom('seed-a-grass-blade-2/3:3')
+    const random = createStableScalarRandom('seed-a-grass-blade-2/3:3')
     expect(descriptor!.rolls).toEqual({
       length: random.value(),
       width: random.value(),
@@ -225,8 +225,8 @@ describe('grass blade descriptors', () => {
     })
 
     expect(near!.rolls).toEqual(far!.rolls)
-    expect(near!.shape.length / far!.shape.length).toBe(5)
-    expect(near!.shape.width / far!.shape.width).toBe(5)
+    expect(near!.shape.length / far!.shape.length).toBeCloseTo(5)
+    expect(near!.shape.width / far!.shape.width).toBeCloseTo(5)
     expect(near!.shape.stiffness).toBe(far!.shape.stiffness)
     expect(near!.shape.lean).toBe(far!.shape.lean)
   })

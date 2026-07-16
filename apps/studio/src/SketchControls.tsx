@@ -19,6 +19,8 @@ import {
   type Preset,
   type PlotProfile,
   type CoordinateSpace,
+  type OutlineTarget,
+  type Scene,
   type Sketch,
 } from "@harness/core";
 
@@ -106,19 +108,13 @@ function sameParams(
 /** Fixed active fineliner until tool width joins the persisted Plot Profile. */
 const OUTLINE_TOOL_WIDTH_MILLIMETERS = 0.3;
 
-function outlineTargetFor(
+function outlineIdentitySourceFor(
   sketch: Sketch,
   profile: PlotProfile,
   frame: CoordinateSpace,
-):
-  | {
-      outlineTarget: {
-        toolWidthMillimeters: number;
-        millimetersPerSceneUnit: number;
-      };
-    }
-  | Record<string, never> {
-  if (sketch.generateOutlineSource === undefined) return {};
+  sourceScene: Scene,
+): { sourceScene: Scene } | { outlineTarget: OutlineTarget } {
+  if (sketch.generateOutlineSource === undefined) return { sourceScene };
   return {
     outlineTarget: {
       toolWidthMillimeters: OUTLINE_TOOL_WIDTH_MILLIMETERS,
@@ -517,8 +513,12 @@ export function SketchControls({
       compositionFrame,
       tolerance: edit.tolerance,
       includeFrame: edit.profile.includeFrame,
-      sourceScene: capture.scene,
-      ...outlineTargetFor(sketch, edit.profile, compositionFrame),
+      ...outlineIdentitySourceFor(
+        sketch,
+        edit.profile,
+        compositionFrame,
+        capture.scene,
+      ),
     });
     const next = dispatchOutline({
       type: "fill-captured",
@@ -725,11 +725,12 @@ export function SketchControls({
     // A displayed Outline is processed geometry, never a derivation source. Its
     // cache retains the immutable raw identity source for misses and is offered
     // separately as an exact reuse candidate.
-    const sourceScene =
-      displayed.renderMode === "outline"
-        ? cachedOutline === null
-          ? undefined
-          : mutableScene(cachedOutline.identity.sourceScene)
+    const sourceScene = sketch.generateOutlineSource !== undefined
+      ? displayed.scene
+      : displayed.renderMode === "outline"
+        ? cachedOutline?.identity.sourceKind === "legacy-scene"
+          ? mutableScene(cachedOutline.identity.sourceScene)
+          : undefined
         : displayed.scene;
     if (sourceScene === undefined) return;
     const identity = createOutlineComputeIdentity({
@@ -741,8 +742,12 @@ export function SketchControls({
       compositionFrame,
       tolerance: displayed.tolerance,
       includeFrame: displayed.includeFrame,
-      sourceScene,
-      ...outlineTargetFor(sketch, edit.profile, compositionFrame),
+      ...outlineIdentitySourceFor(
+        sketch,
+        edit.profile,
+        compositionFrame,
+        sourceScene,
+      ),
     });
     const t = sketch.time === undefined ? undefined : displayed.t;
     const metadata = buildReproMetadata({

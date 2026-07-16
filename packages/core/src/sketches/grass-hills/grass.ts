@@ -1,5 +1,4 @@
 import { clamp, lerp } from '../../math'
-import { createRandom } from '../../random'
 import type { Seed } from '../../sketch'
 import type { BladeShape } from './blade'
 import { grassScaleAtY } from './depth'
@@ -8,6 +7,7 @@ import {
   type GrassHillMask,
 } from './grass-placement'
 import type { GrassRootCandidate } from './grass-scatter'
+import { createStableScalarRandom } from './stable-random'
 
 /** Fixed seeded micro-lean selected by the issue-305 architecture decision. */
 export const BASELINE_LEAN_VARIATION = 0.32
@@ -95,7 +95,9 @@ export function buildGrassBlades({
 }: BuildGrassBladesOptions): readonly GrassBladeDescriptor[] {
   return Object.freeze(
     roots.map((root) => {
-      const random = createRandom(`${seed}-grass-blade-${root.rootKey}`)
+      const random = createStableScalarRandom(
+        `${seed}-grass-blade-${root.rootKey}`,
+      )
       const rolls = Object.freeze({
         length: random.value(),
         width: random.value(),

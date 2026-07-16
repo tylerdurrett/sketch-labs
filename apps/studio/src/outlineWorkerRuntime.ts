@@ -92,7 +92,7 @@ function mutableProfile(profile: Readonly<PlotProfile>): PlotProfile {
 
 /** Resolve legacy Fill input or a Sketch's optional specialized source. */
 function sourceSceneForIdentity(identity: OutlineComputeIdentity): Scene {
-  if (identity.outlineTarget === undefined) {
+  if (identity.sourceKind === "legacy-scene") {
     return mutableScene(identity.sourceScene);
   }
   const sketch = registry.get(identity.sketchId);

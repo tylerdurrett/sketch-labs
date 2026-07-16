@@ -30,15 +30,18 @@
  * emitted before its blades, whose ascending root-y order lets lower blades
  * cover higher ones before the next, nearer hill covers the whole group.
  *
- * DENSE ARCHITECTURE DECISION (#305; PRODUCTION): the approved
+ * DENSE ARCHITECTURE DECISION (#305; PRODUCTION): the selected
  * full-composition target is 10,000 descriptors from a seeded 100×100
  * stratified bank per stable hill identity. Fill uses curved seven-point closed
  * blades. On-demand Outline/plot derives curved six-point spines from those same
  * descriptors, applies a tool-width deterministic LOD plus nearer-hill masks,
  * retains visible ridges, and gives one processed Scene to preview and SVG.
  * Blade-to-blade Outline occlusion is intentionally perceptual, and plot density
- * may be lower than Fill density. The pinned reference and implementation
- * boundary live under `reference/` and the issue-305 benchmark decision. The
+ * may be lower than Fill density. The artifacts under `reference/` record the
+ * equal-per-hill decision prototype, not the inverse-square production output.
+ * P4 must regenerate and independently approve the production Fill, Outline,
+ * and physical plot before any production reference or wind gate is claimed.
+ * The issue-305 benchmark decision records that boundary. The
  * generic optional Outline-source hook runs this representation only on demand;
  * the legacy sparse closed-blade Hidden-line path remains a debug fallback, not
  * an automatic downgrade for this dense source.
@@ -93,10 +96,10 @@ import { createTerrainField } from './terrain'
 /** Horizontal segments used to resolve each prepared ridgeline. */
 const RIDGE_SAMPLES = 128
 
-/** Live ridge width pinned by the approved issue-305 reference. */
+/** Live ridge width selected by the issue-305 architecture decision. */
 const HILL_STROKE_WIDTH = 1
 
-/** Live blade contour width pinned by the approved issue-305 reference. */
+/** Live blade contour width selected by the issue-305 architecture decision. */
 const BLADE_STROKE_WIDTH = 0.7
 
 /**

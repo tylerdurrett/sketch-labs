@@ -10,6 +10,7 @@ import {
   isHiddenLineWorkerRequest,
   type CompletedOutline,
   type HiddenLineExportSnapshot,
+  type LegacyOutlineComputeIdentity,
   type OutlineComputeIdentity,
 } from "./outlineComputeProtocol";
 
@@ -34,7 +35,7 @@ function sourceScene(): Scene {
   };
 }
 
-function identity(frame = { width: 100, height: 80 }): OutlineComputeIdentity {
+function identity(frame = { width: 100, height: 80 }): LegacyOutlineComputeIdentity {
   return createOutlineComputeIdentity({
     sketchId: "lines",
     schema,
@@ -140,6 +141,10 @@ describe("hidden-line export snapshot", () => {
     expect(captured.profile.insets.left).toBe(10);
     expect(captured.reusableOutline?.scene.space.width).toBe(100);
     expect(captured.reusableOutline?.scene.primitives[0]?.points[0]?.[0]).toBe(1);
+    expect(captured.identity.sourceKind).toBe("legacy-scene");
+    if (captured.identity.sourceKind !== "legacy-scene") {
+      throw new Error("expected legacy identity");
+    }
     expect(captured.identity.sourceScene.primitives[0]?.hiddenLineRole).toBe(
       "source",
     );
