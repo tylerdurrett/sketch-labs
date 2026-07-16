@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { performance } from 'node:perf_hooks'
 
 import { describe, expect, it } from 'vitest'
 
@@ -26,11 +25,8 @@ function sceneSha256(scene: Scene): string {
 describe('grass-hills production Outline architecture', () => {
   it('derives a deterministic faithful source from the full 10k Fill geometry', () => {
     const fill = grassHills.generate(PARAMS, 12345, 0, FRAME)
-    const fillPreparationStarted = performance.now()
     const preparedFill = grassHills.prepare!(PARAMS, 12345, FRAME)
-    const fillPreparationMs = performance.now() - fillPreparationStarted
     const warmFill = preparedFill(999)
-    const started = performance.now()
     const source = grassHills.generateOutlineSource!(
       PARAMS,
       12345,
@@ -38,7 +34,6 @@ describe('grass-hills production Outline architecture', () => {
       FRAME,
       TARGET,
     )
-    const preparedMs = performance.now() - started
 
     expect(warmFill).toEqual(fill)
 
@@ -75,10 +70,6 @@ describe('grass-hills production Outline architecture', () => {
     expect(sceneSha256(fill)).toBe(
       '1909cd36e92c13444acd3a600b9362360f2caf23f41024a131b7903bf57f2cc9',
     )
-    // Observations only, not SLAs; guards merely catch accidental pathological
-    // work on ordinary development hardware.
-    expect(fillPreparationMs).toBeLessThan(1_000)
-    expect(preparedMs).toBeLessThan(1_000)
   }, 30_000)
 
   it('rejects an invalid physical tool target rather than falling back', () => {

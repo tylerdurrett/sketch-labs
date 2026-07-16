@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "referenceId": "grass-hills-faithful-visible-line",
-  "status": "awaiting-independent-paired-fidelity-review",
+  "status": "generated-evidence-with-separate-review-attestation",
   "pipeline": [
     "production prepared Fill sample",
     "exact Fill-derived role annotation",
@@ -203,9 +203,9 @@
           "outline.svg",
           "physical-plot.svg"
         ],
-        "verdict": "PENDING-INDEPENDENT-REVIEW",
-        "reviewer": null,
-        "provenance": "generated from this scenario exact Scene values in the same run"
+        "status": "RECORDED-SEPARATELY",
+        "attestationFile": "review-attestation.json",
+        "provenance": "Generated artifacts and hashes are review inputs; reviewer identity and verdict live only in the separate attestation."
       }
     },
     "supportedCeiling50k": {
@@ -397,21 +397,16 @@
           "supported-ceiling-50k-fill-outline-contact-sheet.png"
         ],
         "boundedReviewRationale": "Lossless 900x900 PNG projections and a paired contact sheet are committed; exact full vector/Scene hashes are pinned here and the reproduction command writes those large duplicate values outside git.",
-        "verdict": "PENDING-INDEPENDENT-REVIEW",
-        "reviewer": null,
-        "provenance": "generated from this scenario exact Scene values in the same run"
+        "status": "RECORDED-SEPARATELY",
+        "attestationFile": "review-attestation.json",
+        "provenance": "Generated artifacts and hashes are review inputs; reviewer identity and verdict live only in the separate attestation."
       }
     }
   },
   "review": {
-    "verdict": "PENDING-INDEPENDENT-REVIEW",
-    "reviewer": null,
-    "provenance": "A reviewer other than the implementation agent must compare Fill and Outline as a pair; generation does not self-approve fidelity.",
-    "rubric": {
-      "adopted10kFillToOutlineFidelity": "PENDING",
-      "supportedCeiling50kFillToOutlineFidelity": "PENDING",
-      "physicalPlotLegibility": "PENDING"
-    }
+    "status": "RECORDED-SEPARATELY",
+    "attestationFile": "review-attestation.json",
+    "provenance": "Generated evidence never writes reviewer identity or verdict; the separately maintained attestation records the independent comparative review."
   },
   "reproduction": {
     "workingDirectory": "repository root",

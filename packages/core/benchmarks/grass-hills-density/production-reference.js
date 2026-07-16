@@ -28,6 +28,7 @@ export const PRODUCTION_OUTLINE_TOLERANCE = 0
 export const ADOPTED_BLADE_DENSITY = 2
 export const CEILING_BLADE_DENSITY = 10
 export const REVIEW_RASTER_SIZE = 900
+export const PRODUCTION_REVIEW_ATTESTATION_FILE = 'review-attestation.json'
 
 const REPRODUCTION_COMMANDS = Object.freeze([
   'node packages/core/benchmarks/grass-hills-density/bundle-cli.js --entry=packages/core/benchmarks/grass-hills-density/production-reference-cli.js --out=/tmp/issue-309-production-reference-cli.mjs',
@@ -249,9 +250,9 @@ export function productionReferenceManifest(
   generated = generateProductionReference(),
 ) {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     referenceId: PRODUCTION_REFERENCE_ID,
-    status: 'awaiting-independent-paired-fidelity-review',
+    status: 'generated-evidence-with-separate-review-attestation',
     pipeline: [
       'production prepared Fill sample',
       'exact Fill-derived role annotation',
@@ -282,15 +283,10 @@ export function productionReferenceManifest(
       }),
     },
     review: {
-      verdict: 'PENDING-INDEPENDENT-REVIEW',
-      reviewer: null,
+      status: 'RECORDED-SEPARATELY',
+      attestationFile: PRODUCTION_REVIEW_ATTESTATION_FILE,
       provenance:
-        'A reviewer other than the implementation agent must compare Fill and Outline as a pair; generation does not self-approve fidelity.',
-      rubric: {
-        adopted10kFillToOutlineFidelity: 'PENDING',
-        supportedCeiling50kFillToOutlineFidelity: 'PENDING',
-        physicalPlotLegibility: 'PENDING',
-      },
+        'Generated evidence never writes reviewer identity or verdict; the separately maintained attestation records the independent comparative review.',
     },
     reproduction: {
       workingDirectory: 'repository root',
@@ -304,10 +300,10 @@ function scenarioManifest(scenario, review) {
     ...scenario.deterministic,
     review: {
       ...review,
-      verdict: 'PENDING-INDEPENDENT-REVIEW',
-      reviewer: null,
+      status: 'RECORDED-SEPARATELY',
+      attestationFile: PRODUCTION_REVIEW_ATTESTATION_FILE,
       provenance:
-        'generated from this scenario exact Scene values in the same run',
+        'Generated artifacts and hashes are review inputs; reviewer identity and verdict live only in the separate attestation.',
     },
   }
 }

@@ -5,8 +5,12 @@
 The production-equivalent Fill → exact Fill-derived Outline source → indexed
 Hidden-line → bounds/profile/serialization pipeline completed at both the
 adopted 10,000-blade Preset and the supported 50,000-blade ceiling. This is an
-implementation evidence record, not a visual approval: the paired fidelity
-verdict remains `PENDING-INDEPENDENT-REVIEW` in the manifest.
+implementation evidence record. Independent reviewer `/root/review_309_h`
+subsequently returned an explicit comparative **PASS** for both the adopted 10k
+and supported 50k pairs. That human/agent-owned result and the exact evidence
+hashes are durable in `reference/review-attestation.json`; generated
+`manifest.json` contains only a stable pointer to it and never overwrites the
+attestation.
 
 The harness has no alternative centerline, physical-tool LOD, density reduction,
 or proxy-mask route. Runtime guards require every sampled Fill primitive to
@@ -72,22 +76,22 @@ geometry and artifacts but contain no elapsed-time assertions.
 
 | Duration (ms) | Adopted 10k | Supported 50k ceiling |
 | --- | ---: | ---: |
-| Preparation | `109.05` | `187.95` |
-| Fill sampling | `16.35` | `33.44` |
-| Fill-derived source | `5.06` | `13.05` |
-| Standalone plan analysis | `102.99` | `728.11` |
-| Indexed Hidden-line, including its own plan | `426.55` | `4,012.36` |
-| Fill / Outline bounds clipping | `4.07 / 8.15` | `12.52 / 18.77` |
-| Fill / Outline / physical serialization | `21.65 / 28.53 / 28.60` | `106.83 / 170.38 / 159.02` |
-| Complete evidence scenario | `2,576.16` | `9,211.76` |
+| Preparation | `119.96` | `182.93` |
+| Fill sampling | `16.84` | `33.92` |
+| Fill-derived source | `5.63` | `13.41` |
+| Standalone plan analysis | `115.74` | `735.26` |
+| Indexed Hidden-line, including its own plan | `403.34` | `3,923.66` |
+| Fill / Outline bounds clipping | `3.47 / 10.80` | `12.80 / 19.12` |
+| Fill / Outline / physical serialization | `24.19 / 27.14 / 29.25` | `105.64 / 179.48 / 165.83` |
+| Complete evidence scenario | `2,620.60` | `9,187.83` |
 
 The scenario total also includes deterministic review rasterization/contact-sheet
-work. Stage-sampled RSS peaked at `431,046,656` bytes for 10k and
-`1,252,442,112` bytes for 50k; sampled heap used peaked at `286,054,640` and
-`993,262,896` bytes. `process.resourceUsage()` reported process-lifetime maximum
-RSS of `462,929,920` and `1,425,391,616` bytes at the end of each scenario. The
-outer `/usr/bin/time -lp` run observed `1,495,990,272` bytes maximum RSS for the
-complete two-scenario process. The raw stage samples are committed in
+work. Stage-sampled RSS peaked at `441,679,872` bytes for 10k and
+`1,269,956,608` bytes for 50k; sampled heap used peaked at `281,354,632` and
+`993,335,664` bytes. `process.resourceUsage()` reported process-lifetime maximum
+RSS of `497,729,536` and `1,448,869,888` bytes at the end of each scenario. A
+separate outer `/usr/bin/time -lp` run observed `1,495,990,272` bytes maximum RSS
+for the complete two-scenario process. The raw stage samples are committed in
 `reference/observations.json`.
 
 ## Reproduction and review handoff
@@ -108,6 +112,6 @@ node --expose-gc /tmp/issue-309-production-reference-cli.mjs \
 ```
 
 The third command writes the exact 50k Fill/Outline/physical SVGs and clipped
-Scene JSON values outside git. An independent reviewer should compare each Fill
-and Outline as one pair, check the physical plot, and replace the manifest's
-placeholder only after that paired gate. Generation itself never writes a PASS.
+Scene JSON values outside git. Regeneration intentionally does not write or
+modify `review-attestation.json`: generated evidence and independent attestation
+remain separate, so reproducibility cannot erase reviewer provenance.

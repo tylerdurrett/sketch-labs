@@ -8,6 +8,7 @@ import {
   CEILING_BLADE_DENSITY,
   PRODUCTION_OUTLINE_TOLERANCE,
   PRODUCTION_REFERENCE_ID,
+  PRODUCTION_REVIEW_ATTESTATION_FILE,
   generateProductionReference,
   productionReferenceManifest,
 } from './production-reference.js'
@@ -31,9 +32,9 @@ describe('Grass Hills faithful production evidence', () => {
       manifestBytes,
     )
     expect(manifest).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       referenceId: PRODUCTION_REFERENCE_ID,
-      status: 'awaiting-independent-paired-fidelity-review',
+      status: 'generated-evidence-with-separate-review-attestation',
       qualityFallbackPolicy: { allowed: false },
       scenarios: {
         adopted10k: {
@@ -49,7 +50,10 @@ describe('Grass Hills faithful production evidence', () => {
             physicalToolRootRejection: false,
             representationFallbackDetected: false,
           },
-          review: { verdict: 'PENDING-INDEPENDENT-REVIEW' },
+          review: {
+            status: 'RECORDED-SEPARATELY',
+            attestationFile: PRODUCTION_REVIEW_ATTESTATION_FILE,
+          },
         },
         supportedCeiling50k: {
           preset: { params: { bladeDensity: CEILING_BLADE_DENSITY } },
@@ -63,10 +67,16 @@ describe('Grass Hills faithful production evidence', () => {
             physicalToolRootRejection: false,
             representationFallbackDetected: false,
           },
-          review: { verdict: 'PENDING-INDEPENDENT-REVIEW' },
+          review: {
+            status: 'RECORDED-SEPARATELY',
+            attestationFile: PRODUCTION_REVIEW_ATTESTATION_FILE,
+          },
         },
       },
-      review: { verdict: 'PENDING-INDEPENDENT-REVIEW', reviewer: null },
+      review: {
+        status: 'RECORDED-SEPARATELY',
+        attestationFile: PRODUCTION_REVIEW_ATTESTATION_FILE,
+      },
     })
 
     const committed = {
@@ -142,6 +152,44 @@ describe('Grass Hills faithful production evidence', () => {
       expect(scenario.durationsMs.total).toBeGreaterThan(0)
       expect(scenario.memory.peakObservedRssBytes).toBeGreaterThan(0)
       expect(scenario.memory.processLifetimeMaxRssBytes).toBeGreaterThan(0)
+    }
+  })
+
+  it('keeps independent comparative review in a durable non-generated attestation', () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL('manifest.json', referenceDirectory), 'utf8'),
+    )
+    const attestation = JSON.parse(
+      readFileSync(
+        new URL(PRODUCTION_REVIEW_ATTESTATION_FILE, referenceDirectory),
+        'utf8',
+      ),
+    )
+
+    expect(attestation).toMatchObject({
+      schemaVersion: 1,
+      referenceId: PRODUCTION_REFERENCE_ID,
+      reviewer: '/root/review_309_h',
+      independence: 'reviewer was separate from the implementation agent',
+      verdict: 'PASS',
+      comparativeFidelity: {
+        adopted10k: { verdict: 'PASS' },
+        supportedCeiling50k: { verdict: 'PASS' },
+      },
+    })
+    expect(manifest.review).toEqual({
+      status: 'RECORDED-SEPARATELY',
+      attestationFile: PRODUCTION_REVIEW_ATTESTATION_FILE,
+      provenance:
+        'Generated evidence never writes reviewer identity or verdict; the separately maintained attestation records the independent comparative review.',
+    })
+
+    for (const evidence of Object.values(attestation.comparativeFidelity)) {
+      for (const artifact of evidence.visualEvidence) {
+        const bytes = readFileSync(new URL(artifact.file, referenceDirectory))
+        expect(bytes.byteLength).toBe(artifact.bytes)
+        expect(sha256(bytes)).toBe(artifact.sha256)
+      }
     }
   })
 })
