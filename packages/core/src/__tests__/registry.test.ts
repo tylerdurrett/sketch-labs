@@ -5,6 +5,7 @@ import {
   grassHills,
   registry,
   scribbleMoon,
+  toneCalibration,
 } from '../index'
 import { circles } from '../sketches/circles'
 import type { Sketch } from '../sketch'
@@ -52,15 +53,27 @@ describe('the default registry', () => {
     expect(registry.list().filter((sketch) => sketch === grassHills)).toEqual([grassHills])
   })
 
-  it('exports and registers Scribble Moon exactly once as the newest Sketch', () => {
+  it('exports and registers Scribble Moon exactly once', () => {
     expect(scribbleMoon.id).toBe('scribble-moon')
     expect(scribbleMoon.name).toBe('Scribble Moon')
     expect(registry.get('scribble-moon')).toBe(scribbleMoon)
     expect(
       registry.list().filter((sketch) => sketch === scribbleMoon),
     ).toEqual([scribbleMoon])
-    expect(registry.list().at(-1)).toBe(scribbleMoon)
   })
+
+  it(
+    'exports and registers Tone Calibration exactly once as the newest Sketch',
+    () => {
+      expect(toneCalibration.id).toBe('tone-calibration')
+      expect(toneCalibration.name).toBe('Tone Calibration')
+      expect(registry.get('tone-calibration')).toBe(toneCalibration)
+      expect(
+        registry.list().filter((sketch) => sketch === toneCalibration),
+      ).toEqual([toneCalibration])
+      expect(registry.list().at(-1)).toBe(toneCalibration)
+    },
+  )
 
   it('registers every built-in under a unique id and display name', () => {
     const sketches = registry.list()
