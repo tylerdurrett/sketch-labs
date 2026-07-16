@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createRegistry, registry } from '../registry'
+import { createRegistry, grassHills, registry } from '../index'
 import { circles } from '../sketches/circles'
 import type { Sketch } from '../sketch'
 
@@ -40,8 +40,18 @@ describe('the default registry', () => {
     expect(registry.list()).toContain(circles)
   })
 
-  it('registers every built-in under a unique id', () => {
-    const ids = registry.list().map((sketch) => sketch.id)
+  it('exposes grass hills through the public catalog exactly once', () => {
+    expect(grassHills.id).toBe('grass-hills')
+    expect(grassHills.name).toBe('Grass Hills')
+    expect(registry.get('grass-hills')).toBe(grassHills)
+    expect(registry.list().filter((sketch) => sketch === grassHills)).toEqual([grassHills])
+  })
+
+  it('registers every built-in under a unique id and display name', () => {
+    const sketches = registry.list()
+    const ids = sketches.map((sketch) => sketch.id)
+    const names = sketches.map((sketch) => sketch.name)
     expect(new Set(ids).size).toBe(ids.length)
+    expect(new Set(names).size).toBe(names.length)
   })
 })

@@ -1,6 +1,8 @@
 import {
   clipSceneToBounds,
+  registry,
   renderPlotterSVG,
+  type Params,
   type PlotProfile,
   type Scene,
 } from "@harness/core";
@@ -16,6 +18,7 @@ import {
   type OutlineComputeFailure,
   type OutlineComputeProgress,
   type OutlineComputeResponse,
+  type OutlineComputeIdentity,
 } from "./outlineComputeProtocol";
 import { outlineScene } from "./outlineScene";
 
@@ -87,6 +90,36 @@ function mutableProfile(profile: Readonly<PlotProfile>): PlotProfile {
   };
 }
 
+/** Resolve legacy Fill input or a Sketch's optional specialized source. */
+function sourceSceneForIdentity(identity: OutlineComputeIdentity): Scene {
+  if (identity.sourceKind === "legacy-scene") {
+    return mutableScene(identity.sourceScene);
+  }
+  const sketch = registry.get(identity.sketchId);
+  if (sketch.generateOutlineSource === undefined) {
+    throw new Error(
+      `Sketch ${identity.sketchId} has no specialized Outline source`,
+    );
+  }
+
+  const params: Params = {};
+  for (const entry of identity.params) params[entry.key] = entry.value;
+  return sketch.generateOutlineSource(
+    params,
+    identity.seed,
+    identity.sampledT,
+    {
+      width: identity.compositionFrame.width,
+      height: identity.compositionFrame.height,
+    },
+    {
+      toolWidthMillimeters: identity.outlineTarget.toolWidthMillimeters,
+      millimetersPerSceneUnit:
+        identity.outlineTarget.millimetersPerSceneUnit,
+    },
+  );
+}
+
 /**
  * Execute the typed preview/export protocol. Export owns only pure derivation
  * and serialization; Blob construction and downloading remain on the main
@@ -131,7 +164,7 @@ export function handleHiddenLineWorkerMessage(
         jobId: value.jobId,
         identity,
         scene: derive(
-          mutableScene(identity.sourceScene),
+          sourceSceneForIdentity(identity),
           identity.tolerance,
           identity.includeFrame,
           report,
@@ -146,7 +179,7 @@ export function handleHiddenLineWorkerMessage(
     const completedScene: Scene =
       value.snapshot.reusableOutline === undefined
         ? derive(
-            mutableScene(identity.sourceScene),
+            sourceSceneForIdentity(identity),
             identity.tolerance,
             identity.includeFrame,
             report,
@@ -216,7 +249,7 @@ export function handleOutlineWorkerMessage(
       jobId: value.jobId,
       identity: value.identity,
       scene: derive(
-        mutableScene(value.identity.sourceScene),
+        sourceSceneForIdentity(value.identity),
         value.identity.tolerance,
         value.identity.includeFrame,
         emitProgress === undefined

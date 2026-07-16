@@ -1,0 +1,618 @@
+{
+  "recordedAt": "2026-07-15",
+  "evidence": {
+    "campaignRaw": {
+      "file": "simplified-screen-2026-07-15.campaign-raw.json",
+      "contract": "verbatim protocol envelope with every timing/memory sample and collector result"
+    },
+    "browserRaw": {
+      "file": "simplified-screen-2026-07-15.browser-raw.json",
+      "contract": "verbatim Chrome envelope with every load, first draw, and redraw sample"
+    }
+  },
+  "campaign": {
+    "protocolVersion": 1,
+    "mode": "screen",
+    "policy": {
+      "timeoutMs": 90000,
+      "memoryMiB": 1024,
+      "samples": {
+        "preparation": 3,
+        "cold": 3,
+        "warm": 12,
+        "warmups": 1
+      }
+    },
+    "candidateBundle": "generated; not committed",
+    "resultCount": 8,
+    "okCount": 8,
+    "censoredCount": 0,
+    "runtime": {
+      "pid": 46761,
+      "node": "v23.9.0",
+      "platform": "darwin",
+      "arch": "arm64",
+      "hostname": "Tdogss-MacBook-Pro.local",
+      "osRelease": "24.6.0",
+      "cpuModel": "Apple M2 Max",
+      "logicalCpuCount": 12,
+      "totalMemoryBytes": 68719476736,
+      "freeMemoryBytesAtCapture": 2742894592
+    }
+  },
+  "browser": {
+    "harness": "core drawSceneFitted",
+    "canvas": {
+      "width": 1000,
+      "height": 1000
+    },
+    "machine": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/144.0.0.0 Safari/537.36",
+      "platform": "macOS",
+      "logicalCpuCount": 12,
+      "deviceMemoryGiB": 8,
+      "devicePixelRatio": 1
+    },
+    "redrawsPerScene": 12,
+    "observationCount": 16
+  },
+  "results": [
+    {
+      "fixtureId": "historical-baseline-400--hill-only--same-density",
+      "status": "ok",
+      "variant": {
+        "occluderMode": "hill-only",
+        "densityMode": "same-density"
+      },
+      "phaseMedianMs": {
+        "preparation": 185.679958,
+        "cold": 183.70904200000007,
+        "warm": 3.9547919999999976
+      },
+      "maxRssMiB": 154.078125,
+      "representation": {
+        "bladeCount": 400,
+        "tuftCount": 83,
+        "processedRootCount": 400
+      },
+      "source": {
+        "primitiveCount": 400,
+        "pointCount": 2400,
+        "checksum": "9a6d66351d2bb63cd3eb6e4580b325e501cd9d7d009473a864af806dc03d33b0",
+        "serializedBytes": 119311,
+        "structuralCanvasSubmissionMs": 0.3237500000000182
+      },
+      "processing": {
+        "durationMs": 3.5704580000001442,
+        "primitiveCount": 395,
+        "pointCount": 2247,
+        "checksum": "eb934e6c494ae0a75792793a89f4ff7e92eb4d79a9abfd5edf0d6fd48f385bfd"
+      },
+      "plotter": {
+        "pathCount": 395,
+        "svgBytes": 63815,
+        "serializationMs": 1.2468330000001515
+      },
+      "physicalSpacing": {
+        "nibWidthMillimeters": 0.3,
+        "rootMinimumMillimeters": 0.05603345402556904,
+        "rootMedianMillimeters": 0.3739528885233143,
+        "pathClearanceMedianMillimeters": 0.2878879035433738,
+        "collidingPathPairCount": 115
+      },
+      "browser": {
+        "source": {
+          "checksum": "9a6d66351d2bb63cd3eb6e4580b325e501cd9d7d009473a864af806dc03d33b0",
+          "primitiveCount": 400,
+          "pointCount": 2400,
+          "serializedBytes": 119311,
+          "loadMs": 5.200000047683716,
+          "firstDrawMs": 0.39999985694885254,
+          "redrawMedianMs": 0.2999999523162842,
+          "redrawMinMs": 0.19999980926513672,
+          "redrawMaxMs": 0.40000009536743164
+        },
+        "processed": {
+          "checksum": "eb934e6c494ae0a75792793a89f4ff7e92eb4d79a9abfd5edf0d6fd48f385bfd",
+          "primitiveCount": 395,
+          "pointCount": 2247,
+          "serializedBytes": 113316,
+          "loadMs": 4.300000190734863,
+          "firstDrawMs": 0.2999999523162842,
+          "redrawMedianMs": 0.20000004768371582,
+          "redrawMinMs": 0.09999990463256836,
+          "redrawMaxMs": 0.3000001907348633
+        }
+      }
+    },
+    {
+      "fixtureId": "one-hill-5000--hill-only--same-density",
+      "status": "ok",
+      "variant": {
+        "occluderMode": "hill-only",
+        "densityMode": "same-density"
+      },
+      "phaseMedianMs": {
+        "preparation": 2193.782375,
+        "cold": 2236.9017079999994,
+        "warm": 11.86724999999933
+      },
+      "maxRssMiB": 194.328125,
+      "representation": {
+        "bladeCount": 5000,
+        "tuftCount": 1000,
+        "processedRootCount": 5000
+      },
+      "source": {
+        "primitiveCount": 5000,
+        "pointCount": 30000,
+        "checksum": "4d84d096c90f1be0b1d081bc6b377a6dd65db700409f3bc6d15c009a0dc4719f",
+        "serializedBytes": 1520482,
+        "structuralCanvasSubmissionMs": 1.131667000001471
+      },
+      "processing": {
+        "durationMs": 9.610833999999159,
+        "primitiveCount": 5000,
+        "pointCount": 30000,
+        "checksum": "622c399e9adc11ddf17ef472c9ef72e7d93a0634751c53ee00b9ff02e0c88f67"
+      },
+      "plotter": {
+        "pathCount": 5000,
+        "svgBytes": 869369,
+        "serializationMs": 22.743249999999534
+      },
+      "physicalSpacing": {
+        "nibWidthMillimeters": 0.3,
+        "rootMinimumMillimeters": 0.0379427446007821,
+        "rootMedianMillimeters": 0.9084867271130492,
+        "pathClearanceMedianMillimeters": 0.24130717190604856,
+        "collidingPathPairCount": 3514
+      },
+      "browser": {
+        "source": {
+          "checksum": "4d84d096c90f1be0b1d081bc6b377a6dd65db700409f3bc6d15c009a0dc4719f",
+          "primitiveCount": 5000,
+          "pointCount": 30000,
+          "serializedBytes": 1520482,
+          "loadMs": 24.5,
+          "firstDrawMs": 1.4000000953674316,
+          "redrawMedianMs": 1.3999998569488525,
+          "redrawMinMs": 1.1999998092651367,
+          "redrawMaxMs": 6.8999998569488525
+        },
+        "processed": {
+          "checksum": "622c399e9adc11ddf17ef472c9ef72e7d93a0634751c53ee00b9ff02e0c88f67",
+          "primitiveCount": 5000,
+          "pointCount": 30000,
+          "serializedBytes": 1520449,
+          "loadMs": 18,
+          "firstDrawMs": 1,
+          "redrawMedianMs": 1,
+          "redrawMinMs": 1,
+          "redrawMaxMs": 6.5
+        }
+      }
+    },
+    {
+      "fixtureId": "historical-baseline-400--hill-only--plotter-lod",
+      "status": "ok",
+      "variant": {
+        "occluderMode": "hill-only",
+        "densityMode": "plotter-lod"
+      },
+      "phaseMedianMs": {
+        "preparation": 181.830417,
+        "cold": 184.58966699999996,
+        "warm": 3.4362089999999625
+      },
+      "maxRssMiB": 145.828125,
+      "representation": {
+        "bladeCount": 400,
+        "tuftCount": 83,
+        "processedRootCount": 324
+      },
+      "source": {
+        "primitiveCount": 400,
+        "pointCount": 2400,
+        "checksum": "9a6d66351d2bb63cd3eb6e4580b325e501cd9d7d009473a864af806dc03d33b0",
+        "serializedBytes": 119311,
+        "structuralCanvasSubmissionMs": 0.3341249999998581
+      },
+      "processing": {
+        "durationMs": 3.2125840000003336,
+        "primitiveCount": 320,
+        "pointCount": 1812,
+        "checksum": "51f43570c1384e26f826d7da6762442e82baf0eafa24209576ea48e1150b2892"
+      },
+      "plotter": {
+        "pathCount": 320,
+        "svgBytes": 51339,
+        "serializationMs": 1.0252909999999247
+      },
+      "physicalSpacing": {
+        "nibWidthMillimeters": 0.3,
+        "rootMinimumMillimeters": 0.3030026316951817,
+        "rootMedianMillimeters": 0.5602700124131442,
+        "pathClearanceMedianMillimeters": 0.47207130356758625,
+        "collidingPathPairCount": 28
+      },
+      "browser": {
+        "source": {
+          "checksum": "9a6d66351d2bb63cd3eb6e4580b325e501cd9d7d009473a864af806dc03d33b0",
+          "primitiveCount": 400,
+          "pointCount": 2400,
+          "serializedBytes": 119311,
+          "loadMs": 2.700000047683716,
+          "firstDrawMs": 0.09999990463256836,
+          "redrawMedianMs": 0.09999990463256836,
+          "redrawMinMs": 0,
+          "redrawMaxMs": 0.20000004768371582
+        },
+        "processed": {
+          "checksum": "51f43570c1384e26f826d7da6762442e82baf0eafa24209576ea48e1150b2892",
+          "primitiveCount": 320,
+          "pointCount": 1812,
+          "serializedBytes": 90298,
+          "loadMs": 2.1000001430511475,
+          "firstDrawMs": 0.09999990463256836,
+          "redrawMedianMs": 0.09999990463256836,
+          "redrawMinMs": 0,
+          "redrawMaxMs": 0.10000014305114746
+        }
+      }
+    },
+    {
+      "fixtureId": "one-hill-5000--hill-only--plotter-lod",
+      "status": "ok",
+      "variant": {
+        "occluderMode": "hill-only",
+        "densityMode": "plotter-lod"
+      },
+      "phaseMedianMs": {
+        "preparation": 2222.2776669999994,
+        "cold": 2245.675583,
+        "warm": 11.703750000000582
+      },
+      "maxRssMiB": 186.078125,
+      "representation": {
+        "bladeCount": 5000,
+        "tuftCount": 1000,
+        "processedRootCount": 4863
+      },
+      "source": {
+        "primitiveCount": 5000,
+        "pointCount": 30000,
+        "checksum": "4d84d096c90f1be0b1d081bc6b377a6dd65db700409f3bc6d15c009a0dc4719f",
+        "serializedBytes": 1520482,
+        "structuralCanvasSubmissionMs": 1.3098749999990105
+      },
+      "processing": {
+        "durationMs": 10.39549999999872,
+        "primitiveCount": 4863,
+        "pointCount": 29178,
+        "checksum": "dabbe95e9dd0cd28d0dbc0c65e339b4456c7da075554ad286a5ea5f2cf612bb9"
+      },
+      "plotter": {
+        "pathCount": 4863,
+        "svgBytes": 845702,
+        "serializationMs": 23.871291999999812
+      },
+      "physicalSpacing": {
+        "nibWidthMillimeters": 0.3,
+        "rootMinimumMillimeters": 0.30244230969043046,
+        "rootMedianMillimeters": 0.939502837507083,
+        "pathClearanceMedianMillimeters": 0.2601212614015447,
+        "collidingPathPairCount": 3174
+      },
+      "browser": {
+        "source": {
+          "checksum": "4d84d096c90f1be0b1d081bc6b377a6dd65db700409f3bc6d15c009a0dc4719f",
+          "primitiveCount": 5000,
+          "pointCount": 30000,
+          "serializedBytes": 1520482,
+          "loadMs": 16.700000047683716,
+          "firstDrawMs": 1,
+          "redrawMedianMs": 1.0999999046325684,
+          "redrawMinMs": 0.8999998569488525,
+          "redrawMaxMs": 5.8999998569488525
+        },
+        "processed": {
+          "checksum": "dabbe95e9dd0cd28d0dbc0c65e339b4456c7da075554ad286a5ea5f2cf612bb9",
+          "primitiveCount": 4863,
+          "pointCount": 29178,
+          "serializedBytes": 1478338,
+          "loadMs": 16.90000009536743,
+          "firstDrawMs": 1,
+          "redrawMedianMs": 1,
+          "redrawMinMs": 0.8999998569488525,
+          "redrawMaxMs": 5.6000001430511475
+        }
+      }
+    },
+    {
+      "fixtureId": "historical-baseline-400--hill-and-clump--same-density",
+      "status": "ok",
+      "variant": {
+        "occluderMode": "hill-and-clump",
+        "densityMode": "same-density"
+      },
+      "phaseMedianMs": {
+        "preparation": 184.034042,
+        "cold": 198.17466699999989,
+        "warm": 4.805666999999858
+      },
+      "maxRssMiB": 175.15625,
+      "representation": {
+        "bladeCount": 400,
+        "tuftCount": 83,
+        "processedRootCount": 400
+      },
+      "source": {
+        "primitiveCount": 400,
+        "pointCount": 2400,
+        "checksum": "9a6d66351d2bb63cd3eb6e4580b325e501cd9d7d009473a864af806dc03d33b0",
+        "serializedBytes": 119311,
+        "structuralCanvasSubmissionMs": 0.31062500000007276
+      },
+      "processing": {
+        "durationMs": 4.821875000000091,
+        "primitiveCount": 395,
+        "pointCount": 2246,
+        "checksum": "0d02500a974c1c648fad5f632e7b13529eb996dcf96c78ed61ab3bf8284d6f58"
+      },
+      "plotter": {
+        "pathCount": 395,
+        "svgBytes": 63795,
+        "serializationMs": 1.2036250000001019
+      },
+      "physicalSpacing": {
+        "nibWidthMillimeters": 0.3,
+        "rootMinimumMillimeters": 0.05603345402556904,
+        "rootMedianMillimeters": 0.3739528885233143,
+        "pathClearanceMedianMillimeters": 0.2878879035433738,
+        "collidingPathPairCount": 115
+      },
+      "browser": {
+        "source": {
+          "checksum": "9a6d66351d2bb63cd3eb6e4580b325e501cd9d7d009473a864af806dc03d33b0",
+          "primitiveCount": 400,
+          "pointCount": 2400,
+          "serializedBytes": 119311,
+          "loadMs": 3.5,
+          "firstDrawMs": 0,
+          "redrawMedianMs": 0.09999990463256836,
+          "redrawMinMs": 0,
+          "redrawMaxMs": 0.20000004768371582
+        },
+        "processed": {
+          "checksum": "0d02500a974c1c648fad5f632e7b13529eb996dcf96c78ed61ab3bf8284d6f58",
+          "primitiveCount": 395,
+          "pointCount": 2246,
+          "serializedBytes": 113283,
+          "loadMs": 2.0999999046325684,
+          "firstDrawMs": 0.10000014305114746,
+          "redrawMedianMs": 0.09999990463256836,
+          "redrawMinMs": 0,
+          "redrawMaxMs": 0.10000014305114746
+        }
+      }
+    },
+    {
+      "fixtureId": "one-hill-5000--hill-and-clump--same-density",
+      "status": "ok",
+      "variant": {
+        "occluderMode": "hill-and-clump",
+        "densityMode": "same-density"
+      },
+      "phaseMedianMs": {
+        "preparation": 2243.0642089999997,
+        "cold": 2267.0139579999995,
+        "warm": 35.0122080000001
+      },
+      "maxRssMiB": 200.609375,
+      "representation": {
+        "bladeCount": 5000,
+        "tuftCount": 1000,
+        "processedRootCount": 5000
+      },
+      "source": {
+        "primitiveCount": 5000,
+        "pointCount": 30000,
+        "checksum": "4d84d096c90f1be0b1d081bc6b377a6dd65db700409f3bc6d15c009a0dc4719f",
+        "serializedBytes": 1520482,
+        "structuralCanvasSubmissionMs": 1.105042000002868
+      },
+      "processing": {
+        "durationMs": 30.03150000000096,
+        "primitiveCount": 2994,
+        "pointCount": 14759,
+        "checksum": "e5b9e7496f5d9915c8a71b1a4ff93681744e7ae15d597cb2ecfeffc4bb6d627a"
+      },
+      "plotter": {
+        "pathCount": 2994,
+        "svgBytes": 465125,
+        "serializationMs": 5.266583999997238
+      },
+      "physicalSpacing": {
+        "nibWidthMillimeters": 0.3,
+        "rootMinimumMillimeters": 0.0379427446007821,
+        "rootMedianMillimeters": 0.9084867271130492,
+        "pathClearanceMedianMillimeters": 0.3340967666358547,
+        "collidingPathPairCount": 959
+      },
+      "browser": {
+        "source": {
+          "checksum": "4d84d096c90f1be0b1d081bc6b377a6dd65db700409f3bc6d15c009a0dc4719f",
+          "primitiveCount": 5000,
+          "pointCount": 30000,
+          "serializedBytes": 1520482,
+          "loadMs": 15.5,
+          "firstDrawMs": 1,
+          "redrawMedianMs": 1,
+          "redrawMinMs": 1,
+          "redrawMaxMs": 5.299999952316284
+        },
+        "processed": {
+          "checksum": "e5b9e7496f5d9915c8a71b1a4ff93681744e7ae15d597cb2ecfeffc4bb6d627a",
+          "primitiveCount": 2994,
+          "pointCount": 14759,
+          "serializedBytes": 790860,
+          "loadMs": 8.599999904632568,
+          "firstDrawMs": 0.6000001430511475,
+          "redrawMedianMs": 0.5999999046325684,
+          "redrawMinMs": 0.5,
+          "redrawMaxMs": 0.6000001430511475
+        }
+      }
+    },
+    {
+      "fixtureId": "historical-baseline-400--hill-and-clump--plotter-lod",
+      "status": "ok",
+      "variant": {
+        "occluderMode": "hill-and-clump",
+        "densityMode": "plotter-lod"
+      },
+      "phaseMedianMs": {
+        "preparation": 184.1077499999999,
+        "cold": 191.5859170000001,
+        "warm": 4.271416000000045
+      },
+      "maxRssMiB": 154.015625,
+      "representation": {
+        "bladeCount": 400,
+        "tuftCount": 83,
+        "processedRootCount": 324
+      },
+      "source": {
+        "primitiveCount": 400,
+        "pointCount": 2400,
+        "checksum": "9a6d66351d2bb63cd3eb6e4580b325e501cd9d7d009473a864af806dc03d33b0",
+        "serializedBytes": 119311,
+        "structuralCanvasSubmissionMs": 0.33541699999977936
+      },
+      "processing": {
+        "durationMs": 3.839332999999897,
+        "primitiveCount": 320,
+        "pointCount": 1811,
+        "checksum": "1402998b3541f41d7f8f199d6c76541d412fb17d7d0221dadc3d892c47df0c24"
+      },
+      "plotter": {
+        "pathCount": 320,
+        "svgBytes": 51320,
+        "serializationMs": 1.0020829999998568
+      },
+      "physicalSpacing": {
+        "nibWidthMillimeters": 0.3,
+        "rootMinimumMillimeters": 0.3030026316951817,
+        "rootMedianMillimeters": 0.5602700124131442,
+        "pathClearanceMedianMillimeters": 0.47207130356758625,
+        "collidingPathPairCount": 28
+      },
+      "browser": {
+        "source": {
+          "checksum": "9a6d66351d2bb63cd3eb6e4580b325e501cd9d7d009473a864af806dc03d33b0",
+          "primitiveCount": 400,
+          "pointCount": 2400,
+          "serializedBytes": 119311,
+          "loadMs": 4.3999998569488525,
+          "firstDrawMs": 0.10000014305114746,
+          "redrawMedianMs": 0.09999990463256836,
+          "redrawMinMs": 0,
+          "redrawMaxMs": 0.10000014305114746
+        },
+        "processed": {
+          "checksum": "1402998b3541f41d7f8f199d6c76541d412fb17d7d0221dadc3d892c47df0c24",
+          "primitiveCount": 320,
+          "pointCount": 1811,
+          "serializedBytes": 90264,
+          "loadMs": 1.7000000476837158,
+          "firstDrawMs": 0.20000004768371582,
+          "redrawMedianMs": 0.09999990463256836,
+          "redrawMinMs": 0,
+          "redrawMaxMs": 0.20000004768371582
+        }
+      }
+    },
+    {
+      "fixtureId": "one-hill-5000--hill-and-clump--plotter-lod",
+      "status": "ok",
+      "variant": {
+        "occluderMode": "hill-and-clump",
+        "densityMode": "plotter-lod"
+      },
+      "phaseMedianMs": {
+        "preparation": 2228.733375,
+        "cold": 2284.6671669999996,
+        "warm": 33.63750000000073
+      },
+      "maxRssMiB": 202.15625,
+      "representation": {
+        "bladeCount": 5000,
+        "tuftCount": 1000,
+        "processedRootCount": 4863
+      },
+      "source": {
+        "primitiveCount": 5000,
+        "pointCount": 30000,
+        "checksum": "4d84d096c90f1be0b1d081bc6b377a6dd65db700409f3bc6d15c009a0dc4719f",
+        "serializedBytes": 1520482,
+        "structuralCanvasSubmissionMs": 1.2890000000006694
+      },
+      "processing": {
+        "durationMs": 33.998999999999796,
+        "primitiveCount": 2950,
+        "pointCount": 14548,
+        "checksum": "5a1fb74ae8d486af03d8878fb07f75011e706cc26272e547cc69993c5194cf97"
+      },
+      "plotter": {
+        "pathCount": 2950,
+        "svgBytes": 458431,
+        "serializationMs": 6.097624999998516
+      },
+      "physicalSpacing": {
+        "nibWidthMillimeters": 0.3,
+        "rootMinimumMillimeters": 0.30244230969043046,
+        "rootMedianMillimeters": 0.939502837507083,
+        "pathClearanceMedianMillimeters": 0.3398487887507917,
+        "collidingPathPairCount": 903
+      },
+      "browser": {
+        "source": {
+          "checksum": "4d84d096c90f1be0b1d081bc6b377a6dd65db700409f3bc6d15c009a0dc4719f",
+          "primitiveCount": 5000,
+          "pointCount": 30000,
+          "serializedBytes": 1520482,
+          "loadMs": 19.699999809265137,
+          "firstDrawMs": 1,
+          "redrawMedianMs": 1,
+          "redrawMinMs": 0.8999998569488525,
+          "redrawMaxMs": 5.400000095367432
+        },
+        "processed": {
+          "checksum": "5a1fb74ae8d486af03d8878fb07f75011e706cc26272e547cc69993c5194cf97",
+          "primitiveCount": 2950,
+          "pointCount": 14548,
+          "serializedBytes": 779377,
+          "loadMs": 9.099999904632568,
+          "firstDrawMs": 0.6000001430511475,
+          "redrawMedianMs": 0.5,
+          "redrawMinMs": 0.5,
+          "redrawMaxMs": 0.6000001430511475
+        }
+      }
+    }
+  ],
+  "finalist": {
+    "representation": "open six-point blades/stable five-member tufts",
+    "occluderMode": "hill-and-clump",
+    "densityMode": "plotter-lod",
+    "selectedCount": 1,
+    "reasons": [
+      "all baseline and one-hill 5k screen jobs completed inside the pinned 90 second/1 GiB policy",
+      "the one-hill 5k processed Scene retains the grass-covered hill silhouette with 2,950 paths instead of 5,000",
+      "deterministic LOD raises retained-root minimum spacing from 0.038 mm to 0.302 mm, above the pinned 0.30 mm nib",
+      "actual 1000x1000 Canvas redraw median is about 0.5 ms for the processed 5k Scene",
+      "clump processing costs about 34 ms, but generation preparation remains the dominant roughly 2.3 second operation"
+    ]
+  }
+}

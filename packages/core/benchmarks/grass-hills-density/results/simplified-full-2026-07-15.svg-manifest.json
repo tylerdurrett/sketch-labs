@@ -1,0 +1,163 @@
+{
+  "recordedAt": "2026-07-15",
+  "candidate": {
+    "id": "simplified-stroke-tufts",
+    "representation": "open six-point blades/stable five-member tufts",
+    "occluderMode": "hill-and-clump",
+    "densityMode": "plotter-lod"
+  },
+  "serializer": "core renderToSVG after core clipSceneToBounds",
+  "artifactCount": 10,
+  "artifacts": [
+    {
+      "fixtureId": "one-hill-5000",
+      "kind": "fill",
+      "path": "/tmp/issue-305-y3b-one-hill-5000-fill.svg",
+      "sha256": "0e05b5d7140876fdffe720cb87fd658616cf01ef07c684fe1b9836f7d4ae288a",
+      "bytes": 889476,
+      "pathCount": 5000,
+      "scene": {
+        "primitiveCount": 5000,
+        "pointCount": 30000,
+        "checksum": "4d84d096c90f1be0b1d081bc6b377a6dd65db700409f3bc6d15c009a0dc4719f",
+        "serializedBytes": 1520482,
+        "geometryBytes": 1112422
+      }
+    },
+    {
+      "fixtureId": "one-hill-5000",
+      "kind": "outline",
+      "path": "/tmp/issue-305-y3b-one-hill-5000-outline.svg",
+      "sha256": "42fb8cbccc85f7476bf0289c27a6120bce2d32914805333a874249dd1eb6febb",
+      "bytes": 466184,
+      "pathCount": 2950,
+      "scene": {
+        "primitiveCount": 2950,
+        "pointCount": 14548,
+        "checksum": "5a1fb74ae8d486af03d8878fb07f75011e706cc26272e547cc69993c5194cf97",
+        "serializedBytes": 779377,
+        "geometryBytes": 538712
+      }
+    },
+    {
+      "fixtureId": "one-hill-10000",
+      "kind": "fill",
+      "path": "/tmp/issue-305-y3b-one-hill-10000-fill.svg",
+      "sha256": "8051e0f76b6d6f394782d0aad394fb49af0fd5ac320b7294a266d0c0b951641c",
+      "bytes": 1778804,
+      "pathCount": 10000,
+      "scene": {
+        "primitiveCount": 10000,
+        "pointCount": 60000,
+        "checksum": "67b1d1f4a9ceaf8027c0dc3cec6731f240d467cf35138ae45dad68aafc773f7f",
+        "serializedBytes": 3052417,
+        "geometryBytes": 2236368
+      }
+    },
+    {
+      "fixtureId": "one-hill-10000",
+      "kind": "outline",
+      "path": "/tmp/issue-305-y3b-one-hill-10000-outline.svg",
+      "sha256": "f75d42ca9808d953be33ef5c8cf08305bf7895c6fc49f933605201d05ae7036d",
+      "bytes": 487387,
+      "pathCount": 3441,
+      "scene": {
+        "primitiveCount": 3441,
+        "pointCount": 13947,
+        "checksum": "f2afd1ec20f5c71caf2ba4df0ab47f02efab91983b77636728c13c327d0a2dc6",
+        "serializedBytes": 799854,
+        "geometryBytes": 519159
+      }
+    },
+    {
+      "fixtureId": "full-10000",
+      "kind": "fill",
+      "path": "/tmp/issue-305-y3b-full-10000-fill.svg",
+      "sha256": "d3dbd0bb1c3b580bc0ad4dd8377bdc4294fb2ab329b25ea4515c1d6bcd72928e",
+      "bytes": 1772690,
+      "pathCount": 10000,
+      "scene": {
+        "primitiveCount": 10000,
+        "pointCount": 60000,
+        "checksum": "ff6c84622849ab4e84ae03f912d34ecc0d19dd3fd3c4392cf959de2f7b0ad15a",
+        "serializedBytes": 3035664,
+        "geometryBytes": 2218251
+      }
+    },
+    {
+      "fixtureId": "full-10000",
+      "kind": "outline",
+      "path": "/tmp/issue-305-y3b-full-10000-outline.svg",
+      "sha256": "e0c5eedb9456469035e1b8ebc77135894a4b21f08759b2e8208e623ed4fd749e",
+      "bytes": 734747,
+      "pathCount": 4892,
+      "scene": {
+        "primitiveCount": 4892,
+        "pointCount": 22350,
+        "checksum": "42f78ee192e97077a93211e3507eb3536dacf2135e10ad2e04cec2668e894ad4",
+        "serializedBytes": 1213272,
+        "geometryBytes": 813617
+      }
+    },
+    {
+      "fixtureId": "full-25000",
+      "kind": "fill",
+      "path": "/tmp/issue-305-y3b-full-25000-fill.svg",
+      "sha256": "40bbc304cd9739b21a10ed23778434bfed5722f2c4c5ba802f64e564269ca35f",
+      "bytes": 4442027,
+      "pathCount": 25000,
+      "scene": {
+        "primitiveCount": 25000,
+        "pointCount": 150000,
+        "checksum": "a8b83a6e78e65c353ce4e842fd3066620c4cd390a073831864e6327688395346",
+        "serializedBytes": 7629587,
+        "geometryBytes": 5586184
+      }
+    },
+    {
+      "fixtureId": "full-25000",
+      "kind": "outline",
+      "path": "/tmp/issue-305-y3b-full-25000-outline.svg",
+      "sha256": "3dad1c7aaf681fcc9fd7e9824c9610fdf45ab5eb0c749525ea04fa32a0a4f217",
+      "bytes": 1112545,
+      "pathCount": 7841,
+      "scene": {
+        "primitiveCount": 7841,
+        "pointCount": 32090,
+        "checksum": "969a30872da01bc44c54529f33b5e4adb3b1e1b327558e894cb868e5cae7f10c",
+        "serializedBytes": 1816163,
+        "geometryBytes": 1175864
+      }
+    },
+    {
+      "fixtureId": "full-50000",
+      "kind": "fill",
+      "path": "/tmp/issue-305-y3b-full-50000-fill.svg",
+      "sha256": "f0f8b801b75d56ba2c45f63bdddadefffcf99467b68d941411039c955388ac72",
+      "bytes": 8889162,
+      "pathCount": 50000,
+      "scene": {
+        "primitiveCount": 50000,
+        "pointCount": 300000,
+        "checksum": "155d135e7bd84b76065f3b9c2c3868ce4e940f2e92d088f0de3f0bac8cb19b66",
+        "serializedBytes": 15318773,
+        "geometryBytes": 11232201
+      }
+    },
+    {
+      "fixtureId": "full-50000",
+      "kind": "outline",
+      "path": "/tmp/issue-305-y3b-full-50000-outline.svg",
+      "sha256": "dee62c6cd509f03e3e3a98aa0456ca0ad69d2507030773caff39dc22d75f3b70",
+      "bytes": 1327630,
+      "pathCount": 10089,
+      "scene": {
+        "primitiveCount": 10089,
+        "pointCount": 35585,
+        "checksum": "d0c5969c15367e4ebc0ad8cfd710eea4bc9398b0b0c04ade6bb1afbb33ee06f4",
+        "serializedBytes": 2135804,
+        "geometryBytes": 1312244
+      }
+    }
+  ]
+}

@@ -1,0 +1,427 @@
+{
+  "schemaVersion": 4,
+  "referenceId": "grass-hills-faithful-visible-line",
+  "status": "generated-evidence-with-separate-review-attestation",
+  "pipeline": [
+    "production prepared Fill sample",
+    "exact Fill-derived role annotation",
+    "production indexed Hidden-line pass at tolerance 0",
+    "Composition Frame policy",
+    "bounds clipping",
+    "ordinary/physical serialization or bounded review rasterization"
+  ],
+  "qualityFallbackPolicy": {
+    "allowed": false,
+    "enforcedBy": "source/fill geometry identity, exact blade inventory, both-role inventory, tolerance 0, and runtime assertions"
+  },
+  "scenarios": {
+    "adopted10k": {
+      "id": "adopted-10k",
+      "preset": {
+        "version": 2,
+        "sketch": "grass-hills",
+        "name": "dense-grass",
+        "seed": 12345,
+        "params": {
+          "hillCount": 10,
+          "horizonHeight": 0.25,
+          "depthFalloff": 2,
+          "ridgeScale": 3.5,
+          "ridgeAmplitude": 0.8,
+          "terrainDrift": 1.25,
+          "bladeDensity": 2,
+          "bladeLength": 28,
+          "bladeLengthVariance": 8,
+          "bladeWidth": 3,
+          "stiffnessVariance": 0.25,
+          "windLean": 0,
+          "backgroundColor": "#f7f4e8",
+          "hillColor": "#dce8d3",
+          "hillStrokeColor": "#496a43",
+          "bladeColor": "#24643a",
+          "bladeStrokeColor": "#24643a"
+        },
+        "locks": [],
+        "profile": {
+          "width": 200,
+          "height": 200,
+          "insets": {
+            "top": 10,
+            "right": 10,
+            "bottom": 10,
+            "left": 10
+          },
+          "includeFrame": true
+        }
+      },
+      "time": 0,
+      "frame": {
+        "width": 1000,
+        "height": 1000
+      },
+      "profile": {
+        "width": 200,
+        "height": 200,
+        "insets": {
+          "top": 10,
+          "right": 10,
+          "bottom": 10,
+          "left": 10
+        },
+        "includeFrame": true
+      },
+      "mapping": {
+        "scale": 0.18,
+        "offsetX": 10,
+        "offsetY": 10
+      },
+      "target": {
+        "toolWidthMillimeters": 0.3,
+        "millimetersPerSceneUnit": 0.18
+      },
+      "outlineTolerance": 0,
+      "fidelity": {
+        "expectedBladeCount": 10000,
+        "fillBladeCount": 10000,
+        "outlineSourceBladeCount": 10000,
+        "fillPrimitiveCount": 10010,
+        "outlineSourcePrimitiveCount": 10010,
+        "bothRoleCount": 10010,
+        "rejectedPrimitiveCount": 0,
+        "sixPointCenterlineCount": 0,
+        "fillGeometrySha256": "44620635b7933ff558109ff5f759e1c7ba36a30c881bd057fcda3eb38e26ad7e",
+        "sourceGeometrySha256": "44620635b7933ff558109ff5f759e1c7ba36a30c881bd057fcda3eb38e26ad7e",
+        "exactGeometryIdentity": true,
+        "physicalToolRootRejection": false,
+        "representationFallbackDetected": false
+      },
+      "fillScene": {
+        "primitiveCount": 10010,
+        "pointCount": 71340,
+        "sha256": "88a6d2e4d7d0bc0470b665fa918c2d0596136ea154be50e5be4e0d68df456472",
+        "geometrySha256": "44620635b7933ff558109ff5f759e1c7ba36a30c881bd057fcda3eb38e26ad7e",
+        "bytes": 3681177
+      },
+      "outlineSource": {
+        "primitiveCount": 10010,
+        "pointCount": 71340,
+        "sha256": "1aae1eb5b7584b0cbfe469da81b094437e3fc1d19a1a433c71edd6bd748d9a8f",
+        "geometrySha256": "44620635b7933ff558109ff5f759e1c7ba36a30c881bd057fcda3eb38e26ad7e",
+        "bytes": 4071587
+      },
+      "hiddenLinePlan": {
+        "workload": {
+          "filledPrimitiveCount": 10010,
+          "sourceSegmentCount": 61330,
+          "overlappingPairCount": 68367,
+          "estimatedSegmentEdgeComparisons": 38925698,
+          "totalWorkUnits": 40344970
+        },
+        "broadPhase": {
+          "queriedSourceCount": 10010,
+          "occluderCount": 10010,
+          "eligiblePainterPairCount": 50095045,
+          "enumeratedCandidatePairCount": 68367,
+          "trueOverlappingPairCount": 68367,
+          "cellSize": 9.900990099009901,
+          "index": {
+            "entryCount": 10010,
+            "indexedEntryCount": 10001,
+            "overflowEntryCount": 9,
+            "unsafeEntryCount": 0,
+            "cellCapOverflowEntryCount": 9,
+            "occupiedCellCount": 8256,
+            "cellEntryCount": 34137
+          }
+        }
+      },
+      "outlineScene": {
+        "primitiveCount": 20079,
+        "pointCount": 80910,
+        "sha256": "44e89a5ed10027c7648d8842a606259f9f57b9d19b0e2e51d2a94bca16c3eb76",
+        "geometrySha256": "6d5c384cf39991168f8ce9ca07c15f16f9dbbf999dbd2a85349e152ec2d94c10",
+        "bytes": 4446204
+      },
+      "artifacts": {
+        "fillSvg": {
+          "file": "fill.svg",
+          "sha256": "385b37a4f07ba842dcd10600df42164f1dd254726c5fd0d551ccd93cc106eb28",
+          "bytes": 2012317,
+          "scene": {
+            "primitiveCount": 10033,
+            "pointCount": 71312,
+            "sha256": "9b068b2e6109255bab66297bb2667476a00a4698643c113fafe182dd858a2ffd",
+            "geometrySha256": "7bb19c2373df2097b4218875ee3cb02f8b1c485a8df7edc6be897b6535e2f2a6",
+            "bytes": 3681742
+          }
+        },
+        "outlineSvg": {
+          "file": "outline.svg",
+          "sha256": "7867a67bc6a6a89181c3dc8662cd6734fd93b22c46c1ba75cf131cd5e767f398",
+          "bytes": 2794301,
+          "scene": {
+            "primitiveCount": 20079,
+            "pointCount": 80910,
+            "sha256": "44e89a5ed10027c7648d8842a606259f9f57b9d19b0e2e51d2a94bca16c3eb76",
+            "geometrySha256": "6d5c384cf39991168f8ce9ca07c15f16f9dbbf999dbd2a85349e152ec2d94c10",
+            "bytes": 4446204
+          }
+        },
+        "physicalPlotSvg": {
+          "file": "physical-plot.svg",
+          "sha256": "2237c080de94010cd7809eef598657cc36b320b6a8710104e37f650ede3bc7f1",
+          "bytes": 2635316,
+          "scene": {
+            "primitiveCount": 20079,
+            "pointCount": 80910,
+            "sha256": "44e89a5ed10027c7648d8842a606259f9f57b9d19b0e2e51d2a94bca16c3eb76",
+            "geometrySha256": "6d5c384cf39991168f8ce9ca07c15f16f9dbbf999dbd2a85349e152ec2d94c10",
+            "bytes": 4446204
+          },
+          "derivedFrom": "outlineScene.sha256"
+        },
+        "fillReviewPng": {
+          "file": "adopted-10k-fill.png",
+          "sha256": "db839acdfd6985bfd529b83d322cb41ab658a04de4685d3d8a4f847c9aa68fc0",
+          "bytes": 77411
+        },
+        "outlineReviewPng": {
+          "file": "adopted-10k-outline.png",
+          "sha256": "8ff417c082172a9cfb2bf6f15c5a21107a7224ae096774a51c992b0efca89da6",
+          "bytes": 74465
+        },
+        "contactSheetPng": {
+          "file": "adopted-10k-fill-outline-contact-sheet.png",
+          "sha256": "aa2ca40631acd5e1b2bdccf565b3ca22ecb363b1bf3dc14708ea4af156f4938d",
+          "bytes": 157783
+        }
+      },
+      "review": {
+        "committedVectorPair": true,
+        "reviewArtifacts": [
+          "fill.svg",
+          "outline.svg",
+          "physical-plot.svg"
+        ],
+        "status": "RECORDED-SEPARATELY",
+        "attestationFile": "review-attestation.json",
+        "provenance": "Generated artifacts and hashes are review inputs; reviewer identity and verdict live only in the separate attestation."
+      }
+    },
+    "supportedCeiling50k": {
+      "id": "supported-ceiling-50k",
+      "preset": {
+        "version": 2,
+        "sketch": "grass-hills",
+        "name": "dense-grass",
+        "seed": 12345,
+        "params": {
+          "hillCount": 10,
+          "horizonHeight": 0.25,
+          "depthFalloff": 2,
+          "ridgeScale": 3.5,
+          "ridgeAmplitude": 0.8,
+          "terrainDrift": 1.25,
+          "bladeDensity": 10,
+          "bladeLength": 28,
+          "bladeLengthVariance": 8,
+          "bladeWidth": 3,
+          "stiffnessVariance": 0.25,
+          "windLean": 0,
+          "backgroundColor": "#f7f4e8",
+          "hillColor": "#dce8d3",
+          "hillStrokeColor": "#496a43",
+          "bladeColor": "#24643a",
+          "bladeStrokeColor": "#24643a"
+        },
+        "locks": [],
+        "profile": {
+          "width": 200,
+          "height": 200,
+          "insets": {
+            "top": 10,
+            "right": 10,
+            "bottom": 10,
+            "left": 10
+          },
+          "includeFrame": true
+        }
+      },
+      "time": 0,
+      "frame": {
+        "width": 1000,
+        "height": 1000
+      },
+      "profile": {
+        "width": 200,
+        "height": 200,
+        "insets": {
+          "top": 10,
+          "right": 10,
+          "bottom": 10,
+          "left": 10
+        },
+        "includeFrame": true
+      },
+      "mapping": {
+        "scale": 0.18,
+        "offsetX": 10,
+        "offsetY": 10
+      },
+      "target": {
+        "toolWidthMillimeters": 0.3,
+        "millimetersPerSceneUnit": 0.18
+      },
+      "outlineTolerance": 0,
+      "fidelity": {
+        "expectedBladeCount": 50000,
+        "fillBladeCount": 50000,
+        "outlineSourceBladeCount": 50000,
+        "fillPrimitiveCount": 50010,
+        "outlineSourcePrimitiveCount": 50010,
+        "bothRoleCount": 50010,
+        "rejectedPrimitiveCount": 0,
+        "sixPointCenterlineCount": 0,
+        "fillGeometrySha256": "ec7d0521673505cb7468ff33ff17b81e3b5aea7159bec02f3ba1a3ed75089934",
+        "sourceGeometrySha256": "ec7d0521673505cb7468ff33ff17b81e3b5aea7159bec02f3ba1a3ed75089934",
+        "exactGeometryIdentity": true,
+        "physicalToolRootRejection": false,
+        "representationFallbackDetected": false
+      },
+      "fillScene": {
+        "primitiveCount": 50010,
+        "pointCount": 351340,
+        "sha256": "9f7998dd7755c76a683b1ebdede1f2c994ad38a849990a041f9f5b1b25bfaf82",
+        "geometrySha256": "ec7d0521673505cb7468ff33ff17b81e3b5aea7159bec02f3ba1a3ed75089934",
+        "bytes": 18252006
+      },
+      "outlineSource": {
+        "primitiveCount": 50010,
+        "pointCount": 351340,
+        "sha256": "1f1e60d5b9a3e8354789ad92bd532eebbbfe6ccc3eca9c57c6ee85524a3d3090",
+        "geometrySha256": "ec7d0521673505cb7468ff33ff17b81e3b5aea7159bec02f3ba1a3ed75089934",
+        "bytes": 20202416
+      },
+      "hiddenLinePlan": {
+        "workload": {
+          "filledPrimitiveCount": 50010,
+          "sourceSegmentCount": 301330,
+          "overlappingPairCount": 902980,
+          "estimatedSegmentEdgeComparisons": 215192268,
+          "totalWorkUnits": 231245348
+        },
+        "broadPhase": {
+          "queriedSourceCount": 50010,
+          "occluderCount": 50010,
+          "eligiblePainterPairCount": 1250475045,
+          "enumeratedCandidatePairCount": 902980,
+          "trueOverlappingPairCount": 902980,
+          "cellSize": 4.464285714285714,
+          "index": {
+            "entryCount": 50010,
+            "indexedEntryCount": 50000,
+            "overflowEntryCount": 10,
+            "unsafeEntryCount": 0,
+            "cellCapOverflowEntryCount": 10,
+            "occupiedCellCount": 37332,
+            "cellEntryCount": 347786
+          }
+        }
+      },
+      "outlineScene": {
+        "primitiveCount": 134773,
+        "pointCount": 413226,
+        "sha256": "dd2aa67f808fa4883ad8599d44431f55f9dde784704b5b9f35923feb60ea14e6",
+        "geometrySha256": "ddde5a19f82a1ce593d988c188cff0a51d0cad81c6876ee4a9668d7f5f0ad1d2",
+        "bytes": 24915215
+      },
+      "artifacts": {
+        "fillSvg": {
+          "file": "fill.svg",
+          "sha256": "7e60f429cee97b8073d0808fb72178ae5564d9d1c15c691b331e1d9fc664ba99",
+          "bytes": 9965263,
+          "scene": {
+            "primitiveCount": 50149,
+            "pointCount": 351308,
+            "sha256": "ff111c796041c23717211ef5a76d9e578d73b4402b51aa01eed27776ac986e4e",
+            "geometrySha256": "364d11746ebf9eb89f15e74c251f0b5894795ca38ec06774abae31f06ab705c6",
+            "bytes": 18259659
+          }
+        },
+        "outlineSvg": {
+          "file": "outline.svg",
+          "sha256": "9db5ec880b1ed21c058cbbebb206e1aef23169e5d1ee4637384d6dc8f6f2d161",
+          "bytes": 16337472,
+          "scene": {
+            "primitiveCount": 134773,
+            "pointCount": 413226,
+            "sha256": "dd2aa67f808fa4883ad8599d44431f55f9dde784704b5b9f35923feb60ea14e6",
+            "geometrySha256": "ddde5a19f82a1ce593d988c188cff0a51d0cad81c6876ee4a9668d7f5f0ad1d2",
+            "bytes": 24915215
+          }
+        },
+        "physicalPlotSvg": {
+          "file": "physical-plot.svg",
+          "sha256": "61202cb577c7986717b766177002e27b1dd6cb681cc6218530deb21f64515cd6",
+          "bytes": 15436802,
+          "scene": {
+            "primitiveCount": 134773,
+            "pointCount": 413226,
+            "sha256": "dd2aa67f808fa4883ad8599d44431f55f9dde784704b5b9f35923feb60ea14e6",
+            "geometrySha256": "ddde5a19f82a1ce593d988c188cff0a51d0cad81c6876ee4a9668d7f5f0ad1d2",
+            "bytes": 24915215
+          },
+          "derivedFrom": "outlineScene.sha256"
+        },
+        "fillReviewPng": {
+          "file": "supported-ceiling-50k-fill.png",
+          "sha256": "d9780fdba95127160ffe08a5c2ad0217353c90a6e95d40e2acbc8775e832c1b8",
+          "bytes": 90905
+        },
+        "outlineReviewPng": {
+          "file": "supported-ceiling-50k-outline.png",
+          "sha256": "09ee23869b622de9a668ba78b0a283e9791e35bbfef913d819dab6efe57e5bc9",
+          "bytes": 85590
+        },
+        "contactSheetPng": {
+          "file": "supported-ceiling-50k-fill-outline-contact-sheet.png",
+          "sha256": "3660523f2eeccd71a8ad3bbf6d47e2a5002e7aa5f31173cfea377c1eecf76d56",
+          "bytes": 181652
+        }
+      },
+      "review": {
+        "committedVectorPair": false,
+        "reviewArtifacts": [
+          "supported-ceiling-50k-fill.png",
+          "supported-ceiling-50k-outline.png",
+          "supported-ceiling-50k-fill-outline-contact-sheet.png"
+        ],
+        "boundedReviewRationale": "Lossless 900x900 PNG projections and a paired contact sheet are committed; exact full vector/Scene hashes are pinned here and the reproduction command writes those large duplicate values outside git.",
+        "status": "RECORDED-SEPARATELY",
+        "attestationFile": "review-attestation.json",
+        "provenance": "Generated artifacts and hashes are review inputs; reviewer identity and verdict live only in the separate attestation."
+      }
+    }
+  },
+  "review": {
+    "status": "RECORDED-SEPARATELY",
+    "attestationFile": "review-attestation.json",
+    "provenance": "Generated evidence never writes reviewer identity or verdict; the separately maintained attestation records the independent comparative review."
+  },
+  "browserWorkerEvidence": {
+    "status": "RECORDED-SEPARATELY",
+    "observationsFile": "studio-worker-observations.json",
+    "sha256": "529a84dc1067097b8db51449c5ec93c454dedb0721821ec884981af772b0970f",
+    "contract": "real Studio coordinator and DedicatedWorker module path, postMessage structured clone, validated responses, session cache, terminal progress, and cached physical export reuse at adopted 10k and supported 50k",
+    "reproductionCommand": "node packages/core/benchmarks/grass-hills-density/studio-worker-browser-cli.js --out=packages/core/src/sketches/grass-hills/reference/studio-worker-observations.json",
+    "provenance": "Browser observations are captured independently from Node artifact generation; regeneration does not synthesize or overwrite them."
+  },
+  "reproduction": {
+    "workingDirectory": "repository root",
+    "commands": [
+      "node packages/core/benchmarks/grass-hills-density/bundle-cli.js --entry=packages/core/benchmarks/grass-hills-density/production-reference-cli.js --out=/tmp/issue-309-production-reference-cli.mjs",
+      "node --expose-gc /tmp/issue-309-production-reference-cli.mjs --out=packages/core/src/sketches/grass-hills/reference",
+      "node --expose-gc /tmp/issue-309-production-reference-cli.mjs --out=/tmp/issue-309-reference --full-50k-out=/tmp/issue-309-reference/full-50k"
+    ]
+  }
+}

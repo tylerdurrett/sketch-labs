@@ -10,6 +10,7 @@ import {
   isHiddenLineWorkerRequest,
   type CompletedOutline,
   type HiddenLineExportSnapshot,
+  type LegacyOutlineComputeIdentity,
   type OutlineComputeIdentity,
 } from "./outlineComputeProtocol";
 
@@ -28,12 +29,13 @@ function sourceScene(): Scene {
           [30, 40],
         ],
         stroke: { color: "black", width: 1 },
+        hiddenLineRole: "source",
       },
     ],
   };
 }
 
-function identity(frame = { width: 100, height: 80 }): OutlineComputeIdentity {
+function identity(frame = { width: 100, height: 80 }): LegacyOutlineComputeIdentity {
   return createOutlineComputeIdentity({
     sketchId: "lines",
     schema,
@@ -111,6 +113,12 @@ const identityMismatches: ReadonlyArray<
       copy.sourceScene.primitives[0].points[0][0] = 2;
     },
   ],
+  [
+    "source/occluder role",
+    (copy) => {
+      copy.sourceScene.primitives[0].hiddenLineRole = "both";
+    },
+  ],
 ];
 
 describe("hidden-line export snapshot", () => {
@@ -133,6 +141,16 @@ describe("hidden-line export snapshot", () => {
     expect(captured.profile.insets.left).toBe(10);
     expect(captured.reusableOutline?.scene.space.width).toBe(100);
     expect(captured.reusableOutline?.scene.primitives[0]?.points[0]?.[0]).toBe(1);
+    expect(captured.identity.sourceKind).toBe("legacy-scene");
+    if (captured.identity.sourceKind !== "legacy-scene") {
+      throw new Error("expected legacy identity");
+    }
+    expect(captured.identity.sourceScene.primitives[0]?.hiddenLineRole).toBe(
+      "source",
+    );
+    expect(
+      captured.reusableOutline?.scene.primitives[0]?.hiddenLineRole,
+    ).toBe("source");
     expect(captured.identity).not.toBe(liveIdentity);
     expect(captured.reusableOutline?.identity).not.toBe(liveIdentity);
     expect(Object.isFrozen(captured)).toBe(true);
