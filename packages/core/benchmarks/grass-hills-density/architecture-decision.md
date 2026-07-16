@@ -38,9 +38,11 @@ The production architecture is deliberately representation-specific:
   value into the `200 × 200 mm` sheet with `10 mm` insets; it does not rerun LOD
   or occlusion. This preserves ADR-0011.
 
-This is a sketch-local decision under ADR-0007, not a system ADR. The generic
-Scene, Canvas/SVG renderers, Hidden-line pass, and prepared-Sketch contract do
-not change.
+The representation remains a sketch-local decision under ADR-0007, not a system
+ADR. This slice did add two narrow generic contract seams: `hiddenLineRole` and
+its Hidden-line role semantics, plus the optional `generateOutlineSource`
+Sketch hook. The Canvas/SVG renderers and ADR-0012 prepared-frame sampling
+semantics remain unchanged.
 
 ## Approved fixture and visual threshold
 

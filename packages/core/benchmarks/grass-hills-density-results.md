@@ -30,10 +30,12 @@ asserts the reproducible value and retains 11,372,294 as an explicit historical
 observation; it does not misrepresent the latter as reproducible from different
 fixture metadata.
 
-The initial benchmark is intentionally an opt-in smoke check: it generates and
-processes the fixture once, reports those one-shot local timings, and asserts the
-pinned inventory. It is not a statistically meaningful runner. Later issue #305
-work may add explicit measurement modes without weakening this baseline.
+The initial benchmark remains an opt-in smoke check: it generates and processes
+the fixture once, reports those one-shot local timings, and asserts the pinned
+inventory. It is not a statistically meaningful runner. Subsequent issue #305
+work added explicit bounded measurement modes, candidate campaigns, the
+architecture decision, and production acceptance evidence without weakening
+this baseline.
 
 ## X3a exact-filled screen
 

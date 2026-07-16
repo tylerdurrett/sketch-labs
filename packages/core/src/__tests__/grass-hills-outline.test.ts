@@ -112,8 +112,8 @@ describe('grass-hills production Outline architecture', () => {
       source: sceneSha256(source),
       outlined: sceneSha256(outlined),
     }
-    // Mechanical determinism only. P4 must regenerate and independently
-    // approve the production visual/plot references before they are canonical.
+    // Mechanical determinism for the production path. P4 separately regenerated
+    // and independently approved the canonical visual/plot references.
     expect(checksums).toEqual({
       fill: '1909cd36e92c13444acd3a600b9362360f2caf23f41024a131b7903bf57f2cc9',
       source: '3666c202e0e3a21d478de635eadd3482d135c28cf0737e34552012e6fbbf71c3',

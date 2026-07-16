@@ -103,8 +103,9 @@ Its generic CLI is also smoke-only by default; screen/full/adopted modes require
 explicit flags, and long finalist/adopted campaigns require an additional
 confirmation flag. The same directory documents the 5k–50k request manifest,
 reusable structural/export collectors, and explicit checksum-pinned real-browser
-Canvas seam. Candidate algorithms and production Studio evidence remain later
-issue #305 work.
+Canvas seam. The same record now includes the completed candidate campaigns,
+architecture decision, and production Studio acceptance evidence from issue
+#305.
 
 The original measurement machine observed approximately 248 ms cold generation
 and approximately 44 ms Hidden-line processing. Those timings are historical
