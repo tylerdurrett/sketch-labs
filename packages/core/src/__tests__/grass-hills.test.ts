@@ -19,6 +19,7 @@ const SCHEMA_KEYS = [
   'hillCount',
   'horizonHeight',
   'depthFalloff',
+  'foregroundZoom',
   'ridgeScale',
   'ridgeAmplitude',
   'terrainDrift',
@@ -146,6 +147,13 @@ describe('grass-hills Sketch contract', () => {
         min: 0.25,
         max: 4,
         default: 2,
+        step: 0.05,
+      },
+      foregroundZoom: {
+        kind: 'number',
+        min: 1,
+        max: 2,
+        default: 1,
         step: 0.05,
       },
       ridgeScale: {
@@ -361,6 +369,7 @@ describe('grass-hills preparation and determinism', () => {
     hillCount: 7,
     horizonHeight: 0.31,
     depthFalloff: 2.4,
+    foregroundZoom: 1,
     ridgeScale: 4.25,
     ridgeAmplitude: 0.72,
     terrainDrift: 2.1,
@@ -453,6 +462,7 @@ describe('grass-hills preparation and determinism', () => {
     for (const key of [
       'hillCount',
       'horizonHeight',
+      'foregroundZoom',
       'ridgeScale',
       'ridgeAmplitude',
       'terrainDrift',

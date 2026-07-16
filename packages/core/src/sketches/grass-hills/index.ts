@@ -9,6 +9,14 @@
  * landscape moves between depths. Relief scales with each band's local height,
  * so distant ridges flatten with the same perspective cue as their spacing.
  *
+ * FOREGROUND ZOOM / COMPOSITION: `foregroundZoom` uniformly magnifies the
+ * completed scene around the horizon center. Terrain, projected roots, blade
+ * lengths, and blade widths transform together, so the oversized foreground
+ * can continue beyond the fixed Composition Frame instead of ending visibly at
+ * its bottom. This is a sketch-local prepared-geometry transform, not a crop or
+ * literal 3D camera. It runs once after canonical construction and before Fill
+ * and Outline diverge; authored Fill strokes and physical tool width stay fixed.
+ *
  * UNBOUNDED RELIEF / PAINTER ORDER: ridge relief is a direct multiple of each
  * band's local height. Every ridge follows the shared terrain independently, so
  * high amplitudes can carry mountains above the horizon or valleys below the
@@ -74,6 +82,7 @@ import {
 import { colorParam, numberParam } from '../sketch-util'
 import { blade } from './blade'
 import { layoutHillBands } from './depth'
+import { applyForegroundZoom } from './foreground-zoom'
 import {
   buildGrassBlades,
   resolveMaximumUnscaledBladeLength,
@@ -119,6 +128,8 @@ const schema = {
   horizonHeight: { kind: 'number', min: 0, max: 0.9, default: 0.25, step: 0.01 },
   /** Perspective exponent; values above one compress distant ridge spacing. */
   depthFalloff: { kind: 'number', min: 0.25, max: 4, default: 2, step: 0.05 },
+  /** Uniform horizon-centered magnification of completed scene geometry. */
+  foregroundZoom: { kind: 'number', min: 1, max: 2, default: 1, step: 0.05 },
   /** Horizontal fBm frequency in features across the frame. */
   ridgeScale: { kind: 'number', min: 0.25, max: 12, default: 3.5, step: 0.05 },
   /** Nominal relief as a fraction of each band's local height. */
@@ -207,6 +218,7 @@ function prepareGrassHills(
   const hillCount = Math.round(numberParam(params, schema, 'hillCount'))
   const horizonHeight = numberParam(params, schema, 'horizonHeight')
   const depthFalloff = numberParam(params, schema, 'depthFalloff')
+  const foregroundZoom = numberParam(params, schema, 'foregroundZoom')
   const ridgeScale = numberParam(params, schema, 'ridgeScale')
   const ridgeAmplitude = numberParam(params, schema, 'ridgeAmplitude')
   const terrainDrift = numberParam(params, schema, 'terrainDrift')
@@ -252,7 +264,7 @@ function prepareGrassHills(
     bands.map(({ depth }) => depth),
     bladeDensity,
   )
-  const hills: ReadonlyArray<PreparedHill> = Object.freeze(
+  const unzoomedHills: ReadonlyArray<PreparedHill> = Object.freeze(
     bands.map((band, hillIndex) => {
       const ridge = ridges[hillIndex]!
       const count = rootCounts[hillIndex]!
@@ -302,6 +314,11 @@ function prepareGrassHills(
       })
     }),
   )
+  const hills = applyForegroundZoom(unzoomedHills, {
+    frame: preparedFrame,
+    horizonHeight,
+    zoom: foregroundZoom,
+  })
 
   return Object.freeze({
     frame: preparedFrame,

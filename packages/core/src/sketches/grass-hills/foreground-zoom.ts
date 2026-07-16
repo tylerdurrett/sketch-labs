@@ -28,10 +28,10 @@ export interface ForegroundZoomOptions {
  * not clamped here; the Parameter Schema owns the public range while this pure
  * geometry operation stays literal and independently testable.
  */
-export function applyForegroundZoom<T extends readonly ForegroundZoomHill[]>(
-  hills: T,
+export function applyForegroundZoom(
+  hills: readonly ForegroundZoomHill[],
   { frame, horizonHeight, zoom }: ForegroundZoomOptions,
-): T | readonly ForegroundZoomHill[] {
+): readonly ForegroundZoomHill[] {
   if (zoom === 1) return hills
 
   const anchorX = frame.width / 2
