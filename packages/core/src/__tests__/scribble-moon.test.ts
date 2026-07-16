@@ -8,15 +8,38 @@ import type { CoordinateSpace, Primitive, Scene } from '../scene'
 import { defaultParams } from '../sketch'
 import {
   createScribbleMoonStructuralScene,
+  generateScribbleMoonScribble,
   scribbleMoon,
   scribbleMoonSchema,
+  type ScribbleMoonSource,
 } from '../sketches/scribble-moon'
+import type { ScribbleResult } from '../scribbleStrategy'
+import type { Point } from '../types'
 
 const SOURCE_CONTROL_KEYS = [
   'lightAngle',
   'terminatorSoftness',
   'toneContrast',
   'maskFeather',
+] as const
+const SCRIBBLE_CONTROL_KEYS = [
+  'pathDensity',
+  'scribbleScale',
+  'momentum',
+  'chaos',
+  'toneFidelity',
+] as const
+const CONTROL_KEYS = [...SOURCE_CONTROL_KEYS, ...SCRIBBLE_CONTROL_KEYS]
+const FORBIDDEN_CONTROL_KEYS = [
+  'segmentLength',
+  'coverageRadius',
+  'residualSpacing',
+  'maskCheckSpacing',
+  'coveragePerPass',
+  'completionThreshold',
+  'maxAcceptedSegments',
+  'maxPolylines',
+  'strategy',
 ]
 
 function expectComposed(scene: Scene, frame: CoordinateSpace): void {
@@ -32,12 +55,6 @@ function expectComposed(scene: Scene, frame: CoordinateSpace): void {
   }
 }
 
-function expectContainsStructuralScene(scene: Scene, structural: Scene): void {
-  for (const primitive of structural.primitives) {
-    expect(scene.primitives).toContainEqual(primitive)
-  }
-}
-
 function expectAuthoredVector(primitive: Primitive): void {
   expect(Array.isArray(primitive.points)).toBe(true)
   expect(primitive.fill).toBeUndefined()
@@ -46,18 +63,88 @@ function expectAuthoredVector(primitive: Primitive): void {
   expect(primitive.hiddenLineRole).toBeUndefined()
 }
 
+function sourceSnapshot(source: ScribbleMoonSource) {
+  const { frame } = source.layout
+  const columns = 13
+  const rows = 11
+  const samples = []
+
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const point = [
+        ((column + 0.5) / columns) * frame.width,
+        ((row + 0.5) / rows) * frame.height,
+      ] as const
+      samples.push([
+        point,
+        source.toneField.sample(point),
+        source.shadingMask.sample(point),
+      ])
+    }
+  }
+
+  return {
+    layout: source.layout,
+    maskFeatherWidth: source.maskFeatherWidth,
+    samples,
+  }
+}
+
+function independentlySampleMask(
+  result: ScribbleResult,
+  source: ScribbleMoonSource,
+  frame: CoordinateSpace,
+): { sawSoftPermission: boolean } {
+  // This spacing is intentionally independent of Scribble's derived mask-check
+  // ratio and finer than one thousandth of the shorter frame extent.
+  const maxSpacing = Math.min(frame.width, frame.height) / 1_000
+  let sawSoftPermission = false
+
+  for (const polyline of result.polylines) {
+    for (let index = 1; index < polyline.length; index++) {
+      const start = polyline[index - 1]!
+      const end = polyline[index]!
+      const intervals = Math.max(
+        1,
+        Math.ceil(
+          Math.hypot(end[0] - start[0], end[1] - start[1]) / maxSpacing,
+        ),
+      )
+
+      for (let step = 0; step <= intervals; step++) {
+        const progress = step / intervals
+        const point: Point = [
+          start[0] + (end[0] - start[0]) * progress,
+          start[1] + (end[1] - start[1]) * progress,
+        ]
+        const permission = source.shadingMask.sample(point)
+        expect(permission).toBeGreaterThan(0)
+        if (permission < 1) sawSoftPermission = true
+      }
+    }
+  }
+
+  return { sawSoftPermission }
+}
+
 describe('Scribble Moon Sketch contract', () => {
-  it('declares exactly the four bounded numeric source controls', () => {
-    expect(Object.keys(scribbleMoon.schema)).toEqual(SOURCE_CONTROL_KEYS)
+  it('declares exactly four source controls plus five shared Scribble controls', () => {
+    expect(Object.keys(scribbleMoon.schema)).toEqual(CONTROL_KEYS)
     expect(scribbleMoon.schema).toBe(scribbleMoonSchema)
 
-    for (const key of SOURCE_CONTROL_KEYS) {
+    for (const key of CONTROL_KEYS) {
       const spec = scribbleMoon.schema[key]!
       expect(spec.kind).toBe('number')
       if (spec.kind !== 'number') throw new Error(`${key} is not numeric`)
       expect(spec.default).toBeGreaterThanOrEqual(spec.min)
       expect(spec.default).toBeLessThanOrEqual(spec.max)
     }
+
+    expect(
+      Object.keys(scribbleMoon.schema).filter((key) =>
+        FORBIDDEN_CONTROL_KEYS.includes(key),
+      ),
+    ).toEqual([])
   })
 
   it('delegates defaults and live control values to the accepted source model', () => {
@@ -129,60 +216,125 @@ describe('Scribble Moon structural artwork', () => {
     expect(scene.background).toBeUndefined()
   })
 
-  it('keeps its structural helper byte-identical and present across Seeds', () => {
+  it('keeps its structural helper byte-identical', () => {
     const frame = resolveCompositionFrame(16 / 9)
-    const params = defaultParams(scribbleMoon.schema)
     const structural = createScribbleMoonStructuralScene(frame)
     const structuralAgain = createScribbleMoonStructuralScene(frame)
-    const first = scribbleMoon.generate(params, 'seed-a', 0, frame)
-    const second = scribbleMoon.generate(params, 'seed-b', 0, frame)
 
     expect(JSON.stringify(structuralAgain)).toBe(JSON.stringify(structural))
-    expectContainsStructuralScene(first, structural)
-    expectContainsStructuralScene(second, structural)
   })
 
-  it('keeps source layout and samples byte-identical when artwork Seed changes', () => {
+  it('keeps exact source metadata and lattice samples independent of Seed and Scribble controls while routes differ', () => {
     const frame = resolveCompositionFrame(4 / 3)
     const params = defaultParams(scribbleMoon.schema)
-    // generateToneSource has no Seed argument by contract. Interleaving two
-    // differently Seeded artwork calls demonstrates the source remains separate
-    // from that axis without requiring all future generated paths to match.
-    scribbleMoon.generate(params, 'first-seed', 0, frame)
-    const first = scribbleMoon.generateToneSource!(params, frame)
-    scribbleMoon.generate(params, 'second-seed', 0, frame)
-    const second = scribbleMoon.generateToneSource!(params, frame)
-    const samplePoints = [
-      first.layout.sphere.center,
-      first.layout.craters[0]!.center,
-      [0, 0] as const,
-    ]
+    const adjusted = {
+      ...params,
+      pathDensity: scribbleMoonSchema.pathDensity.max,
+      scribbleScale: scribbleMoonSchema.scribbleScale.min,
+      momentum: scribbleMoonSchema.momentum.min,
+      chaos: scribbleMoonSchema.chaos.max,
+      toneFidelity: scribbleMoonSchema.toneFidelity.min,
+    }
+    const before = scribbleMoon.generateToneSource!(params, frame)
+    const seedA = generateScribbleMoonScribble(params, 'moon-seed-a', frame)
+    const afterSeedA = scribbleMoon.generateToneSource!(params, frame)
+    const seedB = generateScribbleMoonScribble(params, 'moon-seed-b', frame)
+    const afterSeedB = scribbleMoon.generateToneSource!(params, frame)
+    const adjustedRoute = generateScribbleMoonScribble(
+      adjusted,
+      'moon-seed-a',
+      frame,
+    )
+    const afterControls = scribbleMoon.generateToneSource!(adjusted, frame)
+    const expectedSource = sourceSnapshot(before)
 
-    expect(JSON.stringify(second.layout)).toBe(JSON.stringify(first.layout))
-    expect(
-      samplePoints.map((point) => [
-        second.toneField.sample(point),
-        second.shadingMask.sample(point),
-      ]),
-    ).toEqual(
-      samplePoints.map((point) => [
-        first.toneField.sample(point),
-        first.shadingMask.sample(point),
-      ]),
+    expect(sourceSnapshot(afterSeedA)).toEqual(expectedSource)
+    expect(sourceSnapshot(afterSeedB)).toEqual(expectedSource)
+    expect(sourceSnapshot(afterControls)).toEqual(expectedSource)
+    expect(seedB.polylines).not.toEqual(seedA.polylines)
+    expect(adjustedRoute.polylines).not.toEqual(seedA.polylines)
+  })
+
+  it('lets source controls change the target without changing structural geometry', () => {
+    const frame = resolveCompositionFrame(3 / 2)
+    const params = defaultParams(scribbleMoon.schema)
+    const adjusted = {
+      ...params,
+      lightAngle: 205,
+      terminatorSoftness: 0.8,
+      toneContrast: 0.9,
+      maskFeather: 0.2,
+    }
+    const structural = createScribbleMoonStructuralScene(frame)
+    const defaultSource = scribbleMoon.generateToneSource!(params, frame)
+    const adjustedSource = scribbleMoon.generateToneSource!(adjusted, frame)
+    const defaultArtwork = scribbleMoon.generate(
+      params,
+      'source-controls',
+      0,
+      frame,
+    )
+    const adjustedArtwork = scribbleMoon.generate(
+      adjusted,
+      'source-controls',
+      0,
+      frame,
+    )
+
+    expect(sourceSnapshot(adjustedSource)).not.toEqual(
+      sourceSnapshot(defaultSource),
+    )
+    expect(defaultArtwork.primitives.slice(0, 13)).toEqual(
+      structural.primitives,
+    )
+    expect(adjustedArtwork.primitives.slice(0, 13)).toEqual(
+      structural.primitives,
     )
   })
 
-  it('keeps normal artwork vector-only and free of grayscale field encoding', () => {
-    const scene = scribbleMoon.generate(
-      defaultParams(scribbleMoon.schema),
-      'normal-artwork',
-      0,
-      DEFAULT_COMPOSITION_FRAME,
-    )
+  it('returns byte-identical complete artwork for identical inputs and Seed', () => {
+    const frame = resolveCompositionFrame(16 / 9)
+    const params = defaultParams(scribbleMoon.schema)
+    const first = scribbleMoon.generate(params, 'repeatable-moon', 0, frame)
+    const second = scribbleMoon.generate(params, 'repeatable-moon', 0, frame)
 
-    scene.primitives.forEach(expectAuthoredVector)
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+  })
+
+  it('keeps all 13 structural primitives as the exact prefix, then appends generated paths in painter order', () => {
+    const frame = DEFAULT_COMPOSITION_FRAME
+    const params = defaultParams(scribbleMoon.schema)
+    const structural = createScribbleMoonStructuralScene(frame)
+    const result = generateScribbleMoonScribble(params, 'painter-order', frame)
+    const scene = scribbleMoon.generate(params, 'painter-order', 0, frame)
+    const generated = scene.primitives.slice(structural.primitives.length)
+
+    expect(scene.primitives.slice(0, 13)).toEqual(structural.primitives)
+    expect(generated.map(({ points }) => points)).toEqual(result.polylines)
+    expect(generated).toHaveLength(result.polylines.length)
+    generated.forEach((primitive) => {
+      expect(primitive.closed).toBe(false)
+      expect(primitive.fill).toBeUndefined()
+      expect(primitive.stroke).toEqual({ color: 'black', width: 1.1 })
+      expect(primitive.hiddenLineRole).toBeUndefined()
+    })
     expect(JSON.stringify(scene)).not.toMatch(
       /imageData|pixel|raster|tile|toneField|shadingMask|gray/i,
     )
+  })
+
+  it('independently samples generated segments through Moon soft permission and never exact zero', () => {
+    const frame = DEFAULT_COMPOSITION_FRAME
+    const params = defaultParams(scribbleMoon.schema)
+    const source = scribbleMoon.generateToneSource!(params, frame)
+    const result = generateScribbleMoonScribble(
+      params,
+      'moon-mask-safety',
+      frame,
+    )
+    const sampled = independentlySampleMask(result, source, frame)
+
+    expect(result.polylines.length).toBeGreaterThan(0)
+    expect(sampled.sawSoftPermission).toBe(true)
   })
 })
