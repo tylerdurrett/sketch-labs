@@ -181,7 +181,7 @@ describe('grass-hills Sketch contract', () => {
         kind: 'number',
         min: 0,
         max: 10,
-        default: 1,
+        default: 0,
         step: 0.05,
       },
       bladeLength: {

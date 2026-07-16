@@ -137,7 +137,7 @@ const schema = {
   /** Travel through the shared terrain field from foreground to horizon. */
   terrainDrift: { kind: 'number', min: 0, max: 8, default: 1.25, step: 0.05 },
   /** Relative density: 2 is the adopted 10k scene; 10 explores up to 50k. */
-  bladeDensity: { kind: 'number', min: 0, max: 10, default: 1, step: 0.05 },
+  bladeDensity: { kind: 'number', min: 0, max: 10, default: 0, step: 0.05 },
   /** Nominal foreground blade length in Composition Frame units. */
   bladeLength: { kind: 'number', min: 4, max: 80, default: 28, step: 1 },
   /** Symmetric seeded variation around the nominal blade length. */
