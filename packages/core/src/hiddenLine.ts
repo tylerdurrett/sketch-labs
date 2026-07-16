@@ -1,4 +1,6 @@
 import { simplifyPath } from './simplifyPath'
+import { UniformAabbGrid } from './aabbGrid'
+import type { UniformAabbGridStats } from './aabbGrid'
 import {
   preparePolygon,
   subtractPreparedPolygonsFromPolyline,
@@ -35,10 +37,11 @@ import type { Point, Polyline } from './types'
  *   1. Its `points` ring is the outline to draw. If the Primitive is `closed`
  *      but its points do not repeat the first vertex, the closing edge is added
  *      so the FULL boundary ring is drawn (see "Ring closure" below).
- *   2. Broad-phase: find the occluder Primitives drawn AFTER it (higher index =
- *      nearer) whose axis-aligned bounding box overlaps this outline's AABB.
- *      This is a plain per-Primitive AABB-overlap test — deliberately NO spatial
- *      index (out of scope for this pass; issue #210).
+ *   2. Broad-phase: query an exact uniform AABB grid for occluder Primitives
+ *      drawn AFTER it (higher index = nearer), restoring painter order before
+ *      accepting candidates. Finite, bounded geometry takes the spatial path;
+ *      oversized or non-finite bounds stay conservative through the grid's
+ *      overflow path and the same final AABB-overlap predicate.
  *   3. Subtract the union of those nearer fill polygons from the outline via
  *      {@link subtractPolygonsFromPolyline} (the #209 arbitrary-polygon clip,
  *      correct for concave occluders like a leaf silhouette).
@@ -131,6 +134,31 @@ interface PlannedPrimitive {
 interface HiddenLinePlan {
   planned: PlannedPrimitive[]
   workload: HiddenLineWorkload
+  broadPhase: HiddenLineBroadPhaseStats
+}
+
+/** Spatial-planning evidence from the exact plan used by Hidden-line. */
+export interface HiddenLineBroadPhaseStats {
+  /** Sources with at least one segment that participate in broad-phase queries. */
+  readonly queriedSourceCount: number
+  /** Prepared filled polygons available to occlude a farther source. */
+  readonly occluderCount: number
+  /** Source/nearer-occluder pairs a quadratic painter scan would inspect. */
+  readonly eligiblePainterPairCount: number
+  /** Painter-eligible pairs returned by the spatial index before final overlap. */
+  readonly enumeratedCandidatePairCount: number
+  /** Candidates accepted by the unchanged inclusive AABB overlap predicate. */
+  readonly trueOverlappingPairCount: number
+  /** Deterministically selected square-cell size in Scene units. */
+  readonly cellSize: number
+  /** Index construction evidence, including conservative overflow counts. */
+  readonly index: UniformAabbGridStats
+}
+
+/** Exact workload plus additive evidence about how its candidates were found. */
+export interface HiddenLinePlanAnalysis {
+  readonly workload: HiddenLineWorkload
+  readonly broadPhase: HiddenLineBroadPhaseStats
 }
 
 /** Immutable, serialization-friendly progress reported by the Hidden-line pass. */
@@ -232,6 +260,25 @@ function hiddenLineRoles(primitive: Primitive): {
   }
 }
 
+const HIDDEN_LINE_MAX_CELLS_PER_AABB = 4096
+
+/** Pick a deterministic finite cell size without assuming ordinary Scene bounds. */
+function hiddenLineCellSize(scene: Scene, planned: readonly PlannedPrimitive[]) {
+  const sceneSpan = Math.max(scene.space.width, scene.space.height)
+  let span = Number.isFinite(sceneSpan) && sceneSpan > 0 ? sceneSpan : 0
+  if (span === 0) {
+    for (const { aabb } of planned) {
+      const width = aabb.maxX - aabb.minX
+      const height = aabb.maxY - aabb.minY
+      if (Number.isFinite(width) && width > span) span = width
+      if (Number.isFinite(height) && height > span) span = height
+    }
+  }
+  if (!Number.isFinite(span) || span <= 0) span = 1
+  const cellSize = span / Math.max(1, Math.ceil(Math.sqrt(planned.length)))
+  return Number.isFinite(cellSize) && cellSize > 0 ? cellSize : span
+}
+
 /** Build the single deterministic inventory/execution plan used by the pass. */
 function createHiddenLinePlan(scene: Scene): HiddenLinePlan {
   const planned: PlannedPrimitive[] = []
@@ -263,6 +310,32 @@ function createHiddenLinePlan(scene: Scene): HiddenLinePlan {
     })
   }
 
+  const occluderEntries: Array<{
+    plannedIndex: number
+    aabb: AABB
+  }> = []
+  for (let plannedIndex = 0; plannedIndex < planned.length; plannedIndex++) {
+    const item = planned[plannedIndex]!
+    if (item.occluder !== null) {
+      occluderEntries.push({ plannedIndex, aabb: item.aabb })
+    }
+  }
+  const cellSize = hiddenLineCellSize(scene, planned)
+  const index = new UniformAabbGrid(
+    occluderEntries.map(({ aabb }) => aabb),
+    { cellSize, maxCellsPerAabb: HIDDEN_LINE_MAX_CELLS_PER_AABB },
+  )
+
+  const nearerOccluderCounts = new Array<number>(planned.length).fill(0)
+  let nearerOccluderCount = 0
+  for (let plannedIndex = planned.length - 1; plannedIndex >= 0; plannedIndex--) {
+    nearerOccluderCounts[plannedIndex] = nearerOccluderCount
+    if (planned[plannedIndex]!.occluder !== null) nearerOccluderCount++
+  }
+
+  let queriedSourceCount = 0
+  let eligiblePainterPairCount = 0
+  let enumeratedCandidatePairCount = 0
   let overlappingPairCount = 0
   let estimatedSegmentEdgeComparisons = 0
   for (let f = 0; f < planned.length; f++) {
@@ -270,15 +343,27 @@ function createHiddenLinePlan(scene: Scene): HiddenLinePlan {
     if (!self.source) continue
     const sourceSegments = Math.max(0, self.outline.length - 1)
     if (sourceSegments === 0) continue
-    for (let g = f + 1; g < planned.length; g++) {
-      const other = planned[g]!
-      if (other.occluder === null) continue
+    queriedSourceCount = safeAdd(queriedSourceCount, 1)
+    eligiblePainterPairCount = safeAdd(
+      eligiblePainterPairCount,
+      nearerOccluderCounts[f]!,
+    )
+    for (const occluderIndex of index.query(self.aabb)) {
+      const entry = occluderEntries[occluderIndex]!
+      if (entry.plannedIndex <= f) continue
+      enumeratedCandidatePairCount = safeAdd(
+        enumeratedCandidatePairCount,
+        1,
+      )
+      const other = planned[entry.plannedIndex]!
       if (!aabbOverlap(self.aabb, other.aabb)) continue
-      self.occluders.push(other.occluder)
+      const occluder = other.occluder
+      if (occluder === null) continue
+      self.occluders.push(occluder)
       overlappingPairCount = safeAdd(overlappingPairCount, 1)
       estimatedSegmentEdgeComparisons = safeAdd(
         estimatedSegmentEdgeComparisons,
-        safeMultiply(sourceSegments, other.occluder.edges.length),
+        safeMultiply(sourceSegments, occluder.edges.length),
       )
     }
   }
@@ -310,8 +395,17 @@ function createHiddenLinePlan(scene: Scene): HiddenLinePlan {
     estimatedSegmentEdgeComparisons,
     totalWorkUnits,
   })
+  const broadPhase = Object.freeze({
+    queriedSourceCount,
+    occluderCount: occluderEntries.length,
+    eligiblePainterPairCount,
+    enumeratedCandidatePairCount,
+    trueOverlappingPairCount: overlappingPairCount,
+    cellSize,
+    index: index.stats,
+  })
 
-  return { planned, workload }
+  return { planned, workload, broadPhase }
 }
 
 /**
@@ -322,6 +416,21 @@ function createHiddenLinePlan(scene: Scene): HiddenLinePlan {
  */
 export function analyzeHiddenLineWorkload(scene: Scene): HiddenLineWorkload {
   return createHiddenLinePlan(scene).workload
+}
+
+/**
+ * Analyze the exact Hidden-line plan, including additive spatial-index evidence.
+ *
+ * `eligiblePainterPairCount` is the quadratic search space avoided by the
+ * planner. `enumeratedCandidatePairCount` is the conservative spatial result,
+ * while `trueOverlappingPairCount` is the unchanged broad-phase acceptance
+ * count used by the workload and execution plan. Finite adopted fixtures should
+ * have no index overflow; malformed, non-finite, or extremely large geometry is
+ * retained conservatively and is visible in `broadPhase.index`.
+ */
+export function analyzeHiddenLinePlan(scene: Scene): HiddenLinePlanAnalysis {
+  const { workload, broadPhase } = createHiddenLinePlan(scene)
+  return Object.freeze({ workload, broadPhase })
 }
 
 /**

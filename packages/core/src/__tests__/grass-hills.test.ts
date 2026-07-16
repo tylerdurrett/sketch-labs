@@ -181,7 +181,7 @@ describe('grass-hills Sketch contract', () => {
         kind: 'number',
         min: 0,
         max: 10,
-        default: 1,
+        default: 0,
         step: 0.05,
       },
       bladeLength: {
@@ -763,7 +763,7 @@ describe('grass-hills hidden-line workload inventory', () => {
     })
   })
 
-  it('emits the adopted maximum count and inventories its hill-only filtering', () => {
+  it('emits the adopted 10k count and inventories a hills-only diagnostic', () => {
     const maximum = grassHills.generate(
       {
         hillCount: 10,

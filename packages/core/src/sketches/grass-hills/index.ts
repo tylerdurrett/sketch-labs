@@ -38,20 +38,16 @@
  * emitted before its blades, whose ascending root-y order lets lower blades
  * cover higher ones before the next, nearer hill covers the whole group.
  *
- * DENSE ARCHITECTURE DECISION (#305; PRODUCTION): the selected
- * full-composition target is 10,000 descriptors from a seeded 100×100
- * stratified bank per stable hill identity. Fill uses curved seven-point closed
- * blades. On-demand Outline/plot derives curved six-point spines from those same
- * descriptors, applies a tool-width deterministic LOD plus nearer-hill masks,
- * retains visible ridges, and gives one processed Scene to preview and SVG.
- * Blade-to-blade Outline occlusion is intentionally perceptual, and plot density
- * may be lower than Fill density. The artifacts under `reference/` are the
- * independently approved inverse-square production Fill, Outline, and physical
- * plot; the equal-per-hill decision prototype is archived below them. The
- * issue-305 benchmark decision records that gate. The
- * generic optional Outline-source hook runs this representation only on demand;
- * the legacy sparse closed-blade Hidden-line path remains a debug fallback, not
- * an automatic downgrade for this dense source.
+ * DENSE / FAITHFUL OUTLINE ARCHITECTURE: the full-composition target is 10,000
+ * descriptors from a seeded 100×100 stratified bank per stable hill identity.
+ * Fill traces curved seven-point blade silhouettes. On-demand Outline starts
+ * from that exact sampled geometry — all hill rings and every tapered blade in
+ * painter order — then annotates every primitive as both source and occluder for
+ * the generic indexed Hidden-line pass. There are no substitute centerline
+ * spines, physical-tool root LOD, or hill-only approximation. The physical tool
+ * target changes output stroke width only; it never selects roots or
+ * reconstructs geometry. The optional Outline-source hook keeps this dense
+ * generation in Studio's worker.
  *
  * BLADE SILHOUETTES / PHYSICAL PALETTE: blades are traced by the private
  * tapered-outline generator as filled-and-stroked shapes — never single stroked
@@ -108,10 +104,10 @@ import { createTerrainField } from './terrain'
 /** Horizontal segments used to resolve each prepared ridgeline. */
 const RIDGE_SAMPLES = 128
 
-/** Live ridge width selected by the issue-305 architecture decision. */
+/** Authored Fill ridgeline width; Outline applies the active physical tool. */
 const HILL_STROKE_WIDTH = 1
 
-/** Live blade contour width selected by the issue-305 architecture decision. */
+/** Authored Fill blade-contour width; Outline applies the active physical tool. */
 const BLADE_STROKE_WIDTH = 0.7
 
 /**
@@ -141,7 +137,7 @@ const schema = {
   /** Travel through the shared terrain field from foreground to horizon. */
   terrainDrift: { kind: 'number', min: 0, max: 8, default: 1.25, step: 0.05 },
   /** Relative density: 2 is the adopted 10k scene; 10 explores up to 50k. */
-  bladeDensity: { kind: 'number', min: 0, max: 10, default: 1, step: 0.05 },
+  bladeDensity: { kind: 'number', min: 0, max: 10, default: 0, step: 0.05 },
   /** Nominal foreground blade length in Composition Frame units. */
   bladeLength: { kind: 'number', min: 4, max: 80, default: 28, step: 1 },
   /** Symmetric seeded variation around the nominal blade length. */
@@ -206,7 +202,7 @@ export const grassHills = definePreparedSketch({
   ) {
     validateGrassHillsOutlineTarget(target)
     const prepared = prepareGrassHills(params, seed, frame)
-    return grassHillsOutlineSource(prepared.frame, prepared.hills, target)
+    return grassHillsOutlineSource(sampleGrassHills(prepared, _t), target)
   },
 })
 
