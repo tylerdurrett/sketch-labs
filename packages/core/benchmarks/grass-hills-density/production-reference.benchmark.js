@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import {
+  ADOPTED_BLADE_DENSITY,
+  CEILING_BLADE_DENSITY,
   PRODUCTION_OUTLINE_TOLERANCE,
-  PRODUCTION_PRESET_NAME,
   PRODUCTION_REFERENCE_ID,
   generateProductionReference,
   productionReferenceManifest,
@@ -16,8 +17,8 @@ const referenceDirectory = new URL(
   import.meta.url,
 )
 
-describe('Grass Hills production acceptance reference', () => {
-  it('reproduces production Fill, Outline, and the physical plot byte-for-byte', () => {
+describe('Grass Hills faithful production evidence', () => {
+  it('reproduces the committed 10k vectors and bounded 50k review pair', () => {
     const manifestBytes = readFileSync(
       new URL('manifest.json', referenceDirectory),
       'utf8',
@@ -29,107 +30,120 @@ describe('Grass Hills production acceptance reference', () => {
     expect(`${JSON.stringify(regeneratedManifest, null, 2)}\n`).toBe(
       manifestBytes,
     )
-
     expect(manifest).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       referenceId: PRODUCTION_REFERENCE_ID,
-      status: 'production-acceptance',
-      preset: {
-        name: PRODUCTION_PRESET_NAME,
-        seed: 12345,
-        params: { hillCount: 10, bladeDensity: 2 },
-      },
-      tool: {
-        widthMillimeters: 0.3,
-        millimetersPerSceneUnit: 0.18,
-      },
-      outline: {
-        tolerance: PRODUCTION_OUTLINE_TOLERANCE,
-        includeFrame: true,
-        physicalWidthsMillimeters: {
-          grassAndRidges: 0.3,
-          compositionFrame: 0.18,
-        },
-      },
-      evidence: {
-        allocation: [3094, 1928, 1316, 955, 724, 568, 457, 376, 315, 267],
-        fillBladeCount: 10_000,
-        outlineSelectedBladeCount: 8_179,
-        outlineSourceRidgeCount: 10,
-        outlineOccluderCount: 10,
-        workload: {
-          filledPrimitiveCount: 10,
-          sourceSegmentCount: 42_195,
-          overlappingPairCount: 5_742,
-          estimatedSegmentEdgeComparisons: 3_897_390,
-          totalWorkUnits: 4_158_122,
-        },
-      },
-      approval: {
-        verdict: 'PASS',
-        reviewer: '/root/impl_p4/p4_visual_review',
-        rubric: {
-          fillGrassReading: 'PASS',
-          depthAndTerrainBands: 'PASS',
-          outlineFidelity: 'PASS',
-          physicalPlotLegibility: 'PASS',
-        },
-        committedLeanRoundtrip: {
-          values: [0, 0.25, 0],
-          timingRun: {
-            longTasksMilliseconds: [410, 383],
+      status: 'awaiting-independent-paired-fidelity-review',
+      qualityFallbackPolicy: { allowed: false },
+      scenarios: {
+        adopted10k: {
+          preset: { params: { bladeDensity: ADOPTED_BLADE_DENSITY } },
+          outlineTolerance: PRODUCTION_OUTLINE_TOLERANCE,
+          fidelity: {
+            expectedBladeCount: 10_000,
+            fillBladeCount: 10_000,
+            outlineSourceBladeCount: 10_000,
+            rejectedPrimitiveCount: 0,
+            sixPointCenterlineCount: 0,
+            exactGeometryIdentity: true,
+            physicalToolRootRejection: false,
+            representationFallbackDetected: false,
           },
-          sceneIdentityRun: {
-            exactSceneRestoration: true,
-            exactCanvasPixelRestoration: false,
+          review: { verdict: 'PENDING-INDEPENDENT-REVIEW' },
+        },
+        supportedCeiling50k: {
+          preset: { params: { bladeDensity: CEILING_BLADE_DENSITY } },
+          fidelity: {
+            expectedBladeCount: 50_000,
+            fillBladeCount: 50_000,
+            outlineSourceBladeCount: 50_000,
+            rejectedPrimitiveCount: 0,
+            sixPointCenterlineCount: 0,
+            exactGeometryIdentity: true,
+            physicalToolRootRejection: false,
+            representationFallbackDetected: false,
           },
+          review: { verdict: 'PENDING-INDEPENDENT-REVIEW' },
         },
       },
+      review: { verdict: 'PENDING-INDEPENDENT-REVIEW', reviewer: null },
     })
-    expect(generated.fillSvg).toBe(
-      readFileSync(new URL('fill.svg', referenceDirectory), 'utf8'),
-    )
-    expect(generated.outlineSvg).toBe(
-      readFileSync(new URL('outline.svg', referenceDirectory), 'utf8'),
-    )
-    expect(generated.physicalPlotSvg).toBe(
-      readFileSync(new URL('physical-plot.svg', referenceDirectory), 'utf8'),
-    )
-    expect(sha256(generated.fillSvg)).toBe(manifest.artifacts.fill.sha256)
-    expect(sha256(generated.outlineSvg)).toBe(
-      manifest.artifacts.outline.sha256,
-    )
-    expect(sha256(generated.physicalPlotSvg)).toBe(
-      manifest.artifacts.physicalPlot.sha256,
-    )
-  }, 30_000)
 
-  it('reuses the exact processed geometry and preserves physical mark widths', () => {
-    const first = generateProductionReference()
-    const second = generateProductionReference()
-    const outlineSceneHash = sha256(JSON.stringify(first.outlineScene))
-
-    expect(first.fillScene).toEqual(second.fillScene)
-    expect(first.outlineSource).toEqual(second.outlineSource)
-    expect(first.outlineScene).toEqual(second.outlineScene)
-    expect(first.physicalPlotSvg).toBe(second.physicalPlotSvg)
-    expect(outlineSceneHash).toBe(
-      sha256(JSON.stringify(second.outlineScene)),
-    )
-    expect(first.evidence.outlineInventory.sha256).toBe(outlineSceneHash)
-    expect(first.physicalPlotSvg).toContain('width="200mm" height="200mm"')
-
-    const grassMarks = first.outlineScene.primitives.slice(0, -1)
-    expect(grassMarks.length).toBeGreaterThan(7_000)
-    expect(
-      grassMarks.every(
-        ({ stroke }) =>
-          stroke?.width * first.mapping.scale ===
-          first.target.toolWidthMillimeters,
+    const committed = {
+      fillSvg: readFileSync(new URL('fill.svg', referenceDirectory), 'utf8'),
+      outlineSvg: readFileSync(
+        new URL('outline.svg', referenceDirectory),
+        'utf8',
       ),
-    ).toBe(true)
-    expect(first.outlineScene.primitives.at(-1)?.stroke?.width).toBe(1)
-  }, 30_000)
+      physicalPlotSvg: readFileSync(
+        new URL('physical-plot.svg', referenceDirectory),
+        'utf8',
+      ),
+    }
+    expect(generated.adopted.fullArtifacts).toMatchObject(committed)
+    expect(sha256(committed.fillSvg)).toBe(
+      manifest.scenarios.adopted10k.artifacts.fillSvg.sha256,
+    )
+    expect(sha256(committed.outlineSvg)).toBe(
+      manifest.scenarios.adopted10k.artifacts.outlineSvg.sha256,
+    )
+    expect(sha256(committed.physicalPlotSvg)).toBe(
+      manifest.scenarios.adopted10k.artifacts.physicalPlotSvg.sha256,
+    )
+
+    for (const key of [
+      'fillReviewPng',
+      'outlineReviewPng',
+      'contactSheetPng',
+    ]) {
+      const artifact = manifest.scenarios.supportedCeiling50k.artifacts[key]
+      const bytes = readFileSync(new URL(artifact.file, referenceDirectory))
+      expect(sha256(bytes)).toBe(artifact.sha256)
+      expect(bytes.byteLength).toBe(artifact.bytes)
+    }
+  })
+
+  it('pins indexed-plan evidence without treating observations as time limits', () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL('manifest.json', referenceDirectory), 'utf8'),
+    )
+    const observations = JSON.parse(
+      readFileSync(new URL('observations.json', referenceDirectory), 'utf8'),
+    )
+
+    for (const scenario of Object.values(manifest.scenarios)) {
+      expect(scenario.hiddenLinePlan.broadPhase).toMatchObject({
+        queriedSourceCount: scenario.fidelity.fillPrimitiveCount,
+        occluderCount: scenario.fidelity.fillPrimitiveCount,
+        trueOverlappingPairCount:
+          scenario.hiddenLinePlan.workload.overlappingPairCount,
+        index: {
+          entryCount: scenario.fidelity.fillPrimitiveCount,
+          unsafeEntryCount: 0,
+        },
+      })
+      expect(
+        scenario.hiddenLinePlan.broadPhase.index.indexedEntryCount +
+          scenario.hiddenLinePlan.broadPhase.index.overflowEntryCount,
+      ).toBe(scenario.hiddenLinePlan.broadPhase.index.entryCount)
+      expect(
+        scenario.hiddenLinePlan.broadPhase.index.cellEntryCount,
+      ).toBeGreaterThan(0)
+      expect(
+        scenario.hiddenLinePlan.broadPhase.enumeratedCandidatePairCount,
+      ).toBeLessThan(
+        scenario.hiddenLinePlan.broadPhase.eligiblePainterPairCount,
+      )
+    }
+
+    expect(observations.warning).toMatch(/not SLAs and not test limits/)
+    for (const scenario of Object.values(observations.scenarios)) {
+      expect(scenario.contract).toMatch(/never pass\/fail limits or SLAs/)
+      expect(scenario.durationsMs.total).toBeGreaterThan(0)
+      expect(scenario.memory.peakObservedRssBytes).toBeGreaterThan(0)
+      expect(scenario.memory.processLifetimeMaxRssBytes).toBeGreaterThan(0)
+    }
+  })
 })
 
 function sha256(value) {

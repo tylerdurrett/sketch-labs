@@ -1,0 +1,1171 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "grass-hills-faithful-visible-line",
+  "capturedAt": "2026-07-16T04:45:01.499Z",
+  "warning": "Observations from one machine/run; not SLAs and not test limits.",
+  "machine": {
+    "hostname": "Tdogss-MacBook-Pro.local",
+    "os": {
+      "platform": "darwin",
+      "release": "24.6.0"
+    },
+    "runtime": {
+      "node": "v23.9.0",
+      "v8": "12.9.202.28-node.13"
+    },
+    "architecture": "arm64",
+    "cpu": {
+      "model": "Apple M2 Max",
+      "logicalCount": 12
+    },
+    "totalMemoryBytes": 68719476736
+  },
+  "scenarios": {
+    "adopted10k": {
+      "id": "adopted-10k",
+      "contract": "single local run; durations and memory are observations, never pass/fail limits or SLAs",
+      "durationsMs": {
+        "preparation": 109.046666,
+        "fillGeneration": 16.354332999999997,
+        "fillDerivedOutlineSource": 5.062333999999993,
+        "standalonePlanAnalysis": 102.99041699999998,
+        "indexedHiddenLineIncludingItsOwnPlan": 426.55100000000004,
+        "fillBoundsClip": 4.074957999999924,
+        "outlineBoundsClip": 8.152416000000017,
+        "fillSvgSerialization": 21.646124999999984,
+        "outlineSvgSerialization": 28.531750000000102,
+        "physicalPlotSerialization": 28.60349999999994,
+        "fillReviewRaster": 455.73016599999994,
+        "outlineReviewRaster": 523.6487500000001,
+        "contactSheetAssembly": 665.4318750000002,
+        "total": 2576.163542
+      },
+      "memory": {
+        "sampling": "process.memoryUsage at stage boundaries and every 512 Hidden-line progress events",
+        "peakObservedRssBytes": 431046656,
+        "peakObservedHeapUsedBytes": 286054640,
+        "processLifetimeMaxRssBytes": 462929920,
+        "samples": [
+          {
+            "stage": "start",
+            "rssBytes": 46383104,
+            "heapUsedBytes": 4629496,
+            "heapTotalBytes": 7684096,
+            "externalBytes": 2052845,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "prepared",
+            "rssBytes": 107282432,
+            "heapUsedBytes": 24568992,
+            "heapTotalBytes": 52510720,
+            "externalBytes": 1943135,
+            "arrayBuffersBytes": 58539
+          },
+          {
+            "stage": "fill-generated",
+            "rssBytes": 111640576,
+            "heapUsedBytes": 27545800,
+            "heapTotalBytes": 56705024,
+            "externalBytes": 1943135,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "outline-source-derived",
+            "rssBytes": 127467520,
+            "heapUsedBytes": 27165920,
+            "heapTotalBytes": 61161472,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "plan-analyzed",
+            "rssBytes": 221560832,
+            "heapUsedBytes": 123322168,
+            "heapTotalBytes": 153387008,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-512",
+            "rssBytes": 324026368,
+            "heapUsedBytes": 227466928,
+            "heapTotalBytes": 246923264,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-1024",
+            "rssBytes": 328974336,
+            "heapUsedBytes": 228410568,
+            "heapTotalBytes": 248758272,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-1536",
+            "rssBytes": 331923456,
+            "heapUsedBytes": 226930944,
+            "heapTotalBytes": 249806848,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-2048",
+            "rssBytes": 333053952,
+            "heapUsedBytes": 218769896,
+            "heapTotalBytes": 250593280,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-2560",
+            "rssBytes": 334020608,
+            "heapUsedBytes": 217759272,
+            "heapTotalBytes": 251904000,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-3072",
+            "rssBytes": 334807040,
+            "heapUsedBytes": 226572960,
+            "heapTotalBytes": 252166144,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-3584",
+            "rssBytes": 335429632,
+            "heapUsedBytes": 219930432,
+            "heapTotalBytes": 252690432,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-4096",
+            "rssBytes": 336281600,
+            "heapUsedBytes": 231328248,
+            "heapTotalBytes": 254525440,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-4608",
+            "rssBytes": 337674240,
+            "heapUsedBytes": 222468704,
+            "heapTotalBytes": 255049728,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-5120",
+            "rssBytes": 338477056,
+            "heapUsedBytes": 225742280,
+            "heapTotalBytes": 256098304,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-5632",
+            "rssBytes": 338968576,
+            "heapUsedBytes": 223288424,
+            "heapTotalBytes": 256622592,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-6144",
+            "rssBytes": 340180992,
+            "heapUsedBytes": 226139656,
+            "heapTotalBytes": 257671168,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-6656",
+            "rssBytes": 340803584,
+            "heapUsedBytes": 235324960,
+            "heapTotalBytes": 258457600,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-7168",
+            "rssBytes": 341917696,
+            "heapUsedBytes": 239593096,
+            "heapTotalBytes": 259702784,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-7680",
+            "rssBytes": 342540288,
+            "heapUsedBytes": 232940632,
+            "heapTotalBytes": 259964928,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-8192",
+            "rssBytes": 343457792,
+            "heapUsedBytes": 231265528,
+            "heapTotalBytes": 261275648,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-8704",
+            "rssBytes": 344178688,
+            "heapUsedBytes": 243937984,
+            "heapTotalBytes": 261799936,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-9216",
+            "rssBytes": 344801280,
+            "heapUsedBytes": 240217944,
+            "heapTotalBytes": 262586368,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-9728",
+            "rssBytes": 345604096,
+            "heapUsedBytes": 234448576,
+            "heapTotalBytes": 263110656,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-10010",
+            "rssBytes": 345833472,
+            "heapUsedBytes": 238585560,
+            "heapTotalBytes": 263110656,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "hidden-line-complete",
+            "rssBytes": 345833472,
+            "heapUsedBytes": 238586456,
+            "heapTotalBytes": 263110656,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "bounds-clipped",
+            "rssBytes": 349929472,
+            "heapUsedBytes": 248025536,
+            "heapTotalBytes": 266436608,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "vector-artifacts-serialized",
+            "rssBytes": 391610368,
+            "heapUsedBytes": 286054640,
+            "heapTotalBytes": 305987584,
+            "externalBytes": 1904735,
+            "arrayBuffersBytes": 20139
+          },
+          {
+            "stage": "review-images-rendered",
+            "rssBytes": 431046656,
+            "heapUsedBytes": 281450368,
+            "heapTotalBytes": 309837824,
+            "externalBytes": 25589961,
+            "arrayBuffersBytes": 23705365
+          }
+        ]
+      },
+      "progressEvents": 10010
+    },
+    "supportedCeiling50k": {
+      "id": "supported-ceiling-50k",
+      "contract": "single local run; durations and memory are observations, never pass/fail limits or SLAs",
+      "durationsMs": {
+        "preparation": 187.95183399999996,
+        "fillGeneration": 33.43629199999987,
+        "fillDerivedOutlineSource": 13.048875000000407,
+        "standalonePlanAnalysis": 728.105125,
+        "indexedHiddenLineIncludingItsOwnPlan": 4012.3638330000003,
+        "fillBoundsClip": 12.523417000000336,
+        "outlineBoundsClip": 18.76825000000008,
+        "fillSvgSerialization": 106.82541700000002,
+        "outlineSvgSerialization": 170.37904200000048,
+        "physicalPlotSerialization": 159.01779200000055,
+        "fillReviewRaster": 850.4314579999991,
+        "outlineReviewRaster": 881.6333340000001,
+        "contactSheetAssembly": 1110.0587500000001,
+        "total": 9211.756375
+      },
+      "memory": {
+        "sampling": "process.memoryUsage at stage boundaries and every 512 Hidden-line progress events",
+        "peakObservedRssBytes": 1252442112,
+        "peakObservedHeapUsedBytes": 993262896,
+        "processLifetimeMaxRssBytes": 1425391616,
+        "samples": [
+          {
+            "stage": "start",
+            "rssBytes": 473726976,
+            "heapUsedBytes": 21062600,
+            "heapTotalBytes": 95371264,
+            "externalBytes": 5454394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "prepared",
+            "rssBytes": 475545600,
+            "heapUsedBytes": 77621528,
+            "heapTotalBytes": 99303424,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "fill-generated",
+            "rssBytes": 476774400,
+            "heapUsedBytes": 112895320,
+            "heapTotalBytes": 137412608,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "outline-source-derived",
+            "rssBytes": 525484032,
+            "heapUsedBytes": 156906736,
+            "heapTotalBytes": 189890560,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "plan-analyzed",
+            "rssBytes": 825507840,
+            "heapUsedBytes": 605987768,
+            "heapTotalBytes": 628129792,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-512",
+            "rssBytes": 980713472,
+            "heapUsedBytes": 601068800,
+            "heapTotalBytes": 629702656,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-1024",
+            "rssBytes": 981499904,
+            "heapUsedBytes": 609102672,
+            "heapTotalBytes": 631275520,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-1536",
+            "rssBytes": 981499904,
+            "heapUsedBytes": 597954680,
+            "heapTotalBytes": 632324096,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-2048",
+            "rssBytes": 981499904,
+            "heapUsedBytes": 603400056,
+            "heapTotalBytes": 632848384,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-2560",
+            "rssBytes": 981499904,
+            "heapUsedBytes": 609937864,
+            "heapTotalBytes": 634159104,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-3072",
+            "rssBytes": 981499904,
+            "heapUsedBytes": 604093552,
+            "heapTotalBytes": 634945536,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-3584",
+            "rssBytes": 981499904,
+            "heapUsedBytes": 603423976,
+            "heapTotalBytes": 636256256,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-4096",
+            "rssBytes": 981499904,
+            "heapUsedBytes": 604659216,
+            "heapTotalBytes": 637304832,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-4608",
+            "rssBytes": 981696512,
+            "heapUsedBytes": 610850344,
+            "heapTotalBytes": 638025728,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-5120",
+            "rssBytes": 981696512,
+            "heapUsedBytes": 610316544,
+            "heapTotalBytes": 639074304,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-5632",
+            "rssBytes": 981696512,
+            "heapUsedBytes": 606542032,
+            "heapTotalBytes": 640385024,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-6144",
+            "rssBytes": 981696512,
+            "heapUsedBytes": 618517232,
+            "heapTotalBytes": 641433600,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-6656",
+            "rssBytes": 981696512,
+            "heapUsedBytes": 614518584,
+            "heapTotalBytes": 642482176,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-7168",
+            "rssBytes": 981975040,
+            "heapUsedBytes": 611861168,
+            "heapTotalBytes": 643284992,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-7680",
+            "rssBytes": 981975040,
+            "heapUsedBytes": 612727264,
+            "heapTotalBytes": 644333568,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-8192",
+            "rssBytes": 981975040,
+            "heapUsedBytes": 626712848,
+            "heapTotalBytes": 645120000,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-8704",
+            "rssBytes": 981975040,
+            "heapUsedBytes": 622406632,
+            "heapTotalBytes": 645906432,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-9216",
+            "rssBytes": 981975040,
+            "heapUsedBytes": 612354512,
+            "heapTotalBytes": 646955008,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-9728",
+            "rssBytes": 981975040,
+            "heapUsedBytes": 617624728,
+            "heapTotalBytes": 647741440,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-10240",
+            "rssBytes": 981975040,
+            "heapUsedBytes": 622493192,
+            "heapTotalBytes": 648527872,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-10752",
+            "rssBytes": 981975040,
+            "heapUsedBytes": 631327616,
+            "heapTotalBytes": 649314304,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-11264",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 628570528,
+            "heapTotalBytes": 650510336,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-11776",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 619985048,
+            "heapTotalBytes": 651296768,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-12288",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 622647032,
+            "heapTotalBytes": 652083200,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-12800",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 628126728,
+            "heapTotalBytes": 652869632,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-13312",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 627174816,
+            "heapTotalBytes": 653656064,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-13824",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 628882744,
+            "heapTotalBytes": 654180352,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-14336",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 621470448,
+            "heapTotalBytes": 654966784,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-14848",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 633493856,
+            "heapTotalBytes": 655491072,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-15360",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 636562784,
+            "heapTotalBytes": 656015360,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-15872",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 635863904,
+            "heapTotalBytes": 656539648,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-16384",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 626906832,
+            "heapTotalBytes": 658374656,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-16896",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 635447144,
+            "heapTotalBytes": 658898944,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-17408",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 628910792,
+            "heapTotalBytes": 660471808,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-17920",
+            "rssBytes": 982384640,
+            "heapUsedBytes": 639806456,
+            "heapTotalBytes": 660996096,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-18432",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 635566984,
+            "heapTotalBytes": 662667264,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-18944",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 633705080,
+            "heapTotalBytes": 664240128,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-19456",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 639564992,
+            "heapTotalBytes": 665026560,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-19968",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 642577272,
+            "heapTotalBytes": 665812992,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-20480",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 633436144,
+            "heapTotalBytes": 667385856,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-20992",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 645315624,
+            "heapTotalBytes": 668172288,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-21504",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 646532080,
+            "heapTotalBytes": 668696576,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-22016",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 644844904,
+            "heapTotalBytes": 669483008,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-22528",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 642604296,
+            "heapTotalBytes": 670531584,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-23040",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 639462064,
+            "heapTotalBytes": 671318016,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-23552",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 642758768,
+            "heapTotalBytes": 672104448,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-24064",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 648421496,
+            "heapTotalBytes": 672890880,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-24576",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 655427328,
+            "heapTotalBytes": 673677312,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-25088",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 645293000,
+            "heapTotalBytes": 674201600,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-25600",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 643685472,
+            "heapTotalBytes": 674725888,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-26112",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 645472992,
+            "heapTotalBytes": 676036608,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-26624",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 647218776,
+            "heapTotalBytes": 677347328,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-27136",
+            "rssBytes": 983007232,
+            "heapUsedBytes": 649008000,
+            "heapTotalBytes": 678395904,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-27648",
+            "rssBytes": 983924736,
+            "heapUsedBytes": 661162264,
+            "heapTotalBytes": 680361984,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-28160",
+            "rssBytes": 983924736,
+            "heapUsedBytes": 648561888,
+            "heapTotalBytes": 681934848,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-28672",
+            "rssBytes": 983924736,
+            "heapUsedBytes": 664220456,
+            "heapTotalBytes": 682459136,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-29184",
+            "rssBytes": 983924736,
+            "heapUsedBytes": 654309640,
+            "heapTotalBytes": 683245568,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-29696",
+            "rssBytes": 983924736,
+            "heapUsedBytes": 657981464,
+            "heapTotalBytes": 684818432,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-30208",
+            "rssBytes": 983924736,
+            "heapUsedBytes": 650977728,
+            "heapTotalBytes": 685342720,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-30720",
+            "rssBytes": 983924736,
+            "heapUsedBytes": 651595752,
+            "heapTotalBytes": 686129152,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-31232",
+            "rssBytes": 983924736,
+            "heapUsedBytes": 653336760,
+            "heapTotalBytes": 686915584,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-31744",
+            "rssBytes": 983924736,
+            "heapUsedBytes": 661014128,
+            "heapTotalBytes": 687702016,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-32256",
+            "rssBytes": 983924736,
+            "heapUsedBytes": 656366632,
+            "heapTotalBytes": 687964160,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-32768",
+            "rssBytes": 983924736,
+            "heapUsedBytes": 669177520,
+            "heapTotalBytes": 688488448,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-33280",
+            "rssBytes": 983941120,
+            "heapUsedBytes": 666737800,
+            "heapTotalBytes": 689537024,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-33792",
+            "rssBytes": 983941120,
+            "heapUsedBytes": 664880032,
+            "heapTotalBytes": 690585600,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-34304",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 658011280,
+            "heapTotalBytes": 693207040,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-34816",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 667386264,
+            "heapTotalBytes": 693731328,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-35328",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 669422696,
+            "heapTotalBytes": 694517760,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-35840",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 673700672,
+            "heapTotalBytes": 695566336,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-36352",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 663122384,
+            "heapTotalBytes": 696090624,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-36864",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 670840376,
+            "heapTotalBytes": 696877056,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-37376",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 665746464,
+            "heapTotalBytes": 697401344,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-37888",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 676447984,
+            "heapTotalBytes": 697663488,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-38400",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 676506352,
+            "heapTotalBytes": 699236352,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-38912",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 671134184,
+            "heapTotalBytes": 701595648,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-39424",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 668970648,
+            "heapTotalBytes": 701857792,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-39936",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 670854392,
+            "heapTotalBytes": 702906368,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-40448",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 676527488,
+            "heapTotalBytes": 703430656,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-40960",
+            "rssBytes": 983957504,
+            "heapUsedBytes": 670975576,
+            "heapTotalBytes": 703954944,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-41472",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 684603872,
+            "heapTotalBytes": 705593344,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-41984",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 681828680,
+            "heapTotalBytes": 708214784,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-42496",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 688215824,
+            "heapTotalBytes": 709001216,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-43008",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 684921984,
+            "heapTotalBytes": 709787648,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-43520",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 677317224,
+            "heapTotalBytes": 710049792,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-44032",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 686696832,
+            "heapTotalBytes": 710574080,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-44544",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 691133216,
+            "heapTotalBytes": 712671232,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-45056",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 689645296,
+            "heapTotalBytes": 713719808,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-45568",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 688282744,
+            "heapTotalBytes": 713981952,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-46080",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 681029568,
+            "heapTotalBytes": 714506240,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-46592",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 692445992,
+            "heapTotalBytes": 716079104,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-47104",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 697739552,
+            "heapTotalBytes": 717389824,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-47616",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 689336864,
+            "heapTotalBytes": 717389824,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-48128",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 689288696,
+            "heapTotalBytes": 718176256,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-48640",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 687844344,
+            "heapTotalBytes": 719749120,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-49152",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 687678568,
+            "heapTotalBytes": 720535552,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-49664",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 696714464,
+            "heapTotalBytes": 720535552,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-50010",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 701163152,
+            "heapTotalBytes": 720797696,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "hidden-line-complete",
+            "rssBytes": 985333760,
+            "heapUsedBytes": 701164152,
+            "heapTotalBytes": 720797696,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "bounds-clipped",
+            "rssBytes": 991330304,
+            "heapUsedBytes": 745799376,
+            "heapTotalBytes": 769949696,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "vector-artifacts-serialized",
+            "rssBytes": 1230864384,
+            "heapUsedBytes": 985893712,
+            "heapTotalBytes": 1020592128,
+            "externalBytes": 2214394,
+            "arrayBuffersBytes": 329798
+          },
+          {
+            "stage": "review-images-rendered",
+            "rssBytes": 1252442112,
+            "heapUsedBytes": 993262896,
+            "heapTotalBytes": 1021116416,
+            "externalBytes": 29292458,
+            "arrayBuffersBytes": 27407862
+          }
+        ]
+      },
+      "progressEvents": 50010
+    }
+  }
+}
