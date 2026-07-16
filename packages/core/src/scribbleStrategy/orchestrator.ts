@@ -1,0 +1,232 @@
+import type { Point, Polyline, Random } from '../types'
+import { chooseScribbleGrowthStep } from './growth'
+import type { ScribbleModel } from './types'
+
+const MIN_MEANINGFUL_RESIDUAL = 1e-12
+
+/** Non-authored safety caps supplied by the integration executing one pass. */
+export interface ScribbleExecutionLimits {
+  /** Maximum deposited segments across every polyline. */
+  readonly maxAcceptedSegments: number
+  /** Maximum non-empty polylines retained in the outcome. */
+  readonly maxPolylines: number
+  /** Maximum failed local growth attempts, including rejected starts. */
+  readonly maxStagnations: number
+  /** Maximum weighted lifts after the initial starting-cell selection. */
+  readonly maxRestarts: number
+}
+
+/** Policy-neutral input for one deterministic Scribble solver pass. */
+export interface ScribbleOrchestratorInput {
+  readonly model: ScribbleModel
+  /** One caller-owned stream shared by restart selection and local growth. */
+  readonly rng: Random
+  /** A normalized residual error in `[0, 1]`. */
+  readonly residualThreshold: number
+  readonly limits: Readonly<ScribbleExecutionLimits>
+}
+
+export type ScribbleOrchestratorStopCause =
+  | 'threshold-reached'
+  | 'budget-reached'
+
+/** Raw solver state, before a public strategy assigns authored policy. */
+export interface ScribbleOrchestratorOutcome {
+  readonly polylines: Polyline[]
+  readonly residualError: number
+  readonly acceptedSegments: number
+  readonly stopCause: ScribbleOrchestratorStopCause
+}
+
+interface RestartCell {
+  readonly index: number
+  readonly point: Readonly<Point>
+  readonly weight: number
+}
+
+function assertNormalizedThreshold(residualThreshold: number): void {
+  if (
+    !Number.isFinite(residualThreshold) ||
+    residualThreshold < 0 ||
+    residualThreshold > 1
+  ) {
+    throw new RangeError('residualThreshold must be finite and within [0, 1]')
+  }
+}
+
+function assertExecutionLimits(limits: ScribbleExecutionLimits): void {
+  const entries = [
+    ['maxAcceptedSegments', limits.maxAcceptedSegments],
+    ['maxPolylines', limits.maxPolylines],
+    ['maxStagnations', limits.maxStagnations],
+    ['maxRestarts', limits.maxRestarts],
+  ] as const
+
+  for (const [name, value] of entries) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new RangeError(`${name} must be a non-negative safe integer`)
+    }
+  }
+}
+
+/**
+ * Pick a row-major lattice cell with probability proportional to its current
+ * permission-weighted residual. Rejected starting cells may be excluded so a
+ * locally impossible island cannot consume every restart.
+ */
+function chooseRestartCell(
+  model: ScribbleModel,
+  rng: Random,
+  excluded: ReadonlySet<number>,
+): RestartCell | undefined {
+  const candidates: RestartCell[] = []
+  let totalWeight = 0
+
+  for (const [index, sample] of model.samples().entries()) {
+    if (excluded.has(index) || sample.residual <= MIN_MEANINGFUL_RESIDUAL) {
+      continue
+    }
+
+    const candidate = {
+      index,
+      point: sample.point,
+      weight: sample.residual,
+    }
+    candidates.push(candidate)
+    totalWeight += candidate.weight
+  }
+
+  if (candidates.length === 0 || totalWeight <= MIN_MEANINGFUL_RESIDUAL) {
+    return undefined
+  }
+
+  let cursor = rng.value() * totalWeight
+  for (const candidate of candidates) {
+    cursor -= candidate.weight
+    if (cursor < 0) return candidate
+  }
+
+  return candidates[candidates.length - 1]
+}
+
+/**
+ * Execute one deterministic residual-seeking Scribble pass.
+ *
+ * This layer owns only geometry growth, virtual deposits, lifting/restarting,
+ * and hard execution caps. It deliberately knows nothing of authored fidelity,
+ * public termination wording, Scene construction, or Seed creation.
+ */
+export function runScribbleOrchestrator({
+  model,
+  rng,
+  residualThreshold,
+  limits,
+}: ScribbleOrchestratorInput): ScribbleOrchestratorOutcome {
+  assertNormalizedThreshold(residualThreshold)
+  assertExecutionLimits(limits)
+
+  const polylines: Polyline[] = []
+  const rejectedStarts = new Set<number>()
+  let residualError = model.residualError()
+  let acceptedSegments = 0
+  let stagnations = 0
+  let restarts = 0
+
+  if (residualError <= residualThreshold) {
+    return {
+      polylines,
+      residualError,
+      acceptedSegments,
+      stopCause: 'threshold-reached',
+    }
+  }
+
+  if (limits.maxAcceptedSegments === 0 || limits.maxPolylines === 0) {
+    return {
+      polylines,
+      residualError,
+      acceptedSegments,
+      stopCause: 'budget-reached',
+    }
+  }
+
+  let restartCell = chooseRestartCell(model, rng, rejectedStarts)
+  let current = restartCell?.point
+  let heading: number | undefined
+  let activePolyline: Polyline | undefined
+
+  while (current !== undefined) {
+    const step = chooseScribbleGrowthStep({
+      model,
+      rng,
+      current,
+      ...(heading === undefined ? {} : { heading }),
+    })
+
+    if (step.kind === 'advanced') {
+      if (activePolyline === undefined) {
+        activePolyline = [
+          [current[0], current[1]],
+          step.point,
+        ]
+        polylines.push(activePolyline)
+      } else {
+        activePolyline.push(step.point)
+      }
+
+      model.depositSegment(current, step.point)
+      acceptedSegments++
+      current = step.point
+      heading = step.heading
+      residualError = model.residualError()
+
+      // Completion always wins when the same accepted segment reaches a cap.
+      if (residualError <= residualThreshold) {
+        return {
+          polylines,
+          residualError,
+          acceptedSegments,
+          stopCause: 'threshold-reached',
+        }
+      }
+      if (acceptedSegments >= limits.maxAcceptedSegments) {
+        return {
+          polylines,
+          residualError,
+          acceptedSegments,
+          stopCause: 'budget-reached',
+        }
+      }
+
+      continue
+    }
+
+    stagnations++
+    if (activePolyline === undefined && restartCell !== undefined) {
+      rejectedStarts.add(restartCell.index)
+    }
+    activePolyline = undefined
+    heading = undefined
+
+    if (
+      stagnations >= limits.maxStagnations ||
+      restarts >= limits.maxRestarts ||
+      polylines.length >= limits.maxPolylines
+    ) {
+      break
+    }
+
+    restartCell = chooseRestartCell(model, rng, rejectedStarts)
+    if (restartCell === undefined) break
+
+    current = restartCell.point
+    restarts++
+  }
+
+  return {
+    polylines,
+    residualError,
+    acceptedSegments,
+    stopCause: 'budget-reached',
+  }
+}
