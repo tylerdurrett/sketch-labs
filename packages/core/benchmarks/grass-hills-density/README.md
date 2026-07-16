@@ -227,8 +227,10 @@ committed `dense-grass` Preset and invokes the production generator, exact
 role-annotated Outline source, generic indexed Hidden-line pass, clipping, and
 serializers at both 10k and 50k. `production-reference.benchmark.js` guards
 exact Fill/source geometry identity, the full blade inventory, zero physical
-root rejection, workload, preview/export Scene reuse, physical widths, and
-artifact hashes. The current evidence record is
+root rejection, workload, ordinary/physical serializer reuse of one processed
+Scene, physical widths, and artifact hashes. Studio's worker/cache and
+preview/export reuse are covered separately by its focused integration tests.
+The current evidence record is
 [`results/faithful-outline-evidence-2026-07-15.md`](results/faithful-outline-evidence-2026-07-15.md);
 the older
 [`results/production-acceptance-2026-07-15.md`](results/production-acceptance-2026-07-15.md)
