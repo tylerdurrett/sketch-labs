@@ -196,6 +196,7 @@ describe("App — keyed edit-history sessions", () => {
   it("cannot traverse an old sketch's history after switching or fresh remounting", () => {
     vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
     mountApp();
+    selectOption("Scribble Moon");
     const firstSketch = trigger().textContent!;
     const input = document.querySelector<HTMLInputElement>(
       '#inspector input[id^="control-"]',
