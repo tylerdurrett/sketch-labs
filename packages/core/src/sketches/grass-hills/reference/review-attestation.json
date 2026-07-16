@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "grass-hills-faithful-visible-line",
+  "reviewer": "/root/review_309_h",
+  "reviewedAt": "2026-07-15",
+  "independence": "reviewer was separate from the implementation agent",
+  "method": "comparative visual review of each committed Fill and faithful Outline pair at original PNG detail; contact sheets place Fill on the left and Outline on the right",
+  "verdict": "PASS",
+  "comparativeFidelity": {
+    "adopted10k": {
+      "verdict": "PASS",
+      "statement": "The adopted 10k Outline is a faithful comparative reproduction of the supplied Fill scene.",
+      "visualEvidence": [
+        {
+          "file": "adopted-10k-fill.png",
+          "sha256": "db839acdfd6985bfd529b83d322cb41ab658a04de4685d3d8a4f847c9aa68fc0",
+          "bytes": 77411
+        },
+        {
+          "file": "adopted-10k-outline.png",
+          "sha256": "8ff417c082172a9cfb2bf6f15c5a21107a7224ae096774a51c992b0efca89da6",
+          "bytes": 74465
+        },
+        {
+          "file": "adopted-10k-fill-outline-contact-sheet.png",
+          "sha256": "aa2ca40631acd5e1b2bdccf565b3ca22ecb363b1bf3dc14708ea4af156f4938d",
+          "bytes": 157783
+        }
+      ]
+    },
+    "supportedCeiling50k": {
+      "verdict": "PASS",
+      "statement": "The supported 50k Outline is a faithful comparative reproduction of the supplied Fill scene without a visible quality fallback.",
+      "visualEvidence": [
+        {
+          "file": "supported-ceiling-50k-fill.png",
+          "sha256": "d9780fdba95127160ffe08a5c2ad0217353c90a6e95d40e2acbc8775e832c1b8",
+          "bytes": 90905
+        },
+        {
+          "file": "supported-ceiling-50k-outline.png",
+          "sha256": "09ee23869b622de9a668ba78b0a283e9791e35bbfef913d819dab6efe57e5bc9",
+          "bytes": 85590
+        },
+        {
+          "file": "supported-ceiling-50k-fill-outline-contact-sheet.png",
+          "sha256": "3660523f2eeccd71a8ad3bbf6d47e2a5002e7aa5f31173cfea377c1eecf76d56",
+          "bytes": 181652
+        }
+      ]
+    }
+  },
+  "generatedEvidenceBoundary": "This attestation is maintained independently. production-reference-cli.js regenerates manifest.json, observations.json, vectors, and review rasters but never creates, changes, or deletes this file."
+}

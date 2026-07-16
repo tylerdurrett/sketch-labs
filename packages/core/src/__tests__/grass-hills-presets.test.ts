@@ -24,7 +24,11 @@ describe('Grass Hills production presets', () => {
         includeFrame: true,
       },
     })
-    expect(reconciled.params).toEqual(preset.params)
+    expect(preset.params).not.toHaveProperty('foregroundZoom')
+    expect(reconciled.params).toEqual({
+      ...preset.params,
+      foregroundZoom: 1,
+    })
     expect(reconciled.seed).toBe(preset.seed)
     expect(reconciled.profile).toEqual(preset.profile)
   })

@@ -19,6 +19,7 @@ const SCHEMA_KEYS = [
   'hillCount',
   'horizonHeight',
   'depthFalloff',
+  'foregroundZoom',
   'ridgeScale',
   'ridgeAmplitude',
   'terrainDrift',
@@ -148,6 +149,13 @@ describe('grass-hills Sketch contract', () => {
         default: 2,
         step: 0.05,
       },
+      foregroundZoom: {
+        kind: 'number',
+        min: 1,
+        max: 2,
+        default: 1,
+        step: 0.05,
+      },
       ridgeScale: {
         kind: 'number',
         min: 0.25,
@@ -173,7 +181,7 @@ describe('grass-hills Sketch contract', () => {
         kind: 'number',
         min: 0,
         max: 10,
-        default: 1,
+        default: 0,
         step: 0.05,
       },
       bladeLength: {
@@ -361,6 +369,7 @@ describe('grass-hills preparation and determinism', () => {
     hillCount: 7,
     horizonHeight: 0.31,
     depthFalloff: 2.4,
+    foregroundZoom: 1,
     ridgeScale: 4.25,
     ridgeAmplitude: 0.72,
     terrainDrift: 2.1,
@@ -453,6 +462,7 @@ describe('grass-hills preparation and determinism', () => {
     for (const key of [
       'hillCount',
       'horizonHeight',
+      'foregroundZoom',
       'ridgeScale',
       'ridgeAmplitude',
       'terrainDrift',
@@ -753,7 +763,7 @@ describe('grass-hills hidden-line workload inventory', () => {
     })
   })
 
-  it('emits the adopted maximum count and inventories its hill-only filtering', () => {
+  it('emits the adopted 10k count and inventories a hills-only diagnostic', () => {
     const maximum = grassHills.generate(
       {
         hillCount: 10,

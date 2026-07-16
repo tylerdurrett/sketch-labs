@@ -1,4 +1,19 @@
-# Grass Hills dense architecture decision — issue #305
+# SUPERSEDED — Grass Hills dense architecture decision, issue #305
+
+> **SUPERSEDED BY [#309](https://github.com/tylerdurrett/sketch-labs/issues/309).**
+> The six-point spine, physical-tool root LOD, and hill-only occlusion selected
+> here are not the current Grass Hills production contract. Production Outline
+> now starts from every exact seven-point Fill blade and hill ring, marks every
+> primitive as both source and occluder, and performs faithful painter-order
+> hidden-line subtraction. Current durable evidence lives in
+> [`results/faithful-outline-evidence-2026-07-15.md`](results/faithful-outline-evidence-2026-07-15.md)
+> and `src/sketches/grass-hills/reference/`. ADR-0011's on-demand worker and
+> single processed-Scene preview/export boundary remain unchanged.
+
+<details>
+<summary><strong>Historical #305 decision record (superseded; preserved verbatim below)</strong></summary>
+
+## Archived decision text
 
 > **Production-reference status:** P4 passed. The shipped inverse-square,
 > root-keyed implementation now owns the independently approved Fill, Outline,
@@ -180,3 +195,5 @@ sparse Scenes, but it must not silently process the 10k production source or
 replace the representation-specific Outline path. There is no automatic quality
 downgrade: failure to build the shared processed Scene is surfaced rather than
 exporting a different composition.
+
+</details>

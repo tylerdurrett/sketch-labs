@@ -11,6 +11,7 @@ const BASE_PARAMS = {
   hillCount: 1,
   horizonHeight: 0.2,
   depthFalloff: 1.5,
+  foregroundZoom: 1,
   ridgeScale: 3,
   ridgeAmplitude: 0,
   terrainDrift: 1,
@@ -229,6 +230,7 @@ describe('grass-hills control workflow contracts', () => {
 
     for (const key of [
       'horizonHeight',
+      'foregroundZoom',
       'ridgeScale',
       'ridgeAmplitude',
       'terrainDrift',
@@ -259,6 +261,14 @@ describe('grass-hills control workflow contracts', () => {
     ] as const) {
       expect(randomized[key]).toBe(BASE_PARAMS[key])
     }
+
+    const zoomLocked = randomize(
+      grassHills.schema,
+      BASE_PARAMS,
+      new Set(['foregroundZoom']),
+      () => 0.9,
+    )
+    expect(zoomLocked.foregroundZoom).toBe(BASE_PARAMS.foregroundZoom)
   })
 
   it.each([

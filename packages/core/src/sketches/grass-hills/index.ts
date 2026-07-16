@@ -9,6 +9,14 @@
  * landscape moves between depths. Relief scales with each band's local height,
  * so distant ridges flatten with the same perspective cue as their spacing.
  *
+ * FOREGROUND ZOOM / COMPOSITION: `foregroundZoom` uniformly magnifies the
+ * completed scene around the horizon center. Terrain, projected roots, blade
+ * lengths, and blade widths transform together, so the oversized foreground
+ * can continue beyond the fixed Composition Frame instead of ending visibly at
+ * its bottom. This is a sketch-local prepared-geometry transform, not a crop or
+ * literal 3D camera. It runs once after canonical construction and before Fill
+ * and Outline diverge; authored Fill strokes and physical tool width stay fixed.
+ *
  * UNBOUNDED RELIEF / PAINTER ORDER: ridge relief is a direct multiple of each
  * band's local height. Every ridge follows the shared terrain independently, so
  * high amplitudes can carry mountains above the horizon or valleys below the
@@ -30,26 +38,26 @@
  * emitted before its blades, whose ascending root-y order lets lower blades
  * cover higher ones before the next, nearer hill covers the whole group.
  *
- * DENSE ARCHITECTURE DECISION (#305; PRODUCTION): the selected
- * full-composition target is 10,000 descriptors from a seeded 100×100
- * stratified bank per stable hill identity. Fill uses curved seven-point closed
- * blades. On-demand Outline/plot derives curved six-point spines from those same
- * descriptors, applies a tool-width deterministic LOD plus nearer-hill masks,
- * retains visible ridges, and gives one processed Scene to preview and SVG.
- * Blade-to-blade Outline occlusion is intentionally perceptual, and plot density
- * may be lower than Fill density. The artifacts under `reference/` are the
- * independently approved inverse-square production Fill, Outline, and physical
- * plot; the equal-per-hill decision prototype is archived below them. The
- * issue-305 benchmark decision records that gate. The
- * generic optional Outline-source hook runs this representation only on demand;
- * the legacy sparse closed-blade Hidden-line path remains a debug fallback, not
- * an automatic downgrade for this dense source.
+ * DENSE / FAITHFUL OUTLINE ARCHITECTURE: the full-composition target is 10,000
+ * descriptors from a seeded 100×100 stratified bank per stable hill identity.
+ * Fill traces curved seven-point blade silhouettes. On-demand Outline starts
+ * from that exact sampled geometry — all hill rings and every tapered blade in
+ * painter order — then annotates every primitive as both source and occluder for
+ * the generic indexed Hidden-line pass. There are no substitute centerline
+ * spines, physical-tool root LOD, or hill-only approximation. The physical tool
+ * target changes output stroke width only; it never selects roots or
+ * reconstructs geometry. The optional Outline-source hook keeps this dense
+ * generation in Studio's worker.
  *
- * CLOSED SILHOUETTES / PHYSICAL PALETTE: blades are traced by the private
- * tapered-outline generator and emitted as closed, filled-and-stroked shapes —
- * never single stroked lines. The background, hill fills, and blade fills
- * default to paper white; authored hill and blade contours default to black.
- * All five colors are tunable without participating in geometry or RNG.
+ * BLADE SILHOUETTES / PHYSICAL PALETTE: blades are traced by the private
+ * tapered-outline generator as filled-and-stroked shapes — never single stroked
+ * lines. Every outline explicitly repeats its root. Default geometry retains
+ * `closed: true` for exact compatibility; active foreground zoom uses open path
+ * metadata so bounds clipping cannot synthesize a new last-to-first stroke
+ * across a clipped blade. The explicit root closure keeps the uncut fill and
+ * contour unchanged. The background, hill fills, and blade fills default to
+ * paper white; authored hill and blade contours default to black. All five
+ * colors are tunable without participating in geometry or RNG.
  *
  * STATIC / DETERMINISTIC / PREPARED: there is no `time` metadata. All terrain
  * randomness comes from the explicit Seed, with no clock reads, `Math.random`,
@@ -74,6 +82,7 @@ import {
 import { colorParam, numberParam } from '../sketch-util'
 import { blade } from './blade'
 import { layoutHillBands } from './depth'
+import { applyForegroundZoom } from './foreground-zoom'
 import {
   buildGrassBlades,
   resolveMaximumUnscaledBladeLength,
@@ -95,10 +104,10 @@ import { createTerrainField } from './terrain'
 /** Horizontal segments used to resolve each prepared ridgeline. */
 const RIDGE_SAMPLES = 128
 
-/** Live ridge width selected by the issue-305 architecture decision. */
+/** Authored Fill ridgeline width; Outline applies the active physical tool. */
 const HILL_STROKE_WIDTH = 1
 
-/** Live blade contour width selected by the issue-305 architecture decision. */
+/** Authored Fill blade-contour width; Outline applies the active physical tool. */
 const BLADE_STROKE_WIDTH = 0.7
 
 /**
@@ -119,6 +128,8 @@ const schema = {
   horizonHeight: { kind: 'number', min: 0, max: 0.9, default: 0.25, step: 0.01 },
   /** Perspective exponent; values above one compress distant ridge spacing. */
   depthFalloff: { kind: 'number', min: 0.25, max: 4, default: 2, step: 0.05 },
+  /** Uniform horizon-centered magnification of completed scene geometry. */
+  foregroundZoom: { kind: 'number', min: 1, max: 2, default: 1, step: 0.05 },
   /** Horizontal fBm frequency in features across the frame. */
   ridgeScale: { kind: 'number', min: 0.25, max: 12, default: 3.5, step: 0.05 },
   /** Nominal relief as a fraction of each band's local height. */
@@ -126,7 +137,7 @@ const schema = {
   /** Travel through the shared terrain field from foreground to horizon. */
   terrainDrift: { kind: 'number', min: 0, max: 8, default: 1.25, step: 0.05 },
   /** Relative density: 2 is the adopted 10k scene; 10 explores up to 50k. */
-  bladeDensity: { kind: 'number', min: 0, max: 10, default: 1, step: 0.05 },
+  bladeDensity: { kind: 'number', min: 0, max: 10, default: 0, step: 0.05 },
   /** Nominal foreground blade length in Composition Frame units. */
   bladeLength: { kind: 'number', min: 4, max: 80, default: 28, step: 1 },
   /** Symmetric seeded variation around the nominal blade length. */
@@ -169,6 +180,7 @@ interface PreparedGrassHills {
   readonly hillStrokeColor: string
   readonly bladeColor: string
   readonly bladeStrokeColor: string
+  readonly bladePathsClosed: boolean
   readonly hills: ReadonlyArray<PreparedHill>
 }
 
@@ -190,7 +202,7 @@ export const grassHills = definePreparedSketch({
   ) {
     validateGrassHillsOutlineTarget(target)
     const prepared = prepareGrassHills(params, seed, frame)
-    return grassHillsOutlineSource(prepared.frame, prepared.hills, target)
+    return grassHillsOutlineSource(sampleGrassHills(prepared, _t), target)
   },
 })
 
@@ -207,6 +219,7 @@ function prepareGrassHills(
   const hillCount = Math.round(numberParam(params, schema, 'hillCount'))
   const horizonHeight = numberParam(params, schema, 'horizonHeight')
   const depthFalloff = numberParam(params, schema, 'depthFalloff')
+  const foregroundZoom = numberParam(params, schema, 'foregroundZoom')
   const ridgeScale = numberParam(params, schema, 'ridgeScale')
   const ridgeAmplitude = numberParam(params, schema, 'ridgeAmplitude')
   const terrainDrift = numberParam(params, schema, 'terrainDrift')
@@ -252,7 +265,7 @@ function prepareGrassHills(
     bands.map(({ depth }) => depth),
     bladeDensity,
   )
-  const hills: ReadonlyArray<PreparedHill> = Object.freeze(
+  const unzoomedHills: ReadonlyArray<PreparedHill> = Object.freeze(
     bands.map((band, hillIndex) => {
       const ridge = ridges[hillIndex]!
       const count = rootCounts[hillIndex]!
@@ -302,6 +315,11 @@ function prepareGrassHills(
       })
     }),
   )
+  const hills = applyForegroundZoom(unzoomedHills, {
+    frame: preparedFrame,
+    horizonHeight,
+    zoom: foregroundZoom,
+  })
 
   return Object.freeze({
     frame: preparedFrame,
@@ -310,6 +328,7 @@ function prepareGrassHills(
     hillStrokeColor,
     bladeColor,
     bladeStrokeColor,
+    bladePathsClosed: foregroundZoom === 1,
     hills,
   })
 }
@@ -338,7 +357,7 @@ function sampleGrassHills(prepared: PreparedGrassHills, _t: number): Scene {
       builder.addPath(
         blade(descriptor.shape).map(([x, y]) => [x + rootX, y + rootY]),
         {
-          closed: true,
+          closed: prepared.bladePathsClosed,
           fill: { color: prepared.bladeColor },
           stroke: {
             color: prepared.bladeStrokeColor,
