@@ -4,6 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createShadingMask,
+  createToneField,
   DEFAULT_COMPOSITION_FRAME,
   HARNESS_FALLBACK_PLOT_PROFILE,
   resolveCompositionFrame,
@@ -12,6 +14,7 @@ import {
   type Scene,
   type Sketch,
   type TimeMetadata,
+  type ToneSource,
 } from "@harness/core";
 
 import {
@@ -177,6 +180,53 @@ function recordingContext(): {
 /** Point `getContext('2d')` at the given recording context for this test. */
 function useRecordingContext(ctx: CanvasRenderingContext2D): void {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx);
+}
+
+/** A Scene-capable recording context that also retains each pixel-native paint. */
+function pixelRecordingContext(): {
+  ctx: CanvasRenderingContext2D;
+  counts: Record<string, number>;
+  images: Uint8ClampedArray[];
+} {
+  const counts: Record<string, number> = {};
+  const images: Uint8ClampedArray[] = [];
+  const ctx = new Proxy({} as Record<string, unknown>, {
+    get: (target, prop) => {
+      if (prop in target) return target[prop as string];
+      if (prop === "createImageData") {
+        return (width: number, height: number) => ({
+          width,
+          height,
+          data: new Uint8ClampedArray(width * height * 4),
+        });
+      }
+      if (prop === "putImageData") {
+        return (imageData: ImageData) => {
+          counts.putImageData = (counts.putImageData ?? 0) + 1;
+          images.push(new Uint8ClampedArray(imageData.data));
+        };
+      }
+      return (..._args: unknown[]) => {
+        counts[prop as string] = (counts[prop as string] ?? 0) + 1;
+      };
+    },
+    set: (target, prop, value) => {
+      target[prop as string] = value;
+      return true;
+    },
+  });
+  return {
+    ctx: ctx as unknown as CanvasRenderingContext2D,
+    counts,
+    images,
+  };
+}
+
+function toneSource(tone: number): ToneSource {
+  return {
+    toneField: createToneField(() => tone),
+    shadingMask: createShadingMask(() => 1),
+  };
 }
 
 // --- the hand-driven rAF clock ----------------------------------------------
@@ -1044,6 +1094,175 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
       );
     });
     tick(3500);
+    expect(lastDrawnT(generate)).toBeCloseTo(2.5, 5);
+  });
+});
+
+describe("LiveCanvas Tone reference pixels (#316)", () => {
+  it("bypasses Sketch generation and the Scene renderer and exposes no displayed Scene", () => {
+    const { ctx, counts, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 2, height: 1 } as DOMRect,
+    );
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const handle = createRef<LiveCanvasHandle>();
+
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        renderState={{ kind: "tone-reference", source: toneSource(1) }}
+      />,
+    );
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(counts.putImageData).toBe(1);
+    expect(counts.setTransform ?? 0).toBe(0);
+    expect(counts.fillRect ?? 0).toBe(0);
+    expect([...images[0]!]).toEqual([
+      0, 0, 0, 255,
+      0, 0, 0, 255,
+    ]);
+    expect(handle.current?.getDisplayedScene()).toBeNull();
+    expect(handle.current?.captureDisplayedFrame()).toBeNull();
+  });
+
+  it("repaints immediately when the source or Composition Frame changes", () => {
+    const { ctx, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 1, height: 1 } as DOMRect,
+    );
+    const { sketch } = animatedSketch(undefined);
+    const sampled: number[] = [];
+    const frameAwareSource: ToneSource = {
+      toneField: createToneField(([x]) => {
+        sampled.push(x);
+        return x / 200;
+      }),
+      shadingMask: createShadingMask(() => 1),
+    };
+    const toneState = {
+      kind: "tone-reference" as const,
+      source: frameAwareSource,
+    };
+
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={{ width: 100, height: 100 }}
+        renderState={toneState}
+      />,
+    );
+    expect(sampled.at(-1)).toBe(50);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          compositionFrame={{ width: 200, height: 200 }}
+          renderState={toneState}
+        />,
+      );
+    });
+    expect(sampled.at(-1)).toBe(100);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          compositionFrame={{ width: 200, height: 200 }}
+          renderState={{ kind: "tone-reference", source: toneSource(0) }}
+        />,
+      );
+    });
+    expect([...images.at(-1)!]).toEqual([255, 255, 255, 255]);
+  });
+
+  it("re-samples at the new backing resolution after a box resize", () => {
+    const { ctx, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    let width = 2;
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => ({ width, height: 1 }) as DOMRect,
+    );
+    const { sketch, generate } = animatedSketch(undefined);
+    const sample = vi.fn(() => 0.5);
+    const source: ToneSource = {
+      toneField: createToneField(sample),
+      shadingMask: createShadingMask(() => 1),
+    };
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        renderState={{ kind: "tone-reference", source }}
+      />,
+    );
+    expect(sample).toHaveBeenCalledTimes(2);
+
+    width = 4;
+    act(() => fireResizeObserver?.());
+
+    expect(canvasEl(el).width).toBe(4);
+    expect(sample).toHaveBeenCalledTimes(6);
+    expect(images.at(-1)).toHaveLength(16);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("suspends and resumes artwork without mutating the selected time", () => {
+    const { ctx } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 1, height: 1 } as DOMRect,
+    );
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const handle = createRef<LiveCanvasHandle>();
+    const params = {};
+    mount(
+      <LiveCanvas handleRef={handle} sketch={sketch} params={params} seed={1} />,
+    );
+    tick(2000);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={1}
+          renderState={{ kind: "tone-reference", source: toneSource(0.5) }}
+        />,
+      );
+    });
+    const drawsBeforeSuspension = generate.mock.calls.length;
+    expect(handle.current?.getCurrentT()).toBe(2);
+    tick(8000);
+    expect(handle.current?.getCurrentT()).toBe(2);
+    expect(generate).toHaveBeenCalledTimes(drawsBeforeSuspension);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={1}
+          renderState={{ kind: "fill-live" }}
+        />,
+      );
+    });
+    tick(8500);
     expect(lastDrawnT(generate)).toBeCloseTo(2.5, 5);
   });
 });

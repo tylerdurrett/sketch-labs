@@ -21,7 +21,10 @@ import {
   type Seed,
   type Sketch,
   type TimeMetadata,
+  type ToneSource,
 } from "@harness/core";
+
+import { rasterizeToneReference } from "./toneReference";
 
 /**
  * Which processed Scene the live preview renders (issue #219, feature #4).
@@ -61,7 +64,8 @@ export interface FillCapture extends FillCaptureRequest {
 export type LiveCanvasRenderState =
   | { readonly kind: "fill-live" }
   | { readonly kind: "fill-held"; readonly scene: Scene; readonly t: number }
-  | { readonly kind: "outline"; readonly scene: Scene; readonly t: number };
+  | { readonly kind: "outline"; readonly scene: Scene; readonly t: number }
+  | { readonly kind: "tone-reference"; readonly source: ToneSource };
 
 const LIVE_FILL_RENDER_STATE: LiveCanvasRenderState = { kind: "fill-live" };
 
@@ -138,8 +142,8 @@ export interface LiveCanvasProps {
   /** Answers a capture token at most once, and only from its matching revision. */
   onFillCaptured?: (capture: FillCapture) => void;
   /**
-   * Selects live Fill sampling or paints caller-owned, immutable held/Outline
-   * geometry. Held and Outline states never invoke the Sketch generator.
+   * Selects live Fill sampling, caller-owned held/Outline geometry, or a
+   * pixel-native Tone reference. No non-live state invokes the Sketch generator.
    */
   renderState?: LiveCanvasRenderState;
   /** Export identity metadata retained in the displayed-scene handle. */
@@ -195,6 +199,27 @@ function paintFrame(canvas: HTMLCanvasElement, rendered: Scene): boolean {
   return true;
 }
 
+/** Paint a Tone reference directly into the canvas backing store. */
+function paintToneReference(
+  canvas: HTMLCanvasElement,
+  source: ToneSource,
+  compositionFrame: CoordinateSpace,
+): boolean {
+  const ctx = canvas.getContext("2d");
+  if (ctx === null || canvas.width === 0 || canvas.height === 0) return false;
+
+  const raster = rasterizeToneReference(
+    source,
+    compositionFrame,
+    canvas.width,
+    canvas.height,
+  );
+  const imageData = ctx.createImageData(raster.width, raster.height);
+  imageData.data.set(raster.data);
+  ctx.putImageData(imageData, 0, 0);
+  return true;
+}
+
 /**
  * Size `canvas`'s backing store to its CSS box × `dpr`, keeping the CSS box as
  * the display size. Returns whether it actually changed the backing store.
@@ -244,8 +269,9 @@ export function sizeToBox(canvas: HTMLCanvasElement, dpr: number): boolean {
  * `frameId` and cancels exactly that frame).
  *
  * Live Fill is the only state that samples a Sketch. Held Fill and completed
- * Outline states paint exact caller-supplied geometry and suspend animation.
- * Resize and DPR changes repaint the displayed Scene without deriving geometry.
+ * Outline states paint exact caller-supplied geometry; Tone reference samples
+ * only its headless source into pixels. All non-live states suspend animation.
+ * Resize and DPR changes repaint or re-rasterize without deriving geometry.
  */
 export function LiveCanvas({
   sketch,
@@ -283,9 +309,14 @@ export function LiveCanvas({
   // object identity — is the cache boundary. Recreating an equivalent frame does
   // not discard prepared geometry; changing drawable aspect does.
   const compositionAspect = compositionFrame.width / compositionFrame.height;
+  const compositionWidth = compositionFrame.width;
+  const compositionHeight = compositionFrame.height;
   const preparedFrame = useMemo(
-    () => prepareSketch(sketch, params, seed, compositionFrame),
-    [sketch, params, seed, compositionAspect],
+    () =>
+      renderState.kind === "tone-reference"
+        ? null
+        : prepareSketch(sketch, params, seed, compositionFrame),
+    [sketch, params, seed, compositionAspect, renderState.kind],
   );
 
   // The paper's CSS-box aspect (#155): the `<canvas>` box is sized to the
@@ -328,6 +359,7 @@ export function LiveCanvas({
   // samples the new immutable layout at the continuing `t`.
   const preparedFrameRef = useRef(preparedFrame);
   const renderStateRef = useRef(renderState);
+  const compositionFrameRef = useRef(compositionFrame);
   // `toleranceRef` lets the stable on-demand draw callbacks (rebuild/repaint,
   // scrubTo) read the current tolerance without a `tolerance` dependency, so the
   // clock effect and rAF baseline stay untouched by a knob change (issue #232).
@@ -342,6 +374,7 @@ export function LiveCanvas({
   useLayoutEffect(() => {
     preparedFrameRef.current = preparedFrame;
     renderStateRef.current = renderState;
+    compositionFrameRef.current = compositionFrame;
     toleranceRef.current = tolerance;
     includeFrameRef.current = includeFrame;
     inputRevisionRef.current = inputRevision;
@@ -350,6 +383,7 @@ export function LiveCanvas({
   }, [
     preparedFrame,
     renderState,
+    compositionFrame,
     tolerance,
     includeFrame,
     inputRevision,
@@ -448,14 +482,16 @@ export function LiveCanvas({
   const rebuildAndDrawFillAt = useCallback((t: number) => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
-    const rendered = preparedFrameRef.current(t);
+    const sampleFrame = preparedFrameRef.current;
+    if (sampleFrame === null) return;
+    const rendered = sampleFrame(t);
     if (paintFrame(canvas, rendered)) {
       commitFillFrame(rendered, t);
     }
   }, [commitFillFrame]);
 
   const paintSuppliedFrame = useCallback(
-    (state: Exclude<LiveCanvasRenderState, { kind: "fill-live" }>) => {
+    (state: Extract<LiveCanvasRenderState, { kind: "fill-held" | "outline" }>) => {
       const canvas = canvasRef.current;
       if (canvas === null || !paintFrame(canvas, state.scene)) return;
       const snapshot: DisplayedSceneSnapshot = {
@@ -480,6 +516,12 @@ export function LiveCanvas({
   const repaintCurrentFrame = useCallback(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
+    const state = renderStateRef.current;
+    if (state.kind === "tone-reference") {
+      displayedSceneRef.current = null;
+      paintToneReference(canvas, state.source, compositionFrameRef.current);
+      return;
+    }
     const displayed = displayedSceneRef.current;
     if (displayed !== null) paintFrame(canvas, displayed.scene);
   }, []);
@@ -493,13 +535,14 @@ export function LiveCanvas({
     rebuildAndDrawFillAt(tRef.current);
   }, [rebuildAndDrawFillAt]);
 
-  // A supplied state freezes both geometry and time. Returning to live Fill
-  // resumes from that exact t rather than restarting the Sketch clock.
+  // Supplied geometry freezes time at its captured t. Tone reference suspends
+  // geometry without touching time, so returning to artwork resumes unchanged.
   useEffect(() => {
     if (renderState.kind === "fill-live") {
       resumeTRef.current = tRef.current;
       return;
     }
+    if (renderState.kind === "tone-reference") return;
     tRef.current = renderState.t;
     resumeTRef.current = renderState.t;
     if (scrubberRef.current !== null) {
@@ -565,7 +608,9 @@ export function LiveCanvas({
       // guarantee that `tick` can only ever draw fill. Tolerance is hardcoded 0
       // to match: the fill branch never simplifies, so the live loop stays
       // provably simplify-free (issue #232's on-demand-only invariant).
-      const rendered = preparedFrameRef.current(t);
+      const sampleFrame = preparedFrameRef.current;
+      if (sampleFrame === null) return;
+      const rendered = sampleFrame(t);
       if (paintFrame(canvas, rendered)) commitFillFrame(rendered, t);
       frameId = requestAnimationFrame(tick);
     };
@@ -578,12 +623,18 @@ export function LiveCanvas({
   }, [sketch, playing, renderState.kind, commitFillFrame]);
 
   // Static live Fill derives synchronously. Supplied held/Outline geometry paints
-  // atomically as-is and is never sent through prepareSketch or hidden-line work.
+  // atomically as-is; Tone samples directly to pixels. Neither path is sent
+  // through prepareSketch or hidden-line work.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
     sizeToBox(canvas, window.devicePixelRatio || 1);
 
+    if (renderState.kind === "tone-reference") {
+      displayedSceneRef.current = null;
+      paintToneReference(canvas, renderState.source, compositionFrame);
+      return;
+    }
     if (renderState.kind !== "fill-live") {
       paintSuppliedFrame(renderState);
       return;
@@ -594,6 +645,8 @@ export function LiveCanvas({
     params,
     seed,
     compositionAspect,
+    compositionWidth,
+    compositionHeight,
     renderState,
     inputRevision,
     refitAndDrawFill,
