@@ -16,8 +16,9 @@
  *     directions (missing Fill contours and extra Outline geometry).
  *
  * The exact final Composition Frame path optionally appended by Studio is not
- * sketch geometry. Only a matching final primitive is excluded; an earlier
- * rectangle with the same coordinates remains ordinary Outline geometry.
+ * sketch geometry. Callers explicitly request its exclusion; only a matching
+ * final primitive is then excluded, while an earlier frame-shaped path remains
+ * ordinary Outline geometry.
  */
 
 import type { Primitive, Scene } from '../scene'
@@ -33,17 +34,36 @@ export interface VisibleContourComparison {
   readonly extra: readonly ContourInterval[]
 }
 
+export interface OutlineContourOptions {
+  /** Ignore an exact final Composition Frame path appended by the output profile. */
+  readonly excludeCompositionFrame?: boolean
+}
+
+const ROUND_OFF_ULPS = 64
+
+/** Scale-aware floating-point roundoff, not an authored geometry tolerance. */
+function roundOff(...values: number[]): number {
+  let scale = 1
+  for (const value of values) scale = Math.max(scale, Math.abs(value))
+  return Number.EPSILON * scale * ROUND_OFF_ULPS
+}
+
+function nearlyEqual(a: number, b: number, ...context: number[]): boolean {
+  return Math.abs(a - b) <= roundOff(a, b, ...context)
+}
+
 function pointsEqual(a: Point, b: Point): boolean {
-  return a[0] === b[0] && a[1] === b[1]
+  return nearlyEqual(a[0], b[0]) && nearlyEqual(a[1], b[1])
 }
 
 function comparePoints(a: Point, b: Point): number {
-  return a[0] === b[0] ? a[1] - b[1] : a[0] - b[0]
+  return nearlyEqual(a[0], b[0]) ? a[1] - b[1] : a[0] - b[0]
 }
 
-function cross(a: Point, b: Point, c: Point): number {
-  return (b[0] - a[0]) * (c[1] - a[1]) -
-    (b[1] - a[1]) * (c[0] - a[0])
+function crossIsZero(a: Point, b: Point, c: Point): boolean {
+  const first = (b[0] - a[0]) * (c[1] - a[1])
+  const second = (b[1] - a[1]) * (c[0] - a[0])
+  return nearlyEqual(first, second)
 }
 
 function interpolate(a: Point, b: Point, t: number): Point {
@@ -59,17 +79,19 @@ function canonicalInterval(a: Point, b: Point): ContourInterval | null {
 
 function pointOnInterval(point: Point, interval: ContourInterval): boolean {
   const [start, end] = interval
+  const xRoundOff = roundOff(point[0], start[0], end[0])
+  const yRoundOff = roundOff(point[1], start[1], end[1])
   return (
-    cross(start, end, point) === 0 &&
-    point[0] >= Math.min(start[0], end[0]) &&
-    point[0] <= Math.max(start[0], end[0]) &&
-    point[1] >= Math.min(start[1], end[1]) &&
-    point[1] <= Math.max(start[1], end[1])
+    crossIsZero(start, end, point) &&
+    point[0] >= Math.min(start[0], end[0]) - xRoundOff &&
+    point[0] <= Math.max(start[0], end[0]) + xRoundOff &&
+    point[1] >= Math.min(start[1], end[1]) - yRoundOff &&
+    point[1] <= Math.max(start[1], end[1]) + yRoundOff
   )
 }
 
 function collinear(a: ContourInterval, b: ContourInterval): boolean {
-  return cross(a[0], a[1], b[0]) === 0 && cross(a[0], a[1], b[1]) === 0
+  return crossIsZero(a[0], a[1], b[0]) && crossIsZero(a[0], a[1], b[1])
 }
 
 function mergeIntervals(
@@ -77,12 +99,12 @@ function mergeIntervals(
   b: ContourInterval,
 ): ContourInterval | null {
   if (!collinear(a, b)) return null
-    if (
-      !pointOnInterval(a[0], b) &&
-      !pointOnInterval(a[1], b) &&
-      !pointOnInterval(b[0], a) &&
-      !pointOnInterval(b[1], a)
-    ) {
+  if (
+    !pointOnInterval(a[0], b) &&
+    !pointOnInterval(a[1], b) &&
+    !pointOnInterval(b[0], a) &&
+    !pointOnInterval(b[1], a)
+  ) {
     return null
   }
   const points = [a[0], a[1], b[0], b[1]].sort(comparePoints)
@@ -132,17 +154,23 @@ function clipIntervalToFrame(
     [dy, height - a[1]],
   ]
   for (const [p, q] of tests) {
-    if (p === 0) {
-      if (q < 0) return null
+    if (nearlyEqual(p, 0, dx, dy)) {
+      if (q < -roundOff(q, width, height)) return null
       continue
     }
     const ratio = q / p
     if (p < 0) lower = Math.max(lower, ratio)
     else upper = Math.min(upper, ratio)
-    if (lower > upper) return null
+    if (lower > upper + roundOff(lower, upper)) return null
   }
 
-  return canonicalInterval(interpolate(a, b, lower), interpolate(a, b, upper))
+  const clippedStart = interpolate(a, b, Math.max(0, Math.min(1, lower)))
+  const clippedEnd = interpolate(a, b, Math.max(0, Math.min(1, upper)))
+  const snapToFrame = ([x, y]: Point): Point => [
+    nearlyEqual(x, 0, width) ? 0 : nearlyEqual(x, width) ? width : x,
+    nearlyEqual(y, 0, height) ? 0 : nearlyEqual(y, height) ? height : y,
+  ]
+  return canonicalInterval(snapToFrame(clippedStart), snapToFrame(clippedEnd))
 }
 
 function polygonPoints(primitive: Primitive): Point[] {
@@ -203,7 +231,7 @@ function parameterOnSegment(a: Point, b: Point, point: Point): number {
     : (point[1] - a[1]) / dy
 }
 
-/** Add exact split parameters where A-B meets or overlaps C-D. */
+/** Add topology-exact split parameters, accepting only roundoff-scale drift. */
 function addIntersectionParameters(
   parameters: number[],
   a: Point,
@@ -215,23 +243,35 @@ function addIntersectionParameters(
   const ry = b[1] - a[1]
   const sx = d[0] - c[0]
   const sy = d[1] - c[1]
-  const denominator = rx * sy - ry * sx
+  const firstProduct = rx * sy
+  const secondProduct = ry * sx
+  const denominator = firstProduct - secondProduct
   const cax = c[0] - a[0]
   const cay = c[1] - a[1]
 
-  if (denominator !== 0) {
+  if (!nearlyEqual(firstProduct, secondProduct)) {
     const t = (cax * sy - cay * sx) / denominator
     const u = (cax * ry - cay * rx) / denominator
-    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) parameters.push(t)
+    const parameterRoundOff = roundOff(t, u)
+    if (
+      t >= -parameterRoundOff &&
+      t <= 1 + parameterRoundOff &&
+      u >= -parameterRoundOff &&
+      u <= 1 + parameterRoundOff
+    ) {
+      parameters.push(Math.max(0, Math.min(1, t)))
+    }
     return
   }
 
-  if (cax * ry - cay * rx !== 0) return
+  if (!nearlyEqual(cax * ry, cay * rx)) return
   const cParameter = parameterOnSegment(a, b, c)
   const dParameter = parameterOnSegment(a, b, d)
   const overlapStart = Math.max(0, Math.min(cParameter, dParameter))
   const overlapEnd = Math.min(1, Math.max(cParameter, dParameter))
-  if (overlapStart <= overlapEnd) parameters.push(overlapStart, overlapEnd)
+  if (overlapStart <= overlapEnd + roundOff(overlapStart, overlapEnd)) {
+    parameters.push(overlapStart, overlapEnd)
+  }
 }
 
 function visibleAtoms(
@@ -252,14 +292,15 @@ function visibleAtoms(
   }
   parameters.sort((a, b) => a - b)
   const uniqueParameters = parameters.filter(
-    (parameter, index) => index === 0 || parameter !== parameters[index - 1],
+    (parameter, index) =>
+      index === 0 || !nearlyEqual(parameter, parameters[index - 1]!),
   )
 
   const visible: ContourInterval[] = []
   for (let index = 1; index < uniqueParameters.length; index++) {
     const startParameter = uniqueParameters[index - 1]!
     const endParameter = uniqueParameters[index]!
-    if (startParameter === endParameter) continue
+    if (nearlyEqual(startParameter, endParameter)) continue
     const midpoint = interpolate(
       interval[0],
       interval[1],
@@ -337,7 +378,7 @@ function isOptionalCompositionFrame(
   primitive: Primitive,
   scene: Scene,
 ): boolean {
-  if (primitive.fill !== undefined) return false
+  if (primitive.fill !== undefined || primitive.stroke === undefined) return false
   const frame = canonicalize([
     [[0, 0], [scene.space.width, 0]],
     [[scene.space.width, 0], [scene.space.width, scene.space.height]],
@@ -348,14 +389,32 @@ function isOptionalCompositionFrame(
   return intervalsCover(frame, candidate) && intervalsCover(candidate, frame)
 }
 
-/** Extract Outline geometry, excluding only an exact appended profile frame. */
-export function deriveOutlineContours(scene: Scene): readonly ContourInterval[] {
+/**
+ * Extract frame-clipped Outline geometry without inventing connector edges.
+ *
+ * The output-profile frame is compared by default. Callers must explicitly opt
+ * out, and only the exact final frame-shaped primitive is eligible.
+ */
+export function deriveOutlineContours(
+  scene: Scene,
+  options: OutlineContourOptions = {},
+): readonly ContourInterval[] {
   const lastIndex = scene.primitives.length - 1
   return canonicalize(
     scene.primitives.flatMap((primitive, index) =>
-      index === lastIndex && isOptionalCompositionFrame(primitive, scene)
+      options.excludeCompositionFrame === true &&
+      index === lastIndex &&
+      isOptionalCompositionFrame(primitive, scene)
         ? []
-        : primitiveIntervals(primitive),
+        : primitiveIntervals(primitive).flatMap((interval) => {
+            const clipped = clipIntervalToFrame(
+              interval[0],
+              interval[1],
+              scene.space.width,
+              scene.space.height,
+            )
+            return clipped === null ? [] : [clipped]
+          }),
     ),
   )
 }
@@ -371,7 +430,7 @@ function coverageParameters(
     const second = parameterOnSegment(interval[0], interval[1], candidate[1])
     const start = Math.max(0, Math.min(first, second))
     const end = Math.min(1, Math.max(first, second))
-    if (start < end) covered.push([start, end])
+    if (start < end - roundOff(start, end)) covered.push([start, end])
   }
   return covered.sort((a, b) => a[0] - b[0] || a[1] - b[1])
 }
@@ -384,7 +443,7 @@ function uncoveredIntervals(
   for (const interval of wanted) {
     let cursor = 0
     for (const [start, end] of coverageParameters(interval, available)) {
-      if (start > cursor) {
+      if (start > cursor + roundOff(start, cursor)) {
         const gap = canonicalInterval(
           interpolate(interval[0], interval[1], cursor),
           interpolate(interval[0], interval[1], start),
@@ -392,9 +451,12 @@ function uncoveredIntervals(
         if (gap !== null) uncovered.push(gap)
       }
       cursor = Math.max(cursor, end)
-      if (cursor === 1) break
+      if (cursor >= 1 - roundOff(cursor, 1)) {
+        cursor = 1
+        break
+      }
     }
-    if (cursor < 1) {
+    if (cursor < 1 - roundOff(cursor, 1)) {
       const gap = canonicalInterval(
         interpolate(interval[0], interval[1], cursor),
         interval[1],
@@ -409,6 +471,7 @@ function uncoveredIntervals(
 export function compareVisibleContours(
   fillScene: Scene,
   outlineScene: Scene,
+  options: OutlineContourOptions = {},
 ): VisibleContourComparison {
   if (
     fillScene.space.width !== outlineScene.space.width ||
@@ -418,7 +481,7 @@ export function compareVisibleContours(
   }
 
   const fill = deriveVisibleFillContours(fillScene)
-  const outline = deriveOutlineContours(outlineScene)
+  const outline = deriveOutlineContours(outlineScene, options)
   const missing = uncoveredIntervals(fill, outline)
   const extra = uncoveredIntervals(outline, fill)
   return Object.freeze({
