@@ -137,6 +137,16 @@ describe('Scribble mask segment validation', () => {
       ).toThrow(RangeError)
     },
   )
+
+  it('fails fast when finite spacing overflows the interval count', () => {
+    const sample = vi.fn(() => 1)
+    const mask = createShadingMask(sample)
+
+    expect(() =>
+      isMaskPermittedSegment(mask, FRAME, [1, 1], [2, 1], Number.MIN_VALUE),
+    ).toThrow(RangeError)
+    expect(sample).not.toHaveBeenCalled()
+  })
 })
 
 describe('Scribble mask polyline validation', () => {
