@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createShadingMask,
   createToneField,
+  toneCalibration,
   type ToneSource,
 } from "@harness/core";
 
@@ -54,6 +55,37 @@ describe("rasterizeToneReference", () => {
       [15, 10],
       [5, 30],
       [15, 30],
+    ]);
+  });
+
+  it("rasterizes Tone Calibration's two ramps and hard off-axis boundary to exact bytes", () => {
+    const frame = { width: 10, height: 10 };
+    const source = toneCalibration.generateToneSource!({}, frame);
+    const raster = rasterizeToneReference(source, frame, 10, 10);
+    const pixel = (x: number, y: number): number[] => {
+      const offset = (y * raster.width + x) * 4;
+      return [...raster.data.slice(offset, offset + 4)];
+    };
+
+    // The far-left exterior follows the background's downward 0 -> 1 ramp.
+    expect([pixel(0, 0), pixel(0, 4), pixel(0, 9)]).toEqual([
+      [242, 242, 242, 255],
+      [140, 140, 140, 255],
+      [13, 13, 13, 255],
+    ]);
+
+    // The central circle runs in the inverse direction, dark to light.
+    expect([pixel(5, 1), pixel(5, 4), pixel(5, 8)]).toEqual([
+      [16, 16, 16, 255],
+      [112, 112, 112, 255],
+      [239, 239, 239, 255],
+    ]);
+
+    // At y=2.5 (not the circle midline), adjacent exterior/interior centers
+    // jump directly from the background to the inverse circle: no blend byte.
+    expect([pixel(1, 2), pixel(2, 2)]).toEqual([
+      [191, 191, 191, 255],
+      [48, 48, 48, 255],
     ]);
   });
 
