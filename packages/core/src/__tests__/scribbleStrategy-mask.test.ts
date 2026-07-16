@@ -138,12 +138,15 @@ describe('Scribble mask segment validation', () => {
     },
   )
 
-  it('fails fast when finite spacing overflows the interval count', () => {
+  it.each([
+    ['non-finite', Number.MIN_VALUE],
+    ['finite but unsafe', 2 ** -53],
+  ])('fails fast when spacing produces a %s interval count', (_kind, spacing) => {
     const sample = vi.fn(() => 1)
     const mask = createShadingMask(sample)
 
     expect(() =>
-      isMaskPermittedSegment(mask, FRAME, [1, 1], [2, 1], Number.MIN_VALUE),
+      isMaskPermittedSegment(mask, FRAME, [1, 1], [2, 1], spacing),
     ).toThrow(RangeError)
     expect(sample).not.toHaveBeenCalled()
   })

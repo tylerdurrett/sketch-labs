@@ -49,8 +49,8 @@ export function isMaskPermittedSegment(
   if (!Number.isFinite(length)) return false
 
   const intervalCount = Math.ceil(length / maxSpacing)
-  if (!Number.isFinite(intervalCount)) {
-    throw new RangeError('maxSpacing produces a non-finite interval count')
+  if (!Number.isSafeInteger(intervalCount)) {
+    throw new RangeError('maxSpacing produces an unsafe interval count')
   }
   if (intervalCount === 0) return isPermittedSample(mask, frame, start)
 
