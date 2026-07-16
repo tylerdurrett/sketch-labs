@@ -10,7 +10,6 @@ import {
   mutableScene,
   outlineComputeIdentitiesEqual,
   type LegacyOutlineComputeIdentity,
-  type OutlineComputeIdentity,
   type SpecializedOutlineComputeIdentity,
 } from "./outlineComputeProtocol";
 
@@ -82,6 +81,14 @@ function changed(
   const copy = structuredClone(identity()) as Record<string, any>;
   update(copy);
   return copy as unknown as LegacyOutlineComputeIdentity;
+}
+
+function changedTargeted(
+  update: (copy: Record<string, any>) => void,
+): SpecializedOutlineComputeIdentity {
+  const copy = structuredClone(targetedIdentity()) as Record<string, any>;
+  update(copy);
+  return copy as unknown as SpecializedOutlineComputeIdentity;
 }
 
 describe("outline compute identity", () => {
@@ -157,29 +164,31 @@ describe("outline compute identity", () => {
     expect(outlineComputeIdentitiesEqual(original, identity())).toBe(true);
   });
 
-  it("freezes and compares the active physical Outline target", () => {
+  it("keys specialized results by every frozen derivation input", () => {
     const target = targetedIdentity();
-    const changedWidth = structuredClone(target) as Record<string, any>;
-    changedWidth.outlineTarget.toolWidthMillimeters = 0.31;
-    const changedMapping = structuredClone(target) as Record<string, any>;
-    changedMapping.outlineTarget.millimetersPerSceneUnit = 0.2;
+    const mutations: Array<(copy: Record<string, any>) => void> = [
+      (copy) => (copy.sketchId = "other-sketch"),
+      (copy) => (copy.params[0].value = "#000000"),
+      (copy) => (copy.params[1].value = 4),
+      (copy) => (copy.seed = "other-seed"),
+      (copy) => (copy.sampledT = 1.5000000000000002),
+      (copy) => (copy.compositionFrame.width = 121),
+      (copy) => (copy.compositionFrame.height = 91),
+      (copy) => (copy.outlineTarget.toolWidthMillimeters = 0.31),
+      (copy) => (copy.outlineTarget.millimetersPerSceneUnit = 0.2),
+      (copy) => (copy.tolerance = 0.25000000000000006),
+      (copy) => (copy.includeFrame = false),
+    ];
 
     expect(Object.isFrozen(target.outlineTarget)).toBe(true);
     expect(target.sourceKind).toBe("specialized-sketch");
     expect("sourceScene" in target).toBe(false);
     expect(outlineComputeIdentitiesEqual(target, targetedIdentity())).toBe(true);
-    expect(
-      outlineComputeIdentitiesEqual(
-        target,
-        changedWidth as OutlineComputeIdentity,
-      ),
-    ).toBe(false);
-    expect(
-      outlineComputeIdentitiesEqual(
-        target,
-        changedMapping as OutlineComputeIdentity,
-      ),
-    ).toBe(false);
+    for (const mutate of mutations) {
+      expect(
+        outlineComputeIdentitiesEqual(target, changedTargeted(mutate)),
+      ).toBe(false);
+    }
     expect(outlineComputeIdentitiesEqual(target, identity())).toBe(false);
   });
 
