@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "issue": 302,
+  "referenceId": "leaf-field-busy-leaves-balls-compact-export-progress",
+  "capturedAt": "2026-07-16T15:15:36.405Z",
+  "warning": "One browser/machine observation. Timings are evidence only, never pass/fail limits or SLAs.",
+  "machine": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/144.0.0.0 Safari/537.36",
+    "platform": "MacIntel",
+    "logicalCpuCount": 12
+  },
+  "input": {
+    "preset": "busy-leaves-balls",
+    "identityKind": "legacy-scene",
+    "source": {
+      "serializedBytes": 82993494,
+      "sha256": "d68a43dca20793931cb4a0aa263703a9bc071b1ce7b7a001c08c7bacef4dd87f",
+      "primitiveCount": 21666,
+      "pointCount": 2101122
+    }
+  },
+  "timingsMs": {
+    "fillGeneration": 551.0999999046326,
+    "preview": 56784.39999985695,
+    "coldExport": 58235.10000014305,
+    "warmExactReuse": 3716.300000190735,
+    "cancellation": 7140.100000143051
+  },
+  "preview": {
+    "status": "success",
+    "scene": {
+      "serializedBytes": 4710304,
+      "sha256": "0c6d477bc3d83cc68ebbc2d2395de26be0db957365f7471c32b3653e283565c9",
+      "primitiveCount": 14772,
+      "pointCount": 102724
+    },
+    "messages": {
+      "progress": 480,
+      "success": 1
+    },
+    "progress": {
+      "updateCount": 480,
+      "derivationUpdateCount": 480,
+      "first": {
+        "kind": "estimating",
+        "revision": 1
+      },
+      "last": {
+        "kind": "remaining",
+        "revision": 480,
+        "remainingMs": 0
+      },
+      "lastWorkUnits": {
+        "completedWorkUnits": 41542084640,
+        "totalWorkUnits": 41542084640,
+        "terminal": true
+      }
+    },
+    "derivationCount": 1
+  },
+  "coldExport": {
+    "status": "success",
+    "scene": {
+      "serializedBytes": 4710304,
+      "sha256": "0c6d477bc3d83cc68ebbc2d2395de26be0db957365f7471c32b3653e283565c9",
+      "primitiveCount": 14772,
+      "pointCount": 102724
+    },
+    "svg": {
+      "serializedBytes": 2261868,
+      "sha256": "53b5e862f843a02413feae8919ac6f79697d38461f362ee37fff4d45f61c123d",
+      "pathCount": 12533
+    },
+    "messages": {
+      "derivation-progress": 488,
+      "finalizing": 1,
+      "complete": 1
+    },
+    "compactStatus": {
+      "messageCount": 489,
+      "maxSerializedBytes": 180,
+      "keySets": [
+        [
+          "jobKind",
+          "owner",
+          "jobId",
+          "type",
+          "snapshot"
+        ],
+        [
+          "type",
+          "jobKind",
+          "owner",
+          "jobId"
+        ]
+      ],
+      "containsIdentity": false,
+      "containsSourceScene": false
+    },
+    "progress": {
+      "updateCount": 489,
+      "derivationUpdateCount": 488,
+      "first": {
+        "kind": "estimating",
+        "revision": 1
+      },
+      "last": {
+        "kind": "remaining",
+        "revision": 487,
+        "remainingMs": 0
+      },
+      "lastWorkUnits": {
+        "completedWorkUnits": 41542084640,
+        "totalWorkUnits": 41542084640,
+        "terminal": true
+      }
+    },
+    "derivationCount": 1,
+    "matchesPreviewScene": true
+  },
+  "warmExactReuse": {
+    "status": "success",
+    "scene": {
+      "serializedBytes": 4710304,
+      "sha256": "0c6d477bc3d83cc68ebbc2d2395de26be0db957365f7471c32b3653e283565c9",
+      "primitiveCount": 14772,
+      "pointCount": 102724
+    },
+    "messages": {
+      "finalizing": 1,
+      "complete": 1
+    },
+    "progress": {
+      "updateCount": 1,
+      "derivationUpdateCount": 0,
+      "first": null,
+      "last": null,
+      "lastWorkUnits": null
+    },
+    "derivationCount": 0,
+    "matchesColdScene": true
+  },
+  "cancellation": {
+    "status": "cancelled",
+    "cancelRequested": true,
+    "messagesBeforeTermination": {
+      "derivation-progress": 1
+    },
+    "compactStatus": {
+      "messageCount": 1,
+      "maxSerializedBytes": 175,
+      "keySets": [
+        [
+          "jobKind",
+          "owner",
+          "jobId",
+          "type",
+          "snapshot"
+        ]
+      ],
+      "containsIdentity": false,
+      "containsSourceScene": false
+    },
+    "lastWorkUnits": {
+      "completedWorkUnits": 911464,
+      "totalWorkUnits": 41542084640,
+      "terminal": false
+    },
+    "workerTerminatedCount": 1
+  }
+}

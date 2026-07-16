@@ -700,6 +700,103 @@ describe("hidden-line export worker runtime", () => {
           event.type === "derivation-progress",
       ),
     ).toBe(true);
+    for (const event of events.slice(0, -1)) {
+      if (
+        typeof event === "object" &&
+        event !== null &&
+        "type" in event &&
+        (event.type === "derivation-progress" || event.type === "finalizing")
+      ) {
+        expect(event).not.toHaveProperty("identity");
+        expect(event).not.toHaveProperty("sourceScene");
+        expect(Object.keys(event)).toEqual(
+          event.type === "derivation-progress"
+            ? ["jobKind", "owner", "jobId", "type", "snapshot"]
+            : ["type", "jobKind", "owner", "jobId"],
+        );
+      }
+    }
+  });
+
+  it("keeps export status byte size independent of the legacy source Scene", () => {
+    const statusBytes = (primitiveCount: number): number[] => {
+      const largeSource: Scene = {
+        space: source.space,
+        primitives: Array.from({ length: primitiveCount }, (_, index) => ({
+          points: [[index, index + 1] as [number, number]],
+        })),
+      };
+      const identity = createOutlineComputeIdentity({
+        sketchId: "size-independent",
+        schema,
+        params: {},
+        seed: 1,
+        sampledT: 0,
+        compositionFrame: source.space,
+        tolerance: 0,
+        includeFrame: false,
+        sourceScene: largeSource,
+      });
+      const events: unknown[] = [];
+      const derive = vi.fn(
+        (
+          _scene: Scene,
+          _tolerance: number,
+          _includeFrame: boolean,
+          report?: Parameters<typeof outlineScene>[3],
+        ) => {
+          report?.({
+            completedWorkUnits: 1,
+            totalWorkUnits: 2,
+            terminal: false,
+          });
+          report?.({
+            completedWorkUnits: 2,
+            totalWorkUnits: 2,
+            terminal: true,
+          });
+          return source;
+        },
+      );
+      handleHiddenLineWorkerMessage(
+        exportRequest({ identity }),
+        { derive: derive as typeof outlineScene },
+        (event) => events.push(event),
+        () => 0,
+      );
+      return events.map((event) => new TextEncoder().encode(JSON.stringify(event)).byteLength);
+    };
+
+    expect(statusBytes(1)).toEqual(statusBytes(2_000));
+  });
+
+  it("gives production preview and cold export the exact same derived Outline Scene", () => {
+    const identity = exportIdentity({ tolerance: 0.5, includeFrame: false });
+    const preview = handleOutlineWorkerMessage({
+      type: "compute",
+      jobId: 21,
+      identity,
+    });
+    const coldExport = handleHiddenLineWorkerMessage(
+      {
+        ...exportRequest({ identity }),
+        jobId: 22,
+      },
+    );
+
+    expect(preview?.type).toBe("success");
+    expect(coldExport).toMatchObject({ type: "complete", jobKind: "export" });
+    if (
+      preview?.type !== "success" ||
+      coldExport?.type !== "complete" ||
+      coldExport.jobKind !== "export"
+    ) {
+      throw new Error("expected preview and export completions");
+    }
+    expect(coldExport.completedOutline).toEqual({
+      identity,
+      scene: preview.scene,
+    });
   });
 
   it.each([

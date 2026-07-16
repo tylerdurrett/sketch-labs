@@ -725,6 +725,12 @@ export function isHiddenLineExportSnapshot(
 export type HiddenLineJobKind = "preview" | "export";
 export type HiddenLineJobOwner = "outline-preview" | "hidden-line-export";
 
+interface HiddenLineRoutingEnvelope {
+  readonly jobId: number;
+  readonly jobKind: HiddenLineJobKind;
+  readonly owner: HiddenLineJobOwner;
+}
+
 interface HiddenLineJobEnvelope {
   readonly jobId: number;
   readonly identity: OutlineComputeIdentity;
@@ -757,17 +763,23 @@ export type HiddenLineWorkerRequest =
   | HiddenLineExportRequest;
 
 export type HiddenLineDerivationProgress =
-  | (HiddenLinePreviewEnvelope & {
+  | (HiddenLineRoutingEnvelope & {
+      readonly jobKind: "preview";
+      readonly owner: "outline-preview";
       readonly type: "derivation-progress";
       readonly snapshot: HiddenLineProgress;
     })
-  | (HiddenLineExportEnvelope & {
+  | (HiddenLineRoutingEnvelope & {
+      readonly jobKind: "export";
+      readonly owner: "hidden-line-export";
       readonly type: "derivation-progress";
       readonly snapshot: HiddenLineProgress;
     });
 
-export interface HiddenLineFinalizing extends HiddenLineExportEnvelope {
+export interface HiddenLineFinalizing extends HiddenLineRoutingEnvelope {
   readonly type: "finalizing";
+  readonly jobKind: "export";
+  readonly owner: "hidden-line-export";
 }
 
 export interface HiddenLinePreviewComplete extends HiddenLinePreviewEnvelope {
@@ -815,6 +827,53 @@ function hasMatchingJobKindAndOwner(
   );
 }
 
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === expected.length &&
+    expected.every((key) => hasOwn(value, key))
+  );
+}
+
+function isCompactHiddenLineProgress(
+  value: Record<string, unknown>,
+): boolean {
+  return (
+    hasExactKeys(value, [
+      "type",
+      "jobKind",
+      "owner",
+      "jobId",
+      "snapshot",
+    ]) &&
+    hasMatchingJobKindAndOwner(value) &&
+    isRecord(value.snapshot) &&
+    hasExactKeys(value.snapshot, [
+      "completedWorkUnits",
+      "totalWorkUnits",
+      "terminal",
+    ]) &&
+    isOutlineComputeProgress({
+      type: "progress",
+      jobId: value.jobId,
+      snapshot: value.snapshot,
+    })
+  );
+}
+
+function isCompactHiddenLineFinalizing(
+  value: Record<string, unknown>,
+): boolean {
+  return (
+    hasExactKeys(value, ["type", "jobKind", "owner", "jobId"]) &&
+    value.jobKind === "export" &&
+    value.owner === "hidden-line-export"
+  );
+}
+
 export function isHiddenLineWorkerRequest(
   value: unknown,
 ): value is HiddenLineWorkerRequest {
@@ -837,22 +896,21 @@ export function isHiddenLineWorkerRequest(
 export function isHiddenLineWorkerMessage(
   value: unknown,
 ): value is HiddenLineWorkerMessage {
+  if (!isRecord(value) || !isJobId(value.jobId)) {
+    return false;
+  }
+  if (value.type === "derivation-progress") {
+    return isCompactHiddenLineProgress(value);
+  }
+  if (value.type === "finalizing") {
+    return isCompactHiddenLineFinalizing(value);
+  }
   if (
-    !isRecord(value) ||
-    !isJobId(value.jobId) ||
     !isOutlineComputeIdentity(value.identity) ||
     !hasMatchingJobKindAndOwner(value)
   ) {
     return false;
   }
-  if (value.type === "derivation-progress") {
-    return isOutlineComputeProgress({
-      type: "progress",
-      jobId: value.jobId,
-      snapshot: value.snapshot,
-    });
-  }
-  if (value.type === "finalizing") return value.jobKind === "export";
   if (value.type === "failure") return typeof value.error === "string";
   if (value.type !== "complete") return false;
   if (value.jobKind === "preview") return isScene(value.scene);

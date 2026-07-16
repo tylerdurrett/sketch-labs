@@ -148,7 +148,6 @@ export function handleHiddenLineWorkerMessage(
                 jobKind: value.jobKind,
                 owner: value.owner,
                 jobId: value.jobId,
-                identity,
                 type: "derivation-progress",
                 snapshot: progress.snapshot,
               } as HiddenLineDerivationProgress);
@@ -191,7 +190,6 @@ export function handleHiddenLineWorkerMessage(
       jobKind: "export",
       owner: "hidden-line-export",
       jobId: value.jobId,
-      identity,
     });
     const clip = dependencies.clip ?? clipSceneToBounds;
     const render = dependencies.render ?? renderPlotterSVG;
