@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { createRegistry, grassHills, registry } from '../index'
+import {
+  createRegistry,
+  grassHills,
+  registry,
+  scribbleMoon,
+} from '../index'
 import { circles } from '../sketches/circles'
 import type { Sketch } from '../sketch'
 
@@ -45,6 +50,16 @@ describe('the default registry', () => {
     expect(grassHills.name).toBe('Grass Hills')
     expect(registry.get('grass-hills')).toBe(grassHills)
     expect(registry.list().filter((sketch) => sketch === grassHills)).toEqual([grassHills])
+  })
+
+  it('exports and registers Scribble Moon exactly once as the newest Sketch', () => {
+    expect(scribbleMoon.id).toBe('scribble-moon')
+    expect(scribbleMoon.name).toBe('Scribble Moon')
+    expect(registry.get('scribble-moon')).toBe(scribbleMoon)
+    expect(
+      registry.list().filter((sketch) => sketch === scribbleMoon),
+    ).toEqual([scribbleMoon])
+    expect(registry.list().at(-1)).toBe(scribbleMoon)
   })
 
   it('registers every built-in under a unique id and display name', () => {

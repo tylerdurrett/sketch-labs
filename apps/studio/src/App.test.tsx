@@ -243,10 +243,10 @@ describe("App — keyed edit-history sessions", () => {
 describe("App — hidden-line navigation guard (#289)", () => {
   it("disables Sketch navigation for the full active interval with the exact reason", () => {
     mountApp();
-    const outlineToggle = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="Toggle outline render mode"]',
-    )!;
-    act(() => outlineToggle.click());
+    const outlineChoice = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Outline",
+    ) as HTMLButtonElement;
+    act(() => outlineChoice.click());
 
     expect(trigger().disabled).toBe(true);
     expect(trigger().getAttribute("aria-describedby")).toBe(
@@ -262,7 +262,10 @@ describe("App — hidden-line navigation guard (#289)", () => {
       "Finish or cancel the hidden-line job before switching Sketches.",
     );
 
-    act(() => outlineToggle.click());
+    const fillChoice = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Fill",
+    ) as HTMLButtonElement;
+    act(() => fillChoice.click());
     expect(trigger().disabled).toBe(false);
   });
 

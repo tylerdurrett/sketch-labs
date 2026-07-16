@@ -10,6 +10,11 @@ import {
 import type { Params, ParamSchema, StatelessSketch } from '../sketch'
 import type { Scene } from '../scene'
 import { DEFAULT_COMPOSITION_FRAME } from '../compositionFrame'
+import {
+  createShadingMask,
+  createToneField,
+  sampleEffectiveTone,
+} from '../shadingFields'
 
 /**
  * A scripted `rand` stub: yields the given values in order, so a test can pin
@@ -216,5 +221,49 @@ describe('caller-owned prepared frames', () => {
     expect(adapted(1)).toEqual(sceneAt(1))
     expect(adapted(2)).toEqual(sceneAt(2))
     expect(generated).toBe(2)
+  })
+})
+
+describe('optional tone-source capability', () => {
+  const emptyScene = (): Scene => ({
+    space: DEFAULT_COMPOSITION_FRAME,
+    primitives: [],
+  })
+
+  it('leaves an ordinary Sketch valid without the capability', () => {
+    const ordinary: StatelessSketch = {
+      id: 'ordinary',
+      name: 'Ordinary',
+      schema: {},
+      generate: emptyScene,
+    }
+
+    expect(ordinary.generateToneSource).toBeUndefined()
+  })
+
+  it('lets a tone-aware Sketch derive a source from only params and frame', () => {
+    const toneAware: StatelessSketch = {
+      id: 'tone-aware',
+      name: 'Tone aware',
+      schema: {
+        tone: { kind: 'number', min: 0, max: 1, default: 0.5 },
+      },
+      generate: emptyScene,
+      generateToneSource(params, frame) {
+        const tone = params.tone as number
+        return {
+          toneField: createToneField(([x]) => tone * (x / frame.width)),
+          shadingMask: createShadingMask(() => 1),
+        }
+      },
+    }
+
+    const source = toneAware.generateToneSource?.(
+      { tone: 0.8 },
+      DEFAULT_COMPOSITION_FRAME,
+    )
+
+    expect(source).toBeDefined()
+    expect(source && sampleEffectiveTone(source, [500, 500])).toBe(0.4)
   })
 })
