@@ -9,6 +9,7 @@ import {
   type ScribbleExecutionLimits,
 } from '../scribbleStrategy/orchestrator'
 import type { ScribbleControls } from '../scribbleStrategy/types'
+import type { Random } from '../types'
 
 const FRAME = { width: 100, height: 100 }
 const GENEROUS_LIMITS: ScribbleExecutionLimits = {
@@ -31,6 +32,30 @@ function model(
     FRAME,
     controls,
   )
+}
+
+function scriptedRandom(draws: readonly number[]): {
+  readonly rng: Random
+  readonly valueCalls: () => number
+} {
+  const fallback = createRandom('scripted-growth-fallback')
+  let drawIndex = 0
+
+  return {
+    rng: {
+      ...fallback,
+      value(): number {
+        const draw = draws[drawIndex]
+        drawIndex++
+        return draw ?? fallback.value()
+      },
+      // Candidate jitter must not consume the restart-selection script.
+      range(min: number, max: number): number {
+        return (min + max) / 2
+      },
+    },
+    valueCalls: () => drawIndex,
+  }
 }
 
 describe('Scribble pass orchestration', () => {
@@ -92,27 +117,59 @@ describe('Scribble pass orchestration', () => {
     )
   })
 
-  it('repeats residual-weighted restart order for the same Seed', () => {
-    const islandMask = ([x, y]: readonly [number, number]) => {
-      const column = x < 50 ? 20 : 80
-      const row = y < 50 ? 20 : 80
-      return Math.abs(x - column) < 7 && Math.abs(y - row) < 7 ? 1 : 0
+  it('uses residual weights, rather than uniform or global-max restart selection', () => {
+    const islandMask = ([x, y]: readonly [number, number]) =>
+      (x < 1.2 && y < 1.2) ||
+      (x > 30 && x < 50 && y > 10 && y < 25) ||
+      (x > 30 && x < 50 && y > 70 && y < 85)
+        ? 1
+        : 0
+    const islandTone = ([x, y]: readonly [number, number]) => {
+      if (x < 1.2 && y < 1.2) return 0.5
+      return y < 50 ? 0.2 : 1
     }
-    const execute = (seed: string) =>
-      runScribbleOrchestrator({
-        model: model(() => 1, islandMask, { chaos: 0.6 }),
-        rng: createRandom(seed),
-        residualThreshold: 0.015,
-        limits: GENEROUS_LIMITS,
-      })
+    const createResidual = () =>
+      model(islandTone, islandMask, { chaos: 0.5 })
+    const residual = createResidual()
+    const samples = residual.samples()
+    const low = samples.filter(
+      ({ point: [x, y] }) => x > 30 && x < 50 && y > 10 && y < 25,
+    )
+    const high = samples.filter(
+      ({ point: [x, y] }) => x > 30 && x < 50 && y > 70 && y < 85,
+    )
+    const lowWeight = low.reduce((sum, sample) => sum + sample.residual, 0)
+    const highWeight = high.reduce((sum, sample) => sum + sample.residual, 0)
+    const { rng, valueCalls } = scriptedRandom([0, 0.3, 0.5])
 
-    const first = execute('restart-order')
-    const repeated = execute('restart-order')
-    const changed = execute('restart-order-changed')
+    expect(low).toHaveLength(high.length)
+    // Draw 0.3 lies after the low island by residual weight, but before it if
+    // cells were sampled uniformly. Draw 0 first selects the lower-residual,
+    // isolated cell, which a global-max selector would never choose.
+    expect(lowWeight / (lowWeight + highWeight)).toBeLessThan(0.3)
+    expect(low.length / (low.length + high.length)).toBeGreaterThan(0.3)
 
-    expect(first.polylines.length).toBeGreaterThan(1)
-    expect(repeated).toEqual(first)
-    expect(changed.polylines).not.toEqual(first.polylines)
+    const result = runScribbleOrchestrator({
+      model: residual,
+      rng,
+      residualThreshold: 0,
+      limits: { ...GENEROUS_LIMITS, maxAcceptedSegments: 1 },
+    })
+
+    expect(valueCalls()).toBe(3)
+    expect(result.stopCause).toBe('budget-reached')
+    expect(result.polylines).toHaveLength(1)
+    expect(result.polylines[0]![0]![1]).toBeGreaterThan(70)
+
+    const repeatedScript = scriptedRandom([0, 0.3, 0.5])
+    const repeated = runScribbleOrchestrator({
+      model: createResidual(),
+      rng: repeatedScript.rng,
+      residualThreshold: 0,
+      limits: { ...GENEROUS_LIMITS, maxAcceptedSegments: 1 },
+    })
+    expect(repeatedScript.valueCalls()).toBe(3)
+    expect(repeated).toEqual(result)
   })
 
   it('lifts between disconnected islands without crossing exact-zero space', () => {
@@ -220,5 +277,74 @@ describe('Scribble pass orchestration', () => {
         limits: { ...GENEROUS_LIMITS, maxRestarts: -1 },
       }),
     ).toThrow(/maxRestarts/)
+  })
+})
+
+describe('Scribble lift-budget accounting', () => {
+  function execute(limits: ScribbleExecutionLimits) {
+    const islandMask = ([x, y]: readonly [number, number]) =>
+      Math.hypot(x - 20, y - 20) < 5 ||
+      Math.hypot(x - 50, y - 50) < 5 ||
+      Math.hypot(x - 80, y - 80) < 5
+        ? 1
+        : 0
+
+    return runScribbleOrchestrator({
+      model: model(() => 1, islandMask, { momentum: 0.8, chaos: 0.5 }),
+      rng: createRandom('lift-accounting'),
+      residualThreshold: 0,
+      limits,
+    })
+  }
+
+  it('returns no geometry when the polyline cap is zero', () => {
+    const result = execute({
+      ...GENEROUS_LIMITS,
+      maxPolylines: 0,
+    })
+
+    expect(result.stopCause).toBe('budget-reached')
+    expect(result.polylines).toEqual([])
+    expect(result.acceptedSegments).toBe(0)
+    expect(result.residualError).toBeGreaterThan(0)
+  })
+
+  it('retains exactly one non-empty polyline at the tiny polyline cap', () => {
+    const result = execute({
+      ...GENEROUS_LIMITS,
+      maxPolylines: 1,
+    })
+
+    expect(result.stopCause).toBe('budget-reached')
+    expect(result.polylines).toHaveLength(1)
+    expect(result.polylines[0]!.length).toBeGreaterThan(1)
+    expect(result.acceptedSegments).toBe(result.polylines[0]!.length - 1)
+    expect(result.residualError).toBeGreaterThan(0)
+  })
+
+  it('retains initial-island geometry when the restart cap is zero', () => {
+    const result = execute({
+      ...GENEROUS_LIMITS,
+      maxRestarts: 0,
+    })
+
+    expect(result.stopCause).toBe('budget-reached')
+    expect(result.polylines).toHaveLength(1)
+    expect(result.polylines[0]!.length).toBeGreaterThan(1)
+    expect(result.acceptedSegments).toBe(result.polylines[0]!.length - 1)
+    expect(result.residualError).toBeGreaterThan(0)
+  })
+
+  it('retains initial-island geometry at one allowed stagnation', () => {
+    const result = execute({
+      ...GENEROUS_LIMITS,
+      maxStagnations: 1,
+    })
+
+    expect(result.stopCause).toBe('budget-reached')
+    expect(result.polylines).toHaveLength(1)
+    expect(result.polylines[0]!.length).toBeGreaterThan(1)
+    expect(result.acceptedSegments).toBe(result.polylines[0]!.length - 1)
+    expect(result.residualError).toBeGreaterThan(0)
   })
 })
