@@ -1,11 +1,14 @@
 import { grassScaleAtDepth } from './depth'
 import type { GrassRootCandidate } from './grass-scatter'
 
-/** Adopted maximum full-composition density from the issue-305 decision. */
+/** Adopted full-composition blade count from the issue-305 decision. */
 export const ADOPTED_BLADE_COUNT = 10_000
 
-/** Public relative-density value that maps to the adopted blade count. */
-export const MAX_BLADE_DENSITY = 2
+/** Relative-density value that maps to the adopted blade count. */
+export const ADOPTED_BLADE_DENSITY = 2
+
+/** Public relative-density ceiling for higher-density exploration. */
+export const MAX_BLADE_DENSITY = 10
 
 /** Inputs that select one nested canonical prefix. */
 export interface GrassRootSelectionOptions {
@@ -32,7 +35,7 @@ export function bladeCountForDensity(bladeDensity: number): number {
     )
   }
   return Math.round(
-    (bladeDensity / MAX_BLADE_DENSITY) * ADOPTED_BLADE_COUNT,
+    (bladeDensity / ADOPTED_BLADE_DENSITY) * ADOPTED_BLADE_COUNT,
   )
 }
 

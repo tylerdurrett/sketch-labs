@@ -172,7 +172,7 @@ describe('grass-hills Sketch contract', () => {
       bladeDensity: {
         kind: 'number',
         min: 0,
-        max: 2,
+        max: 10,
         default: 1,
         step: 0.05,
       },
@@ -784,5 +784,16 @@ describe('grass-hills hidden-line workload inventory', () => {
       estimatedSegmentEdgeComparisons: 801_990,
       totalWorkUnits: 808_110,
     })
+  })
+
+  it('emits 50,000 blades at the extended density ceiling', () => {
+    const maximum = grassHills.generate(
+      { hillCount: 1, bladeDensity: 10 },
+      seed,
+      0,
+      SQUARE,
+    )
+
+    expect(blades(maximum)).toHaveLength(50_000)
   })
 })

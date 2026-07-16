@@ -7,6 +7,8 @@ import {
 } from '../sketches/grass-hills/grass-scatter'
 import {
   ADOPTED_BLADE_COUNT,
+  ADOPTED_BLADE_DENSITY,
+  MAX_BLADE_DENSITY,
   allocateGrassRootCounts,
   bladeCountForDensity,
   canonicalScale,
@@ -18,18 +20,20 @@ function root(rootKey: string, ordinal: number): GrassRootCandidate {
 }
 
 describe('grass-hills composition density mapping', () => {
-  it('maps the unchanged relative 0..2 schema onto the adopted full 10k target', () => {
+  it('preserves the adopted 2 = 10k scale while extending exploration to 10 = 50k', () => {
     expect(ADOPTED_BLADE_COUNT).toBe(10_000)
-    expect([0, 0.25, 0.5, 1, 1.5, 2].map(bladeCountForDensity)).toEqual([
-      0, 1_250, 2_500, 5_000, 7_500, 10_000,
-    ])
+    expect(ADOPTED_BLADE_DENSITY).toBe(2)
+    expect(MAX_BLADE_DENSITY).toBe(10)
+    expect(
+      [0, 0.25, 0.5, 1, 1.5, 2, 5, 10].map(bladeCountForDensity),
+    ).toEqual([0, 1_250, 2_500, 5_000, 7_500, 10_000, 25_000, 50_000])
   })
 
-  it.each([-1, 2.01, Number.NaN, Number.POSITIVE_INFINITY])(
+  it.each([-1, 10.01, Number.NaN, Number.POSITIVE_INFINITY])(
     'rejects density outside the public schema at %s',
     (bladeDensity) => {
       expect(() => bladeCountForDensity(bladeDensity)).toThrow(
-        /bladeDensity must be between 0 and 2/,
+        /bladeDensity must be between 0 and 10/,
       )
     },
   )

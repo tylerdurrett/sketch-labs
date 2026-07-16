@@ -125,8 +125,8 @@ const schema = {
   ridgeAmplitude: { kind: 'number', min: 0, max: 25, default: 0.8, step: 0.01 },
   /** Travel through the shared terrain field from foreground to horizon. */
   terrainDrift: { kind: 'number', min: 0, max: 8, default: 1.25, step: 0.05 },
-  /** Relative density: 0 is off and 2 is the adopted 10,000-blade scene. */
-  bladeDensity: { kind: 'number', min: 0, max: 2, default: 1, step: 0.05 },
+  /** Relative density: 2 is the adopted 10k scene; 10 explores up to 50k. */
+  bladeDensity: { kind: 'number', min: 0, max: 10, default: 1, step: 0.05 },
   /** Nominal foreground blade length in Composition Frame units. */
   bladeLength: { kind: 'number', min: 4, max: 80, default: 28, step: 1 },
   /** Symmetric seeded variation around the nominal blade length. */
@@ -259,7 +259,11 @@ function prepareGrassHills(
       const candidates =
         count === 0
           ? Object.freeze([])
-          : scatterGrassRoots({ seed, hillKey: band.hillKey })
+          : scatterGrassRoots({
+              seed,
+              hillKey: band.hillKey,
+              minimumCount: count,
+            })
       const roots = selectGrassRoots({ count, candidates })
       const mask = createGrassHillMask({
         frame: preparedFrame,

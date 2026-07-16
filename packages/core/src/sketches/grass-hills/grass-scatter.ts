@@ -1,14 +1,18 @@
 import type { Seed } from '../../sketch'
 import { createStableScalarRandom } from './stable-random'
 
-/** One stable cell per root at the adopted per-hill canonical capacity. */
+/** One stable cell per root in each canonical density layer. */
 const STRATIFIED_SIDE = 100
+const ROOTS_PER_LAYER = STRATIFIED_SIDE ** 2
+const MAX_CANONICAL_ROOT_COUNT = 50_000
 
 /** Inputs that determine one hill's count-independent canonical root bank. */
 export interface GrassRootScatterOptions {
   seed: Seed
   /** Reduced rational depth identity supplied by the hill layout. */
   hillKey: string
+  /** Minimum prefix capacity needed by this hill. Defaults to the adopted bank. */
+  minimumCount?: number
 }
 
 /**
@@ -35,43 +39,74 @@ interface PrioritizedRoot {
 }
 
 /**
- * Build the adopted 100 x 100 stable-cell bank for one reduced hill identity.
+ * Build the layered stable-cell bank for one reduced hill identity.
  *
- * Every cell owns independent jitter and priority streams. Sorting once by
- * priority turns every requested density into a prefix operation: increasing
- * density never moves or removes an existing root, and no quadratic farthest-
- * point pass is needed. Terrain geometry and hill count do not participate.
+ * Layer zero is exactly the adopted 100 x 100 bank. Higher densities append
+ * independently jittered 100 x 100 layers, so existing roots retain their
+ * coordinates, keys, ranks, and selection order. Each layer is sorted by its
+ * own stable priority stream before it is appended. Increasing density is
+ * therefore still a prefix operation, while ordinary scenes never prepare
+ * extension layers they do not need. Terrain geometry and hill count do not
+ * participate.
  */
 export function scatterGrassRoots({
   seed,
   hillKey,
+  minimumCount = ROOTS_PER_LAYER,
 }: GrassRootScatterOptions): readonly GrassRootCandidate[] {
-  const roots: PrioritizedRoot[] = []
-
-  for (let row = 0; row < STRATIFIED_SIDE; row++) {
-    for (let column = 0; column < STRATIFIED_SIDE; column++) {
-      const cellKey = `${column},${row}`
-      const jitter = createStableScalarRandom(
-        `${seed}-exact-stratified-root-${hillKey}-${cellKey}`,
-      )
-      roots.push({
-        u: (column + jitter.value()) / STRATIFIED_SIDE,
-        v: (row + jitter.value()) / STRATIFIED_SIDE,
-        rootKey: `${hillKey}:cell:${cellKey}`,
-        cellOrdinal: row * STRATIFIED_SIDE + column,
-        priority: createStableScalarRandom(
-          `${seed}-exact-stratified-priority-${hillKey}-${cellKey}`,
-        ).value(),
-      })
-    }
+  if (
+    !Number.isInteger(minimumCount) ||
+    minimumCount < 0 ||
+    minimumCount > MAX_CANONICAL_ROOT_COUNT
+  ) {
+    throw new RangeError(
+      `minimum root count must be an integer between 0 and ${MAX_CANONICAL_ROOT_COUNT}`,
+    )
   }
 
-  roots.sort(
-    (a, b) => a.priority - b.priority || a.cellOrdinal - b.cellOrdinal,
-  )
-  return Object.freeze(
-    roots.map(({ u, v, rootKey }, ordinal) =>
-      Object.freeze({ u, v, rootKey, ordinal }),
-    ),
-  )
+  const layerCount = Math.max(1, Math.ceil(minimumCount / ROOTS_PER_LAYER))
+  const roots: GrassRootCandidate[] = []
+
+  for (let layer = 0; layer < layerCount; layer++) {
+    const layerRoots: PrioritizedRoot[] = []
+
+    for (let row = 0; row < STRATIFIED_SIDE; row++) {
+      for (let column = 0; column < STRATIFIED_SIDE; column++) {
+        const cellKey = `${column},${row}`
+        const streamKey =
+          layer === 0 ? cellKey : `layer-${layer}-${cellKey}`
+        const jitter = createStableScalarRandom(
+          `${seed}-exact-stratified-root-${hillKey}-${streamKey}`,
+        )
+        layerRoots.push({
+          u: (column + jitter.value()) / STRATIFIED_SIDE,
+          v: (row + jitter.value()) / STRATIFIED_SIDE,
+          rootKey:
+            layer === 0
+              ? `${hillKey}:cell:${cellKey}`
+              : `${hillKey}:layer:${layer}:cell:${cellKey}`,
+          cellOrdinal: row * STRATIFIED_SIDE + column,
+          priority: createStableScalarRandom(
+            `${seed}-exact-stratified-priority-${hillKey}-${streamKey}`,
+          ).value(),
+        })
+      }
+    }
+
+    layerRoots.sort(
+      (a, b) => a.priority - b.priority || a.cellOrdinal - b.cellOrdinal,
+    )
+    roots.push(
+      ...layerRoots.map(({ u, v, rootKey }, index) =>
+        Object.freeze({
+          u,
+          v,
+          rootKey,
+          ordinal: layer * ROOTS_PER_LAYER + index,
+        }),
+      ),
+    )
+  }
+
+  return Object.freeze(roots)
 }

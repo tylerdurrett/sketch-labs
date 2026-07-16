@@ -42,6 +42,27 @@ describe('grass-hills stable-cell canonical roots', () => {
     expect(scatterGrassRoots(options)).toEqual(scatterGrassRoots(options))
   })
 
+  it('appends deterministic density layers without changing the adopted bank', () => {
+    const options = { seed: 'extended-density', hillKey: '1/2' } as const
+    const adopted = scatterGrassRoots(options)
+    const extended = scatterGrassRoots({ ...options, minimumCount: 50_000 })
+
+    expect(extended).toHaveLength(50_000)
+    expect(extended.slice(0, adopted.length)).toEqual(adopted)
+    expect(new Set(extended.map(({ rootKey }) => rootKey)).size).toBe(50_000)
+    expect(extended.at(-1)?.ordinal).toBe(49_999)
+    expect(
+      extended.slice(10_000).every(
+        ({ u, v, rootKey }) =>
+          u >= 0 &&
+          u < 1 &&
+          v >= 0 &&
+          v < 1 &&
+          /^1\/2:layer:[1-4]:cell:\d{1,2},\d{1,2}$/.test(rootKey),
+      ),
+    ).toBe(true)
+  })
+
   it('re-seeding changes priority order and jitter without changing cell identities', () => {
     const first = scatterGrassRoots({ seed: 'seed-a', hillKey: '2/3' })
     const reseeded = scatterGrassRoots({ seed: 'seed-b', hillKey: '2/3' })
