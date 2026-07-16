@@ -42,10 +42,12 @@
  * descriptors from a seeded 100×100 stratified bank per stable hill identity.
  * Fill traces curved seven-point blade silhouettes. On-demand Outline starts
  * from that exact sampled geometry — all hill rings and every tapered blade in
- * painter order — then annotates each primitive as both source and occluder for
- * the generic indexed Hidden-line pass. The physical tool target changes output
- * stroke width only; it never selects roots or reconstructs geometry. The
- * optional Outline-source hook keeps this dense generation in Studio's worker.
+ * painter order — then annotates every primitive as both source and occluder for
+ * the generic indexed Hidden-line pass. There are no substitute centerline
+ * spines, physical-tool root LOD, or hill-only approximation. The physical tool
+ * target changes output stroke width only; it never selects roots or
+ * reconstructs geometry. The optional Outline-source hook keeps this dense
+ * generation in Studio's worker.
  *
  * BLADE SILHOUETTES / PHYSICAL PALETTE: blades are traced by the private
  * tapered-outline generator as filled-and-stroked shapes — never single stroked
@@ -102,10 +104,10 @@ import { createTerrainField } from './terrain'
 /** Horizontal segments used to resolve each prepared ridgeline. */
 const RIDGE_SAMPLES = 128
 
-/** Live ridge width selected by the issue-305 architecture decision. */
+/** Authored Fill ridgeline width; Outline applies the active physical tool. */
 const HILL_STROKE_WIDTH = 1
 
-/** Live blade contour width selected by the issue-305 architecture decision. */
+/** Authored Fill blade-contour width; Outline applies the active physical tool. */
 const BLADE_STROKE_WIDTH = 0.7
 
 /**

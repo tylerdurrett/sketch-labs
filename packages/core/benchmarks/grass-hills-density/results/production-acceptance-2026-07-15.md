@@ -1,4 +1,17 @@
-# Grass Hills production acceptance — 2026-07-15
+# SUPERSEDED — Grass Hills #305 production acceptance, 2026-07-15
+
+> **SUPERSEDED BY [#309](https://github.com/tylerdurrett/sketch-labs/issues/309).**
+> This record approved a six-point, tool-selected, hill-only approximation and
+> is historical evidence only. It is not the current production fidelity gate.
+> Current Outline retains every exact seven-point Fill blade and hill ring as
+> both source and occluder; the current 10k/50k paired evidence and comparative
+> attestation live in `src/sketches/grass-hills/reference/` and
+> [`faithful-outline-evidence-2026-07-15.md`](faithful-outline-evidence-2026-07-15.md).
+
+<details>
+<summary><strong>Historical #305 acceptance record (superseded; preserved verbatim below)</strong></summary>
+
+## Archived acceptance text
 
 ## Outcome
 
@@ -131,3 +144,5 @@ The captures, local servers, browser endpoint, downloaded export, and temporary
 profiling scripts were removed after the verdict. Durable provenance is this
 record plus the capture hashes and reviewer identity; the reference SVGs and
 manifest remain reproducible.
+
+</details>

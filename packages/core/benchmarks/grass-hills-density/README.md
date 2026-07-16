@@ -5,6 +5,14 @@ subprocess protocol, literal workload manifest, reusable metric collectors, and
 an explicit browser profiling seam. Dense-grass candidate algorithms remain
 isolated here and do not add production Sketch or Studio instrumentation.
 
+> **Historical campaign archive:** issue #309 superseded #305's six-point
+> spine, physical-tool LOD, and hill-only production choice. Those candidates
+> and results remain here as decision history, not as the current Grass Hills
+> contract. Current production evidence is
+> [`results/faithful-outline-evidence-2026-07-15.md`](results/faithful-outline-evidence-2026-07-15.md)
+> and the exact Fill-derived reference under
+> `src/sketches/grass-hills/reference/`.
+
 Every candidate × fixture pair runs in a fresh Node child. The parent runs jobs
 serially, applies a wall-clock deadline, polls RSS against the mode's hard
 ceiling, and also starts V8 with a smaller old-space allowance. A timeout,
@@ -202,25 +210,29 @@ handoff manifest are adjacent. Three jobs completed the fixed `full` sample plan
 full 25k and 50k remain explicit timeout censors. The result does not silently
 reduce samples or imply production adoption.
 
-## Architecture decision, prototype archive, and production reference
+## Superseded decision, prototype archive, and current production reference
 
 [`architecture-decision.md`](architecture-decision.md) records the issue-305
 decision after comparing both full finalists and a bounded shared-root revision.
-The adopted fixture is full-composition 10k. Its checksum-pinned equal-per-hill
-decision-prototype Fill and Outline remain archived with the sketch under
+Issue #309 superseded that production choice; the file and its
+full-composition 10k fixture are historical evidence only. Its checksum-pinned
+equal-per-hill decision-prototype Fill and Outline remain archived under
 `src/sketches/grass-hills/reference/decision-prototype/`;
 [`decision-reference.js`](decision-reference.js) is the isolated reproduction
 implementation and `decision-reference.benchmark.js` guards byte determinism.
 
-The approved production Fill, Outline, physical plot, and manifest live one
-level above that archive. [`production-reference.js`](production-reference.js)
-starts at the committed `dense-grass` Preset and invokes the shipped production
-generator, specialized Outline source, generic Hidden-line pass, clipping, and
-serializers. `production-reference.benchmark.js` reproduces every artifact and
-guards production density, allocation, workload, geometry reuse, physical
-widths, hashes, and the recorded independent verdict. The complete Studio,
-Chrome, and visual result is recorded in
-[`results/production-acceptance-2026-07-15.md`](results/production-acceptance-2026-07-15.md).
+The current approved Fill-derived Outline reference lives one level above that
+archive. [`production-reference.js`](production-reference.js) starts at the
+committed `dense-grass` Preset and invokes the production generator, exact
+role-annotated Outline source, generic indexed Hidden-line pass, clipping, and
+serializers at both 10k and 50k. `production-reference.benchmark.js` guards
+exact Fill/source geometry identity, the full blade inventory, zero physical
+root rejection, workload, preview/export Scene reuse, physical widths, and
+artifact hashes. The current evidence record is
+[`results/faithful-outline-evidence-2026-07-15.md`](results/faithful-outline-evidence-2026-07-15.md);
+the older
+[`results/production-acceptance-2026-07-15.md`](results/production-acceptance-2026-07-15.md)
+is prominently retained as superseded #305 history.
 
 ## Timing and memory contract
 

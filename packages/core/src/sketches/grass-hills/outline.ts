@@ -15,7 +15,7 @@
 import type { OutlineTarget } from '../../sketch'
 import type { Primitive, Scene } from '../../scene'
 
-/** The physical fineliner width pinned by the approved issue-305 reference. */
+/** The default physical fineliner width pinned by the production plot profile. */
 export const GRASS_HILLS_TOOL_WIDTH_MILLIMETERS = 0.3
 
 const OUTLINE_COLOR = '#111111'
