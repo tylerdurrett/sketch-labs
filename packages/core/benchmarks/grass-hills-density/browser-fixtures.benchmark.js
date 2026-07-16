@@ -4,10 +4,11 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import { hiddenLinePass } from '../../src/hiddenLine'
-import { grassHills } from '../../src/sketches/grass-hills'
 import { BROWSER_SCENE_FIXTURES } from './browser/fixture-manifest.js'
-import { HISTORICAL_BASELINE } from './fixtures.js'
+import {
+  replayHistoricalBaselineFill,
+  replayHistoricalBaselineOutline,
+} from './historical-baseline.js'
 
 const UPDATE_FIXTURES = process.env.UPDATE_GRASS_HILLS_BROWSER_FIXTURES === '1'
 
@@ -29,9 +30,8 @@ describe('checksum-pinned browser Scene fixtures', () => {
 })
 
 function writeFixtures() {
-  const { params, seed, t, frame } = HISTORICAL_BASELINE.payload
-  const fill = grassHills.generate(params, seed, t, frame)
-  const outline = hiddenLinePass(fill, { tolerance: 0 })
+  const fill = replayHistoricalBaselineFill()
+  const outline = replayHistoricalBaselineOutline()
   const directory = new URL('./browser/fixtures/', import.meta.url)
   mkdirSync(fileURLToPath(directory), { recursive: true })
   writeFileSync(new URL('historical-baseline-fill.scene.json', directory), JSON.stringify(fill))

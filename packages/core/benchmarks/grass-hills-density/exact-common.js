@@ -1,5 +1,4 @@
 import { createScene } from '../../src/scene.ts'
-import { blade } from '../../src/sketches/grass-hills/blade.ts'
 import { grassScaleAtY } from '../../src/sketches/grass-hills/depth.ts'
 import {
   createGrassHillMask,
@@ -17,6 +16,7 @@ const STRATIFIED_SIDE = 100
 const RIDGE_SAMPLES = 128
 const HILL_STROKE_WIDTH = 2
 const BLADE_STROKE_WIDTH = 2
+const LEGACY_FLANK_SEGMENTS = 16
 
 export const EXACT_ROOT_STRATEGIES = Object.freeze(['poisson', 'stratified'])
 export const EXACT_BLADE_GEOMETRIES = Object.freeze(['detailed-33', 'simple-7'])
@@ -335,7 +335,7 @@ export function sampleExactComposition(prepared, _t = 0) {
       const [rootX, rootY] = descriptor.projected
       const local =
         prepared.bladeGeometry === 'detailed-33'
-          ? blade(descriptor.shape)
+          ? legacyDetailedBlade(descriptor.shape)
           : simpleBlade(descriptor.shape)
       builder.addPath(
         local.map(([x, y]) => [x + rootX, y + rootY]),
@@ -364,6 +364,27 @@ export function sampleExactComposition(prepared, _t = 0) {
       ),
     },
   }
+}
+
+/** Issue-start 33-point blade, isolated from production's adopted seven points. */
+function legacyDetailedBlade(shape) {
+  const { length, width, lean, stiffness } = shape
+  const right = []
+  const left = []
+  for (let index = 0; index <= LEGACY_FLANK_SEGMENTS; index++) {
+    if (index === 0) {
+      right.push([0, 0])
+      left.push([0, 0])
+      continue
+    }
+    const t = index / LEGACY_FLANK_SEGMENTS
+    const spineX = lean * length * t ** (stiffness + 1)
+    const y = -length * t
+    const halfWidth = width * (2 * t * (1 - t))
+    right.push([spineX + halfWidth, y])
+    left.push([spineX - halfWidth, y])
+  }
+  return [...right, ...left.slice(0, -1).reverse()]
 }
 
 /** Seven explicit points: root, two stations per flank, apex, and root again. */

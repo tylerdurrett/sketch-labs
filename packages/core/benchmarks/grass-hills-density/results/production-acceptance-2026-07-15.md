@@ -47,15 +47,14 @@ same processed geometry rather than independently reprocessing it.
 ## Actual Studio and Chrome profile
 
 Chrome `144.0.0.0` headless on macOS loaded the committed Preset in the real
-Studio `LiveCanvas`. The run covered Preset reload, a `958 → 688 → 958` canvas
-resize round-trip, `windLean 0 → 0.25 → 0`, Fill → Outline, and hidden-line SVG
+Studio `LiveCanvas`. The cold interaction run covered Preset reload, a
+`958 → 688 → 958` canvas resize round-trip, Fill → Outline, and hidden-line SVG
 export.
 
 | Observation | Result |
 | --- | ---: |
 | Preset reload through two rAF commits | `447.92 ms` |
 | Resize round-trip through two rAF commits | `32.80 ms` |
-| Lean round-trip through two rAF commits | `32.10 ms` |
 | Fill → completed Outline | `545.93 ms` |
 | Main-thread long tasks in measured window | `1` (`389 ms`, cold Preset generation) |
 | rAF intervals, median / p95 / max (`240` samples) | `8.3 / 9.3 / 383.3 ms` |
@@ -70,6 +69,44 @@ the retained production Fill/Outline session cache; it is an observed retained
 state delta, not a leak claim or memory SLA. rAF cadence is headless scheduling
 evidence, not a frame-rate claim. Canvas durations measure JavaScript submission
 through the actual Canvas2D context, not raster or GPU completion.
+
+### Committed lean round-trip
+
+A fresh run committed `windLean 0 → 0.25 → 0` through the real NumberControl.
+Automation selected the whole browser field, inserted one value through CDP,
+allowed one animation frame for React's draft state, then pressed Enter and
+waited for blur and the resulting canvas draws. This avoids mistaking a DOM-only
+value assignment for a React transaction.
+
+| Observation | Result |
+| --- | ---: |
+| Commit `0 → 0.25` | `479.2 ms` |
+| Commit `0.25 → 0` | `492.9 ms` |
+| Complete round-trip | `972.1 ms` |
+| Main-thread long tasks | `2` (`410 / 383 ms`) |
+| rAF intervals, median / p95 / max (`180` samples) | `8.3 / 9.2 / 408.2 ms` |
+| rAF intervals over `16.7 ms` | `5 / 180` |
+| Canvas submissions, median / p95 / max (`4` draws) | `4.4 / 4.6 / 5.3 ms` |
+| JS heap after explicit GC, before / after | `28,483,992 / 28,650,593 bytes` |
+
+A separate identity run exported the displayed SVG at each committed value.
+The initial and restored exports were byte-identical (`2,012,905` bytes,
+SHA-256 `7b42fc609fef2e71dda66a22d3a71e22aaf989ebf3d10475947882a9619ac888`),
+while the committed `0.25` export changed (`2,014,171` bytes, SHA-256
+`d3f3031544ca5c31255367590292eb61a63112c603f8dfc03ecb0bd5a6db9b4e`).
+All authored controls also matched after restoration. This is exact displayed
+Scene restoration.
+
+Chrome's raw Canvas2D backing pixels changed as expected at `0.25`, but did not
+return to a byte-identical raster for the byte-identical restored geometry:
+initial `4515ee1c…`, changed `c84a6a1d…`, restored `70ff599b…`. That is recorded
+as a browser raster/state observation, not hidden as a successful pixel-hash
+round-trip and not treated as a Grass Hills geometry determinism failure.
+
+The two long tasks track the two production 10k regenerations. The `166,601`-byte
+post-GC increase is one observed retained-state delta, not a leak claim or a
+memory SLA. These timings are measurements from one headless Chrome run, not a
+latency SLA.
 
 ## Independent visual gate
 

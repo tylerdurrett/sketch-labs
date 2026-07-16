@@ -4,23 +4,26 @@ import {
   analyzeHiddenLineWorkload,
   hiddenLinePass,
 } from '../../src/hiddenLine.ts'
-import { grassHills } from '../../src/sketches/grass-hills/index.ts'
 import {
   prepareExactComposition,
   sampleExactComposition,
 } from './exact-common.js'
 import { exactSpatialHiddenLinePass } from './exact-spatial-hidden-line.js'
-import { HISTORICAL_BASELINE } from './fixtures.js'
+import { EXACT_CANDIDATE_BASELINE } from './fixtures.js'
+import {
+  replayHistoricalBaselineFill,
+  replayHistoricalBaselineOutline,
+} from './historical-baseline.js'
 import { sceneChecksum } from './metrics.js'
 
 describe('Grass Hills exact spatial Hidden-line prototype', () => {
-  it('is output/checksum-equivalent on the pinned production baseline', () => {
-    const { params, seed, t, frame } = HISTORICAL_BASELINE.payload
-    const source = grassHills.generate(params, seed, t, frame)
-    const expected = hiddenLinePass(source)
+  it('is output/checksum-equivalent on the pinned issue-start snapshot', () => {
+    const source = replayHistoricalBaselineFill()
+    const expected = replayHistoricalBaselineOutline()
     const expectedWork = analyzeHiddenLineWorkload(source)
     const actual = exactSpatialHiddenLinePass(source)
 
+    expect(hiddenLinePass(source)).toEqual(expected)
     expect(actual.scene).toEqual(expected)
     expect(sceneChecksum(actual.scene)).toBe(sceneChecksum(expected))
     expect(actual.stats.filledPrimitiveCount).toBe(410)
@@ -159,7 +162,7 @@ describe('Grass Hills exact spatial Hidden-line prototype', () => {
 })
 
 function fixturePayload({ hillCount, bladeCount }) {
-  const baseline = HISTORICAL_BASELINE.payload
+  const baseline = EXACT_CANDIDATE_BASELINE.payload
   return {
     ...baseline,
     frame: { ...baseline.frame },

@@ -8,6 +8,7 @@ import {
   PRODUCTION_PRESET_NAME,
   PRODUCTION_REFERENCE_ID,
   generateProductionReference,
+  productionReferenceManifest,
 } from './production-reference.js'
 
 const referenceDirectory = new URL(
@@ -17,10 +18,17 @@ const referenceDirectory = new URL(
 
 describe('Grass Hills production acceptance reference', () => {
   it('reproduces production Fill, Outline, and the physical plot byte-for-byte', () => {
-    const manifest = JSON.parse(
-      readFileSync(new URL('manifest.json', referenceDirectory), 'utf8'),
+    const manifestBytes = readFileSync(
+      new URL('manifest.json', referenceDirectory),
+      'utf8',
     )
+    const manifest = JSON.parse(manifestBytes)
     const generated = generateProductionReference()
+    const regeneratedManifest = productionReferenceManifest(generated)
+
+    expect(`${JSON.stringify(regeneratedManifest, null, 2)}\n`).toBe(
+      manifestBytes,
+    )
 
     expect(manifest).toMatchObject({
       schemaVersion: 2,
@@ -65,6 +73,16 @@ describe('Grass Hills production acceptance reference', () => {
           depthAndTerrainBands: 'PASS',
           outlineFidelity: 'PASS',
           physicalPlotLegibility: 'PASS',
+        },
+        committedLeanRoundtrip: {
+          values: [0, 0.25, 0],
+          timingRun: {
+            longTasksMilliseconds: [410, 383],
+          },
+          sceneIdentityRun: {
+            exactSceneRestoration: true,
+            exactCanvasPixelRestoration: false,
+          },
         },
       },
     })

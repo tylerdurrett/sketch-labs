@@ -242,10 +242,15 @@ set a new child-process high-water mark,” not an isolated per-phase peak.
 
 ## Literal workload manifest and collectors
 
-[`fixtures.js`](fixtures.js) pins six requests: the historical 10-hill/400-blade
-baseline, one-hill 5k and 10k targets, and full-composition 10k, 25k, and 50k
-targets. Every request repeats the seed, frame, time, complete Grass Hills param
-set, and physical profile. The 200 × 200 mm paper with 10 mm insets supplies a
+[`fixtures.js`](fixtures.js) pins six requests: a benchmark-local exact-candidate
+400-blade baseline, one-hill 5k and 10k targets, and full-composition 10k, 25k,
+and 50k targets. The distinct issue-start historical baseline is replayed from
+the committed Fill/Outline Scene snapshots by
+[`historical-baseline.js`](historical-baseline.js); its 10 hills, 400 blades,
+410 primitives, 14,540 points, and hidden-line workload remain durable even
+though the production generator now emits 10,000 seven-point blades. Every
+request repeats the seed, frame, time, complete Grass Hills param set, and
+physical profile. The 200 × 200 mm paper with 10 mm insets supplies a
 180 × 180 mm drawable region: 0.18 mm per Scene unit. A 0.30 mm fineliner is
 therefore 1.6666666666666667 Scene units. Requested counts are evidence targets,
 not claims about the current implementation.

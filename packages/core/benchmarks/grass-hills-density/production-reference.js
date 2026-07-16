@@ -179,18 +179,16 @@ function artifact(file, value, scene) {
   }
 }
 
-export function writeProductionReference(out) {
-  const generated = generateProductionReference()
+/** Build every deterministic manifest field from one regenerated production value. */
+export function productionReferenceManifest(
+  generated = generateProductionReference(),
+) {
   assertApprovedArtifacts(generated)
-  mkdirSync(out, { recursive: true })
-  writeFileSync(`${out}/fill.svg`, generated.fillSvg)
-  writeFileSync(`${out}/outline.svg`, generated.outlineSvg)
-  writeFileSync(`${out}/physical-plot.svg`, generated.physicalPlotSvg)
   const {
     processingDurationMs: _processingDurationMs,
     ...deterministicEvidence
   } = generated.evidence
-  const manifest = {
+  return {
     schemaVersion: 2,
     referenceId: PRODUCTION_REFERENCE_ID,
     status: 'production-acceptance',
@@ -272,6 +270,64 @@ export function writeProductionReference(out) {
           source: '200mm physical plot at 756x756 CSS pixels (96dpi)',
         },
       ],
+      committedLeanRoundtrip: {
+        inputMechanism:
+          'CDP whole-value text insertion into a browser-selected NumberControl, one animation frame for React draft state, then Enter commit and blur',
+        values: [0, 0.25, 0],
+        timingRun: {
+          forwardMilliseconds: 479.2,
+          restoreMilliseconds: 492.9,
+          roundtripMilliseconds: 972.1,
+          longTasksMilliseconds: [410, 383],
+          rafIntervals: {
+            samples: 180,
+            medianMilliseconds: 8.3,
+            p95Milliseconds: 9.2,
+            maxMilliseconds: 408.2,
+            over16_7Milliseconds: 5,
+          },
+          canvasSubmissions: {
+            draws: 4,
+            medianMilliseconds: 4.4,
+            p95Milliseconds: 4.6,
+            maxMilliseconds: 5.3,
+          },
+          heapAfterExplicitGc: {
+            beforeBytes: 28_483_992,
+            afterBytes: 28_650_593,
+            deltaBytes: 166_601,
+          },
+        },
+        sceneIdentityRun: {
+          initialSvg: {
+            sha256:
+              '7b42fc609fef2e71dda66a22d3a71e22aaf989ebf3d10475947882a9619ac888',
+            bytes: 2_012_905,
+          },
+          changedSvg: {
+            sha256:
+              'd3f3031544ca5c31255367590292eb61a63112c603f8dfc03ecb0bd5a6db9b4e',
+            bytes: 2_014_171,
+          },
+          restoredSvg: {
+            sha256:
+              '7b42fc609fef2e71dda66a22d3a71e22aaf989ebf3d10475947882a9619ac888',
+            bytes: 2_012_905,
+          },
+          exactSceneRestoration: true,
+          canvasPixelSha256: {
+            initial:
+              '4515ee1c96121af84fbea4ec3b33462105792a9b8661e257c47b574765aed962',
+            changed:
+              'c84a6a1d8cfc9bef631c1085eb1795d2bf1b261a2e3ea455d09c1038827a52ac',
+            restored:
+              '70ff599b00ef980d2264a6445a530b447113c013f29b5b15d59bd3b7c1fc51ea',
+          },
+          exactCanvasPixelRestoration: false,
+          interpretation:
+            'The authored controls and exported displayed Scene restore exactly; Chrome did not reproduce byte-identical Canvas2D backing pixels for that byte-identical geometry.',
+        },
+      },
       details:
         'benchmarks/grass-hills-density/results/production-acceptance-2026-07-15.md',
     },
@@ -283,6 +339,15 @@ export function writeProductionReference(out) {
       ],
     },
   }
+}
+
+export function writeProductionReference(out) {
+  const generated = generateProductionReference()
+  const manifest = productionReferenceManifest(generated)
+  mkdirSync(out, { recursive: true })
+  writeFileSync(`${out}/fill.svg`, generated.fillSvg)
+  writeFileSync(`${out}/outline.svg`, generated.outlineSvg)
+  writeFileSync(`${out}/physical-plot.svg`, generated.physicalPlotSvg)
   writeFileSync(
     `${out}/manifest.json`,
     `${JSON.stringify(manifest, null, 2)}\n`,
