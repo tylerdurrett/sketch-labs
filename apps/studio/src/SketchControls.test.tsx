@@ -21,6 +21,7 @@ import {
   leafField,
   renderPlotterSVG,
   resolvePlotCompositionFrame,
+  toneCalibration,
   type ParamSchema,
   type CoordinateSpace,
   type PlotProfile,
@@ -680,6 +681,16 @@ function paperMarginsCheckbox(el: HTMLElement): HTMLInputElement {
     ),
   );
   if (checkbox === undefined) throw new Error("no paper margins checkbox");
+  return checkbox;
+}
+
+function compositionFrameCheckbox(el: HTMLElement): HTMLInputElement {
+  const checkbox = [
+    ...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+  ].find((input) =>
+    input.labels?.[0]?.textContent?.includes("Include composition frame"),
+  );
+  if (checkbox === undefined) throw new Error("no composition frame checkbox");
   return checkbox;
 }
 
@@ -4047,6 +4058,106 @@ describe("SketchControls — Tone reference mode (#316)", () => {
     clickButton(el, "Export SVG");
     expect(exportSceneCapture.current).not.toBeNull();
     expect(downloadBlob).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SketchControls — Tone Calibration target (#324)", () => {
+  function button(el: HTMLElement, label: string): HTMLButtonElement {
+    const match = [...el.querySelectorAll<HTMLButtonElement>("button")].find(
+      (candidate) => candidate.textContent === label,
+    );
+    if (match === undefined) throw new Error(`no ${label} button`);
+    return match;
+  }
+
+  it("uses the real source capability without adding authored controls", () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+
+    expect(el.querySelector('#inspector input[id^="control-"]')).toBeNull();
+    expect(
+      [...el.querySelectorAll('[role="group"][aria-label="Render mode"] button')].map(
+        (candidate) => candidate.textContent,
+      ),
+    ).toEqual(["Fill", "Outline", "Tone"]);
+
+    clickButton(el, "Tone");
+    expect(lastToneSource).not.toBeNull();
+    const frame = lastCompositionFrame!;
+    const expected = toneCalibration.generateToneSource!({}, frame);
+    const points: [number, number][] = [
+      [0, frame.height * 0.25],
+      [frame.width / 2, frame.height * 0.25],
+      [frame.width / 2, frame.height * 0.75],
+    ];
+    expect(points.map((point) => lastToneSource!.toneField.sample(point))).toEqual(
+      points.map((point) => expected.toneField.sample(point)),
+    );
+  });
+
+  it("keeps its pixel target inert in Tone and exports only empty Fill artwork", async () => {
+    const toBlob = vi.fn((callback: BlobCallback) => {
+      callback(new Blob([MINIMAL_PNG], { type: "image/png" }));
+    });
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+
+    clickButton(el, "Tone");
+    const png = button(el, "Export PNG");
+    const svg = button(el, "Export SVG");
+    const plotter = button(el, "Export Hidden-line SVG");
+    expect([png.disabled, svg.disabled, plotter.disabled]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+
+    act(() => {
+      png.click();
+      svg.click();
+      plotter.click();
+    });
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(plotterExportCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+
+    clickButton(el, "Fill");
+    expect([png.disabled, svg.disabled, plotter.disabled]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+
+    // PNG is a snapshot of the Fill canvas pixels, not a Scene serialization.
+    clickButton(el, "Export PNG");
+    await flush();
+    expect(toBlob).toHaveBeenCalledTimes(1);
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+
+    // The ordinary SVG source contains no calibration target or guide geometry.
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).toEqual({
+      space: lastCompositionFrame,
+      primitives: [],
+    });
+
+    // A disabled composition frame makes the empty artwork assertion meaningful:
+    // the plotter path cannot add Harness-owned frame geometry to the result.
+    const includeFrame = compositionFrameCheckbox(el);
+    expect(includeFrame.checked).toBe(true);
+    act(() => includeFrame.click());
+    expect(includeFrame.checked).toBe(false);
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(outlineJob.lastExportSnapshot?.identity.includeFrame).toBe(false);
+    expect(plotterExportCapture.current?.scene).toEqual({
+      space: lastCompositionFrame,
+      primitives: [],
+    });
   });
 });
 

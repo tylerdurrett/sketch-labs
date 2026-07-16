@@ -29,9 +29,11 @@ import type { LiveCanvasHandle } from "./LiveCanvas";
 vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
     params,
+    renderState,
     handleRef,
   }: {
     params: Readonly<Record<string, unknown>>;
+    renderState?: { kind: string };
     handleRef?: Ref<LiveCanvasHandle>;
   }) => {
     useImperativeHandle(handleRef, () => ({
@@ -47,7 +49,13 @@ vi.mock("./LiveCanvas", () => ({
         inputRevision: 0,
       }),
     }));
-    return <div data-testid="canvas" data-params={JSON.stringify(params)} />;
+    return (
+      <div
+        data-testid="canvas"
+        data-params={JSON.stringify(params)}
+        data-render-state={renderState?.kind ?? "fill-live"}
+      />
+    );
   },
 }));
 
@@ -238,6 +246,47 @@ describe("App — keyed edit-history sessions", () => {
     root = createRoot(container!);
     act(() => root!.render(<App />));
     expect(pressUndo().defaultPrevented).toBe(false);
+  });
+});
+
+describe("App — Tone Calibration integration (#324)", () => {
+  it("opens on the control-free calibration target and resets its diagnostic view after switching", () => {
+    mountApp();
+
+    expect(trigger().textContent).toBe("Tone Calibration");
+    expect(
+      document.querySelector('#inspector input[id^="control-"]'),
+    ).toBeNull();
+    expect(document.querySelector("#sketch-seed")).not.toBeNull();
+    expect(
+      [...document.querySelectorAll("button")].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(expect.arrayContaining(["New seed", "Randomize", "Export PNG"]));
+
+    const tone = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Tone",
+    )!;
+    act(() => tone.click());
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-render-state"),
+    ).toBe("tone-reference");
+
+    selectOption("Circles");
+    selectOption("Tone Calibration");
+
+    expect(
+      [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) => button.textContent === "Fill",
+      )?.getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-render-state"),
+    ).toBe("fill-live");
   });
 });
 
