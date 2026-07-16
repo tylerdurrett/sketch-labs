@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "sketch": "grass-hills",
+  "name": "dense-grass",
+  "seed": 12345,
+  "params": {
+    "hillCount": 10,
+    "horizonHeight": 0.25,
+    "depthFalloff": 2,
+    "ridgeScale": 3.5,
+    "ridgeAmplitude": 0.8,
+    "terrainDrift": 1.25,
+    "bladeDensity": 2,
+    "bladeLength": 28,
+    "bladeLengthVariance": 8,
+    "bladeWidth": 3,
+    "stiffnessVariance": 0.25,
+    "windLean": 0,
+    "backgroundColor": "#f7f4e8",
+    "hillColor": "#dce8d3",
+    "hillStrokeColor": "#496a43",
+    "bladeColor": "#24643a",
+    "bladeStrokeColor": "#24643a"
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true
+  }
+}

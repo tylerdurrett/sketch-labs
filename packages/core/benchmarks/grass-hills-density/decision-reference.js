@@ -258,7 +258,7 @@ export function writeDecisionReference(out) {
     reproduction: {
       commands: [
         'node packages/core/benchmarks/grass-hills-density/bundle-cli.js --entry=packages/core/benchmarks/grass-hills-density/decision-reference-cli.js --out=/tmp/issue-305-decision-reference-cli.mjs',
-        'node /tmp/issue-305-decision-reference-cli.mjs --out=packages/core/src/sketches/grass-hills/reference',
+        'node /tmp/issue-305-decision-reference-cli.mjs --out=packages/core/src/sketches/grass-hills/reference/decision-prototype',
       ],
       workingDirectory: 'repository root',
     },
