@@ -5,11 +5,8 @@ import { hiddenLinePass } from '../hiddenLine'
 import type { CoordinateSpace, Primitive, Scene } from '../scene'
 import { defaultParams } from '../sketch'
 import { grassHills } from '../sketches/grass-hills'
-import { applyForegroundZoom } from '../sketches/grass-hills/foreground-zoom'
-import type { GrassBladeDescriptor } from '../sketches/grass-hills/grass'
 import {
   GRASS_HILLS_TOOL_WIDTH_MILLIMETERS,
-  selectToolReadableBlades,
 } from '../sketches/grass-hills/outline'
 
 const WIDE: CoordinateSpace = { width: 480, height: 270 }
@@ -79,10 +76,6 @@ function blades(scene: Scene): Primitive[] {
   return scene.primitives.filter(({ points }) => points.length === 7)
 }
 
-function role(scene: Scene, value: Primitive['hiddenLineRole']): Primitive[] {
-  return scene.primitives.filter(({ hiddenLineRole }) => hiddenLineRole === value)
-}
-
 function isFrameEdgeSegment(
   start: readonly [number, number],
   end: readonly [number, number],
@@ -137,16 +130,6 @@ function crossesBoundary(
     primitive.points.some(isOutside) &&
     primitive.points.some((point) => !isOutside(point))
   )
-}
-
-function lodDescriptor(x: number, ordinal: number): GrassBladeDescriptor {
-  return {
-    identity: { hillKey: '1/1', rootKey: `root-${ordinal}`, ordinal },
-    canonical: { u: x, v: 0 },
-    projected: [x, 0],
-    rolls: { length: 0, width: ordinal, stiffness: 0, lean: 0 },
-    shape: { length: 1, width: 0.2, stiffness: 2.5, lean: 0 },
-  }
 }
 
 describe('grass-hills foreground zoom integration', () => {
@@ -228,7 +211,7 @@ describe('grass-hills foreground zoom integration', () => {
     )
   })
 
-  it('keeps Fill blade roots and tips identical to specialized Outline geometry', () => {
+  it('keeps the complete transformed Fill geometry in the Outline source', () => {
     const params = { ...PARAMS, foregroundZoom: ZOOM }
     const fill = grassHills.generate(params, 'shared-geometry', 0, WIDE)
     const outline = grassHills.generateOutlineSource!(
@@ -238,39 +221,17 @@ describe('grass-hills foreground zoom integration', () => {
       WIDE,
       TARGET,
     )
-    const fillByRoot = new Map(
-      blades(fill).map((primitive) => [primitive.points[0]!.join(':'), primitive]),
-    )
-    const spines = role(outline, 'source').filter(
-      ({ points }) => points.length === 6,
-    )
-
-    expect(spines.length).toBeGreaterThan(0)
-    for (const spine of spines) {
-      const fillBlade = fillByRoot.get(spine.points[0]!.join(':'))
-      expect(fillBlade).toBeDefined()
-      expect(spine.points.at(-1)).toEqual(fillBlade!.points[3])
-      expect(spine.stroke?.width).toBe(
+    expect(outline.primitives).toHaveLength(fill.primitives.length)
+    for (let index = 0; index < fill.primitives.length; index++) {
+      const fillPrimitive = fill.primitives[index]!
+      const outlinePrimitive = outline.primitives[index]!
+      expect(outlinePrimitive.points).toEqual(fillPrimitive.points)
+      expect(outlinePrimitive.closed).toBe(fillPrimitive.closed)
+      expect(outlinePrimitive.hiddenLineRole).toBe('both')
+      expect(outlinePrimitive.stroke?.width).toBe(
         TARGET.toolWidthMillimeters / TARGET.millimetersPerSceneUnit,
       )
     }
-  })
-
-  it('runs fixed-tool-width LOD against transformed root distances', () => {
-    const hills = [
-      {
-        ridge: [],
-        blades: [lodDescriptor(0, 0), lodDescriptor(0.75, 1)],
-      },
-    ]
-    const transformed = applyForegroundZoom(hills, {
-      frame: { width: 0, height: 0 },
-      horizonHeight: 0,
-      zoom: 2,
-    })
-
-    expect(selectToolReadableBlades(hills, 1).size).toBe(1)
-    expect(selectToolReadableBlades(transformed, 1).size).toBe(2)
   })
 
   it('clips the magnified Fill and Outline inside the fixed frame without closure or frame-edge lines', () => {

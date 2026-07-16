@@ -154,51 +154,31 @@ describe('Grass Hills real-call-site visible-contour fidelity', () => {
     expect(comparison.extra.length).toBeGreaterThan(0)
   })
 
-  it('characterizes the current public #305 Outline path as unfaithful', () => {
+  it('faithfully reproduces Fill contours through the public Outline path', () => {
     const fixture = GRASS_HILLS_FIDELITY_FIXTURES.bounded
     const { fill, source, outline } = invokePublicFixture(fixture)
-    const fillBladeRoots = new Set(
-      fill.primitives
-        .filter(({ points }) => points.length === 7)
-        .map(({ points }) => points[0]!.join(':')),
-    )
-    const spines = source.primitives.filter(({ points }) => points.length === 6)
-    const reconstructedByRoot = new Map(
-      fill.primitives
-        .filter(({ points }) => points.length === 7)
-        .map((blade) => [
-          blade.points[0]!.join(':'),
-          reconstructIssue305Centerline(blade),
-        ]),
-    )
     const comparison = compareVisibleContours(fill, outline)
 
-    // CHARACTERIZATION SEAM: block E must flip this verdict when the public
-    // call site stops returning #305 centerlines and represents Fill exactly.
-    expect(comparison.matches).toBe(false)
-    expect(comparison.missing.length).toBeGreaterThan(0)
-    expect(comparison.extra.length).toBeGreaterThan(0)
-    expect(spines.length).toBeGreaterThan(0)
+    expect(comparison).toEqual({ matches: true, missing: [], extra: [] })
+    expect(source.primitives).toHaveLength(fill.primitives.length)
+    expect(source.primitives.map(({ points }) => points)).toEqual(
+      fill.primitives.map(({ points }) => points),
+    )
+    expect(source.primitives.map(({ closed }) => closed)).toEqual(
+      fill.primitives.map(({ closed }) => closed),
+    )
     expect(
-      spines.every(({ points }) => fillBladeRoots.has(points[0]!.join(':'))),
+      source.primitives.every(({ hiddenLineRole }) => hiddenLineRole === 'both'),
     ).toBe(true)
-    for (const spine of spines) {
-      const reconstructed = reconstructedByRoot.get(spine.points[0]!.join(':'))!
-      expect(reconstructed).toHaveLength(6)
-      for (let index = 0; index < 6; index++) {
-        expect(spine.points[index]![0]).toBeCloseTo(
-          reconstructed[index]![0],
-          10,
-        )
-        expect(spine.points[index]![1]).toBeCloseTo(
-          reconstructed[index]![1],
-          10,
-        )
-      }
-    }
+    expect(
+      source.primitives.filter(({ points }) => points.length === 7),
+    ).toHaveLength(fixture.expectedBladeCount)
+    expect(
+      source.primitives.some(({ points }) => points.length === 6),
+    ).toBe(false)
   })
 
-  it('exposes #305 physical-tool root rejection as a completeness failure', () => {
+  it('keeps geometry and complete roots invariant across physical tool widths', () => {
     const fixture = GRASS_HILLS_FIDELITY_FIXTURES.bounded
     const fill = grassHills.generate(
       fixture.params,
@@ -213,15 +193,16 @@ describe('Grass Hills real-call-site visible-contour fidelity', () => {
       fixture.frame,
       { ...fixture.target, millimetersPerSceneUnit: 0.003 },
     )
-    const selectedSpines = source.primitives.filter(
-      ({ points }) => points.length === 6,
+    const blades = source.primitives.filter(
+      ({ points }) => points.length === 7,
     )
     const comparison = compareVisibleContours(fill, hiddenLinePass(source))
 
-    expect(selectedSpines.length).toBeGreaterThan(0)
-    expect(selectedSpines.length).toBeLessThan(fixture.expectedBladeCount)
-    expect(comparison.matches).toBe(false)
-    expect(comparison.missing.length).toBeGreaterThan(0)
+    expect(blades).toHaveLength(fixture.expectedBladeCount)
+    expect(source.primitives.map(({ points }) => points)).toEqual(
+      fill.primitives.map(({ points }) => points),
+    )
+    expect(comparison).toEqual({ matches: true, missing: [], extra: [] })
   })
 
   it('pins adopted and ceiling envelopes for scalable fidelity campaigns', () => {
