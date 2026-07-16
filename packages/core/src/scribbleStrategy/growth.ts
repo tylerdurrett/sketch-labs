@@ -1,4 +1,3 @@
-import { sampleShadingMask } from '../shadingFields'
 import type { Point, Random } from '../types'
 import { isMaskPermittedSegment } from './mask'
 import type { ScribbleModel } from './types'
@@ -105,11 +104,11 @@ function scoreCandidate(
     lookAhead,
     scales.maskCheckSpacing,
   )
-  const endpointPermission = sampleShadingMask(source.shadingMask, point)
-  const endpointDemand = model.residualAt(point) * endpointPermission
+  // residualAt already contains the model's linear permission weighting.
+  // Multiplying permission here again would incorrectly steer by permission².
+  const endpointDemand = model.residualAt(point)
   const futureDemand = lookAheadPermitted
-    ? model.residualAt(lookAhead) *
-      sampleShadingMask(source.shadingMask, lookAhead)
+    ? model.residualAt(lookAhead)
     : 0
   const demand = endpointDemand + LOOK_AHEAD_WEIGHT * futureDemand
   if (demand <= MIN_SCORE) return 0

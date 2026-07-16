@@ -121,6 +121,36 @@ describe('Scribble candidate growth', () => {
     expect(highSamples).toEqual(lowSamples)
   })
 
+  it('steers from linearly permission-weighted residual without squaring permission', () => {
+    const softRight = createShadingMask(([x]) => (x > 50 ? 0.5 : 1))
+    const controlled = {
+      ...model({ momentum: 0, chaos: 0 }, softRight),
+      // Right-side demand wins when these already-weighted residuals are used
+      // directly (0.5 > 0.4). Multiplying permission again would reverse the
+      // ranking (0.25 < 0.4) and choose the left side with this scripted draw.
+      residualAt([x]: Readonly<Point>): number {
+        return x > 50 ? 0.5 : 0.4
+      },
+    }
+    const fallback = createRandom('linear-permission-fallback')
+    const next = chooseScribbleGrowthStep({
+      model: controlled,
+      rng: {
+        ...fallback,
+        range(min: number, max: number): number {
+          return (min + max) / 2
+        },
+        value(): number {
+          return 0.3
+        },
+      },
+      current: [50, 50],
+    })
+
+    expect(next.kind).toBe('advanced')
+    if (next.kind === 'advanced') expect(next.point[0]).toBeGreaterThan(50)
+  })
+
   it('never considers a segment that crosses an exact-zero barrier', () => {
     const barrier = createShadingMask(([x]) => (x >= 50 && x <= 51 ? 0 : 1))
     const residual = createScribbleModel(

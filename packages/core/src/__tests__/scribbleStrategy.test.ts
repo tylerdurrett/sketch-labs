@@ -65,6 +65,10 @@ function segmentCount(result: ScribbleResult): number {
   )
 }
 
+function meanSegmentLength(result: ScribbleResult): number {
+  return totalPathLength(result.polylines) / segmentCount(result)
+}
+
 function expectValidResult(result: ScribbleResult): void {
   expect(['completed', 'budget-exhausted']).toContain(result.termination)
   expect(Number.isFinite(result.residualError)).toBe(true)
@@ -361,6 +365,31 @@ describe('Scribble authored control behavior', () => {
       totalPathLength(small.polylines) * 2,
       8,
     )
+  })
+
+  it('changes characteristic spatial detail with Scribble scale on one frame', () => {
+    const controls = { toneFidelity: 0 }
+    const fixture = source()
+    const fine = scribbleStrategy(
+      input(fixture, 'scribble-scale', {
+        ...controls,
+        scribbleScale: 0.75,
+      }),
+    )
+    const broad = scribbleStrategy(
+      input(fixture, 'scribble-scale', {
+        ...controls,
+        scribbleScale: 1.5,
+      }),
+    )
+
+    expect(fine.termination).toBe('completed')
+    expect(broad.termination).toBe('completed')
+    expect(meanSegmentLength(broad)).toBeCloseTo(
+      meanSegmentLength(fine) * 2,
+      10,
+    )
+    expect(segmentCount(fine)).toBeGreaterThan(segmentCount(broad))
   })
 
   it('lets Momentum and Chaos alter routing independently', () => {
