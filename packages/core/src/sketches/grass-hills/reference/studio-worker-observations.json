@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "grass-hills-faithful-visible-line",
+  "capturedAt": "2026-07-16T05:28:29.747Z",
+  "warning": "Observations from one browser/machine run; not SLAs and not test limits.",
+  "machine": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.77 Safari/537.36",
+    "platform": "macOS",
+    "logicalCpuCount": 12,
+    "deviceMemoryGiB": 8
+  },
+  "scenarios": [
+    {
+      "id": "adopted-10k",
+      "bladeDensity": 2,
+      "expectedBladeCount": 10000,
+      "contract": "one local browser run; timings and memory are observations, never pass/fail limits or SLAs",
+      "timingsMs": {
+        "fillGeneration": 224.10000014305115,
+        "workerPreview": 658.3999998569489,
+        "exportSnapshotCopy": 9.399999856948853,
+        "cachedPhysicalExport": 131.70000004768372,
+        "total": 1156.1000001430511
+      },
+      "memory": {
+        "before": {
+          "usedJsHeapSize": 3818569,
+          "totalJsHeapSize": 5490337,
+          "jsHeapSizeLimit": 4294967296
+        },
+        "after": {
+          "usedJsHeapSize": 76747163,
+          "totalJsHeapSize": 97189383,
+          "jsHeapSizeLimit": 4294967296
+        }
+      },
+      "preview": {
+        "scene": {
+          "bytes": 4448895,
+          "sha256": "f5f174526ace6e3a4a19022f33c7b9f3c915517d83157f10c2c83222a5b978c1",
+          "primitiveCount": 20069,
+          "pointCount": 80998
+        },
+        "progressMessageCount": 4,
+        "terminalProgressCount": 1,
+        "coordinatorProgressCount": 4,
+        "responseValidation": {
+          "validMessageCount": 5,
+          "invalidMessageCount": 0
+        },
+        "structuredClone": {
+          "responseIdentityReferenceDiffers": true,
+          "responseIdentityValueMatches": true,
+          "coordinatorSceneIsWorkerResponseScene": true
+        }
+      },
+      "cacheAndPhysicalExportReuse": {
+        "matchingReusableOutlineCaptured": true,
+        "previewCacheIsCoordinatorScene": true,
+        "snapshotCopyReferenceDiffers": true,
+        "workerResponseCopyReferenceDiffers": true,
+        "coordinatorSceneIsWorkerResponseScene": true,
+        "settledCacheCopyReferenceDiffers": true,
+        "previewDerivationCount": 1,
+        "exportDerivationCount": 0,
+        "exportDerivationProgressMessageCount": 0,
+        "finalizingMessageCount": 1,
+        "completedSceneMatchesPreviewHash": true,
+        "completedScene": {
+          "bytes": 4448895,
+          "sha256": "f5f174526ace6e3a4a19022f33c7b9f3c915517d83157f10c2c83222a5b978c1",
+          "primitiveCount": 20069,
+          "pointCount": 80998
+        },
+        "physicalSvg": {
+          "bytes": 2635379,
+          "sha256": "17f9bdb389206ec5a1b7117d4722710af4bc3446004316134c4ed91f140f2714",
+          "pathCount": 20079
+        },
+        "responseValidation": {
+          "validMessageCount": 2,
+          "invalidMessageCount": 0
+        }
+      },
+      "noFallback": {
+        "specializedSketchIdentity": true,
+        "legacySourceSceneAbsent": true,
+        "previewStatus": "success",
+        "exportStatus": "success"
+      }
+    },
+    {
+      "id": "supported-ceiling-50k",
+      "bladeDensity": 10,
+      "expectedBladeCount": 50000,
+      "contract": "one local browser run; timings and memory are observations, never pass/fail limits or SLAs",
+      "timingsMs": {
+        "fillGeneration": 307.7000000476837,
+        "workerPreview": 3823.100000143051,
+        "exportSnapshotCopy": 69.70000004768372,
+        "cachedPhysicalExport": 690.7999999523163,
+        "total": 5636.700000047684
+      },
+      "memory": {
+        "before": {
+          "usedJsHeapSize": 76751152,
+          "totalJsHeapSize": 97189436,
+          "jsHeapSizeLimit": 4294967296
+        },
+        "after": {
+          "usedJsHeapSize": 303575591,
+          "totalJsHeapSize": 363054959,
+          "jsHeapSizeLimit": 4294967296
+        }
+      },
+      "preview": {
+        "scene": {
+          "bytes": 24923575,
+          "sha256": "77ce19de7093b927b300d797aaf92675eb0b19aedfa6f4f49558a480fae107a7",
+          "primitiveCount": 134726,
+          "pointCount": 413450
+        },
+        "progressMessageCount": 16,
+        "terminalProgressCount": 1,
+        "coordinatorProgressCount": 16,
+        "responseValidation": {
+          "validMessageCount": 17,
+          "invalidMessageCount": 0
+        },
+        "structuredClone": {
+          "responseIdentityReferenceDiffers": true,
+          "responseIdentityValueMatches": true,
+          "coordinatorSceneIsWorkerResponseScene": true
+        }
+      },
+      "cacheAndPhysicalExportReuse": {
+        "matchingReusableOutlineCaptured": true,
+        "previewCacheIsCoordinatorScene": true,
+        "snapshotCopyReferenceDiffers": true,
+        "workerResponseCopyReferenceDiffers": true,
+        "coordinatorSceneIsWorkerResponseScene": true,
+        "settledCacheCopyReferenceDiffers": true,
+        "previewDerivationCount": 1,
+        "exportDerivationCount": 0,
+        "exportDerivationProgressMessageCount": 0,
+        "finalizingMessageCount": 1,
+        "completedSceneMatchesPreviewHash": true,
+        "completedScene": {
+          "bytes": 24923575,
+          "sha256": "77ce19de7093b927b300d797aaf92675eb0b19aedfa6f4f49558a480fae107a7",
+          "primitiveCount": 134726,
+          "pointCount": 413450
+        },
+        "physicalSvg": {
+          "bytes": 15436875,
+          "sha256": "acf52bbfdf15ff0c15382b81b9820af4df70744f1e02cb9530a9aca2429a9809",
+          "pathCount": 134773
+        },
+        "responseValidation": {
+          "validMessageCount": 2,
+          "invalidMessageCount": 0
+        }
+      },
+      "noFallback": {
+        "specializedSketchIdentity": true,
+        "legacySourceSceneAbsent": true,
+        "previewStatus": "success",
+        "exportStatus": "success"
+      }
+    }
+  ]
+}

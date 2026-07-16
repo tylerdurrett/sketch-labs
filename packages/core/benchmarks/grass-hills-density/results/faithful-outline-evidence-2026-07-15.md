@@ -2,8 +2,8 @@
 
 ## Outcome
 
-The production-equivalent Fill → exact Fill-derived Outline source → indexed
-Hidden-line → bounds/profile/serialization pipeline completed at both the
+The production Fill → exact Fill-derived Outline source → indexed Hidden-line →
+bounds/profile/serialization pipeline completed at both the
 adopted 10,000-blade Preset and the supported 50,000-blade ceiling. This is an
 implementation evidence record. Independent reviewer `/root/review_309_h`
 subsequently returned an explicit comparative **PASS** for both the adopted 10k
@@ -18,6 +18,15 @@ appear in the role-annotated source at the same painter index with identical
 points and closure metadata. Both runs recorded zero rejected primitives, zero
 six-point centerlines, no physical-tool root rejection, and matching Fill/source
 geometry hashes.
+
+The same two densities subsequently completed through Studio's real module
+`DedicatedWorker`, `postMessage` structured-clone boundary, response validators,
+`HiddenLineCoordinator`, and `outlineSessionReducer` cache. A matching physical
+export snapshot reused each completed preview Scene: export emitted no
+derivation-progress message, emitted one finalizing message, and returned a
+structured-cloned completed Scene with the same SHA-256. There was no mock
+derivation, legacy Scene fallback, or main-thread Hidden-line pass in this
+browser run.
 
 ## Deterministic evidence
 
@@ -36,6 +45,40 @@ geometry hashes.
 | Estimated segment-edge comparisons | `38,925,698` | `215,192,268` |
 | Total workload units | `40,344,970` | `231,245,348` |
 | Final Outline primitives / points | `20,079 / 80,910` | `134,773 / 413,226` |
+
+Those final counts are after production bounds clipping. The browser Worker
+returns the pre-clip completed Scene (`20,069 / 80,998` and
+`134,726 / 413,450`); physical export reuses that exact Scene, and clipping can
+split paths into the final `20,079` and `134,773` physical path inventories.
+
+## Real Studio Worker observations
+
+Captured with Puppeteer against cached Headless Chrome `145.0.7632.77` on the
+same Apple M2 Max host. `navigator.deviceMemory` reported its privacy-bounded
+`8 GiB`, not the host's physical 64 GiB. These are one-run observations, not
+SLAs or test limits.
+
+| Observation | Adopted 10k | Supported 50k ceiling |
+| --- | ---: | ---: |
+| Worker preview | `658.40 ms` | `3,823.10 ms` |
+| Completed Scene bytes | `4,448,895` | `24,923,575` |
+| Completed Scene primitives / points | `20,069 / 80,998` | `134,726 / 413,450` |
+| Completed Scene SHA-256 | `f5f17452…` | `77ce19de…` |
+| Progress messages / terminal | `4 / 1` | `16 / 1` |
+| Valid / invalid preview messages | `5 / 0` | `17 / 0` |
+| Cached physical export | `131.70 ms` | `690.80 ms` |
+| Export derivations / finalizing messages | `0 / 1` | `0 / 1` |
+| Physical SVG bytes / paths | `2,635,379 / 20,079` | `15,436,875 / 134,773` |
+| Main-realm JS heap before / after | `3,818,569 / 76,747,163` | `76,751,152 / 303,575,591` |
+
+At both densities the returned identity was value-equal but reference-distinct
+from the posted identity, demonstrating structured clone. The coordinator
+returned the validated Worker response Scene by identity; the session cache
+retained that same Scene. The export snapshot made its defensive copy, the
+Worker response crossed a second clone boundary, and the settled session cache
+made its own mutable copy. All four Scene values had the same serialized hash.
+The exact observation payload is
+`reference/studio-worker-observations.json` (`529a84dc…`).
 
 The few overflow entries are the deliberately conservative full hill-band
 polygons whose AABBs exceed the per-entry cell cap. They remain in every query;
@@ -109,9 +152,14 @@ node --expose-gc /tmp/issue-309-production-reference-cli.mjs \
 node --expose-gc /tmp/issue-309-production-reference-cli.mjs \
   --out=/tmp/issue-309-reference \
   --full-50k-out=/tmp/issue-309-reference/full-50k
+
+node packages/core/benchmarks/grass-hills-density/studio-worker-browser-cli.js \
+  --out=packages/core/src/sketches/grass-hills/reference/studio-worker-observations.json
 ```
 
 The third command writes the exact 50k Fill/Outline/physical SVGs and clipped
 Scene JSON values outside git. Regeneration intentionally does not write or
 modify `review-attestation.json`: generated evidence and independent attestation
 remain separate, so reproducibility cannot erase reviewer provenance.
+The browser command starts and stops its own Studio Vite server and cached
+Chromium instance; it likewise remains separate from Node artifact generation.

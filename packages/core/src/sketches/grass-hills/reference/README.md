@@ -42,6 +42,15 @@ and no representation fallback or physical-tool root rejection occurred.
 `observations.json` records one machine's durations and memory samples. They are
 observations, not SLAs or test limits.
 
+`studio-worker-observations.json` is the complementary real-browser record. Its
+Studio entry point uses the production `HiddenLineCoordinator`, module
+`DedicatedWorker`, worker response validators, and `outlineSessionReducer`
+cache. At both 10k and 50k it records the `postMessage` structured-clone
+boundaries, terminal progress, completed preview Scene count/bytes/hash, and a
+matching physical export that reuses the cached Scene with zero export
+derivation messages. The wrapper observes Worker traffic only; it never replaces
+source generation, Hidden-line derivation, clipping, or serialization.
+
 `review-attestation.json` is maintained separately from generated evidence. It
 records the independent comparative PASS for both the adopted 10k and supported
 50k Fill/Outline pairs. Regeneration never creates, changes, or deletes it, so
@@ -62,12 +71,21 @@ node --expose-gc /tmp/issue-309-production-reference-cli.mjs \
 node --expose-gc /tmp/issue-309-production-reference-cli.mjs \
   --out=/tmp/issue-309-reference \
   --full-50k-out=/tmp/issue-309-reference/full-50k
+
+node packages/core/benchmarks/grass-hills-density/studio-worker-browser-cli.js \
+  --out=packages/core/src/sketches/grass-hills/reference/studio-worker-observations.json
 ```
 
 The second command reproduces the committed 10k reference and the bounded 50k
 review assets. The third also writes the full 50k vectors and clipped Scene JSON
 outside git. Focused benchmark tests reproduce the committed artifacts without
 writing them.
+
+The fourth command uses the chrome-devtools skill's existing Puppeteer package
+and cached Chromium, starts a strict local Studio Vite server, captures both
+densities serially, and closes browser/server in `finally`. If Puppeteer lives
+elsewhere, set `PUPPETEER_MODULE` to its existing ESM package entry; the script
+does not install a browser or dependency.
 
 ## Historical issue #305 evidence
 

@@ -408,6 +408,14 @@
     "attestationFile": "review-attestation.json",
     "provenance": "Generated evidence never writes reviewer identity or verdict; the separately maintained attestation records the independent comparative review."
   },
+  "browserWorkerEvidence": {
+    "status": "RECORDED-SEPARATELY",
+    "observationsFile": "studio-worker-observations.json",
+    "sha256": "529a84dc1067097b8db51449c5ec93c454dedb0721821ec884981af772b0970f",
+    "contract": "real Studio coordinator and DedicatedWorker module path, postMessage structured clone, validated responses, session cache, terminal progress, and cached physical export reuse at adopted 10k and supported 50k",
+    "reproductionCommand": "node packages/core/benchmarks/grass-hills-density/studio-worker-browser-cli.js --out=packages/core/src/sketches/grass-hills/reference/studio-worker-observations.json",
+    "provenance": "Browser observations are captured independently from Node artifact generation; regeneration does not synthesize or overwrite them."
+  },
   "reproduction": {
     "workingDirectory": "repository root",
     "commands": [

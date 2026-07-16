@@ -308,6 +308,32 @@ result records the manifest policy it used.
 
 ## Explicit browser seam
 
+### Production Studio Worker evidence
+
+The current faithful contract has a separate Studio-owned page at
+`apps/studio/outline-worker-evidence.html`. It exercises the real
+`HiddenLineCoordinator` and module `DedicatedWorker`, observes the actual typed
+response validators and structured-clone boundaries, settles the completed
+preview into the real Outline session cache, and physically exports from a
+matching reusable Scene without another source/Hidden-line derivation. It runs
+the adopted 10k and supported 50k densities serially and has no mock derivation
+or fallback route.
+
+Capture it from the repository root with the existing chrome-devtools Puppeteer
+package and cached Chromium:
+
+```sh
+node packages/core/benchmarks/grass-hills-density/studio-worker-browser-cli.js \
+  --out=packages/core/src/sketches/grass-hills/reference/studio-worker-observations.json
+```
+
+The command owns and closes its strict-port Vite server and browser. Timings and
+memory are observations only. The fixture config aliases `@harness/core` to the
+active checkout so worktree reuse of an existing locked install cannot profile
+another branch.
+
+### Historical Canvas replay seam
+
 The benchmark-local Vite page loads checksum-pinned serialized fill and Outline
 Scene JSON and passes either Scene to core's actual `drawSceneFitted` on a real
 browser Canvas2D context. Start it explicitly from the repository root:

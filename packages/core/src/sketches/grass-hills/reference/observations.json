@@ -1167,5 +1167,11 @@
       },
       "progressEvents": 50010
     }
+  },
+  "browserWorkerEvidence": {
+    "status": "RECORDED-SEPARATELY",
+    "observationsFile": "studio-worker-observations.json",
+    "sha256": "529a84dc1067097b8db51449c5ec93c454dedb0721821ec884981af772b0970f",
+    "warning": "Browser timings and memory are one-machine observations, not SLAs or test limits."
   }
 }

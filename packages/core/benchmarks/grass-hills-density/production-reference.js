@@ -29,6 +29,13 @@ export const ADOPTED_BLADE_DENSITY = 2
 export const CEILING_BLADE_DENSITY = 10
 export const REVIEW_RASTER_SIZE = 900
 export const PRODUCTION_REVIEW_ATTESTATION_FILE = 'review-attestation.json'
+export const PRODUCTION_STUDIO_WORKER_OBSERVATIONS_FILE =
+  'studio-worker-observations.json'
+
+const PRODUCTION_STUDIO_WORKER_OBSERVATIONS_SHA256 =
+  '529a84dc1067097b8db51449c5ec93c454dedb0721821ec884981af772b0970f'
+const STUDIO_WORKER_REPRODUCTION_COMMAND =
+  'node packages/core/benchmarks/grass-hills-density/studio-worker-browser-cli.js --out=packages/core/src/sketches/grass-hills/reference/studio-worker-observations.json'
 
 const REPRODUCTION_COMMANDS = Object.freeze([
   'node packages/core/benchmarks/grass-hills-density/bundle-cli.js --entry=packages/core/benchmarks/grass-hills-density/production-reference-cli.js --out=/tmp/issue-309-production-reference-cli.mjs',
@@ -288,6 +295,16 @@ export function productionReferenceManifest(
       provenance:
         'Generated evidence never writes reviewer identity or verdict; the separately maintained attestation records the independent comparative review.',
     },
+    browserWorkerEvidence: {
+      status: 'RECORDED-SEPARATELY',
+      observationsFile: PRODUCTION_STUDIO_WORKER_OBSERVATIONS_FILE,
+      sha256: PRODUCTION_STUDIO_WORKER_OBSERVATIONS_SHA256,
+      contract:
+        'real Studio coordinator and DedicatedWorker module path, postMessage structured clone, validated responses, session cache, terminal progress, and cached physical export reuse at adopted 10k and supported 50k',
+      reproductionCommand: STUDIO_WORKER_REPRODUCTION_COMMAND,
+      provenance:
+        'Browser observations are captured independently from Node artifact generation; regeneration does not synthesize or overwrite them.',
+    },
     reproduction: {
       workingDirectory: 'repository root',
       commands: [...REPRODUCTION_COMMANDS],
@@ -329,6 +346,13 @@ export function productionReferenceObservations(generated) {
     scenarios: {
       adopted10k: generated.adopted.observations,
       supportedCeiling50k: generated.ceiling.observations,
+    },
+    browserWorkerEvidence: {
+      status: 'RECORDED-SEPARATELY',
+      observationsFile: PRODUCTION_STUDIO_WORKER_OBSERVATIONS_FILE,
+      sha256: PRODUCTION_STUDIO_WORKER_OBSERVATIONS_SHA256,
+      warning:
+        'Browser timings and memory are one-machine observations, not SLAs or test limits.',
     },
   }
 }
