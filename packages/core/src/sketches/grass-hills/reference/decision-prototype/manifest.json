@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "candidateId": "stratified-7-centerline-lod",
+  "fixtureId": "full-10000",
+  "seed": 12345,
+  "time": 0,
+  "frame": {
+    "width": 1000,
+    "height": 1000
+  },
+  "request": {
+    "hillCount": 10,
+    "bladeCount": 10000
+  },
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true
+  },
+  "tool": {
+    "widthMillimeters": 0.3
+  },
+  "contract": {
+    "rootGenerator": "100x100 seeded stratified stable-cell bank; nested priority prefix",
+    "fill": "seven-point closed silhouettes from shared descriptors",
+    "outline": "six-point shared spines; hill-only occlusion; deterministic tool-width LOD",
+    "previewExportGeometry": "Outline preview and physical plot serialization consume the identical processed Scene"
+  },
+  "evidence": {
+    "bladeCount": 10000,
+    "selectedRootCount": 9298,
+    "outlinePathCount": 8939,
+    "rootKeysSha256": "b26d453a2225c08ac17a784c8bf9dfd52db964bdd4bfc0c57dfbcabfe3f097ab",
+    "selectedRootKeysSha256": "d8fa4c27219f3923bf530f06caa274021a79178cb56bd7a835a565e7e0b094d1"
+  },
+  "artifacts": {
+    "fill": {
+      "file": "fill.svg",
+      "sha256": "4192c1ff4fd04a43951f709cffa1b4ceed4f3ec477e5220dcff2fa5354f59aa6",
+      "bytes": 2012546,
+      "scene": {
+        "primitiveCount": 10045,
+        "pointCount": 71305,
+        "sha256": "d8c7bf2bfd2d347e018f0ed0e9aa89f68ef06d2b599eb6b2adccde767bed183d",
+        "bytes": 3671748
+      }
+    },
+    "outline": {
+      "file": "outline.svg",
+      "sha256": "f35ce83197a5e47be2e0ec0eeb4065a2a639624ab6bd9e3b45d2dcf0f541dfe2",
+      "bytes": 1551507,
+      "scene": {
+        "primitiveCount": 8939,
+        "pointCount": 51577,
+        "sha256": "d4e4e0b80b42312f9ab20372c22d4deca48ae244eb78c498ca6aebada666647a",
+        "bytes": 2712416
+      }
+    },
+    "physicalPlot": {
+      "derivedFrom": "the exact processed Scene pinned by outline.scene.sha256",
+      "sha256": "7d0d783809ab20b83d8f1a9a98bb6a4008361ea267e273460aa7ac5d8cbfd0d9",
+      "bytes": 1478735,
+      "sceneSha256": "d4e4e0b80b42312f9ab20372c22d4deca48ae244eb78c498ca6aebada666647a"
+    }
+  },
+  "reproduction": {
+    "commands": [
+      "node packages/core/benchmarks/grass-hills-density/bundle-cli.js --entry=packages/core/benchmarks/grass-hills-density/decision-reference-cli.js --out=/tmp/issue-305-decision-reference-cli.mjs",
+      "node /tmp/issue-305-decision-reference-cli.mjs --out=packages/core/src/sketches/grass-hills/reference/decision-prototype"
+    ],
+    "workingDirectory": "repository root"
+  }
+}

@@ -1,17 +1,18 @@
 import { describe, expect, it } from 'vitest'
 
 import { clamp, lerp } from '../math'
-import { createRandom } from '../random'
 import {
   grassScaleAtY,
   type HillDepthProjection,
 } from '../sketches/grass-hills/depth'
 import {
+  BASELINE_LEAN_VARIATION,
   buildGrassBlades,
   resolveMaximumUnscaledBladeLength,
 } from '../sketches/grass-hills/grass'
 import type { GrassHillMask } from '../sketches/grass-hills/grass-placement'
 import type { GrassRootCandidate } from '../sketches/grass-hills/grass-scatter'
+import { createStableScalarRandom } from '../sketches/grass-hills/stable-random'
 
 const PROJECTION: HillDepthProjection = {
   frame: { height: 100 },
@@ -67,7 +68,7 @@ function build(
 describe('grass blade descriptors', () => {
   it('uses exactly four root-local draws in length, width, stiffness, lean order', () => {
     const [descriptor] = build({ roots: [ROOTS[0]!] })
-    const random = createRandom('seed-a-grass-blade-2/3:3')
+    const random = createStableScalarRandom('seed-a-grass-blade-2/3:3')
     const lengthRoll = random.value()
     const widthRoll = random.value()
     const stiffnessRoll = random.value()
@@ -102,7 +103,9 @@ describe('grass blade descriptors', () => {
         1,
         4,
       ),
-      lean: SHAPE_OPTIONS.windLean * lerp(0.8, 1.2, leanRoll),
+      lean:
+        (2 * leanRoll - 1) * BASELINE_LEAN_VARIATION +
+        SHAPE_OPTIONS.windLean * lerp(0.8, 1.2, leanRoll),
     })
     // A fifth draw must not leak into any stored property.
     expect(Object.values(descriptor!.rolls)).not.toContain(random.value())
@@ -135,7 +138,7 @@ describe('grass blade descriptors', () => {
     )
   })
 
-  it('consumes rolls while zero variance resolves exact nominal values', () => {
+  it('consumes rolls while zero control variance retains fixed seeded micro-lean', () => {
     const [descriptor] = build({
       roots: [ROOTS[0]!],
       bladeLengthVariance: 0,
@@ -144,7 +147,7 @@ describe('grass blade descriptors', () => {
       mask: fixedMask(100),
     })
 
-    const random = createRandom('seed-a-grass-blade-2/3:3')
+    const random = createStableScalarRandom('seed-a-grass-blade-2/3:3')
     expect(descriptor!.rolls).toEqual({
       length: random.value(),
       width: random.value(),
@@ -153,7 +156,9 @@ describe('grass blade descriptors', () => {
     })
     expect(descriptor!.shape.length).toBe(20)
     expect(descriptor!.shape.stiffness).toBe(2.5)
-    expect(descriptor!.shape.lean).toBe(0)
+    expect(descriptor!.shape.lean).toBe(
+      (2 * descriptor!.rolls.lean - 1) * BASELINE_LEAN_VARIATION,
+    )
   })
 
   it('clamps maximum variance to finite positive shape limits', () => {
@@ -220,8 +225,8 @@ describe('grass blade descriptors', () => {
     })
 
     expect(near!.rolls).toEqual(far!.rolls)
-    expect(near!.shape.length / far!.shape.length).toBe(5)
-    expect(near!.shape.width / far!.shape.width).toBe(5)
+    expect(near!.shape.length / far!.shape.length).toBeCloseTo(5)
+    expect(near!.shape.width / far!.shape.width).toBeCloseTo(5)
     expect(near!.shape.stiffness).toBe(far!.shape.stiffness)
     expect(near!.shape.lean).toBe(far!.shape.lean)
   })

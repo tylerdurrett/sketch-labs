@@ -1,16 +1,18 @@
-import { samplePoissonDisk } from '../../poisson'
 import type { Seed } from '../../sketch'
+import { createStableScalarRandom } from './stable-random'
 
-/** Poisson spacing at the neutral blade-density setting. */
-const BASE_CANONICAL_RADIUS = 0.12
+/** One stable cell per root in each canonical density layer. */
+const STRATIFIED_SIDE = 100
+const ROOTS_PER_LAYER = STRATIFIED_SIDE ** 2
+const MAX_CANONICAL_ROOT_COUNT = 50_000
 
-/** Inputs that determine one hill's canonical, count-independent root field. */
+/** Inputs that determine one hill's count-independent canonical root bank. */
 export interface GrassRootScatterOptions {
   seed: Seed
   /** Reduced rational depth identity supplied by the hill layout. */
   hillKey: string
-  /** Relative areal density. Zero returns an empty field. */
-  bladeDensity: number
+  /** Minimum prefix capacity needed by this hill. Defaults to the adopted bank. */
+  minimumCount?: number
 }
 
 /**
@@ -22,48 +24,89 @@ export interface GrassRootScatterOptions {
 export interface GrassRootCandidate {
   readonly u: number
   readonly v: number
-  /** Identity-preserving index in the completed canonical sampler output. */
+  /** Rank in the hill's stable priority order. */
   readonly ordinal: number
-  /** Stable per-hill identity used to seed later per-blade variation. */
+  /** Stable per-hill cell identity used to seed later per-blade variation. */
   readonly rootKey: string
 }
 
+interface PrioritizedRoot {
+  readonly u: number
+  readonly v: number
+  readonly rootKey: string
+  readonly cellOrdinal: number
+  readonly priority: number
+}
+
 /**
- * Sample a stable canonical root field for one reduced-depth hill identity.
+ * Build the layered stable-cell bank for one reduced hill identity.
  *
- * Sampling happens entirely in a fixed unit square. Neither terrain geometry
- * nor hill count participates, so the same reduced `hillKey` retains the same
- * candidates when the set of visible bands changes. The completed Poisson
- * array is mapped without filtering: its array index is the canonical ordinal.
- * Count-dependent selection and projection belong to the composition layer.
+ * Layer zero is exactly the adopted 100 x 100 bank. Higher densities append
+ * independently jittered 100 x 100 layers, so existing roots retain their
+ * coordinates, keys, ranks, and selection order. Each layer is sorted by its
+ * own stable priority stream before it is appended. Increasing density is
+ * therefore still a prefix operation, while ordinary scenes never prepare
+ * extension layers they do not need. Terrain geometry and hill count do not
+ * participate.
  */
 export function scatterGrassRoots({
   seed,
   hillKey,
-  bladeDensity,
+  minimumCount = ROOTS_PER_LAYER,
 }: GrassRootScatterOptions): readonly GrassRootCandidate[] {
-  if (!Number.isFinite(bladeDensity) || bladeDensity < 0) {
-    throw new RangeError('bladeDensity must be a finite non-negative number')
+  if (
+    !Number.isInteger(minimumCount) ||
+    minimumCount < 0 ||
+    minimumCount > MAX_CANONICAL_ROOT_COUNT
+  ) {
+    throw new RangeError(
+      `minimum root count must be an integer between 0 and ${MAX_CANONICAL_ROOT_COUNT}`,
+    )
   }
-  if (bladeDensity === 0) return Object.freeze([])
 
-  const canonicalRadius = BASE_CANONICAL_RADIUS / Math.sqrt(bladeDensity)
-  const points = samplePoissonDisk({
-    width: 1,
-    height: 1,
-    radius: () => canonicalRadius,
-    minRadius: canonicalRadius,
-    seed: `${seed}-grass-roots-${hillKey}`,
-  })
+  const layerCount = Math.max(1, Math.ceil(minimumCount / ROOTS_PER_LAYER))
+  const roots: GrassRootCandidate[] = []
 
-  return Object.freeze(
-    points.map(([u, v], ordinal) =>
-      Object.freeze({
-        u,
-        v,
-        ordinal,
-        rootKey: `${hillKey}:${ordinal}`,
-      }),
-    ),
-  )
+  for (let layer = 0; layer < layerCount; layer++) {
+    const layerRoots: PrioritizedRoot[] = []
+
+    for (let row = 0; row < STRATIFIED_SIDE; row++) {
+      for (let column = 0; column < STRATIFIED_SIDE; column++) {
+        const cellKey = `${column},${row}`
+        const streamKey =
+          layer === 0 ? cellKey : `layer-${layer}-${cellKey}`
+        const jitter = createStableScalarRandom(
+          `${seed}-exact-stratified-root-${hillKey}-${streamKey}`,
+        )
+        layerRoots.push({
+          u: (column + jitter.value()) / STRATIFIED_SIDE,
+          v: (row + jitter.value()) / STRATIFIED_SIDE,
+          rootKey:
+            layer === 0
+              ? `${hillKey}:cell:${cellKey}`
+              : `${hillKey}:layer:${layer}:cell:${cellKey}`,
+          cellOrdinal: row * STRATIFIED_SIDE + column,
+          priority: createStableScalarRandom(
+            `${seed}-exact-stratified-priority-${hillKey}-${streamKey}`,
+          ).value(),
+        })
+      }
+    }
+
+    layerRoots.sort(
+      (a, b) => a.priority - b.priority || a.cellOrdinal - b.cellOrdinal,
+    )
+    roots.push(
+      ...layerRoots.map(({ u, v, rootKey }, index) =>
+        Object.freeze({
+          u,
+          v,
+          rootKey,
+          ordinal: layer * ROOTS_PER_LAYER + index,
+        }),
+      ),
+    )
+  }
+
+  return Object.freeze(roots)
 }

@@ -132,8 +132,12 @@ vi.mock("./hiddenLineCoordinator", () => ({
       const processed =
         snapshot.reusableOutline === undefined
           ? outlineScene(
-              snapshot.identity
-                .sourceScene as unknown as Parameters<typeof outlineScene>[0],
+              snapshot.identity.sourceKind === "legacy-scene"
+                ? mutableScene(snapshot.identity.sourceScene)
+                : {
+                    space: { ...snapshot.identity.compositionFrame },
+                    primitives: [],
+                  },
               snapshot.identity.tolerance,
               snapshot.identity.includeFrame,
             )
@@ -353,7 +357,12 @@ vi.mock("./LiveCanvas", () => ({
       if (active === null) return;
       outlineJob.active = null;
       const scene = outlineScene(
-        active.identity.sourceScene as unknown as Parameters<typeof outlineScene>[0],
+        active.identity.sourceKind === "legacy-scene"
+          ? mutableScene(active.identity.sourceScene)
+          : {
+              space: { ...active.identity.compositionFrame },
+              primitives: [],
+            },
         active.identity.tolerance,
         active.identity.includeFrame,
       );
@@ -2533,6 +2542,41 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
   };
 
+  it("keeps specialized preview and cached-export identities Scene-free", () => {
+    autoFireOutlineComputed = false;
+    const sketch = {
+      ...(hlStaticSketch("specialized") as unknown as Record<string, unknown>),
+      generateOutlineSource: () => hlScene,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+    const el = mount(<SketchControls sketch={sketch} />);
+    const toggle = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
+
+    act(() => toggle.click());
+    expect(outlineJob.lastIdentity?.sourceKind).toBe("specialized-sketch");
+    expect(outlineJob.lastIdentity).not.toHaveProperty("sourceScene");
+    act(() => lastOnOutlineComputed?.());
+
+    fakeDisplayedScene = {
+      scene: outlineJob.lastCompletedScene!,
+      t: 0,
+      renderMode: "outline",
+      tolerance: 0,
+      includeFrame: true,
+    };
+    clickButton(el, "Export Hidden-line SVG");
+
+    expect(outlineJob.lastExportSnapshot?.identity.sourceKind).toBe(
+      "specialized-sketch",
+    );
+    expect(outlineJob.lastExportSnapshot?.identity).not.toHaveProperty(
+      "sourceScene",
+    );
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(outlineJob.exportDerivations).toBe(0);
+  });
+
   function blobText(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -2840,7 +2884,13 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     expect(outlineJob.exportDerivations).toBe(1);
     expect(outlineJob.exportFinalizations).toBe(2);
     expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
-    expect(outlineJob.lastExportSnapshot?.identity.sourceScene).toEqual(source);
+    expect(outlineJob.lastExportSnapshot?.identity.sourceKind).toBe(
+      "legacy-scene",
+    );
+    if (outlineJob.lastExportSnapshot?.identity.sourceKind !== "legacy-scene") {
+      throw new Error("expected legacy Scene identity");
+    }
+    expect(outlineJob.lastExportSnapshot.identity.sourceScene).toEqual(source);
 
     setInput(paramInput(el, "radius"), "14");
     clickButton(el, "Export Hidden-line SVG");

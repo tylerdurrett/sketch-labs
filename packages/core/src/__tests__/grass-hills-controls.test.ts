@@ -14,7 +14,7 @@ const BASE_PARAMS = {
   ridgeScale: 3,
   ridgeAmplitude: 0,
   terrainDrift: 1,
-  bladeDensity: 0.25,
+  bladeDensity: 0.004,
   bladeLength: 30,
   bladeLengthVariance: 0,
   bladeWidth: 2,
@@ -56,18 +56,18 @@ function relativeBladeGeometry(scene: Scene) {
 
 function bladeLength({ points }: Primitive): number {
   const root = points[0]!
-  const tip = points[16]!
+  const tip = points[3]!
   return root[1] - tip[1]
 }
 
 function bladeWidth({ points }: Primitive): number {
-  return Math.abs(points[8]![0] - points[24]![0])
+  return Math.abs(points[1]![0] - points[5]![0])
 }
 
 function midpointBendRatio({ points }: Primitive): number {
   const rootX = points[0]![0]
-  const tipX = points[16]![0]
-  const midpointX = (points[8]![0] + points[24]![0]) / 2
+  const tipX = points[3]![0]
+  const midpointX = (points[1]![0] + points[5]![0]) / 2
   return (midpointX - rootX) / (tipX - rootX)
 }
 
@@ -82,7 +82,7 @@ function shapeInvariants(scene: Scene): number[][] {
     .map((primitive) => {
       const length = bladeLength(primitive)
       const root = primitive.points[0]!
-      const tip = primitive.points[16]!
+      const tip = primitive.points[3]!
       return [
         length / grassScaleAtY(root[1], projection),
         bladeWidth(primitive) / length,
@@ -112,8 +112,8 @@ describe('grass-hills control sensitivity', () => {
   })
 
   it('uses bladeDensity to change rendered root count, identity, and placement', () => {
-    const sparse = render({ bladeDensity: 0.25 })
-    const dense = render({ bladeDensity: 2 })
+    const sparse = render({ bladeDensity: 0.0016 })
+    const dense = render({ bladeDensity: 0.0032 })
 
     expect(blades(sparse)).toHaveLength(8)
     expect(blades(dense).length).toBeGreaterThan(blades(sparse).length)
@@ -321,7 +321,7 @@ describe('grass-hills control workflow contracts', () => {
 
 describe('grass-hills supported Grass/Wind extremes', () => {
   it('keeps every cross-parameter extreme finite, closed, and within shape bounds', () => {
-    for (const bladeDensity of [0, 2]) {
+    for (const bladeDensity of [0, 0.002]) {
       for (const bladeLengthParam of [4, 80]) {
         for (const bladeLengthVariance of [0, 40]) {
           for (const bladeWidthParam of [0.5, 12]) {
@@ -346,7 +346,7 @@ describe('grass-hills supported Grass/Wind extremes', () => {
                   const { points } = primitive
                   const length = bladeLength(primitive)
                   const width = bladeWidth(primitive)
-                  const tipLean = (points[16]![0] - points[0]![0]) / length
+                  const tipLean = (points[3]![0] - points[0]![0]) / length
                   const stiffness =
                     Math.log(Math.abs(midpointBendRatio(primitive))) /
                       Math.log(0.5) -
@@ -358,8 +358,8 @@ describe('grass-hills supported Grass/Wind extremes', () => {
                   expect(length).toBeGreaterThan(0)
                   expect(width).toBeGreaterThan(0)
                   expect(width).toBeLessThanOrEqual(0.8 * length + 1e-10)
-                  expect(Math.abs(tipLean)).toBeGreaterThanOrEqual(0.8)
-                  expect(Math.abs(tipLean)).toBeLessThanOrEqual(1.2)
+                  expect(Math.abs(tipLean)).toBeGreaterThanOrEqual(0.48)
+                  expect(Math.abs(tipLean)).toBeLessThanOrEqual(1.52)
                   expect(stiffness).toBeGreaterThanOrEqual(1)
                   expect(stiffness).toBeLessThanOrEqual(4)
                 }

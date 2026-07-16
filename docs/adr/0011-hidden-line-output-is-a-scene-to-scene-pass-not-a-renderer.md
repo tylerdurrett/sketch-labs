@@ -1,6 +1,6 @@
 # Hidden-line output is a Scene-to-Scene pass, not a Scene Renderer
 
-Plotter/hidden-line geometry — the visible-only line art a pen plotter can actually draw — is produced by a **Hidden-line pass**: a pure `Scene → Scene` transform that removes outline geometry occluded by nearer **Primitive** fills in painter's order and returns a stroke-only Scene of occlusion-clipped outlines. It is deliberately **not** a **Scene Renderer**. The pass consumes a Scene and emits *another Scene*, which preview and export then consume. A future reader scanning the renderer family may expect the hidden-line algorithm to sit alongside them and be surprised it does not — hence this record.
+Plotter/hidden-line geometry — the visible-only line art a pen plotter can actually draw — is produced by a **Hidden-line pass**: a pure `Scene → Scene` transform that subtracts nearer filled occluder polygons from source paths in painter's order and returns a stroke-only Scene of occlusion-clipped paths. It is deliberately **not** a **Scene Renderer**. The pass consumes a Scene and emits *another Scene*, which preview and export then consume. A future reader scanning the renderer family may expect the hidden-line algorithm to sit alongside them and be surprised it does not — hence this record.
 
 **The rejected alternative was a bespoke plotter/hidden-line Scene Renderer** that does occlusion internally and emits SVG in one shot. That is how the original feature spec framed it, and how CONTEXT.md's **Scene Renderer** entry once listed it ("Canvas2D preview, SVG, or plotter/hidden-line SVG"). We rejected it for two reasons. First, **preview would diverge from export.** The studio needs an **Outline mode** that shows the plotter result on screen *before* a pen is committed; if occlusion lived inside an SVG-only renderer, the on-screen preview and the exported file would run different geometry code and could disagree — exactly the failure the plotter author is trying to avoid. Modeling hidden-line removal as a Scene→Scene pass makes preview and export consume the *same* processed Scene, so their visible geometry agrees by construction. Second, **testability.** A pass whose input and output are both the generic Scene IR is tested as pure geometry — feed it an overlapping-rectangles Scene, assert the surviving strokes — with no serializer, no canvas, and no leaf-domain knowledge in the loop. A renderer that fused occlusion with SVG string-building would force every occlusion test through markup assertions.
 
@@ -8,11 +8,27 @@ Plotter/hidden-line geometry — the visible-only line art a pen plotter can act
 
 **The pass stays out of the live exploration loop.** The core invariant (CONTEXT.md) is that expensive, export-only work — hidden-line removal, path simplification, pen ordering — never runs in the per-frame `generate → draw → painter's render` loop. Framing hidden-line removal as an *on-demand* Scene→Scene pass honors that directly: the live fill preview never invokes it; Outline mode and export invoke it explicitly. The leaf field is static (no time metadata), so there is no realtime budget at stake, and if the pass proves slow on a dense field the cost is confined to Outline mode — a view the user opts into — not to tuning.
 
-**The genuinely new code is arbitrary-polygon clipping, not the pass wiring.** The lifted `clip` module only clips polylines to an axis-aligned box (`clipPolylinesToBox` via `lineclip`). The pass needs to subtract each nearer fill *polygon* (a leaf silhouette, an occluder disc) from a farther outline — segment/polygon intersection plus point-in-polygon inside-tests. That is where the effort and the correctness tests concentrate; the Scene→Scene framing is what keeps that geometry isolated and unit-testable.
+**The genuinely new code is arbitrary-polygon clipping, not the pass wiring.** The lifted `clip` module only clips polylines to an axis-aligned box (`clipPolylinesToBox` via `lineclip`). The pass needs to subtract each nearer fill *polygon* from a farther source path — segment/polygon intersection plus point-in-polygon inside-tests. That is where the effort and the correctness tests concentrate; the Scene→Scene framing is what keeps that geometry isolated and unit-testable.
 
 ## Consequences
 
 - CONTEXT.md gains **Hidden-line pass** and **Outline mode** glossary entries, and the **Scene Renderer** entry is corrected: plotter preparation is a Scene-to-Scene pass, not a renderer. A target-specific physical SVG serializer may consume the processed Scene without owning hidden-line behavior.
 - One pass feeds both preview (Canvas2D) and physical plotter SVG serialization; a test asserts the two are handed the *same* processed Scene, so geometry divergence is a caught regression, not a latent risk.
 - Path simplification rides *inside* the pass (previewed and exported identically). Pen-layer separation, hand-drawn stroke styling, and pen-travel optimization are deferred to their own follow-ups (issues #202/#203/#204) and are out of this decision's scope.
-- The Scene IR is unchanged: the pass's output is an ordinary Scene of stroke-only, sometimes-open Primitives. No new IR field (no source/layer tag) is introduced here — pen-layer separation, when built, is what would earn that.
+- The pass's output is an ordinary Scene of stroke-only, sometimes-open Primitives. It needs no renderer-specific container or output tag.
+
+## Amendment: generic source and occluder roles
+
+Issue #305 selected a representation-specific Outline path whose visible source strokes and filled occlusion polygons are intentionally different geometry. Treating every fill boundary as both the line to draw and the occluder would force that representation back into the legacy closed-silhouette model. The Scene IR therefore gains one optional, generic Primitive field: `hiddenLineRole: 'source' | 'occluder' | 'both'`.
+
+This field changes participation only. `source` emits a Primitive's path after clipping against nearer occluders; `occluder` requires a fill, contributes its polygon to clipping, and emits no boundary; `both` explicitly combines them. When the field is omitted, compatibility is exact: a filled Primitive remains both source and occluder, and a stroke-only Primitive remains ignored. The role is not a Grass Hills special case, a domain identifier, or a general pen-layer/source tag; the Hidden-line pass and Studio worker protocol interpret the same three geometry roles for every Scene.
+
+The amendment does not weaken the on-demand boundary. A Sketch may generate a representation-specific source Scene, but the Hidden-line pass still runs only when Outline preview or plotter export requests it, never in the per-frame Fill loop. The resulting ordinary stroke-only Scene remains the single geometry value shared by Canvas preview and physical SVG serialization, and an exact completed Outline may be reused by export without rerunning derivation.
+
+The optional `generateOutlineSource(params, seed, t, frame, target)` Sketch
+capability is the generic boundary for that representation-specific source. Its
+physical target carries tool width and the current millimeter-to-Scene mapping;
+it is part of Outline cache identity and is evaluated in the worker. Sketches
+without the capability retain legacy Fill-Scene processing. Once a specialized
+target is requested, source-generation failure is surfaced and never silently
+downgraded to the legacy representation.

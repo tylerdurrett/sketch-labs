@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   clipSceneToBounds,
+  defaultParams,
+  grassHills,
   hiddenLinePass,
   renderPlotterSVG,
   type ParamSchema,
@@ -37,6 +39,31 @@ const source: Scene = {
 };
 const schema: ParamSchema = {};
 
+const hybridSource: Scene = {
+  space: { width: 40, height: 30 },
+  primitives: [
+    {
+      points: [
+        [0, 15],
+        [40, 15],
+      ],
+      stroke: { color: "green", width: 1 },
+      hiddenLineRole: "source",
+    },
+    {
+      points: [
+        [10, 10],
+        [20, 10],
+        [20, 20],
+        [10, 20],
+      ],
+      closed: true,
+      fill: { color: "gray" },
+      hiddenLineRole: "occluder",
+    },
+  ],
+};
+
 function request(includeFrame = false, tolerance = 0) {
   return {
     type: "compute" as const,
@@ -69,6 +96,107 @@ describe("outline worker runtime", () => {
     const response = handleOutlineWorkerMessage(request(true));
     if (response?.type !== "success") throw new Error("expected success");
     expect(response.scene).toEqual(outlineScene(source, 0, true));
+  });
+
+  it("preserves source and occluder roles through worker identity restoration", () => {
+    const hybridRequest = {
+      type: "compute" as const,
+      jobId: 8,
+      identity: createOutlineComputeIdentity({
+        sketchId: "hybrid",
+        schema,
+        params: {},
+        seed: 1,
+        sampledT: 0,
+        compositionFrame: hybridSource.space,
+        tolerance: 0,
+        includeFrame: false,
+        sourceScene: hybridSource,
+      }),
+    };
+
+    const response = handleOutlineWorkerMessage(hybridRequest);
+
+    expect(response).toMatchObject({ type: "success", jobId: 8 });
+    if (response?.type !== "success") throw new Error("expected success");
+    expect(response.scene).toEqual(hiddenLinePass(hybridSource));
+    expect(response.scene.primitives.map(({ points }) => points)).toEqual([
+      [
+        [0, 15],
+        [10, 15],
+      ],
+      [
+        [20, 15],
+        [40, 15],
+      ],
+    ]);
+  });
+
+  it("derives an opted-in Sketch source generically inside the worker", () => {
+    const params = {
+      ...defaultParams(grassHills.schema),
+      hillCount: 1,
+      bladeDensity: 0,
+      ridgeAmplitude: 0,
+    };
+    const identity = createOutlineComputeIdentity({
+      sketchId: grassHills.id,
+      schema: grassHills.schema,
+      params,
+      seed: 12345,
+      sampledT: 0,
+      compositionFrame: { width: 1_000, height: 1_000 },
+      tolerance: 0,
+      includeFrame: false,
+      outlineTarget: {
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.18,
+      },
+    });
+    const derive = vi.fn((scene: Scene) => scene);
+
+    const response = handleOutlineWorkerMessage(
+      { type: "compute", jobId: 9, identity },
+      derive as typeof outlineScene,
+    );
+
+    expect(response).toMatchObject({ type: "success", jobId: 9 });
+    expect(identity.sourceKind).toBe("specialized-sketch");
+    expect("sourceScene" in identity).toBe(false);
+    const specialized = derive.mock.calls[0]![0];
+    expect(specialized).not.toEqual(source);
+    expect(specialized.primitives.map(({ hiddenLineRole }) => hiddenLineRole))
+      .toEqual(["occluder", "source"]);
+  });
+
+  it("surfaces a specialized-source mismatch without legacy fallback", () => {
+    const identity = createOutlineComputeIdentity({
+      sketchId: "circles",
+      schema,
+      params: {},
+      seed: 1,
+      sampledT: 0,
+      compositionFrame: source.space,
+      tolerance: 0,
+      includeFrame: false,
+      outlineTarget: {
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.18,
+      },
+    });
+    const derive = vi.fn();
+
+    expect(
+      handleOutlineWorkerMessage(
+        { type: "compute", jobId: 10, identity },
+        derive,
+      ),
+    ).toMatchObject({
+      type: "failure",
+      jobId: 10,
+      error: "Sketch circles has no specialized Outline source",
+    });
+    expect(derive).not.toHaveBeenCalled();
   });
 
   it("emits compact terminal progress before success for zero work", () => {
@@ -168,6 +296,41 @@ describe("outline worker runtime", () => {
       expect(derive).not.toHaveBeenCalled();
     },
   );
+
+  it("rejects unknown roles before either worker runtime reaches geometry", () => {
+    const malformed = structuredClone({
+      type: "compute",
+      jobId: 8,
+      identity: createOutlineComputeIdentity({
+        sketchId: "hybrid",
+        schema,
+        params: {},
+        seed: 1,
+        sampledT: 0,
+        compositionFrame: hybridSource.space,
+        tolerance: 0,
+        includeFrame: false,
+        sourceScene: hybridSource,
+      }),
+    }) as Record<string, any>;
+    malformed.identity.sourceScene.primitives[0].hiddenLineRole = "unknown";
+    const derive = vi.fn();
+
+    expect(handleOutlineWorkerMessage(malformed, derive)).toBeNull();
+    expect(
+      handleHiddenLineWorkerMessage(
+        {
+          type: "preview",
+          jobKind: "preview",
+          owner: "outline-preview",
+          jobId: 9,
+          identity: malformed.identity,
+        },
+        { derive },
+      ),
+    ).toBeNull();
+    expect(derive).not.toHaveBeenCalled();
+  });
 
   it("turns thrown geometry errors into safe domain failures", () => {
     const response = handleOutlineWorkerMessage(request(), () => {
@@ -527,6 +690,88 @@ describe("hidden-line export worker runtime", () => {
       jobId: 12,
       identity,
       scene: outlineScene(source, 0.5, false),
+    });
+  });
+
+  it("reuses one hybrid preview Scene for physical SVG export", () => {
+    const identity = createOutlineComputeIdentity({
+      sketchId: "hybrid",
+      schema,
+      params: {},
+      seed: 1,
+      sampledT: 0,
+      compositionFrame: hybridSource.space,
+      tolerance: 0,
+      includeFrame: false,
+      sourceScene: hybridSource,
+    });
+    const preview = handleHiddenLineWorkerMessage({
+      type: "preview",
+      jobKind: "preview",
+      owner: "outline-preview",
+      jobId: 12,
+      identity,
+    });
+    if (preview?.type !== "complete" || preview.jobKind !== "preview") {
+      throw new Error("expected preview completion");
+    }
+    const derive = vi.fn((...args: Parameters<typeof outlineScene>) =>
+      outlineScene(...args),
+    );
+
+    const exported = handleHiddenLineWorkerMessage(
+      exportRequest({
+        identity,
+        reusableOutline: { identity, scene: preview.scene },
+      }),
+      { derive },
+    );
+
+    expect(derive).not.toHaveBeenCalled();
+    expect(exported).toMatchObject({
+      type: "complete",
+      jobKind: "export",
+      completedOutline: { identity, scene: preview.scene },
+    });
+    if (exported?.type !== "complete" || exported.jobKind !== "export") {
+      throw new Error("expected export completion");
+    }
+    expect(exported.svg.match(/<path /g)).toHaveLength(2);
+  });
+
+  it("reuses an exact specialized completion without deriving its source again", () => {
+    const identity = createOutlineComputeIdentity({
+      sketchId: grassHills.id,
+      schema: grassHills.schema,
+      params: defaultParams(grassHills.schema),
+      seed: 12345,
+      sampledT: 0,
+      compositionFrame: { width: 1_000, height: 1_000 },
+      tolerance: 0,
+      includeFrame: false,
+      outlineTarget: {
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.18,
+      },
+    });
+    const completedScene = hiddenLinePass(hybridSource);
+    const derive = vi.fn(() => {
+      throw new Error("exact reuse must not rederive");
+    });
+
+    const exported = handleHiddenLineWorkerMessage(
+      exportRequest({
+        identity,
+        reusableOutline: { identity, scene: completedScene },
+      }),
+      { derive },
+    );
+
+    expect(derive).not.toHaveBeenCalled();
+    expect(exported).toMatchObject({
+      type: "complete",
+      jobKind: "export",
+      completedOutline: { identity, scene: completedScene },
     });
   });
 });

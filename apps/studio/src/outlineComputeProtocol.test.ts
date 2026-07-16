@@ -7,8 +7,11 @@ import {
   isOutlineComputeProgress,
   isOutlineComputeRequest,
   isOutlineComputeResponse,
+  mutableScene,
   outlineComputeIdentitiesEqual,
+  type LegacyOutlineComputeIdentity,
   type OutlineComputeIdentity,
+  type SpecializedOutlineComputeIdentity,
 } from "./outlineComputeProtocol";
 
 const schema: ParamSchema = {
@@ -29,6 +32,7 @@ const scene: Scene = {
       closed: true,
       fill: { color: "red" },
       stroke: { color: "blue", width: 2 },
+      hiddenLineRole: "occluder",
     },
     {
       points: [
@@ -36,11 +40,12 @@ const scene: Scene = {
         [90, 20],
       ],
       stroke: { color: "black", width: 1 },
+      hiddenLineRole: "source",
     },
   ],
 };
 
-function identity(): OutlineComputeIdentity {
+function identity(): LegacyOutlineComputeIdentity {
   return createOutlineComputeIdentity({
     sketchId: "triangles",
     schema,
@@ -54,12 +59,29 @@ function identity(): OutlineComputeIdentity {
   });
 }
 
+function targetedIdentity(): SpecializedOutlineComputeIdentity {
+  return createOutlineComputeIdentity({
+    sketchId: "triangles",
+    schema,
+    params: { zeta: 3, alpha: "#abcdef" },
+    seed: "seed",
+    sampledT: 1.5,
+    compositionFrame: { width: 120, height: 90 },
+    tolerance: 0.25,
+    includeFrame: true,
+    outlineTarget: {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    },
+  });
+}
+
 function changed(
   update: (copy: Record<string, any>) => void,
-): OutlineComputeIdentity {
+): LegacyOutlineComputeIdentity {
   const copy = structuredClone(identity()) as Record<string, any>;
   update(copy);
-  return copy as unknown as OutlineComputeIdentity;
+  return copy as unknown as LegacyOutlineComputeIdentity;
 }
 
 describe("outline compute identity", () => {
@@ -79,6 +101,8 @@ describe("outline compute identity", () => {
     scene.primitives[0]!.points[0]![0] = 999;
     expect(snapshot.sourceScene.space.width).toBe(100);
     expect(snapshot.sourceScene.primitives[0]?.points[0]?.[0]).toBe(1);
+    expect(snapshot.sourceScene.primitives[0]?.hiddenLineRole).toBe("occluder");
+    expect(snapshot.sourceScene.primitives[1]?.hiddenLineRole).toBe("source");
     scene.space.width = 100;
     scene.primitives[0]!.points[0]![0] = 1;
   });
@@ -106,6 +130,8 @@ describe("outline compute identity", () => {
       (copy) => (copy.sourceScene.primitives[0].stroke.color = "black"),
       (copy) => (copy.sourceScene.primitives[0].stroke.width = 3),
       (copy) => delete copy.sourceScene.primitives[0].stroke,
+      (copy) => (copy.sourceScene.primitives[0].hiddenLineRole = "both"),
+      (copy) => delete copy.sourceScene.primitives[0].hiddenLineRole,
       (copy) => (copy.sourceScene.primitives[0].points[0][0] = 1 + Number.EPSILON),
       (copy) => (copy.sourceScene.primitives[0].points[0][1] = 3),
       (copy) => copy.sourceScene.primitives[0].points.push([9, 9]),
@@ -129,6 +155,45 @@ describe("outline compute identity", () => {
       ),
     ).toBe(false);
     expect(outlineComputeIdentitiesEqual(original, identity())).toBe(true);
+  });
+
+  it("freezes and compares the active physical Outline target", () => {
+    const target = targetedIdentity();
+    const changedWidth = structuredClone(target) as Record<string, any>;
+    changedWidth.outlineTarget.toolWidthMillimeters = 0.31;
+    const changedMapping = structuredClone(target) as Record<string, any>;
+    changedMapping.outlineTarget.millimetersPerSceneUnit = 0.2;
+
+    expect(Object.isFrozen(target.outlineTarget)).toBe(true);
+    expect(target.sourceKind).toBe("specialized-sketch");
+    expect("sourceScene" in target).toBe(false);
+    expect(outlineComputeIdentitiesEqual(target, targetedIdentity())).toBe(true);
+    expect(
+      outlineComputeIdentitiesEqual(
+        target,
+        changedWidth as OutlineComputeIdentity,
+      ),
+    ).toBe(false);
+    expect(
+      outlineComputeIdentitiesEqual(
+        target,
+        changedMapping as OutlineComputeIdentity,
+      ),
+    ).toBe(false);
+    expect(outlineComputeIdentitiesEqual(target, identity())).toBe(false);
+  });
+
+  it("restores source and occluder roles without inventing omitted fields", () => {
+    const restored = mutableScene(identity().sourceScene);
+    const omitted = changed((copy) => {
+      delete copy.sourceScene.primitives[1].hiddenLineRole;
+    });
+
+    expect(restored.primitives[0]?.hiddenLineRole).toBe("occluder");
+    expect(restored.primitives[1]?.hiddenLineRole).toBe("source");
+    expect(
+      "hiddenLineRole" in mutableScene(omitted.sourceScene).primitives[1]!,
+    ).toBe(false);
   });
 });
 
@@ -182,6 +247,77 @@ describe("outline compute protocol guards", () => {
     "rejects malformed request %o",
     (candidate) => expect(isOutlineComputeRequest(candidate)).toBe(false),
   );
+
+  it("rejects non-positive or non-finite specialized tool targets", () => {
+    for (const outlineTarget of [
+      { toolWidthMillimeters: 0, millimetersPerSceneUnit: 0.18 },
+      { toolWidthMillimeters: 0.3, millimetersPerSceneUnit: Infinity },
+    ]) {
+      expect(() =>
+        createOutlineComputeIdentity({
+          sketchId: "triangles",
+          schema,
+          params: { zeta: 3, alpha: "#abcdef" },
+          seed: "seed",
+          sampledT: 0,
+          compositionFrame: { width: 100, height: 80 },
+          tolerance: 0,
+          includeFrame: false,
+          outlineTarget,
+        }),
+      ).toThrow(/Outline compute identity contains an invalid value/);
+    }
+  });
+
+  it("rejects identities that mix legacy and specialized sources", () => {
+    const mixedSpecialized = structuredClone(targetedIdentity()) as unknown as Record<
+      string,
+      unknown
+    >;
+    mixedSpecialized.sourceScene = scene;
+    const mixedLegacy = structuredClone(identity()) as unknown as Record<
+      string,
+      unknown
+    >;
+    mixedLegacy.outlineTarget = {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    };
+
+    expect(isOutlineComputeRequest({
+      type: "compute",
+      jobId: 1,
+      identity: mixedSpecialized,
+    })).toBe(false);
+    expect(isOutlineComputeRequest({
+      type: "compute",
+      jobId: 1,
+      identity: mixedLegacy,
+    })).toBe(false);
+  });
+
+  it("rejects unknown hidden-line roles in requests and response Scenes", () => {
+    const malformedRequest = structuredClone({
+      type: "compute",
+      jobId: 1,
+      identity: identity(),
+    }) as Record<string, any>;
+    malformedRequest.identity.sourceScene.primitives[0].hiddenLineRole =
+      "grass-mask";
+
+    const malformedScene = structuredClone(scene) as Record<string, any>;
+    malformedScene.primitives[0].hiddenLineRole = "grass-mask";
+
+    expect(isOutlineComputeRequest(malformedRequest)).toBe(false);
+    expect(
+      isOutlineComputeResponse({
+        type: "success",
+        jobId: 1,
+        identity: identity(),
+        scene: malformedScene,
+      }),
+    ).toBe(false);
+  });
 
   it.each([null, {}, { type: "success" }, { type: "failure", error: 4 }])(
     "rejects malformed response %o",
