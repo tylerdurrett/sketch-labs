@@ -257,12 +257,25 @@ describe("App — Tone Calibration integration (#324)", () => {
     expect(
       document.querySelector('#inspector input[id^="control-"]'),
     ).toBeNull();
-    expect(document.querySelector("#sketch-seed")).not.toBeNull();
     expect(
-      [...document.querySelectorAll("button")].map(
-        (button) => button.textContent,
+      [...document.querySelectorAll("summary")].find(
+        (summary) => summary.textContent?.includes("Paper"),
       ),
-    ).toEqual(expect.arrayContaining(["New seed", "Randomize", "Export PNG"]));
+    ).toBeDefined();
+    expect(document.querySelector("#sketch-seed")).not.toBeNull();
+    expect(document.querySelector("#sketch-tolerance")).not.toBeNull();
+    const buttonLabels = [...document.querySelectorAll("button")].map(
+      (button) => button.textContent,
+    );
+    expect(buttonLabels).toEqual(
+      expect.arrayContaining([
+        "New seed",
+        "Randomize",
+        "Export PNG",
+        "Export SVG",
+        "Export Hidden-line SVG",
+      ]),
+    );
 
     const tone = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent === "Tone",
