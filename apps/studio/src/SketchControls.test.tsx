@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clipSceneToBounds,
+  createShadingMask,
+  createToneField,
   crc32,
   DEFAULT_COMPOSITION_FRAME,
   defaultParams,
@@ -24,6 +26,7 @@ import {
   type PlotProfile,
   type Preset,
   type Seed,
+  type ToneSource,
 } from "@harness/core";
 
 import type {
@@ -304,6 +307,7 @@ let lastOnOutlineComputed: (() => void) | null = null;
 let autoFireOutlineComputed = true;
 let lastCompositionFrame: CoordinateSpace | null = null;
 let lastProfile: PlotProfile | null = null;
+let lastToneSource: ToneSource | null = null;
 
 // LiveCanvas is a browser-only sink (canvas2d, ResizeObserver, matchMedia) and
 // is NOT under test here — these are wiring tests for the control state. Replace
@@ -327,7 +331,12 @@ vi.mock("./LiveCanvas", () => ({
     sketch: Parameters<typeof SketchControls>[0]["sketch"];
     params: Record<string, unknown>;
     seed: Seed;
-    renderState?: { kind: string; scene?: unknown; t?: number };
+    renderState?: {
+      kind: string;
+      scene?: unknown;
+      t?: number;
+      source?: ToneSource;
+    };
     tolerance?: number;
     compositionFrame: CoordinateSpace;
     profile: PlotProfile;
@@ -376,6 +385,7 @@ vi.mock("./LiveCanvas", () => ({
     };
     lastCompositionFrame = compositionFrame;
     lastProfile = profile;
+    lastToneSource = renderState?.source ?? null;
     // Model the outline pass finishing: fire the "computed" signal after each
     // outline render so the owner's busy label clears (unless a test opts out to
     // observe the intermediate "Computing…" state itself).
@@ -460,6 +470,25 @@ const sketchWith = (id: string, schema: ParamSchema) =>
     generate: () => ({ space: { width: 100, height: 100 }, strokes: [] }),
   }) as unknown as Parameters<typeof SketchControls>[0]["sketch"];
 
+const toneSketchWith = (id: string, schema: ParamSchema) => ({
+  ...sketchWith(id, schema),
+  generate: (
+    _params: Readonly<Record<string, unknown>>,
+    _seed: Seed,
+    _t: number,
+    frame: CoordinateSpace,
+  ) => ({ space: frame, primitives: [] }),
+  generateToneSource: (
+    params: Readonly<Record<string, unknown>>,
+    frame: CoordinateSpace,
+  ): ToneSource => ({
+    toneField: createToneField(
+      () => Number(params.radius ?? 0) / Math.max(frame.width, 1),
+    ),
+    shadingMask: createShadingMask(() => 1),
+  }),
+});
+
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
@@ -541,6 +570,7 @@ beforeEach(() => {
   lastOnOutlineComputed = null;
   lastCompositionFrame = null;
   lastProfile = null;
+  lastToneSource = null;
   autoFireOutlineComputed = true;
   window.localStorage.clear();
   fakeCanvasToBlob = ((cb: BlobCallback) => {
@@ -3802,6 +3832,217 @@ describe("SketchControls — render-mode toggle wiring (#219)", () => {
     expect(paramInput(el, "radius").value).toBe(radiusBefore);
     expect(historyCapture.atomic).toHaveLength(0);
     expect(historyCapture.transactionCommits).toHaveLength(0);
+  });
+});
+
+describe("SketchControls — Tone reference mode (#316)", () => {
+  const schema: ParamSchema = {
+    radius: numberSpec({ default: 10 }),
+  };
+
+  function renderState(el: HTMLElement): string | null {
+    return el
+      .querySelector('[data-testid="canvas-seed"]')
+      ?.getAttribute("data-render-state") ?? null;
+  }
+
+  function modeButton(el: HTMLElement, label: string): HTMLButtonElement {
+    const button = [...el.querySelectorAll<HTMLButtonElement>("button")].find(
+      (candidate) => candidate.textContent === label,
+    );
+    if (button === undefined) throw new Error(`no ${label} mode button`);
+    return button;
+  }
+
+  it("adds explicit Fill, Outline, and Tone choices only for capable Sketches", () => {
+    const el = mount(
+      <SketchControls key="plain" sketch={sketchWith("plain", schema)} />,
+    );
+    expect(
+      el.querySelector('[role="group"][aria-label="Render mode"]'),
+    ).toBeNull();
+    expect(el.querySelector('[aria-label="Show Tone reference"]')).toBeNull();
+    expect(
+      el.querySelector('[aria-label="Toggle outline render mode"]'),
+    ).not.toBeNull();
+
+    act(() => {
+      root!.render(
+        <SketchControls key="tone" sketch={toneSketchWith("tone", schema)} />,
+      );
+    });
+    const group = el.querySelector(
+      '[role="group"][aria-label="Render mode"]',
+    );
+    expect(group).not.toBeNull();
+    expect(
+      [...group!.querySelectorAll("button")].map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(["Fill", "Outline", "Tone"]);
+    expect(modeButton(el, "Fill").getAttribute("aria-pressed")).toBe("true");
+    expect(renderState(el)).toBe("fill-live");
+  });
+
+  it("derives Tone directly from live preview params and remains Seed-independent", () => {
+    const el = mount(
+      <SketchControls sketch={toneSketchWith("tone", schema)} />,
+    );
+    clickButton(el, "Tone");
+
+    expect(renderState(el)).toBe("tone-reference");
+    expect(lastToneSource).not.toBeNull();
+    const point: [number, number] = [25, 25];
+    const initialSample =
+      lastToneSource!.toneField.sample(point) *
+      lastToneSource!.shadingMask.sample(point);
+
+    const radius = paramInput(el, "radius");
+    act(() => radius.focus());
+    setInput(radius, "50");
+    const previewSample =
+      lastToneSource!.toneField.sample(point) *
+      lastToneSource!.shadingMask.sample(point);
+    expect(previewSample).not.toBe(initialSample);
+    expect(renderState(el)).toBe("tone-reference");
+
+    const sourceBeforeSeed = lastToneSource!;
+    const sampleBeforeSeed =
+      sourceBeforeSeed.toneField.sample(point) *
+      sourceBeforeSeed.shadingMask.sample(point);
+    vi.spyOn(Math, "random").mockReturnValue(0.75);
+    clickButton(el, "New seed");
+    expect(
+      lastToneSource!.toneField.sample(point) *
+        lastToneSource!.shadingMask.sample(point),
+    ).toBe(sampleBeforeSeed);
+    expect(renderState(el)).toBe("tone-reference");
+  });
+
+  it("cancels Outline ownership on entry and exits Tone before requesting Outline", () => {
+    autoFireOutlineComputed = false;
+    const el = mount(
+      <SketchControls sketch={toneSketchWith("tone", schema)} />,
+    );
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.active).not.toBeNull();
+
+    clickButton(el, "Tone");
+    expect(outlineJob.active).toBeNull();
+    expect(renderState(el)).toBe("tone-reference");
+    expect(modeButton(el, "Tone").getAttribute("aria-pressed")).toBe("true");
+    expect(modeButton(el, "Outline").getAttribute("aria-pressed")).toBe("false");
+
+    clickButton(el, "Outline");
+    expect(renderState(el)).toBe("fill-held");
+    expect(modeButton(el, "Tone").getAttribute("aria-pressed")).toBe("false");
+    expect(outlineJob.starts).toBe(2);
+    act(() => lastOnOutlineComputed?.());
+    expect(renderState(el)).toBe("outline");
+  });
+
+  it("keeps mode outside edit history and Presets, including reload", async () => {
+    listPresets.mockResolvedValue(["saved"]);
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "tone",
+      name: "saved",
+      seed: 99,
+      params: { radius: 27 },
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    const el = mount(
+      <SketchControls sketch={toneSketchWith("tone", schema)} />,
+    );
+    await flush();
+    const seedBefore = el.querySelector<HTMLInputElement>(
+      "#sketch-seed",
+    )!.value;
+    const profileBefore = lastProfile;
+
+    clickButton(el, "Tone");
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(historyCapture.transactionCommits).toHaveLength(0);
+    expect(paramInput(el, "radius").value).toBe("10");
+    expect(el.querySelector<HTMLInputElement>("#sketch-seed")!.value).toBe(
+      seedBefore,
+    );
+    expect(lastProfile).toBe(profileBefore);
+
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      "tone-view",
+    );
+    clickButton(el, "Save");
+    await flush();
+    expect(savePreset).toHaveBeenCalledTimes(1);
+    expect(Object.keys(savePreset.mock.calls[0]![0]).sort()).toEqual([
+      "locks",
+      "name",
+      "params",
+      "profile",
+      "seed",
+      "sketch",
+      "version",
+    ]);
+
+    const picker = el.querySelector(
+      'select[aria-label="saved presets"]',
+    ) as HTMLSelectElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "saved");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+    await flush();
+    expect(paramInput(el, "radius").value).toBe("27");
+    expect(renderState(el)).toBe("tone-reference");
+    expect(modeButton(el, "Tone").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("visibly and defensively excludes Tone pixels from every export path", async () => {
+    const toBlob = vi.fn();
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls sketch={toneSketchWith("tone", schema)} />,
+    );
+    clickButton(el, "Tone");
+
+    const png = modeButton(el, "Export PNG");
+    const svg = modeButton(el, "Export SVG");
+    const hidden = modeButton(el, "Export Hidden-line SVG");
+    expect(png.disabled).toBe(true);
+    expect(svg.disabled).toBe(true);
+    expect(hidden.disabled).toBe(true);
+
+    // Programmatic native clicks are inert, while the handlers also retain
+    // mode guards for callers that bypass the visual disabled state.
+    act(() => {
+      png.click();
+      svg.click();
+      hidden.click();
+    });
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+
+    clickButton(el, "Fill");
+    expect(renderState(el)).toBe("fill-live");
+    expect(png.disabled).toBe(false);
+    expect(svg.disabled).toBe(false);
+    expect(hidden.disabled).toBe(false);
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).not.toBeNull();
+    expect(downloadBlob).toHaveBeenCalledTimes(1);
   });
 });
 

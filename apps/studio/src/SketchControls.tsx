@@ -1,5 +1,12 @@
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   applyPreset,
@@ -243,6 +250,16 @@ export function SketchControls({
   const historyRef = useRef(history);
   historyRef.current = history;
   const { params, seed, locks, profile, tolerance } = history.present;
+  // Tone reference is diagnostic Studio chrome, not authored state. Keeping it
+  // beside (rather than inside) the edit-history model excludes it from Undo,
+  // Presets, locks, profiles, and every reproduction envelope by construction.
+  const [toneReferenceActive, setToneReferenceActive] = useState(false);
+  // Mirror selection synchronously so even a programmatic export dispatched in
+  // the same React batch as mode entry hits the handler-level guard.
+  const toneReferenceActiveRef = useRef(toneReferenceActive);
+  useLayoutEffect(() => {
+    toneReferenceActiveRef.current = toneReferenceActive;
+  }, [toneReferenceActive]);
   // Export-document intent is Studio-wide and deliberately independent of the
   // keyed Sketch session: remounts lazily restore the persisted preference,
   // while Plot Profile, Preset, reproduction, and composition state stay pure.
@@ -278,6 +295,13 @@ export function SketchControls({
     () => resolvePlotCompositionFrame(profile),
     [drawableAspectIdentity],
   );
+
+  // Sample-source derivation intentionally reads the live transaction preview
+  // params and Composition Frame directly. Seed, timeline, profile magnitude,
+  // and the Outline session are absent from this capability seam.
+  const toneSource = toneReferenceActive
+    ? sketch.generateToneSource?.(params, compositionFrame)
+    : undefined;
 
   const [outlineSession, setOutlineSession] = useState(
     createOutlineSessionState,
@@ -495,6 +519,31 @@ export function SketchControls({
     }
   };
 
+  const selectFill = (): void => {
+    setToneReferenceActive(false);
+    if (outlineSessionRef.current.desired === "outline") {
+      cancelOutlineCoordinator();
+      dispatchOutline({ type: "request-fill" });
+    }
+  };
+
+  const selectOutline = (): void => {
+    setToneReferenceActive(false);
+    if (outlineSessionRef.current.desired !== "outline") {
+      requestOutlineForCurrentInputs();
+    }
+  };
+
+  const selectToneReference = (): void => {
+    if (sketch.generateToneSource === undefined) return;
+    // Tone has no Outline phase of its own. Relinquish preview ownership and
+    // reset intent to Fill before switching LiveCanvas to the pixel source.
+    cancelOutlineCoordinator();
+    dispatchOutline({ type: "request-fill" });
+    toneReferenceActiveRef.current = true;
+    setToneReferenceActive(true);
+  };
+
   const onFillCaptured = (capture: FillCapture): void => {
     const current = outlineSessionRef.current;
     if (
@@ -567,15 +616,17 @@ export function SketchControls({
   };
 
   const renderState: LiveCanvasRenderState =
-    outlineSession.phase.kind === "fill-live"
-      ? { kind: "fill-live" }
-      : outlineSession.phase.kind === "fill-held-pending"
-        ? {
-            kind: "fill-held",
-            scene: outlineSession.phase.scene,
-            t: outlineSession.phase.t,
-          }
-        : outlineSession.phase;
+    toneSource !== undefined
+      ? { kind: "tone-reference", source: toneSource }
+      : outlineSession.phase.kind === "fill-live"
+        ? { kind: "fill-live" }
+        : outlineSession.phase.kind === "fill-held-pending"
+          ? {
+              kind: "fill-held",
+              scene: outlineSession.phase.scene,
+              t: outlineSession.phase.t,
+            }
+          : outlineSession.phase;
 
   // New seed: roll a fresh arrangement, leaving every param value untouched —
   // the seed axis is independent of the param (Randomize) axis.
@@ -634,6 +685,7 @@ export function SketchControls({
   // Sketch passes the captured `t` (the last-drawn moment from the handle), a
   // static Sketch omits `t` entirely so the name carries no segment.
   const exportPng = () => {
+    if (toneReferenceActiveRef.current) return;
     const handle = canvasHandle.current;
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
@@ -682,6 +734,7 @@ export function SketchControls({
   // PNG path does, so the regenerated Scene and the `-t{t}` filename segment both
   // reflect the same displayed moment (static Sketches pass `undefined`, not 0).
   const exportSvg = () => {
+    if (toneReferenceActiveRef.current) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
@@ -714,7 +767,7 @@ export function SketchControls({
   // export envelope before handing it to the worker. No completion callback
   // reads React state or the live canvas again.
   const exportHiddenLineSvg = () => {
-    if (hiddenLineBusy) return;
+    if (toneReferenceActiveRef.current || hiddenLineBusy) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
     const displayed = handle.captureDisplayedFrame();
@@ -1001,21 +1054,77 @@ export function SketchControls({
           <span className="flex-none min-w-16 text-sm text-muted-foreground">
             render
           </span>
-          <Button
-            type="button"
-            variant={outlineSession.desired === "outline" ? "default" : "outline"}
-            size="sm"
-            className="flex-1"
-            aria-pressed={outlineSession.desired === "outline"}
-            aria-busy={outlineBusy}
-            aria-label="Toggle outline render mode"
-            onClick={toggleRenderMode}
-            disabled={exportBusy}
-          >
-            {outlineSession.desired === "outline"
-                ? "Outline"
-                : "Fill"}
-          </Button>
+          {sketch.generateToneSource === undefined ? (
+            <Button
+              type="button"
+              variant={
+                outlineSession.desired === "outline" ? "default" : "outline"
+              }
+              size="sm"
+              className="flex-1"
+              aria-pressed={outlineSession.desired === "outline"}
+              aria-busy={outlineBusy}
+              aria-label="Toggle outline render mode"
+              onClick={toggleRenderMode}
+              disabled={exportBusy}
+            >
+              {outlineSession.desired === "outline" ? "Outline" : "Fill"}
+            </Button>
+          ) : (
+            <div
+              role="group"
+              aria-label="Render mode"
+              className="flex min-w-0 flex-1 gap-1"
+            >
+              <Button
+                type="button"
+                variant={
+                  !toneReferenceActive && outlineSession.desired === "fill"
+                    ? "default"
+                    : "outline"
+                }
+                size="sm"
+                className="flex-1"
+                aria-pressed={
+                  !toneReferenceActive && outlineSession.desired === "fill"
+                }
+                onClick={selectFill}
+                disabled={exportBusy}
+              >
+                Fill
+              </Button>
+              <Button
+                type="button"
+                variant={
+                  !toneReferenceActive && outlineSession.desired === "outline"
+                    ? "default"
+                    : "outline"
+                }
+                size="sm"
+                className="flex-1"
+                aria-pressed={
+                  !toneReferenceActive && outlineSession.desired === "outline"
+                }
+                aria-busy={outlineBusy}
+                onClick={selectOutline}
+                disabled={exportBusy}
+              >
+                Outline
+              </Button>
+              <Button
+                type="button"
+                variant={toneReferenceActive ? "default" : "outline"}
+                size="sm"
+                className="flex-1"
+                aria-pressed={toneReferenceActive}
+                aria-label="Show Tone reference"
+                onClick={selectToneReference}
+                disabled={exportBusy}
+              >
+                Tone
+              </Button>
+            </div>
+          )}
         </div>
         {revealedOutlineToken === outlineWorkToken && outlineBusy ? (
           <div className="space-y-2 text-sm text-muted-foreground">
@@ -1114,6 +1223,7 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportPng}
+            disabled={toneReferenceActive}
           >
             Export PNG
           </Button>
@@ -1123,6 +1233,7 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportSvg}
+            disabled={toneReferenceActive}
           >
             Export SVG
           </Button>
@@ -1134,7 +1245,7 @@ export function SketchControls({
                 size="sm"
                 className="flex-1"
                 onClick={exportHiddenLineSvg}
-                disabled={hiddenLineBusy}
+                disabled={toneReferenceActive || hiddenLineBusy}
               >
                 Export Hidden-line SVG
               </Button>
