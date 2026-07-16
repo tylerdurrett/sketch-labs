@@ -3912,10 +3912,14 @@ describe("SketchControls — Tone reference mode (#316)", () => {
       sourceBeforeSeed.shadingMask.sample(point);
     vi.spyOn(Math, "random").mockReturnValue(0.75);
     clickButton(el, "New seed");
+    expect(lastToneSource).toBe(sourceBeforeSeed);
     expect(
       lastToneSource!.toneField.sample(point) *
         lastToneSource!.shadingMask.sample(point),
     ).toBe(sampleBeforeSeed);
+
+    act(() => paperMarginsCheckbox(el).click());
+    expect(lastToneSource).toBe(sourceBeforeSeed);
     expect(renderState(el)).toBe("tone-reference");
   });
 

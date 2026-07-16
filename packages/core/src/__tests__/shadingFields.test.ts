@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   createShadingMask,
@@ -64,11 +64,13 @@ describe('bounded shading fields', () => {
 
     expect(sampleEffectiveTone(source, [20, 30])).toBe(0.8 * 0.25)
 
+    const forbiddenTone = vi.fn(() => 1)
     const forbidden: ToneSource = {
-      toneField: createToneField(() => 1),
+      toneField: createToneField(forbiddenTone),
       shadingMask: createShadingMask(() => 0),
     }
     expect(Object.is(sampleEffectiveTone(forbidden, [20, 30]), 0)).toBe(true)
+    expect(forbiddenTone).not.toHaveBeenCalled()
   })
 
   it('keeps Tone Field and Shading Mask distinct at the type boundary', () => {

@@ -299,9 +299,13 @@ export function SketchControls({
   // Sample-source derivation intentionally reads the live transaction preview
   // params and Composition Frame directly. Seed, timeline, profile magnitude,
   // and the Outline session are absent from this capability seam.
-  const toneSource = toneReferenceActive
-    ? sketch.generateToneSource?.(params, compositionFrame)
-    : undefined;
+  const toneSource = useMemo(
+    () =>
+      toneReferenceActive
+        ? sketch.generateToneSource?.(params, compositionFrame)
+        : undefined,
+    [toneReferenceActive, sketch, params, compositionFrame],
+  );
 
   const [outlineSession, setOutlineSession] = useState(
     createOutlineSessionState,

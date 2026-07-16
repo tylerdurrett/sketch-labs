@@ -1188,6 +1188,47 @@ describe("LiveCanvas Tone reference pixels (#316)", () => {
     expect([...images.at(-1)!]).toEqual([255, 255, 255, 255]);
   });
 
+  it("does not re-sample an unchanged source for unrelated artwork inputs", () => {
+    const { ctx, counts } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 2, height: 1 } as DOMRect,
+    );
+    const { sketch } = animatedSketch(undefined);
+    const sample = vi.fn(() => 0.5);
+    const source: ToneSource = {
+      toneField: createToneField(sample),
+      shadingMask: createShadingMask(() => 1),
+    };
+
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{ value: 1 }}
+        seed={1}
+        inputRevision={1}
+        renderState={{ kind: "tone-reference", source }}
+      />,
+    );
+    expect(sample).toHaveBeenCalledTimes(2);
+    expect(counts.putImageData).toBe(1);
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={{ value: 2 }}
+          seed={2}
+          inputRevision={2}
+          renderState={{ kind: "tone-reference", source }}
+        />,
+      );
+    });
+
+    expect(sample).toHaveBeenCalledTimes(2);
+    expect(counts.putImageData).toBe(1);
+  });
+
   it("re-samples at the new backing resolution after a box resize", () => {
     const { ctx, images } = pixelRecordingContext();
     useRecordingContext(ctx);

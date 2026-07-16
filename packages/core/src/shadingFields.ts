@@ -89,16 +89,15 @@ export function sampleShadingMask(mask: ShadingMask, point: Readonly<Point>): nu
 /**
  * Sample the canonical target seen by a Shading Strategy or Tone reference.
  *
- * Effective tone is desired darkness multiplied by ink permission. Sampling both
- * operands through the public helpers keeps the result finite and bounded, while
- * an exact zero permission produces an exact zero result.
+ * Effective tone is desired darkness multiplied by ink permission. Permission is
+ * sampled first so an exact-zero prohibition can skip source work that cannot
+ * affect the result. Both operands still pass through the bounded public helpers.
  */
 export function sampleEffectiveTone(
   source: ToneSource,
   point: Readonly<Point>,
 ): number {
-  return (
-    sampleToneField(source.toneField, point) *
-    sampleShadingMask(source.shadingMask, point)
-  )
+  const permission = sampleShadingMask(source.shadingMask, point)
+  if (permission === 0) return 0
+  return sampleToneField(source.toneField, point) * permission
 }

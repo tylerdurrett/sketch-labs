@@ -311,6 +311,8 @@ export function LiveCanvas({
   const compositionAspect = compositionFrame.width / compositionFrame.height;
   const compositionWidth = compositionFrame.width;
   const compositionHeight = compositionFrame.height;
+  const toneReferenceSource =
+    renderState.kind === "tone-reference" ? renderState.source : null;
   const preparedFrame = useMemo(
     () =>
       renderState.kind === "tone-reference"
@@ -622,19 +624,31 @@ export function LiveCanvas({
     };
   }, [sketch, playing, renderState.kind, commitFillFrame]);
 
-  // Static live Fill derives synchronously. Supplied held/Outline geometry paints
-  // atomically as-is; Tone samples directly to pixels. Neither path is sent
-  // through prepareSketch or hidden-line work.
+  // Tone depends only on its analytic source and Composition Frame. Keeping it
+  // outside the artwork effect prevents Seed, Outline bookkeeping, and unrelated
+  // Studio state from re-sampling every backing pixel.
   useEffect(() => {
+    if (toneReferenceSource === null) return;
+    const canvas = canvasRef.current;
+    if (canvas === null) return;
+    sizeToBox(canvas, window.devicePixelRatio || 1);
+    displayedSceneRef.current = null;
+    paintToneReference(canvas, toneReferenceSource, compositionFrame);
+  }, [
+    toneReferenceSource,
+    compositionAspect,
+    compositionWidth,
+    compositionHeight,
+  ]);
+
+  // Static live Fill derives synchronously. Supplied held/Outline geometry paints
+  // atomically as-is. Neither path is sent through hidden-line work.
+  useEffect(() => {
+    if (renderState.kind === "tone-reference") return;
     const canvas = canvasRef.current;
     if (canvas === null) return;
     sizeToBox(canvas, window.devicePixelRatio || 1);
 
-    if (renderState.kind === "tone-reference") {
-      displayedSceneRef.current = null;
-      paintToneReference(canvas, renderState.source, compositionFrame);
-      return;
-    }
     if (renderState.kind !== "fill-live") {
       paintSuppliedFrame(renderState);
       return;
