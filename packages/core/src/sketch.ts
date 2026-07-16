@@ -2,8 +2,8 @@
  * The Sketch contract — what a Sketch file exports.
  *
  * A Sketch is a Parameter Schema plus its frame logic. This module defines the
- * contract types only; concrete field formats are deliberately left to emerge
- * (see CONTEXT.md "Deliberately deferred").
+ * contract types only; reusable source-field sampling lives separately in
+ * `shadingFields.ts` (ADR-0013).
  *
  * Two design decisions are load-bearing here:
  *
@@ -29,6 +29,7 @@
 
 import type { PlotProfile } from './plotProfile'
 import type { CoordinateSpace, Scene } from './scene'
+import type { ToneSource } from './shadingFields'
 
 /**
  * The single value feeding all of a Sketch's internal randomness.
@@ -290,6 +291,16 @@ export interface SketchBase {
    * the caller's concern.
    */
   defaultOutputProfile?: PlotProfile
+  /**
+   * Optionally produce deterministic source fields for a Tone reference or a
+   * reusable Shading Strategy.
+   *
+   * Seed, time, output resolution, and physical-output values are deliberately
+   * absent. The target is authored only from Parameter Schema values and the
+   * scale-independent Composition Frame, so re-seeding may vary future strategy
+   * geometry without changing what that strategy is asked to match.
+   */
+  generateToneSource?(params: Params, frame: CoordinateSpace): ToneSource
 }
 
 /**
