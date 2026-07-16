@@ -202,21 +202,25 @@ handoff manifest are adjacent. Three jobs completed the fixed `full` sample plan
 full 25k and 50k remain explicit timeout censors. The result does not silently
 reduce samples or imply production adoption.
 
-## Architecture decision and decision-prototype reference
+## Architecture decision, prototype archive, and production reference
 
 [`architecture-decision.md`](architecture-decision.md) records the issue-305
 decision after comparing both full finalists and a bounded shared-root revision.
 The adopted fixture is full-composition 10k. Its checksum-pinned equal-per-hill
-decision-prototype Fill and Outline live with the sketch under
-`src/sketches/grass-hills/reference/`;
+decision-prototype Fill and Outline remain archived with the sketch under
+`src/sketches/grass-hills/reference/decision-prototype/`;
 [`decision-reference.js`](decision-reference.js) is the isolated reproduction
 implementation and `decision-reference.benchmark.js` guards byte determinism.
 
-The reference generator is benchmark-only. It records the architecture decision,
-not approval of current production output. Production uses inverse-square hill
-allocation and root-keyed scalar rolls, so P4 must regenerate and independently
-approve its Fill, Outline, and physical plot before a production reference or
-wind gate can be claimed.
+The approved production Fill, Outline, physical plot, and manifest live one
+level above that archive. [`production-reference.js`](production-reference.js)
+starts at the committed `dense-grass` Preset and invokes the shipped production
+generator, specialized Outline source, generic Hidden-line pass, clipping, and
+serializers. `production-reference.benchmark.js` reproduces every artifact and
+guards production density, allocation, workload, geometry reuse, physical
+widths, hashes, and the recorded independent verdict. The complete Studio,
+Chrome, and visual result is recorded in
+[`results/production-acceptance-2026-07-15.md`](results/production-acceptance-2026-07-15.md).
 
 ## Timing and memory contract
 
@@ -238,10 +242,15 @@ set a new child-process high-water mark,” not an isolated per-phase peak.
 
 ## Literal workload manifest and collectors
 
-[`fixtures.js`](fixtures.js) pins six requests: the historical 10-hill/400-blade
-baseline, one-hill 5k and 10k targets, and full-composition 10k, 25k, and 50k
-targets. Every request repeats the seed, frame, time, complete Grass Hills param
-set, and physical profile. The 200 × 200 mm paper with 10 mm insets supplies a
+[`fixtures.js`](fixtures.js) pins six requests: a benchmark-local exact-candidate
+400-blade baseline, one-hill 5k and 10k targets, and full-composition 10k, 25k,
+and 50k targets. The distinct issue-start historical baseline is replayed from
+the committed Fill/Outline Scene snapshots by
+[`historical-baseline.js`](historical-baseline.js); its 10 hills, 400 blades,
+410 primitives, 14,540 points, and hidden-line workload remain durable even
+though the production generator now emits 10,000 seven-point blades. Every
+request repeats the seed, frame, time, complete Grass Hills param set, and
+physical profile. The 200 × 200 mm paper with 10 mm insets supplies a
 180 × 180 mm drawable region: 0.18 mm per Scene unit. A 0.30 mm fineliner is
 therefore 1.6666666666666667 Scene units. Requested counts are evidence targets,
 not claims about the current implementation.

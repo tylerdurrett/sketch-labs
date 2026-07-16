@@ -37,11 +37,10 @@
  * descriptors, applies a tool-width deterministic LOD plus nearer-hill masks,
  * retains visible ridges, and gives one processed Scene to preview and SVG.
  * Blade-to-blade Outline occlusion is intentionally perceptual, and plot density
- * may be lower than Fill density. The artifacts under `reference/` record the
- * equal-per-hill decision prototype, not the inverse-square production output.
- * P4 must regenerate and independently approve the production Fill, Outline,
- * and physical plot before any production reference or wind gate is claimed.
- * The issue-305 benchmark decision records that boundary. The
+ * may be lower than Fill density. The artifacts under `reference/` are the
+ * independently approved inverse-square production Fill, Outline, and physical
+ * plot; the equal-per-hill decision prototype is archived below them. The
+ * issue-305 benchmark decision records that gate. The
  * generic optional Outline-source hook runs this representation only on demand;
  * the legacy sparse closed-blade Hidden-line path remains a debug fallback, not
  * an automatic downgrade for this dense source.

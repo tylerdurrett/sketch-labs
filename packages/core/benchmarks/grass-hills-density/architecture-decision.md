@@ -1,12 +1,10 @@
 # Grass Hills dense architecture decision — issue #305
 
-> **Production-reference status (P4 gate):** the `9,298` selected-root / `8,939`
-> path SVGs and manifest are the equal-per-hill **decision prototype**, not proof
-> of the production implementation. Production uses inverse-square hill
-> allocation and root-keyed scalar variation, so its counts and checksums
-> intentionally differ. P4 must regenerate and independently approve Fill,
-> Outline, and the physical plot before those outputs become the production
-> visual reference or unblock wind work.
+> **Production-reference status:** P4 passed. The shipped inverse-square,
+> root-keyed implementation now owns the independently approved Fill, Outline,
+> and physical-plot reference under `src/sketches/grass-hills/reference/`. The
+> older `9,298` selected-root / `8,939`-path equal-per-hill decision prototype is
+> preserved under `reference/decision-prototype/` and is not production proof.
 
 ## Decision
 
@@ -63,10 +61,11 @@ and a 0.30 mm tool. The drawable square is `180 mm`, which is approximately
    plot-legible marks at the pinned 0.30 mm tool width. Local crossings are
    acceptable; a solid bar or collision-dominated region is not.
 
-The independently approved decision-prototype artifacts are
-`src/sketches/grass-hills/reference/{fill.svg,outline.svg,manifest.json}`.
-The manifest also pins the physical plot checksum and proves that its input
-Scene checksum is exactly the Outline Scene checksum.
+The independently approved decision-prototype artifacts are archived under
+`src/sketches/grass-hills/reference/decision-prototype/`. The inverse-square
+production artifacts live in the parent directory and are reproduced by
+`production-reference.js`; their manifest pins the physical plot and proves its
+input Scene checksum is exactly the Outline Scene checksum.
 
 Independent visual provenance: `/root/decision_d/decision_visual_review`.
 That reviewer first rejected both stock finalists in every mode at full 10k,
@@ -153,10 +152,9 @@ pinned fixture rather than claiming collision-free output.
   full-10k exact output, while simplified full campaigns censor. Higher targets
   need a new pinned fixture and the same three-mode visual gate.
 
-## Production and fallback boundary
+## Production implementation outcome
 
-The committed generator and SVGs are **decision evidence, not production
-reference evidence**. The implementation blocks must:
+The production implementation completed the three required blocks:
 
 1. Land the stratified stable-cell bank, nested selection, shared descriptor
    preparation, and 10k density mapping without weakening stable hill/root
@@ -168,10 +166,13 @@ reference evidence**. The implementation blocks must:
    tool-profile LOD, nearer-hill masks, ridge visibility, caching/invalidation,
    and the single processed-Scene handoff to Outline preview and SVG export.
 
-All three architecture blocks have landed, but their inverse-square allocation
-and root-keyed scalar rolls deliberately do not reproduce the historical
-equal-per-hill checksums. P4 owns regeneration and independent visual/plot
-approval of the actual production output; wind work remains gated until then.
+Their inverse-square allocation and root-keyed scalar rolls deliberately do not
+reproduce the historical equal-per-hill checksums. P4 regenerated the actual
+production artifacts, profiled the real Studio interaction, proved Outline/SVG
+geometry reuse, and received independent PASS verdicts for Fill, Outline, and
+the 96 dpi physical plot. Counts, workload, hashes, Chrome evidence, capture
+provenance, and the verdict live in
+`results/production-acceptance-2026-07-15.md`. The wind gate is cleared.
 The generic Hidden-line pass remains a compatibility/debug path for legacy
 sparse Scenes, but it must not silently process the 10k production source or
 replace the representation-specific Outline path. There is no automatic quality

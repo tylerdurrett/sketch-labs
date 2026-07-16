@@ -1,16 +1,48 @@
 {
-  "schemaVersion": 1,
-  "candidateId": "stratified-7-centerline-lod",
-  "fixtureId": "full-10000",
-  "seed": 12345,
+  "schemaVersion": 2,
+  "referenceId": "grass-hills-production-inverse-square-10k",
+  "status": "production-acceptance",
+  "preset": {
+    "version": 2,
+    "sketch": "grass-hills",
+    "name": "dense-grass",
+    "seed": 12345,
+    "params": {
+      "hillCount": 10,
+      "horizonHeight": 0.25,
+      "depthFalloff": 2,
+      "ridgeScale": 3.5,
+      "ridgeAmplitude": 0.8,
+      "terrainDrift": 1.25,
+      "bladeDensity": 2,
+      "bladeLength": 28,
+      "bladeLengthVariance": 8,
+      "bladeWidth": 3,
+      "stiffnessVariance": 0.25,
+      "windLean": 0,
+      "backgroundColor": "#f7f4e8",
+      "hillColor": "#dce8d3",
+      "hillStrokeColor": "#496a43",
+      "bladeColor": "#24643a",
+      "bladeStrokeColor": "#24643a"
+    },
+    "locks": [],
+    "profile": {
+      "width": 200,
+      "height": 200,
+      "insets": {
+        "top": 10,
+        "right": 10,
+        "bottom": 10,
+        "left": 10
+      },
+      "includeFrame": true
+    }
+  },
   "time": 0,
   "frame": {
     "width": 1000,
     "height": 1000
-  },
-  "request": {
-    "hillCount": 10,
-    "bladeCount": 10000
   },
   "profile": {
     "width": 200,
@@ -24,56 +56,206 @@
     "includeFrame": true
   },
   "tool": {
-    "widthMillimeters": 0.3
+    "widthMillimeters": 0.3,
+    "millimetersPerSceneUnit": 0.18
+  },
+  "mapping": {
+    "scale": 0.18,
+    "offsetX": 10,
+    "offsetY": 10
+  },
+  "outline": {
+    "tolerance": 0,
+    "includeFrame": true,
+    "geometryReuse": "Outline SVG and physical plot serialize the exact clipped processed Scene pinned below",
+    "physicalWidthsMillimeters": {
+      "grassAndRidges": 0.3,
+      "compositionFrame": 0.18
+    }
   },
   "contract": {
-    "rootGenerator": "100x100 seeded stratified stable-cell bank; nested priority prefix",
-    "fill": "seven-point closed silhouettes from shared descriptors",
-    "outline": "six-point shared spines; hill-only occlusion; deterministic tool-width LOD",
-    "previewExportGeometry": "Outline preview and physical plot serialization consume the identical processed Scene"
+    "allocation": "10,000 blades distributed inverse-square by hill depth; integer remainder resolved deterministically",
+    "roots": "100x100 seeded stratified stable-cell bank per reduced hill identity; nested priority prefix",
+    "variation": "four root-keyed scalar rolls in length, width, stiffness, lean order",
+    "fill": "seven-point closed silhouettes from production descriptors",
+    "outline": "six-point shared spines; nearer-hill masks; deterministic physical-tool LOD"
   },
   "evidence": {
-    "bladeCount": 10000,
-    "selectedRootCount": 9298,
-    "outlinePathCount": 8939,
-    "rootKeysSha256": "b26d453a2225c08ac17a784c8bf9dfd52db964bdd4bfc0c57dfbcabfe3f097ab",
-    "selectedRootKeysSha256": "d8fa4c27219f3923bf530f06caa274021a79178cb56bd7a835a565e7e0b094d1"
+    "allocation": [
+      3094,
+      1928,
+      1316,
+      955,
+      724,
+      568,
+      457,
+      376,
+      315,
+      267
+    ],
+    "fillBladeCount": 10000,
+    "fillInventory": {
+      "primitiveCount": 10010,
+      "pointCount": 71340,
+      "sha256": "88a6d2e4d7d0bc0470b665fa918c2d0596136ea154be50e5be4e0d68df456472",
+      "bytes": 3681177
+    },
+    "clippedFillInventory": {
+      "primitiveCount": 10033,
+      "pointCount": 71312,
+      "sha256": "9b068b2e6109255bab66297bb2667476a00a4698643c113fafe182dd858a2ffd",
+      "bytes": 3681742
+    },
+    "outlineSourceInventory": {
+      "primitiveCount": 8199,
+      "pointCount": 51724,
+      "sha256": "3666c202e0e3a21d478de635eadd3482d135c28cf0737e34552012e6fbbf71c3",
+      "bytes": 2862374
+    },
+    "outlineSelectedBladeCount": 8179,
+    "outlineSourceRidgeCount": 10,
+    "outlineOccluderCount": 10,
+    "outlineInventory": {
+      "primitiveCount": 7798,
+      "pointCount": 44601,
+      "sha256": "1d5227f202c1323480fad2ecccbcfd5615a3d545c02bf206c333a9741e9a1c5c",
+      "bytes": 2222757
+    },
+    "workload": {
+      "filledPrimitiveCount": 10,
+      "sourceSegmentCount": 42195,
+      "overlappingPairCount": 5742,
+      "estimatedSegmentEdgeComparisons": 3897390,
+      "totalWorkUnits": 4158122
+    }
   },
   "artifacts": {
     "fill": {
       "file": "fill.svg",
-      "sha256": "4192c1ff4fd04a43951f709cffa1b4ceed4f3ec477e5220dcff2fa5354f59aa6",
-      "bytes": 2012546,
+      "sha256": "385b37a4f07ba842dcd10600df42164f1dd254726c5fd0d551ccd93cc106eb28",
+      "bytes": 2012317,
       "scene": {
-        "primitiveCount": 10045,
-        "pointCount": 71305,
-        "sha256": "d8c7bf2bfd2d347e018f0ed0e9aa89f68ef06d2b599eb6b2adccde767bed183d",
-        "bytes": 3671748
+        "primitiveCount": 10033,
+        "pointCount": 71312,
+        "sha256": "9b068b2e6109255bab66297bb2667476a00a4698643c113fafe182dd858a2ffd",
+        "bytes": 3681742
       }
     },
     "outline": {
       "file": "outline.svg",
-      "sha256": "f35ce83197a5e47be2e0ec0eeb4065a2a639624ab6bd9e3b45d2dcf0f541dfe2",
-      "bytes": 1551507,
+      "sha256": "720ed77598cc0feac36f3794bc85651a1b83f989b1ab68a501d9cfa72f2f4b36",
+      "bytes": 1330316,
       "scene": {
-        "primitiveCount": 8939,
-        "pointCount": 51577,
-        "sha256": "d4e4e0b80b42312f9ab20372c22d4deca48ae244eb78c498ca6aebada666647a",
-        "bytes": 2712416
+        "primitiveCount": 7798,
+        "pointCount": 44601,
+        "sha256": "1d5227f202c1323480fad2ecccbcfd5615a3d545c02bf206c333a9741e9a1c5c",
+        "bytes": 2222757
       }
     },
     "physicalPlot": {
-      "derivedFrom": "the exact processed Scene pinned by outline.scene.sha256",
-      "sha256": "7d0d783809ab20b83d8f1a9a98bb6a4008361ea267e273460aa7ac5d8cbfd0d9",
-      "bytes": 1478735,
-      "sceneSha256": "d4e4e0b80b42312f9ab20372c22d4deca48ae244eb78c498ca6aebada666647a"
+      "file": "physical-plot.svg",
+      "sha256": "ff7ae34fbec456a09c95127b8df3943927d77e0a71962756149cbe4eb18687d8",
+      "bytes": 1255797,
+      "scene": {
+        "primitiveCount": 7798,
+        "pointCount": 44601,
+        "sha256": "1d5227f202c1323480fad2ecccbcfd5615a3d545c02bf206c333a9741e9a1c5c",
+        "bytes": 2222757
+      },
+      "derivedFrom": "artifacts.outline.scene.sha256"
     }
   },
-  "reproduction": {
-    "commands": [
-      "node packages/core/benchmarks/grass-hills-density/bundle-cli.js --entry=packages/core/benchmarks/grass-hills-density/decision-reference-cli.js --out=/tmp/issue-305-decision-reference-cli.mjs",
-      "node /tmp/issue-305-decision-reference-cli.mjs --out=packages/core/src/sketches/grass-hills/reference"
+  "approval": {
+    "verdict": "PASS",
+    "reviewer": "/root/impl_p4/p4_visual_review",
+    "reviewedAt": "2026-07-15",
+    "rubric": {
+      "fillGrassReading": "PASS",
+      "depthAndTerrainBands": "PASS",
+      "outlineFidelity": "PASS",
+      "physicalPlotLegibility": "PASS"
+    },
+    "temporaryCaptures": [
+      {
+        "file": "2026-07-15_192900_grass-hills-production-fill.png",
+        "sha256": "889fabbef603c88129b20a2045508c95fbe339f00730ee76ea4e289e1c8f3dbc",
+        "source": "actual Studio LiveCanvas at 958x958"
+      },
+      {
+        "file": "2026-07-15_192901_grass-hills-production-outline.png",
+        "sha256": "622ecaa875e8c7066623cd2698af5b025c1fc853146de359bc2a4eac6ea2be27",
+        "source": "actual Studio LiveCanvas after Fill to Outline"
+      },
+      {
+        "file": "2026-07-15_193001_grass-hills-production-physical-96dpi.png",
+        "sha256": "cde557793432c76f11a9df7f44247957fb1b97c631dd308e60ae2a41088419a9",
+        "source": "200mm physical plot at 756x756 CSS pixels (96dpi)"
+      }
     ],
-    "workingDirectory": "repository root"
+    "committedLeanRoundtrip": {
+      "inputMechanism": "CDP whole-value text insertion into a browser-selected NumberControl, one animation frame for React draft state, then Enter commit and blur",
+      "values": [
+        0,
+        0.25,
+        0
+      ],
+      "timingRun": {
+        "forwardMilliseconds": 479.2,
+        "restoreMilliseconds": 492.9,
+        "roundtripMilliseconds": 972.1,
+        "longTasksMilliseconds": [
+          410,
+          383
+        ],
+        "rafIntervals": {
+          "samples": 180,
+          "medianMilliseconds": 8.3,
+          "p95Milliseconds": 9.2,
+          "maxMilliseconds": 408.2,
+          "over16_7Milliseconds": 5
+        },
+        "canvasSubmissions": {
+          "draws": 4,
+          "medianMilliseconds": 4.4,
+          "p95Milliseconds": 4.6,
+          "maxMilliseconds": 5.3
+        },
+        "heapAfterExplicitGc": {
+          "beforeBytes": 28483992,
+          "afterBytes": 28650593,
+          "deltaBytes": 166601
+        }
+      },
+      "sceneIdentityRun": {
+        "initialSvg": {
+          "sha256": "7b42fc609fef2e71dda66a22d3a71e22aaf989ebf3d10475947882a9619ac888",
+          "bytes": 2012905
+        },
+        "changedSvg": {
+          "sha256": "d3f3031544ca5c31255367590292eb61a63112c603f8dfc03ecb0bd5a6db9b4e",
+          "bytes": 2014171
+        },
+        "restoredSvg": {
+          "sha256": "7b42fc609fef2e71dda66a22d3a71e22aaf989ebf3d10475947882a9619ac888",
+          "bytes": 2012905
+        },
+        "exactSceneRestoration": true,
+        "canvasPixelSha256": {
+          "initial": "4515ee1c96121af84fbea4ec3b33462105792a9b8661e257c47b574765aed962",
+          "changed": "c84a6a1d8cfc9bef631c1085eb1795d2bf1b261a2e3ea455d09c1038827a52ac",
+          "restored": "70ff599b00ef980d2264a6445a530b447113c013f29b5b15d59bd3b7c1fc51ea"
+        },
+        "exactCanvasPixelRestoration": false,
+        "interpretation": "The authored controls and exported displayed Scene restore exactly; Chrome did not reproduce byte-identical Canvas2D backing pixels for that byte-identical geometry."
+      }
+    },
+    "details": "benchmarks/grass-hills-density/results/production-acceptance-2026-07-15.md"
+  },
+  "reproduction": {
+    "workingDirectory": "repository root",
+    "commands": [
+      "node packages/core/benchmarks/grass-hills-density/bundle-cli.js --entry=packages/core/benchmarks/grass-hills-density/production-reference-cli.js --out=/tmp/issue-305-production-reference-cli.mjs",
+      "node /tmp/issue-305-production-reference-cli.mjs --out=packages/core/src/sketches/grass-hills/reference"
+    ]
   }
 }

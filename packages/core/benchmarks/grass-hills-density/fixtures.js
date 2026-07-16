@@ -88,6 +88,17 @@ export const DENSITY_FIXTURES = deepFreeze([
 
 export const HISTORICAL_BASELINE = DENSITY_FIXTURES[0]
 
+/**
+ * Benchmark-local 400-blade request for exact candidate comparisons.
+ *
+ * This intentionally has a distinct identity from the historical production
+ * snapshot. Exact candidates own their root/geometry implementation and use
+ * the old request shape only as a controlled comparison input.
+ */
+export const EXACT_CANDIDATE_BASELINE = deepFreeze(
+  fixture('exact-candidate-baseline-400', 'baseline', 10, 400),
+)
+
 function deepFreeze(value) {
   if (value !== null && typeof value === 'object') {
     for (const nested of Object.values(value)) deepFreeze(nested)

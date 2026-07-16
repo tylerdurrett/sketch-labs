@@ -10,11 +10,11 @@ import {
 } from './decision-reference.js'
 
 const referenceDirectory = new URL(
-  '../../src/sketches/grass-hills/reference/',
+  '../../src/sketches/grass-hills/reference/decision-prototype/',
   import.meta.url,
 )
 
-describe('Grass Hills architecture-decision reference', () => {
+describe('Grass Hills archived architecture-decision prototype', () => {
   it('reproduces the checksum-pinned Fill, Outline, and physical plot', () => {
     const manifest = JSON.parse(
       readFileSync(new URL('manifest.json', referenceDirectory), 'utf8'),

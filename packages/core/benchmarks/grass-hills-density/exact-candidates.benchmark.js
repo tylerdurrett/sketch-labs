@@ -11,9 +11,9 @@ import { benchmarkCandidate as poisson7 } from './exact-poisson-7.js'
 import { benchmarkCandidate as stratified33 } from './exact-stratified-33.js'
 import { benchmarkCandidate as stratified7 } from './exact-stratified-7.js'
 import { EXACT_FINALIST } from './exact-selection.js'
-import { HISTORICAL_BASELINE } from './fixtures.js'
+import { EXACT_CANDIDATE_BASELINE } from './fixtures.js'
 
-const BASE_PAYLOAD = HISTORICAL_BASELINE.payload
+const BASE_PAYLOAD = EXACT_CANDIDATE_BASELINE.payload
 const CURRENT_RIDGE_POINTS = 134
 const CURRENT_BASELINE_POINTS = 14_540
 
@@ -195,7 +195,7 @@ describe('Grass Hills exact filled-blade candidates', () => {
     },
   )
 
-  it('matches the current 33-point baseline inventory and authored styles', () => {
+  it('matches the benchmark-local legacy 33-point candidate inventory and styles', () => {
     const result = sampleExactComposition(
       prepare('poisson', 'detailed-33', {
         hillCount: 10,

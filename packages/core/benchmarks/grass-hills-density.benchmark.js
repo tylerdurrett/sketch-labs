@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import { analyzeHiddenLineWorkload, hiddenLinePass } from '../src/hiddenLine'
-import { grassHills } from '../src/sketches/grass-hills'
 import { HISTORICAL_BASELINE } from './grass-hills-density/fixtures.js'
+import {
+  HISTORICAL_BASELINE_INVENTORY,
+  replayHistoricalBaselineFill,
+  replayHistoricalBaselineOutline,
+} from './grass-hills-density/historical-baseline.js'
 
 // This historical maximum-density fixture is deliberately literal. In
 // particular, do not derive its params or frame from mutable application
@@ -14,13 +18,6 @@ const {
   frame: BASELINE_FRAME,
   params: BASELINE_PARAMS,
 } = HISTORICAL_BASELINE.payload
-
-const EXPECTED_HILLS = 10
-const EXPECTED_BLADES = 400
-const EXPECTED_PRIMITIVES = 410
-const EXPECTED_POINTS = 14_540
-const EXPECTED_CURRENT_HIDDEN_LINE_WORK_UNITS = 11_584_278
-const ISSUE_RECORDED_HIDDEN_LINE_WORK_UNITS = 11_372_294
 
 function sceneCounts(scene) {
   let points = 0
@@ -43,14 +40,9 @@ function sceneCounts(scene) {
 
 describe('Grass Hills historical density baseline', () => {
   it('smoke-checks the pinned geometry and hidden-line workload once', () => {
-    const coldStart = performance.now()
-    const scene = grassHills.generate(
-      BASELINE_PARAMS,
-      BASELINE_SEED,
-      BASELINE_TIME,
-      BASELINE_FRAME,
-    )
-    const coldMs = performance.now() - coldStart
+    const replayStart = performance.now()
+    const scene = replayHistoricalBaselineFill()
+    const replayMs = performance.now() - replayStart
     const counts = sceneCounts(scene)
     const workload = analyzeHiddenLineWorkload(scene)
 
@@ -59,15 +51,15 @@ describe('Grass Hills historical density baseline', () => {
     const hiddenLineMs = performance.now() - hiddenLineStart
 
     expect(counts).toEqual({
-      hills: EXPECTED_HILLS,
-      blades: EXPECTED_BLADES,
-      primitives: EXPECTED_PRIMITIVES,
-      points: EXPECTED_POINTS,
+      hills: HISTORICAL_BASELINE_INVENTORY.hills,
+      blades: HISTORICAL_BASELINE_INVENTORY.blades,
+      primitives: HISTORICAL_BASELINE_INVENTORY.primitives,
+      points: HISTORICAL_BASELINE_INVENTORY.points,
     })
     expect(workload.totalWorkUnits).toBe(
-      EXPECTED_CURRENT_HIDDEN_LINE_WORK_UNITS,
+      HISTORICAL_BASELINE_INVENTORY.hiddenLineWorkUnits,
     )
-    expect(outline.primitives.length).toBeGreaterThan(0)
+    expect(outline).toEqual(replayHistoricalBaselineOutline())
 
     console.log('\nGrass Hills density baseline (smoke-only)')
     console.log(`runtime                           ${process.version} ${process.platform}/${process.arch}`)
@@ -75,9 +67,9 @@ describe('Grass Hills historical density baseline', () => {
     console.log(`frame                             ${BASELINE_FRAME.width} × ${BASELINE_FRAME.height}`)
     console.log(`scene                             ${counts.hills} hills, ${counts.blades} blades, ${counts.primitives} primitives, ${counts.points} points`)
     console.log(`hidden-line work                  ${workload.totalWorkUnits} units`)
-    console.log(`issue #305 historical work       ${ISSUE_RECORDED_HIDDEN_LINE_WORK_UNITS} units; fixture metadata unavailable`)
-    console.log(`cold generation (one smoke run)  ${coldMs.toFixed(2)} ms`)
+    console.log(`issue #305 historical work       ${HISTORICAL_BASELINE_INVENTORY.issueRecordedHiddenLineWorkUnits} units; fixture metadata unavailable`)
+    console.log(`snapshot replay (one smoke run)   ${replayMs.toFixed(2)} ms`)
     console.log(`hidden-line (one smoke run)       ${hiddenLineMs.toFixed(2)} ms`)
-    console.log('historical observations           ~248 ms cold, ~44 ms hidden-line; non-SLA')
+    console.log('issue-start observations          ~248 ms cold, ~44 ms hidden-line; non-SLA')
   })
 })
