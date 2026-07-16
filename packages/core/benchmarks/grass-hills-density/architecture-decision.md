@@ -1,5 +1,13 @@
 # Grass Hills dense architecture decision — issue #305
 
+> **Production-reference status (P4 gate):** the `9,298` selected-root / `8,939`
+> path SVGs and manifest are the equal-per-hill **decision prototype**, not proof
+> of the production implementation. Production uses inverse-square hill
+> allocation and root-keyed scalar variation, so its counts and checksums
+> intentionally differ. P4 must regenerate and independently approve Fill,
+> Outline, and the physical plot before those outputs become the production
+> visual reference or unblock wind work.
+
 ## Decision
 
 Adopt **`stratified-7-centerline-lod` at 10,000 blades across the ten-hill
@@ -23,7 +31,8 @@ The production architecture is deliberately representation-specific:
   width, nearer hill polygons are the only occluders, and visible ridge strokes
   are retained. There is no tuft aggregation and no blade-to-blade or clump
   occlusion in this representation.
-- Fill keeps all 10,000 descriptors. The pinned 0.30 mm profile selects 9,298
+- In the decision prototype, Fill keeps all 10,000 descriptors and the pinned
+  0.30 mm profile selects 9,298
   roots and emits 8,939 clipped Outline paths. Different density is therefore
   intentional, but composition, identities, terrain, and lean stay shared.
 - One processed stroke-only Scene is the geometry boundary for both Outline
@@ -54,7 +63,7 @@ and a 0.30 mm tool. The drawable square is `180 mm`, which is approximately
    plot-legible marks at the pinned 0.30 mm tool width. Local crossings are
    acceptable; a solid bar or collision-dominated region is not.
 
-The approved byte-pinned artifacts are
+The independently approved decision-prototype artifacts are
 `src/sketches/grass-hills/reference/{fill.svg,outline.svg,manifest.json}`.
 The manifest also pins the physical plot checksum and proves that its input
 Scene checksum is exactly the Outline Scene checksum.
@@ -147,7 +156,7 @@ pinned fixture rather than claiming collision-free output.
 ## Production and fallback boundary
 
 The committed generator and SVGs are **decision evidence, not production
-implementation**. The later implementation blocks must:
+reference evidence**. The implementation blocks must:
 
 1. Land the stratified stable-cell bank, nested selection, shared descriptor
    preparation, and 10k density mapping without weakening stable hill/root
@@ -159,11 +168,12 @@ implementation**. The later implementation blocks must:
    tool-profile LOD, nearer-hill masks, ridge visibility, caching/invalidation,
    and the single processed-Scene handoff to Outline preview and SVG export.
 
-Until all three land and reproduce the pinned reference, the existing sparse
-closed-blade Sketch remains the production fallback and wind work must not
-raise its numeric density cap as a substitute. The generic Hidden-line pass may
-remain a compatibility/debug fallback for the legacy sparse Scene, but it must
-not silently process the 10k production source or replace the selected
-representation-specific Outline path. There is no automatic quality downgrade:
-failure to build the shared processed Scene is surfaced rather than exporting a
-different composition.
+All three architecture blocks have landed, but their inverse-square allocation
+and root-keyed scalar rolls deliberately do not reproduce the historical
+equal-per-hill checksums. P4 owns regeneration and independent visual/plot
+approval of the actual production output; wind work remains gated until then.
+The generic Hidden-line pass remains a compatibility/debug path for legacy
+sparse Scenes, but it must not silently process the 10k production source or
+replace the representation-specific Outline path. There is no automatic quality
+downgrade: failure to build the shared processed Scene is surfaced rather than
+exporting a different composition.

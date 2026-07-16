@@ -72,6 +72,9 @@ vi.mock("./hiddenLineCoordinator", async () => {
   return {
     HiddenLineCoordinator: class {
       start(identity: import("./outlineComputeProtocol").OutlineComputeIdentity) {
+        if (identity.sourceKind !== "legacy-scene") {
+          throw new Error("PhysicalPaperFlow uses only legacy Scene identities");
+        }
         return {
           then(resolve: (result: unknown) => void) {
             resolve({
@@ -91,6 +94,9 @@ vi.mock("./hiddenLineCoordinator", async () => {
       startExport(
         snapshot: import("./outlineComputeProtocol").HiddenLineExportSnapshot,
       ) {
+        if (snapshot.identity.sourceKind !== "legacy-scene") {
+          throw new Error("PhysicalPaperFlow uses only legacy Scene identities");
+        }
         const scene = outlineScene(
           snapshot.identity.sourceScene as Scene,
           snapshot.identity.tolerance,

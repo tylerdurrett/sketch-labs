@@ -2,6 +2,7 @@ import type {
   CoordinateSpace,
   HiddenLineRole,
   HiddenLineProgress,
+  OutlineTarget,
   ParamSchema,
   Params,
   PlotProfile,
@@ -33,7 +34,7 @@ export interface ImmutableScene {
   readonly background?: Readonly<{ color: string }>;
 }
 
-export interface OutlineComputeIdentity {
+interface OutlineComputeIdentityBase {
   readonly sketchId: string;
   readonly params: readonly OutlineParamEntry[];
   readonly seed: Seed;
@@ -41,8 +42,24 @@ export interface OutlineComputeIdentity {
   readonly compositionFrame: Readonly<CoordinateSpace>;
   readonly tolerance: number;
   readonly includeFrame: boolean;
+}
+
+export interface LegacyOutlineComputeIdentity
+  extends OutlineComputeIdentityBase {
+  readonly sourceKind: "legacy-scene";
   readonly sourceScene: ImmutableScene;
 }
+
+export interface SpecializedOutlineComputeIdentity
+  extends OutlineComputeIdentityBase {
+  readonly sourceKind: "specialized-sketch";
+  readonly outlineTarget: Readonly<OutlineTarget>;
+}
+
+/** Legacy requests carry a Scene; specialized requests carry only derivation inputs. */
+export type OutlineComputeIdentity =
+  | LegacyOutlineComputeIdentity
+  | SpecializedOutlineComputeIdentity;
 
 export interface OutlineComputeRequest {
   readonly type: "compute";
@@ -79,7 +96,7 @@ export type OutlineWorkerMessage =
   | OutlineComputeProgress
   | OutlineComputeResponse;
 
-interface CreateIdentityInput {
+interface CreateIdentityInputBase {
   sketchId: string;
   schema: ParamSchema;
   params: Params;
@@ -88,8 +105,21 @@ interface CreateIdentityInput {
   compositionFrame: CoordinateSpace;
   tolerance: number;
   includeFrame: boolean;
-  sourceScene: Scene;
 }
+
+type CreateLegacyIdentityInput = CreateIdentityInputBase & {
+  sourceScene: Scene;
+  outlineTarget?: never;
+};
+
+type CreateSpecializedIdentityInput = CreateIdentityInputBase & {
+  sourceScene?: never;
+  outlineTarget: OutlineTarget;
+};
+
+type CreateIdentityInput =
+  | CreateLegacyIdentityInput
+  | CreateSpecializedIdentityInput;
 
 const hasOwn = (value: object, key: PropertyKey): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
@@ -156,7 +186,7 @@ function copyScene(scene: Scene | ImmutableScene): ImmutableScene {
 }
 
 function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity {
-  return Object.freeze({
+  const common = {
     sketchId: identity.sketchId,
     params: Object.freeze(
       identity.params.map((entry) =>
@@ -171,10 +201,29 @@ function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity 
     }),
     tolerance: identity.tolerance,
     includeFrame: identity.includeFrame,
-    sourceScene: copyScene(identity.sourceScene),
-  });
+  };
+  return identity.sourceKind === "legacy-scene"
+    ? Object.freeze({
+        ...common,
+        sourceKind: "legacy-scene",
+        sourceScene: copyScene(identity.sourceScene),
+      })
+    : Object.freeze({
+        ...common,
+        sourceKind: "specialized-sketch",
+        outlineTarget: Object.freeze({ ...identity.outlineTarget }),
+      });
 }
 
+export function createOutlineComputeIdentity(
+  input: CreateLegacyIdentityInput,
+): LegacyOutlineComputeIdentity;
+export function createOutlineComputeIdentity(
+  input: CreateSpecializedIdentityInput,
+): SpecializedOutlineComputeIdentity;
+export function createOutlineComputeIdentity(
+  input: CreateIdentityInput,
+): OutlineComputeIdentity;
 export function createOutlineComputeIdentity(
   input: CreateIdentityInput,
 ): OutlineComputeIdentity {
@@ -183,7 +232,7 @@ export function createOutlineComputeIdentity(
     .map((key) =>
       Object.freeze({ key, value: copyParamValue(input.params[key], key) }),
     );
-  const identity: OutlineComputeIdentity = Object.freeze({
+  const common = {
     sketchId: input.sketchId,
     params: Object.freeze(params),
     seed: input.seed,
@@ -194,8 +243,19 @@ export function createOutlineComputeIdentity(
     }),
     tolerance: input.tolerance,
     includeFrame: input.includeFrame,
-    sourceScene: copyScene(input.sourceScene),
-  });
+  };
+  const identity: OutlineComputeIdentity =
+    input.outlineTarget === undefined
+      ? Object.freeze({
+          ...common,
+          sourceKind: "legacy-scene",
+          sourceScene: copyScene(input.sourceScene),
+        })
+      : Object.freeze({
+          ...common,
+          sourceKind: "specialized-sketch",
+          outlineTarget: Object.freeze({ ...input.outlineTarget }),
+        });
   if (!isOutlineComputeIdentity(identity)) {
     throw new TypeError("Outline compute identity contains an invalid value");
   }
@@ -277,9 +337,26 @@ export function isOutlineComputeIdentity(
     !isFiniteNumber(value.compositionFrame.width) ||
     !isFiniteNumber(value.compositionFrame.height) ||
     !isFiniteNumber(value.tolerance) ||
-    typeof value.includeFrame !== "boolean" ||
-    !isScene(value.sourceScene)
+    typeof value.includeFrame !== "boolean"
   ) {
+    return false;
+  }
+  if (value.sourceKind === "legacy-scene") {
+    if (hasOwn(value, "outlineTarget") || !isScene(value.sourceScene)) {
+      return false;
+    }
+  } else if (value.sourceKind === "specialized-sketch") {
+    if (
+      hasOwn(value, "sourceScene") ||
+      !isRecord(value.outlineTarget) ||
+      !isFiniteNumber(value.outlineTarget.toolWidthMillimeters) ||
+      value.outlineTarget.toolWidthMillimeters <= 0 ||
+      !isFiniteNumber(value.outlineTarget.millimetersPerSceneUnit) ||
+      value.outlineTarget.millimetersPerSceneUnit <= 0
+    ) {
+      return false;
+    }
+  } else {
     return false;
   }
   let previous: string | null = null;
@@ -444,7 +521,19 @@ export function outlineComputeIdentitiesEqual(
         Object.is(entry.value, other.value)
       );
     }) &&
-    sceneEqual(left.sourceScene, right.sourceScene)
+    left.sourceKind === right.sourceKind &&
+    (left.sourceKind === "legacy-scene"
+      ? right.sourceKind === "legacy-scene" &&
+        sceneEqual(left.sourceScene, right.sourceScene)
+      : right.sourceKind === "specialized-sketch" &&
+        Object.is(
+          left.outlineTarget.toolWidthMillimeters,
+          right.outlineTarget.toolWidthMillimeters,
+        ) &&
+        Object.is(
+          left.outlineTarget.millimetersPerSceneUnit,
+          right.outlineTarget.millimetersPerSceneUnit,
+        ))
   );
 }
 

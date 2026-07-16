@@ -24,3 +24,11 @@ Issue #305 selected a representation-specific Outline path whose visible source 
 This field changes participation only. `source` emits a Primitive's path after clipping against nearer occluders; `occluder` requires a fill, contributes its polygon to clipping, and emits no boundary; `both` explicitly combines them. When the field is omitted, compatibility is exact: a filled Primitive remains both source and occluder, and a stroke-only Primitive remains ignored. The role is not a Grass Hills special case, a domain identifier, or a general pen-layer/source tag; the Hidden-line pass and Studio worker protocol interpret the same three geometry roles for every Scene.
 
 The amendment does not weaken the on-demand boundary. A Sketch may generate a representation-specific source Scene, but the Hidden-line pass still runs only when Outline preview or plotter export requests it, never in the per-frame Fill loop. The resulting ordinary stroke-only Scene remains the single geometry value shared by Canvas preview and physical SVG serialization, and an exact completed Outline may be reused by export without rerunning derivation.
+
+The optional `generateOutlineSource(params, seed, t, frame, target)` Sketch
+capability is the generic boundary for that representation-specific source. Its
+physical target carries tool width and the current millimeter-to-Scene mapping;
+it is part of Outline cache identity and is evaluated in the worker. Sketches
+without the capability retain legacy Fill-Scene processing. Once a specialized
+target is requested, source-generation failure is surfaced and never silently
+downgraded to the legacy representation.

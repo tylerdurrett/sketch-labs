@@ -17,8 +17,8 @@ export interface BladeShape {
   stiffness: number
 }
 
-/** Enough stations for a smooth silhouette without wasteful scene geometry. */
-const FLANK_SEGMENTS = 16
+/** Stations pinned by the approved seven-point architecture-decision fixture. */
+const FLANK_STATIONS = [0, 0.5, 0.82, 1] as const
 
 function requirePositiveFinite(value: number, name: 'length' | 'width'): void {
   if (!Number.isFinite(value) || value <= 0) {
@@ -61,14 +61,13 @@ export function blade(shape: BladeShape): Polyline {
   const rightFlank: Point[] = []
   const leftFlank: Point[] = []
 
-  for (let index = 0; index <= FLANK_SEGMENTS; index++) {
-    if (index === 0) {
+  for (const t of FLANK_STATIONS) {
+    if (t === 0) {
       rightFlank.push([0, 0])
       leftFlank.push([0, 0])
       continue
     }
 
-    const t = index / FLANK_SEGMENTS
     const spineX = tipOffset * t ** bendExponent
     const y = -length * t
     // A parabolic profile is exactly zero at both ends, reaches the requested

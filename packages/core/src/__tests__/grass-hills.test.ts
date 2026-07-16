@@ -286,7 +286,7 @@ describe('grass-hills Sketch contract', () => {
     expect(scene.background).toEqual({ color: '#f7f3e8' })
     for (const primitive of hills(scene)) {
       expect(primitive.fill).toEqual({ color: '#88aa55' })
-      expect(primitive.stroke).toEqual({ color: '#102010', width: 2 })
+      expect(primitive.stroke).toEqual({ color: '#102010', width: 1 })
       expect(primitive.closed).toBe(false)
       expect(primitive.points.at(-1)).toEqual(primitive.points[0])
       expect(primitive.points[0]![0]).toBeLessThan(0)
@@ -331,7 +331,7 @@ describe('grass-hills Sketch contract', () => {
       expect(hillGroups).toBeGreaterThan(0)
       expect(primitive.closed).toBe(true)
       expect(primitive.fill).toEqual({ color: '#ddeeaa' })
-      expect(primitive.stroke).toEqual({ color: '#203010', width: 2 })
+      expect(primitive.stroke).toEqual({ color: '#203010', width: 0.7 })
       expect(primitive.points.at(-1)).toEqual(primitive.points[0])
       roots.push([...primitive.points[0]!] as [number, number])
     }
@@ -739,17 +739,17 @@ describe('grass-hills hidden-line workload inventory', () => {
 
     expect(analyzeHiddenLineWorkload(small)).toEqual({
       filledPrimitiveCount: 9,
-      sourceSegmentCount: 389,
+      sourceSegmentCount: 181,
       overlappingPairCount: 8,
-      estimatedSegmentEdgeComparisons: 35_112,
-      totalWorkUnits: 36_868,
+      estimatedSegmentEdgeComparisons: 7_448,
+      totalWorkUnits: 8_372,
     })
     expect(analyzeHiddenLineWorkload(bounded)).toEqual({
       filledPrimitiveCount: 30,
-      sourceSegmentCount: 1_970,
+      sourceSegmentCount: 1_450,
       overlappingPairCount: 102,
-      estimatedSegmentEdgeComparisons: 1_051_557,
-      totalWorkUnits: 1_061_309,
+      estimatedSegmentEdgeComparisons: 854_295,
+      totalWorkUnits: 861_967,
     })
   })
 

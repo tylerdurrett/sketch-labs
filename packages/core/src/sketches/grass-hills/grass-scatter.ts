@@ -1,4 +1,5 @@
 import type { Seed } from '../../sketch'
+import { createStableScalarRandom } from './stable-random'
 
 /** One stable cell per root at the adopted per-hill canonical capacity. */
 const STRATIFIED_SIDE = 100
@@ -50,7 +51,7 @@ export function scatterGrassRoots({
   for (let row = 0; row < STRATIFIED_SIDE; row++) {
     for (let column = 0; column < STRATIFIED_SIDE; column++) {
       const cellKey = `${column},${row}`
-      const jitter = stableRandom(
+      const jitter = createStableScalarRandom(
         `${seed}-exact-stratified-root-${hillKey}-${cellKey}`,
       )
       roots.push({
@@ -58,7 +59,7 @@ export function scatterGrassRoots({
         v: (row + jitter.value()) / STRATIFIED_SIDE,
         rootKey: `${hillKey}:cell:${cellKey}`,
         cellOrdinal: row * STRATIFIED_SIDE + column,
-        priority: stableRandom(
+        priority: createStableScalarRandom(
           `${seed}-exact-stratified-priority-${hillKey}-${cellKey}`,
         ).value(),
       })
@@ -73,30 +74,4 @@ export function scatterGrassRoots({
       Object.freeze({ u, v, rootKey, ordinal }),
     ),
   )
-}
-
-/**
- * Small deterministic generator for the large canonical bank.
- *
- * `createRandom` intentionally constructs noise fields as well as a scalar
- * stream. Stable cells need only two scalar rolls, so using that broader helper
- * 20,000 times per hill would dominate preparation without changing output.
- * This FNV-1a seeded Mulberry32 stream is pinned by the decision prototype.
- */
-function stableRandom(seed: string): { value(): number } {
-  let state = 2_166_136_261
-  for (let index = 0; index < seed.length; index++) {
-    state ^= seed.charCodeAt(index)
-    state = Math.imul(state, 16_777_619)
-  }
-
-  return {
-    value() {
-      state = (state + 0x6d2b79f5) | 0
-      let mixed = state
-      mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1)
-      mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61)
-      return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296
-    },
-  }
 }

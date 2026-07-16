@@ -30,16 +30,21 @@
  * emitted before its blades, whose ascending root-y order lets lower blades
  * cover higher ones before the next, nearer hill covers the whole group.
  *
- * DENSE ARCHITECTURE DECISION (#305; FOUNDATION LANDED): the approved
+ * DENSE ARCHITECTURE DECISION (#305; PRODUCTION): the selected
  * full-composition target is 10,000 descriptors from a seeded 100×100
  * stratified bank per stable hill identity. Fill uses curved seven-point closed
  * blades. On-demand Outline/plot derives curved six-point spines from those same
  * descriptors, applies a tool-width deterministic LOD plus nearer-hill masks,
  * retains visible ridges, and gives one processed Scene to preview and SVG.
  * Blade-to-blade Outline occlusion is intentionally perceptual, and plot density
- * may be lower than Fill density. The pinned reference and implementation
- * boundary live under `reference/` and the issue-305 benchmark decision; later
- * implementation blocks must land this contract before wind work can consume it.
+ * may be lower than Fill density. The artifacts under `reference/` record the
+ * equal-per-hill decision prototype, not the inverse-square production output.
+ * P4 must regenerate and independently approve the production Fill, Outline,
+ * and physical plot before any production reference or wind gate is claimed.
+ * The issue-305 benchmark decision records that boundary. The
+ * generic optional Outline-source hook runs this representation only on demand;
+ * the legacy sparse closed-blade Hidden-line path remains a debug fallback, not
+ * an automatic downgrade for this dense source.
  *
  * CLOSED SILHOUETTES / PHYSICAL PALETTE: blades are traced by the private
  * tapered-outline generator and emitted as closed, filled-and-stroked shapes —
@@ -62,6 +67,7 @@ import { createScene } from '../../scene'
 import type { CoordinateSpace, Scene } from '../../scene'
 import {
   definePreparedSketch,
+  type OutlineTarget,
   type ParamSpec,
   type Params,
   type Seed,
@@ -75,6 +81,10 @@ import {
   type GrassBladeDescriptor,
 } from './grass'
 import { createGrassHillMask } from './grass-placement'
+import {
+  grassHillsOutlineSource,
+  validateGrassHillsOutlineTarget,
+} from './outline'
 import { scatterGrassRoots } from './grass-scatter'
 import {
   allocateGrassRootCounts,
@@ -86,11 +96,11 @@ import { createTerrainField } from './terrain'
 /** Horizontal segments used to resolve each prepared ridgeline. */
 const RIDGE_SAMPLES = 128
 
-/** Plot-readable contour width in Composition Frame units. */
-const HILL_STROKE_WIDTH = 2
+/** Live ridge width selected by the issue-305 architecture decision. */
+const HILL_STROKE_WIDTH = 1
 
-/** Plot-readable blade-outline width in Composition Frame units. */
-const BLADE_STROKE_WIDTH = 2
+/** Live blade contour width selected by the issue-305 architecture decision. */
+const BLADE_STROKE_WIDTH = 0.7
 
 /**
  * Flat Studio declaration order: Terrain, Grass (including static lean), Colors.
@@ -153,137 +163,188 @@ interface PreparedHill {
   readonly blades: ReadonlyArray<GrassBladeDescriptor>
 }
 
+interface PreparedGrassHills {
+  readonly frame: CoordinateSpace
+  readonly backgroundColor: string
+  readonly hillColor: string
+  readonly hillStrokeColor: string
+  readonly bladeColor: string
+  readonly bladeStrokeColor: string
+  readonly hills: ReadonlyArray<PreparedHill>
+}
+
 export const grassHills = definePreparedSketch({
   id: 'grass-hills',
   name: 'Grass Hills',
   schema,
   // NO `time` metadata: this still-grass slice is intentionally static.
   prepare(params: Params, seed: Seed, frame: CoordinateSpace) {
-    const hillCount = Math.round(numberParam(params, schema, 'hillCount'))
-    const horizonHeight = numberParam(params, schema, 'horizonHeight')
-    const depthFalloff = numberParam(params, schema, 'depthFalloff')
-    const ridgeScale = numberParam(params, schema, 'ridgeScale')
-    const ridgeAmplitude = numberParam(params, schema, 'ridgeAmplitude')
-    const terrainDrift = numberParam(params, schema, 'terrainDrift')
-    const bladeDensity = numberParam(params, schema, 'bladeDensity')
-    const bladeLength = numberParam(params, schema, 'bladeLength')
-    const bladeLengthVariance = numberParam(
-      params,
-      schema,
-      'bladeLengthVariance',
-    )
-    const bladeWidth = numberParam(params, schema, 'bladeWidth')
-    const stiffnessVariance = numberParam(
-      params,
-      schema,
-      'stiffnessVariance',
-    )
-    const windLean = numberParam(params, schema, 'windLean')
-    const backgroundColor = colorParam(params, schema, 'backgroundColor')
-    const hillColor = colorParam(params, schema, 'hillColor')
-    const hillStrokeColor = colorParam(params, schema, 'hillStrokeColor')
-    const bladeColor = colorParam(params, schema, 'bladeColor')
-    const bladeStrokeColor = colorParam(params, schema, 'bladeStrokeColor')
-
-    const projection = {
-      frame,
-      horizonHeight,
-      depthFalloff,
-    }
-    const bands = layoutHillBands(hillCount, projection)
-    const terrainAt = createTerrainField(seed, { ridgeScale, terrainDrift })
-    const ridges = buildRidgeBands({
-      frame,
-      bands,
-      terrainAt,
-      ridgeAmplitude,
-      ridgeSamples: RIDGE_SAMPLES,
-    })
-    const maxUnscaledBladeLength = resolveMaximumUnscaledBladeLength(
-      bladeLength,
-      bladeLengthVariance,
-    )
-    const rootCounts = allocateGrassRootCounts(
-      bands.map(({ depth }) => depth),
-      bladeDensity,
-    )
-    const preparedHills: ReadonlyArray<PreparedHill> = Object.freeze(
-      bands.map((band, hillIndex) => {
-        const ridge = ridges[hillIndex]!
-        const count = rootCounts[hillIndex]!
-        const candidates =
-          count === 0
-            ? Object.freeze([])
-            : scatterGrassRoots({ seed, hillKey: band.hillKey })
-        const roots = selectGrassRoots({ count, candidates })
-        const mask = createGrassHillMask({
-          frame,
-          projection,
-          band,
-          ridge,
-          ...(hillIndex + 1 < ridges.length
-            ? { nextNearerRidge: ridges[hillIndex + 1]! }
-            : {}),
-          maxUnscaledBladeLength,
-        })
-        const descriptors = [
-          ...buildGrassBlades({
-            seed,
-            hillKey: band.hillKey,
-            roots,
-            mask,
-            bladeLength,
-            bladeLengthVariance,
-            bladeWidth,
-            stiffnessVariance,
-            windLean,
-          }),
-        ].sort(
-          (a, b) =>
-            a.projected[1] - b.projected[1] ||
-            a.projected[0] - b.projected[0] ||
-            a.identity.ordinal - b.identity.ordinal,
-        )
-
-        return Object.freeze({
-          ridge: Object.freeze(
-            ridge.points.map(([x, y]) => Object.freeze([x, y] as const)),
-          ),
-          blades: Object.freeze(descriptors),
-        })
-      }),
-    )
-
-    return (_t: number): Scene => {
-      const builder = createScene(frame, { color: backgroundColor })
-
-      for (const hill of preparedHills) {
-        builder.addPath(
-          hill.ridge.map(([x, y]) => [x, y]),
-          {
-            closed: false,
-            fill: { color: hillColor },
-            stroke: { color: hillStrokeColor, width: HILL_STROKE_WIDTH },
-          },
-        )
-
-        for (const descriptor of hill.blades) {
-          const [rootX, rootY] = descriptor.projected
-          builder.addPath(
-            blade(descriptor.shape).map(([x, y]) => [
-              x + rootX,
-              y + rootY,
-            ]),
-            {
-              closed: true,
-              fill: { color: bladeColor },
-              stroke: { color: bladeStrokeColor, width: BLADE_STROKE_WIDTH },
-            },
-          )
-        }
-      }
-
-      return builder.build()
-    }
+    const prepared = prepareGrassHills(params, seed, frame)
+    return (t: number): Scene => sampleGrassHills(prepared, t)
+  },
+  generateOutlineSource(
+    params: Params,
+    seed: Seed,
+    _t: number,
+    frame: CoordinateSpace,
+    target: OutlineTarget,
+  ) {
+    validateGrassHillsOutlineTarget(target)
+    const prepared = prepareGrassHills(params, seed, frame)
+    return grassHillsOutlineSource(prepared.frame, prepared.hills, target)
   },
 })
+
+/** Prepare every immutable root, variation roll, projected shape, and ridge. */
+function prepareGrassHills(
+  params: Params,
+  seed: Seed,
+  frame: CoordinateSpace,
+): PreparedGrassHills {
+  const preparedFrame = Object.freeze({
+    width: frame.width,
+    height: frame.height,
+  })
+  const hillCount = Math.round(numberParam(params, schema, 'hillCount'))
+  const horizonHeight = numberParam(params, schema, 'horizonHeight')
+  const depthFalloff = numberParam(params, schema, 'depthFalloff')
+  const ridgeScale = numberParam(params, schema, 'ridgeScale')
+  const ridgeAmplitude = numberParam(params, schema, 'ridgeAmplitude')
+  const terrainDrift = numberParam(params, schema, 'terrainDrift')
+  const bladeDensity = numberParam(params, schema, 'bladeDensity')
+  const bladeLength = numberParam(params, schema, 'bladeLength')
+  const bladeLengthVariance = numberParam(
+    params,
+    schema,
+    'bladeLengthVariance',
+  )
+  const bladeWidth = numberParam(params, schema, 'bladeWidth')
+  const stiffnessVariance = numberParam(
+    params,
+    schema,
+    'stiffnessVariance',
+  )
+  const windLean = numberParam(params, schema, 'windLean')
+  const backgroundColor = colorParam(params, schema, 'backgroundColor')
+  const hillColor = colorParam(params, schema, 'hillColor')
+  const hillStrokeColor = colorParam(params, schema, 'hillStrokeColor')
+  const bladeColor = colorParam(params, schema, 'bladeColor')
+  const bladeStrokeColor = colorParam(params, schema, 'bladeStrokeColor')
+
+  const projection = {
+    frame: preparedFrame,
+    horizonHeight,
+    depthFalloff,
+  }
+  const bands = layoutHillBands(hillCount, projection)
+  const terrainAt = createTerrainField(seed, { ridgeScale, terrainDrift })
+  const ridges = buildRidgeBands({
+    frame: preparedFrame,
+    bands,
+    terrainAt,
+    ridgeAmplitude,
+    ridgeSamples: RIDGE_SAMPLES,
+  })
+  const maxUnscaledBladeLength = resolveMaximumUnscaledBladeLength(
+    bladeLength,
+    bladeLengthVariance,
+  )
+  const rootCounts = allocateGrassRootCounts(
+    bands.map(({ depth }) => depth),
+    bladeDensity,
+  )
+  const hills: ReadonlyArray<PreparedHill> = Object.freeze(
+    bands.map((band, hillIndex) => {
+      const ridge = ridges[hillIndex]!
+      const count = rootCounts[hillIndex]!
+      const candidates =
+        count === 0
+          ? Object.freeze([])
+          : scatterGrassRoots({ seed, hillKey: band.hillKey })
+      const roots = selectGrassRoots({ count, candidates })
+      const mask = createGrassHillMask({
+        frame: preparedFrame,
+        projection,
+        band,
+        ridge,
+        ...(hillIndex + 1 < ridges.length
+          ? { nextNearerRidge: ridges[hillIndex + 1]! }
+          : {}),
+        maxUnscaledBladeLength,
+      })
+      const descriptors = [
+        ...buildGrassBlades({
+          seed,
+          hillKey: band.hillKey,
+          roots,
+          mask,
+          bladeLength,
+          bladeLengthVariance,
+          bladeWidth,
+          stiffnessVariance,
+          windLean,
+        }),
+      ].sort(
+        (a, b) =>
+          a.projected[1] - b.projected[1] ||
+          a.projected[0] - b.projected[0] ||
+          a.identity.ordinal - b.identity.ordinal,
+      )
+
+      return Object.freeze({
+        ridge: Object.freeze(
+          ridge.points.map(([x, y]) => Object.freeze([x, y] as const)),
+        ),
+        blades: Object.freeze(descriptors),
+      })
+    }),
+  )
+
+  return Object.freeze({
+    frame: preparedFrame,
+    backgroundColor,
+    hillColor,
+    hillStrokeColor,
+    bladeColor,
+    bladeStrokeColor,
+    hills,
+  })
+}
+
+/** Trace only lean-dependent geometry/styles into fresh Scene-owned values. */
+function sampleGrassHills(prepared: PreparedGrassHills, _t: number): Scene {
+  const builder = createScene(prepared.frame, {
+    color: prepared.backgroundColor,
+  })
+
+  for (const hill of prepared.hills) {
+    builder.addPath(
+      hill.ridge.map(([x, y]) => [x, y]),
+      {
+        closed: false,
+        fill: { color: prepared.hillColor },
+        stroke: {
+          color: prepared.hillStrokeColor,
+          width: HILL_STROKE_WIDTH,
+        },
+      },
+    )
+
+    for (const descriptor of hill.blades) {
+      const [rootX, rootY] = descriptor.projected
+      builder.addPath(
+        blade(descriptor.shape).map(([x, y]) => [x + rootX, y + rootY]),
+        {
+          closed: true,
+          fill: { color: prepared.bladeColor },
+          stroke: {
+            color: prepared.bladeStrokeColor,
+            width: BLADE_STROKE_WIDTH,
+          },
+        },
+      )
+    }
+  }
+
+  return builder.build()
+}

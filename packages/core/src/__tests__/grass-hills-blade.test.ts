@@ -29,7 +29,7 @@ describe('grass-hills blade', () => {
   it('returns a finite outline rooted at the origin and explicitly closed', () => {
     const outline = blade(baseShape)
 
-    expect(outline.length).toBeGreaterThan(4)
+    expect(outline).toHaveLength(7)
     expect(outline[0]).toEqual([0, 0])
     expect(outline.at(-1)).toEqual([0, 0])
     for (const point of outline) {
@@ -73,8 +73,9 @@ describe('grass-hills blade', () => {
     expect(widths[0]).toBe(0)
     expect(Math.max(...widths)).toBeCloseTo(baseShape.width)
     expect(widths.at(-1)).toBe(0)
-    expect(widths[4]).toBeGreaterThan(widths[1]!)
-    expect(widths.at(-5)).toBeGreaterThan(widths.at(-2)!)
+    expect(widths[1]).toBeGreaterThan(widths[0]!)
+    expect(widths[1]).toBeGreaterThan(widths[2]!)
+    expect(widths[2]).toBeGreaterThan(widths[3]!)
   })
 
   it('stands upright at zero lean', () => {

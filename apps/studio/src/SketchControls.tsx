@@ -5,6 +5,7 @@ import {
   applyPreset,
   buildReproMetadata,
   clipSceneToBounds,
+  computePlotMapping,
   defaultParams,
   exportFilename,
   insertPngMetadata,
@@ -16,6 +17,10 @@ import {
   resolveOutputProfile,
   resolvePlotCompositionFrame,
   type Preset,
+  type PlotProfile,
+  type CoordinateSpace,
+  type OutlineTarget,
+  type Scene,
   type Sketch,
 } from "@harness/core";
 
@@ -100,10 +105,29 @@ function sameParams(
   );
 }
 
+/** Fixed active fineliner until tool width joins the persisted Plot Profile. */
+const OUTLINE_TOOL_WIDTH_MILLIMETERS = 0.3;
+
+function outlineIdentitySourceFor(
+  sketch: Sketch,
+  profile: PlotProfile,
+  frame: CoordinateSpace,
+  sourceScene: Scene,
+): { sourceScene: Scene } | { outlineTarget: OutlineTarget } {
+  if (sketch.generateOutlineSource === undefined) return { sourceScene };
+  return {
+    outlineTarget: {
+      toolWidthMillimeters: OUTLINE_TOOL_WIDTH_MILLIMETERS,
+      millimetersPerSceneUnit: computePlotMapping(frame, profile).scale,
+    },
+  };
+}
+
 /** Whether moving between two authored states invalidates prepared Outline geometry. */
 function outlineInputsChanged(
   previous: StudioEditState,
   next: StudioEditState,
+  usesPhysicalTool: boolean,
 ): boolean {
   if (
     !sameParams(previous.params, next.params) ||
@@ -116,6 +140,13 @@ function outlineInputsChanged(
 
   const previousDrawable = plotDrawableRectangle(previous.profile);
   const nextDrawable = plotDrawableRectangle(next.profile);
+  if (
+    usesPhysicalTool &&
+    (!Object.is(previousDrawable.width, nextDrawable.width) ||
+      !Object.is(previousDrawable.height, nextDrawable.height))
+  ) {
+    return true;
+  }
   return !plotDrawableAspectsEquivalent(
     previousDrawable.width / previousDrawable.height,
     nextDrawable.width / nextDrawable.height,
@@ -348,7 +379,11 @@ export function SketchControls({
     const next = transition(current);
     if (next === current) return false;
     historyRef.current = next;
-    const invalidated = outlineInputsChanged(current.present, next.present);
+    const invalidated = outlineInputsChanged(
+      current.present,
+      next.present,
+      sketch.generateOutlineSource !== undefined,
+    );
     if (invalidated) {
       cancelOutlineCoordinator();
       dispatchOutline({ type: "inputs-changed", launch: launchOutline });
@@ -478,7 +513,12 @@ export function SketchControls({
       compositionFrame,
       tolerance: edit.tolerance,
       includeFrame: edit.profile.includeFrame,
-      sourceScene: capture.scene,
+      ...outlineIdentitySourceFor(
+        sketch,
+        edit.profile,
+        compositionFrame,
+        capture.scene,
+      ),
     });
     const next = dispatchOutline({
       type: "fill-captured",
@@ -685,11 +725,12 @@ export function SketchControls({
     // A displayed Outline is processed geometry, never a derivation source. Its
     // cache retains the immutable raw identity source for misses and is offered
     // separately as an exact reuse candidate.
-    const sourceScene =
-      displayed.renderMode === "outline"
-        ? cachedOutline === null
-          ? undefined
-          : mutableScene(cachedOutline.identity.sourceScene)
+    const sourceScene = sketch.generateOutlineSource !== undefined
+      ? displayed.scene
+      : displayed.renderMode === "outline"
+        ? cachedOutline?.identity.sourceKind === "legacy-scene"
+          ? mutableScene(cachedOutline.identity.sourceScene)
+          : undefined
         : displayed.scene;
     if (sourceScene === undefined) return;
     const identity = createOutlineComputeIdentity({
@@ -701,7 +742,12 @@ export function SketchControls({
       compositionFrame,
       tolerance: displayed.tolerance,
       includeFrame: displayed.includeFrame,
-      sourceScene,
+      ...outlineIdentitySourceFor(
+        sketch,
+        edit.profile,
+        compositionFrame,
+        sourceScene,
+      ),
     });
     const t = sketch.time === undefined ? undefined : displayed.t;
     const metadata = buildReproMetadata({
