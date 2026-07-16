@@ -26,6 +26,7 @@ import {
   type CoordinateSpace,
   type PlotProfile,
   type Preset,
+  type Scene,
   type Seed,
   type ToneSource,
 } from "@harness/core";
@@ -4070,10 +4071,25 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     return match;
   }
 
-  it("uses the real source capability without adding authored controls", () => {
+  it("shows exactly the five Scribble controls while keeping the source fixed", () => {
     const el = mount(<SketchControls sketch={toneCalibration} />);
 
-    expect(el.querySelector('#inspector input[id^="control-"]')).toBeNull();
+    expect(
+      [...el.querySelectorAll('#inspector input[id^="control-"]')].map(
+        (input) => input.id,
+      ),
+    ).toEqual([
+      "control-pathDensity",
+      "control-scribbleScale",
+      "control-momentum",
+      "control-chaos",
+      "control-toneFidelity",
+    ]);
+    expect(paramInput(el, "pathDensity").value).toBe("1");
+    expect(paramInput(el, "scribbleScale").value).toBe("1");
+    expect(paramInput(el, "momentum").value).toBe("0.75");
+    expect(paramInput(el, "chaos").value).toBe("0.25");
+    expect(paramInput(el, "toneFidelity").value).toBe("0.9");
     expect(
       [...el.querySelectorAll('[role="group"][aria-label="Render mode"] button')].map(
         (candidate) => candidate.textContent,
@@ -4083,7 +4099,10 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     clickButton(el, "Tone");
     expect(lastToneSource).not.toBeNull();
     const frame = lastCompositionFrame!;
-    const expected = toneCalibration.generateToneSource!({}, frame);
+    const expected = toneCalibration.generateToneSource!(
+      defaultParams(toneCalibration.schema),
+      frame,
+    );
     const points: [number, number][] = [
       [0, frame.height * 0.25],
       [frame.width / 2, frame.height * 0.25],
@@ -4094,7 +4113,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     );
   });
 
-  it("keeps its pixel target inert in Tone and exports only empty Fill artwork", async () => {
+  it("keeps Tone pixels inert and exports only nonempty vector Fill artwork", async () => {
     const toBlob = vi.fn((callback: BlobCallback) => {
       callback(new Blob([MINIMAL_PNG], { type: "image/png" }));
     });
@@ -4137,15 +4156,22 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(exportSceneCapture.current).toBeNull();
     expect(outlineJob.exportStarts).toBe(0);
 
-    // The ordinary SVG source contains no calibration target or guide geometry.
+    // The ordinary SVG source is the generated Scribble Scene: black open
+    // vectors, with no calibration target pixels or boundary guide geometry.
     clickButton(el, "Export SVG");
-    expect(exportSceneCapture.current).toEqual({
-      space: lastCompositionFrame,
-      primitives: [],
-    });
+    const ordinary = exportSceneCapture.current as Scene;
+    expect(ordinary.space).toEqual(lastCompositionFrame);
+    expect(ordinary.primitives.length).toBeGreaterThan(0);
+    expect(ordinary.background).toBeUndefined();
+    for (const primitive of ordinary.primitives) {
+      expect(primitive.closed).toBe(false);
+      expect(primitive.fill).toBeUndefined();
+      expect(primitive.stroke).toEqual({ color: "black", width: 1 });
+    }
 
-    // A disabled composition frame makes the empty artwork assertion meaningful:
-    // the plotter path cannot add Harness-owned frame geometry to the result.
+    // A disabled composition frame keeps the plotter assertion isolated from
+    // Harness-owned frame geometry. Ordinary stroke-only Scribbles are not
+    // implicit hidden-line sources, so this separate derived export stays empty.
     const includeFrame = compositionFrameCheckbox(el);
     expect(includeFrame.checked).toBe(true);
     act(() => includeFrame.click());
