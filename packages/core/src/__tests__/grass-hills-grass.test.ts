@@ -7,6 +7,7 @@ import {
   type HillDepthProjection,
 } from '../sketches/grass-hills/depth'
 import {
+  BASELINE_LEAN_VARIATION,
   buildGrassBlades,
   resolveMaximumUnscaledBladeLength,
 } from '../sketches/grass-hills/grass'
@@ -102,7 +103,9 @@ describe('grass blade descriptors', () => {
         1,
         4,
       ),
-      lean: SHAPE_OPTIONS.windLean * lerp(0.8, 1.2, leanRoll),
+      lean:
+        (2 * leanRoll - 1) * BASELINE_LEAN_VARIATION +
+        SHAPE_OPTIONS.windLean * lerp(0.8, 1.2, leanRoll),
     })
     // A fifth draw must not leak into any stored property.
     expect(Object.values(descriptor!.rolls)).not.toContain(random.value())
@@ -135,7 +138,7 @@ describe('grass blade descriptors', () => {
     )
   })
 
-  it('consumes rolls while zero variance resolves exact nominal values', () => {
+  it('consumes rolls while zero control variance retains fixed seeded micro-lean', () => {
     const [descriptor] = build({
       roots: [ROOTS[0]!],
       bladeLengthVariance: 0,
@@ -153,7 +156,9 @@ describe('grass blade descriptors', () => {
     })
     expect(descriptor!.shape.length).toBe(20)
     expect(descriptor!.shape.stiffness).toBe(2.5)
-    expect(descriptor!.shape.lean).toBe(0)
+    expect(descriptor!.shape.lean).toBe(
+      (2 * descriptor!.rolls.lean - 1) * BASELINE_LEAN_VARIATION,
+    )
   })
 
   it('clamps maximum variance to finite positive shape limits', () => {

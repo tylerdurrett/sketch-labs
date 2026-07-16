@@ -5,6 +5,7 @@ import {
   applyPreset,
   buildReproMetadata,
   clipSceneToBounds,
+  computePlotMapping,
   defaultParams,
   exportFilename,
   insertPngMetadata,
@@ -16,6 +17,8 @@ import {
   resolveOutputProfile,
   resolvePlotCompositionFrame,
   type Preset,
+  type PlotProfile,
+  type CoordinateSpace,
   type Sketch,
 } from "@harness/core";
 
@@ -100,10 +103,35 @@ function sameParams(
   );
 }
 
+/** Fixed active fineliner until tool width joins the persisted Plot Profile. */
+const OUTLINE_TOOL_WIDTH_MILLIMETERS = 0.3;
+
+function outlineTargetFor(
+  sketch: Sketch,
+  profile: PlotProfile,
+  frame: CoordinateSpace,
+):
+  | {
+      outlineTarget: {
+        toolWidthMillimeters: number;
+        millimetersPerSceneUnit: number;
+      };
+    }
+  | Record<string, never> {
+  if (sketch.generateOutlineSource === undefined) return {};
+  return {
+    outlineTarget: {
+      toolWidthMillimeters: OUTLINE_TOOL_WIDTH_MILLIMETERS,
+      millimetersPerSceneUnit: computePlotMapping(frame, profile).scale,
+    },
+  };
+}
+
 /** Whether moving between two authored states invalidates prepared Outline geometry. */
 function outlineInputsChanged(
   previous: StudioEditState,
   next: StudioEditState,
+  usesPhysicalTool: boolean,
 ): boolean {
   if (
     !sameParams(previous.params, next.params) ||
@@ -116,6 +144,13 @@ function outlineInputsChanged(
 
   const previousDrawable = plotDrawableRectangle(previous.profile);
   const nextDrawable = plotDrawableRectangle(next.profile);
+  if (
+    usesPhysicalTool &&
+    (!Object.is(previousDrawable.width, nextDrawable.width) ||
+      !Object.is(previousDrawable.height, nextDrawable.height))
+  ) {
+    return true;
+  }
   return !plotDrawableAspectsEquivalent(
     previousDrawable.width / previousDrawable.height,
     nextDrawable.width / nextDrawable.height,
@@ -348,7 +383,11 @@ export function SketchControls({
     const next = transition(current);
     if (next === current) return false;
     historyRef.current = next;
-    const invalidated = outlineInputsChanged(current.present, next.present);
+    const invalidated = outlineInputsChanged(
+      current.present,
+      next.present,
+      sketch.generateOutlineSource !== undefined,
+    );
     if (invalidated) {
       cancelOutlineCoordinator();
       dispatchOutline({ type: "inputs-changed", launch: launchOutline });
@@ -479,6 +518,7 @@ export function SketchControls({
       tolerance: edit.tolerance,
       includeFrame: edit.profile.includeFrame,
       sourceScene: capture.scene,
+      ...outlineTargetFor(sketch, edit.profile, compositionFrame),
     });
     const next = dispatchOutline({
       type: "fill-captured",
@@ -702,6 +742,7 @@ export function SketchControls({
       tolerance: displayed.tolerance,
       includeFrame: displayed.includeFrame,
       sourceScene,
+      ...outlineTargetFor(sketch, edit.profile, compositionFrame),
     });
     const t = sketch.time === undefined ? undefined : displayed.t;
     const metadata = buildReproMetadata({

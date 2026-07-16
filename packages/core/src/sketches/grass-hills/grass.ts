@@ -9,6 +9,9 @@ import {
 } from './grass-placement'
 import type { GrassRootCandidate } from './grass-scatter'
 
+/** Fixed seeded micro-lean selected by the issue-305 architecture decision. */
+export const BASELINE_LEAN_VARIATION = 0.32
+
 /** Grass controls that resolve the shape of every selected blade. */
 export interface GrassBladeShapeOptions {
   bladeLength: number
@@ -129,7 +132,9 @@ export function buildGrassBlades({
             1,
             4,
           ),
-          lean: windLean * lerp(0.8, 1.2, rolls.lean),
+          lean:
+            signed(rolls.lean) * BASELINE_LEAN_VARIATION +
+            windLean * lerp(0.8, 1.2, rolls.lean),
         }),
       })
     }),

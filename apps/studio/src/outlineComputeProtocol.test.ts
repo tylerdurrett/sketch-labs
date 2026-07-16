@@ -57,6 +57,24 @@ function identity(): OutlineComputeIdentity {
   });
 }
 
+function targetedIdentity(): OutlineComputeIdentity {
+  return createOutlineComputeIdentity({
+    sketchId: "triangles",
+    schema,
+    params: { zeta: 3, alpha: "#abcdef" },
+    seed: "seed",
+    sampledT: 1.5,
+    compositionFrame: { width: 120, height: 90 },
+    tolerance: 0.25,
+    includeFrame: true,
+    sourceScene: scene,
+    outlineTarget: {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    },
+  });
+}
+
 function changed(
   update: (copy: Record<string, any>) => void,
 ): OutlineComputeIdentity {
@@ -138,6 +156,30 @@ describe("outline compute identity", () => {
     expect(outlineComputeIdentitiesEqual(original, identity())).toBe(true);
   });
 
+  it("freezes and compares the active physical Outline target", () => {
+    const target = targetedIdentity();
+    const changedWidth = structuredClone(target) as Record<string, any>;
+    changedWidth.outlineTarget.toolWidthMillimeters = 0.31;
+    const changedMapping = structuredClone(target) as Record<string, any>;
+    changedMapping.outlineTarget.millimetersPerSceneUnit = 0.2;
+
+    expect(Object.isFrozen(target.outlineTarget)).toBe(true);
+    expect(outlineComputeIdentitiesEqual(target, targetedIdentity())).toBe(true);
+    expect(
+      outlineComputeIdentitiesEqual(
+        target,
+        changedWidth as OutlineComputeIdentity,
+      ),
+    ).toBe(false);
+    expect(
+      outlineComputeIdentitiesEqual(
+        target,
+        changedMapping as OutlineComputeIdentity,
+      ),
+    ).toBe(false);
+    expect(outlineComputeIdentitiesEqual(target, identity())).toBe(false);
+  });
+
   it("restores source and occluder roles without inventing omitted fields", () => {
     const restored = mutableScene(identity().sourceScene);
     const omitted = changed((copy) => {
@@ -202,6 +244,28 @@ describe("outline compute protocol guards", () => {
     "rejects malformed request %o",
     (candidate) => expect(isOutlineComputeRequest(candidate)).toBe(false),
   );
+
+  it("rejects non-positive or non-finite specialized tool targets", () => {
+    for (const outlineTarget of [
+      { toolWidthMillimeters: 0, millimetersPerSceneUnit: 0.18 },
+      { toolWidthMillimeters: 0.3, millimetersPerSceneUnit: Infinity },
+    ]) {
+      expect(() =>
+        createOutlineComputeIdentity({
+          sketchId: "triangles",
+          schema,
+          params: { zeta: 3, alpha: "#abcdef" },
+          seed: "seed",
+          sampledT: 0,
+          compositionFrame: { width: 100, height: 80 },
+          tolerance: 0,
+          includeFrame: false,
+          sourceScene: scene,
+          outlineTarget,
+        }),
+      ).toThrow(/Outline compute identity contains an invalid value/);
+    }
+  });
 
   it("rejects unknown hidden-line roles in requests and response Scenes", () => {
     const malformedRequest = structuredClone({

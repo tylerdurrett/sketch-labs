@@ -240,6 +240,19 @@ export interface TimeMetadata {
 }
 
 /**
+ * Physical output-tool values available to an on-demand Outline representation.
+ *
+ * The tool remains fixed in millimeters while the mapping states how many
+ * millimeters one unit of the current Composition Frame occupies. Keeping both
+ * values explicit makes a specialized source generator deterministic and keeps
+ * physical-output policy out of live Fill sampling.
+ */
+export interface OutlineTarget {
+  readonly toolWidthMillimeters: number
+  readonly millimetersPerSceneUnit: number
+}
+
+/**
  * Fields every Sketch carries regardless of variant: its Parameter Schema and
  * optional time metadata. Shared base for the stateless/stateful members so the
  * union below only has to differ on the frame logic.
@@ -312,6 +325,24 @@ export interface StatelessSketch extends SketchBase {
    * random-access callers can continue using {@link generate} unchanged.
    */
   prepare?(params: Params, seed: Seed, frame: CoordinateSpace): PreparedFrame
+
+  /**
+   * Optionally derive a representation-specific source Scene for on-demand
+   * Outline processing.
+   *
+   * The result is still generic Scene geometry: explicit `hiddenLineRole`
+   * values describe sources and occluders, and the Harness's ordinary
+   * Hidden-line pass produces the completed stroke-only Scene. This hook never
+   * runs in the live Fill loop. Sketches that omit it retain the legacy behavior
+   * of processing their sampled Fill Scene directly.
+   */
+  generateOutlineSource?(
+    params: Params,
+    seed: Seed,
+    t: number,
+    frame: CoordinateSpace,
+    target: OutlineTarget,
+  ): Scene
 }
 
 /**
@@ -336,9 +367,10 @@ export interface PreparedStatelessSketch extends StatelessSketch {
  * the Sketch.
  */
 export function definePreparedSketch(
-  definition: SketchBase & {
-    prepare(params: Params, seed: Seed, frame: CoordinateSpace): PreparedFrame
-  },
+  definition: SketchBase &
+    Pick<StatelessSketch, 'generateOutlineSource'> & {
+      prepare(params: Params, seed: Seed, frame: CoordinateSpace): PreparedFrame
+    },
 ): PreparedStatelessSketch {
   return {
     ...definition,

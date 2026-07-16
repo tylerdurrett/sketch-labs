@@ -2,6 +2,7 @@ import type {
   CoordinateSpace,
   HiddenLineRole,
   HiddenLineProgress,
+  OutlineTarget,
   ParamSchema,
   Params,
   PlotProfile,
@@ -42,6 +43,8 @@ export interface OutlineComputeIdentity {
   readonly tolerance: number;
   readonly includeFrame: boolean;
   readonly sourceScene: ImmutableScene;
+  /** Present only when the Sketch owns a specialized Outline source. */
+  readonly outlineTarget?: Readonly<OutlineTarget>;
 }
 
 export interface OutlineComputeRequest {
@@ -89,6 +92,7 @@ interface CreateIdentityInput {
   tolerance: number;
   includeFrame: boolean;
   sourceScene: Scene;
+  outlineTarget?: OutlineTarget;
 }
 
 const hasOwn = (value: object, key: PropertyKey): boolean =>
@@ -172,6 +176,11 @@ function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity 
     tolerance: identity.tolerance,
     includeFrame: identity.includeFrame,
     sourceScene: copyScene(identity.sourceScene),
+    ...(identity.outlineTarget === undefined
+      ? {}
+      : {
+          outlineTarget: Object.freeze({ ...identity.outlineTarget }),
+        }),
   });
 }
 
@@ -195,6 +204,9 @@ export function createOutlineComputeIdentity(
     tolerance: input.tolerance,
     includeFrame: input.includeFrame,
     sourceScene: copyScene(input.sourceScene),
+    ...(input.outlineTarget === undefined
+      ? {}
+      : { outlineTarget: Object.freeze({ ...input.outlineTarget }) }),
   });
   if (!isOutlineComputeIdentity(identity)) {
     throw new TypeError("Outline compute identity contains an invalid value");
@@ -281,6 +293,17 @@ export function isOutlineComputeIdentity(
     !isScene(value.sourceScene)
   ) {
     return false;
+  }
+  if (hasOwn(value, "outlineTarget")) {
+    if (
+      !isRecord(value.outlineTarget) ||
+      !isFiniteNumber(value.outlineTarget.toolWidthMillimeters) ||
+      value.outlineTarget.toolWidthMillimeters <= 0 ||
+      !isFiniteNumber(value.outlineTarget.millimetersPerSceneUnit) ||
+      value.outlineTarget.millimetersPerSceneUnit <= 0
+    ) {
+      return false;
+    }
   }
   let previous: string | null = null;
   for (const entry of value.params) {
@@ -435,6 +458,17 @@ export function outlineComputeIdentitiesEqual(
     Object.is(left.compositionFrame.height, right.compositionFrame.height) &&
     Object.is(left.tolerance, right.tolerance) &&
     Object.is(left.includeFrame, right.includeFrame) &&
+    ((left.outlineTarget === undefined && right.outlineTarget === undefined) ||
+      (left.outlineTarget !== undefined &&
+        right.outlineTarget !== undefined &&
+        Object.is(
+          left.outlineTarget.toolWidthMillimeters,
+          right.outlineTarget.toolWidthMillimeters,
+        ) &&
+        Object.is(
+          left.outlineTarget.millimetersPerSceneUnit,
+          right.outlineTarget.millimetersPerSceneUnit,
+        ))) &&
     left.params.length === right.params.length &&
     left.params.every((entry, index) => {
       const other = right.params[index];
