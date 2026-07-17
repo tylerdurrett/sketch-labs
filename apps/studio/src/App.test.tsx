@@ -250,13 +250,34 @@ describe("App — keyed edit-history sessions", () => {
 });
 
 describe("App — Tone Calibration integration (#324)", () => {
-  it("opens on the control-free calibration target and resets its diagnostic view after switching", () => {
+  it("opens on Scribble controls and resets its diagnostic view after switching", () => {
     mountApp();
 
     expect(trigger().textContent).toBe("Tone Calibration");
     expect(
-      document.querySelector('#inspector input[id^="control-"]'),
-    ).toBeNull();
+      [...document.querySelectorAll('#inspector input[id^="control-"]')].map(
+        (input) => input.id,
+      ),
+    ).toEqual([
+      "control-pathDensity",
+      "control-scribbleScale",
+      "control-momentum",
+      "control-chaos",
+      "control-toneFidelity",
+    ]);
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-params"),
+    ).toBe(
+      JSON.stringify({
+        pathDensity: 1,
+        scribbleScale: 1,
+        momentum: 0.75,
+        chaos: 0.25,
+        toneFidelity: 0.9,
+      }),
+    );
     expect(
       [...document.querySelectorAll("summary")].find(
         (summary) => summary.textContent?.includes("Paper"),
@@ -300,6 +321,9 @@ describe("App — Tone Calibration integration (#324)", () => {
         .querySelector('[data-testid="canvas"]')
         ?.getAttribute("data-render-state"),
     ).toBe("fill-live");
+    expect(
+      document.querySelectorAll('#inspector input[id^="control-"]'),
+    ).toHaveLength(5);
   });
 });
 

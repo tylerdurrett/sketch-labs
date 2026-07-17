@@ -15,6 +15,18 @@ export * from './hiddenLine'
 export * from './scene'
 export * from './compositionFrame'
 export * from './shadingFields'
+export * from './shadingStrategy'
+export {
+  scribbleStrategy,
+  type ScribbleResult,
+  type ScribbleStrategyInput,
+} from './scribbleStrategy/index'
+export {
+  defaultScribbleControls,
+  scribbleControlSchema,
+  type ScribbleControlName,
+  type ScribbleControls,
+} from './scribbleStrategy/types'
 export * from './plotProfile'
 export * from './plotMapping'
 export * from './plotterSvg'

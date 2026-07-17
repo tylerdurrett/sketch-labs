@@ -5,12 +5,18 @@
  * Fill therefore contains only a sparse set of black vector contours derived
  * from the same fixed layout: the moon, its craters and inner contours, a halo,
  * a broken ring, and two satellites. The structural builder is intentionally
- * separate from `generate`; a later Shading Strategy may append Seeded Scribble
- * paths without making these identifying contours depend on Seed.
+ * separate from the Scribble pass so these identifying contours remain fixed
+ * while Seed and the shared artist controls change the generated shading.
  */
 
 import { createScene } from '../../scene'
 import type { CoordinateSpace, Scene } from '../../scene'
+import {
+  scribbleControlSchema,
+  scribbleStrategy,
+  type ScribbleControls,
+  type ScribbleResult,
+} from '../../scribbleStrategy'
 import type {
   NumberParamSpec,
   Params,
@@ -37,7 +43,7 @@ export * from './source'
 
 const FULL_CIRCLE_SEGMENTS = 72
 
-/** The complete Scribble Moon source-control surface. */
+/** Scribble Moon's source controls followed by the five shared Scribble controls. */
 export const scribbleMoonSchema = {
   /** Direction of the sphere's projected light, in degrees. */
   lightAngle: {
@@ -71,7 +77,31 @@ export const scribbleMoonSchema = {
     default: 0.5,
     step: 0.01,
   },
+  ...scribbleControlSchema,
 } satisfies Record<string, NumberParamSpec>
+
+function sourceControls(params: Params) {
+  return {
+    lightAngle: numberParam(params, scribbleMoonSchema, 'lightAngle'),
+    terminatorSoftness: numberParam(
+      params,
+      scribbleMoonSchema,
+      'terminatorSoftness',
+    ),
+    toneContrast: numberParam(params, scribbleMoonSchema, 'toneContrast'),
+    maskFeather: numberParam(params, scribbleMoonSchema, 'maskFeather'),
+  }
+}
+
+function scribbleControls(params: Params): ScribbleControls {
+  return {
+    pathDensity: numberParam(params, scribbleMoonSchema, 'pathDensity'),
+    scribbleScale: numberParam(params, scribbleMoonSchema, 'scribbleScale'),
+    momentum: numberParam(params, scribbleMoonSchema, 'momentum'),
+    chaos: numberParam(params, scribbleMoonSchema, 'chaos'),
+    toneFidelity: numberParam(params, scribbleMoonSchema, 'toneFidelity'),
+  }
+}
 
 function circlePath(
   circle: ScribbleMoonCircle,
@@ -136,69 +166,97 @@ export function createScribbleMoonStructuralScene(
   builder.addPath(circlePath(layout.halo), {
     closed: true,
     stroke: fineStroke,
+    hiddenLineRole: 'source',
   })
   for (const segment of layout.brokenRingSegments) {
     builder.addPath(ellipseArcPath(segment), {
       closed: false,
       stroke,
+      hiddenLineRole: 'source',
     })
   }
   for (const satellite of layout.satellites) {
     builder.addPath(circlePath(satellite, 24), {
       closed: true,
       stroke,
+      hiddenLineRole: 'source',
     })
   }
   builder.addPath(circlePath(layout.sphere), {
     closed: true,
     stroke,
+    hiddenLineRole: 'source',
   })
   for (const crater of layout.craters) {
     builder.addPath(circlePath(crater, 32), {
       closed: true,
       stroke: fineStroke,
+      hiddenLineRole: 'source',
     })
   }
   for (const contour of layout.structuralContours) {
     builder.addPath(circleArcPath(contour), {
       closed: false,
       stroke: fineStroke,
+      hiddenLineRole: 'source',
     })
   }
 
   return builder.build()
 }
 
-/** A static authored moon whose procedural target is available diagnostically. */
+/**
+ * Generate only Scribble Moon's headless strategy result.
+ *
+ * Keeping this seam independent of Scene styling lets downstream integrations
+ * inspect truthful termination and residual error without duplicating how Moon
+ * resolves its source and the five shared controls.
+ */
+export function generateScribbleMoonScribble(
+  params: Params,
+  seed: Seed,
+  frame: CoordinateSpace,
+): ScribbleResult {
+  return scribbleStrategy({
+    source: createScribbleMoonSource(sourceControls(params), frame),
+    frame,
+    controls: scribbleControls(params),
+    seed,
+  })
+}
+
+/** A contour-plus-Scribble moon whose procedural target remains diagnostic. */
 export const scribbleMoon: StatelessSketch = {
   id: 'scribble-moon',
   name: 'Scribble Moon',
   schema: scribbleMoonSchema,
   generateToneSource(params: Params, frame: CoordinateSpace) {
-    return createScribbleMoonSource(
-      {
-        lightAngle: numberParam(params, scribbleMoonSchema, 'lightAngle'),
-        terminatorSoftness: numberParam(
-          params,
-          scribbleMoonSchema,
-          'terminatorSoftness',
-        ),
-        toneContrast: numberParam(
-          params,
-          scribbleMoonSchema,
-          'toneContrast',
-        ),
-        maskFeather: numberParam(params, scribbleMoonSchema, 'maskFeather'),
-      },
-      frame,
-    )
+    return createScribbleMoonSource(sourceControls(params), frame)
   },
   generate(
-    _params: Params,
-    _seed: Seed,
+    params: Params,
+    seed: Seed,
     _t: number,
     frame: CoordinateSpace,
   ): Scene {
-    return createScribbleMoonStructuralScene(frame)
+    const structural = createScribbleMoonStructuralScene(frame)
+    const scribble = generateScribbleMoonScribble(params, seed, frame)
+    const builder = createScene(frame)
+
+    for (const primitive of structural.primitives) builder.add(primitive)
+
+    const stroke = {
+      color: 'black',
+      width: Math.min(frame.width, frame.height) * 0.0011,
+    }
+    for (const polyline of scribble.polylines) {
+      builder.addPath(polyline, {
+        closed: false,
+        stroke,
+        hiddenLineRole: 'source',
+      })
+    }
+
+    return builder.build()
   },
 }
