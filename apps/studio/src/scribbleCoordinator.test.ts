@@ -16,6 +16,13 @@ const schema: ParamSchema = {
   amount: { kind: "number", min: 0, max: 10, default: 1 },
 };
 
+const imageAssetSchema: ParamSchema = {
+  imageAsset: {
+    kind: "image-asset",
+    default: "pinecone-4330aa0314f7",
+  },
+};
+
 const scene: Scene = {
   space: { width: 20, height: 20 },
   primitives: [
@@ -43,6 +50,16 @@ function identity(amount = 1): ScribbleComputeIdentity {
     schema,
     params: { amount },
     seed: 123,
+    compositionFrame: scene.space,
+  });
+}
+
+function imageIdentity(seed: string): ScribbleComputeIdentity {
+  return createScribbleComputeIdentity({
+    sketchId: "photo-scribble",
+    schema: imageAssetSchema,
+    params: { imageAsset: "pinecone-4330aa0314f7" },
+    seed,
     compositionFrame: scene.space,
   });
 }
@@ -271,6 +288,41 @@ describe("ScribbleCoordinator", () => {
       status: "success",
       jobId: 2,
     });
+    expect(secondWorker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it("keeps seed-only replacement requests identity-only and ignores late events", async () => {
+    const firstWorker = new FakeWorker();
+    const secondWorker = new FakeWorker();
+    const workers = [firstWorker, secondWorker];
+    const coordinator = new ScribbleCoordinator(() => workers.shift()!);
+
+    const first = coordinator.start(imageIdentity("seed-a"));
+    expect(firstWorker.request).toEqual({
+      type: "compute",
+      jobId: 1,
+      identity: imageIdentity("seed-a"),
+    });
+    expect(JSON.stringify(firstWorker.request)).not.toMatch(
+      /data|pixels|bitmap|blob/i,
+    );
+    coordinator.cancel();
+    await expect(first).resolves.toEqual({ status: "cancelled", jobId: 1 });
+
+    const second = coordinator.start(imageIdentity("seed-b"));
+    expect(secondWorker.request?.identity.params).toEqual(
+      firstWorker.request?.identity.params,
+    );
+    expect(secondWorker.request?.identity.seed).toBe("seed-b");
+    firstWorker.emit("message", successResponse(firstWorker));
+    expect(coordinator.busy).toBe(true);
+
+    secondWorker.emit("message", successResponse(secondWorker));
+    await expect(second).resolves.toMatchObject({
+      status: "success",
+      identity: { sketchId: "photo-scribble", seed: "seed-b" },
+    });
+    expect(firstWorker.terminate).toHaveBeenCalledOnce();
     expect(secondWorker.terminate).toHaveBeenCalledOnce();
   });
 
