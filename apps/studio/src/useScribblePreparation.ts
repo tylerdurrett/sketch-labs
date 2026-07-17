@@ -64,6 +64,8 @@ export interface ScribblePreparationProgress {
 export interface UseScribblePreparationResult {
   readonly session: ScribbleSessionState;
   readonly progress: ScribblePreparationProgress | null;
+  /** Read the reducer's latest synchronous state, including same-batch edits. */
+  readonly getSessionSnapshot: () => ScribbleSessionState;
   /** Cancel active preparation before a history transaction starts previewing. */
   readonly beginTransaction: () => void;
   /** Record the latest transaction preview without launching preparation. */
@@ -334,6 +336,7 @@ export function useScribblePreparation({
   return {
     session,
     progress,
+    getSessionSnapshot: () => sessionRef.current,
     beginTransaction,
     previewAuthoredState,
     settleTransaction,

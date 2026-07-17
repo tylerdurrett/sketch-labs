@@ -358,6 +358,8 @@ describe("App — hidden-line navigation guard (#289)", () => {
 
   it("guards navigation for an export while inspector collapse remains available", async () => {
     mountApp();
+    // Export readiness is immediate for an ordinary live-Fill Sketch.
+    selectOption("Circles");
     const exportButton = [...document.querySelectorAll("button")].find(
       (button) => button.textContent === "Export Hidden-line SVG",
     ) as HTMLButtonElement;
