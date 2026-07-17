@@ -208,17 +208,27 @@ describe("Scribble compute protocol guards", () => {
     expect(isScribbleWorkerMessage(completed)).toBe(true);
   });
 
-  it("keeps progress compact and identity-free", () => {
+  it("accepts early terminal progress and keeps it compact and identity-free", () => {
     const progress = {
       type: "progress",
       jobId: 7,
       snapshot: {
-        completedWorkUnits: 10,
+        completedWorkUnits: 2,
         totalWorkUnits: 10,
         terminal: true,
       },
     };
     expect(isScribbleComputeProgress(progress)).toBe(true);
+    expect(
+      isScribbleComputeProgress({
+        ...progress,
+        snapshot: {
+          completedWorkUnits: 0,
+          totalWorkUnits: 0,
+          terminal: true,
+        },
+      }),
+    ).toBe(true);
     expect(progress).not.toHaveProperty("identity");
     expect(
       isScribbleComputeProgress({ ...progress, identity: identity() }),
@@ -283,10 +293,6 @@ describe("Scribble compute protocol guards", () => {
         snapshot: { ...progress.snapshot, totalWorkUnits: Infinity },
       },
       { ...progress, snapshot: { ...progress.snapshot, terminal: "no" } },
-      {
-        ...progress,
-        snapshot: { completedWorkUnits: 2, totalWorkUnits: 10, terminal: true },
-      },
       { ...progress, snapshot: { ...progress.snapshot, extra: true } },
     ];
     for (const candidate of invalid) {

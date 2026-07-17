@@ -257,7 +257,7 @@ function isScribbleProgressSnapshot(value: unknown): value is ScribbleProgress {
   ) {
     return false;
   }
-  return !value.terminal || value.completedWorkUnits === value.totalWorkUnits;
+  return true;
 }
 
 export function isScribbleComputeProgress(
