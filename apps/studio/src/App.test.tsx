@@ -29,6 +29,26 @@ import type { LiveCanvasHandle } from "./LiveCanvas";
   true;
 
 const appImageResolution = vi.hoisted(() => ({ ids: [] as string[] }));
+const appNormalization = vi.hoisted(() => ({ caps: [] as number[] }));
+
+vi.mock("./imageAssetNormalization", async (importActual) => {
+  const actual =
+    await importActual<typeof import("./imageAssetNormalization")>();
+  return {
+    ...actual,
+    normalizeImageAsset: async (
+      _file: Blob,
+      options: { readonly maxLongEdge: number },
+    ) => {
+      appNormalization.caps.push(options.maxLongEdge);
+      return {
+        png: new Blob(["normalized"], { type: "image/png" }),
+        width: 12,
+        height: 8,
+      };
+    },
+  };
+});
 
 vi.mock("./imageAssetResolver", async (importActual) => {
   const actual = await importActual<typeof import("./imageAssetResolver")>();
@@ -131,7 +151,9 @@ afterEach(() => {
   container = null;
   root = null;
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
   appImageResolution.ids = [];
+  appNormalization.caps = [];
   exportJob.resolve = null;
 });
 
@@ -376,6 +398,55 @@ describe("App — Photo Scribble integration (#333)", () => {
       PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
       PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
     ]);
+  });
+
+  it("wires the default 2048px normalization cap into image import", async () => {
+    vi.stubGlobal("fetch", (_url: string, init?: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify(
+              init?.method === "POST"
+                ? { id: "app-import-bbbbbbbbbbbb", created: true }
+                : [],
+            ),
+          ),
+      } as Response),
+    );
+    mountApp();
+    const choose = [
+      ...document.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((candidate) => candidate.textContent === "Choose image")!;
+    act(() => choose.click());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const input = document.querySelector<HTMLInputElement>(
+      '#inspector input[type="file"]',
+    )!;
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [new File(["source"], "App Import.webp")],
+    });
+    act(() => input.dispatchEvent(new Event("change", { bubbles: true })));
+    const confirm = [
+      ...document.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((candidate) => candidate.textContent === "Import Image Asset")!;
+    act(() => confirm.click());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(appNormalization.caps).toEqual([2048]);
+    expect(
+      document.querySelector(
+        '[aria-label="imageAsset image asset identity"]',
+      )?.textContent,
+    ).toBe("app-import-bbbbbbbbbbbb");
   });
 });
 

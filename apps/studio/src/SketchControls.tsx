@@ -99,6 +99,7 @@ import {
   type ScribbleAuthoredState,
 } from "./useScribblePreparation";
 import { useSketchEnvironment } from "./useSketchEnvironment";
+import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
 
 function formatOutlineEta(remainingMs: number): string {
   const seconds = Math.max(1, Math.ceil(remainingMs / 1_000));
@@ -224,6 +225,8 @@ export interface SketchControlsProps {
   onToggleCollapse?: () => void;
   /** Reports the complete capture/compute interval to App's navigation guard. */
   onHiddenLineBusyChange?: (busy: boolean) => void;
+  /** Longest normalized source edge for Image Asset imports. */
+  imageAssetLongEdgeCap?: number;
 }
 
 /**
@@ -273,6 +276,7 @@ export function SketchControls({
   collapsed = false,
   onToggleCollapse,
   onHiddenLineBusyChange,
+  imageAssetLongEdgeCap = STUDIO_IMAGE_ASSET_LONG_EDGE_CAP,
 }: SketchControlsProps) {
   const [history, setHistory] = useState<EditHistory>(() =>
     createEditHistory({
@@ -677,8 +681,9 @@ export function SketchControls({
   const canvasHandle = useRef<LiveCanvasHandle>(null);
 
   // Value type mirrors ControlPanel's onChange seam: `number` from a
-  // NumberControl, a hex color `string` from a ColorControl. The params state
-  // itself is `Record<string, unknown>`, so only this handler widens.
+  // NumberControl, a hex color `string` from a ColorControl, or an Image Asset
+  // ID from ImageAssetControl. The params state itself is
+  // `Record<string, unknown>`, so only this handler widens.
   const setParam = (key: string, value: number | string) => {
     commitLeaf("params", { ...historyRef.current.present.params, [key]: value });
   };
@@ -1304,6 +1309,7 @@ export function SketchControls({
             onCancel: cancelTransaction,
           }}
           onToggleLock={toggleLock}
+          imageAssetLongEdgeCap={imageAssetLongEdgeCap}
         />
         <div className="flex flex-wrap gap-2">
           <Button

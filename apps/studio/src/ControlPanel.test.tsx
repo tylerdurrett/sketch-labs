@@ -34,6 +34,7 @@ afterEach(() => {
   container = null;
   root = null;
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const numberSpec = (over: Record<string, unknown> = {}): ParamSpec =>
@@ -154,6 +155,64 @@ describe("ControlPanel", () => {
     expect(html).toContain(`src="/image-assets/${value}.png"`);
     expect(html).not.toContain("unsupported control kind");
     expect(html).not.toContain('aria-label="source lock"');
+  });
+
+  it("routes an Image Asset choice through the ordinary lock-free setter", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({
+        ok: true,
+        text: () =>
+          Promise.resolve(JSON.stringify(["apple-tree-bbbbbbbbbbbb"])),
+      } as Response),
+    );
+    const onChange = vi.fn();
+    const onBegin = vi.fn();
+    const onPreview = vi.fn();
+    const onCommit = vi.fn();
+    const el = mount(
+      <ControlPanel
+        schema={{
+          source: {
+            kind: "image-asset",
+            default: "default-aaaaaaaaaaaa",
+          },
+        }}
+        params={{ source: "current-cccccccccccc" }}
+        locks={new Set(["source"])}
+        onChange={onChange}
+        editHistory={{
+          onBegin,
+          onPreview,
+          onCommit,
+          onCancel: vi.fn(),
+        }}
+        onToggleLock={vi.fn()}
+      />,
+    );
+
+    act(() => {
+      [...el.querySelectorAll<HTMLButtonElement>("button")]
+        .find((candidate) => candidate.textContent === "Choose image")!
+        .click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      el.querySelector<HTMLButtonElement>(
+        '[aria-label="Image Assets"] button',
+      )!.click();
+    });
+
+    expect(onChange).toHaveBeenCalledWith(
+      "source",
+      "apple-tree-bbbbbbbbbbbb",
+    );
+    expect(onBegin).not.toHaveBeenCalled();
+    expect(onPreview).not.toHaveBeenCalled();
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(el.querySelector('[aria-label="source lock"]')).toBeNull();
   });
 
   it("falls image-asset back only for a missing or nonstring runtime value", () => {
