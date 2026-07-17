@@ -41,6 +41,8 @@ describe('Photo Scribble tone controls', () => {
   it('maps gamma symmetrically to reciprocal exponents around the center', () => {
     expect(toneGammaExponent(0)).toBe(0.5)
     expect(toneGammaExponent(1)).toBe(2)
+    expect(toneGammaExponent(0.25)).toBeCloseTo(2 ** -0.5, 14)
+    expect(toneGammaExponent(0.75)).toBeCloseTo(2 ** 0.5, 14)
     expect(toneGammaExponent(0.25) * toneGammaExponent(0.75)).toBeCloseTo(1, 14)
   })
 
