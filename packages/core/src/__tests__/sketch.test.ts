@@ -258,6 +258,51 @@ describe('caller-owned prepared frames', () => {
     expect(generated).toBe(2)
   })
 
+  it('preserves exact legacy invocation arity when no environment is supplied', () => {
+    const params = { offset: 2 }
+    const prepare = vi.fn(() => sceneAt)
+    const specialized = definePreparedSketch({
+      id: 'legacy-arity-prepared',
+      name: 'Legacy arity prepared',
+      schema: {},
+      prepare,
+    })
+    const generate = vi.fn(
+      (_params: Params, _seed: string | number, t: number) => sceneAt(t),
+    )
+    const legacy: StatelessSketch = {
+      id: 'legacy-arity-generate',
+      name: 'Legacy arity generate',
+      schema: {},
+      generate,
+    }
+
+    specialized.generate(params, 1, 2, DEFAULT_COMPOSITION_FRAME)
+    expect(prepare).toHaveBeenLastCalledWith(
+      params,
+      1,
+      DEFAULT_COMPOSITION_FRAME,
+    )
+
+    prepare.mockClear()
+    prepareSketch(specialized, params, 1, DEFAULT_COMPOSITION_FRAME)(2)
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(prepare).toHaveBeenCalledWith(
+      params,
+      1,
+      DEFAULT_COMPOSITION_FRAME,
+    )
+
+    prepareSketch(legacy, params, 1, DEFAULT_COMPOSITION_FRAME)(2)
+    expect(generate).toHaveBeenCalledOnce()
+    expect(generate).toHaveBeenCalledWith(
+      params,
+      1,
+      2,
+      DEFAULT_COMPOSITION_FRAME,
+    )
+  })
+
   it('forwards the optional environment through prepared and legacy paths', () => {
     const pixels: DecodedPixels = {
       width: 1,

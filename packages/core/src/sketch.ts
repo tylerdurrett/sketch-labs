@@ -504,7 +504,9 @@ export interface PreparedStatelessSketch extends StatelessSketch {
  * `prepare(params, seed, frame, environment)(t)`. The public ADR-0002 contract
  * therefore remains the source of truth for every random-access caller, while
  * sequential Harness callers can explicitly retain the prepared sampler. No
- * cache lives in the Sketch.
+ * cache lives in the Sketch. When no environment is supplied, the adapter keeps
+ * the historical three-argument `prepare` invocation exactly; this preserves
+ * compatibility with existing implementations, spies, and call-boundary code.
  */
 export function definePreparedSketch(
   definition: SketchBase &
@@ -525,7 +527,9 @@ export function definePreparedSketch(
   return {
     ...definition,
     generate(params, seed, t, frame, environment) {
-      return definition.prepare(params, seed, frame, environment)(t)
+      return (environment === undefined
+        ? definition.prepare(params, seed, frame)
+        : definition.prepare(params, seed, frame, environment))(t)
     },
   }
 }
@@ -537,7 +541,8 @@ export function definePreparedSketch(
  * over their existing `generate`; prepared Sketches hand back their optimized,
  * caller-owned sampler. Either path has identical observable frame semantics. The
  * Composition Frame and optional pre-resolved environment are captured here and
- * threaded to both paths.
+ * threaded to both paths. The absent-environment path retains the historical
+ * three-argument `prepare` and four-argument `generate` invocation arities.
  */
 export function prepareSketch(
   sketch: StatelessSketch,
@@ -546,10 +551,15 @@ export function prepareSketch(
   frame: CoordinateSpace,
   environment?: SketchEnvironment,
 ): PreparedFrame {
-  return (
-    sketch.prepare?.(params, seed, frame, environment) ??
-    ((t) => sketch.generate(params, seed, t, frame, environment))
-  )
+  const prepared =
+    environment === undefined
+      ? sketch.prepare?.(params, seed, frame)
+      : sketch.prepare?.(params, seed, frame, environment)
+  if (prepared !== undefined) return prepared
+
+  return environment === undefined
+    ? (t) => sketch.generate(params, seed, t, frame)
+    : (t) => sketch.generate(params, seed, t, frame, environment)
 }
 
 /**
