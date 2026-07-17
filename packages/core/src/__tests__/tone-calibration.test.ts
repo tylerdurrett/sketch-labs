@@ -306,6 +306,7 @@ describe('Tone Calibration Scribble integration', () => {
       height: 120,
       insets: { top: 10, right: 10, bottom: 10, left: 10 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     })
     const paths = svg.match(/<path\b[^>]*>/g) ?? []
 

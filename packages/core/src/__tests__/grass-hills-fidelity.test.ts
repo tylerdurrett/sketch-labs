@@ -539,6 +539,7 @@ describe('Grass Hills real-call-site visible-contour fidelity', () => {
       height: 101.25,
       insets: { top: 0, right: 0, bottom: 0, left: 0 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     }
     renderToCanvas(noOpCanvas(), simplified)
     renderPlotterSVG(clipSceneToBounds(simplified), profile)

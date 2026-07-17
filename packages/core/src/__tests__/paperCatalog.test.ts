@@ -94,14 +94,12 @@ describe('standardPaperProfile', () => {
       insets: ZERO_INSETS,
       includeFrame: true,
       toolWidthMillimeters: 0.3,
-      toolWidthMillimeters: 0.3,
     })
     expect(standardPaperProfile('square', 'landscape')).toEqual({
       width: 200,
       height: 200,
       insets: ZERO_INSETS,
       includeFrame: true,
-      toolWidthMillimeters: 0.3,
       toolWidthMillimeters: 0.3,
     })
   })

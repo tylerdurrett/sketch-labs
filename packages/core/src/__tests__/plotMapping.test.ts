@@ -8,6 +8,7 @@ const profile: PlotProfile = {
   height: 160,
   insets: { top: 20, right: 30, bottom: 40, left: 10 },
   includeFrame: true,
+  toolWidthMillimeters: 0.3,
 }
 
 function nextRepresentableFloat(value: number): number {
@@ -34,6 +35,7 @@ describe('computePlotMapping', () => {
       height: 240,
       insets: { top: 10, right: 20, bottom: 30, left: 10 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     }
 
     // Drawable: 90 × 200 mm, matching the portrait frame's 0.45 aspect.
@@ -54,12 +56,14 @@ describe('computePlotMapping', () => {
       height: 70,
       insets: { top: 10, right: 10, bottom: 10, left: 10 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     }
     const doubled: PlotProfile = {
       width: 240,
       height: 140,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     }
 
     expect(computePlotMapping(space, small)).toEqual({
@@ -84,6 +88,7 @@ describe('computePlotMapping', () => {
       height: 1,
       insets: { top: 0, right: 0, bottom: 0, left: 0 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     }
 
     const mapping = computePlotMapping(space, noisyProfile)
@@ -132,6 +137,7 @@ describe('computePlotMapping', () => {
       height: 160,
       insets: { top: 80, right: 30, bottom: 80, left: 10 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     }
 
     expect(() =>
@@ -146,6 +152,7 @@ describe('computePlotMapping', () => {
       height: 160,
       insets: { top: 20, right: 30, bottom: 40, left: 10 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     }
     const originalSpace = structuredClone(space)
     const originalProfile = structuredClone(mutableProfile)

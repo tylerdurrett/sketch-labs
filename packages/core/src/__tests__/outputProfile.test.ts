@@ -16,6 +16,7 @@ function makeProfile(label = 1): PlotProfile {
     height: 150 + label,
     insets: { top: 5, right: 5, bottom: 5, left: 5 },
     includeFrame: true,
+    toolWidthMillimeters: 0.3,
   }
 }
 
