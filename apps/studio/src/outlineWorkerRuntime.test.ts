@@ -5,7 +5,10 @@ import {
   defaultParams,
   grassHills,
   hiddenLinePass,
+  registry,
   renderPlotterSVG,
+  toneCalibration,
+  type OutlineTarget,
   type ParamSchema,
   type PlotProfile,
   type Scene,
@@ -212,6 +215,89 @@ describe("outline worker runtime", () => {
       ),
     ).toBe(true);
     expect(derive).toHaveBeenCalledWith(specialized, 0.4, false, undefined);
+  });
+
+  it("dispatches completed artwork to Scene-based specialization without regeneration", () => {
+    const completed = structuredClone(hybridSource);
+    const specialized: Scene = {
+      ...completed,
+      primitives: completed.primitives.map((primitive) => ({
+        ...primitive,
+        stroke: { color: "black", width: 2 },
+      })),
+    };
+    const deriveOutlineSource = vi.fn(
+      (_completed: Readonly<Scene>, _target: OutlineTarget) => specialized,
+    );
+    const generate = vi.fn(toneCalibration.generate);
+    const registryGet = vi
+      .spyOn(registry, "get")
+      .mockReturnValue({ ...toneCalibration, generate, deriveOutlineSource });
+    const target = {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    };
+    const identity = createOutlineComputeIdentity({
+      sketchId: toneCalibration.id,
+      schema: toneCalibration.schema,
+      params: defaultParams(toneCalibration.schema),
+      seed: "prepared-seed",
+      sampledT: 0,
+      compositionFrame: completed.space,
+      tolerance: 0.2,
+      includeFrame: false,
+      sourceScene: completed,
+      outlineTarget: target,
+    });
+    const derive = vi.fn((..._args: Parameters<typeof outlineScene>) =>
+      specialized,
+    );
+
+    const response = handleOutlineWorkerMessage(
+      { type: "compute", jobId: 12, identity },
+      derive,
+    );
+
+    expect(response).toMatchObject({ type: "success", jobId: 12 });
+    expect(identity.sourceKind).toBe("completed-scene-sketch");
+    expect(deriveOutlineSource).toHaveBeenCalledOnce();
+    expect(deriveOutlineSource.mock.calls[0]?.[0]).toEqual(completed);
+    expect(deriveOutlineSource.mock.calls[0]?.[0]).not.toBe(completed);
+    expect(deriveOutlineSource).toHaveBeenCalledWith(expect.anything(), target);
+    expect(generate).not.toHaveBeenCalled();
+    expect(derive).toHaveBeenCalledWith(specialized, 0.2, false, undefined);
+    registryGet.mockRestore();
+  });
+
+  it("rejects completed-Scene specialization mismatches without regeneration fallback", () => {
+    const identity = createOutlineComputeIdentity({
+      sketchId: "circles",
+      schema,
+      params: {},
+      seed: 1,
+      sampledT: 0,
+      compositionFrame: source.space,
+      tolerance: 0,
+      includeFrame: false,
+      sourceScene: source,
+      outlineTarget: {
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.18,
+      },
+    });
+    const derive = vi.fn();
+
+    expect(
+      handleOutlineWorkerMessage(
+        { type: "compute", jobId: 13, identity },
+        derive,
+      ),
+    ).toMatchObject({
+      type: "failure",
+      jobId: 13,
+      error: "Sketch circles has no completed-Scene Outline source",
+    });
+    expect(derive).not.toHaveBeenCalled();
   });
 
   it("surfaces a specialized-source mismatch without legacy fallback", () => {

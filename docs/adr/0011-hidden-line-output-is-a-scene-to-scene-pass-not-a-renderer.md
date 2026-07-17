@@ -32,3 +32,14 @@ it is part of Outline cache identity and is evaluated in the worker. Sketches
 without the capability retain legacy Fill-Scene processing. Once a specialized
 target is requested, source-generation failure is surfaced and never silently
 downgraded to the legacy representation.
+
+Prepared consumers have an additive sibling capability,
+`deriveOutlineSource(completedScene, target)`. It preserves the same on-demand
+Scene-to-Scene architecture, but makes an already-completed caller-owned Scene
+authoritative: the worker may restyle that Scene for the physical target without
+regenerating it from params, Seed, or time. Outline identity therefore
+distinguishes legacy Scene input, parameter-driven specialized Sketch input, and
+completed-Scene specialized Sketch input. The completed-Scene form carries both
+an immutable Scene snapshot and the target so cache reuse and export freshness
+remain exact. Existing `generateOutlineSource` Sketches and Scene-free worker
+requests retain their prior behavior.

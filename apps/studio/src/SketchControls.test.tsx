@@ -183,7 +183,7 @@ vi.mock("./hiddenLineCoordinator", () => ({
       const processed =
         snapshot.reusableOutline === undefined
           ? outlineScene(
-              snapshot.identity.sourceKind === "legacy-scene"
+              snapshot.identity.sourceKind !== "specialized-sketch"
                 ? mutableScene(snapshot.identity.sourceScene)
                 : {
                     space: { ...snapshot.identity.compositionFrame },
@@ -443,7 +443,7 @@ vi.mock("./LiveCanvas", () => ({
       if (active === null) return;
       outlineJob.active = null;
       const scene = outlineScene(
-        active.identity.sourceKind === "legacy-scene"
+        active.identity.sourceKind !== "specialized-sketch"
           ? mutableScene(active.identity.sourceScene)
           : {
               space: { ...active.identity.compositionFrame },
@@ -4637,6 +4637,61 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(exportSceneCapture.current).toBeNull();
     expect(outlineJob.exportStarts).toBe(0);
     expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("carries the exact painted Scribble Scene through completed-Scene Outline identity and reuse", async () => {
+    autoFireOutlineComputed = false;
+    const generate = vi.fn(toneCalibration.generate);
+    const deriveOutlineSource = vi.fn((completed: Readonly<Scene>) =>
+      structuredClone(completed),
+    );
+    const el = mount(
+      <SketchControls
+        sketch={{ ...toneCalibration, generate, deriveOutlineSource }}
+      />,
+    );
+    const exactScene = preparedScene(21);
+    exactScene.primitives[0]!.stroke = { color: "navy", width: 0.75 };
+    await completeScribble(0, exactScene);
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    const identity = outlineJob.lastIdentity;
+    expect(identity?.sourceKind).toBe("completed-scene-sketch");
+    if (identity?.sourceKind !== "completed-scene-sketch") {
+      throw new Error("expected completed-Scene identity");
+    }
+    expect(identity.sourceScene).toEqual(exactScene);
+    expect(identity.sourceScene).not.toBe(exactScene);
+    expect(identity.outlineTarget).toEqual({
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: expect.any(Number),
+    });
+    expect(generate).not.toHaveBeenCalled();
+    expect(deriveOutlineSource).not.toHaveBeenCalled();
+
+    act(() => lastOnOutlineComputed?.());
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.lastExportSnapshot?.identity.sourceKind).toBe(
+      "completed-scene-sketch",
+    );
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(generate).not.toHaveBeenCalled();
+    expect(deriveOutlineSource).not.toHaveBeenCalled();
+
+    outlineJob.exportStarts = 0;
+    clickButton(el, "New seed");
+    act(() => {
+      const hidden = exportButton(el, "Export Hidden-line SVG");
+      hidden.disabled = false;
+      hidden.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(generate).not.toHaveBeenCalled();
   });
 
   it("waits for a cache re-promotion to repaint before re-enabling export", async () => {

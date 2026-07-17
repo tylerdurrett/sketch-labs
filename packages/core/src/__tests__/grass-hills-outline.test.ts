@@ -24,6 +24,7 @@ function sceneSha256(scene: Scene): string {
 
 describe('grass-hills production Outline architecture', () => {
   it('derives a deterministic faithful source from the full 10k Fill geometry', () => {
+    expect(grassHills.deriveOutlineSource).toBeUndefined()
     const fill = grassHills.generate(PARAMS, 12345, 0, FRAME)
     const preparedFill = grassHills.prepare!(PARAMS, 12345, FRAME)
     const warmFill = preparedFill(999)
