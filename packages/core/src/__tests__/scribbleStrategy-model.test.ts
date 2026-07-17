@@ -51,6 +51,8 @@ describe('Scribble authored controls', () => {
         spec.default,
       )
     }
+
+    expect(scribbleControlSchema.pathDensity.max).toBe(10)
   })
 
   it('uses defaults for missing/non-finite values and authored bounds otherwise', () => {
@@ -245,6 +247,29 @@ describe('Scribble residual model', () => {
 })
 
 describe('Scribble virtual coverage', () => {
+  it('keeps the cached residual equal to the residual sample sum', () => {
+    const model = createScribbleModel(
+      source(horizontalGradientTone(SQUARE), featheredBoundaryMask(SQUARE)),
+      SQUARE,
+      { pathDensity: 3.5, scribbleScale: 0.5 },
+    )
+    const segments = [
+      [[100, 100], [350, 225]],
+      [[350, 225], [700, 500]],
+      [[700, 500], [900, 850]],
+      [[200, 800], [800, 200]],
+    ] as const
+
+    for (const [start, end] of segments) {
+      model.depositSegment(start, end)
+      const samples = model.samples()
+      const independentlySummed =
+        samples.reduce((sum, sample) => sum + sample.residual, 0) /
+        samples.length
+      expect(model.residualError()).toBeCloseTo(independentlySummed, 12)
+    }
+  })
+
   it('deposits compact smooth coverage additively and reduces residual monotonically', () => {
     const model = createScribbleModel(source(constantTone(1)), SQUARE)
     const centerSample = model.samples()[Math.floor(model.lattice.sampleCount / 2)]!

@@ -220,6 +220,11 @@ export function createScribbleModel(
     return permission[index]! * Math.max(0, tone[index]! - coverage[index]!)
   }
 
+  let residualTotal = 0
+  for (let index = 0; index < lattice.sampleCount; index++) {
+    residualTotal += cellResidual(index)
+  }
+
   function deposit(start: Readonly<Point>, end: Readonly<Point>): void {
     const radius = scales.coverageRadius
     const radiusSquared = radius * radius
@@ -259,7 +264,9 @@ export function createScribbleModel(
         const normalizedDistanceSquared = distanceSquared / radiusSquared
         const shoulder = 1 - normalizedDistanceSquared
         const amount = scales.coveragePerPass * shoulder * shoulder
+        const previousResidual = cellResidual(index)
         coverage[index] = Math.min(1, coverage[index]! + amount)
+        residualTotal += cellResidual(index) - previousResidual
       }
     }
   }
@@ -270,18 +277,21 @@ export function createScribbleModel(
     scales,
     lattice,
     residualError(): number {
-      let total = 0
-      for (let index = 0; index < lattice.sampleCount; index++) {
-        total += cellResidual(index)
-      }
       // Every term is bounded [0,1], and sampleCount is always positive.
-      return Math.min(1, Math.max(0, total / lattice.sampleCount))
+      return Math.min(1, Math.max(0, residualTotal / lattice.sampleCount))
     },
     residualAt(point: Readonly<Point>): number {
       return cellResidual(nearestIndex(lattice, point))
     },
     coverageAt(point: Readonly<Point>): number {
       return coverage[nearestIndex(lattice, point)]!
+    },
+    visitResidualSamples(visit): void {
+      for (let index = 0; index < lattice.sampleCount; index++) {
+        if (visit(index, points[index]!, cellResidual(index)) === false) {
+          break
+        }
+      }
     },
     samples(): readonly ScribbleResidualSample[] {
       return points.map((point, index) =>

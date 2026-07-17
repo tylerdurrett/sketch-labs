@@ -79,34 +79,47 @@ function chooseRestartCell(
   rng: Random,
   excluded: ReadonlySet<number>,
 ): RestartCell | undefined {
-  const candidates: RestartCell[] = []
   let totalWeight = 0
+  let fallbackIndex = -1
+  let fallbackPoint: Readonly<Point> | undefined
+  let fallbackWeight = 0
 
-  for (const [index, sample] of model.samples().entries()) {
-    if (excluded.has(index) || sample.residual <= MIN_MEANINGFUL_RESIDUAL) {
-      continue
+  model.visitResidualSamples((index, point, residual) => {
+    if (excluded.has(index) || residual <= MIN_MEANINGFUL_RESIDUAL) {
+      return
     }
 
-    const candidate = {
-      index,
-      point: sample.point,
-      weight: sample.residual,
-    }
-    candidates.push(candidate)
-    totalWeight += candidate.weight
-  }
+    fallbackIndex = index
+    fallbackPoint = point
+    fallbackWeight = residual
+    totalWeight += residual
+  })
 
-  if (candidates.length === 0 || totalWeight <= MIN_MEANINGFUL_RESIDUAL) {
+  if (fallbackPoint === undefined || totalWeight <= MIN_MEANINGFUL_RESIDUAL) {
     return undefined
   }
 
   let cursor = rng.value() * totalWeight
-  for (const candidate of candidates) {
-    cursor -= candidate.weight
-    if (cursor < 0) return candidate
-  }
+  let selected: RestartCell | undefined
+  model.visitResidualSamples((index, point, residual) => {
+    if (excluded.has(index) || residual <= MIN_MEANINGFUL_RESIDUAL) {
+      return
+    }
 
-  return candidates[candidates.length - 1]
+    cursor -= residual
+    if (cursor < 0) {
+      selected = { index, point, weight: residual }
+      return false
+    }
+  })
+
+  return (
+    selected ?? {
+      index: fallbackIndex,
+      point: fallbackPoint,
+      weight: fallbackWeight,
+    }
+  )
 }
 
 /**

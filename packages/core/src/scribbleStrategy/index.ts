@@ -20,7 +20,7 @@ import {
   type ScribbleOrchestratorInput,
   type ScribbleOrchestratorOutcome,
 } from './orchestrator'
-import type { ScribbleControls } from './types'
+import type { ScribbleControls, ScribbleModel } from './types'
 
 export {
   defaultScribbleControls,
@@ -41,14 +41,38 @@ type ScribbleOrchestrator = (
   input: ScribbleOrchestratorInput,
 ) => ScribbleOrchestratorOutcome
 
-// Fixed safety caps are implementation policy, not authored controls. They are
-// intentionally absent from the public strategy input and parameter schema.
-const PRODUCTION_LIMITS: Readonly<ScribbleExecutionLimits> = Object.freeze({
-  maxAcceptedSegments: 12_000,
-  maxPolylines: 1_000,
-  maxStagnations: 2_000,
-  maxRestarts: 1_000,
-})
+// The ordinary work budget follows the normalized model: finer lattices and
+// lower per-pass coverage both require proportionally more deposited segments.
+// Separate hard ceilings remain as emergency guards against extreme frames.
+const HARD_MAX_ACCEPTED_SEGMENTS = 250_000
+const HARD_MAX_POLYLINES = 4_000
+const HARD_MAX_STAGNATIONS = 8_000
+const HARD_MAX_RESTARTS = 4_000
+const SEGMENTS_PER_DENSITY_WEIGHTED_SAMPLE = 2
+
+function productionLimits(
+  model: Readonly<ScribbleModel>,
+): Readonly<ScribbleExecutionLimits> {
+  const maxAcceptedSegments = Math.min(
+    HARD_MAX_ACCEPTED_SEGMENTS,
+    Math.ceil(
+      model.lattice.sampleCount *
+        model.controls.pathDensity *
+        SEGMENTS_PER_DENSITY_WEIGHTED_SAMPLE,
+    ),
+  )
+  // Rejected starts can add one failed attempt per lattice sample. Scale lift
+  // allowances with ordinary work while retaining tighter emergency ceilings:
+  // restart selection scans the lattice and must not become the dominant cap.
+  const failureBudget = maxAcceptedSegments + model.lattice.sampleCount
+
+  return Object.freeze({
+    maxAcceptedSegments,
+    maxPolylines: Math.min(HARD_MAX_POLYLINES, maxAcceptedSegments),
+    maxStagnations: Math.min(HARD_MAX_STAGNATIONS, failureBudget),
+    maxRestarts: Math.min(HARD_MAX_RESTARTS, failureBudget),
+  })
+}
 
 function isFinitePoint(point: Readonly<Point>): boolean {
   return Number.isFinite(point[0]) && Number.isFinite(point[1])
@@ -77,8 +101,8 @@ function assertValidOutcomeGeometry(
 
 function executeScribbleStrategy(
   input: ScribbleStrategyInput,
-  limits: Readonly<ScribbleExecutionLimits>,
   orchestrate: ScribbleOrchestrator,
+  injectedLimits?: Readonly<ScribbleExecutionLimits>,
 ): ScribbleResult {
   const model = createScribbleModel(input.source, input.frame, input.controls)
   const initialResidual = model.residualError()
@@ -93,7 +117,7 @@ function executeScribbleStrategy(
     model,
     rng: createRandom(input.seed),
     residualThreshold: model.scales.completionThreshold,
-    limits,
+    limits: injectedLimits ?? productionLimits(model),
   })
 
   if (
@@ -124,11 +148,7 @@ function executeScribbleStrategy(
 
 /** Execute the deterministic, residual-seeking Scribble Strategy. */
 export function scribbleStrategy(input: ScribbleStrategyInput): ScribbleResult {
-  return executeScribbleStrategy(
-    input,
-    PRODUCTION_LIMITS,
-    runScribbleOrchestrator,
-  )
+  return executeScribbleStrategy(input, runScribbleOrchestrator)
 }
 
 /**
@@ -142,5 +162,5 @@ export function runScribbleStrategyForTesting(
   limits: Readonly<ScribbleExecutionLimits>,
   orchestrate: ScribbleOrchestrator = runScribbleOrchestrator,
 ): ScribbleResult {
-  return executeScribbleStrategy(input, limits, orchestrate)
+  return executeScribbleStrategy(input, orchestrate, limits)
 }

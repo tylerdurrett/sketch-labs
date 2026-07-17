@@ -26,6 +26,7 @@ import {
   toneCalibrationSchema,
 } from '../sketches/tone-calibration'
 import type { ToneCalibrationSource } from '../sketches/tone-calibration/source'
+import type { Point, Polyline } from '../types'
 
 const FRAME = { width: 100, height: 100 }
 const CONTROL_KEYS = [
@@ -42,6 +43,110 @@ function params(overrides: Record<string, number> = {}) {
 
 function capturedInput(call: number): ScribbleStrategyInput {
   return scribbleStrategyMock.mock.calls[call]![0] as ScribbleStrategyInput
+}
+
+function squaredDistanceToSegment(
+  point: Readonly<Point>,
+  start: Readonly<Point>,
+  end: Readonly<Point>,
+): number {
+  const segmentX = end[0] - start[0]
+  const segmentY = end[1] - start[1]
+  const lengthSquared = segmentX * segmentX + segmentY * segmentY
+  const projection =
+    lengthSquared === 0
+      ? 0
+      : Math.min(
+          1,
+          Math.max(
+            0,
+            ((point[0] - start[0]) * segmentX +
+              (point[1] - start[1]) * segmentY) /
+              lengthSquared,
+          ),
+        )
+  const nearestX = start[0] + projection * segmentX
+  const nearestY = start[1] + projection * segmentY
+  return (point[0] - nearestX) ** 2 + (point[1] - nearestY) ** 2
+}
+
+/**
+ * Raster-like center sampling of the geometry's actual one-unit black stroke.
+ * This deliberately knows nothing about the strategy's virtual coverage model.
+ */
+function rasterizeInk(
+  polylines: readonly Polyline[],
+  frame: Readonly<{ width: number; height: number }>,
+  strokeWidth: number,
+): Uint8Array {
+  const width = Math.round(frame.width)
+  const height = Math.round(frame.height)
+  const ink = new Uint8Array(width * height)
+  const radius = strokeWidth / 2
+  const radiusSquared = radius * radius
+
+  for (const polyline of polylines) {
+    for (let index = 1; index < polyline.length; index += 1) {
+      const start = polyline[index - 1]!
+      const end = polyline[index]!
+      const minColumn = Math.max(
+        0,
+        Math.ceil(Math.min(start[0], end[0]) - radius - 0.5),
+      )
+      const maxColumn = Math.min(
+        width - 1,
+        Math.floor(Math.max(start[0], end[0]) + radius - 0.5),
+      )
+      const minRow = Math.max(
+        0,
+        Math.ceil(Math.min(start[1], end[1]) - radius - 0.5),
+      )
+      const maxRow = Math.min(
+        height - 1,
+        Math.floor(Math.max(start[1], end[1]) + radius - 0.5),
+      )
+
+      for (let row = minRow; row <= maxRow; row += 1) {
+        for (let column = minColumn; column <= maxColumn; column += 1) {
+          if (
+            squaredDistanceToSegment(
+              [column + 0.5, row + 0.5],
+              start,
+              end,
+            ) <= radiusSquared
+          ) {
+            ink[row * width + column] = 1
+          }
+        }
+      }
+    }
+  }
+
+  return ink
+}
+
+function inkRatio(
+  ink: Uint8Array,
+  frame: Readonly<{ width: number; height: number }>,
+  predicate: (x: number, y: number) => boolean = () => true,
+): number {
+  const width = Math.round(frame.width)
+  const height = Math.round(frame.height)
+  let marked = 0
+  let sampled = 0
+
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      const x = column + 0.5
+      const y = row + 0.5
+      if (!predicate(x, y)) continue
+      sampled += 1
+      marked += ink[row * width + column]!
+    }
+  }
+
+  expect(sampled).toBeGreaterThan(0)
+  return marked / sampled
 }
 
 afterEach(() => {
@@ -245,6 +350,51 @@ describe('Tone Calibration Scribble integration', () => {
     expect(JSON.stringify(scene)).not.toMatch(
       /background|fill|gray|toneField|shadingMask|circle|guide/i,
     )
+  })
+
+  it('renders materially dense, opposing tones at the densest fine scale', () => {
+    const renderFrame = { width: 1000, height: 1000 }
+    const fineDense = generateToneCalibrationScribble(
+      params({
+        pathDensity: toneCalibrationSchema.pathDensity.max,
+        scribbleScale: toneCalibrationSchema.scribbleScale.min,
+      }),
+      'density-range',
+      renderFrame,
+    )
+    const ink = rasterizeInk(fineDense.polylines, renderFrame, 1)
+    const insideCircle = (x: number, y: number) =>
+      (x - 500) ** 2 + (y - 500) ** 2 <= 400 ** 2
+    const exteriorInk = [
+      inkRatio(ink, renderFrame, (x, y) => !insideCircle(x, y) && y < 200),
+      inkRatio(
+        ink,
+        renderFrame,
+        (x, y) => !insideCircle(x, y) && y >= 400 && y < 600,
+      ),
+      inkRatio(ink, renderFrame, (x, y) => !insideCircle(x, y) && y > 800),
+    ]
+    const circleInk = [
+      inkRatio(ink, renderFrame, (x, y) => insideCircle(x, y) && y < 300),
+      inkRatio(
+        ink,
+        renderFrame,
+        (x, y) => insideCircle(x, y) && y >= 450 && y < 550,
+      ),
+      inkRatio(ink, renderFrame, (x, y) => insideCircle(x, y) && y > 700),
+    ]
+    const overallInk = inkRatio(ink, renderFrame)
+
+    expect(fineDense.termination).toBe('completed')
+    expect(overallInk).toBeGreaterThan(0.4)
+    expect(exteriorInk[2]).toBeGreaterThan(0.6)
+    expect(circleInk[0]).toBeGreaterThan(0.6)
+    expect(exteriorInk[0]).toBeLessThan(exteriorInk[1]!)
+    expect(exteriorInk[1]).toBeLessThan(exteriorInk[2]!)
+    expect(circleInk[0]).toBeGreaterThan(circleInk[1]!)
+    expect(circleInk[1]).toBeGreaterThan(circleInk[2]!)
+    expect(exteriorInk[2]! - exteriorInk[0]!).toBeGreaterThan(0.45)
+    expect(circleInk[0]! - circleInk[2]!).toBeGreaterThan(0.4)
   })
 
   it('keeps forced budget-exhausted geometry visible through ordinary SVG export', () => {

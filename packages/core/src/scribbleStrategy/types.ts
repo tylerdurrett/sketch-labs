@@ -28,7 +28,7 @@ export const scribbleControlSchema = Object.freeze({
   pathDensity: {
     kind: 'number',
     min: 0.5,
-    max: 2.5,
+    max: 10,
     default: 1,
     step: 0.05,
   },
@@ -108,7 +108,15 @@ export interface ScribbleModel {
   residualAt(point: Readonly<Point>): number
   /** Virtual coverage at the nearest deterministic lattice cell. */
   coverageAt(point: Readonly<Point>): number
-  /** Stable row-major snapshots for residual-seeking candidate selection. */
+  /** Visit current residuals row-major; return false to stop without snapshots. */
+  visitResidualSamples(
+    visit: (
+      index: number,
+      point: Readonly<Point>,
+      residual: number,
+    ) => boolean | void,
+  ): void
+  /** Stable row-major frozen snapshots of the current model state. */
   samples(): readonly ScribbleResidualSample[]
   /** Add one compact, smooth coverage footprint. */
   depositPoint(point: Readonly<Point>): void
