@@ -88,7 +88,7 @@ describe("ShadingDiagnostics", () => {
     const details = disclosure(el);
     expect(details.open).toBe(false);
     const summary = details.querySelector("summary")!;
-    expect(summary.textContent).toContain("Shading diagnostics");
+    expect(summary.textContent).toContain("Shading");
     expect(summary.textContent).toContain("Displayed result: stale");
     expect(summary.textContent).toContain("Displayed result: budget exhausted");
     expect(summary.textContent).toContain("Preparing 25%");
@@ -165,7 +165,8 @@ describe("ShadingDiagnostics", () => {
     });
 
     const summary = el.querySelector("summary")!;
-    expect(summary.textContent).toContain("Current result: converged");
+    expect(summary.textContent).toContain("Converged");
+    expect(summary.textContent).not.toContain("Current result:");
     expect(summary.querySelectorAll('[role="status"]')).toHaveLength(1);
 
     expand(el);
@@ -190,7 +191,8 @@ describe("ShadingDiagnostics", () => {
     const details = disclosure(el);
     expect(details.open).toBe(false);
     const warning = details.querySelector('summary [role="status"]');
-    expect(warning?.textContent).toContain("Current result: budget exhausted");
+    expect(warning?.textContent).toContain("Budget exhausted");
+    expect(warning?.textContent).not.toContain("Current result:");
     expect(details.querySelector('summary [role="alert"]')).toBeNull();
 
     expand(el);

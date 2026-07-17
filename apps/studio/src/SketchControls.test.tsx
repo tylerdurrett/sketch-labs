@@ -4420,16 +4420,16 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
   function shadingDisclosure(el: HTMLElement): HTMLDetailsElement {
     const match = [...el.querySelectorAll("details")].find((details) =>
       details.querySelector("summary")?.textContent?.includes(
-        "Shading diagnostics",
+        "Shading",
       ),
     );
-    if (match === undefined) throw new Error("no Shading diagnostics");
+    if (match === undefined) throw new Error("no Shading");
     return match;
   }
 
   it("shows diagnostics only for Scribble-capable Sketches", () => {
     const ordinary = mount(<SketchControls sketch={leafField} />);
-    expect(ordinary.textContent).not.toContain("Shading diagnostics");
+    expect(ordinary.textContent).not.toContain("Shading");
 
     act(() => root!.unmount());
     root = null;
@@ -4477,7 +4477,8 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(diagnosticsPanel.textContent).toContain("12.5 s");
 
     await completeScribble(0, preparedScene(1));
-    expect(diagnosticsPanel.textContent).toContain("Current result: converged");
+    expect(diagnosticsPanel.textContent).toContain("Converged");
+    expect(diagnosticsPanel.textContent).not.toContain("Current result:");
     expect(diagnosticsPanel.textContent).toContain("Residual error1.00%");
 
     const density = paramInput(el, "pathDensity");
@@ -4523,9 +4524,8 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       termination: "budget-exhausted",
       residualError: 0.3,
     });
-    expect(diagnosticsPanel.textContent).toContain(
-      "Current result: budget exhausted",
-    );
+    expect(diagnosticsPanel.textContent).toContain("Budget exhausted");
+    expect(diagnosticsPanel.textContent).not.toContain("Current result:");
     expect(diagnosticsPanel.textContent).toContain("Residual error30.00%");
     clickButton(el, "Fill");
     expect(exportButton(el, "Export SVG").disabled).toBe(false);

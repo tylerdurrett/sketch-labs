@@ -77,7 +77,7 @@ function SummaryStatuses({ displayed, preparation }: ShadingDiagnosticsProps) {
           role="status"
           className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-emerald-200"
         >
-          Current result: converged
+          Converged
         </span>
       ) : null}
 
@@ -87,7 +87,7 @@ function SummaryStatuses({ displayed, preparation }: ShadingDiagnosticsProps) {
           className="rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-amber-200"
         >
           {displayed.freshness === "current"
-            ? "Current result: budget exhausted"
+            ? "Budget exhausted"
             : "Displayed result: budget exhausted"}
         </span>
       ) : null}
@@ -304,7 +304,7 @@ export function ShadingDiagnostics({
   return (
     <details className="min-w-0 rounded-lg border border-border bg-card px-3 py-2">
       <summary className="flex min-w-0 cursor-pointer items-center justify-between gap-3 text-sm font-medium">
-        <span>Shading diagnostics</span>
+        <span>Shading</span>
         <SummaryStatuses displayed={displayed} preparation={preparation} />
       </summary>
       <div className="mt-3 min-w-0 space-y-3 border-t border-border pt-3">
