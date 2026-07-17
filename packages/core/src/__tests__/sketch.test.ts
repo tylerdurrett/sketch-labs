@@ -9,6 +9,7 @@ import {
 } from '../sketch'
 import type { Params, ParamSchema, StatelessSketch } from '../sketch'
 import type { Scene } from '../scene'
+import type { DecodedPixels, SketchEnvironment } from '../imageAssets'
 import { DEFAULT_COMPOSITION_FRAME } from '../compositionFrame'
 import {
   createShadingMask,
@@ -67,6 +68,13 @@ describe('defaultParams', () => {
       ink: { kind: 'color', default: '#1a2b3c' },
     }
     expect(defaultParams(schema)).toEqual({ count: 24, ink: '#1a2b3c' })
+  })
+
+  it('seeds an Image Asset param with its stable string ID default', () => {
+    const schema: ParamSchema = {
+      image: { kind: 'image-asset', default: 'portrait-a1b2c3d4' },
+    }
+    expect(defaultParams(schema)).toEqual({ image: 'portrait-a1b2c3d4' })
   })
 })
 
@@ -137,6 +145,32 @@ describe('randomize', () => {
     }
     const next = randomize(schema, { ink: '#c0ffee' }, new Set(['ink']), scriptedRand([]))
     expect(next.ink).toBe('#c0ffee')
+  })
+
+  it('passes an unlocked Image Asset ID through without consuming randomness', () => {
+    const schema: ParamSchema = {
+      image: { kind: 'image-asset', default: 'portrait-default' },
+    }
+    const next = randomize(
+      schema,
+      { image: 'portrait-selected' },
+      new Set(),
+      scriptedRand([]),
+    )
+    expect(next.image).toBe('portrait-selected')
+  })
+
+  it('passes a locked Image Asset ID through untouched too', () => {
+    const schema: ParamSchema = {
+      image: { kind: 'image-asset', default: 'portrait-default' },
+    }
+    const next = randomize(
+      schema,
+      { image: 'portrait-selected' },
+      new Set(['image']),
+      scriptedRand([]),
+    )
+    expect(next.image).toBe('portrait-selected')
   })
 
   it('passes non-rolled keys present in params but absent from schema through unchanged', () => {
@@ -222,6 +256,100 @@ describe('caller-owned prepared frames', () => {
     expect(adapted(1)).toEqual(sceneAt(1))
     expect(adapted(2)).toEqual(sceneAt(2))
     expect(generated).toBe(2)
+  })
+
+  it('preserves exact legacy invocation arity when no environment is supplied', () => {
+    const params = { offset: 2 }
+    const prepare = vi.fn(() => sceneAt)
+    const specialized = definePreparedSketch({
+      id: 'legacy-arity-prepared',
+      name: 'Legacy arity prepared',
+      schema: {},
+      prepare,
+    })
+    const generate = vi.fn(
+      (_params: Params, _seed: string | number, t: number) => sceneAt(t),
+    )
+    const legacy: StatelessSketch = {
+      id: 'legacy-arity-generate',
+      name: 'Legacy arity generate',
+      schema: {},
+      generate,
+    }
+
+    specialized.generate(params, 1, 2, DEFAULT_COMPOSITION_FRAME)
+    expect(prepare).toHaveBeenLastCalledWith(
+      params,
+      1,
+      DEFAULT_COMPOSITION_FRAME,
+    )
+
+    prepare.mockClear()
+    prepareSketch(specialized, params, 1, DEFAULT_COMPOSITION_FRAME)(2)
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(prepare).toHaveBeenCalledWith(
+      params,
+      1,
+      DEFAULT_COMPOSITION_FRAME,
+    )
+
+    prepareSketch(legacy, params, 1, DEFAULT_COMPOSITION_FRAME)(2)
+    expect(generate).toHaveBeenCalledOnce()
+    expect(generate).toHaveBeenCalledWith(
+      params,
+      1,
+      2,
+      DEFAULT_COMPOSITION_FRAME,
+    )
+  })
+
+  it('forwards the optional environment through prepared and legacy paths', () => {
+    const pixels: DecodedPixels = {
+      width: 1,
+      height: 1,
+      data: Uint8Array.from([0, 0, 0, 255]),
+    }
+    const environment: SketchEnvironment = {
+      imageAssets: (id) => (id === 'fixture' ? pixels : undefined),
+    }
+    const preparedEnvironments: Array<SketchEnvironment | undefined> = []
+    const generatedEnvironments: Array<SketchEnvironment | undefined> = []
+    const specialized = definePreparedSketch({
+      id: 'environment-prepared',
+      name: 'Environment prepared',
+      schema: {},
+      prepare(_params, _seed, _frame, received) {
+        preparedEnvironments.push(received)
+        return sceneAt
+      },
+    })
+    const legacy: StatelessSketch = {
+      id: 'environment-legacy',
+      name: 'Environment legacy',
+      schema: {},
+      generate(_params, _seed, t, _frame, received) {
+        generatedEnvironments.push(received)
+        return sceneAt(t)
+      },
+    }
+
+    specialized.generate({}, 1, 2, DEFAULT_COMPOSITION_FRAME, environment)
+    specialized.prepare({}, 1, DEFAULT_COMPOSITION_FRAME, environment)(2)
+    prepareSketch(
+      specialized,
+      {},
+      1,
+      DEFAULT_COMPOSITION_FRAME,
+      environment,
+    )(2)
+    prepareSketch(legacy, {}, 1, DEFAULT_COMPOSITION_FRAME, environment)(2)
+
+    expect(preparedEnvironments).toEqual([
+      environment,
+      environment,
+      environment,
+    ])
+    expect(generatedEnvironments).toEqual([environment])
   })
 
   it('preserves an optional Scribble artwork capability on a prepared Sketch', () => {
@@ -340,5 +468,103 @@ describe('optional tone-source capability', () => {
 
     expect(source).toBeDefined()
     expect(source && sampleEffectiveTone(source, [500, 500])).toBe(0.4)
+  })
+})
+
+describe('optional Sketch environment', () => {
+  const scene: Scene = {
+    space: DEFAULT_COMPOSITION_FRAME,
+    primitives: [],
+  }
+  const pixels: DecodedPixels = {
+    width: 1,
+    height: 1,
+    data: Uint8ClampedArray.from([0, 0, 0, 255]),
+  }
+  const environment: SketchEnvironment = {
+    imageAssets: (id) => (id === 'fixture' ? pixels : undefined),
+  }
+
+  it('reaches tone, Scribble, cold generate, and generated Outline hooks', () => {
+    const received: Array<SketchEnvironment | undefined> = []
+    const sketch: StatelessSketch = {
+      id: 'environment-hooks',
+      name: 'Environment hooks',
+      schema: {},
+      generate(_params, _seed, _t, _frame, current) {
+        received.push(current)
+        return scene
+      },
+      generateToneSource(_params, _frame, current) {
+        received.push(current)
+        return {
+          toneField: createToneField(() => 0),
+          shadingMask: createShadingMask(() => 0),
+        }
+      },
+      generateScribbleArtwork(_params, _seed, _frame, _observer, current) {
+        received.push(current)
+        return {
+          scene,
+          diagnostics: {
+            termination: 'completed',
+            residualError: 0,
+            pathLength: 0,
+            polylineCount: 0,
+            penLiftCount: 0,
+          },
+        }
+      },
+      generateOutlineSource(_params, _seed, _t, _frame, _target, current) {
+        received.push(current)
+        return scene
+      },
+    }
+
+    sketch.generate({}, 1, 0, DEFAULT_COMPOSITION_FRAME, environment)
+    sketch.generateToneSource?.({}, DEFAULT_COMPOSITION_FRAME, environment)
+    sketch.generateScribbleArtwork?.(
+      {},
+      1,
+      DEFAULT_COMPOSITION_FRAME,
+      undefined,
+      environment,
+    )
+    sketch.generateOutlineSource?.(
+      {},
+      1,
+      0,
+      DEFAULT_COMPOSITION_FRAME,
+      { toolWidthMillimeters: 0.3, millimetersPerSceneUnit: 0.1 },
+      environment,
+    )
+
+    expect(received).toEqual([
+      environment,
+      environment,
+      environment,
+      environment,
+    ])
+  })
+
+  it('keeps legacy calls valid and completed-Scene Outline derivation environment-free', () => {
+    const deriveOutlineSource = vi.fn(() => scene)
+    const sketch: StatelessSketch = {
+      id: 'legacy-environment',
+      name: 'Legacy environment',
+      schema: {},
+      generate() {
+        return scene
+      },
+      deriveOutlineSource,
+    }
+    const target = {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.1,
+    }
+
+    expect(sketch.generate({}, 1, 0, DEFAULT_COMPOSITION_FRAME)).toBe(scene)
+    expect(sketch.deriveOutlineSource?.(scene, target)).toBe(scene)
+    expect(deriveOutlineSource).toHaveBeenCalledWith(scene, target)
   })
 })
