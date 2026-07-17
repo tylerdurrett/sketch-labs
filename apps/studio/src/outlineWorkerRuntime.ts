@@ -21,16 +21,12 @@ import {
   type OutlineComputeIdentity,
 } from "./outlineComputeProtocol";
 import { outlineScene } from "./outlineScene";
-
-/**
- * Caps ordinary progress traffic at ten messages per second. The first useful
- * snapshot and terminal snapshot bypass the interval, so a job emits at most
- * one initial message, one message per elapsed interval, and one terminal.
- */
-const PROGRESS_INTERVAL_MS = 100;
+import {
+  createWorkerProgressEmitter,
+  type MonotonicClock,
+} from "./workerProgress";
 
 type ProgressSink = (progress: OutlineComputeProgress) => void;
-type MonotonicClock = () => number;
 
 type HiddenLineEvent = HiddenLineDerivationProgress | HiddenLineFinalizing;
 type HiddenLineEventSink = (event: HiddenLineEvent) => void;
@@ -50,23 +46,11 @@ function createProgressReporter(
   emit: ProgressSink,
   now: MonotonicClock,
 ) {
-  let hasEmitted = false;
-  let lastEmittedAt = 0;
-
-  return (snapshot: OutlineComputeProgress["snapshot"]): void => {
-    if (snapshot.terminal) {
-      emit({ type: "progress", jobId, snapshot });
-      return;
-    }
-
-    const observedAt = now();
-    if (hasEmitted && observedAt - lastEmittedAt < PROGRESS_INTERVAL_MS) {
-      return;
-    }
-    hasEmitted = true;
-    lastEmittedAt = observedAt;
-    emit({ type: "progress", jobId, snapshot });
-  };
+  return createWorkerProgressEmitter(
+    (snapshot: OutlineComputeProgress["snapshot"]) =>
+      emit({ type: "progress", jobId, snapshot }),
+    now,
+  );
 }
 
 function safeError(error: unknown): string {
