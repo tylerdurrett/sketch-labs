@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clipSceneToBounds,
   createShadingMask,
+  createScribbleMoonStructuralScene,
   createToneField,
   crc32,
   DEFAULT_COMPOSITION_FRAME,
@@ -102,6 +103,9 @@ const scribbleJob = vi.hoisted(() => ({
   starts: [] as Array<{
     identity: import("./scribbleComputeProtocol").ScribbleComputeIdentity;
     resolve: (result: unknown) => void;
+    observeProgress:
+      | import("./scribbleCoordinator").ScribbleProgressObserver
+      | undefined;
   }>,
 }));
 
@@ -113,9 +117,12 @@ vi.mock("./scribbleCoordinator", () => ({
       scribbleJob.coordinators += 1;
     }
 
-    start(identity: import("./scribbleComputeProtocol").ScribbleComputeIdentity) {
+    start(
+      identity: import("./scribbleComputeProtocol").ScribbleComputeIdentity,
+      observeProgress?: import("./scribbleCoordinator").ScribbleProgressObserver,
+    ) {
       return new Promise((resolve) => {
-        scribbleJob.starts.push({ identity, resolve });
+        scribbleJob.starts.push({ identity, resolve, observeProgress });
       });
     }
 
@@ -4358,6 +4365,38 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     });
   }
 
+  function reportScribbleProgress(
+    index: number,
+    completedWorkUnits: number,
+    totalWorkUnits: number,
+    eta: import("./rollingEta").RollingEtaEstimate = {
+      kind: "estimating",
+      revision: 1,
+    },
+  ): void {
+    const observe = scribbleJob.starts[index]?.observeProgress;
+    if (observe === undefined) throw new Error(`no Scribble observer ${index}`);
+    act(() => {
+      observe({
+        snapshot: {
+          completedWorkUnits,
+          totalWorkUnits,
+          terminal: completedWorkUnits === totalWorkUnits,
+        },
+        eta,
+      });
+    });
+  }
+
+  async function failScribble(index: number, error: string): Promise<void> {
+    const job = scribbleJob.starts[index];
+    if (job === undefined) throw new Error(`no Scribble job ${index}`);
+    await act(async () => {
+      job.resolve({ status: "failure", jobId: index + 1, error });
+      await Promise.resolve();
+    });
+  }
+
   function preparedScene(label: number): Scene {
     return {
       space: { width: 100, height: 100 },
@@ -4377,6 +4416,121 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     if (match === undefined) throw new Error(`no ${label} button`);
     return match;
   }
+
+  function shadingDisclosure(el: HTMLElement): HTMLDetailsElement {
+    const match = [...el.querySelectorAll("details")].find((details) =>
+      details.querySelector("summary")?.textContent?.includes(
+        "Shading diagnostics",
+      ),
+    );
+    if (match === undefined) throw new Error("no Shading diagnostics");
+    return match;
+  }
+
+  it("shows diagnostics only for Scribble-capable Sketches", () => {
+    const ordinary = mount(<SketchControls sketch={leafField} />);
+    expect(ordinary.textContent).not.toContain("Shading diagnostics");
+
+    act(() => root!.unmount());
+    root = null;
+    container!.remove();
+    container = null;
+
+    const scribble = mount(<SketchControls sketch={toneCalibration} />);
+    expect(shadingDisclosure(scribble).open).toBe(false);
+    expect(shadingDisclosure(scribble).textContent).toContain("Preparing");
+  });
+
+  it("attributes Tone progress, cancellation, stale metrics, failure, and budget completion to the right result", async () => {
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    const diagnosticsPanel = shadingDisclosure(el);
+
+    // The fixed diagnostic source stays immediately available while artwork is
+    // held in the worker. Its outer and inner vertical ramps oppose one another.
+    clickButton(el, "Tone");
+    const frame = lastCompositionFrame!;
+    const source = lastToneSource!;
+    expect(source.toneField.sample([0, frame.height * 0.2])).toBeLessThan(
+      source.toneField.sample([0, frame.height * 0.8]),
+    );
+    expect(
+      source.toneField.sample([frame.width / 2, frame.height * 0.2]),
+    ).toBeGreaterThan(
+      source.toneField.sample([frame.width / 2, frame.height * 0.8]),
+    );
+    expect(generate).not.toHaveBeenCalled();
+
+    reportScribbleProgress(0, 25, 100, {
+      kind: "remaining",
+      revision: 2,
+      remainingMs: 12_500,
+    });
+    act(() => {
+      diagnosticsPanel
+        .querySelector("summary")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(diagnosticsPanel.textContent).toContain("25% (25 of 100 work units)");
+    expect(diagnosticsPanel.textContent).toContain("12.5 s");
+
+    await completeScribble(0, preparedScene(1));
+    expect(diagnosticsPanel.textContent).toContain("Current result: converged");
+    expect(diagnosticsPanel.textContent).toContain("Residual error1.00%");
+
+    const density = paramInput(el, "pathDensity");
+    act(() => density.focus());
+    setInput(density, "2");
+    expect(diagnosticsPanel.textContent).toContain("Displayed result: stale");
+    act(() => density.blur());
+    expect(scribbleJob.starts).toHaveLength(2);
+    reportScribbleProgress(1, 40, 100, {
+      kind: "remaining",
+      revision: 2,
+      remainingMs: 2_000,
+    });
+    expect(diagnosticsPanel.textContent).toContain("Preparing 40%");
+    expect(diagnosticsPanel.textContent).toContain("Preparing replacement");
+
+    // Beginning a newer transaction deterministically cancels that replacement;
+    // its later result and progress are ignored while the retained metrics stay stale.
+    act(() => density.focus());
+    setInput(density, "3");
+    expect(scribbleJob.cancelCount).toBe(1);
+    expect(diagnosticsPanel.textContent).toContain("Displayed result: stale");
+    expect(diagnosticsPanel.textContent).not.toContain("Preparing replacement");
+    reportScribbleProgress(1, 90, 100, {
+      kind: "remaining",
+      revision: 3,
+      remainingMs: 100,
+    });
+    expect(diagnosticsPanel.textContent).not.toContain("Preparing 90%");
+    await completeScribble(1, preparedScene(99));
+    expect(diagnosticsPanel.textContent).toContain("Residual error1.00%");
+    act(() => density.blur());
+    expect(scribbleJob.starts).toHaveLength(3);
+
+    await failScribble(2, "safe worker detail");
+    expect(diagnosticsPanel.textContent).toContain("Preparation failed");
+    expect(diagnosticsPanel.textContent).toContain("safe worker detail");
+    expect(diagnosticsPanel.textContent).toContain("Displayed result: stale");
+
+    clickButton(el, "New seed");
+    await completeScribble(3, preparedScene(4), {
+      ...diagnostics,
+      termination: "budget-exhausted",
+      residualError: 0.3,
+    });
+    expect(diagnosticsPanel.textContent).toContain(
+      "Current result: budget exhausted",
+    );
+    expect(diagnosticsPanel.textContent).toContain("Residual error30.00%");
+    clickButton(el, "Fill");
+    expect(exportButton(el, "Export SVG").disabled).toBe(false);
+    expect(generate).not.toHaveBeenCalled();
+  });
 
   it("gates every export on current painted provenance and never generates Scribble synchronously", async () => {
     const toBlob = vi.fn((callback: BlobCallback) => {
@@ -4408,8 +4562,13 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(outlineJob.exportStarts).toBe(0);
     expect(downloadBlob).not.toHaveBeenCalled();
 
+    clickButton(el, "Tone");
+    clickButton(el, "Outline");
+    expect(generate).not.toHaveBeenCalled();
+
     const exactScene = preparedScene(10);
     await completeScribble(0, exactScene);
+    await flush();
     expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
       false,
       false,
@@ -4422,10 +4581,16 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     clickButton(el, "Export PNG");
     await flush();
     expect(toBlob).toHaveBeenCalledTimes(1);
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(generate).not.toHaveBeenCalled();
+    expect(downloadBlob).toHaveBeenCalledTimes(3);
 
     toBlob.mockClear();
     downloadBlob.mockClear();
     exportSceneCapture.current = null;
+    outlineJob.exportStarts = 0;
     const newSeedButton = exportButton(el, "New seed");
     act(() => {
       // React has not painted the disabled state yet; the synchronous session
@@ -4574,8 +4739,11 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(canvas.dataset.contentRevision).toBe("2");
   });
 
-  it("keeps Scribble Moon Tone live during previews and launches only on settle", () => {
-    const el = mount(<SketchControls sketch={scribbleMoon} />);
+  it("keeps Scribble Moon Tone live while artwork is pending and retains its completed contours", async () => {
+    const generate = vi.fn(scribbleMoon.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...scribbleMoon, generate }} />,
+    );
     clickButton(el, "Tone");
     const originalSource = lastToneSource;
     const lightAngle = paramInput(el, "lightAngle");
@@ -4592,6 +4760,104 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       key: "lightAngle",
       value: 180,
     });
+
+    const structural = createScribbleMoonStructuralScene(
+      lastCompositionFrame!,
+    );
+    const completeMoon: Scene = {
+      space: { ...structural.space },
+      primitives: [
+        ...structural.primitives,
+        {
+          points: [[1, 1], [2, 2]],
+          closed: false,
+          stroke: { color: "black", width: 0.1 },
+          hiddenLineRole: "source",
+        },
+      ],
+    };
+    await completeScribble(1, completeMoon);
+    clickButton(el, "Fill");
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).toBe(completeMoon);
+    expect(
+      (exportSceneCapture.current as Scene).primitives.slice(
+        0,
+        structural.primitives.length,
+      ),
+    ).toEqual(structural.primitives);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("keeps progress observational and out of params, Presets, history, and export metadata", async () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    reportScribbleProgress(0, 30, 100, {
+      kind: "remaining",
+      revision: 2,
+      remainingMs: 7_000,
+    });
+
+    expect(
+      [...el.querySelectorAll('#inspector input[id^="control-"]')].map(
+        (input) => input.id,
+      ),
+    ).toEqual([
+      "control-pathDensity",
+      "control-scribbleScale",
+      "control-momentum",
+      "control-chaos",
+      "control-toneFidelity",
+    ]);
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(historyCapture.transactionCommits).toHaveLength(0);
+    expect(historyCapture.cancels).toHaveLength(0);
+
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      "observational-state",
+    );
+    clickButton(el, "Save");
+    await flush();
+    const saved = JSON.stringify(savePreset.mock.calls[0]![0]);
+    expect(saved).not.toMatch(
+      /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+    );
+
+    await completeScribble(0, preparedScene(8));
+    clickButton(el, "Export SVG");
+    const svgBlob = downloadBlob.mock.calls[0]![0];
+    const svg = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(svgBlob);
+    });
+    const embedded = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
+    expect(embedded).toBeDefined();
+    expect(embedded).not.toMatch(
+      /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+    );
+
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(plotterExportCapture.current?.metadata).toBeDefined();
+    expect(plotterExportCapture.current?.metadata).not.toMatch(
+      /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+    );
+
+    clickButton(el, "Export PNG");
+    await flush();
+    const pngBlob = downloadBlob.mock.calls[2]![0];
+    const pngText = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(pngBlob);
+    });
+    expect(pngText).toContain("tone-calibration");
+    expect(pngText).not.toMatch(
+      /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+    );
   });
 
   it("waits for the current paint before Outline and preserves its provenance", async () => {

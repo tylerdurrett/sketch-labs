@@ -83,6 +83,11 @@ import {
 } from "./plotterSvgPreference";
 import { PresetControls } from "./PresetControls";
 import { SeedControl } from "./SeedControl";
+import {
+  ShadingDiagnostics,
+  type DisplayedShadingDiagnostics,
+  type ShadingPreparationDiagnostics,
+} from "./ShadingDiagnostics";
 import { SimplifyControl } from "./SimplifyControl";
 import { selectCurrentScribbleResult } from "./scribbleSession";
 import {
@@ -337,6 +342,37 @@ export function SketchControls({
   const currentScribble = selectCurrentScribbleResult(
     scribblePreparation.session,
   );
+  const displayedShadingDiagnostics: DisplayedShadingDiagnostics | null =
+    scribblePreparation.session.displayed === null
+      ? null
+      : {
+          freshness: currentScribble === null ? "stale" : "current",
+          diagnostics: scribblePreparation.session.displayed.diagnostics,
+          computeTimeMs: scribblePreparation.session.displayed.computeTimeMs,
+        };
+  const activeScribbleToken =
+    scribblePreparation.session.active?.token ??
+    scribblePreparation.session.pending?.token ??
+    null;
+  const shadingPreparationDiagnostics: ShadingPreparationDiagnostics =
+    activeScribbleToken !== null
+      ? {
+          kind: "preparing",
+          progress:
+            scribblePreparation.progress?.token === activeScribbleToken
+              ? scribblePreparation.progress.update.snapshot
+              : null,
+          eta:
+            scribblePreparation.progress?.token === activeScribbleToken
+              ? scribblePreparation.progress.update.eta
+              : { kind: "estimating", revision: 0 },
+        }
+      : scribblePreparation.session.failure === null
+        ? { kind: "idle" }
+        : {
+            kind: "failure",
+            message: scribblePreparation.session.failure,
+          };
   const [acknowledgedScribble, setAcknowledgedScribble] =
     useState<ScribblePaintAcknowledgement | null>(null);
   const acknowledgedScribbleRef = useRef(acknowledgedScribble);
@@ -1273,6 +1309,12 @@ export function SketchControls({
             onCancel: cancelTransaction,
           }}
         />
+        {hasScribblePreparation ? (
+          <ShadingDiagnostics
+            displayed={displayedShadingDiagnostics}
+            preparation={shadingPreparationDiagnostics}
+          />
+        ) : null}
         {/*
          * Render-mode toggle (#219) — swaps the whole preview between the live
          * fill render and the on-demand Hidden-line (outline) render. `mt-auto`
