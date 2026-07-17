@@ -71,7 +71,11 @@ export const toneCalibration: StatelessSketch = {
     const builder = createScene(frame)
 
     for (const polyline of result.polylines) {
-      builder.addPath(polyline, { closed: false, stroke: PREVIEW_STROKE })
+      builder.addPath(polyline, {
+        closed: false,
+        stroke: PREVIEW_STROKE,
+        hiddenLineRole: 'source',
+      })
     }
 
     return builder.build()

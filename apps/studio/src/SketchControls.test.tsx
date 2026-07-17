@@ -4172,8 +4172,8 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     }
 
     // A disabled composition frame keeps the plotter assertion isolated from
-    // Harness-owned frame geometry. Ordinary stroke-only Scribbles are not
-    // implicit hidden-line sources, so this separate derived export stays empty.
+    // Harness-owned frame geometry. The authored Scribbles explicitly survive
+    // the hidden-line pass into the separate plotter export.
     const includeFrame = compositionFrameCheckbox(el);
     expect(includeFrame.checked).toBe(true);
     act(() => includeFrame.click());
@@ -4182,10 +4182,11 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     await flush();
     expect(outlineJob.exportStarts).toBe(1);
     expect(outlineJob.lastExportSnapshot?.identity.includeFrame).toBe(false);
-    expect(plotterExportCapture.current?.scene).toEqual({
-      space: lastCompositionFrame,
-      primitives: [],
-    });
+    const plotterScene = plotterExportCapture.current?.scene as Scene;
+    expect(plotterScene.primitives.length).toBeGreaterThan(0);
+    expect(plotterScene.primitives.map(({ points }) => points)).toEqual(
+      ordinary.primitives.map(({ points }) => points),
+    );
   });
 });
 

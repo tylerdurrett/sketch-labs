@@ -4,6 +4,8 @@ import {
   DEFAULT_COMPOSITION_FRAME,
   resolveCompositionFrame,
 } from '../compositionFrame'
+import { hiddenLinePass } from '../hiddenLine'
+import { renderPlotterSVG } from '../plotterSvg'
 import type { CoordinateSpace, Primitive, Scene } from '../scene'
 import { defaultParams } from '../sketch'
 import {
@@ -60,7 +62,7 @@ function expectAuthoredVector(primitive: Primitive): void {
   expect(primitive.fill).toBeUndefined()
   expect(primitive.stroke?.color).toBe('black')
   expect(primitive.stroke?.width).toBeGreaterThan(0)
-  expect(primitive.hiddenLineRole).toBeUndefined()
+  expect(primitive.hiddenLineRole).toBe('source')
 }
 
 function sourceSnapshot(source: ScribbleMoonSource) {
@@ -316,11 +318,44 @@ describe('Scribble Moon structural artwork', () => {
       expect(primitive.closed).toBe(false)
       expect(primitive.fill).toBeUndefined()
       expect(primitive.stroke).toEqual({ color: 'black', width: 1.1 })
-      expect(primitive.hiddenLineRole).toBeUndefined()
+      expect(primitive.hiddenLineRole).toBe('source')
     })
     expect(JSON.stringify(scene)).not.toMatch(
       /imageData|pixel|raster|tile|toneField|shadingMask|gray/i,
     )
+  })
+
+  it('preserves structural contours and generated Scribbles through hidden-line plotter export', () => {
+    const frame = DEFAULT_COMPOSITION_FRAME
+    const structural = createScribbleMoonStructuralScene(frame)
+    const scene = scribbleMoon.generate(
+      defaultParams(scribbleMoon.schema),
+      'hidden-line-export',
+      0,
+      frame,
+    )
+    const outline = hiddenLinePass(scene)
+    const svg = renderPlotterSVG(outline, {
+      width: 120,
+      height: 120,
+      insets: { top: 10, right: 10, bottom: 10, left: 10 },
+      includeFrame: false,
+    })
+    const paths = svg.match(/<path\b[^>]*>/g) ?? []
+    const expectedOutlinePoints = scene.primitives.map((primitive) => {
+      if (primitive.closed !== true) return primitive.points
+      const first = primitive.points[0]!
+      const last = primitive.points.at(-1)!
+      return first[0] === last[0] && first[1] === last[1]
+        ? primitive.points
+        : [...primitive.points, first]
+    })
+
+    expect(scene.primitives.length).toBeGreaterThan(structural.primitives.length)
+    expect(outline.primitives.map(({ points }) => points)).toEqual(
+      expectedOutlinePoints,
+    )
+    expect(paths).toHaveLength(scene.primitives.length)
   })
 
   it('independently samples generated segments through Moon soft permission and never exact zero', () => {

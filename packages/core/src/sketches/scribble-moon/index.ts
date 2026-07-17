@@ -166,33 +166,39 @@ export function createScribbleMoonStructuralScene(
   builder.addPath(circlePath(layout.halo), {
     closed: true,
     stroke: fineStroke,
+    hiddenLineRole: 'source',
   })
   for (const segment of layout.brokenRingSegments) {
     builder.addPath(ellipseArcPath(segment), {
       closed: false,
       stroke,
+      hiddenLineRole: 'source',
     })
   }
   for (const satellite of layout.satellites) {
     builder.addPath(circlePath(satellite, 24), {
       closed: true,
       stroke,
+      hiddenLineRole: 'source',
     })
   }
   builder.addPath(circlePath(layout.sphere), {
     closed: true,
     stroke,
+    hiddenLineRole: 'source',
   })
   for (const crater of layout.craters) {
     builder.addPath(circlePath(crater, 32), {
       closed: true,
       stroke: fineStroke,
+      hiddenLineRole: 'source',
     })
   }
   for (const contour of layout.structuralContours) {
     builder.addPath(circleArcPath(contour), {
       closed: false,
       stroke: fineStroke,
+      hiddenLineRole: 'source',
     })
   }
 
@@ -244,7 +250,11 @@ export const scribbleMoon: StatelessSketch = {
       width: Math.min(frame.width, frame.height) * 0.0011,
     }
     for (const polyline of scribble.polylines) {
-      builder.addPath(polyline, { closed: false, stroke })
+      builder.addPath(polyline, {
+        closed: false,
+        stroke,
+        hiddenLineRole: 'source',
+      })
     }
 
     return builder.build()

@@ -13,6 +13,8 @@ vi.mock('../scribbleStrategy/index', async (importOriginal) => {
 import {
   defaultParams,
   generateToneCalibrationScribble as publicGenerateToneCalibrationScribble,
+  hiddenLinePass,
+  renderPlotterSVG,
   renderToSVG,
   scribbleControlSchema,
   toneCalibration as publicToneCalibration,
@@ -261,6 +263,29 @@ describe('Tone Calibration Scribble integration', () => {
     expect(scene.primitives.map(({ points }) => points)).toEqual(first.polylines)
   })
 
+  it('preserves generated Scribble paths through hidden-line plotter export', () => {
+    const scene = toneCalibration.generate(
+      params({ toneFidelity: 0 }),
+      'hidden-line-export',
+      0,
+      FRAME,
+    )
+    const outline = hiddenLinePass(scene)
+    const svg = renderPlotterSVG(outline, {
+      width: 120,
+      height: 120,
+      insets: { top: 10, right: 10, bottom: 10, left: 10 },
+      includeFrame: false,
+    })
+    const paths = svg.match(/<path\b[^>]*>/g) ?? []
+
+    expect(scene.primitives.length).toBeGreaterThan(0)
+    expect(outline.primitives.map(({ points }) => points)).toEqual(
+      scene.primitives.map(({ points }) => points),
+    )
+    expect(paths).toHaveLength(scene.primitives.length)
+  })
+
   it('produces nonempty Scribble-only default artwork with a readable inversion', () => {
     const scene = toneCalibration.generate(params(), 'default', 0, FRAME)
     const strategyInput = capturedInput(0)
@@ -280,7 +305,7 @@ describe('Tone Calibration Scribble integration', () => {
       expect(primitive.closed).toBe(false)
       expect(primitive.fill).toBeUndefined()
       expect(primitive.stroke).toEqual({ color: 'black', width: 1 })
-      expect(primitive.hiddenLineRole).toBeUndefined()
+      expect(primitive.hiddenLineRole).toBe('source')
       expect(primitive.points.length).toBeGreaterThan(1)
     }
 
@@ -412,6 +437,7 @@ describe('Tone Calibration Scribble integration', () => {
         ],
         closed: false,
         stroke: { color: 'black', width: 1 },
+        hiddenLineRole: 'source',
       },
     ])
 
