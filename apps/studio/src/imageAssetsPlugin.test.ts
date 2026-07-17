@@ -1,5 +1,11 @@
 // @vitest-environment node
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -50,14 +56,17 @@ async function request(
 
 describe("Image Asset static serving", () => {
   let root: string;
+  let outsidePath: string;
 
   beforeEach(async () => {
     root = await mkdtemp(`${tmpdir()}/harness-image-assets-`);
+    outsidePath = `${root}-outside.png`;
     await writeFile(`${root}/${ID}.png`, PNG_BYTES);
   });
 
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
+    await rm(outsidePath, { recursive: true, force: true });
   });
 
   it("serves the exact PNG bytes with the correct headers", async () => {
@@ -92,6 +101,29 @@ describe("Image Asset static serving", () => {
 
     expect(res.status).toBe(404);
     expect(res.body).toBe('{"error":"Not found"}');
+    expect(res.body).not.toContain(root);
+  });
+
+  it("refuses a canonical-named symlink without reading outside the root", async () => {
+    await rm(`${root}/${ID}.png`, { recursive: true, force: true });
+    await writeFile(outsidePath, PNG_BYTES);
+    await symlink(outsidePath, `${root}/${ID}.png`, "file");
+
+    const res = await request(root, `/image-assets/${ID}.png`);
+
+    expect(res.status).toBe(404);
+    expect(res.body).toBe('{"error":"Not found"}');
+    expect(res.body).not.toContain(root);
+    expect(res.body).not.toContain(outsidePath);
+  });
+
+  it("returns a path-free 500 for unexpected filesystem failures", async () => {
+    const invalidRoot = `${root}\0unreadable`;
+
+    const res = await request(invalidRoot, `/image-assets/${ID}.png`);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toBe('{"error":"Internal server error"}');
     expect(res.body).not.toContain(root);
   });
 

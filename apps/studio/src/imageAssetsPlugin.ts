@@ -6,7 +6,7 @@
  * write, delete, or import routes. The canonical ID parser is the sole path
  * boundary: malformed IDs never reach the filesystem.
  */
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import type { Connect, Plugin } from "vite";
 
 import { parseImageAssetId } from "./imageAssetIdentity";
@@ -31,6 +31,15 @@ function isENOENT(error: unknown): boolean {
 function sendNotFound(res: ServerResponse): void {
   const body = '{"error":"Not found"}';
   res.writeHead(404, {
+    "Content-Type": "application/json",
+    "Content-Length": body.length,
+  });
+  res.end(body);
+}
+
+function sendInternalError(res: ServerResponse): void {
+  const body = '{"error":"Internal server error"}';
+  res.writeHead(500, {
     "Content-Type": "application/json",
     "Content-Length": body.length,
   });
@@ -84,8 +93,16 @@ export async function handleImageAssetRequest(
     return;
   }
 
+  const assetPath = `${imageAssetsRoot}/${id}${PNG_SUFFIX}`;
   try {
-    const bytes = await readFile(`${imageAssetsRoot}/${id}${PNG_SUFFIX}`);
+    // Asset files must be owned by the configured root, not merely named
+    // there. Refuse a leaf symlink so readFile cannot follow it outside.
+    if ((await lstat(assetPath)).isSymbolicLink()) {
+      sendNotFound(res);
+      return;
+    }
+
+    const bytes = await readFile(assetPath);
     res.writeHead(200, {
       "Content-Type": "image/png",
       "Content-Length": bytes.byteLength,
@@ -96,7 +113,7 @@ export async function handleImageAssetRequest(
       sendNotFound(res);
       return;
     }
-    throw error;
+    sendInternalError(res);
   }
 }
 
@@ -120,7 +137,7 @@ export function imageAssetsPlugin(imageAssetsRoot: string): Plugin {
         handleImageAssetRequest(imageAssetsRoot, imageAssetReq, res).catch(
           (error: unknown) => {
             console.error("[harness:image-assets-static]", error);
-            if (!res.headersSent) sendNotFound(res);
+            if (!res.headersSent) sendInternalError(res);
           },
         );
       });

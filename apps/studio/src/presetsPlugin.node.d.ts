@@ -9,6 +9,9 @@
  * way `vite.config.ts` resolves `sketchesRoot` via the WHATWG `URL`.
  */
 declare module "node:fs/promises" {
+  export function lstat(path: string): Promise<{
+    isSymbolicLink(): boolean;
+  }>;
   export function readdir(path: string): Promise<string[]>;
   export function readFile(path: string): Promise<Uint8Array>;
   export function readFile(path: string, encoding: "utf-8"): Promise<string>;
@@ -27,6 +30,11 @@ declare module "node:fs/promises" {
   export function rm(
     path: string,
     options: { recursive: boolean; force: boolean },
+  ): Promise<void>;
+  export function symlink(
+    target: string,
+    path: string,
+    type: "file",
   ): Promise<void>;
 }
 
