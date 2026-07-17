@@ -2,6 +2,7 @@ import type { ParamSchema, Params, ParamSpec } from "@harness/core";
 
 import { ColorControl } from "./ColorControl";
 import type { EditTransactionLifecycle } from "./editHistory";
+import { ImageAssetControl } from "./ImageAssetControl";
 import { NumberControl } from "./NumberControl";
 
 /**
@@ -41,7 +42,8 @@ export interface ControlPanelProps {
  * Render one control for a single schema entry, switching on `spec.kind`.
  *
  * `kind: 'number'` → a lock-aware {@link NumberControl}; `kind: 'color'` → a
- * lock-free {@link ColorControl}. An UNKNOWN kind renders a LOUD, visible
+ * lock-free {@link ColorControl}; `kind: 'image-asset'` → a lock-free,
+ * read-only {@link ImageAssetControl}. An UNKNOWN kind renders a LOUD, visible
  * fallback (never a silent skip) so an unsupported control surfaces in the UI
  * as a defect to fix rather than vanishing. As the open `ParamSpec` union
  * widens further (boolean, enum, …) this switch grows a case per kind; the
@@ -90,6 +92,14 @@ function renderControl(
           value={typeof value === "string" ? value : spec.default}
           onChange={(next) => onChange(key, next)}
           editHistory={rowHistory}
+        />
+      );
+    case "image-asset":
+      return (
+        <ImageAssetControl
+          key={key}
+          paramKey={key}
+          value={typeof value === "string" ? value : spec.default}
         />
       );
     default:
