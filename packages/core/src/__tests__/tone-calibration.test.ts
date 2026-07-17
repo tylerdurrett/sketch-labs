@@ -490,6 +490,118 @@ describe('Tone Calibration Scribble integration', () => {
     expect(svg).not.toMatch(/<circle|<rect/)
   })
 
+  it('derives both physical widths by restyling the exact completed Scribble paths only', () => {
+    scribbleStrategyMock.mockReturnValueOnce({
+      polylines: [
+        [
+          [7, 11],
+          [13, 17],
+          [19, 23],
+        ],
+        [
+          [29, 31],
+          [37, 41],
+        ],
+      ],
+      termination: 'completed',
+      residualError: 0.01,
+    })
+    const completed = toneCalibration.generateScribbleArtwork!(
+      params(),
+      'exact-prepared-result',
+      FRAME,
+    ).scene
+
+    const fine = toneCalibration.deriveOutlineSource!(completed, {
+      toolWidthMillimeters: 0.5,
+      millimetersPerSceneUnit: 0.25,
+    })
+    const broad = toneCalibration.deriveOutlineSource!(completed, {
+      toolWidthMillimeters: 1,
+      millimetersPerSceneUnit: 0.25,
+    })
+
+    expect(fine).toEqual({
+      space: FRAME,
+      primitives: [
+        {
+          points: [
+            [7, 11],
+            [13, 17],
+            [19, 23],
+          ],
+          closed: false,
+          stroke: { color: 'black', width: 2 },
+          hiddenLineRole: 'source',
+        },
+        {
+          points: [
+            [29, 31],
+            [37, 41],
+          ],
+          closed: false,
+          stroke: { color: 'black', width: 2 },
+          hiddenLineRole: 'source',
+        },
+      ],
+    })
+    expect(
+      broad.primitives.map(({ stroke: _stroke, ...primitive }) => primitive),
+    ).toEqual(
+      fine.primitives.map(({ stroke: _stroke, ...primitive }) => primitive),
+    )
+    expect(broad.primitives.map(({ stroke }) => stroke?.width)).toEqual([4, 4])
+    expect(fine.primitives[0]?.points).not.toBe(
+      completed.primitives[0]?.points,
+    )
+    expect(completed.primitives.map(({ stroke }) => stroke?.width)).toEqual([
+      1, 1,
+    ])
+    expect(fine).not.toHaveProperty('background')
+    expect(
+      fine.primitives.every((primitive) => primitive.fill === undefined),
+    ).toBe(true)
+    expect(JSON.stringify(fine)).not.toMatch(
+      /toneField|shadingMask|layout|circle|grayscale|background|fill/,
+    )
+  })
+
+  it('uses the shared Hidden-line simplification path without changing physical width', () => {
+    const completed = {
+      space: FRAME,
+      primitives: [
+        {
+          points: [
+            [0, 10],
+            [10, 10.05],
+            [20, 9.95],
+            [30, 10],
+          ],
+          closed: false,
+          stroke: { color: 'navy', width: 9 },
+          hiddenLineRole: 'source' as const,
+        },
+      ],
+    }
+    const source = toneCalibration.deriveOutlineSource!(completed, {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.15,
+    })
+
+    expect(hiddenLinePass(source, { tolerance: 0.1 })).toEqual({
+      space: FRAME,
+      primitives: [
+        {
+          points: [
+            [0, 10],
+            [30, 10],
+          ],
+          stroke: { color: 'black', width: 2 },
+        },
+      ],
+    })
+  })
+
   it('keeps Tone reference data separate from generated Scene geometry', () => {
     const source = toneCalibration.generateToneSource!(
       params({ chaos: 1, momentum: 0 }),

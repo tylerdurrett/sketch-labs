@@ -27,8 +27,10 @@ import {
   type StatelessSketch,
 } from '../../sketch'
 import { numberParam } from '../sketch-util'
+import { toneCalibrationOutlineSource } from './outline'
 import { createToneCalibrationSource } from './source'
 
+export * from './outline'
 export * from './source'
 
 /** Exactly the five shared Scribble controls; the fixed source has no controls. */
@@ -100,6 +102,9 @@ export const toneCalibration: StatelessSketch = {
   schema: toneCalibrationSchema,
   generateToneSource(_params: Params, frame: CoordinateSpace) {
     return createToneCalibrationSource(frame)
+  },
+  deriveOutlineSource(completedScene, target) {
+    return toneCalibrationOutlineSource(completedScene, target)
   },
   generateScribbleArtwork: generateToneCalibrationScribbleArtwork,
   generate(
