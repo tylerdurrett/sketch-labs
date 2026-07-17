@@ -1,6 +1,9 @@
 /** Number of SHA-256 hex characters retained in a stable Image Asset ID. */
 export const IMAGE_ASSET_HASH_HEX_LENGTH = 12;
 
+/** Largest canonical human-readable slug accepted by every Image Asset seam. */
+export const IMAGE_ASSET_MAX_SLUG_LENGTH = 100;
+
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const IMAGE_ASSET_ID = /^([a-z0-9]+(?:-[a-z0-9]+)*)-([0-9a-f]{12})$/;
 
@@ -23,6 +26,21 @@ export function normalizeImageAssetSlug(value: string): string {
   );
 }
 
+/** Whether a draft normalizes to a slug that fits the shared identity bound. */
+export function isImageAssetSlugDraftWithinLimit(value: string): boolean {
+  return normalizeImageAssetSlug(value).length <= IMAGE_ASSET_MAX_SLUG_LENGTH;
+}
+
+/** Whether a value is already the exact bounded canonical slug form. */
+export function isCanonicalImageAssetSlug(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= IMAGE_ASSET_MAX_SLUG_LENGTH &&
+    normalizeImageAssetSlug(value) === value
+  );
+}
+
 /** Build an Image Asset ID from a readable name and a lowercase SHA-256 hex. */
 export function imageAssetIdFromDigest(slug: string, digest: string): string {
   if (!SHA256_HEX.test(digest)) {
@@ -31,7 +49,14 @@ export function imageAssetIdFromDigest(slug: string, digest: string): string {
     );
   }
 
-  return `${normalizeImageAssetSlug(slug)}-${digest.slice(
+  const canonicalSlug = normalizeImageAssetSlug(slug);
+  if (!isImageAssetSlugDraftWithinLimit(canonicalSlug)) {
+    throw new Error(
+      `Image Asset slug must be ${IMAGE_ASSET_MAX_SLUG_LENGTH} characters or fewer`,
+    );
+  }
+
+  return `${canonicalSlug}-${digest.slice(
     0,
     IMAGE_ASSET_HASH_HEX_LENGTH,
   )}`;
@@ -40,7 +65,7 @@ export function imageAssetIdFromDigest(slug: string, digest: string): string {
 /** Parse only the exact canonical `<slug>-<hash12>` Image Asset ID form. */
 export function parseImageAssetId(value: string): ParsedImageAssetId | null {
   const match = IMAGE_ASSET_ID.exec(value);
-  if (match === null) return null;
+  if (match === null || !isCanonicalImageAssetSlug(match[1])) return null;
 
   return { slug: match[1]!, hash: match[2]! };
 }

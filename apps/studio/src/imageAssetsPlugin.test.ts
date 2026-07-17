@@ -16,10 +16,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   handleImageAssetRequest,
   IMAGE_ASSET_MAX_BODY_BYTES,
-  IMAGE_ASSET_MAX_SLUG_LENGTH,
   imageAssetsPlugin,
 } from "./imageAssetsPlugin";
-import { imageAssetIdFromDigest } from "./imageAssetIdentity";
+import {
+  IMAGE_ASSET_MAX_SLUG_LENGTH,
+  imageAssetIdFromDigest,
+} from "./imageAssetIdentity";
 
 const ID = "pine-cone-0123456789ab";
 const PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 255]);

@@ -9,7 +9,7 @@ import { lstat, readFile } from "node:fs/promises";
 import type { Connect, Plugin } from "vite";
 
 import {
-  normalizeImageAssetSlug,
+  isCanonicalImageAssetSlug,
   parseImageAssetId,
 } from "./imageAssetIdentity";
 import {
@@ -27,9 +27,6 @@ const PNG_CONTENT_TYPE = "image/png";
 
 /** The largest accepted normalized PNG body. */
 export const IMAGE_ASSET_MAX_BODY_BYTES = 32 * 1024 * 1024;
-
-/** Keep user-authored leaf names bounded in URLs and on disk. */
-export const IMAGE_ASSET_MAX_SLUG_LENGTH = 100;
 
 interface RequestChunk extends Uint8Array {
   readonly length: number;
@@ -139,14 +136,6 @@ function readBoundedBody(req: ImageAssetRequest): Promise<Uint8Array> {
       reject(error);
     });
   });
-}
-
-function isCanonicalSlug(slug: string): boolean {
-  return (
-    slug.length > 0 &&
-    slug.length <= IMAGE_ASSET_MAX_SLUG_LENGTH &&
-    normalizeImageAssetSlug(slug) === slug
-  );
 }
 
 function sendStoreError(res: ServerResponse, error: unknown): void {
@@ -294,7 +283,7 @@ export async function handleImageAssetRequest(
       sendError(res, 404, "Not found");
       return;
     }
-    if (!isCanonicalSlug(slug)) {
+    if (!isCanonicalImageAssetSlug(slug)) {
       sendError(res, 400, "Invalid Image Asset slug");
       return;
     }

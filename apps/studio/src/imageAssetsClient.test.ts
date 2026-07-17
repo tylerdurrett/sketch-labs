@@ -202,6 +202,21 @@ describe("imageAssetsClient — importImageAsset", () => {
     },
   );
 
+  it("rejects an overlong canonicalized slug before fetching", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      importImageAsset("a".repeat(101), pngBlob()),
+    ).rejects.toMatchObject({
+      code: "slug-too-long",
+      operation: "import",
+      status: undefined,
+      message: "Image Asset name exceeds the 100-character limit",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["missing id", { created: true }],
     ["malformed id", { id: "Pine-0123456789ab", created: true }],
@@ -217,14 +232,35 @@ describe("imageAssetsClient — importImageAsset", () => {
     });
   });
 
-  it("distinguishes failed status, request network, body network, and invalid JSON", async () => {
-    stubFetch({ ok: false, status: 413, statusText: "too large" });
-    await expect(importImageAsset("pine", pngBlob())).rejects.toMatchObject({
-      code: "http-status",
-      operation: "import",
-      status: 413,
-    });
+  it.each([
+    [400, "invalid-request", "Prepared Image Asset was rejected by the server"],
+    [409, "conflict", "Image Asset conflicts with existing stored bytes"],
+    [413, "payload-too-large", "Prepared Image Asset is too large to import"],
+    [503, "http-status", "Image Asset server request failed"],
+  ])(
+    "maps import HTTP %i to the bounded %s failure",
+    async (status, code, message) => {
+      stubFetch({
+        ok: false,
+        status,
+        statusText: "private server or path detail",
+      });
 
+      const error = await importImageAsset("pine", pngBlob()).catch(
+        (reason: unknown) => reason,
+      );
+      expect(error).toMatchObject({
+        code,
+        operation: "import",
+        status,
+        message,
+      });
+      expect(error).not.toHaveProperty("cause");
+      expect((error as Error).message).not.toContain("private");
+    },
+  );
+
+  it("distinguishes request network, body network, and invalid JSON", async () => {
     vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
     const requestError = await importImageAsset("pine", pngBlob()).catch(
       (reason: unknown) => reason,

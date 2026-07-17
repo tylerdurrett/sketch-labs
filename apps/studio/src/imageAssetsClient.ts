@@ -7,6 +7,8 @@
  * retried under a fallback slug.
  */
 import {
+  IMAGE_ASSET_MAX_SLUG_LENGTH,
+  isImageAssetSlugDraftWithinLimit,
   normalizeImageAssetSlug,
   parseImageAssetId,
 } from "./imageAssetIdentity";
@@ -18,14 +20,22 @@ export type ImageAssetsClientOperation = "list" | "import";
 
 export type ImageAssetsClientErrorCode =
   | "invalid-input"
+  | "slug-too-long"
   | "network"
   | "http-status"
+  | "conflict"
+  | "payload-too-large"
+  | "invalid-request"
   | "malformed-response";
 
 const ERROR_MESSAGES: Readonly<Record<ImageAssetsClientErrorCode, string>> = {
   "invalid-input": "Image Asset request has invalid local input",
+  "slug-too-long": `Image Asset name exceeds the ${IMAGE_ASSET_MAX_SLUG_LENGTH}-character limit`,
   network: "Image Asset network request failed",
   "http-status": "Image Asset server request failed",
+  conflict: "Image Asset conflicts with existing stored bytes",
+  "payload-too-large": "Prepared Image Asset is too large to import",
+  "invalid-request": "Prepared Image Asset was rejected by the server",
   "malformed-response": "Image Asset server response is malformed",
 };
 
@@ -80,7 +90,15 @@ async function request(
   }
 
   if (!response.ok) {
-    throw new ImageAssetsClientError("http-status", operation, {
+    const code: ImageAssetsClientErrorCode =
+      operation === "import" && response.status === 409
+        ? "conflict"
+        : operation === "import" && response.status === 413
+          ? "payload-too-large"
+          : operation === "import" && response.status === 400
+            ? "invalid-request"
+            : "http-status";
+    throw new ImageAssetsClientError(code, operation, {
       status: response.status,
     });
   }
@@ -138,6 +156,9 @@ export async function listImageAssets(): Promise<ManagedImageAsset[]> {
 function canonicalImportSlug(slugDraft: string): string {
   if (typeof slugDraft !== "string") {
     throw new ImageAssetsClientError("invalid-input", "import");
+  }
+  if (!isImageAssetSlugDraftWithinLimit(slugDraft)) {
+    throw new ImageAssetsClientError("slug-too-long", "import");
   }
 
   // The identity helper is the canonical policy, including its readable

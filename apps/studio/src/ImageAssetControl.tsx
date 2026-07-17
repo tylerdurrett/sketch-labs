@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button } from "./components/ui/button";
 import {
+  IMAGE_ASSET_MAX_SLUG_LENGTH,
   imageAssetDisplayName,
   imageAssetUrl,
+  isImageAssetSlugDraftWithinLimit,
 } from "./imageAssetIdentity";
 import {
   importImageAsset,
@@ -44,7 +46,24 @@ function failureMessage(phase: FailurePhase, error: unknown): string {
       : phase === "normalize"
         ? "Could not prepare the selected image."
         : "Could not import the prepared Image Asset.";
-  return `${lead}${detail === null ? "" : ` ${detail}`} Try again.`;
+  let guidance = " Try again.";
+  if (error instanceof ImageAssetsClientError) {
+    switch (error.code) {
+      case "slug-too-long":
+        guidance = ` Shorten the name to ${IMAGE_ASSET_MAX_SLUG_LENGTH} characters or fewer.`;
+        break;
+      case "conflict":
+        guidance = " Choose a different name or image.";
+        break;
+      case "payload-too-large":
+        guidance = " Choose a smaller image.";
+        break;
+      case "invalid-request":
+        guidance = " Choose a different image.";
+        break;
+    }
+  }
+  return `${lead}${detail === null ? "" : ` ${detail}`}${guidance}`;
 }
 
 /**
@@ -73,6 +92,15 @@ export function ImageAssetControl({
   const importToken = useRef(0);
   const mounted = useRef(true);
   const fileInput = useRef<HTMLInputElement>(null);
+  const controlledValue = useRef({ value, revision: 0 });
+  const committedValue = useRef(value);
+
+  if (controlledValue.current.value !== value) {
+    controlledValue.current = {
+      value,
+      revision: controlledValue.current.revision + 1,
+    };
+  }
 
   useEffect(() => {
     mounted.current = true;
@@ -82,6 +110,16 @@ export function ImageAssetControl({
       importToken.current += 1;
     };
   }, []);
+
+  useEffect(() => {
+    if (committedValue.current === value) return;
+    committedValue.current = value;
+    // Undo, Redo, and preset reloads are newer controlled intent. Leave the
+    // selected file available for retry, but stop presenting the older import
+    // as busy and prevent its result from changing selection or the catalog.
+    importToken.current += 1;
+    setImporting(false);
+  }, [value]);
 
   const refreshCatalog = async (): Promise<void> => {
     const token = ++catalogToken.current;
@@ -120,9 +158,17 @@ export function ImageAssetControl({
   const chooseFile = (next: File | null): void => {
     importToken.current += 1;
     setImporting(false);
-    setFailure(null);
     setFile(next);
-    setSlug(next === null ? "" : proposeImageAssetSlug(next.name));
+    const proposedSlug = next === null ? "" : proposeImageAssetSlug(next.name);
+    setSlug(proposedSlug);
+    setFailure(
+      next !== null && !isImageAssetSlugDraftWithinLimit(proposedSlug)
+        ? failureMessage(
+            "import",
+            new ImageAssetsClientError("slug-too-long", "import"),
+          )
+        : null,
+    );
   };
 
   const selectAsset = (id: string): void => {
@@ -137,11 +183,27 @@ export function ImageAssetControl({
 
   const confirmImport = async (): Promise<void> => {
     if (file === null || importing) return;
+    if (!isImageAssetSlugDraftWithinLimit(slug)) {
+      setFailure(
+        failureMessage(
+          "import",
+          new ImageAssetsClientError("slug-too-long", "import"),
+        ),
+      );
+      return;
+    }
     const selectedFile = file;
     const slugDraft = slug;
     const token = ++importToken.current;
+    const confirmedValue = controlledValue.current;
     setImporting(true);
     setFailure(null);
+
+    const isCurrent = (): boolean =>
+      mounted.current &&
+      importToken.current === token &&
+      controlledValue.current.value === confirmedValue.value &&
+      controlledValue.current.revision === confirmedValue.revision;
 
     let normalized: Awaited<ReturnType<typeof normalizeImageAsset>>;
     try {
@@ -149,16 +211,16 @@ export function ImageAssetControl({
         maxLongEdge: imageAssetLongEdgeCap,
       });
     } catch (error) {
-      if (!mounted.current || importToken.current !== token) return;
+      if (!isCurrent()) return;
       setImporting(false);
       setFailure(failureMessage("normalize", error));
       return;
     }
-    if (!mounted.current || importToken.current !== token) return;
+    if (!isCurrent()) return;
 
     try {
       const result = await importImageAsset(slugDraft, normalized.png);
-      if (!mounted.current || importToken.current !== token) return;
+      if (!isCurrent()) return;
       onChange(result.id);
       setFile(null);
       setSlug("");
@@ -166,7 +228,7 @@ export function ImageAssetControl({
       setImporting(false);
       await refreshCatalog();
     } catch (error) {
-      if (!mounted.current || importToken.current !== token) return;
+      if (!isCurrent()) return;
       setImporting(false);
       setFailure(failureMessage("import", error));
     }
@@ -284,13 +346,37 @@ export function ImageAssetControl({
                   type="text"
                   value={slug}
                   disabled={importing}
+                  maxLength={IMAGE_ASSET_MAX_SLUG_LENGTH}
+                  aria-describedby={`${paramKey}-slug-help`}
                   className="h-9 rounded-md border bg-background px-3 text-sm"
-                  onChange={(event) => setSlug(event.currentTarget.value)}
+                  onChange={(event) => {
+                    const nextSlug = event.currentTarget.value;
+                    setSlug(nextSlug);
+                    setFailure(
+                      isImageAssetSlugDraftWithinLimit(nextSlug)
+                        ? null
+                        : failureMessage(
+                            "import",
+                            new ImageAssetsClientError(
+                              "slug-too-long",
+                              "import",
+                            ),
+                          ),
+                    );
+                  }}
                 />
+                <div
+                  id={`${paramKey}-slug-help`}
+                  className="text-xs text-muted-foreground"
+                >
+                  Up to {IMAGE_ASSET_MAX_SLUG_LENGTH} characters.
+                </div>
                 <Button
                   type="button"
                   size="sm"
-                  disabled={importing}
+                  disabled={
+                    importing || !isImageAssetSlugDraftWithinLimit(slug)
+                  }
                   onClick={() => void confirmImport()}
                 >
                   {importing ? "Importing…" : "Import Image Asset"}

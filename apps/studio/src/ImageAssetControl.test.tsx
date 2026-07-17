@@ -221,6 +221,57 @@ describe("ImageAssetControl", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["proposed filename", true],
+    ["edited slug", false],
+  ])(
+    "rejects an overlong %s before normalization, import, or selection",
+    async (_case, fromFilename) => {
+      const onChange = vi.fn();
+      const el = mount(
+        <ImageAssetControl
+          paramKey="source"
+          value="current-aaaaaaaaaaaa"
+          onChange={onChange}
+        />,
+      );
+      act(() => button(el, "Choose image").click());
+      await flush();
+      chooseFile(
+        el,
+        new File(["source"], `${fromFilename ? "a".repeat(101) : "short"}.png`),
+      );
+
+      const slugInput =
+        el.querySelector<HTMLInputElement>('input[type="text"]')!;
+      expect(slugInput.maxLength).toBe(100);
+      expect(slugInput.getAttribute("aria-describedby")).toBe(
+        "source-slug-help",
+      );
+      if (!fromFilename) {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype,
+          "value",
+        )!.set!;
+        act(() => {
+          valueSetter.call(slugInput, "b".repeat(101));
+          slugInput.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+      }
+
+      expect(el.textContent).toContain("Up to 100 characters.");
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+        "Shorten the name to 100 characters or fewer.",
+      );
+      expect(button(el, "Import Image Asset").disabled).toBe(true);
+      act(() => button(el, "Import Image Asset").click());
+      await flush();
+      expect(operations.normalize).not.toHaveBeenCalled();
+      expect(operations.import).not.toHaveBeenCalled();
+      expect(onChange).not.toHaveBeenCalled();
+    },
+  );
+
   it("normalizes only on confirm with the supplied cap, imports the edited slug, selects immediately, and refreshes", async () => {
     const refreshed = deferred<never[]>();
     operations.list
@@ -375,6 +426,67 @@ describe("ImageAssetControl", () => {
       "library-choice-bbbbbbbbbbbb",
     );
   });
+
+  it("keeps a controlled value changed externally while an import settles", async () => {
+    const pendingImport = deferred<{ id: string; created: boolean }>();
+    operations.import.mockImplementationOnce(() => pendingImport.promise);
+    const onChange = vi.fn();
+    const renderControl = (value: string) => (
+      <ImageAssetControl paramKey="source" value={value} onChange={onChange} />
+    );
+    const el = mount(renderControl("current-aaaaaaaaaaaa"));
+    act(() => button(el, "Choose image").click());
+    await flush();
+    chooseFile(el, new File(["source"], "Pending.jpg"));
+    act(() => button(el, "Import Image Asset").click());
+    await flush();
+    expect(operations.import).toHaveBeenCalledTimes(1);
+    expect(button(el, "Importing…").disabled).toBe(true);
+
+    act(() => root!.render(renderControl("undo-choice-bbbbbbbbbbbb")));
+    expect(el.querySelector("code")?.textContent).toBe(
+      "undo-choice-bbbbbbbbbbbb",
+    );
+    expect(button(el, "Import Image Asset").disabled).toBe(false);
+
+    pendingImport.resolve({ id: "stale-import-cccccccccccc", created: true });
+    await flush();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(operations.list).toHaveBeenCalledTimes(1);
+    expect(el.querySelector("code")?.textContent).toBe(
+      "undo-choice-bbbbbbbbbbbb",
+    );
+  });
+
+  it.each([
+    ["conflict", 409, "Choose a different name or image."],
+    ["payload-too-large", 413, "Choose a smaller image."],
+    ["invalid-request", 400, "Choose a different image."],
+  ] as const)(
+    "shows actionable bounded guidance for an import %s",
+    async (code, status, guidance) => {
+      operations.import.mockRejectedValueOnce(
+        new ImageAssetsClientError(code, "import", { status }),
+      );
+      const el = mount(
+        <ImageAssetControl
+          paramKey="source"
+          value="current-aaaaaaaaaaaa"
+          onChange={() => {}}
+        />,
+      );
+      act(() => button(el, "Choose image").click());
+      await flush();
+      chooseFile(el, new File(["source"], "Pine.jpg"));
+      act(() => button(el, "Import Image Asset").click());
+      await flush();
+
+      const message = el.querySelector('[role="alert"]')?.textContent ?? "";
+      expect(message).toContain(guidance);
+      expect(message).not.toContain("/__api/");
+      expect(message).not.toContain("assets/image-assets");
+    },
+  );
 
   it("ignores superseded catalog results and import completion after unmount", async () => {
     const oldList = deferred<
