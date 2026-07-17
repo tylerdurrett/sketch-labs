@@ -22,6 +22,10 @@ const schema: ParamSchema = {
   middle: { kind: "number", min: 0, max: 10, default: 2 },
 };
 
+const imageAssetSchema: ParamSchema = {
+  imageAsset: { kind: "image-asset", default: "portrait-default" },
+};
+
 const scene: Scene = {
   space: { width: 120, height: 90 },
   background: { color: "ivory" },
@@ -63,6 +67,16 @@ function identity(
       width: 120,
       height: 90,
     },
+  });
+}
+
+function imageAssetIdentity(value: unknown): ScribbleComputeIdentity {
+  return createScribbleComputeIdentity({
+    sketchId: "photo-scribble",
+    schema: imageAssetSchema,
+    params: { imageAsset: value },
+    seed: "seed",
+    compositionFrame: { width: 120, height: 90 },
   });
 }
 
@@ -155,6 +169,51 @@ describe("Scribble compute identity", () => {
     expect(Object.isFrozen(copied.params)).toBe(true);
     expect(Object.isFrozen(copied.params[0])).toBe(true);
     expect(Object.isFrozen(copied.compositionFrame)).toBe(true);
+  });
+
+  it("keeps an Image Asset parameter as its opaque ID only", () => {
+    const current = createScribbleComputeIdentity({
+      sketchId: "photo-scribble",
+      schema: imageAssetSchema,
+      params: {
+        imageAsset: "portrait-a1b2c3d4",
+        raster: { width: 640, height: 480, pixels: [1, 2, 3, 4] },
+        decodedImage: { src: "data:image/png;base64,opaque" },
+      },
+      seed: "seed",
+      compositionFrame: { width: 120, height: 90 },
+    });
+    const cached = copyScribbleComputeIdentity(current);
+
+    expect(current.params).toEqual([
+      { key: "imageAsset", value: "portrait-a1b2c3d4" },
+    ]);
+    expect(cached.params).toEqual(current.params);
+    expect(Object.keys(cached.params[0]!)).toEqual(["key", "value"]);
+    expect(JSON.stringify(cached)).not.toContain("raster");
+    expect(JSON.stringify(cached)).not.toContain("decodedImage");
+  });
+
+  it("treats every Image Asset string as an exact identity value", () => {
+    const unresolved = "  unresolved://not-an-asset-id?variant=β\n";
+    const current = imageAssetIdentity(unresolved);
+
+    expect(current.params).toEqual([
+      { key: "imageAsset", value: unresolved },
+    ]);
+    expect(
+      scribbleComputeIdentitiesEqual(
+        current,
+        imageAssetIdentity("unresolved://not-an-asset-id?variant=β"),
+      ),
+    ).toBe(false);
+    expect(imageAssetIdentity("").params[0]?.value).toBe("");
+  });
+
+  it("rejects only non-string Image Asset parameter values", () => {
+    for (const value of [undefined, null, 42, {}, [], new String("asset")]) {
+      expect(() => imageAssetIdentity(value)).toThrow(/imageAsset/);
+    }
   });
 
   it("rejects missing, mistyped, and non-finite authored inputs", () => {
