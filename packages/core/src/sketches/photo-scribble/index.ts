@@ -1,10 +1,9 @@
 /**
  * Headless Photo Scribble Sketch composition.
  *
- * A caller supplies the default Image Asset ID when constructing the Sketch.
- * This slice deliberately exports a factory rather than inventing a placeholder
- * ID: #333 will instantiate and register the production Sketch only after it has
- * a committed normalized PNG and its real content-derived identity.
+ * The named Sketch uses the committed sample's opaque, content-derived Image
+ * Asset ID. The factory remains available for callers and tests that own a
+ * different default; core deliberately does not parse or validate either form.
  *
  * Artwork contains only generated Scribble paths. The photograph remains source
  * data and never becomes a Primitive, authored contour, occluder, guide, or
@@ -43,6 +42,10 @@ export * from './tone'
 
 const PHOTO_TONE_CONTROL_STEP = 0.01
 const PREVIEW_STROKE = Object.freeze({ color: 'black', width: 1 })
+
+/** Opaque stable ID of the bundled sample; its filename and bytes live in Studio. */
+export const PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID =
+  'pinecone-4330aa0314f7'
 
 /** Build the exact schema bound to one real default Image Asset ID. */
 export function createPhotoScribbleSchema(defaultImageAssetId: string) {
@@ -196,3 +199,8 @@ export function createPhotoScribble(
     },
   }
 }
+
+/** Named production composition; Studio registration lands with its asset loader. */
+export const photoScribble = createPhotoScribble(
+  PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+)

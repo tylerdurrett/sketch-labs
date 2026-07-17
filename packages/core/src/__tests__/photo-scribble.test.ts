@@ -6,11 +6,13 @@ import { defaultParams, type Params } from '../sketch'
 import type { ScribbleStrategyInput } from '../scribbleStrategy'
 import { scribbleStrategy } from '../scribbleStrategy'
 import {
+  PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
   createPhotoScribble,
   createPhotoScribbleSchema,
   createPhotoScribbleSource,
   generatePhotoScribble,
   generatePhotoScribbleArtwork,
+  photoScribble,
 } from '../sketches/photo-scribble'
 import { applyPhotoToneControls } from '../sketches/photo-scribble/tone'
 
@@ -109,7 +111,7 @@ describe('Photo Scribble headless composition', () => {
     })
   })
 
-  it('constructs the unregistered Sketch without claiming a production asset', () => {
+  it('preserves arbitrary caller-owned default Image Asset IDs', () => {
     const sketch = createPhotoScribble(HEADLESS_FIXTURE_LOOKUP_KEY)
 
     expect(sketch.id).toBe('photo-scribble')
@@ -118,6 +120,18 @@ describe('Photo Scribble headless composition', () => {
       kind: 'image-asset',
       default: HEADLESS_FIXTURE_LOOKUP_KEY,
     })
+  })
+
+  it('exports the named production Sketch with its opaque bundled default', () => {
+    expect(photoScribble.id).toBe('photo-scribble')
+    expect(photoScribble.name).toBe('Photo Scribble')
+    expect(photoScribble.schema.imageAsset).toEqual({
+      kind: 'image-asset',
+      default: PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+    })
+    expect(PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID).toBe(
+      'pinecone-4330aa0314f7',
+    )
   })
 
   it('passes the selected lookup key verbatim and defaults only a non-string value', () => {
@@ -296,6 +310,23 @@ describe('Photo Scribble headless composition', () => {
 
     expect(cold).toEqual(prepared?.scene)
     expect(cold.space).toEqual(FRAME)
+  })
+
+  it('keeps the named production instance path-only', () => {
+    const currentParams = defaultParams(photoScribble.schema)
+    const env = environment(vi.fn(() => FIXTURE_PIXELS))
+    const scene = photoScribble.generate(currentParams, 'seed', 0, FRAME, env)
+
+    expect(scene.background).toBeUndefined()
+    expect(scene.primitives).not.toHaveLength(0)
+    expect(
+      scene.primitives.every(
+        (primitive) =>
+          primitive.closed === false &&
+          primitive.fill === undefined &&
+          primitive.hiddenLineRole === 'source',
+      ),
+    ).toBe(true)
   })
 
   it.each([
