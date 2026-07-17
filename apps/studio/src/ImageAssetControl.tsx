@@ -125,6 +125,16 @@ export function ImageAssetControl({
     setSlug(next === null ? "" : proposeImageAssetSlug(next.name));
   };
 
+  const selectAsset = (id: string): void => {
+    // A library choice is newer authored intent than any in-flight import.
+    // The browser request cannot be cancelled once posted, but its result must
+    // never overwrite this explicit selection when it eventually settles.
+    importToken.current += 1;
+    setImporting(false);
+    setFailure(null);
+    onChange(id);
+  };
+
   const confirmImport = async (): Promise<void> => {
     if (file === null || importing) return;
     const selectedFile = file;
@@ -226,7 +236,7 @@ export function ImageAssetControl({
                     type="button"
                     aria-pressed={active}
                     className="flex min-w-0 items-center gap-2 rounded-md border p-2 text-left"
-                    onClick={() => onChange(asset.id)}
+                    onClick={() => selectAsset(asset.id)}
                   >
                     <img
                       src={asset.url}

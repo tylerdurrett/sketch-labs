@@ -333,6 +333,49 @@ describe("ImageAssetControl", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("keeps a newer library choice when an older import settles late", async () => {
+    operations.list.mockResolvedValueOnce([
+      {
+        id: "library-choice-bbbbbbbbbbbb",
+        name: "library choice",
+        url: "/image-assets/library-choice-bbbbbbbbbbbb.png",
+      },
+    ]);
+    const pendingImport = deferred<{ id: string; created: boolean }>();
+    operations.import.mockImplementationOnce(() => pendingImport.promise);
+    const onChange = vi.fn();
+    const el = mount(
+      <ImageAssetControl
+        paramKey="source"
+        value="current-aaaaaaaaaaaa"
+        onChange={onChange}
+      />,
+    );
+    act(() => button(el, "Choose image").click());
+    await flush();
+    chooseFile(el, new File(["source"], "Pending.jpg"));
+    act(() => button(el, "Import Image Asset").click());
+    await flush();
+
+    act(() => {
+      el.querySelector<HTMLButtonElement>(
+        '[aria-label="Image Assets"] button',
+      )!.click();
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(
+      "library-choice-bbbbbbbbbbbb",
+    );
+    expect(button(el, "Import Image Asset").disabled).toBe(false);
+
+    pendingImport.resolve({ id: "stale-import-cccccccccccc", created: true });
+    await flush();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(
+      "library-choice-bbbbbbbbbbbb",
+    );
+  });
+
   it("ignores superseded catalog results and import completion after unmount", async () => {
     const oldList = deferred<
       { id: string; name: string; url: string }[]
