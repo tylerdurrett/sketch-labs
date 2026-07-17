@@ -49,3 +49,19 @@ export function parseImageAssetId(value: string): ParsedImageAssetId | null {
 export function isImageAssetId(value: unknown): value is string {
   return typeof value === "string" && parseImageAssetId(value) !== null;
 }
+
+/**
+ * Resolve a canonical Image Asset ID to its browser-facing static URL.
+ *
+ * Invalid IDs have no URL: callers must not fabricate a request for an
+ * unresolved or malformed value.
+ */
+export function imageAssetUrl(value: unknown): string | null {
+  return isImageAssetId(value) ? `/image-assets/${value}.png` : null;
+}
+
+/** Return the readable slug portion of a canonical Image Asset ID. */
+export function imageAssetDisplayName(value: unknown): string | null {
+  const parsed = typeof value === "string" ? parseImageAssetId(value) : null;
+  return parsed === null ? null : parsed.slug.replaceAll("-", " ");
+}

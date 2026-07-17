@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   IMAGE_ASSET_HASH_HEX_LENGTH,
+  imageAssetDisplayName,
   imageAssetIdFromDigest,
+  imageAssetUrl,
   isImageAssetId,
   normalizeImageAssetSlug,
   parseImageAssetId,
@@ -62,6 +64,24 @@ describe("Image Asset identity", () => {
       expect(isImageAssetId(invalid)).toBe(false);
     }
     expect(isImageAssetId(null)).toBe(false);
+  });
+
+  it("exposes browser-safe URL and readable-name helpers only for valid IDs", () => {
+    const id = "pine-cone-0123456789ab";
+
+    expect(imageAssetUrl(id)).toBe(`/image-assets/${id}.png`);
+    expect(imageAssetDisplayName(id)).toBe("pine cone");
+
+    for (const invalid of [
+      "Pine-cone-0123456789ab",
+      "pine-cone-0123456789AB",
+      "pine-cone-0123456789ab.png",
+      "../pine-cone-0123456789ab",
+      null,
+    ]) {
+      expect(imageAssetUrl(invalid)).toBeNull();
+      expect(imageAssetDisplayName(invalid)).toBeNull();
+    }
   });
 });
 
