@@ -38,9 +38,9 @@ export class ImageAssetsClientError extends Error {
   constructor(
     code: ImageAssetsClientErrorCode,
     operation: ImageAssetsClientOperation,
-    options: { readonly cause?: unknown; readonly status?: number } = {},
+    options: { readonly status?: number } = {},
   ) {
-    super(ERROR_MESSAGES[code], { cause: options.cause });
+    super(ERROR_MESSAGES[code]);
     this.name = "ImageAssetsClientError";
     this.code = code;
     this.operation = operation;
@@ -63,9 +63,8 @@ export interface ImportImageAssetResult {
 
 function malformedResponse(
   operation: ImageAssetsClientOperation,
-  cause?: unknown,
 ): ImageAssetsClientError {
-  return new ImageAssetsClientError("malformed-response", operation, { cause });
+  return new ImageAssetsClientError("malformed-response", operation);
 }
 
 async function request(
@@ -76,8 +75,8 @@ async function request(
   let response: Response;
   try {
     response = await fetch(url, init);
-  } catch (cause: unknown) {
-    throw new ImageAssetsClientError("network", operation, { cause });
+  } catch {
+    throw new ImageAssetsClientError("network", operation);
   }
 
   if (!response.ok) {
@@ -92,10 +91,17 @@ async function responseJson(
   response: Response,
   operation: ImageAssetsClientOperation,
 ): Promise<unknown> {
+  let text: string;
   try {
-    return await response.json();
-  } catch (cause: unknown) {
-    throw malformedResponse(operation, cause);
+    text = await response.text();
+  } catch {
+    throw new ImageAssetsClientError("network", operation);
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw malformedResponse(operation);
   }
 }
 

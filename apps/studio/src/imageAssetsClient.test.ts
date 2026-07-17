@@ -33,12 +33,14 @@ describe("imageAssetsClient — listImageAssets", () => {
   it("GETs the list route and returns defensively sorted display records", async () => {
     const calls = stubFetch({
       ok: true,
-      json: () =>
-        Promise.resolve([
-          "zebra-study-aaaaaaaaaaaa",
-          "apple-tree-bbbbbbbbbbbb",
-          "apple-study-cccccccccccc",
-        ]),
+      text: () =>
+        Promise.resolve(
+          JSON.stringify([
+            "zebra-study-aaaaaaaaaaaa",
+            "apple-tree-bbbbbbbbbbbb",
+            "apple-study-cccccccccccc",
+          ]),
+        ),
     });
 
     await expect(listImageAssets()).resolves.toEqual([
@@ -66,7 +68,7 @@ describe("imageAssetsClient — listImageAssets", () => {
     ["non-string entry", ["pine-cone-0123456789ab", 42]],
     ["malformed ID", ["pine-cone-0123456789AB"]],
   ])("rejects a %s response atomically", async (_label, body) => {
-    stubFetch({ ok: true, json: () => Promise.resolve(body) });
+    stubFetch({ ok: true, text: () => Promise.resolve(JSON.stringify(body)) });
 
     await expect(listImageAssets()).rejects.toMatchObject({
       name: "ImageAssetsClientError",
@@ -75,10 +77,10 @@ describe("imageAssetsClient — listImageAssets", () => {
     });
   });
 
-  it("maps invalid JSON to a bounded malformed-response error", async () => {
+  it("maps invalid JSON syntax to a bounded malformed-response error", async () => {
     stubFetch({
       ok: true,
-      json: () => Promise.reject(new SyntaxError("unbounded parser detail")),
+      text: () => Promise.resolve("private invalid JSON detail"),
     });
 
     const error = await listImageAssets().catch((reason: unknown) => reason);
@@ -88,7 +90,26 @@ describe("imageAssetsClient — listImageAssets", () => {
       operation: "list",
       message: "Image Asset server response is malformed",
     });
-    expect((error as Error).message).not.toContain("unbounded parser detail");
+    expect(error).not.toHaveProperty("cause");
+    expect((error as Error).message).not.toContain(
+      "private invalid JSON detail",
+    );
+  });
+
+  it("maps a failed response-body read to a bounded network error", async () => {
+    stubFetch({
+      ok: true,
+      text: () => Promise.reject(new Error("private stream detail")),
+    });
+
+    const error = await listImageAssets().catch((reason: unknown) => reason);
+    expect(error).toMatchObject({
+      code: "network",
+      operation: "list",
+      message: "Image Asset network request failed",
+    });
+    expect(error).not.toHaveProperty("cause");
+    expect((error as Error).message).not.toContain("private stream detail");
   });
 
   it("distinguishes failed status and network errors", async () => {
@@ -101,12 +122,17 @@ describe("imageAssetsClient — listImageAssets", () => {
     });
 
     vi.stubGlobal("fetch", () => Promise.reject(new Error("offline detail")));
-    await expect(listImageAssets()).rejects.toMatchObject({
+    const networkError = await listImageAssets().catch(
+      (reason: unknown) => reason,
+    );
+    expect(networkError).toMatchObject({
       code: "network",
       operation: "list",
       status: undefined,
       message: "Image Asset network request failed",
     });
+    expect(networkError).not.toHaveProperty("cause");
+    expect((networkError as Error).message).not.toContain("offline detail");
   });
 });
 
@@ -115,8 +141,13 @@ describe("imageAssetsClient — importImageAsset", () => {
     const body = pngBlob();
     const calls = stubFetch({
       ok: true,
-      json: () =>
-        Promise.resolve({ id: "pine-cone-png-0123456789ab", created: true }),
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            id: "pine-cone-png-0123456789ab",
+            created: true,
+          }),
+        ),
     });
 
     await expect(importImageAsset("  Pine Cone.PNG  ", body)).resolves.toEqual({
@@ -136,7 +167,10 @@ describe("imageAssetsClient — importImageAsset", () => {
   it("uses the identity policy's safe fallback for a non-ASCII draft", async () => {
     const calls = stubFetch({
       ok: true,
-      json: () => Promise.resolve({ id: "image-0123456789ab", created: false }),
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({ id: "image-0123456789ab", created: false }),
+        ),
     });
 
     await expect(importImageAsset("🌲", pngBlob())).resolves.toEqual({
@@ -175,7 +209,7 @@ describe("imageAssetsClient — importImageAsset", () => {
     ["non-boolean created", { id: "pine-0123456789ab", created: "yes" }],
     ["array", [{ id: "pine-0123456789ab", created: true }]],
   ])("rejects a malformed import response (%s)", async (_label, body) => {
-    stubFetch({ ok: true, json: () => Promise.resolve(body) });
+    stubFetch({ ok: true, text: () => Promise.resolve(JSON.stringify(body)) });
 
     await expect(importImageAsset("pine", pngBlob())).rejects.toMatchObject({
       code: "malformed-response",
@@ -183,7 +217,7 @@ describe("imageAssetsClient — importImageAsset", () => {
     });
   });
 
-  it("distinguishes failed status, network, and invalid JSON", async () => {
+  it("distinguishes failed status, request network, body network, and invalid JSON", async () => {
     stubFetch({ ok: false, status: 413, statusText: "too large" });
     await expect(importImageAsset("pine", pngBlob())).rejects.toMatchObject({
       code: "http-status",
@@ -192,18 +226,43 @@ describe("imageAssetsClient — importImageAsset", () => {
     });
 
     vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
-    await expect(importImageAsset("pine", pngBlob())).rejects.toMatchObject({
+    const requestError = await importImageAsset("pine", pngBlob()).catch(
+      (reason: unknown) => reason,
+    );
+    expect(requestError).toMatchObject({
       code: "network",
       operation: "import",
     });
+    expect(requestError).not.toHaveProperty("cause");
 
     stubFetch({
       ok: true,
-      json: () => Promise.reject(new SyntaxError("bad json")),
+      text: () => Promise.reject(new Error("private body detail")),
     });
-    await expect(importImageAsset("pine", pngBlob())).rejects.toMatchObject({
+    const bodyError = await importImageAsset("pine", pngBlob()).catch(
+      (reason: unknown) => reason,
+    );
+    expect(bodyError).toMatchObject({
+      code: "network",
+      operation: "import",
+    });
+    expect(bodyError).not.toHaveProperty("cause");
+    expect((bodyError as Error).message).not.toContain("private body detail");
+
+    stubFetch({
+      ok: true,
+      text: () => Promise.resolve("private bad json detail"),
+    });
+    const syntaxError = await importImageAsset("pine", pngBlob()).catch(
+      (reason: unknown) => reason,
+    );
+    expect(syntaxError).toMatchObject({
       code: "malformed-response",
       operation: "import",
     });
+    expect(syntaxError).not.toHaveProperty("cause");
+    expect((syntaxError as Error).message).not.toContain(
+      "private bad json detail",
+    );
   });
 });
