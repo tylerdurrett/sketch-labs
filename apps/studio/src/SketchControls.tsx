@@ -127,22 +127,24 @@ function sameParams(
   );
 }
 
-/** Fixed active fineliner until tool width joins the persisted Plot Profile. */
-const OUTLINE_TOOL_WIDTH_MILLIMETERS = 0.3;
-
 function outlineIdentitySourceFor(
   sketch: Sketch,
   profile: PlotProfile,
   frame: CoordinateSpace,
   sourceScene: Scene,
-): { sourceScene: Scene } | { outlineTarget: OutlineTarget } {
-  if (sketch.generateOutlineSource === undefined) return { sourceScene };
-  return {
-    outlineTarget: {
-      toolWidthMillimeters: OUTLINE_TOOL_WIDTH_MILLIMETERS,
-      millimetersPerSceneUnit: computePlotMapping(frame, profile).scale,
-    },
+):
+  | { sourceScene: Scene }
+  | { outlineTarget: OutlineTarget }
+  | { sourceScene: Scene; outlineTarget: OutlineTarget } {
+  const outlineTarget = {
+    toolWidthMillimeters: profile.toolWidthMillimeters,
+    millimetersPerSceneUnit: computePlotMapping(frame, profile).scale,
   };
+  if (sketch.deriveOutlineSource !== undefined) {
+    return { sourceScene, outlineTarget };
+  }
+  if (sketch.generateOutlineSource !== undefined) return { outlineTarget };
+  return { sourceScene };
 }
 
 /** Whether moving between two authored states invalidates prepared Outline geometry. */
@@ -155,7 +157,11 @@ function outlineInputsChanged(
     !sameParams(previous.params, next.params) ||
     previous.seed !== next.seed ||
     previous.tolerance !== next.tolerance ||
-    previous.profile.includeFrame !== next.profile.includeFrame
+    previous.profile.includeFrame !== next.profile.includeFrame ||
+    !Object.is(
+      previous.profile.toolWidthMillimeters,
+      next.profile.toolWidthMillimeters,
+    )
   ) {
     return true;
   }
@@ -537,7 +543,8 @@ export function SketchControls({
     const invalidated = outlineInputsChanged(
       current.present,
       next.present,
-      sketch.generateOutlineSource !== undefined,
+      sketch.generateOutlineSource !== undefined ||
+        sketch.deriveOutlineSource !== undefined,
     );
     if (invalidated) {
       cancelOutlineCoordinator();
@@ -1032,15 +1039,20 @@ export function SketchControls({
     // A displayed Outline is processed geometry, never a derivation source. Its
     // cache retains the immutable raw identity source for misses and is offered
     // separately as an exact reuse candidate.
+    const cachedSourceScene =
+      cachedOutline?.identity.sourceKind === "legacy-scene" ||
+      cachedOutline?.identity.sourceKind === "completed-scene-sketch"
+        ? mutableScene(cachedOutline.identity.sourceScene)
+        : undefined;
     const sourceScene =
       scribbleExport?.result.scene ??
-      (sketch.generateOutlineSource !== undefined
+      (displayed.renderMode !== "outline"
         ? displayed.scene
-        : displayed.renderMode === "outline"
-          ? cachedOutline?.identity.sourceKind === "legacy-scene"
-            ? mutableScene(cachedOutline.identity.sourceScene)
-            : undefined
-          : displayed.scene);
+        : cachedSourceScene ??
+          (sketch.deriveOutlineSource === undefined &&
+          sketch.generateOutlineSource !== undefined
+            ? displayed.scene
+            : undefined));
     if (sourceScene === undefined) return;
     const identity = createOutlineComputeIdentity({
       sketchId: sketch.id,

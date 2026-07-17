@@ -56,10 +56,18 @@ export interface SpecializedOutlineComputeIdentity
   readonly outlineTarget: Readonly<OutlineTarget>;
 }
 
-/** Legacy requests carry a Scene; specialized requests carry only derivation inputs. */
+export interface CompletedSceneOutlineComputeIdentity
+  extends OutlineComputeIdentityBase {
+  readonly sourceKind: "completed-scene-sketch";
+  readonly sourceScene: ImmutableScene;
+  readonly outlineTarget: Readonly<OutlineTarget>;
+}
+
+/** The source shape is explicit so dispatch, equality, and reuse cannot drift. */
 export type OutlineComputeIdentity =
   | LegacyOutlineComputeIdentity
-  | SpecializedOutlineComputeIdentity;
+  | SpecializedOutlineComputeIdentity
+  | CompletedSceneOutlineComputeIdentity;
 
 export interface OutlineComputeRequest {
   readonly type: "compute";
@@ -117,9 +125,15 @@ type CreateSpecializedIdentityInput = CreateIdentityInputBase & {
   outlineTarget: OutlineTarget;
 };
 
+type CreateCompletedSceneIdentityInput = CreateIdentityInputBase & {
+  sourceScene: Scene;
+  outlineTarget: OutlineTarget;
+};
+
 type CreateIdentityInput =
   | CreateLegacyIdentityInput
-  | CreateSpecializedIdentityInput;
+  | CreateSpecializedIdentityInput
+  | CreateCompletedSceneIdentityInput;
 
 const hasOwn = (value: object, key: PropertyKey): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
@@ -202,17 +216,27 @@ function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity 
     tolerance: identity.tolerance,
     includeFrame: identity.includeFrame,
   };
-  return identity.sourceKind === "legacy-scene"
-    ? Object.freeze({
+  switch (identity.sourceKind) {
+    case "legacy-scene":
+      return Object.freeze({
         ...common,
         sourceKind: "legacy-scene",
         sourceScene: copyScene(identity.sourceScene),
-      })
-    : Object.freeze({
+      });
+    case "specialized-sketch":
+      return Object.freeze({
         ...common,
         sourceKind: "specialized-sketch",
         outlineTarget: Object.freeze({ ...identity.outlineTarget }),
       });
+    case "completed-scene-sketch":
+      return Object.freeze({
+        ...common,
+        sourceKind: "completed-scene-sketch",
+        sourceScene: copyScene(identity.sourceScene),
+        outlineTarget: Object.freeze({ ...identity.outlineTarget }),
+      });
+  }
 }
 
 export function createOutlineComputeIdentity(
@@ -221,6 +245,9 @@ export function createOutlineComputeIdentity(
 export function createOutlineComputeIdentity(
   input: CreateSpecializedIdentityInput,
 ): SpecializedOutlineComputeIdentity;
+export function createOutlineComputeIdentity(
+  input: CreateCompletedSceneIdentityInput,
+): CompletedSceneOutlineComputeIdentity;
 export function createOutlineComputeIdentity(
   input: CreateIdentityInput,
 ): OutlineComputeIdentity;
@@ -244,18 +271,27 @@ export function createOutlineComputeIdentity(
     tolerance: input.tolerance,
     includeFrame: input.includeFrame,
   };
-  const identity: OutlineComputeIdentity =
-    input.outlineTarget === undefined
-      ? Object.freeze({
-          ...common,
-          sourceKind: "legacy-scene",
-          sourceScene: copyScene(input.sourceScene),
-        })
-      : Object.freeze({
-          ...common,
-          sourceKind: "specialized-sketch",
-          outlineTarget: Object.freeze({ ...input.outlineTarget }),
-        });
+  let identity: OutlineComputeIdentity;
+  if (input.outlineTarget === undefined) {
+    identity = Object.freeze({
+      ...common,
+      sourceKind: "legacy-scene",
+      sourceScene: copyScene(input.sourceScene),
+    });
+  } else if (input.sourceScene === undefined) {
+    identity = Object.freeze({
+      ...common,
+      sourceKind: "specialized-sketch",
+      outlineTarget: Object.freeze({ ...input.outlineTarget }),
+    });
+  } else {
+    identity = Object.freeze({
+      ...common,
+      sourceKind: "completed-scene-sketch",
+      sourceScene: copyScene(input.sourceScene),
+      outlineTarget: Object.freeze({ ...input.outlineTarget }),
+    });
+  }
   if (!isOutlineComputeIdentity(identity)) {
     throw new TypeError("Outline compute identity contains an invalid value");
   }
@@ -348,6 +384,17 @@ export function isOutlineComputeIdentity(
   } else if (value.sourceKind === "specialized-sketch") {
     if (
       hasOwn(value, "sourceScene") ||
+      !isRecord(value.outlineTarget) ||
+      !isFiniteNumber(value.outlineTarget.toolWidthMillimeters) ||
+      value.outlineTarget.toolWidthMillimeters <= 0 ||
+      !isFiniteNumber(value.outlineTarget.millimetersPerSceneUnit) ||
+      value.outlineTarget.millimetersPerSceneUnit <= 0
+    ) {
+      return false;
+    }
+  } else if (value.sourceKind === "completed-scene-sketch") {
+    if (
+      !isScene(value.sourceScene) ||
       !isRecord(value.outlineTarget) ||
       !isFiniteNumber(value.outlineTarget.toolWidthMillimeters) ||
       value.outlineTarget.toolWidthMillimeters <= 0 ||
@@ -525,15 +572,22 @@ export function outlineComputeIdentitiesEqual(
     (left.sourceKind === "legacy-scene"
       ? right.sourceKind === "legacy-scene" &&
         sceneEqual(left.sourceScene, right.sourceScene)
-      : right.sourceKind === "specialized-sketch" &&
-        Object.is(
-          left.outlineTarget.toolWidthMillimeters,
-          right.outlineTarget.toolWidthMillimeters,
-        ) &&
-        Object.is(
-          left.outlineTarget.millimetersPerSceneUnit,
-          right.outlineTarget.millimetersPerSceneUnit,
-        ))
+      : left.sourceKind === "specialized-sketch"
+        ? right.sourceKind === "specialized-sketch" &&
+          targetEqual(left.outlineTarget, right.outlineTarget)
+        : right.sourceKind === "completed-scene-sketch" &&
+          sceneEqual(left.sourceScene, right.sourceScene) &&
+          targetEqual(left.outlineTarget, right.outlineTarget))
+  );
+}
+
+function targetEqual(
+  left: Readonly<OutlineTarget>,
+  right: Readonly<OutlineTarget>,
+): boolean {
+  return (
+    Object.is(left.toolWidthMillimeters, right.toolWidthMillimeters) &&
+    Object.is(left.millimetersPerSceneUnit, right.millimetersPerSceneUnit)
   );
 }
 
@@ -572,6 +626,7 @@ export interface ImmutablePlotProfile {
   readonly height: number;
   readonly insets: Readonly<PlotProfile["insets"]>;
   readonly includeFrame: boolean;
+  readonly toolWidthMillimeters: number;
 }
 
 /** A completed Outline Scene that may be reused by a later job with the same identity. */
@@ -616,6 +671,7 @@ function copyProfile(profile: PlotProfile): ImmutablePlotProfile {
       left: profile.insets.left,
     }),
     includeFrame: profile.includeFrame,
+    toolWidthMillimeters: profile.toolWidthMillimeters,
   });
 }
 
@@ -686,7 +742,9 @@ function isPlotProfile(value: unknown): value is ImmutablePlotProfile {
     left >= 0 &&
     left + right < width &&
     top + bottom < height &&
-    typeof value.includeFrame === "boolean"
+    typeof value.includeFrame === "boolean" &&
+    isFiniteNumber(value.toolWidthMillimeters) &&
+    value.toolWidthMillimeters > 0
   );
 }
 

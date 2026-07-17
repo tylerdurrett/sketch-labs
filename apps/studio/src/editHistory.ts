@@ -204,6 +204,7 @@ function sameProfile(
     Object.is(left.insets.right, right.insets.right) &&
     Object.is(left.insets.bottom, right.insets.bottom) &&
     Object.is(left.insets.left, right.insets.left) &&
-    left.includeFrame === right.includeFrame
+    left.includeFrame === right.includeFrame &&
+    Object.is(left.toolWidthMillimeters, right.toolWidthMillimeters)
   );
 }

@@ -9,6 +9,7 @@ import {
   isHiddenLineWorkerMessage,
   isHiddenLineWorkerRequest,
   type CompletedOutline,
+  type CompletedSceneOutlineComputeIdentity,
   type HiddenLineExportSnapshot,
   type LegacyOutlineComputeIdentity,
   type OutlineComputeIdentity,
@@ -49,6 +50,24 @@ function identity(frame = { width: 100, height: 80 }): LegacyOutlineComputeIdent
   });
 }
 
+function completedSceneIdentity(): CompletedSceneOutlineComputeIdentity {
+  return createOutlineComputeIdentity({
+    sketchId: "prepared-lines",
+    schema,
+    params: { amount: 3 },
+    seed: 42,
+    sampledT: 1.25,
+    compositionFrame: { width: 100, height: 80 },
+    tolerance: 0.5,
+    includeFrame: true,
+    sourceScene: sourceScene(),
+    outlineTarget: {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    },
+  });
+}
+
 function profile(scale = 1): PlotProfile {
   return {
     width: 210 * scale,
@@ -60,6 +79,7 @@ function profile(scale = 1): PlotProfile {
       left: 10 * scale,
     },
     includeFrame: true,
+    toolWidthMillimeters: 0.3,
   };
 }
 
@@ -189,6 +209,51 @@ describe("hidden-line export snapshot", () => {
     expect(next.reusableOutline).not.toBe(prior);
     expect(next.reusableOutline?.scene).not.toBe(prior.scene);
     expect(isHiddenLineExportSnapshot(next)).toBe(true);
+  });
+
+  it("copies and reuses completed-Scene specialization only on exact Scene and target identity", () => {
+    const requested = completedSceneIdentity();
+    const matching = createHiddenLineExportSnapshot({
+      identity: requested,
+      profile: profile(),
+      metadata: "test",
+      includePaperMargins: false,
+      filename: "prepared.svg",
+      reusableOutline: completed(completedSceneIdentity()),
+    });
+    expect(matching.reusableOutline).toBeDefined();
+    expect(matching.identity).not.toBe(requested);
+    expect(matching.identity.sourceKind).toBe("completed-scene-sketch");
+
+    const staleScene = structuredClone(requested) as unknown as Record<
+      string,
+      any
+    >;
+    staleScene.sourceScene.primitives[0]!.points[0]![0] = 99;
+    const sceneMiss = createHiddenLineExportSnapshot({
+      ...matching,
+      identity: requested,
+      profile: profile(),
+      reusableOutline: completed(
+        staleScene as unknown as OutlineComputeIdentity,
+      ),
+    });
+    expect(sceneMiss.reusableOutline).toBeUndefined();
+
+    const staleTarget = structuredClone(requested) as unknown as Record<
+      string,
+      any
+    >;
+    staleTarget.outlineTarget.toolWidthMillimeters = 0.31;
+    const targetMiss = createHiddenLineExportSnapshot({
+      ...matching,
+      identity: requested,
+      profile: profile(),
+      reusableOutline: completed(
+        staleTarget as unknown as OutlineComputeIdentity,
+      ),
+    });
+    expect(targetMiss.reusableOutline).toBeUndefined();
   });
 
   it.each(identityMismatches)(

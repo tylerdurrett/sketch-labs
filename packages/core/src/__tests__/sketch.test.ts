@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   defaultParams,
@@ -273,6 +273,29 @@ describe('caller-owned prepared frames', () => {
     expect(progress).toEqual([
       { completedWorkUnits: 2, totalWorkUnits: 2, terminal: true },
     ])
+  })
+
+  it('preserves completed-Scene Outline derivation on a prepared Sketch', () => {
+    const completed = sceneAt(7)
+    const derived = sceneAt(9)
+    const deriveOutlineSource = vi.fn(() => derived)
+    const sketch = definePreparedSketch({
+      id: 'prepared-outline',
+      name: 'Prepared Outline',
+      schema: {},
+      prepare() {
+        return sceneAt
+      },
+      deriveOutlineSource,
+    })
+    const target = {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    }
+
+    expect(sketch.deriveOutlineSource?.(completed, target)).toBe(derived)
+    expect(deriveOutlineSource).toHaveBeenCalledOnce()
+    expect(deriveOutlineSource).toHaveBeenCalledWith(completed, target)
   })
 })
 

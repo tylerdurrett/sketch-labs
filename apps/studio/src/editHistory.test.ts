@@ -47,6 +47,7 @@ function editState(
       height: 297,
       insets: { top: 10, right: 11, bottom: 12, left: 13 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     },
     tolerance: 0,
     ...overrides,
@@ -154,6 +155,7 @@ describe("edit history", () => {
         height: 210,
         insets: { top: 1, right: 2, bottom: 3, left: 4 },
         includeFrame: false,
+        toolWidthMillimeters: 0.5,
       },
       tolerance: 0.75,
     });

@@ -10,7 +10,7 @@
  */
 
 import { createScene } from '../../scene'
-import type { CoordinateSpace, Scene } from '../../scene'
+import type { CoordinateSpace, Primitive, Scene } from '../../scene'
 import {
   scribbleControlSchema,
   scribbleStrategy,
@@ -21,6 +21,7 @@ import {
 import {
   createScribbleDiagnostics,
   type NumberParamSpec,
+  type OutlineTarget,
   type Params,
   type ScribbleArtwork,
   type Seed,
@@ -36,15 +37,21 @@ import {
   type ScribbleMoonCircle,
   type ScribbleMoonEllipseArc,
 } from './geometry'
-import {
-  createScribbleMoonLayout,
-  createScribbleMoonSource,
-} from './source'
+import { createScribbleMoonLayout, createScribbleMoonSource } from './source'
 
 export * from './geometry'
 export * from './source'
 
 const FULL_CIRCLE_SEGMENTS = 72
+const OUTLINE_COLOR = '#111111'
+const OUTLINE_PAPER_COLOR = '#ffffff'
+
+const HALO_INDEX = 0
+const FRONT_RING_INDEX = 1
+const BACK_RING_INDEX = 2
+const SATELLITE_INDICES = [3, 4] as const
+const SPHERE_INDEX = 5
+const STRUCTURAL_PRIMITIVE_COUNT = 13
 
 /** Scribble Moon's source controls followed by the five shared Scribble controls. */
 export const scribbleMoonSchema = {
@@ -121,9 +128,7 @@ function circlePath(
 function segmentCount(startAngle: number, endAngle: number): number {
   return Math.max(
     4,
-    Math.ceil(
-      (Math.abs(endAngle - startAngle) / TAU) * FULL_CIRCLE_SEGMENTS,
-    ),
+    Math.ceil((Math.abs(endAngle - startAngle) / TAU) * FULL_CIRCLE_SEGMENTS),
   )
 }
 
@@ -254,6 +259,101 @@ function completeScene(
   return builder.build()
 }
 
+function validateOutlineTarget(target: OutlineTarget): void {
+  if (
+    !Number.isFinite(target.toolWidthMillimeters) ||
+    target.toolWidthMillimeters <= 0
+  ) {
+    throw new RangeError('toolWidthMillimeters must be finite and positive')
+  }
+  if (
+    !Number.isFinite(target.millimetersPerSceneUnit) ||
+    target.millimetersPerSceneUnit <= 0
+  ) {
+    throw new RangeError('millimetersPerSceneUnit must be finite and positive')
+  }
+}
+
+function outlineSourcePrimitive(
+  primitive: Readonly<Primitive>,
+  width: number,
+): Primitive {
+  return {
+    points: primitive.points.map(([x, y]) => [x, y]),
+    ...(primitive.closed === undefined ? {} : { closed: primitive.closed }),
+    stroke: { color: OUTLINE_COLOR, width },
+    hiddenLineRole: 'source',
+  }
+}
+
+function paperOccluder(primitive: Readonly<Primitive>): Primitive {
+  return {
+    points: primitive.points.map(([x, y]) => [x, y]),
+    closed: true,
+    fill: { color: OUTLINE_PAPER_COLOR },
+    hiddenLineRole: 'occluder',
+  }
+}
+
+/**
+ * Restyle one completed Scribble Moon Scene as its faithful Outline source.
+ *
+ * The completed scene is authoritative: this function copies its exact visible
+ * contours and generated Scribbles without re-running either source generation
+ * or the Scribble strategy. The fixed structural prefix supplies the authored
+ * depth order. Its upper ring arc sits behind the opaque moon, while the lower
+ * arc, moon surface marks, and generated shading sit in front. Satellite discs
+ * are persistent paper masks followed immediately by their visible rims.
+ */
+export function deriveScribbleMoonOutlineSource(
+  completedScene: Readonly<Scene>,
+  target: OutlineTarget,
+): Scene {
+  validateOutlineTarget(target)
+  if (completedScene.primitives.length < STRUCTURAL_PRIMITIVE_COUNT) {
+    throw new RangeError(
+      `completed Scribble Moon Scene must contain at least ${STRUCTURAL_PRIMITIVE_COUNT} primitives`,
+    )
+  }
+
+  const width = target.toolWidthMillimeters / target.millimetersPerSceneUnit
+  const source = (index: number) =>
+    outlineSourcePrimitive(completedScene.primitives[index]!, width)
+  const primitives: Primitive[] = [
+    source(HALO_INDEX),
+    source(BACK_RING_INDEX),
+    paperOccluder(completedScene.primitives[SPHERE_INDEX]!),
+    source(FRONT_RING_INDEX),
+  ]
+
+  for (const index of SATELLITE_INDICES) {
+    const satellite = completedScene.primitives[index]!
+    primitives.push(
+      paperOccluder(satellite),
+      outlineSourcePrimitive(satellite, width),
+    )
+  }
+  primitives.push(source(SPHERE_INDEX))
+  for (
+    let index = SPHERE_INDEX + 1;
+    index < completedScene.primitives.length;
+    index += 1
+  ) {
+    primitives.push(source(index))
+  }
+
+  return {
+    space: {
+      width: completedScene.space.width,
+      height: completedScene.space.height,
+    },
+    primitives,
+    ...(completedScene.background === undefined
+      ? {}
+      : { background: { ...completedScene.background } }),
+  }
+}
+
 /** Prepare Moon's complete structural-plus-Scribble Scene and Scribble metrics. */
 export function generateScribbleMoonArtwork(
   params: Params,
@@ -280,6 +380,7 @@ export const scribbleMoon: StatelessSketch = {
     return createScribbleMoonSource(sourceControls(params), frame)
   },
   generateScribbleArtwork: generateScribbleMoonArtwork,
+  deriveOutlineSource: deriveScribbleMoonOutlineSource,
   generate(
     params: Params,
     seed: Seed,

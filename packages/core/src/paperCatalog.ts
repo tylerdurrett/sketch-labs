@@ -62,7 +62,12 @@
  *   displays both millimeters and inches by converting at its boundary").
  */
 
-import type { PlotInsets, PlotProfile, PlotRectangle } from './plotProfile'
+import {
+  DEFAULT_PLOT_TOOL_WIDTH_MILLIMETERS,
+  type PlotInsets,
+  type PlotProfile,
+  type PlotRectangle,
+} from './plotProfile'
 
 /**
  * A paper orientation derived from a Plot Profile's stored dimensions.
@@ -172,9 +177,10 @@ export function standardPaperProfile(
   orientation: PaperOrientation = 'portrait',
   insets: PlotInsets = { top: 0, right: 0, bottom: 0, left: 0 },
   includeFrame = true,
+  toolWidthMillimeters = DEFAULT_PLOT_TOOL_WIDTH_MILLIMETERS,
 ): PlotProfile {
   const { width, height } = orientedStandardDimensions(name, orientation)
-  return { width, height, insets, includeFrame }
+  return { width, height, insets, includeFrame, toolWidthMillimeters }
 }
 
 /**
@@ -204,6 +210,7 @@ export function applyStandardPaper(
     orientation,
     profile.insets,
     profile.includeFrame,
+    profile.toolWidthMillimeters,
   )
 }
 
@@ -269,6 +276,7 @@ export function swapPlotOrientation(profile: PlotProfile): PlotProfile {
     height: profile.width,
     insets: profile.insets,
     includeFrame: profile.includeFrame,
+    toolWidthMillimeters: profile.toolWidthMillimeters,
   }
 }
 
@@ -320,6 +328,7 @@ export function plotProfileToInches(profile: PlotProfile): PlotProfile {
     height: mmToInch(profile.height),
     insets: convertInsets(profile.insets, mmToInch),
     includeFrame: profile.includeFrame,
+    toolWidthMillimeters: mmToInch(profile.toolWidthMillimeters),
   }
 }
 
@@ -341,5 +350,6 @@ export function plotProfileFromInches(profile: PlotProfile): PlotProfile {
     height: inchToMm(profile.height),
     insets: convertInsets(profile.insets, inchToMm),
     includeFrame: profile.includeFrame,
+    toolWidthMillimeters: inchToMm(profile.toolWidthMillimeters),
   }
 }

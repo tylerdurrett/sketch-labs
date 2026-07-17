@@ -622,6 +622,7 @@ describe("LiveCanvas full-sheet preview chrome (#248)", () => {
     height: 100,
     insets: { top: 10, right: 20, bottom: 30, left: 40 },
     includeFrame: true,
+    toolWidthMillimeters: 0.3,
   };
 
   it("contain-fits the full sheet and positions the drawable region from all four inset ratios", () => {

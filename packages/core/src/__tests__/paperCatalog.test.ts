@@ -21,7 +21,13 @@ const ASYMMETRIC_INSETS: PlotInsets = { top: 5, right: 10, bottom: 15, left: 20 
 const ZERO_INSETS: PlotInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 
 /** The record shape carries physical settings and the authored-frame option. */
-const PROFILE_KEYS = ['height', 'includeFrame', 'insets', 'width']
+const PROFILE_KEYS = [
+  'height',
+  'includeFrame',
+  'insets',
+  'toolWidthMillimeters',
+  'width',
+]
 
 describe('STANDARD_PAPERS catalog', () => {
   it('covers the eight standard formats in portrait millimeters (AC4)', () => {
@@ -87,12 +93,14 @@ describe('standardPaperProfile', () => {
       height: 200,
       insets: ZERO_INSETS,
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     })
     expect(standardPaperProfile('square', 'landscape')).toEqual({
       width: 200,
       height: 200,
       insets: ZERO_INSETS,
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     })
   })
 
@@ -132,6 +140,7 @@ describe('applyStandardPaper', () => {
       height: 200,
       insets: ASYMMETRIC_INSETS,
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     }
     const next = applyStandardPaper(profile, 'letter', 'landscape')
     expect(next.width).toBe(279.4)
@@ -145,6 +154,7 @@ describe('applyStandardPaper', () => {
       height: 210,
       insets: ASYMMETRIC_INSETS,
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     }
 
     expect(applyStandardPaper(profile, 'square', 'portrait')).toEqual({
@@ -152,12 +162,14 @@ describe('applyStandardPaper', () => {
       height: 200,
       insets: ASYMMETRIC_INSETS,
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     })
     expect(applyStandardPaper(profile, 'square', 'landscape')).toEqual({
       width: 200,
       height: 200,
       insets: ASYMMETRIC_INSETS,
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     })
   })
 
@@ -358,6 +370,7 @@ describe('millimeter <-> inch conversion', () => {
       height: 50.8,
       insets: { top: 25.4, right: 50.8, bottom: 12.7, left: 0 },
       includeFrame: false,
+      toolWidthMillimeters: 0.254,
     }
     const inches = plotProfileToInches(profile)
     expect(inches.width).toBeCloseTo(1)
@@ -367,6 +380,7 @@ describe('millimeter <-> inch conversion', () => {
     expect(inches.insets.bottom).toBeCloseTo(0.5)
     expect(inches.insets.left).toBeCloseTo(0)
     expect(inches.includeFrame).toBe(false)
+    expect(inches.toolWidthMillimeters).toBeCloseTo(0.01)
   })
 
   it('round-trips mm -> inch -> mm back to the canonical value (AC3)', () => {
@@ -375,6 +389,7 @@ describe('millimeter <-> inch conversion', () => {
       height: 297,
       insets: ASYMMETRIC_INSETS,
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     }
     const roundTripped = plotProfileFromInches(plotProfileToInches(profile))
     // toBeCloseTo — the round trip returns within float tolerance, e.g. 210 may
@@ -386,6 +401,7 @@ describe('millimeter <-> inch conversion', () => {
     expect(roundTripped.insets.bottom).toBeCloseTo(profile.insets.bottom)
     expect(roundTripped.insets.left).toBeCloseTo(profile.insets.left)
     expect(roundTripped.includeFrame).toBe(false)
+    expect(roundTripped.toolWidthMillimeters).toBeCloseTo(0.3)
   })
 
   it('never overwrites the canonical mm model — the input profile is unchanged (AC3)', () => {
@@ -394,6 +410,7 @@ describe('millimeter <-> inch conversion', () => {
       height: 297,
       insets: ASYMMETRIC_INSETS,
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     }
     plotProfileToInches(profile)
     plotProfileFromInches(profile)
@@ -402,6 +419,7 @@ describe('millimeter <-> inch conversion', () => {
       height: 297,
       insets: ASYMMETRIC_INSETS,
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     })
   })
 
@@ -411,6 +429,7 @@ describe('millimeter <-> inch conversion', () => {
       height: 297,
       insets: ZERO_INSETS,
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     }
     const roundTripped = plotProfileFromInches(plotProfileToInches(profile))
     expect(matchStandardPaper(roundTripped)).toBe('a4')

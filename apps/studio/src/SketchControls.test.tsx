@@ -183,7 +183,7 @@ vi.mock("./hiddenLineCoordinator", () => ({
       const processed =
         snapshot.reusableOutline === undefined
           ? outlineScene(
-              snapshot.identity.sourceKind === "legacy-scene"
+              snapshot.identity.sourceKind !== "specialized-sketch"
                 ? mutableScene(snapshot.identity.sourceScene)
                 : {
                     space: { ...snapshot.identity.compositionFrame },
@@ -443,7 +443,7 @@ vi.mock("./LiveCanvas", () => ({
       if (active === null) return;
       outlineJob.active = null;
       const scene = outlineScene(
-        active.identity.sourceKind === "legacy-scene"
+        active.identity.sourceKind !== "specialized-sketch"
           ? mutableScene(active.identity.sourceScene)
           : {
               space: { ...active.identity.compositionFrame },
@@ -1412,6 +1412,7 @@ describe("SketchControls — central edit-history integration", () => {
         height: 297,
         insets: { top: 10, right: 10, bottom: 10, left: 10 },
         includeFrame: true,
+        toolWidthMillimeters: 0.3,
       },
     } as Parameters<typeof SketchControls>[0]["sketch"];
     const el = mount(<SketchControls sketch={sketch} />);
@@ -1814,6 +1815,7 @@ describe("SketchControls — preset save/reload wiring", () => {
       height: 297,
       insets: { top: 12, right: 13, bottom: 14, left: 15 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     };
     loadPreset.mockResolvedValue({
       version: 2,
@@ -2064,6 +2066,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     height: 297,
     insets: { top: 15, right: 12, bottom: 9, left: 6 },
     includeFrame: false,
+    toolWidthMillimeters: 0.3,
   };
 
   // A Sketch that DECLARES its own default Output Profile. No registered sketch
@@ -2328,6 +2331,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
       height: 400,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     };
     loadPreset.mockResolvedValue({
       version: 2,
@@ -2377,6 +2381,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
       height: 200,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     });
     expect(lastCompositionFrame).toBe(initialFrame);
     expect(toggle.textContent).toBe("Outline");
@@ -2408,6 +2413,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
       throw new Error("expected specialized identity");
     }
     expect(firstIdentity.outlineTarget.millimetersPerSceneUnit).toBe(0.18);
+    expect(firstIdentity.outlineTarget.toolWidthMillimeters).toBe(0.3);
     const initialFrame = lastCompositionFrame;
     act(() => lastOnOutlineComputed?.());
 
@@ -2428,6 +2434,24 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(
       outlineJob.lastIdentity.outlineTarget.millimetersPerSceneUnit,
     ).toBe(0.16);
+    act(() => lastOnOutlineComputed?.());
+
+    const toolWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Tool width (mm)"]',
+    )!;
+    act(() => toolWidth.focus());
+    setInput(toolWidth, "0.5");
+    act(() => toolWidth.blur());
+
+    expect(outlineJob.starts).toBe(3);
+    expect(outlineJob.lastIdentity?.sourceKind).toBe("specialized-sketch");
+    if (outlineJob.lastIdentity?.sourceKind !== "specialized-sketch") {
+      throw new Error("expected specialized identity");
+    }
+    expect(outlineJob.lastIdentity.outlineTarget.toolWidthMillimeters).toBe(
+      0.5,
+    );
+    expect(lastCompositionFrame).toBe(initialFrame);
     expect(generateOutlineSource).not.toHaveBeenCalled();
   });
 
@@ -2845,6 +2869,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       height: 180,
       insets: { top: 15, right: 45, bottom: 15, left: 25 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     };
     const source = {
       space: { width: 120, height: 100 },
@@ -2971,6 +2996,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       height: 400,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     };
     loadPreset.mockResolvedValue({
       version: 2,
@@ -4612,6 +4638,160 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(outlineJob.exportStarts).toBe(0);
     expect(downloadBlob).not.toHaveBeenCalled();
   });
+
+  it("carries the exact painted Scribble Scene through completed-Scene Outline identity and reuse", async () => {
+    autoFireOutlineComputed = false;
+    const generate = vi.fn(toneCalibration.generate);
+    const deriveOutlineSource = vi.fn((completed: Readonly<Scene>) =>
+      structuredClone(completed),
+    );
+    const el = mount(
+      <SketchControls
+        sketch={{ ...toneCalibration, generate, deriveOutlineSource }}
+      />,
+    );
+    const exactScene = preparedScene(21);
+    exactScene.primitives[0]!.stroke = { color: "navy", width: 0.75 };
+    await completeScribble(0, exactScene);
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    const identity = outlineJob.lastIdentity;
+    expect(identity?.sourceKind).toBe("completed-scene-sketch");
+    if (identity?.sourceKind !== "completed-scene-sketch") {
+      throw new Error("expected completed-Scene identity");
+    }
+    expect(identity.sourceScene).toEqual(exactScene);
+    expect(identity.sourceScene).not.toBe(exactScene);
+    expect(identity.outlineTarget).toEqual({
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: expect.any(Number),
+    });
+    expect(generate).not.toHaveBeenCalled();
+    expect(deriveOutlineSource).not.toHaveBeenCalled();
+
+    act(() => lastOnOutlineComputed?.());
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.lastExportSnapshot?.identity.sourceKind).toBe(
+      "completed-scene-sketch",
+    );
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(generate).not.toHaveBeenCalled();
+    expect(deriveOutlineSource).not.toHaveBeenCalled();
+
+    outlineJob.exportStarts = 0;
+    clickButton(el, "New seed");
+    act(() => {
+      const hidden = exportButton(el, "Export Hidden-line SVG");
+      hidden.disabled = false;
+      hidden.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Tone Calibration", toneCalibration],
+    ["Scribble Moon", scribbleMoon],
+  ] as const)(
+    "keeps %s preparation stable across physical-only edits and replaces it at the frame-aspect boundary",
+    async (_name, sketch) => {
+      autoFireOutlineComputed = false;
+      const generate = vi.fn(sketch.generate);
+      const el = mount(<SketchControls sketch={{ ...sketch, generate }} />);
+      const firstFrame = lastCompositionFrame!;
+      const firstScene: Scene = {
+        ...preparedScene(31),
+        space: { ...firstFrame },
+      };
+      await completeScribble(0, firstScene);
+
+      clickButton(el, "Outline");
+      expect(outlineJob.starts).toBe(1);
+      const initialOutline = outlineJob.lastIdentity;
+      expect(initialOutline).toMatchObject({
+        sourceKind: "completed-scene-sketch",
+        compositionFrame: firstFrame,
+        sourceScene: firstScene,
+        outlineTarget: {
+          toolWidthMillimeters: 0.3,
+          millimetersPerSceneUnit: 0.18,
+        },
+      });
+      act(() => lastOnOutlineComputed?.());
+
+      const margin = el.querySelector<HTMLInputElement>(
+        'input[aria-label="Linked paper margin (mm)"]',
+      )!;
+      act(() => margin.focus());
+      setInput(margin, "20");
+      act(() => margin.blur());
+
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(lastCompositionFrame).toBe(firstFrame);
+      expect(outlineJob.starts).toBe(2);
+      expect(outlineJob.lastIdentity).toEqual({
+        ...initialOutline,
+        outlineTarget: {
+          toolWidthMillimeters: 0.3,
+          millimetersPerSceneUnit: 0.16,
+        },
+      });
+      act(() => lastOnOutlineComputed?.());
+
+      const toolWidth = el.querySelector<HTMLInputElement>(
+        'input[aria-label="Tool width (mm)"]',
+      )!;
+      act(() => toolWidth.focus());
+      setInput(toolWidth, "0.5");
+      act(() => toolWidth.blur());
+
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(lastCompositionFrame).toBe(firstFrame);
+      expect(outlineJob.starts).toBe(3);
+      expect(outlineJob.lastIdentity).toEqual({
+        ...initialOutline,
+        outlineTarget: {
+          toolWidthMillimeters: 0.5,
+          millimetersPerSceneUnit: 0.16,
+        },
+      });
+      act(() => lastOnOutlineComputed?.());
+
+      const width = el.querySelector<HTMLInputElement>(
+        'input[aria-label="Paper width (mm)"]',
+      )!;
+      act(() => width.focus());
+      setInput(width, "300");
+      act(() => width.blur());
+
+      expect(lastCompositionFrame).not.toBe(firstFrame);
+      expect(scribbleJob.starts).toHaveLength(2);
+      expect(scribbleJob.starts[1]?.identity.compositionFrame).toEqual(
+        lastCompositionFrame,
+      );
+      expect(outlineJob.starts).toBe(3);
+
+      const replacementScene: Scene = {
+        ...preparedScene(32),
+        space: { ...lastCompositionFrame! },
+      };
+      await completeScribble(1, replacementScene);
+      await flush();
+      expect(outlineJob.starts).toBe(4);
+      expect(outlineJob.lastIdentity).toMatchObject({
+        sourceKind: "completed-scene-sketch",
+        compositionFrame: lastCompositionFrame!,
+        sourceScene: replacementScene,
+        outlineTarget: { toolWidthMillimeters: 0.5 },
+      });
+      expect(generate).not.toHaveBeenCalled();
+    },
+  );
 
   it("waits for a cache re-promotion to repaint before re-enabling export", async () => {
     const el = mount(<SketchControls sketch={toneCalibration} />);

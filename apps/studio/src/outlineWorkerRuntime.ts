@@ -71,15 +71,32 @@ function mutableProfile(profile: Readonly<PlotProfile>): PlotProfile {
       left: profile.insets.left,
     },
     includeFrame: profile.includeFrame,
+    toolWidthMillimeters: profile.toolWidthMillimeters,
   };
 }
 
-/** Resolve legacy Fill input or a Sketch's optional specialized source. */
+/** Resolve legacy, parameter-derived, or completed-Scene Outline input. */
 function sourceSceneForIdentity(identity: OutlineComputeIdentity): Scene {
   if (identity.sourceKind === "legacy-scene") {
     return mutableScene(identity.sourceScene);
   }
   const sketch = registry.get(identity.sketchId);
+  const target = {
+    toolWidthMillimeters: identity.outlineTarget.toolWidthMillimeters,
+    millimetersPerSceneUnit:
+      identity.outlineTarget.millimetersPerSceneUnit,
+  };
+  if (identity.sourceKind === "completed-scene-sketch") {
+    if (sketch.deriveOutlineSource === undefined) {
+      throw new Error(
+        `Sketch ${identity.sketchId} has no completed-Scene Outline source`,
+      );
+    }
+    return sketch.deriveOutlineSource(
+      mutableScene(identity.sourceScene),
+      target,
+    );
+  }
   if (sketch.generateOutlineSource === undefined) {
     throw new Error(
       `Sketch ${identity.sketchId} has no specialized Outline source`,
@@ -96,11 +113,7 @@ function sourceSceneForIdentity(identity: OutlineComputeIdentity): Scene {
       width: identity.compositionFrame.width,
       height: identity.compositionFrame.height,
     },
-    {
-      toolWidthMillimeters: identity.outlineTarget.toolWidthMillimeters,
-      millimetersPerSceneUnit:
-        identity.outlineTarget.millimetersPerSceneUnit,
-    },
+    target,
   );
 }
 

@@ -411,6 +411,22 @@ export interface StatelessSketch extends SketchBase {
     frame: CoordinateSpace,
     target: OutlineTarget,
   ): Scene
+
+  /**
+   * Optionally derive an Outline source from artwork a prepared consumer has
+   * already completed.
+   *
+   * Unlike {@link generateOutlineSource}, this capability receives the exact
+   * completed Scene instead of the inputs that could regenerate it. It is for
+   * caller-owned preparation paths such as Scribble, where the prepared result
+   * is the authoritative artwork and must not be rerun or substituted while
+   * applying physical-tool styling. The returned Scene still enters the same
+   * generic Hidden-line pass as every other Outline source.
+   */
+  deriveOutlineSource?(
+    completedScene: Readonly<Scene>,
+    target: OutlineTarget,
+  ): Scene
 }
 
 /**
@@ -438,7 +454,9 @@ export function definePreparedSketch(
   definition: SketchBase &
     Pick<
       StatelessSketch,
-      'generateOutlineSource' | 'generateScribbleArtwork'
+      | 'deriveOutlineSource'
+      | 'generateOutlineSource'
+      | 'generateScribbleArtwork'
     > & {
       prepare(params: Params, seed: Seed, frame: CoordinateSpace): PreparedFrame
     },

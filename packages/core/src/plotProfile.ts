@@ -89,15 +89,25 @@ export interface PlotProfile {
   insets: PlotInsets
   /** Whether plot output includes the drawable Composition Frame boundary. */
   includeFrame: boolean
+  /** Physical width of the active plotter tool, in millimeters. */
+  toolWidthMillimeters: number
 }
 
 /**
  * Compatibility input accepted at persisted/trust boundaries. Older profiles
- * predate `includeFrame`; no other widening of the canonical record is allowed.
+ * predate `includeFrame` and `toolWidthMillimeters`; no other widening of the
+ * canonical record is allowed.
  */
-export type LegacyPlotProfile = Omit<PlotProfile, 'includeFrame'> & {
+export type LegacyPlotProfile = Omit<
+  PlotProfile,
+  'includeFrame' | 'toolWidthMillimeters'
+> & {
   includeFrame?: unknown
+  toolWidthMillimeters?: unknown
 }
+
+/** Tool width assigned to profiles persisted before the field existed. */
+export const DEFAULT_PLOT_TOOL_WIDTH_MILLIMETERS = 0.3
 
 /** The four inset edges, in the canonical top/right/bottom/left order. */
 const INSET_EDGES: ReadonlyArray<keyof PlotInsets> = [
@@ -131,11 +141,20 @@ const INSET_EDGES: ReadonlyArray<keyof PlotInsets> = [
  *   negative/non-finite, or the insets exhaust the drawable region.
  */
 export function validatePlotProfile(profile: PlotProfile): void {
-  const { width, height, insets, includeFrame } = profile
+  const { width, height, insets, includeFrame, toolWidthMillimeters } = profile
 
   if (typeof includeFrame !== 'boolean') {
     throw new Error(
       `validatePlotProfile: includeFrame must be a boolean, got ${String(includeFrame)}`,
+    )
+  }
+
+  if (
+    !Number.isFinite(toolWidthMillimeters) ||
+    toolWidthMillimeters <= 0
+  ) {
+    throw new Error(
+      `validatePlotProfile: toolWidthMillimeters must be a finite positive number of millimeters, got ${toolWidthMillimeters}`,
     )
   }
 
@@ -196,11 +215,25 @@ export function normalizePlotProfile(profile: LegacyPlotProfile): PlotProfile {
     )
   }
 
+  const toolWidthMillimeters = Object.prototype.hasOwnProperty.call(
+    profile,
+    'toolWidthMillimeters',
+  )
+    ? profile.toolWidthMillimeters
+    : DEFAULT_PLOT_TOOL_WIDTH_MILLIMETERS
+
+  if (typeof toolWidthMillimeters !== 'number') {
+    throw new Error(
+      `normalizePlotProfile: toolWidthMillimeters must be a number when present, got ${String(toolWidthMillimeters)}`,
+    )
+  }
+
   const normalized: PlotProfile = {
     width: profile.width,
     height: profile.height,
     insets: { ...profile.insets },
     includeFrame,
+    toolWidthMillimeters,
   }
   validatePlotProfile(normalized)
   return normalized

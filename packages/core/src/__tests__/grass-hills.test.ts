@@ -717,6 +717,7 @@ describe('grass-hills public geometry acceptance', () => {
       height: 100,
       insets: { top: 5, right: 10, bottom: 5, left: 10 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     }
     const svg = renderPlotterSVG(outline, profile)
     const paths = svg.match(/<path\b[^>]*>/g) ?? []

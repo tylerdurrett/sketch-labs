@@ -5,11 +5,12 @@ import {
   resolveCompositionFrame,
 } from '../compositionFrame'
 import { hiddenLinePass } from '../hiddenLine'
-import { renderPlotterSVG } from '../plotterSvg'
+import { renderToSVG } from '../renderer'
 import type { CoordinateSpace, Primitive, Scene } from '../scene'
 import { defaultParams } from '../sketch'
 import { totalPathLength } from '../shadingStrategy'
 import {
+  createScribbleMoonLayout,
   createScribbleMoonStructuralScene,
   generateScribbleMoonScribble,
   scribbleMoon,
@@ -212,9 +213,9 @@ describe('Scribble Moon structural artwork', () => {
     expect(scene.primitives).toHaveLength(13)
     expect(closed).toHaveLength(8)
     expect(open).toHaveLength(5)
-    expect(scene.primitives.flatMap(({ points }) => points).length).toBeLessThan(
-      600,
-    )
+    expect(
+      scene.primitives.flatMap(({ points }) => points).length,
+    ).toBeLessThan(600)
     scene.primitives.forEach(expectAuthoredVector)
     expect(scene.background).toBeUndefined()
   })
@@ -342,37 +343,209 @@ describe('Scribble Moon structural artwork', () => {
     )
   })
 
-  it('preserves structural contours and generated Scribbles through hidden-line plotter export', () => {
+  it('derives and clips the completed scene with authored paper occluders', () => {
     const frame = DEFAULT_COMPOSITION_FRAME
     const structural = createScribbleMoonStructuralScene(frame)
-    const scene = scribbleMoon.generate(
+    const completed = scribbleMoon.generate(
       defaultParams(scribbleMoon.schema),
       'hidden-line-export',
       0,
       frame,
     )
-    const outline = hiddenLinePass(scene)
-    const svg = renderPlotterSVG(outline, {
-      width: 120,
-      height: 120,
-      insets: { top: 10, right: 10, bottom: 10, left: 10 },
-      includeFrame: false,
+    const completedBefore = structuredClone(completed)
+    const fillSvgBefore = renderToSVG(completed)
+    const target = {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    }
+    const source = scribbleMoon.deriveOutlineSource!(completed, target)
+    const wider = scribbleMoon.deriveOutlineSource!(completed, {
+      ...target,
+      toolWidthMillimeters: 0.6,
     })
-    const paths = svg.match(/<path\b[^>]*>/g) ?? []
-    const expectedOutlinePoints = scene.primitives.map((primitive) => {
-      if (primitive.closed !== true) return primitive.points
-      const first = primitive.points[0]!
-      const last = primitive.points.at(-1)!
-      return first[0] === last[0] && first[1] === last[1]
-        ? primitive.points
-        : [...primitive.points, first]
-    })
-
-    expect(scene.primitives.length).toBeGreaterThan(structural.primitives.length)
-    expect(outline.primitives.map(({ points }) => points)).toEqual(
-      expectedOutlinePoints,
+    const sourceRoles = source.primitives.map(
+      ({ hiddenLineRole }) => hiddenLineRole,
     )
-    expect(paths).toHaveLength(scene.primitives.length)
+    const occluders = source.primitives.filter(
+      ({ hiddenLineRole }) => hiddenLineRole === 'occluder',
+    )
+
+    expect(completed.primitives.length).toBeGreaterThan(
+      structural.primitives.length,
+    )
+    expect(completed).toEqual(completedBefore)
+    expect(renderToSVG(completed)).toBe(fillSvgBefore)
+    expect(source.primitives).toHaveLength(completed.primitives.length + 3)
+    expect(sourceRoles).toEqual([
+      'source', // halo
+      'source', // upper/back ring
+      'occluder', // moon paper disc
+      'source', // lower/front ring
+      'occluder',
+      'source', // northwest satellite paper disc and rim
+      'occluder',
+      'source', // southeast satellite paper disc and rim
+      ...Array.from(
+        { length: completed.primitives.length - 5 },
+        () => 'source' as const,
+      ),
+    ])
+    expect(occluders).toHaveLength(3)
+    expect(occluders).toEqual([
+      {
+        points: completed.primitives[5]!.points,
+        closed: true,
+        fill: { color: '#ffffff' },
+        hiddenLineRole: 'occluder',
+      },
+      ...[3, 4].map((index) => ({
+        points: completed.primitives[index]!.points,
+        closed: true,
+        fill: { color: '#ffffff' },
+        hiddenLineRole: 'occluder' as const,
+      })),
+    ])
+
+    const sourceCompletedIndices = [
+      0,
+      2,
+      1,
+      3,
+      4,
+      5,
+      ...Array.from(
+        { length: completed.primitives.length - 6 },
+        (_, index) => index + 6,
+      ),
+    ]
+    const sourcePrimitives = source.primitives.filter(
+      ({ hiddenLineRole }) => hiddenLineRole === 'source',
+    )
+    expect(sourcePrimitives.map(({ points }) => points)).toEqual(
+      sourceCompletedIndices.map(
+        (index) => completed.primitives[index]!.points,
+      ),
+    )
+    expect(
+      sourcePrimitives.every(({ stroke }) => stroke?.width === 0.3 / 0.18),
+    ).toBe(true)
+
+    expect(
+      wider.primitives.map((primitive) => ({
+        ...primitive,
+        ...(primitive.stroke === undefined
+          ? {}
+          : { stroke: { ...primitive.stroke, width: 0 } }),
+      })),
+    ).toEqual(
+      source.primitives.map((primitive) => ({
+        ...primitive,
+        ...(primitive.stroke === undefined
+          ? {}
+          : { stroke: { ...primitive.stroke, width: 0 } }),
+      })),
+    )
+    expect(
+      wider.primitives
+        .filter(({ hiddenLineRole }) => hiddenLineRole === 'source')
+        .every(({ stroke }) => stroke?.width === 0.6 / 0.18),
+    ).toBe(true)
+
+    const outline = hiddenLinePass(source, { tolerance: 0 })
+    const frontRing = completed.primitives[1]!.points
+    const frontRingOutputIndex = outline.primitives.findIndex(
+      ({ points }) => JSON.stringify(points) === JSON.stringify(frontRing),
+    )
+    const backRingFragments = outline.primitives
+      .slice(1, frontRingOutputIndex)
+      .map(({ points }) => points)
+
+    expect(frontRingOutputIndex).toBeGreaterThan(1)
+    expect(backRingFragments.length).toBeGreaterThan(0)
+    expect(totalPathLength(backRingFragments)).toBeLessThan(
+      totalPathLength([completed.primitives[2]!.points]),
+    )
+    expect(outline.primitives).not.toContainEqual(
+      expect.objectContaining({ points: completed.primitives[2]!.points }),
+    )
+    // Paper masks never erase their own later rims, moon surface contours, or
+    // generated Scribbles on the visible side.
+    expect(outline.primitives).toContainEqual(
+      expect.objectContaining({
+        points: [...completed.primitives[10]!.points],
+      }),
+    )
+    expect(outline.primitives).toContainEqual(
+      expect.objectContaining({ points: completed.primitives.at(-1)!.points }),
+    )
+  })
+
+  it('clips an earlier crossing behind both satellite paper discs while retaining their later rims', () => {
+    const frame = DEFAULT_COMPOSITION_FRAME
+    const layout = createScribbleMoonLayout(frame)
+    const completed = createScribbleMoonStructuralScene(frame)
+    const crossingPoints = layout.satellites.flatMap(({ center, radius }) => [
+      [center[0] - radius * 2, center[1]] as Point,
+      [center[0] + radius * 2, center[1]] as Point,
+    ])
+    completed.primitives[0] = {
+      ...completed.primitives[0]!,
+      points: crossingPoints,
+      closed: false,
+    }
+
+    const source = scribbleMoon.deriveOutlineSource!(completed, {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    })
+    const satelliteFixture: Scene = {
+      space: source.space,
+      primitives: [
+        source.primitives[0]!,
+        ...source.primitives.slice(4, 8),
+      ],
+    }
+    const outline = hiddenLinePass(satelliteFixture, { tolerance: 0 })
+    const firstRimPoints = [
+      ...completed.primitives[3]!.points,
+      completed.primitives[3]!.points[0]!,
+    ]
+    const firstRimIndex = outline.primitives.findIndex(
+      ({ points }) => JSON.stringify(points) === JSON.stringify(firstRimPoints),
+    )
+    const crossingFragments = outline.primitives
+      .slice(0, firstRimIndex)
+      .map(({ points }) => points)
+
+    expect(firstRimIndex).toBeGreaterThan(0)
+    expect(totalPathLength(crossingFragments)).toBeLessThan(
+      totalPathLength([crossingPoints]),
+    )
+    for (const satellite of layout.satellites) {
+      expect(
+        crossingFragments.every((points) =>
+          points.slice(1).every((point, index) => {
+            const previous = points[index]!
+            const midpoint: Point = [
+              (previous[0] + point[0]) / 2,
+              (previous[1] + point[1]) / 2,
+            ]
+            return (
+              Math.hypot(
+                midpoint[0] - satellite.center[0],
+                midpoint[1] - satellite.center[1],
+              ) >= satellite.radius
+            )
+          }),
+        ),
+      ).toBe(true)
+    }
+    for (const index of [3, 4]) {
+      const rim = completed.primitives[index]!
+      expect(outline.primitives).toContainEqual(
+        expect.objectContaining({ points: [...rim.points, rim.points[0]!] }),
+      )
+    }
   })
 
   it('independently samples generated segments through Moon soft permission and never exact zero', () => {

@@ -76,8 +76,13 @@ function formatDimension(value: number, unit: PaperDisplayUnit): string {
 }
 
 type PaperDimension = "width" | "height";
-type PaperErrorTarget = "format" | "orientation" | "margin" | PaperDimension;
-type PaperField = PaperDimension | "margin";
+type PaperErrorTarget =
+  | "format"
+  | "orientation"
+  | "margin"
+  | "toolWidth"
+  | PaperDimension;
+type PaperField = PaperDimension | "margin" | "toolWidth";
 
 interface PaperError {
   target: PaperErrorTarget;
@@ -107,7 +112,8 @@ function sameProfile(left: PlotProfile, right: PlotProfile): boolean {
     Object.is(left.insets.right, right.insets.right) &&
     Object.is(left.insets.bottom, right.insets.bottom) &&
     Object.is(left.insets.left, right.insets.left) &&
-    left.includeFrame === right.includeFrame
+    left.includeFrame === right.includeFrame &&
+    Object.is(left.toolWidthMillimeters, right.toolWidthMillimeters)
   );
 }
 
@@ -136,6 +142,9 @@ export function PaperSection({
     const inset = linkedInset(profile);
     return inset === null ? "" : formatDimension(inset, displayUnit);
   });
+  const [toolWidthDraft, setToolWidthDraft] = useState(() =>
+    formatDimension(profile.toolWidthMillimeters, displayUnit),
+  );
   const [error, setError] = useState<PaperError | null>(null);
   const activeField = useRef<{
     field: PaperField;
@@ -159,6 +168,9 @@ export function PaperSection({
     });
     const inset = linkedInset(profile);
     setMarginDraft(inset === null ? "" : formatDimension(inset, displayUnit));
+    setToolWidthDraft(
+      formatDimension(profile.toolWidthMillimeters, displayUnit),
+    );
     dirtyDimensions.current.clear();
     setError(null);
   }, [
@@ -168,6 +180,7 @@ export function PaperSection({
     profile.insets.left,
     profile.insets.right,
     profile.insets.top,
+    profile.toolWidthMillimeters,
     profile.width,
   ]);
 
@@ -209,6 +222,9 @@ export function PaperSection({
     });
     const inset = linkedInset(snapshot);
     setMarginDraft(inset === null ? "" : formatDimension(inset, displayUnit));
+    setToolWidthDraft(
+      formatDimension(snapshot.toolWidthMillimeters, displayUnit),
+    );
     setError(null);
     if ("transaction" in editProps && editProps.transaction !== undefined) {
       editProps.transaction.onCancel();
@@ -343,6 +359,24 @@ export function PaperSection({
     );
   };
 
+  const editToolWidth = (draft: string): void => {
+    setToolWidthDraft(draft);
+    if (draft.trim() === "") {
+      setError({ target: "toolWidth", message: "Tool width is required." });
+      return;
+    }
+
+    const displayValue = Number(draft);
+    commitCandidate(
+      {
+        ...profile,
+        toolWidthMillimeters:
+          displayUnit === "in" ? inchToMm(displayValue) : displayValue,
+      },
+      "toolWidth",
+    );
+  };
+
   const dimensions = `${formatDimension(profile.width, displayUnit)} × ${formatDimension(profile.height, displayUnit)} ${displayUnit}`;
   const format = matchStandardPaper(profile) ?? "custom";
   const isExactSquare = profile.width === profile.height;
@@ -469,6 +503,31 @@ export function PaperSection({
               onFocus={() => beginField("margin")}
               onBlur={() => commitField("margin")}
               onKeyDown={(event) => handleFieldKeyDown("margin", event)}
+            />
+            <span aria-hidden className="text-muted-foreground">
+              {displayUnit}
+            </span>
+          </span>
+        </label>
+        <label className="grid min-w-0 gap-1 text-sm">
+          <span className="text-muted-foreground">tool width</span>
+          <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">
+            <input
+              className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 text-right tabular-nums"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="any"
+              value={toolWidthDraft}
+              aria-label={`Tool width (${displayUnit})`}
+              aria-invalid={error?.target === "toolWidth"}
+              aria-describedby={
+                error?.target === "toolWidth" ? errorId : undefined
+              }
+              onChange={(event) => editToolWidth(event.target.value)}
+              onFocus={() => beginField("toolWidth")}
+              onBlur={() => commitField("toolWidth")}
+              onKeyDown={(event) => handleFieldKeyDown("toolWidth", event)}
             />
             <span aria-hidden className="text-muted-foreground">
               {displayUnit}
