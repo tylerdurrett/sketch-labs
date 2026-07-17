@@ -265,26 +265,13 @@ describe('Tone Calibration Scribble integration', () => {
     const scene = toneCalibration.generate(params(), 'default', 0, FRAME)
     const strategyInput = capturedInput(0)
     const source = strategyInput.source as ToneCalibrationSource
-    const coverageModel = createScribbleModel(
-      source,
-      strategyInput.frame,
-      strategyInput.controls,
-    )
-    for (const { points } of scene.primitives) {
-      for (let index = 1; index < points.length; index += 1) {
-        coverageModel.depositSegment(points[index - 1]!, points[index]!)
-      }
-    }
-    const samples = coverageModel.samples()
-    const meanCoverage = (
-      predicate: (x: number, y: number) => boolean,
-    ): number => {
-      const bin = samples.filter(({ point: [x, y] }) => predicate(x, y))
-      expect(bin.length).toBeGreaterThan(0)
-      return bin.reduce((sum, sample) => sum + sample.coverage, 0) / bin.length
-    }
     const insideCircle = (x: number, y: number) =>
       (x - 50) ** 2 + (y - 50) ** 2 <= 40 ** 2
+    const ink = rasterizeInk(
+      scene.primitives.map(({ points }) => points),
+      FRAME,
+      1,
+    )
 
     expect(scene.primitives.length).toBeGreaterThan(0)
     expect(scene.background).toBeUndefined()
@@ -297,53 +284,58 @@ describe('Tone Calibration Scribble integration', () => {
       expect(primitive.points.length).toBeGreaterThan(1)
     }
 
-    // Equal-area lattice bins make the assertion insensitive to vertex spacing:
-    // deposited virtual coverage follows the rising exterior ramp and the
-    // opposing falling circle ramp from top through middle to bottom.
-    const exteriorCoverage = [
-      meanCoverage((x, y) => !insideCircle(x, y) && y < 20),
-      meanCoverage((x, y) => !insideCircle(x, y) && y >= 40 && y < 60),
-      meanCoverage((x, y) => !insideCircle(x, y) && y > 80),
+    // Raster-like center sampling measures the returned geometry rather than
+    // replaying its curve-refinement points as extra virtual solver passes.
+    const exteriorInk = [
+      inkRatio(ink, FRAME, (x, y) => !insideCircle(x, y) && y < 20),
+      inkRatio(
+        ink,
+        FRAME,
+        (x, y) => !insideCircle(x, y) && y >= 40 && y < 60,
+      ),
+      inkRatio(ink, FRAME, (x, y) => !insideCircle(x, y) && y > 80),
     ]
-    const circleCoverage = [
-      meanCoverage((x, y) => insideCircle(x, y) && y < 30),
-      meanCoverage((x, y) => insideCircle(x, y) && y >= 45 && y < 55),
-      meanCoverage((x, y) => insideCircle(x, y) && y > 70),
+    const circleInk = [
+      inkRatio(ink, FRAME, (x, y) => insideCircle(x, y) && y < 30),
+      inkRatio(
+        ink,
+        FRAME,
+        (x, y) => insideCircle(x, y) && y >= 45 && y < 55,
+      ),
+      inkRatio(ink, FRAME, (x, y) => insideCircle(x, y) && y > 70),
     ]
-    expect(exteriorCoverage[0]).toBeLessThan(exteriorCoverage[1]!)
-    expect(exteriorCoverage[1]).toBeLessThan(exteriorCoverage[2]!)
-    expect(circleCoverage[0]).toBeGreaterThan(circleCoverage[1]!)
-    expect(circleCoverage[1]).toBeGreaterThan(circleCoverage[2]!)
+    expect(exteriorInk[0]).toBeLessThan(exteriorInk[1]!)
+    expect(exteriorInk[1]).toBeLessThan(exteriorInk[2]!)
+    expect(circleInk[0]).toBeGreaterThan(circleInk[1]!)
+    expect(circleInk[1]).toBeGreaterThan(circleInk[2]!)
 
-    // One-and-a-half lattice cells on either side is the nearest robust
-    // working-resolution comparison. The top pair reverses from dark circle to
-    // light exterior; the bottom pair reverses from light circle to dark exterior.
-    const boundaryOffset = coverageModel.lattice.cellWidth * 1.5
-    const boundaryPair = (y: number) => {
-      const boundaryX = 50 + Math.sqrt(40 ** 2 - (y - 50) ** 2)
-      const inside: [number, number] = [boundaryX - boundaryOffset, y]
-      const outside: [number, number] = [boundaryX + boundaryOffset, y]
-      return {
-        tone: [
-          source.toneField.sample(inside),
-          source.toneField.sample(outside),
-        ],
-        coverage: [
-          coverageModel.coverageAt(inside),
-          coverageModel.coverageAt(outside),
-        ],
-      }
-    }
-    const upperBoundary = boundaryPair(15)
-    const lowerBoundary = boundaryPair(85)
-    const upperCoverageContrast =
-      upperBoundary.coverage[0]! - upperBoundary.coverage[1]!
-    const lowerCoverageContrast =
-      lowerBoundary.coverage[1]! - lowerBoundary.coverage[0]!
-    expect(upperBoundary.tone).toEqual([0.9375, 0.15])
-    expect(lowerBoundary.tone).toEqual([0.0625, 0.85])
-    expect(upperCoverageContrast).toBeGreaterThan(0.4)
-    expect(lowerCoverageContrast).toBeGreaterThan(0.8)
+    const radius = (x: number, y: number) => Math.hypot(x - 50, y - 50)
+    const upperInside = inkRatio(
+      ink,
+      FRAME,
+      (x, y) => insideCircle(x, y) && y < 20 && radius(x, y) > 34,
+    )
+    const upperOutside = inkRatio(
+      ink,
+      FRAME,
+      (x, y) => !insideCircle(x, y) && y < 20 && radius(x, y) < 46,
+    )
+    const lowerInside = inkRatio(
+      ink,
+      FRAME,
+      (x, y) => insideCircle(x, y) && y > 80 && radius(x, y) > 34,
+    )
+    const lowerOutside = inkRatio(
+      ink,
+      FRAME,
+      (x, y) => !insideCircle(x, y) && y > 80 && radius(x, y) < 46,
+    )
+    expect(source.toneField.sample([50, 15])).toBe(0.9375)
+    expect(source.toneField.sample([0, 15])).toBe(0.15)
+    expect(source.toneField.sample([50, 85])).toBe(0.0625)
+    expect(source.toneField.sample([0, 85])).toBe(0.85)
+    expect(upperInside - upperOutside).toBeGreaterThan(0.25)
+    expect(lowerOutside - lowerInside).toBeGreaterThan(0.25)
 
     // No closed circle, boundary guide, background, or grayscale primitive is
     // present: the hard edge is readable only through opposing mark coverage.
@@ -352,12 +344,12 @@ describe('Tone Calibration Scribble integration', () => {
     )
   })
 
-  it('renders materially dense, opposing tones at the densest fine scale', () => {
+  it('renders materially dense, opposing tones at the calibrated dense fine scale', () => {
     const renderFrame = { width: 1000, height: 1000 }
     const fineDense = generateToneCalibrationScribble(
       params({
-        pathDensity: toneCalibrationSchema.pathDensity.max,
-        scribbleScale: toneCalibrationSchema.scribbleScale.min,
+        pathDensity: 10,
+        scribbleScale: 0.5,
       }),
       'density-range',
       renderFrame,

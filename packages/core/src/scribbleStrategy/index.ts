@@ -20,6 +20,7 @@ import {
   type ScribbleOrchestratorInput,
   type ScribbleOrchestratorOutcome,
 } from './orchestrator'
+import { smoothScribblePolylines } from './smooth'
 import type { ScribbleControls, ScribbleModel } from './types'
 
 export {
@@ -49,12 +50,21 @@ const HARD_MAX_POLYLINES = 4_000
 const HARD_MAX_STAGNATIONS = 8_000
 const HARD_MAX_RESTARTS = 4_000
 const SEGMENTS_PER_DENSITY_WEIGHTED_SAMPLE = 2
+const FULL_WORK_BUDGET_SCALE = 0.5
 
 function productionLimits(
   model: Readonly<ScribbleModel>,
 ): Readonly<ScribbleExecutionLimits> {
+  // Very fine scales multiply lattice and output-point counts quadratically.
+  // Until generation moves off the synchronous Studio path, taper the
+  // deterministic safety cap below the former 0.5 floor so 0.1 remains useful
+  // for exploration and returns honest partial geometry instead of freezing.
+  const scaleAdjustedHardLimit = Math.floor(
+    HARD_MAX_ACCEPTED_SEGMENTS *
+      Math.min(1, model.controls.scribbleScale / FULL_WORK_BUDGET_SCALE),
+  )
   const maxAcceptedSegments = Math.min(
-    HARD_MAX_ACCEPTED_SEGMENTS,
+    scaleAdjustedHardLimit,
     Math.ceil(
       model.lattice.sampleCount *
         model.controls.pathDensity *
@@ -128,16 +138,23 @@ function executeScribbleStrategy(
     throw new Error('Scribble orchestrator produced an invalid residual error')
   }
 
+  const polylines = smoothScribblePolylines(
+    outcome.polylines,
+    input.source.shadingMask,
+    input.frame,
+    model.scales.maskCheckSpacing,
+  )
+
   // E1 already validates candidate segments. This final pass guards the public
-  // boundary with B's same scale-derived spacing and never regenerates paths.
+  // boundary after mask-safe curve refinement with B's scale-derived spacing.
   assertValidOutcomeGeometry(
     input,
-    outcome.polylines,
+    polylines,
     model.scales.maskCheckSpacing,
   )
 
   return {
-    polylines: outcome.polylines,
+    polylines,
     termination:
       outcome.stopCause === 'threshold-reached'
         ? 'completed'

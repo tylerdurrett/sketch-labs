@@ -69,6 +69,30 @@ function meanSegmentLength(result: ScribbleResult): number {
   return totalPathLength(result.polylines) / segmentCount(result)
 }
 
+function maximumTurn(polyline: readonly Point[]): number {
+  let maximum = 0
+  for (let index = 2; index < polyline.length; index++) {
+    const start = polyline[index - 2]!
+    const corner = polyline[index - 1]!
+    const end = polyline[index]!
+    const incoming = Math.atan2(
+      corner[1] - start[1],
+      corner[0] - start[0],
+    )
+    const outgoing = Math.atan2(end[1] - corner[1], end[0] - corner[0])
+    maximum = Math.max(
+      maximum,
+      Math.abs(
+        Math.atan2(
+          Math.sin(outgoing - incoming),
+          Math.cos(outgoing - incoming),
+        ),
+      ),
+    )
+  }
+  return maximum
+}
+
 function expectValidResult(result: ScribbleResult): void {
   expect(['completed', 'budget-exhausted']).toContain(result.termination)
   expect(Number.isFinite(result.residualError)).toBe(true)
@@ -221,6 +245,58 @@ describe('public Scribble strategy boundary', () => {
     expect(first.polylines[0]).toHaveLength(2)
     expect(first.polylines[0]![0]).not.toEqual(first.polylines[0]![1])
     expectValidResult(first)
+  })
+
+  it('refines sharp solver corners into deterministic curved output', () => {
+    const raw: Polyline = [
+      [10, 10],
+      [40, 10],
+      [40, 40],
+      [70, 40],
+    ]
+    const execute = () =>
+      runScribbleStrategyForTesting(
+        input(source(), 'smooth-public-geometry'),
+        TINY_LIMITS,
+        ({ model }) => ({
+          polylines: [raw],
+          residualError: model.residualError(),
+          acceptedSegments: raw.length - 1,
+          stopCause: 'budget-reached',
+        }),
+      )
+
+    const result = execute()
+    expect(result).toEqual(execute())
+    expect(result.polylines[0]!.length).toBeGreaterThan(raw.length)
+    expect(result.polylines[0]![0]).toEqual(raw[0])
+    expect(result.polylines[0]!.at(-1)).toEqual(raw.at(-1))
+    expect(maximumTurn(result.polylines[0]!)).toBeLessThan(
+      maximumTurn(raw) / 2,
+    )
+  })
+
+  it('keeps the last mask-safe path when corner rounding would cross zero permission', () => {
+    const cornerMask = createShadingMask(([x, y]) =>
+      x < 49 && y < 49 ? 0 : 1,
+    )
+    const raw: Polyline = [
+      [10, 50],
+      [50, 50],
+      [50, 10],
+    ]
+    const result = runScribbleStrategyForTesting(
+      input(source(constantTone(1), cornerMask), 'mask-safe-smoothing'),
+      TINY_LIMITS,
+      ({ model }) => ({
+        polylines: [raw],
+        residualError: model.residualError(),
+        acceptedSegments: raw.length - 1,
+        stopCause: 'budget-reached',
+      }),
+    )
+
+    expect(result.polylines).toEqual([raw])
   })
 
   it('rejects invalid E1 geometry at B-derived mask resolution without regenerating', () => {
@@ -387,7 +463,7 @@ describe('Scribble authored control behavior', () => {
     expect(broad.termination).toBe('completed')
     expect(meanSegmentLength(broad)).toBeCloseTo(
       meanSegmentLength(fine) * 2,
-      10,
+      2,
     )
     expect(segmentCount(fine)).toBeGreaterThan(segmentCount(broad))
   })

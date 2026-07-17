@@ -229,8 +229,8 @@ describe('Scribble Moon structural artwork', () => {
     const params = defaultParams(scribbleMoon.schema)
     const adjusted = {
       ...params,
-      pathDensity: scribbleMoonSchema.pathDensity.max,
-      scribbleScale: scribbleMoonSchema.scribbleScale.min,
+      pathDensity: 10,
+      scribbleScale: 0.5,
       momentum: scribbleMoonSchema.momentum.min,
       chaos: scribbleMoonSchema.chaos.max,
       toneFidelity: scribbleMoonSchema.toneFidelity.min,

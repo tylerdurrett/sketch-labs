@@ -4086,7 +4086,9 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       "control-toneFidelity",
     ]);
     expect(paramInput(el, "pathDensity").value).toBe("1");
+    expect(paramInput(el, "pathDensity").max).toBe("20");
     expect(paramInput(el, "scribbleScale").value).toBe("1");
+    expect(paramInput(el, "scribbleScale").min).toBe("0.1");
     expect(paramInput(el, "momentum").value).toBe("0.75");
     expect(paramInput(el, "chaos").value).toBe("0.25");
     expect(paramInput(el, "toneFidelity").value).toBe("0.9");

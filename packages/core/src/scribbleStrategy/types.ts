@@ -28,13 +28,13 @@ export const scribbleControlSchema = Object.freeze({
   pathDensity: {
     kind: 'number',
     min: 0.5,
-    max: 10,
+    max: 20,
     default: 1,
     step: 0.05,
   },
   scribbleScale: {
     kind: 'number',
-    min: 0.5,
+    min: 0.1,
     max: 2,
     default: 1,
     step: 0.05,

@@ -52,7 +52,8 @@ describe('Scribble authored controls', () => {
       )
     }
 
-    expect(scribbleControlSchema.pathDensity.max).toBe(10)
+    expect(scribbleControlSchema.pathDensity.max).toBe(20)
+    expect(scribbleControlSchema.scribbleScale.min).toBe(0.1)
   })
 
   it('uses defaults for missing/non-finite values and authored bounds otherwise', () => {
@@ -85,6 +86,16 @@ describe('Scribble coherent scale model', () => {
     expect(doubled.residualSpacing).toBeCloseTo(scales.residualSpacing * 2, 12)
     expect(doubled.maskCheckSpacing).toBeCloseTo(
       scales.maskCheckSpacing * 2,
+      12,
+    )
+
+    const fineDense = resolveScribbleScales(SQUARE, {
+      scribbleScale: 0.1,
+      pathDensity: 20,
+    })
+    expect(fineDense.segmentLength).toBeCloseTo(scales.segmentLength * 0.1, 12)
+    expect(fineDense.coveragePerPass).toBeCloseTo(
+      scales.coveragePerPass / 20,
       12,
     )
   })
