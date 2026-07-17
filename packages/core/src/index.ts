@@ -15,6 +15,7 @@ export * from './hiddenLine'
 export * from './scene'
 export * from './compositionFrame'
 export * from './imageAssets'
+export * from './rasterToneSource'
 export * from './shadingFields'
 export * from './shadingStrategy'
 export {
