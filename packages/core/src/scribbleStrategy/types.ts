@@ -104,9 +104,9 @@ export interface ScribbleModel {
 
   /** `sum(permission * max(0, tone - coverage)) / sampleCount`. */
   residualError(): number
-  /** Residual at the nearest deterministic lattice cell. */
+  /** Residual reconstructed at a Composition Frame point. */
   residualAt(point: Readonly<Point>): number
-  /** Virtual coverage at the nearest deterministic lattice cell. */
+  /** Virtual coverage reconstructed at a Composition Frame point. */
   coverageAt(point: Readonly<Point>): number
   /** Visit current residuals row-major; return false to stop without snapshots. */
   visitResidualSamples(

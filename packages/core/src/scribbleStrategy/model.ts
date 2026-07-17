@@ -168,19 +168,35 @@ function squaredDistanceToSegment(
   return nearestDx * nearestDx + nearestDy * nearestDy
 }
 
-function nearestIndex(
+function interpolatedLatticeValue(
   lattice: ScribbleLattice,
+  values: Float64Array,
   point: Readonly<Point>,
 ): number {
-  const column = Math.min(
+  // Cell values live at their centers. Clamp positions to those centers so
+  // interpolation remains continuous all the way to and beyond frame edges.
+  const columnPosition = Math.min(
     lattice.columns - 1,
-    Math.max(0, Math.floor(point[0] / lattice.cellWidth)),
+    Math.max(0, point[0] / lattice.cellWidth - 0.5),
   )
-  const row = Math.min(
+  const rowPosition = Math.min(
     lattice.rows - 1,
-    Math.max(0, Math.floor(point[1] / lattice.cellHeight)),
+    Math.max(0, point[1] / lattice.cellHeight - 0.5),
   )
-  return row * lattice.columns + column
+  const leftColumn = Math.floor(columnPosition)
+  const rightColumn = Math.min(lattice.columns - 1, leftColumn + 1)
+  const topRow = Math.floor(rowPosition)
+  const bottomRow = Math.min(lattice.rows - 1, topRow + 1)
+  const horizontalWeight = columnPosition - leftColumn
+  const verticalWeight = rowPosition - topRow
+  const topLeft = values[topRow * lattice.columns + leftColumn]!
+  const topRight = values[topRow * lattice.columns + rightColumn]!
+  const bottomLeft = values[bottomRow * lattice.columns + leftColumn]!
+  const bottomRight = values[bottomRow * lattice.columns + rightColumn]!
+  const top = topLeft + (topRight - topLeft) * horizontalWeight
+  const bottom = bottomLeft + (bottomRight - bottomLeft) * horizontalWeight
+
+  return top + (bottom - top) * verticalWeight
 }
 
 /**
@@ -281,10 +297,13 @@ export function createScribbleModel(
       return Math.min(1, Math.max(0, residualTotal / lattice.sampleCount))
     },
     residualAt(point: Readonly<Point>): number {
-      return cellResidual(nearestIndex(lattice, point))
+      const permissionAtPoint = sampleShadingMask(source.shadingMask, point)
+      const toneAtPoint = sampleToneField(source.toneField, point)
+      const coverageAtPoint = interpolatedLatticeValue(lattice, coverage, point)
+      return permissionAtPoint * Math.max(0, toneAtPoint - coverageAtPoint)
     },
     coverageAt(point: Readonly<Point>): number {
-      return coverage[nearestIndex(lattice, point)]!
+      return interpolatedLatticeValue(lattice, coverage, point)
     },
     visitResidualSamples(visit): void {
       for (let index = 0; index < lattice.sampleCount; index++) {

@@ -176,6 +176,24 @@ describe('Scribble coherent scale model', () => {
 })
 
 describe('Scribble residual model', () => {
+  it('samples a continuous Tone Field without jumps at lattice-cell boundaries', () => {
+    const model = createScribbleModel(
+      source(horizontalGradientTone(SQUARE)),
+      SQUARE,
+    )
+    const boundaryX = model.lattice.cellWidth
+    const epsilon = model.lattice.cellWidth * 1e-6
+    const y = model.lattice.cellHeight / 2
+    const left = [boundaryX - epsilon, y] as const
+    const right = [boundaryX + epsilon, y] as const
+
+    expect(model.residualAt(left)).toBeCloseTo(left[0] / SQUARE.width, 12)
+    expect(model.residualAt(right)).toBeCloseTo(right[0] / SQUARE.width, 12)
+    expect(Math.abs(model.residualAt(right) - model.residualAt(left))).toBeLessThan(
+      (epsilon * 3) / SQUARE.width,
+    )
+  })
+
   it('measures constant tone and horizontal gradient by cell-center average', () => {
     const constant = createScribbleModel(source(constantTone(0.6)), SQUARE)
     const gradient = createScribbleModel(
@@ -258,6 +276,24 @@ describe('Scribble residual model', () => {
 })
 
 describe('Scribble virtual coverage', () => {
+  it('reconstructs deposited coverage without jumps at lattice-cell boundaries', () => {
+    const model = createScribbleModel(source(constantTone(1)), SQUARE)
+    const firstCenter = model.samples()[0]!.point
+    const boundaryX = model.lattice.cellWidth
+    const epsilon = model.lattice.cellWidth * 1e-6
+    const left = [boundaryX - epsilon, firstCenter[1]] as const
+    const right = [boundaryX + epsilon, firstCenter[1]] as const
+
+    model.depositPoint(firstCenter)
+
+    expect(Math.abs(model.coverageAt(right) - model.coverageAt(left))).toBeLessThan(
+      1e-5,
+    )
+    expect(Math.abs(model.residualAt(right) - model.residualAt(left))).toBeLessThan(
+      1e-5,
+    )
+  })
+
   it('keeps the cached residual equal to the residual sample sum', () => {
     const model = createScribbleModel(
       source(horizontalGradientTone(SQUARE), featheredBoundaryMask(SQUARE)),
