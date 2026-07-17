@@ -436,7 +436,10 @@ export interface PreparedStatelessSketch extends StatelessSketch {
  */
 export function definePreparedSketch(
   definition: SketchBase &
-    Pick<StatelessSketch, 'generateOutlineSource'> & {
+    Pick<
+      StatelessSketch,
+      'generateOutlineSource' | 'generateScribbleArtwork'
+    > & {
       prepare(params: Params, seed: Seed, frame: CoordinateSpace): PreparedFrame
     },
 ): PreparedStatelessSketch {

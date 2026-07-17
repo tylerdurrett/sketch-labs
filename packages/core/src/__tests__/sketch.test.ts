@@ -15,6 +15,7 @@ import {
   createToneField,
   sampleEffectiveTone,
 } from '../shadingFields'
+import type { ScribbleProgress } from '../scribbleStrategy'
 
 /**
  * A scripted `rand` stub: yields the given values in order, so a test can pin
@@ -221,6 +222,57 @@ describe('caller-owned prepared frames', () => {
     expect(adapted(1)).toEqual(sceneAt(1))
     expect(adapted(2)).toEqual(sceneAt(2))
     expect(generated).toBe(2)
+  })
+
+  it('preserves an optional Scribble artwork capability on a prepared Sketch', () => {
+    const progress: ScribbleProgress[] = []
+    const artworkScene = sceneAt(7)
+    const sketch = definePreparedSketch({
+      id: 'prepared-scribble',
+      name: 'Prepared Scribble',
+      schema: {},
+      prepare() {
+        return sceneAt
+      },
+      generateScribbleArtwork(_params, _seed, _frame, observer) {
+        observer?.({
+          completedWorkUnits: 2,
+          totalWorkUnits: 2,
+          terminal: true,
+        })
+        return {
+          scene: artworkScene,
+          diagnostics: {
+            termination: 'completed',
+            residualError: 0,
+            pathLength: 1,
+            polylineCount: 1,
+            penLiftCount: 0,
+          },
+        }
+      },
+    })
+
+    expect(
+      sketch.generateScribbleArtwork?.(
+        {},
+        'seed',
+        DEFAULT_COMPOSITION_FRAME,
+        (snapshot) => progress.push(snapshot),
+      ),
+    ).toEqual({
+      scene: artworkScene,
+      diagnostics: {
+        termination: 'completed',
+        residualError: 0,
+        pathLength: 1,
+        polylineCount: 1,
+        penLiftCount: 0,
+      },
+    })
+    expect(progress).toEqual([
+      { completedWorkUnits: 2, totalWorkUnits: 2, terminal: true },
+    ])
   })
 })
 
