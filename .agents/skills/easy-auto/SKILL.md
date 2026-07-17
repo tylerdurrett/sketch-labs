@@ -4,17 +4,17 @@ description: Orchestrate an issue through decomposition (if slice sized), iterat
 disable-model-invocation: true
 ---
 
-I will provide a GitHub issue. It may be slice sized or task sized. You will act as orchestrator, delegating all planning and decomposition, plan review, plan revision, coding, code review, and code revision to sub agents. You'll use worktrees and parallel sub agents where possible.
+I will provide a GitHub issue. It may be slice sized or task sized. You will act as orchestrator, preserving your own context window by delegating all planning and decomposition, plan review, plan revision, coding, code review, and code revision to sub agents. You'll use worktrees and parallel sub agents where possible.
 
 ## Planning
 
 ### Slice Sized Issues: Full Decomposition Plan
 
-Rather than using the full workflow that involves creating separate issues and PRs for each task, please handle the whole slice yourself. You should act as orchestrator, and put all work out to sub agents.
+Rather than using the full workflow that involves creating separate issues and PRs for each task, handle the whole slice yourself.
 
 Have an agent decompose the slice into a DAG of individual tasks that are one story point and self contained.
 
-Then, you have an agent review that planned DAG of work to ensure it's coherent and meets the full intent of the issue. If there are issues, have an agent update/review the plan. Repeat until you have a reviewed plan that is acceptable.
+Then, have an agent review that planned DAG of work to ensure it's coherent and meets the full intent of the issue. If there are issues, have an agent update/review the plan. Repeat until you have a reviewed plan that is acceptable.
 
 ### Task Sized Issues: Single Task Plan
 
@@ -22,11 +22,9 @@ You do not need to decompose the task, consider it decomposed already. However, 
 
 ## Execution
 
-My goal is for you to preserve your context window and act as orchestrator, so sub agents do the work.
-
 Once you have your accepted plan, whether slice sized or task sized, delegate the work of completing the plan to sub agents as needed, parallelizing what you can and using worktrees.
 
-Each block of work will need to be reviewed by an indpendent agent. Check for correctness, codebase hygiene and best practices, opportunities for simplification, and make sure the intent of the block of work is achieved.
+Each block of work will need to be reviewed by an independent agent. Check for correctness, codebase hygiene and best practices, opportunities for simplification, and make sure the intent of the block of work is achieved.
 
 Send back to a sub agent to fix any issues, and repeat until the block of work passes.
 
