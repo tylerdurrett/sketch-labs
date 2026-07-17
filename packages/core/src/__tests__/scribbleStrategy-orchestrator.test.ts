@@ -61,6 +61,7 @@ function scriptedRandom(draws: readonly number[]): {
 
 describe('Scribble pass orchestration', () => {
   it('stops immediately when the initial residual meets the fixed threshold', () => {
+    const snapshots: ScribbleProgress[] = []
     const result = runScribbleOrchestrator({
       model: model(() => 0.2),
       rng: createRandom('already-complete'),
@@ -71,12 +72,16 @@ describe('Scribble pass orchestration', () => {
         maxStagnations: 0,
         maxRestarts: 0,
       },
+      observer: (progress) => snapshots.push(progress),
     })
 
     expect(result.polylines).toEqual([])
     expect(result.residualError).toBeCloseTo(0.2, 12)
     expect(result.acceptedSegments).toBe(0)
     expect(result.stopCause).toBe('threshold-reached')
+    expect(snapshots).toEqual([
+      { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
+    ])
     expect(Object.keys(result)).toEqual([
       'polylines',
       'residualError',

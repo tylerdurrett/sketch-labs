@@ -160,17 +160,16 @@ export function runScribbleOrchestrator({
   let acceptedSegments = 0
   let stagnations = 0
   let restarts = 0
-  const totalWorkUnits =
-    residualError === 0
-      ? 0
-      : limits.maxAcceptedSegments + limits.maxStagnations
+  const configuredWorkUnits =
+    limits.maxAcceptedSegments + limits.maxStagnations
 
   const reportProgress = (terminal: boolean): void => {
     if (observer === undefined) return
 
+    const completedWorkUnits = acceptedSegments + stagnations
     const progress = Object.freeze({
-      completedWorkUnits: acceptedSegments + stagnations,
-      totalWorkUnits,
+      completedWorkUnits,
+      totalWorkUnits: completedWorkUnits === 0 ? 0 : configuredWorkUnits,
       terminal,
     })
     try {
