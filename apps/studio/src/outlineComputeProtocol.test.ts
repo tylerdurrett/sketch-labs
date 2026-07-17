@@ -471,6 +471,7 @@ describe("outline compute protocol guards", () => {
         height: 80,
         insets: { top: 5, right: 5, bottom: 5, left: 5 },
         includeFrame: false,
+        toolWidthMillimeters: 0.3,
       },
       metadata: "test",
       includePaperMargins: true,

@@ -25,6 +25,7 @@ function makeProfile(
     height?: number
     insets?: Partial<PlotInsets>
     includeFrame?: boolean
+    toolWidthMillimeters?: number
   } = {},
 ): PlotProfile {
   return {
@@ -37,6 +38,7 @@ function makeProfile(
       left: overrides.insets?.left ?? 10,
     },
     includeFrame: overrides.includeFrame ?? true,
+    toolWidthMillimeters: overrides.toolWidthMillimeters ?? 0.3,
   }
 }
 
@@ -80,7 +82,22 @@ describe('validatePlotProfile', () => {
         validatePlotProfile(makeProfile({ includeFrame: false })),
       ).not.toThrow()
     })
+
+    it('accepts a finite positive physical tool width', () => {
+      expect(() =>
+        validatePlotProfile(makeProfile({ toolWidthMillimeters: 0.7 })),
+      ).not.toThrow()
+    })
   })
+
+  it.each([0, -0.1, NaN, Infinity])(
+    'rejects a non-positive or non-finite tool width (%s)',
+    (toolWidthMillimeters) => {
+      expect(() =>
+        validatePlotProfile(makeProfile({ toolWidthMillimeters })),
+      ).toThrow('toolWidthMillimeters')
+    },
+  )
 
   describe('rejects invalid dimensions', () => {
     const rejected: Array<[string, number]> = [
@@ -191,6 +208,18 @@ describe('normalizePlotProfile', () => {
     expect(normalizePlotProfile(legacy).includeFrame).toBe(true)
   })
 
+  it('defaults a legacy profile with no tool width to 0.3 mm', () => {
+    const { toolWidthMillimeters: _toolWidth, ...legacy } = makeProfile()
+    expect(normalizePlotProfile(legacy).toolWidthMillimeters).toBe(0.3)
+  })
+
+  it('preserves an explicit valid tool width', () => {
+    expect(
+      normalizePlotProfile(makeProfile({ toolWidthMillimeters: 0.7 }))
+        .toolWidthMillimeters,
+    ).toBe(0.7)
+  })
+
   it('preserves an explicit false value', () => {
     expect(
       normalizePlotProfile({ ...makeProfile(), includeFrame: false })
@@ -262,6 +291,7 @@ describe('plotDrawableAspectsEquivalent', () => {
         left: base.insets.left * scale,
       },
       includeFrame: base.includeFrame,
+      toolWidthMillimeters: base.toolWidthMillimeters,
     }
     const baseDrawable = plotDrawableRectangle(base)
     const scaledDrawable = plotDrawableRectangle(scaled)

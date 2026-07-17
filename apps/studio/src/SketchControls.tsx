@@ -127,9 +127,6 @@ function sameParams(
   );
 }
 
-/** Fixed active fineliner until tool width joins the persisted Plot Profile. */
-const OUTLINE_TOOL_WIDTH_MILLIMETERS = 0.3;
-
 function outlineIdentitySourceFor(
   sketch: Sketch,
   profile: PlotProfile,
@@ -139,7 +136,7 @@ function outlineIdentitySourceFor(
   if (sketch.generateOutlineSource === undefined) return { sourceScene };
   return {
     outlineTarget: {
-      toolWidthMillimeters: OUTLINE_TOOL_WIDTH_MILLIMETERS,
+      toolWidthMillimeters: profile.toolWidthMillimeters,
       millimetersPerSceneUnit: computePlotMapping(frame, profile).scale,
     },
   };
@@ -155,7 +152,11 @@ function outlineInputsChanged(
     !sameParams(previous.params, next.params) ||
     previous.seed !== next.seed ||
     previous.tolerance !== next.tolerance ||
-    previous.profile.includeFrame !== next.profile.includeFrame
+    previous.profile.includeFrame !== next.profile.includeFrame ||
+    !Object.is(
+      previous.profile.toolWidthMillimeters,
+      next.profile.toolWidthMillimeters,
+    )
   ) {
     return true;
   }

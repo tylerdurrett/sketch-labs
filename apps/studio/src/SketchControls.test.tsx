@@ -1412,6 +1412,7 @@ describe("SketchControls — central edit-history integration", () => {
         height: 297,
         insets: { top: 10, right: 10, bottom: 10, left: 10 },
         includeFrame: true,
+        toolWidthMillimeters: 0.3,
       },
     } as Parameters<typeof SketchControls>[0]["sketch"];
     const el = mount(<SketchControls sketch={sketch} />);
@@ -1814,6 +1815,7 @@ describe("SketchControls — preset save/reload wiring", () => {
       height: 297,
       insets: { top: 12, right: 13, bottom: 14, left: 15 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     };
     loadPreset.mockResolvedValue({
       version: 2,
@@ -2064,6 +2066,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     height: 297,
     insets: { top: 15, right: 12, bottom: 9, left: 6 },
     includeFrame: false,
+    toolWidthMillimeters: 0.3,
   };
 
   // A Sketch that DECLARES its own default Output Profile. No registered sketch
@@ -2328,6 +2331,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
       height: 400,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     };
     loadPreset.mockResolvedValue({
       version: 2,
@@ -2377,6 +2381,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
       height: 200,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     });
     expect(lastCompositionFrame).toBe(initialFrame);
     expect(toggle.textContent).toBe("Outline");
@@ -2408,6 +2413,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
       throw new Error("expected specialized identity");
     }
     expect(firstIdentity.outlineTarget.millimetersPerSceneUnit).toBe(0.18);
+    expect(firstIdentity.outlineTarget.toolWidthMillimeters).toBe(0.3);
     const initialFrame = lastCompositionFrame;
     act(() => lastOnOutlineComputed?.());
 
@@ -2428,6 +2434,24 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(
       outlineJob.lastIdentity.outlineTarget.millimetersPerSceneUnit,
     ).toBe(0.16);
+    act(() => lastOnOutlineComputed?.());
+
+    const toolWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Tool width (mm)"]',
+    )!;
+    act(() => toolWidth.focus());
+    setInput(toolWidth, "0.5");
+    act(() => toolWidth.blur());
+
+    expect(outlineJob.starts).toBe(3);
+    expect(outlineJob.lastIdentity?.sourceKind).toBe("specialized-sketch");
+    if (outlineJob.lastIdentity?.sourceKind !== "specialized-sketch") {
+      throw new Error("expected specialized identity");
+    }
+    expect(outlineJob.lastIdentity.outlineTarget.toolWidthMillimeters).toBe(
+      0.5,
+    );
+    expect(lastCompositionFrame).toBe(initialFrame);
     expect(generateOutlineSource).not.toHaveBeenCalled();
   });
 
@@ -2845,6 +2869,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       height: 180,
       insets: { top: 15, right: 45, bottom: 15, left: 25 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     };
     const source = {
       space: { width: 120, height: 100 },
@@ -2971,6 +2996,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
       height: 400,
       insets: { top: 20, right: 20, bottom: 20, left: 20 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     };
     loadPreset.mockResolvedValue({
       version: 2,

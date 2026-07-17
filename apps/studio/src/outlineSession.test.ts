@@ -28,6 +28,7 @@ const profile: PlotProfile = {
   height: 160,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
   includeFrame: false,
+  toolWidthMillimeters: 0.3,
 };
 
 function identity(amount = 1) {

@@ -427,6 +427,7 @@ const plotProfile: PlotProfile = {
   height: 170,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
   includeFrame: true,
+  toolWidthMillimeters: 0.3,
 };
 
 function exportIdentity(
@@ -582,6 +583,7 @@ describe("hidden-line export worker runtime", () => {
       height: 320,
       insets: { top: 10, right: 10, bottom: 10, left: 10 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     };
 
     const first = handleHiddenLineWorkerMessage(

@@ -60,6 +60,7 @@ function profile(scale = 1): PlotProfile {
       left: 10 * scale,
     },
     includeFrame: true,
+    toolWidthMillimeters: 0.3,
   };
 }
 

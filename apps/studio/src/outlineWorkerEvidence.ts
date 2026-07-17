@@ -1,6 +1,7 @@
 import {
   applyPreset,
   computePlotMapping,
+  deserialize,
   grassHills,
   plotDrawableRectangle,
   resolveCompositionFrame,
@@ -221,11 +222,14 @@ function paramsAtDensity(density: number): {
   seed: string | number;
   profile: PlotProfile;
 } {
-  const preset = applyPreset(grassHills.schema, {
-    ...denseGrassPreset,
-    version: 2,
-    params: { ...denseGrassPreset.params, bladeDensity: density },
-  });
+  const preset = applyPreset(
+    grassHills.schema,
+    deserialize({
+      ...denseGrassPreset,
+      version: 2,
+      params: { ...denseGrassPreset.params, bladeDensity: density },
+    }),
+  );
   assert(preset.profile !== undefined, "dense-grass must carry a Plot Profile");
   return { params: preset.params, seed: preset.seed, profile: preset.profile };
 }

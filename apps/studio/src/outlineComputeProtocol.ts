@@ -572,6 +572,7 @@ export interface ImmutablePlotProfile {
   readonly height: number;
   readonly insets: Readonly<PlotProfile["insets"]>;
   readonly includeFrame: boolean;
+  readonly toolWidthMillimeters: number;
 }
 
 /** A completed Outline Scene that may be reused by a later job with the same identity. */
@@ -616,6 +617,7 @@ function copyProfile(profile: PlotProfile): ImmutablePlotProfile {
       left: profile.insets.left,
     }),
     includeFrame: profile.includeFrame,
+    toolWidthMillimeters: profile.toolWidthMillimeters,
   });
 }
 
@@ -686,7 +688,9 @@ function isPlotProfile(value: unknown): value is ImmutablePlotProfile {
     left >= 0 &&
     left + right < width &&
     top + bottom < height &&
-    typeof value.includeFrame === "boolean"
+    typeof value.includeFrame === "boolean" &&
+    isFiniteNumber(value.toolWidthMillimeters) &&
+    value.toolWidthMillimeters > 0
   );
 }
 

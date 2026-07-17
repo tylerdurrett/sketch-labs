@@ -71,6 +71,7 @@ function mutableProfile(profile: Readonly<PlotProfile>): PlotProfile {
       left: profile.insets.left,
     },
     includeFrame: profile.includeFrame,
+    toolWidthMillimeters: profile.toolWidthMillimeters,
   };
 }
 
