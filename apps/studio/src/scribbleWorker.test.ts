@@ -37,6 +37,9 @@ describe("Scribble worker entry", () => {
     messageListener?.({
       data: { type: "compute", jobId: 3, identity },
     } as MessageEvent<unknown>);
+    expect(workerScope.postMessage).not.toHaveBeenCalled();
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(workerScope.postMessage).toHaveBeenCalledOnce();
     expect(workerScope.postMessage).toHaveBeenCalledWith({

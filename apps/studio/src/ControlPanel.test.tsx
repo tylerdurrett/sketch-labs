@@ -135,6 +135,60 @@ describe("ControlPanel", () => {
     expect(html).toContain('aria-label="ink current color #aabbcc"');
   });
 
+  it("renders image-asset as a lock-free schema-derived control", () => {
+    const value = "pine-cone-0123456789ab";
+    const schema: ParamSchema = {
+      source: { kind: "image-asset", default: "default-aaaaaaaaaaaa" },
+    };
+    const html = renderToStaticMarkup(
+      <ControlPanel
+        schema={schema}
+        params={{ source: value }}
+        locks={new Set(["source"])}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+      />,
+    );
+
+    expect(html).toContain(value);
+    expect(html).toContain(`src="/image-assets/${value}.png"`);
+    expect(html).not.toContain("unsupported control kind");
+    expect(html).not.toContain('aria-label="source lock"');
+  });
+
+  it("falls image-asset back only for a missing or nonstring runtime value", () => {
+    const fallback = "fallback-image-0123456789ab";
+    const malformed = "Present Malformed Identity";
+    const schema: ParamSchema = {
+      source: { kind: "image-asset", default: fallback },
+    };
+    const render = (params: Params) =>
+      renderToStaticMarkup(
+        <ControlPanel
+          schema={schema}
+          params={params}
+          locks={new Set()}
+          onChange={() => {}}
+          onToggleLock={() => {}}
+        />,
+      );
+
+    expect(render({})).toContain(fallback);
+    expect(render({ source: 42 })).toContain(fallback);
+
+    const malformedHtml = render({ source: malformed });
+    expect(malformedHtml).toContain(malformed);
+    expect(malformedHtml).not.toContain(fallback);
+    expect(malformedHtml).not.toContain("<img");
+    expect(malformedHtml).not.toContain("/image-assets/");
+
+    const emptyHtml = render({ source: "" });
+    expect(emptyHtml).not.toContain(fallback);
+    const host = document.createElement("div");
+    host.innerHTML = emptyHtml;
+    expect(host.querySelector("code")?.textContent).toBe("");
+  });
+
   it("renders a LOUD visible fallback for an unsupported kind (never silent)", () => {
     // An unknown kind that the open ParamSpec union does not (yet) inhabit
     // (color graduated to a real control, so `boolean` stands in here).

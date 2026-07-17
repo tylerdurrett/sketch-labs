@@ -3,6 +3,8 @@ import { act, useImperativeHandle, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID } from "@harness/core";
+
 import { App } from "./App";
 import type { LiveCanvasHandle } from "./LiveCanvas";
 
@@ -25,6 +27,31 @@ import type { LiveCanvasHandle } from "./LiveCanvas";
 // React 19's `act` requires this flag; vitest's jsdom env does not set it.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
+
+const appImageResolution = vi.hoisted(() => ({ ids: [] as string[] }));
+
+vi.mock("./imageAssetResolver", async (importActual) => {
+  const actual = await importActual<typeof import("./imageAssetResolver")>();
+  return {
+    ...actual,
+    resolveSketchEnvironment: async (
+      _schema: unknown,
+      params: Readonly<Record<string, unknown>>,
+    ) => {
+      const id = String(params.imageAsset);
+      appImageResolution.ids.push(id);
+      const pixels = {
+        width: 1,
+        height: 1,
+        data: Uint8ClampedArray.from([32, 32, 32, 255]),
+      };
+      return {
+        imageAssets: (requested: string) =>
+          requested === id ? pixels : undefined,
+      };
+    },
+  };
+});
 
 vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
@@ -104,6 +131,7 @@ afterEach(() => {
   container = null;
   root = null;
   vi.clearAllMocks();
+  appImageResolution.ids = [];
   exportJob.resolve = null;
 });
 
@@ -249,16 +277,27 @@ describe("App — keyed edit-history sessions", () => {
   });
 });
 
-describe("App — Tone Calibration integration (#324)", () => {
-  it("opens on Scribble controls and resets its diagnostic view after switching", () => {
+describe("App — Photo Scribble integration (#333)", () => {
+  it("opens on the bundled source and resets all authored controls after switching", async () => {
     mountApp();
+    await act(async () => Promise.resolve());
 
-    expect(trigger().textContent).toBe("Tone Calibration");
+    expect(trigger().textContent).toBe("Photo Scribble");
+    expect(appImageResolution.ids).toEqual([
+      PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+    ]);
+    expect(
+      document.querySelector(
+        '[aria-label="imageAsset image asset identity"]',
+      )?.textContent,
+    ).toBe(PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID);
     expect(
       [...document.querySelectorAll('#inspector input[id^="control-"]')].map(
         (input) => input.id,
       ),
     ).toEqual([
+      "control-toneContrast",
+      "control-toneGamma",
       "control-pathDensity",
       "control-scribbleScale",
       "control-momentum",
@@ -271,6 +310,9 @@ describe("App — Tone Calibration integration (#324)", () => {
         ?.getAttribute("data-params"),
     ).toBe(
       JSON.stringify({
+        imageAsset: PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+        toneContrast: 0.5,
+        toneGamma: 0.5,
         pathDensity: 1,
         scribbleScale: 1,
         momentum: 0.75,
@@ -309,7 +351,8 @@ describe("App — Tone Calibration integration (#324)", () => {
     ).toBe("tone-reference");
 
     selectOption("Circles");
-    selectOption("Tone Calibration");
+    selectOption("Photo Scribble");
+    await act(async () => Promise.resolve());
 
     expect(
       [...document.querySelectorAll<HTMLButtonElement>("button")].find(
@@ -323,7 +366,16 @@ describe("App — Tone Calibration integration (#324)", () => {
     ).toBe("fill-held");
     expect(
       document.querySelectorAll('#inspector input[id^="control-"]'),
-    ).toHaveLength(5);
+    ).toHaveLength(7);
+    expect(
+      document.querySelector(
+        '[aria-label="imageAsset image asset identity"]',
+      )?.textContent,
+    ).toBe(PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID);
+    expect(appImageResolution.ids).toEqual([
+      PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+      PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+    ]);
   });
 });
 
