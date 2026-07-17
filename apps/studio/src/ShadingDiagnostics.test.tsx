@@ -270,6 +270,36 @@ describe("ShadingDiagnostics", () => {
     expect(budget.max).toBe(6);
   });
 
+  it("keeps zero-work terminal budget usage empty while reporting completion", () => {
+    const el = mount({
+      displayed: null,
+      preparation: {
+        kind: "preparing",
+        progress: {
+          completedWorkUnits: 0,
+          totalWorkUnits: 0,
+          terminal: true,
+        },
+        eta: { kind: "remaining", revision: 1, remainingMs: 0 },
+      },
+    });
+
+    const summary = el.querySelector("summary")!;
+    expect(summary.textContent).toContain("Preparation complete");
+    expand(el);
+
+    const prepared = lane(el, "Result prepared");
+    expect(prepared.textContent).toContain("Work budget used");
+    expect(prepared.textContent).toContain("0% (0 of 0 work units)");
+    expect(prepared.textContent).toContain("Preparation statusComplete");
+    const budget = prepared.querySelector("progress")!;
+    expect(budget.getAttribute("aria-valuetext")).toBe(
+      "Preparation complete; 0 of 0 work-budget units used",
+    );
+    expect(budget.value).toBe(0);
+    expect(budget.max).toBe(1);
+  });
+
   it("attributes a safe preparation failure without erasing the stale display warning", () => {
     const el = mount({
       displayed: {

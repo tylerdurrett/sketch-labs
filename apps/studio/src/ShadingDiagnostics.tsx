@@ -45,7 +45,7 @@ function formatPathLength(value: number): string {
 }
 
 function progressPercent(progress: ScribbleProgress): number {
-  if (progress.totalWorkUnits === 0) return progress.terminal ? 100 : 0;
+  if (progress.totalWorkUnits === 0) return 0;
   return Math.min(
     100,
     Math.max(0, (progress.completedWorkUnits / progress.totalWorkUnits) * 100),
@@ -241,11 +241,7 @@ function PreparingLane({
             }
             className="block h-1.5 w-full accent-foreground"
             max={Math.max(1, progress.totalWorkUnits)}
-            value={
-              progress.totalWorkUnits === 0 && progress.terminal
-                ? 1
-                : progress.completedWorkUnits
-            }
+            value={progress.completedWorkUnits}
           />
         </div>
       )}
