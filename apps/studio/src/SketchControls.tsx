@@ -56,6 +56,7 @@ import {
 } from "./historyShortcuts";
 import {
   LiveCanvas,
+  type DisplayedSceneSnapshot,
   type FillCapture,
   type LiveCanvasHandle,
   type LiveCanvasRenderState,
@@ -82,7 +83,21 @@ import {
 } from "./plotterSvgPreference";
 import { PresetControls } from "./PresetControls";
 import { SeedControl } from "./SeedControl";
+import {
+  ShadingDiagnostics,
+  type DisplayedShadingDiagnostics,
+  type ShadingPreparationDiagnostics,
+} from "./ShadingDiagnostics";
 import { SimplifyControl } from "./SimplifyControl";
+import { selectCurrentScribbleResult } from "./scribbleSession";
+import {
+  acknowledgedCurrentScribble,
+  type ScribblePaintAcknowledgement,
+} from "./scribbleExportReadiness";
+import {
+  useScribblePreparation,
+  type ScribbleAuthoredState,
+} from "./useScribblePreparation";
 
 function formatOutlineEta(remainingMs: number): string {
   const seconds = Math.max(1, Math.ceil(remainingMs / 1_000));
@@ -154,6 +169,22 @@ function outlineInputsChanged(
   ) {
     return true;
   }
+  return !plotDrawableAspectsEquivalent(
+    previousDrawable.width / previousDrawable.height,
+    nextDrawable.width / nextDrawable.height,
+  );
+}
+
+/** Whether an edit changes the time-invariant Scribble worker identity. */
+function scribbleInputsChanged(
+  previous: StudioEditState,
+  next: StudioEditState,
+): boolean {
+  if (!sameParams(previous.params, next.params) || previous.seed !== next.seed) {
+    return true;
+  }
+  const previousDrawable = plotDrawableRectangle(previous.profile);
+  const nextDrawable = plotDrawableRectangle(next.profile);
   return !plotDrawableAspectsEquivalent(
     previousDrawable.width / previousDrawable.height,
     nextDrawable.width / nextDrawable.height,
@@ -296,6 +327,75 @@ export function SketchControls({
     [drawableAspectIdentity],
   );
 
+  const hasScribblePreparation = sketch.generateScribbleArtwork !== undefined;
+  const scribbleInputRevisionRef = useRef(0);
+  const scribblePreparation = useScribblePreparation({
+    sketch,
+    enabled: hasScribblePreparation,
+    initial: {
+      params: history.present.params,
+      seed: history.present.seed,
+      compositionFrame,
+      inputRevision: scribbleInputRevisionRef.current,
+    },
+  });
+  const currentScribble = selectCurrentScribbleResult(
+    scribblePreparation.session,
+  );
+  const displayedShadingDiagnostics: DisplayedShadingDiagnostics | null =
+    scribblePreparation.session.displayed === null
+      ? null
+      : {
+          freshness: currentScribble === null ? "stale" : "current",
+          diagnostics: scribblePreparation.session.displayed.diagnostics,
+          computeTimeMs: scribblePreparation.session.displayed.computeTimeMs,
+        };
+  const activeScribbleToken =
+    scribblePreparation.session.active?.token ??
+    scribblePreparation.session.pending?.token ??
+    null;
+  const shadingPreparationDiagnostics: ShadingPreparationDiagnostics =
+    activeScribbleToken !== null
+      ? {
+          kind: "preparing",
+          progress:
+            scribblePreparation.progress?.token === activeScribbleToken
+              ? scribblePreparation.progress.update.snapshot
+              : null,
+          eta:
+            scribblePreparation.progress?.token === activeScribbleToken
+              ? scribblePreparation.progress.update.eta
+              : { kind: "estimating", revision: 0 },
+        }
+      : scribblePreparation.session.failure === null
+        ? { kind: "idle" }
+        : {
+            kind: "failure",
+            message: scribblePreparation.session.failure,
+          };
+  const [acknowledgedScribble, setAcknowledgedScribble] =
+    useState<ScribblePaintAcknowledgement | null>(null);
+  const acknowledgedScribbleRef = useRef(acknowledgedScribble);
+  acknowledgedScribbleRef.current = acknowledgedScribble;
+  const scribblePaintIsCurrent =
+    currentScribble !== null &&
+    acknowledgedScribble?.sourceInputRevision ===
+      currentScribble.sourceInputRevision &&
+    acknowledgedScribble.contentRevision === currentScribble.contentRevision;
+  const emptyScribbleScene = useMemo<Scene>(
+    () => ({ space: compositionFrame, primitives: [] }),
+    [compositionFrame],
+  );
+
+  const authoredScribbleState = (
+    edit: StudioEditState = historyRef.current.present,
+  ): ScribbleAuthoredState => ({
+    params: edit.params,
+    seed: edit.seed,
+    compositionFrame: resolvePlotCompositionFrame(edit.profile),
+    inputRevision: scribbleInputRevisionRef.current,
+  });
+
   // Sample-source derivation intentionally reads the live transaction preview
   // params and Composition Frame directly. Seed, timeline, profile magnitude,
   // and the Outline session are absent from this capability seam.
@@ -396,17 +496,44 @@ export function SketchControls({
   };
 
   const requestOutlineForCurrentInputs = (): void => {
-    dispatchOutline({ type: "request-outline" });
+    dispatchOutline({
+      type: "request-outline",
+      launch: !hasScribblePreparation || scribblePaintIsCurrent,
+      ...(scribblePaintIsCurrent && currentScribble !== null
+        ? {
+            provenance: {
+              sourceInputRevision: currentScribble.sourceInputRevision,
+              contentRevision: currentScribble.contentRevision,
+            },
+          }
+        : {}),
+    });
   };
 
   const updateHistory = (
     transition: (current: EditHistory) => EditHistory,
     launchOutline = true,
-  ): boolean => {
+    scribbleAction: "preview" | "atomic" | null = null,
+  ): void => {
     const current = historyRef.current;
     const next = transition(current);
-    if (next === current) return false;
+    if (next === current) return;
     historyRef.current = next;
+    const scribbleChanged = scribbleInputsChanged(current.present, next.present);
+    if (hasScribblePreparation && scribbleChanged) {
+      scribbleInputRevisionRef.current += 1;
+    }
+    if (hasScribblePreparation && scribbleAction === "preview") {
+      scribblePreparation.previewAuthoredState(
+        authoredScribbleState(next.present),
+      );
+    } else if (
+      hasScribblePreparation &&
+      scribbleAction === "atomic" &&
+      scribbleChanged
+    ) {
+      scribblePreparation.requestAtomic(authoredScribbleState(next.present));
+    }
     const invalidated = outlineInputsChanged(
       current.present,
       next.present,
@@ -414,10 +541,23 @@ export function SketchControls({
     );
     if (invalidated) {
       cancelOutlineCoordinator();
-      dispatchOutline({ type: "inputs-changed", launch: launchOutline });
+      const retainsPaintedScribble =
+        hasScribblePreparation && !scribbleChanged && scribblePaintIsCurrent;
+      dispatchOutline({
+        type: "inputs-changed",
+        launch: launchOutline && !hasScribblePreparation,
+        ...(retainsPaintedScribble && currentScribble !== null
+          ? {
+              provenance: {
+                sourceInputRevision: currentScribble.sourceInputRevision,
+                contentRevision: currentScribble.contentRevision,
+              },
+            }
+          : {}),
+        waitForSource: hasScribblePreparation && !retainsPaintedScribble,
+      });
     }
     setHistory(next);
-    return invalidated;
   };
 
   // History belongs to this keyed Sketch session, so its keyboard listener does
@@ -443,7 +583,11 @@ export function SketchControls({
       if (command === "undo" ? !canUndo(current) : !canRedo(current)) return;
 
       event.preventDefault();
-      updateHistory(command === "undo" ? undoEdit : redoEdit);
+      updateHistory(
+        command === "undo" ? undoEdit : redoEdit,
+        true,
+        "atomic",
+      );
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -458,6 +602,7 @@ export function SketchControls({
       (current) =>
         previewEditState(current, { ...current.present, [key]: value }),
       false,
+      "preview",
     );
   };
 
@@ -465,8 +610,11 @@ export function SketchControls({
     key: Key,
     value: StudioEditState[Key],
   ): void => {
-    updateHistory((current) =>
-      commitEditState(current, { ...current.present, [key]: value }),
+    updateHistory(
+      (current) =>
+        commitEditState(current, { ...current.present, [key]: value }),
+      true,
+      "atomic",
     );
   };
 
@@ -477,15 +625,22 @@ export function SketchControls({
     cancelOutlineCoordinator();
     dispatchOutline({ type: "transaction-began" });
     updateHistory(beginEditTransaction, false);
+    if (hasScribblePreparation) scribblePreparation.beginTransaction();
   };
   const settleTransaction = (
     transition: (current: EditHistory) => EditHistory,
   ): void => {
     updateHistory(transition, false);
+    if (hasScribblePreparation) {
+      scribblePreparation.settleTransaction(authoredScribbleState());
+    }
     // Settlement belongs to the session reducer: outside export it resamples the
     // final Fill exactly once; during export it retains only a deferred request,
     // which the export terminal action releases after relinquishing the slot.
-    dispatchOutline({ type: "transaction-settled" });
+    dispatchOutline({
+      type: "transaction-settled",
+      launch: !hasScribblePreparation,
+    });
   };
   const commitTransaction = (): void => settleTransaction(commitEditTransaction);
   const cancelTransaction = (): void => settleTransaction(cancelEditTransaction);
@@ -580,6 +735,10 @@ export function SketchControls({
       identity,
       scene: capture.scene,
       t: capture.t,
+      sourceInputRevision: capture.sourceInputRevision,
+      ...(capture.contentRevision === undefined
+        ? {}
+        : { contentRevision: capture.contentRevision }),
     });
     if (next.active?.token !== capture.token) return;
     const reportFailure = (detail: string): void => {
@@ -619,16 +778,65 @@ export function SketchControls({
       });
   };
 
+  const onDisplayedSceneCommitted = (
+    snapshot: DisplayedSceneSnapshot,
+  ): void => {
+    const latestScribble = selectCurrentScribbleResult(
+      scribblePreparation.getSessionSnapshot(),
+    );
+    if (
+      latestScribble === null ||
+      snapshot.renderMode !== "fill" ||
+      snapshot.sourceInputRevision !== latestScribble.sourceInputRevision ||
+      snapshot.contentRevision !== latestScribble.contentRevision
+    ) {
+      return;
+    }
+    const provenance = {
+      sourceInputRevision: latestScribble.sourceInputRevision,
+      contentRevision: latestScribble.contentRevision,
+    };
+    acknowledgedScribbleRef.current = provenance;
+    setAcknowledgedScribble((current) =>
+      current?.sourceInputRevision === provenance.sourceInputRevision &&
+      current.contentRevision === provenance.contentRevision
+        ? current
+        : provenance,
+    );
+    dispatchOutline({ type: "source-ready", provenance });
+  };
+
   const renderState: LiveCanvasRenderState =
     toneSource !== undefined
       ? { kind: "tone-reference", source: toneSource }
-      : outlineSession.phase.kind === "fill-live"
+      : hasScribblePreparation && outlineSession.phase.kind === "fill-live"
+        ? scribblePreparation.session.displayed === null
+          ? { kind: "fill-held", scene: emptyScribbleScene, t: 0 }
+          : {
+              kind: "fill-held",
+              scene: scribblePreparation.session.displayed.scene,
+              t: 0,
+              sourceInputRevision:
+                scribblePreparation.session.displayed.sourceInputRevision,
+              contentRevision:
+                scribblePreparation.session.displayed.contentRevision,
+            }
+        : outlineSession.phase.kind === "fill-live"
         ? { kind: "fill-live" }
         : outlineSession.phase.kind === "fill-held-pending"
           ? {
               kind: "fill-held",
               scene: outlineSession.phase.scene,
               t: outlineSession.phase.t,
+              ...(outlineSession.phase.sourceInputRevision === undefined
+                ? {}
+                : {
+                    sourceInputRevision:
+                      outlineSession.phase.sourceInputRevision,
+                  }),
+              ...(outlineSession.phase.contentRevision === undefined
+                ? {}
+                : { contentRevision: outlineSession.phase.contentRevision }),
             }
           : outlineSession.phase;
 
@@ -666,16 +874,45 @@ export function SketchControls({
     // falls back to this Sketch's default / the Harness fallback. `applyPreset`
     // passes the stored profile through verbatim WITHOUT resolving the fallback —
     // resolving it here at the session boundary is #267's job.
-    updateHistory((historyState) =>
-      commitEditState(historyState, {
-        ...current,
-        params: sameParams(current.params, state.params)
-          ? current.params
-          : state.params,
-        seed: state.seed,
-        locks: new Set(state.locks),
-        profile: resolvedProfile,
-      }),
+    updateHistory(
+      (historyState) =>
+        commitEditState(historyState, {
+          ...current,
+          params: sameParams(current.params, state.params)
+            ? current.params
+            : state.params,
+          seed: state.seed,
+          locks: new Set(state.locks),
+          profile: resolvedProfile,
+        }),
+      true,
+      "atomic",
+    );
+  };
+
+  /** Re-prove Scribble session and canvas provenance at an export side effect. */
+  const captureCurrentScribbleExport = () => {
+    if (!hasScribblePreparation) return null;
+    const displayed = canvasHandle.current?.captureDisplayedFrame() ?? null;
+    const result = acknowledgedCurrentScribble(
+      scribblePreparation.getSessionSnapshot(),
+      acknowledgedScribbleRef.current,
+      displayed,
+    );
+    return result === null || displayed === null ? null : { result, displayed };
+  };
+
+  const sameScribbleExportRevision = (
+    expected: ReturnType<typeof captureCurrentScribbleExport>,
+  ): boolean => {
+    if (!hasScribblePreparation) return true;
+    if (expected === null) return false;
+    const current = captureCurrentScribbleExport();
+    return (
+      current !== null &&
+      current.result.sourceInputRevision ===
+        expected.result.sourceInputRevision &&
+      current.result.contentRevision === expected.result.contentRevision
     );
   };
 
@@ -693,6 +930,8 @@ export function SketchControls({
     const handle = canvasHandle.current;
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
+    const scribbleExport = captureCurrentScribbleExport();
+    if (hasScribblePreparation && scribbleExport === null) return;
     // Time-gate the `-t{t}` filename segment on `sketch.time`: a time-driven
     // Sketch carries its captured moment, a static one omits `t` entirely.
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
@@ -708,6 +947,8 @@ export function SketchControls({
       t,
       profile,
     });
+    // Re-read the synchronous session and the canvas at the pixel side effect.
+    if (!sameScribbleExportRevision(scribbleExport)) return;
     canvas.toBlob((blob) => {
       if (blob === null) return;
       const filename = exportFilename({ sketchId: sketch.id, seed, t }, "png");
@@ -715,6 +956,7 @@ export function SketchControls({
       // the downloaded file traces back to this exact frame. Byte work is core's
       // (`insertPngMetadata`); the Studio only does the Blob ⇄ ArrayBuffer dance.
       void blob.arrayBuffer().then((buffer) => {
+        if (!sameScribbleExportRevision(scribbleExport)) return;
         const withMeta = insertPngMetadata(new Uint8Array(buffer), metadata);
         // `withMeta` spans its whole backing buffer (core's `concat` allocates a
         // fresh, offset-0 array), so `.buffer` is exactly these bytes.
@@ -728,11 +970,10 @@ export function SketchControls({
 
   // Export the CURRENTLY DISPLAYED frame as a vector SVG — the sibling export
   // path to {@link exportPng}, also a one-shot click OUTSIDE the per-frame loop.
-  // Unlike PNG (which snapshots the live canvas's pixels), SVG re-bakes the
-  // displayed `(params, seed, t)` into a Scene via `sketch.generate` and serializes
-  // it with core's `renderToSVG`. Plain SVG deliberately keeps this cold path;
-  // the displayed-Scene snapshot is consumed only by Hidden-line export, where
-  // generation and occlusion processing are materially expensive.
+  // Unlike PNG (which snapshots the live canvas's pixels), SVG serializes Scene
+  // geometry with core's `renderToSVG`. Ordinary Sketches retain their cold
+  // `generate` path. Scribble-capable Sketches serialize the exact acknowledged
+  // worker Scene and never regenerate expensive artwork on the main thread.
   //
   // `t` is read from the handle and TIME-GATED on `sketch.time` exactly as the
   // PNG path does, so the regenerated Scene and the `-t{t}` filename segment both
@@ -741,15 +982,19 @@ export function SketchControls({
     if (toneReferenceActiveRef.current) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
+    const scribbleExport = captureCurrentScribbleExport();
+    if (hasScribblePreparation && scribbleExport === null) return;
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
     // `generate` takes a concrete `t` (static Sketches conventionally get 0 and
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
-    const scene = sketch.generate(params, seed, t ?? 0, compositionFrame);
+    const scene =
+      scribbleExport?.result.scene ??
+      sketch.generate(params, seed, t ?? 0, compositionFrame);
     // Clip the generated geometry to the canvas rectangle so the exported plot
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
-    const clipped = clipSceneToBounds(scene);
+    const exportScene = scribbleExport === null ? clipSceneToBounds(scene) : scene;
     // Embed the same reproduction envelope as a <metadata> element (issue #76),
     // built from the displayed `(params, seed, locks, t)` spine plus the active
     // Plot Profile (#247) — core's `renderToSVG` does the injection (ADR-0004:
@@ -762,8 +1007,10 @@ export function SketchControls({
       t,
       profile,
     });
-    const svg = renderToSVG(clipped, metadata);
+    if (!sameScribbleExportRevision(scribbleExport)) return;
+    const svg = renderToSVG(exportScene, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
+    if (!sameScribbleExportRevision(scribbleExport)) return;
     downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "svg"));
   };
 
@@ -774,21 +1021,26 @@ export function SketchControls({
     if (toneReferenceActiveRef.current || hiddenLineBusy) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
-    const displayed = handle.captureDisplayedFrame();
-    if (displayed === null) return;
+    const capturedDisplayed = handle.captureDisplayedFrame();
+    if (capturedDisplayed === null) return;
+    const scribbleExport = captureCurrentScribbleExport();
+    if (hasScribblePreparation && scribbleExport === null) return;
+    const displayed = scribbleExport?.displayed ?? capturedDisplayed;
 
     const edit = historyRef.current.present;
     const cachedOutline = outlineSessionRef.current.cache;
     // A displayed Outline is processed geometry, never a derivation source. Its
     // cache retains the immutable raw identity source for misses and is offered
     // separately as an exact reuse candidate.
-    const sourceScene = sketch.generateOutlineSource !== undefined
-      ? displayed.scene
-      : displayed.renderMode === "outline"
-        ? cachedOutline?.identity.sourceKind === "legacy-scene"
-          ? mutableScene(cachedOutline.identity.sourceScene)
-          : undefined
-        : displayed.scene;
+    const sourceScene =
+      scribbleExport?.result.scene ??
+      (sketch.generateOutlineSource !== undefined
+        ? displayed.scene
+        : displayed.renderMode === "outline"
+          ? cachedOutline?.identity.sourceKind === "legacy-scene"
+            ? mutableScene(cachedOutline.identity.sourceScene)
+            : undefined
+          : displayed.scene);
     if (sourceScene === undefined) return;
     const identity = createOutlineComputeIdentity({
       sketchId: sketch.id,
@@ -835,7 +1087,20 @@ export function SketchControls({
           }
         : {}),
     });
-    const requested = dispatchOutline({ type: "request-export", snapshot });
+    if (!sameScribbleExportRevision(scribbleExport)) return;
+    const requested = dispatchOutline({
+      type: "request-export",
+      snapshot,
+      ...(displayed.sourceInputRevision === undefined ||
+      displayed.contentRevision === undefined
+        ? {}
+        : {
+            provenance: {
+              sourceInputRevision: displayed.sourceInputRevision,
+              contentRevision: displayed.contentRevision,
+            },
+          }),
+    });
     const active = requested.exportActive;
     if (active === null || active.snapshot !== snapshot) return;
     const coordinator = coordinatorRef.current;
@@ -876,6 +1141,7 @@ export function SketchControls({
             token: active.token,
             completedOutline: result.completedOutline,
           });
+          if (!sameScribbleExportRevision(scribbleExport)) return;
           downloadBlob(
             new Blob([result.svg], { type: "image/svg+xml" }),
             result.filename,
@@ -960,6 +1226,7 @@ export function SketchControls({
             inputRevision={outlineSession.inputRevision}
             fillCaptureRequest={outlineSession.capture}
             onFillCaptured={onFillCaptured}
+            onDisplayedSceneCommitted={onDisplayedSceneCommitted}
             renderState={renderState}
             tolerance={tolerance}
           />
@@ -1042,6 +1309,12 @@ export function SketchControls({
             onCancel: cancelTransaction,
           }}
         />
+        {hasScribblePreparation ? (
+          <ShadingDiagnostics
+            displayed={displayedShadingDiagnostics}
+            preparation={shadingPreparationDiagnostics}
+          />
+        ) : null}
         {/*
          * Render-mode toggle (#219) — swaps the whole preview between the live
          * fill render and the on-demand Hidden-line (outline) render. `mt-auto`
@@ -1215,9 +1488,10 @@ export function SketchControls({
         />
         {/*
          * Export controls — the shared home for every export path (PNG snapshots
-         * the live canvas frame; SVG re-bakes the displayed Scene; Hidden-line SVG
-         * reuses an exact displayed Scene when available, then occlusion-clips as
-         * needed for plotting). The buttons split the row
+         * the live canvas frame; SVG serializes ordinary cold geometry or the
+         * acknowledged Scribble Scene; Hidden-line SVG reuses an exact displayed
+         * Scene when available, then occlusion-clips as needed for plotting). The
+         * buttons split the row
          * (`flex-1`) and wrap as the group grows.
          */}
         <div className="flex flex-wrap gap-2">
@@ -1227,7 +1501,10 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportPng}
-            disabled={toneReferenceActive}
+            disabled={
+              toneReferenceActive ||
+              (!scribblePaintIsCurrent && hasScribblePreparation)
+            }
           >
             Export PNG
           </Button>
@@ -1237,7 +1514,10 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportSvg}
-            disabled={toneReferenceActive}
+            disabled={
+              toneReferenceActive ||
+              (!scribblePaintIsCurrent && hasScribblePreparation)
+            }
           >
             Export SVG
           </Button>
@@ -1249,7 +1529,11 @@ export function SketchControls({
                 size="sm"
                 className="flex-1"
                 onClick={exportHiddenLineSvg}
-                disabled={toneReferenceActive || hiddenLineBusy}
+                disabled={
+                  toneReferenceActive ||
+                  hiddenLineBusy ||
+                  (!scribblePaintIsCurrent && hasScribblePreparation)
+                }
               >
                 Export Hidden-line SVG
               </Button>

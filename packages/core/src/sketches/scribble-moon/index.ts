@@ -15,13 +15,16 @@ import {
   scribbleControlSchema,
   scribbleStrategy,
   type ScribbleControls,
+  type ScribbleObserver,
   type ScribbleResult,
 } from '../../scribbleStrategy'
-import type {
-  NumberParamSpec,
-  Params,
-  Seed,
-  StatelessSketch,
+import {
+  createScribbleDiagnostics,
+  type NumberParamSpec,
+  type Params,
+  type ScribbleArtwork,
+  type Seed,
+  type StatelessSketch,
 } from '../../sketch'
 import type { Point, Polyline } from '../../types'
 import { numberParam } from '../sketch-util'
@@ -216,13 +219,56 @@ export function generateScribbleMoonScribble(
   params: Params,
   seed: Seed,
   frame: CoordinateSpace,
+  observer?: ScribbleObserver,
 ): ScribbleResult {
   return scribbleStrategy({
     source: createScribbleMoonSource(sourceControls(params), frame),
     frame,
     controls: scribbleControls(params),
     seed,
+    ...(observer === undefined ? {} : { observer }),
   })
+}
+
+function completeScene(
+  frame: CoordinateSpace,
+  structural: Readonly<Scene>,
+  scribble: Readonly<ScribbleResult>,
+): Scene {
+  const builder = createScene(frame)
+
+  for (const primitive of structural.primitives) builder.add(primitive)
+
+  const stroke = {
+    color: 'black',
+    width: Math.min(frame.width, frame.height) * 0.0011,
+  }
+  for (const polyline of scribble.polylines) {
+    builder.addPath(polyline, {
+      closed: false,
+      stroke,
+      hiddenLineRole: 'source',
+    })
+  }
+
+  return builder.build()
+}
+
+/** Prepare Moon's complete structural-plus-Scribble Scene and Scribble metrics. */
+export function generateScribbleMoonArtwork(
+  params: Params,
+  seed: Seed,
+  frame: CoordinateSpace,
+  observer?: ScribbleObserver,
+): ScribbleArtwork {
+  const structural = createScribbleMoonStructuralScene(frame)
+  const scribble = generateScribbleMoonScribble(params, seed, frame, observer)
+
+  return {
+    scene: completeScene(frame, structural, scribble),
+    // Structural contours identify the authored Moon but are not Scribble work.
+    diagnostics: createScribbleDiagnostics(scribble),
+  }
 }
 
 /** A contour-plus-Scribble moon whose procedural target remains diagnostic. */
@@ -233,30 +279,13 @@ export const scribbleMoon: StatelessSketch = {
   generateToneSource(params: Params, frame: CoordinateSpace) {
     return createScribbleMoonSource(sourceControls(params), frame)
   },
+  generateScribbleArtwork: generateScribbleMoonArtwork,
   generate(
     params: Params,
     seed: Seed,
     _t: number,
     frame: CoordinateSpace,
   ): Scene {
-    const structural = createScribbleMoonStructuralScene(frame)
-    const scribble = generateScribbleMoonScribble(params, seed, frame)
-    const builder = createScene(frame)
-
-    for (const primitive of structural.primitives) builder.add(primitive)
-
-    const stroke = {
-      color: 'black',
-      width: Math.min(frame.width, frame.height) * 0.0011,
-    }
-    for (const polyline of scribble.polylines) {
-      builder.addPath(polyline, {
-        closed: false,
-        stroke,
-        hiddenLineRole: 'source',
-      })
-    }
-
-    return builder.build()
+    return generateScribbleMoonArtwork(params, seed, frame).scene
   },
 }

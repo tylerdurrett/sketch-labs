@@ -320,7 +320,7 @@ describe("App — Tone Calibration integration (#324)", () => {
       document
         .querySelector('[data-testid="canvas"]')
         ?.getAttribute("data-render-state"),
-    ).toBe("fill-live");
+    ).toBe("fill-held");
     expect(
       document.querySelectorAll('#inspector input[id^="control-"]'),
     ).toHaveLength(5);
@@ -330,9 +330,12 @@ describe("App — Tone Calibration integration (#324)", () => {
 describe("App — hidden-line navigation guard (#289)", () => {
   it("disables Sketch navigation for the full active interval with the exact reason", () => {
     mountApp();
-    const outlineChoice = [...document.querySelectorAll("button")].find(
-      (button) => button.textContent === "Outline",
-    ) as HTMLButtonElement;
+    // Use an immediate live-Fill Sketch here. Scribble-capable Sketches now
+    // intentionally defer Outline until current worker geometry is painted.
+    selectOption("Circles");
+    const outlineChoice = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle outline render mode"]',
+    )!;
     act(() => outlineChoice.click());
 
     expect(trigger().disabled).toBe(true);
@@ -349,15 +352,14 @@ describe("App — hidden-line navigation guard (#289)", () => {
       "Finish or cancel the hidden-line job before switching Sketches.",
     );
 
-    const fillChoice = [...document.querySelectorAll("button")].find(
-      (button) => button.textContent === "Fill",
-    ) as HTMLButtonElement;
-    act(() => fillChoice.click());
+    act(() => outlineChoice.click());
     expect(trigger().disabled).toBe(false);
   });
 
   it("guards navigation for an export while inspector collapse remains available", async () => {
     mountApp();
+    // Export readiness is immediate for an ordinary live-Fill Sketch.
+    selectOption("Circles");
     const exportButton = [...document.querySelectorAll("button")].find(
       (button) => button.textContent === "Export Hidden-line SVG",
     ) as HTMLButtonElement;

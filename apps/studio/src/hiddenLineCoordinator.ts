@@ -19,6 +19,13 @@ import {
   type RollingEtaEstimate,
   type RollingEtaEstimator,
 } from "./rollingEta";
+import {
+  terminateWorkerOnce,
+  workerErrorDetail,
+  workerEventDetail,
+  type WorkerFactory,
+  type WorkerPort,
+} from "./workerBoundary";
 
 interface CancelledResult {
   status: "cancelled";
@@ -55,20 +62,12 @@ export type HiddenLineExportResult =
 
 type HiddenLineJobResult = HiddenLineComputeResult | HiddenLineExportResult;
 
-export interface OutlineWorkerPort {
-  postMessage(message: HiddenLineWorkerRequest | OutlineComputeRequest): void;
-  terminate(): void;
-  addEventListener(
-    type: "message",
-    listener: (event: MessageEvent<unknown>) => void,
-  ): void;
-  addEventListener(
-    type: "error" | "messageerror",
-    listener: (event: Event) => void,
-  ): void;
-}
-
-export type OutlineWorkerFactory = () => OutlineWorkerPort;
+export type OutlineWorkerPort = WorkerPort<
+  HiddenLineWorkerRequest | OutlineComputeRequest
+>;
+export type OutlineWorkerFactory = WorkerFactory<
+  HiddenLineWorkerRequest | OutlineComputeRequest
+>;
 export type MonotonicClock = () => number;
 
 export interface HiddenLineProgressUpdate {
@@ -93,7 +92,7 @@ interface ActiveJob {
   readonly jobKind: HiddenLineJobKind;
   readonly owner: HiddenLineJobOwner;
   readonly identity: OutlineComputeIdentity;
-  readonly worker: OutlineWorkerPort;
+  readonly terminateWorker: () => void;
   readonly resolve: (result: HiddenLineJobResult) => void;
   readonly observeProgress:
     | HiddenLineProgressObserver
@@ -105,20 +104,6 @@ interface ActiveJob {
 }
 
 const defaultClock: MonotonicClock = () => performance.now();
-
-function eventDetail(event: Event): string {
-  const message = (event as Event & { message?: unknown }).message;
-  if (typeof message === "string" && message.trim() !== "") {
-    return message.slice(0, 500);
-  }
-  return "Outline worker failed";
-}
-
-function errorDetail(error: unknown): string {
-  return error instanceof Error && error.message.trim() !== ""
-    ? error.message.slice(0, 500)
-    : "Outline worker failed";
-}
 
 function ownerFor(jobKind: HiddenLineJobKind): HiddenLineJobOwner {
   return jobKind === "preview" ? "outline-preview" : "hidden-line-export";
@@ -221,7 +206,7 @@ export class HiddenLineCoordinator {
       return Promise.resolve({
         status: "failure",
         jobId,
-        error: errorDetail(error),
+        error: workerErrorDetail(error, "Outline worker failed"),
       });
     }
 
@@ -231,7 +216,7 @@ export class HiddenLineCoordinator {
         jobKind,
         owner: ownerFor(jobKind),
         identity,
-        worker,
+        terminateWorker: terminateWorkerOnce(worker),
         resolve,
         observeProgress,
         eta: createRollingEtaEstimator(),
@@ -319,7 +304,9 @@ export class HiddenLineCoordinator {
         });
       });
       worker.addEventListener("error", (event) => {
-        if (this.active === active) this.fail(active, eventDetail(event));
+        if (this.active === active) {
+          this.fail(active, workerEventDetail(event, "Outline worker failed"));
+        }
       });
       worker.addEventListener("messageerror", () => {
         if (this.active === active) {
@@ -332,9 +319,7 @@ export class HiddenLineCoordinator {
       } catch (error) {
         this.fail(
           active,
-          error instanceof Error
-            ? error.message
-            : "Outline worker could not start",
+          workerErrorDetail(error, "Outline worker could not start"),
         );
       }
     });
@@ -396,7 +381,7 @@ export class HiddenLineCoordinator {
   private finish(active: ActiveJob, result: HiddenLineJobResult): void {
     if (this.active !== active) return;
     this.active = null;
-    active.worker.terminate();
+    active.terminateWorker();
     active.resolve(result);
   }
 }

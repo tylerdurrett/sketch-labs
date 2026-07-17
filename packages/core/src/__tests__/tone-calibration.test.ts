@@ -20,7 +20,10 @@ import {
   toneCalibration as publicToneCalibration,
   toneCalibrationSchema as publicToneCalibrationSchema,
 } from '../index'
-import type { ScribbleStrategyInput } from '../scribbleStrategy/index'
+import type {
+  ScribbleProgress,
+  ScribbleStrategyInput,
+} from '../scribbleStrategy/index'
 import { createScribbleModel } from '../scribbleStrategy/model'
 import {
   generateToneCalibrationScribble,
@@ -263,6 +266,33 @@ describe('Tone Calibration Scribble integration', () => {
     expect(scene.primitives.map(({ points }) => points)).toEqual(first.polylines)
   })
 
+  it('prepares exactly the cold Scene with public progress and scalar-only diagnostics', () => {
+    const controls = params({ toneFidelity: 0 })
+    const progress: ScribbleProgress[] = []
+    const artwork = toneCalibration.generateScribbleArtwork!(
+      controls,
+      'capability',
+      FRAME,
+      (snapshot) => progress.push(snapshot),
+    )
+
+    expect(artwork.scene).toEqual(
+      toneCalibration.generate(controls, 'capability', 123, FRAME),
+    )
+    expect(artwork.diagnostics).toEqual({
+      termination: 'completed',
+      residualError: expect.any(Number),
+      pathLength: expect.any(Number),
+      polylineCount: artwork.scene.primitives.length,
+      penLiftCount: Math.max(0, artwork.scene.primitives.length - 1),
+    })
+    expect(artwork.diagnostics.pathLength).toBeGreaterThan(0)
+    expect(progress.length).toBeGreaterThan(0)
+    expect(progress.at(-1)?.terminal).toBe(true)
+    expect(artwork).not.toHaveProperty('polylines')
+    expect(artwork.diagnostics).not.toHaveProperty('polylines')
+  })
+
   it('preserves generated Scribble paths through hidden-line plotter export', () => {
     const scene = toneCalibration.generate(
       params({ toneFidelity: 0 }),
@@ -414,7 +444,7 @@ describe('Tone Calibration Scribble integration', () => {
     expect(circleInk[0]! - circleInk[2]!).toBeGreaterThan(0.4)
   })
 
-  it('keeps forced budget-exhausted geometry visible through ordinary SVG export', () => {
+  it('keeps forced budget-exhausted artwork valid and visible through ordinary SVG export', () => {
     scribbleStrategyMock.mockReturnValueOnce({
       polylines: [
         [
@@ -427,7 +457,19 @@ describe('Tone Calibration Scribble integration', () => {
       residualError: 0.4,
     })
 
-    const scene = toneCalibration.generate(params(), 'forced-budget', 0, FRAME)
+    const artwork = toneCalibration.generateScribbleArtwork!(
+      params(),
+      'forced-budget',
+      FRAME,
+    )
+    const { scene } = artwork
+    expect(artwork.diagnostics).toEqual({
+      termination: 'budget-exhausted',
+      residualError: 0.4,
+      pathLength: Math.hypot(20, 20) + Math.hypot(20, 5),
+      polylineCount: 1,
+      penLiftCount: 0,
+    })
     expect(scene.primitives).toEqual([
       {
         points: [

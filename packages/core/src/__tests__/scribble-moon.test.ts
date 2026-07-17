@@ -8,6 +8,7 @@ import { hiddenLinePass } from '../hiddenLine'
 import { renderPlotterSVG } from '../plotterSvg'
 import type { CoordinateSpace, Primitive, Scene } from '../scene'
 import { defaultParams } from '../sketch'
+import { totalPathLength } from '../shadingStrategy'
 import {
   createScribbleMoonStructuralScene,
   generateScribbleMoonScribble,
@@ -307,19 +308,35 @@ describe('Scribble Moon structural artwork', () => {
     const frame = DEFAULT_COMPOSITION_FRAME
     const params = defaultParams(scribbleMoon.schema)
     const structural = createScribbleMoonStructuralScene(frame)
-    const result = generateScribbleMoonScribble(params, 'painter-order', frame)
+    const artwork = scribbleMoon.generateScribbleArtwork!(
+      params,
+      'painter-order',
+      frame,
+    )
     const scene = scribbleMoon.generate(params, 'painter-order', 0, frame)
     const generated = scene.primitives.slice(structural.primitives.length)
 
+    expect(artwork.scene).toEqual(scene)
     expect(scene.primitives.slice(0, 13)).toEqual(structural.primitives)
-    expect(generated.map(({ points }) => points)).toEqual(result.polylines)
-    expect(generated).toHaveLength(result.polylines.length)
     generated.forEach((primitive) => {
       expect(primitive.closed).toBe(false)
       expect(primitive.fill).toBeUndefined()
       expect(primitive.stroke).toEqual({ color: 'black', width: 1.1 })
       expect(primitive.hiddenLineRole).toBe('source')
     })
+    const scribblePolylines = generated.map(({ points }) => points)
+    expect(artwork.diagnostics).toEqual({
+      termination: expect.stringMatching(/^(completed|budget-exhausted)$/),
+      residualError: expect.any(Number),
+      pathLength: totalPathLength(scribblePolylines),
+      polylineCount: generated.length,
+      penLiftCount: Math.max(0, generated.length - 1),
+    })
+    expect(artwork.diagnostics.polylineCount).toBe(
+      scene.primitives.length - structural.primitives.length,
+    )
+    expect(artwork.diagnostics.polylineCount).not.toBe(scene.primitives.length)
+    expect(artwork).not.toHaveProperty('polylines')
     expect(JSON.stringify(scene)).not.toMatch(
       /imageData|pixel|raster|tile|toneField|shadingMask|gray/i,
     )

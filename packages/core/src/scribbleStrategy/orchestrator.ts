@@ -16,6 +16,19 @@ export interface ScribbleExecutionLimits {
   readonly maxRestarts: number
 }
 
+/** Immutable, serialization-friendly progress from one Scribble solver pass. */
+export interface ScribbleProgress {
+  /** Completed growth attempts, whether advanced or stagnant. */
+  readonly completedWorkUnits: number
+  /** Stable upper bound from the accepted-segment and stagnation budgets. */
+  readonly totalWorkUnits: number
+  /** True only when the solver has stopped. */
+  readonly terminal: boolean
+}
+
+/** Optional observation hook for deterministic Scribble progress snapshots. */
+export type ScribbleObserver = (progress: ScribbleProgress) => void
+
 /** Policy-neutral input for one deterministic Scribble solver pass. */
 export interface ScribbleOrchestratorInput {
   readonly model: ScribbleModel
@@ -24,6 +37,8 @@ export interface ScribbleOrchestratorInput {
   /** A normalized residual error in `[0, 1]`. */
   readonly residualThreshold: number
   readonly limits: Readonly<ScribbleExecutionLimits>
+  /** Receives isolated snapshots after completed growth attempts and at stop. */
+  readonly observer?: ScribbleObserver
 }
 
 export type ScribbleOrchestratorStopCause =
@@ -134,6 +149,7 @@ export function runScribbleOrchestrator({
   rng,
   residualThreshold,
   limits,
+  observer,
 }: ScribbleOrchestratorInput): ScribbleOrchestratorOutcome {
   assertNormalizedThreshold(residualThreshold)
   assertExecutionLimits(limits)
@@ -144,23 +160,39 @@ export function runScribbleOrchestrator({
   let acceptedSegments = 0
   let stagnations = 0
   let restarts = 0
+  const configuredWorkUnits =
+    limits.maxAcceptedSegments + limits.maxStagnations
 
-  if (residualError <= residualThreshold) {
-    return {
-      polylines,
-      residualError,
-      acceptedSegments,
-      stopCause: 'threshold-reached',
+  const reportProgress = (terminal: boolean): void => {
+    if (observer === undefined) return
+
+    const completedWorkUnits = acceptedSegments + stagnations
+    const progress = Object.freeze({
+      completedWorkUnits,
+      totalWorkUnits: completedWorkUnits === 0 ? 0 : configuredWorkUnits,
+      terminal,
+    })
+    try {
+      observer(progress)
+    } catch {
+      // Observation is diagnostic only: callback failures cannot change
+      // deterministic geometry, termination, or residual state.
     }
   }
 
+  const finish = (
+    stopCause: ScribbleOrchestratorStopCause,
+  ): ScribbleOrchestratorOutcome => {
+    reportProgress(true)
+    return { polylines, residualError, acceptedSegments, stopCause }
+  }
+
+  if (residualError <= residualThreshold) {
+    return finish('threshold-reached')
+  }
+
   if (limits.maxAcceptedSegments === 0 || limits.maxPolylines === 0) {
-    return {
-      polylines,
-      residualError,
-      acceptedSegments,
-      stopCause: 'budget-reached',
-    }
+    return finish('budget-reached')
   }
 
   let restartCell = chooseRestartCell(model, rng, rejectedStarts)
@@ -192,29 +224,21 @@ export function runScribbleOrchestrator({
       current = step.point
       heading = step.heading
       residualError = model.residualError()
+      reportProgress(false)
 
       // Completion always wins when the same accepted segment reaches a cap.
       if (residualError <= residualThreshold) {
-        return {
-          polylines,
-          residualError,
-          acceptedSegments,
-          stopCause: 'threshold-reached',
-        }
+        return finish('threshold-reached')
       }
       if (acceptedSegments >= limits.maxAcceptedSegments) {
-        return {
-          polylines,
-          residualError,
-          acceptedSegments,
-          stopCause: 'budget-reached',
-        }
+        return finish('budget-reached')
       }
 
       continue
     }
 
     stagnations++
+    reportProgress(false)
     if (activePolyline === undefined && restartCell !== undefined) {
       rejectedStarts.add(restartCell.index)
     }
@@ -236,10 +260,5 @@ export function runScribbleOrchestrator({
     restarts++
   }
 
-  return {
-    polylines,
-    residualError,
-    acceptedSegments,
-    stopCause: 'budget-reached',
-  }
+  return finish('budget-reached')
 }

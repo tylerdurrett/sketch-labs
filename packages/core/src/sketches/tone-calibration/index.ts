@@ -12,13 +12,20 @@ import { createScene } from '../../scene'
 import type { CoordinateSpace, Scene } from '../../scene'
 import {
   scribbleStrategy,
+  type ScribbleObserver,
   type ScribbleResult,
 } from '../../scribbleStrategy/index'
 import {
   scribbleControlSchema,
   type ScribbleControls,
 } from '../../scribbleStrategy/types'
-import type { Params, Seed, StatelessSketch } from '../../sketch'
+import {
+  createScribbleDiagnostics,
+  type Params,
+  type ScribbleArtwork,
+  type Seed,
+  type StatelessSketch,
+} from '../../sketch'
 import { numberParam } from '../sketch-util'
 import { createToneCalibrationSource } from './source'
 
@@ -44,13 +51,46 @@ export function generateToneCalibrationScribble(
   params: Params,
   seed: Seed,
   frame: CoordinateSpace,
+  observer?: ScribbleObserver,
 ): ScribbleResult {
   return scribbleStrategy({
     source: createToneCalibrationSource(frame),
     frame,
     controls: scribbleControls(params),
     seed,
+    ...(observer === undefined ? {} : { observer }),
   })
+}
+
+function sceneFromScribble(
+  frame: CoordinateSpace,
+  result: Readonly<ScribbleResult>,
+): Scene {
+  const builder = createScene(frame)
+
+  for (const polyline of result.polylines) {
+    builder.addPath(polyline, {
+      closed: false,
+      stroke: PREVIEW_STROKE,
+      hiddenLineRole: 'source',
+    })
+  }
+
+  return builder.build()
+}
+
+/** Prepare Tone Calibration's complete Scene and compact Scribble diagnostics. */
+export function generateToneCalibrationScribbleArtwork(
+  params: Params,
+  seed: Seed,
+  frame: CoordinateSpace,
+  observer?: ScribbleObserver,
+): ScribbleArtwork {
+  const result = generateToneCalibrationScribble(params, seed, frame, observer)
+  return {
+    scene: sceneFromScribble(frame, result),
+    diagnostics: createScribbleDiagnostics(result),
+  }
 }
 
 /** A fixed analytic target rendered solely as generated Scribble polylines. */
@@ -61,23 +101,13 @@ export const toneCalibration: StatelessSketch = {
   generateToneSource(_params: Params, frame: CoordinateSpace) {
     return createToneCalibrationSource(frame)
   },
+  generateScribbleArtwork: generateToneCalibrationScribbleArtwork,
   generate(
     params: Params,
     seed: Seed,
     _t: number,
     frame: CoordinateSpace,
   ): Scene {
-    const result = generateToneCalibrationScribble(params, seed, frame)
-    const builder = createScene(frame)
-
-    for (const polyline of result.polylines) {
-      builder.addPath(polyline, {
-        closed: false,
-        stroke: PREVIEW_STROKE,
-        hiddenLineRole: 'source',
-      })
-    }
-
-    return builder.build()
+    return generateToneCalibrationScribbleArtwork(params, seed, frame).scene
   },
 }

@@ -18,6 +18,8 @@ export * from './shadingFields'
 export * from './shadingStrategy'
 export {
   scribbleStrategy,
+  type ScribbleObserver,
+  type ScribbleProgress,
   type ScribbleResult,
   type ScribbleStrategyInput,
 } from './scribbleStrategy/index'

@@ -7,6 +7,7 @@ import { createScribbleModel } from '../scribbleStrategy/model'
 import {
   runScribbleOrchestrator,
   type ScribbleExecutionLimits,
+  type ScribbleProgress,
 } from '../scribbleStrategy/orchestrator'
 import type { ScribbleControls } from '../scribbleStrategy/types'
 import type { Random } from '../types'
@@ -60,6 +61,7 @@ function scriptedRandom(draws: readonly number[]): {
 
 describe('Scribble pass orchestration', () => {
   it('stops immediately when the initial residual meets the fixed threshold', () => {
+    const snapshots: ScribbleProgress[] = []
     const result = runScribbleOrchestrator({
       model: model(() => 0.2),
       rng: createRandom('already-complete'),
@@ -70,12 +72,16 @@ describe('Scribble pass orchestration', () => {
         maxStagnations: 0,
         maxRestarts: 0,
       },
+      observer: (progress) => snapshots.push(progress),
     })
 
     expect(result.polylines).toEqual([])
     expect(result.residualError).toBeCloseTo(0.2, 12)
     expect(result.acceptedSegments).toBe(0)
     expect(result.stopCause).toBe('threshold-reached')
+    expect(snapshots).toEqual([
+      { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
+    ])
     expect(Object.keys(result)).toEqual([
       'polylines',
       'residualError',
@@ -277,6 +283,126 @@ describe('Scribble pass orchestration', () => {
         limits: { ...GENEROUS_LIMITS, maxRestarts: -1 },
       }),
     ).toThrow(/maxRestarts/)
+  })
+})
+
+describe('Scribble pass progress observation', () => {
+  it('preserves byte-identical output with or without observation', () => {
+    const execute = (observer?: (progress: ScribbleProgress) => void) =>
+      runScribbleOrchestrator({
+        model: model(() => 0.8),
+        rng: createRandom('observed-determinism'),
+        residualThreshold: 0.55,
+        limits: GENEROUS_LIMITS,
+        ...(observer === undefined ? {} : { observer }),
+      })
+    const snapshots: ScribbleProgress[] = []
+
+    const unobserved = execute()
+    const observed = execute((progress) => snapshots.push(progress))
+
+    expect(JSON.stringify(observed)).toBe(JSON.stringify(unobserved))
+    expect(snapshots.length).toBeGreaterThan(1)
+  })
+
+  it('reports immutable, monotonic actual work against one stable total', () => {
+    const snapshots: ScribbleProgress[] = []
+    const result = runScribbleOrchestrator({
+      model: model(() => 0.8),
+      rng: createRandom('observed-convergence'),
+      residualThreshold: 0.55,
+      limits: GENEROUS_LIMITS,
+      observer: (progress) => snapshots.push(progress),
+    })
+
+    expect(result.stopCause).toBe('threshold-reached')
+    expect(snapshots.every(Object.isFrozen)).toBe(true)
+    expect(
+      new Set(snapshots.map((progress) => progress.totalWorkUnits)),
+    ).toEqual(
+      new Set([
+        GENEROUS_LIMITS.maxAcceptedSegments +
+          GENEROUS_LIMITS.maxStagnations,
+      ]),
+    )
+    expect(snapshots.at(-1)!.terminal).toBe(true)
+    expect(snapshots.at(-2)!.terminal).toBe(false)
+    expect(snapshots.at(-1)!.completedWorkUnits).toBe(
+      snapshots.at(-2)!.completedWorkUnits,
+    )
+
+    const intermediate = snapshots.slice(0, -1)
+    for (let index = 0; index < intermediate.length; index++) {
+      expect(intermediate[index]!.completedWorkUnits).toBe(index + 1)
+      expect(intermediate[index]!.terminal).toBe(false)
+    }
+    expect(snapshots.at(-1)!.completedWorkUnits).toBeGreaterThanOrEqual(
+      result.acceptedSegments,
+    )
+  })
+
+  it('preserves the actual count when the accepted-segment budget stops work', () => {
+    const snapshots: ScribbleProgress[] = []
+    const limits = {
+      ...GENEROUS_LIMITS,
+      maxAcceptedSegments: 1,
+      maxStagnations: 5,
+    }
+    const result = runScribbleOrchestrator({
+      model: model(() => 1),
+      rng: createRandom('observed-budget'),
+      residualThreshold: 0,
+      limits,
+      observer: (progress) => snapshots.push(progress),
+    })
+
+    expect(result.stopCause).toBe('budget-reached')
+    expect(snapshots).toEqual([
+      { completedWorkUnits: 1, totalWorkUnits: 6, terminal: false },
+      { completedWorkUnits: 1, totalWorkUnits: 6, terminal: true },
+    ])
+  })
+
+  it('counts a stagnant growth attempt as one completed work unit', () => {
+    const snapshots: ScribbleProgress[] = []
+    const limits = {
+      ...GENEROUS_LIMITS,
+      maxAcceptedSegments: 3,
+      maxStagnations: 1,
+    }
+    const result = runScribbleOrchestrator({
+      model: model(
+        () => 1,
+        ([x, y]) => (x < 1.2 && y < 1.2 ? 1 : 0),
+      ),
+      rng: createRandom('observed-stagnation'),
+      residualThreshold: 0,
+      limits,
+      observer: (progress) => snapshots.push(progress),
+    })
+
+    expect(result.acceptedSegments).toBe(0)
+    expect(result.stopCause).toBe('budget-reached')
+    expect(snapshots).toEqual([
+      { completedWorkUnits: 1, totalWorkUnits: 4, terminal: false },
+      { completedWorkUnits: 1, totalWorkUnits: 4, terminal: true },
+    ])
+  })
+
+  it('reports immediate no-demand completion as terminal zero-of-zero', () => {
+    const snapshots: ScribbleProgress[] = []
+    const result = runScribbleOrchestrator({
+      model: model(() => 0),
+      rng: createRandom('observed-no-demand'),
+      residualThreshold: 0,
+      limits: GENEROUS_LIMITS,
+      observer: (progress) => snapshots.push(progress),
+    })
+
+    expect(result.stopCause).toBe('threshold-reached')
+    expect(snapshots).toEqual([
+      { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
+    ])
   })
 })
 

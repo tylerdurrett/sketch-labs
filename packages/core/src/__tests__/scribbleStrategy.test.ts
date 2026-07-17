@@ -8,6 +8,8 @@ import {
   runScribbleStrategyForTesting,
   scribbleControlSchema,
   scribbleStrategy,
+  type ScribbleObserver,
+  type ScribbleProgress,
   type ScribbleResult,
   type ScribbleStrategyInput,
 } from '../scribbleStrategy/index'
@@ -138,9 +140,11 @@ describe('public Scribble strategy boundary', () => {
     expect(core.scribbleControlSchema).toBe(scribbleControlSchema)
     expect(core.defaultScribbleControls).toBe(defaultScribbleControls)
     expect('runScribbleStrategyForTesting' in core).toBe(false)
-    expectTypeOf<ScribbleStrategyInput>().toEqualTypeOf<
+    expectTypeOf<ScribbleStrategyInput>().toMatchTypeOf<
       core.ShadingStrategyInput<ScribbleControls>
     >()
+    expectTypeOf<core.ScribbleObserver>().toEqualTypeOf<ScribbleObserver>()
+    expectTypeOf<core.ScribbleProgress>().toEqualTypeOf<ScribbleProgress>()
     expectTypeOf<ScribbleResult>().toMatchTypeOf<core.ShadingResult>()
 
     expect(Object.keys(scribbleControlSchema)).toEqual([
@@ -204,6 +208,65 @@ describe('public Scribble strategy boundary', () => {
       termination: 'completed',
       residualError: 0,
     })
+  })
+
+  it('reports terminal zero-of-zero for public no-demand completion', () => {
+    const snapshots: ScribbleProgress[] = []
+    const result = scribbleStrategy({
+      ...input(source(constantTone(0))),
+      observer: (progress) => snapshots.push(progress),
+    })
+
+    expect(result).toEqual({
+      polylines: [],
+      termination: 'completed',
+      residualError: 0,
+    })
+    expect(snapshots).toEqual([
+      { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
+    ])
+    expect(Object.isFrozen(snapshots[0])).toBe(true)
+  })
+
+  it('keeps public output byte-identical when observers mutate or throw', () => {
+    const strategyInput = input(
+      source(constantTone(1)),
+      'public-observer-isolation',
+    )
+    const unobserved = runScribbleStrategyForTesting(
+      strategyInput,
+      TINY_LIMITS,
+    )
+    let mutationSucceeded = true
+    const mutationObserved = runScribbleStrategyForTesting(
+      {
+        ...strategyInput,
+        observer: (progress) => {
+          mutationSucceeded = Reflect.set(
+            progress,
+            'completedWorkUnits',
+            999,
+          )
+        },
+      },
+      TINY_LIMITS,
+    )
+    let throwingCalls = 0
+    const throwingObserved = runScribbleStrategyForTesting(
+      {
+        ...strategyInput,
+        observer: () => {
+          throwingCalls++
+          throw new Error('diagnostic observer failure')
+        },
+      },
+      TINY_LIMITS,
+    )
+
+    expect(mutationSucceeded).toBe(false)
+    expect(throwingCalls).toBeGreaterThan(0)
+    expect(JSON.stringify(mutationObserved)).toBe(JSON.stringify(unobserved))
+    expect(JSON.stringify(throwingObserved)).toBe(JSON.stringify(unobserved))
   })
 
   it('calls E1 exactly once for nonzero demand and translates both stop causes', () => {

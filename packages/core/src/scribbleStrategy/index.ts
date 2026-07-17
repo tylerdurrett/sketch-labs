@@ -17,8 +17,10 @@ import { createScribbleModel } from './model'
 import {
   runScribbleOrchestrator,
   type ScribbleExecutionLimits,
+  type ScribbleObserver,
   type ScribbleOrchestratorInput,
   type ScribbleOrchestratorOutcome,
+  type ScribbleProgress,
 } from './orchestrator'
 import { smoothScribblePolylines } from './smooth'
 import type { ScribbleControls, ScribbleModel } from './types'
@@ -30,8 +32,14 @@ export {
   type ScribbleControls,
 } from './types'
 
+export type { ScribbleObserver, ScribbleProgress } from './orchestrator'
+
 /** Scribble's authored specialization of the shared strategy input. */
-export type ScribbleStrategyInput = ShadingStrategyInput<ScribbleControls>
+export interface ScribbleStrategyInput
+  extends ShadingStrategyInput<ScribbleControls> {
+  /** Receives immutable solver progress without affecting deterministic output. */
+  readonly observer?: ScribbleObserver
+}
 
 /** Scribble geometry, truthful termination, and remaining normalized error. */
 export interface ScribbleResult extends ShadingResult {
@@ -120,6 +128,18 @@ function executeScribbleStrategy(
   // No random draw or E1 call is necessary when the authored source has no
   // permission-weighted demand at the model's declared working resolution.
   if (initialResidual === 0) {
+    if (input.observer !== undefined) {
+      const progress: ScribbleProgress = Object.freeze({
+        completedWorkUnits: 0,
+        totalWorkUnits: 0,
+        terminal: true,
+      })
+      try {
+        input.observer(progress)
+      } catch {
+        // Observers are diagnostic only and cannot change strategy results.
+      }
+    }
     return { polylines: [], termination: 'completed', residualError: 0 }
   }
 
@@ -128,6 +148,7 @@ function executeScribbleStrategy(
     rng: createRandom(input.seed),
     residualThreshold: model.scales.completionThreshold,
     limits: injectedLimits ?? productionLimits(model),
+    ...(input.observer === undefined ? {} : { observer: input.observer }),
   })
 
   if (

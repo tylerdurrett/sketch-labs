@@ -953,7 +953,13 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
         inputRevision={6}
         fillCaptureRequest={{ token: 50, inputRevision: 6 }}
         onFillCaptured={onFillCaptured}
-        renderState={{ kind: "fill-held", scene: held, t: 2.25 }}
+        renderState={{
+          kind: "fill-held",
+          scene: held,
+          t: 2.25,
+          sourceInputRevision: 6,
+          contentRevision: 14,
+        }}
       />,
     );
 
@@ -964,9 +970,107 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
       inputRevision: 6,
       scene: held,
       t: 2.25,
+      sourceInputRevision: 6,
+      contentRevision: 14,
     });
     tick(9000);
     expect(onFillCaptured).toHaveBeenCalledOnce();
+  });
+
+  it("retains supplied provenance and never serves stale held geometry as current", () => {
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const held: Scene = { space: { width: 100, height: 100 }, primitives: [] };
+    const handle = createRef<LiveCanvasHandle>();
+    const onFillCaptured = vi.fn();
+
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        inputRevision={8}
+        fillCaptureRequest={{ token: 51, inputRevision: 8 }}
+        onFillCaptured={onFillCaptured}
+        renderState={{
+          kind: "fill-held",
+          scene: held,
+          t: 3,
+          sourceInputRevision: 7,
+          contentRevision: 22,
+        }}
+      />,
+    );
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(onFillCaptured).not.toHaveBeenCalled();
+    expect(handle.current?.getDisplayedScene()).toMatchObject({
+      scene: held,
+      inputRevision: 7,
+      sourceInputRevision: 7,
+      contentRevision: 22,
+    });
+  });
+
+  it("acknowledges supplied content only after its paint succeeds", () => {
+    const { sketch } = animatedSketch({ duration: 10, mode: "loop" });
+    const held: Scene = { space: { width: 100, height: 100 }, primitives: [] };
+    const handle = createRef<LiveCanvasHandle>();
+    const onDisplayedSceneCommitted = vi.fn();
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(null);
+
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        onDisplayedSceneCommitted={onDisplayedSceneCommitted}
+        renderState={{
+          kind: "fill-held",
+          scene: held,
+          t: 3,
+          sourceInputRevision: 7,
+          contentRevision: 22,
+        }}
+      />,
+    );
+
+    expect(onDisplayedSceneCommitted).not.toHaveBeenCalled();
+    expect(handle.current?.getDisplayedScene()).toBeNull();
+
+    const { ctx } = recordingContext();
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(ctx);
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          onDisplayedSceneCommitted={onDisplayedSceneCommitted}
+          renderState={{
+            kind: "fill-held",
+            scene: held,
+            t: 3,
+            sourceInputRevision: 7,
+            contentRevision: 23,
+          }}
+        />,
+      );
+    });
+
+    expect(onDisplayedSceneCommitted).toHaveBeenCalledOnce();
+    expect(onDisplayedSceneCommitted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scene: held,
+        sourceInputRevision: 7,
+        contentRevision: 23,
+      }),
+    );
+    expect(handle.current?.getDisplayedScene()).toBe(
+      onDisplayedSceneCommitted.mock.calls[0]?.[0],
+    );
   });
 
   it("paints a completed caller-supplied Outline atomically without sampling the Sketch", () => {
@@ -995,6 +1099,63 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
       t: 4,
       renderMode: "outline",
     });
+  });
+
+  it("never prepares or generates the Sketch for supplied Fill, Outline, or Tone", () => {
+    const { ctx } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const supplied: Scene = {
+      space: { width: 100, height: 100 },
+      primitives: [],
+    };
+
+    mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{ value: 1 }}
+        seed={1}
+        renderState={{
+          kind: "fill-held",
+          scene: supplied,
+          t: 1,
+          sourceInputRevision: 1,
+          contentRevision: 1,
+        }}
+      />,
+    );
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={{ value: 1 }}
+          seed={1}
+          renderState={{
+            kind: "outline",
+            scene: supplied,
+            t: 1,
+            sourceInputRevision: 1,
+            contentRevision: 2,
+          }}
+        />,
+      );
+    });
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={{ value: 1 }}
+          seed={1}
+          renderState={{ kind: "tone-reference", source: toneSource(0.5) }}
+        />,
+      );
+    });
+
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
   });
 
   it("replaces held Fill with a completed Outline without an empty snapshot", () => {

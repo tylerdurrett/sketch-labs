@@ -14,16 +14,22 @@ export type OutlineSessionPhase =
       readonly kind: "fill-held-pending";
       readonly scene: Scene;
       readonly t: number;
-    }
-  | { readonly kind: "outline"; readonly scene: Scene; readonly t: number };
+    } & OutlineSourceProvenance
+  | ({ readonly kind: "outline"; readonly scene: Scene; readonly t: number } &
+      OutlineSourceProvenance);
 
-export interface OutlineSessionCache {
+export interface OutlineSourceProvenance {
+  readonly sourceInputRevision?: number;
+  readonly contentRevision?: number;
+}
+
+export interface OutlineSessionCache extends OutlineSourceProvenance {
   readonly identity: OutlineComputeIdentity;
   readonly scene: Scene;
   readonly t: number;
 }
 
-export interface OutlineSessionActive {
+export interface OutlineSessionActive extends OutlineSourceProvenance {
   readonly token: number;
   readonly identity: OutlineComputeIdentity;
   readonly scene: Scene;
@@ -36,14 +42,16 @@ export type OutlineSessionSlot =
 
 export type OutlineExportPhase = "deriving" | "finalizing";
 
-export interface OutlineExportActive {
+export interface OutlineExportActive extends OutlineSourceProvenance {
   readonly token: number;
   readonly snapshot: HiddenLineExportSnapshot;
   readonly phase: OutlineExportPhase;
 }
 
-export interface DeferredOutlineRequest {
+export interface DeferredOutlineRequest extends OutlineSourceProvenance {
   readonly inputRevision: number;
+  /** Present only while caller-owned geometry still needs a paint acknowledgement. */
+  readonly waitsForSource?: true;
 }
 
 export interface OutlineSessionState {
@@ -52,7 +60,10 @@ export interface OutlineSessionState {
   readonly inputRevision: number;
   readonly nextToken: number;
   readonly nextExportToken: number;
-  readonly capture: { readonly token: number; readonly inputRevision: number } | null;
+  readonly capture:
+    | ({ readonly token: number; readonly inputRevision: number } &
+        OutlineSourceProvenance)
+    | null;
   readonly active: OutlineSessionActive | null;
   readonly slot: OutlineSessionSlot | null;
   readonly exportActive: OutlineExportActive | null;
@@ -64,11 +75,20 @@ export interface OutlineSessionState {
 }
 
 export type OutlineSessionAction =
-  | { readonly type: "request-outline" }
+  | {
+      readonly type: "request-outline";
+      readonly launch?: boolean;
+      readonly provenance?: OutlineSourceProvenance;
+    }
+  | {
+      readonly type: "source-ready";
+      readonly provenance: Required<OutlineSourceProvenance>;
+    }
   | { readonly type: "request-fill" }
   | {
       readonly type: "request-export";
       readonly snapshot: HiddenLineExportSnapshot;
+      readonly provenance?: OutlineSourceProvenance;
     }
   | {
       readonly type: "export-finalizing";
@@ -92,6 +112,8 @@ export type OutlineSessionAction =
       readonly identity: OutlineComputeIdentity;
       readonly scene: Scene;
       readonly t: number;
+      readonly sourceInputRevision?: number;
+      readonly contentRevision?: number;
     }
   | {
       readonly type: "succeeded";
@@ -102,8 +124,13 @@ export type OutlineSessionAction =
   | { readonly type: "cancelled"; readonly token?: number }
   | { readonly type: "failed"; readonly token: number; readonly error: string }
   | { readonly type: "transaction-began" }
-  | { readonly type: "transaction-settled" }
-  | { readonly type: "inputs-changed"; readonly launch: boolean }
+  | { readonly type: "transaction-settled"; readonly launch?: boolean }
+  | {
+      readonly type: "inputs-changed";
+      readonly launch: boolean;
+      readonly provenance?: OutlineSourceProvenance;
+      readonly waitForSource?: boolean;
+    }
   | { readonly type: "dispose" };
 
 export function createOutlineSessionState(): OutlineSessionState {
@@ -125,13 +152,16 @@ export function createOutlineSessionState(): OutlineSessionState {
   };
 }
 
-function requestCapture(state: OutlineSessionState): OutlineSessionState {
+function requestCapture(
+  state: OutlineSessionState,
+  provenance: OutlineSourceProvenance = {},
+): OutlineSessionState {
   const token = state.nextToken;
   return {
     ...state,
     phase: { kind: "fill-live" },
     nextToken: token + 1,
-    capture: { token, inputRevision: state.inputRevision },
+    capture: { token, inputRevision: state.inputRevision, ...provenance },
     active: null,
     slot: null,
     deferredOutline: null,
@@ -139,14 +169,51 @@ function requestCapture(state: OutlineSessionState): OutlineSessionState {
   };
 }
 
-function deferOutline(state: OutlineSessionState): OutlineSessionState {
+function sameProvenance(
+  left: OutlineSourceProvenance,
+  right: OutlineSourceProvenance,
+): boolean {
+  // Ordinary live Fill revisions are transient capture bookkeeping; exact
+  // Outline identity remains sufficient for their historic cache semantics.
+  // Caller-owned Scribble content carries a revision and must match both axes.
+  if (left.contentRevision === undefined && right.contentRevision === undefined) {
+    return true;
+  }
+  return (
+    left.sourceInputRevision === right.sourceInputRevision &&
+    left.contentRevision === right.contentRevision
+  );
+}
+
+function sourceProvenanceOf(
+  source: OutlineSourceProvenance,
+): OutlineSourceProvenance {
+  return {
+    ...(source.sourceInputRevision === undefined
+      ? {}
+      : { sourceInputRevision: source.sourceInputRevision }),
+    ...(source.contentRevision === undefined
+      ? {}
+      : { contentRevision: source.contentRevision }),
+  };
+}
+
+function deferOutline(
+  state: OutlineSessionState,
+  provenance: OutlineSourceProvenance = {},
+  waitsForSource = false,
+): OutlineSessionState {
   return {
     ...state,
     capture: null,
     active: null,
     deferredOutline:
       state.desired === "outline"
-        ? { inputRevision: state.inputRevision }
+        ? {
+            inputRevision: state.inputRevision,
+            ...sourceProvenanceOf(provenance),
+            ...(waitsForSource ? { waitsForSource: true as const } : {}),
+          }
         : null,
   };
 }
@@ -176,9 +243,14 @@ function finishExport(
     return settled;
   }
   if (settled.transactionOpen) {
-    return deferOutline(settled);
+    return deferOutline(
+      settled,
+      settled.deferredOutline,
+      settled.deferredOutline.waitsForSource === true,
+    );
   }
-  return requestCapture(settled);
+  if (settled.deferredOutline.waitsForSource === true) return settled;
+  return requestCapture(settled, settled.deferredOutline);
 }
 
 /** Pure, stale-safe state machine for one keyed Sketch's one-slot Outline work. */
@@ -189,14 +261,45 @@ export function outlineSessionReducer(
   switch (action.type) {
     case "request-outline":
       if (state.slot?.owner === "hidden-line-export") {
-        return deferOutline({
-          ...state,
-          desired: "outline",
-          phase: { kind: "fill-live" },
-          failure: null,
-        });
+        return deferOutline(
+          {
+            ...state,
+            desired: "outline",
+            phase: { kind: "fill-live" },
+            failure: null,
+          },
+          action.provenance,
+          action.launch === false,
+        );
       }
-      return requestCapture({ ...state, desired: "outline" });
+      return action.launch === false
+        ? deferOutline(
+            { ...state, desired: "outline", failure: null },
+            action.provenance,
+            true,
+          )
+        : requestCapture(
+            { ...state, desired: "outline" },
+            action.provenance,
+          );
+    case "source-ready":
+      if (
+        state.desired === "outline" &&
+        state.slot?.owner === "hidden-line-export"
+      ) {
+        return deferOutline(state, action.provenance);
+      }
+      if (
+        state.desired !== "outline" ||
+        state.transactionOpen ||
+        state.slot !== null ||
+        state.capture !== null ||
+        (state.phase.kind === "outline" &&
+          sameProvenance(state.phase, action.provenance))
+      ) {
+        return state;
+      }
+      return requestCapture(state, action.provenance);
     case "request-fill":
       return {
         ...state,
@@ -226,6 +329,7 @@ export function outlineSessionReducer(
           token,
           snapshot: action.snapshot,
           phase: "deriving",
+          ...sourceProvenanceOf(action.provenance ?? {}),
         },
         exportFailure: null,
         deferredOutline:
@@ -245,15 +349,27 @@ export function outlineSessionReducer(
         ...state,
         exportActive: { ...state.exportActive, phase: "finalizing" },
       };
-    case "export-succeeded":
+    case "export-succeeded": {
+      const exportProvenance = sourceProvenanceOf(state.exportActive ?? {});
+      const cacheProvenance =
+        exportProvenance.contentRevision === undefined &&
+        state.cache !== null &&
+        outlineComputeIdentitiesEqual(
+          state.cache.identity,
+          action.completedOutline.identity,
+        )
+          ? sourceProvenanceOf(state.cache)
+          : exportProvenance;
       return finishExport(state, action.token, {
         cache: {
           identity: action.completedOutline.identity,
           scene: mutableScene(action.completedOutline.scene),
           t: action.completedOutline.identity.sampledT,
+          ...cacheProvenance,
         },
         exportFailure: null,
       });
+    }
     case "export-cancelled":
       return finishExport(state, action.token, { exportFailure: null });
     case "export-failed":
@@ -271,11 +387,17 @@ export function outlineSessionReducer(
       }
       if (
         state.cache !== null &&
-        outlineComputeIdentitiesEqual(state.cache.identity, action.identity)
+        outlineComputeIdentitiesEqual(state.cache.identity, action.identity) &&
+        sameProvenance(state.cache, action)
       ) {
         return {
           ...state,
-          phase: { kind: "outline", scene: state.cache.scene, t: state.cache.t },
+          phase: {
+            kind: "outline",
+            scene: state.cache.scene,
+            t: state.cache.t,
+            ...sourceProvenanceOf(state.cache),
+          },
           capture: null,
           active: null,
           failure: null,
@@ -283,13 +405,19 @@ export function outlineSessionReducer(
       }
       return {
         ...state,
-        phase: { kind: "fill-held-pending", scene: action.scene, t: action.t },
+        phase: {
+          kind: "fill-held-pending",
+          scene: action.scene,
+          t: action.t,
+          ...sourceProvenanceOf(action),
+        },
         capture: null,
         active: {
           token: action.token,
           identity: action.identity,
           scene: action.scene,
           t: action.t,
+          ...sourceProvenanceOf(action),
         },
         slot: { owner: "outline-preview", token: action.token },
         failure: null,
@@ -308,10 +436,16 @@ export function outlineSessionReducer(
         identity: action.identity,
         scene: action.scene,
         t: active.t,
+        ...sourceProvenanceOf(active),
       };
       return {
         ...state,
-        phase: { kind: "outline", scene: action.scene, t: active.t },
+        phase: {
+          kind: "outline",
+          scene: action.scene,
+          t: active.t,
+          ...sourceProvenanceOf(active),
+        },
         active: null,
         slot: null,
         cache,
@@ -368,9 +502,17 @@ export function outlineSessionReducer(
     case "transaction-settled": {
       const settled = { ...state, transactionOpen: false };
       if (state.slot?.owner === "hidden-line-export") {
-        return deferOutline(settled);
+        const deferred = state.deferredOutline;
+        return deferOutline(
+          settled,
+          deferred ?? {},
+          deferred?.waitsForSource === true ||
+            (deferred === null && action.launch === false),
+        );
       }
-      return state.desired === "outline" ? requestCapture(settled) : settled;
+      return state.desired === "outline" && action.launch !== false
+        ? requestCapture(settled)
+        : settled;
     }
     case "inputs-changed": {
       const changed = {
@@ -386,7 +528,11 @@ export function outlineSessionReducer(
         failure: null,
       };
       if (state.slot?.owner === "hidden-line-export") {
-        return deferOutline(changed);
+        return deferOutline(
+          changed,
+          action.provenance,
+          action.waitForSource === true,
+        );
       }
       return action.launch && state.desired === "outline"
         ? requestCapture(changed)
