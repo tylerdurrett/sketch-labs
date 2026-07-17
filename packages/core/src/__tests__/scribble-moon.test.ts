@@ -10,6 +10,7 @@ import type { CoordinateSpace, Primitive, Scene } from '../scene'
 import { defaultParams } from '../sketch'
 import { totalPathLength } from '../shadingStrategy'
 import {
+  createScribbleMoonLayout,
   createScribbleMoonStructuralScene,
   generateScribbleMoonScribble,
   scribbleMoon,
@@ -477,6 +478,74 @@ describe('Scribble Moon structural artwork', () => {
     expect(outline.primitives).toContainEqual(
       expect.objectContaining({ points: completed.primitives.at(-1)!.points }),
     )
+  })
+
+  it('clips an earlier crossing behind both satellite paper discs while retaining their later rims', () => {
+    const frame = DEFAULT_COMPOSITION_FRAME
+    const layout = createScribbleMoonLayout(frame)
+    const completed = createScribbleMoonStructuralScene(frame)
+    const crossingPoints = layout.satellites.flatMap(({ center, radius }) => [
+      [center[0] - radius * 2, center[1]] as Point,
+      [center[0] + radius * 2, center[1]] as Point,
+    ])
+    completed.primitives[0] = {
+      ...completed.primitives[0]!,
+      points: crossingPoints,
+      closed: false,
+    }
+
+    const source = scribbleMoon.deriveOutlineSource!(completed, {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    })
+    const satelliteFixture: Scene = {
+      space: source.space,
+      primitives: [
+        source.primitives[0]!,
+        ...source.primitives.slice(4, 8),
+      ],
+    }
+    const outline = hiddenLinePass(satelliteFixture, { tolerance: 0 })
+    const firstRimPoints = [
+      ...completed.primitives[3]!.points,
+      completed.primitives[3]!.points[0]!,
+    ]
+    const firstRimIndex = outline.primitives.findIndex(
+      ({ points }) => JSON.stringify(points) === JSON.stringify(firstRimPoints),
+    )
+    const crossingFragments = outline.primitives
+      .slice(0, firstRimIndex)
+      .map(({ points }) => points)
+
+    expect(firstRimIndex).toBeGreaterThan(0)
+    expect(totalPathLength(crossingFragments)).toBeLessThan(
+      totalPathLength([crossingPoints]),
+    )
+    for (const satellite of layout.satellites) {
+      expect(
+        crossingFragments.every((points) =>
+          points.slice(1).every((point, index) => {
+            const previous = points[index]!
+            const midpoint: Point = [
+              (previous[0] + point[0]) / 2,
+              (previous[1] + point[1]) / 2,
+            ]
+            return (
+              Math.hypot(
+                midpoint[0] - satellite.center[0],
+                midpoint[1] - satellite.center[1],
+              ) >= satellite.radius
+            )
+          }),
+        ),
+      ).toBe(true)
+    }
+    for (const index of [3, 4]) {
+      const rim = completed.primitives[index]!
+      expect(outline.primitives).toContainEqual(
+        expect.objectContaining({ points: [...rim.points, rim.points[0]!] }),
+      )
+    }
   })
 
   it('independently samples generated segments through Moon soft permission and never exact zero', () => {
