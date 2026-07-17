@@ -48,6 +48,10 @@ export interface DisplayedSceneSnapshot {
   readonly includeFrame: boolean;
   /** Authored-input revision from which a Fill Scene was sampled. */
   readonly inputRevision?: number;
+  /** Authored-input revision from which this exact Scene originated. */
+  readonly sourceInputRevision?: number;
+  /** Caller-owned identity for this exact completed Scene content. */
+  readonly contentRevision?: number;
 }
 
 export interface FillCaptureRequest {
@@ -58,13 +62,23 @@ export interface FillCaptureRequest {
 export interface FillCapture extends FillCaptureRequest {
   readonly scene: Scene;
   readonly t: number;
+  readonly sourceInputRevision: number;
+  readonly contentRevision?: number;
+}
+
+/** Provenance supplied alongside caller-owned, already-derived geometry. */
+export interface SuppliedSceneProvenance {
+  readonly sourceInputRevision?: number;
+  readonly contentRevision?: number;
 }
 
 /** Geometry ownership is explicit: LiveCanvas only derives live Fill frames. */
 export type LiveCanvasRenderState =
   | { readonly kind: "fill-live" }
-  | { readonly kind: "fill-held"; readonly scene: Scene; readonly t: number }
-  | { readonly kind: "outline"; readonly scene: Scene; readonly t: number }
+  | ({ readonly kind: "fill-held"; readonly scene: Scene; readonly t: number } &
+      SuppliedSceneProvenance)
+  | ({ readonly kind: "outline"; readonly scene: Scene; readonly t: number } &
+      SuppliedSceneProvenance)
   | { readonly kind: "tone-reference"; readonly source: ToneSource };
 
 const LIVE_FILL_RENDER_STATE: LiveCanvasRenderState = { kind: "fill-live" };
@@ -141,6 +155,8 @@ export interface LiveCanvasProps {
   fillCaptureRequest?: FillCaptureRequest | null;
   /** Answers a capture token at most once, and only from its matching revision. */
   onFillCaptured?: (capture: FillCapture) => void;
+  /** Reports a Scene only after that exact Scene was successfully painted. */
+  onDisplayedSceneCommitted?: (snapshot: DisplayedSceneSnapshot) => void;
   /**
    * Selects live Fill sampling, caller-owned held/Outline geometry, or a
    * pixel-native Tone reference. No non-live state invokes the Sketch generator.
@@ -282,6 +298,7 @@ export function LiveCanvas({
   inputRevision = 0,
   fillCaptureRequest = null,
   onFillCaptured,
+  onDisplayedSceneCommitted,
   renderState = LIVE_FILL_RENDER_STATE,
   tolerance = 0,
   handleRef,
@@ -294,6 +311,7 @@ export function LiveCanvas({
   const displayedFillRef = useRef<DisplayedSceneSnapshot | null>(null);
   const captureRequestRef = useRef(fillCaptureRequest);
   const onFillCapturedRef = useRef(onFillCaptured);
+  const onDisplayedSceneCommittedRef = useRef(onDisplayedSceneCommitted);
   const inputRevisionRef = useRef(inputRevision);
   const servedCaptureTokensRef = useRef(new Set<number>());
 
@@ -315,9 +333,9 @@ export function LiveCanvas({
     renderState.kind === "tone-reference" ? renderState.source : null;
   const preparedFrame = useMemo(
     () =>
-      renderState.kind === "tone-reference"
-        ? null
-        : prepareSketch(sketch, params, seed, compositionFrame),
+      renderState.kind === "fill-live"
+        ? prepareSketch(sketch, params, seed, compositionFrame)
+        : null,
     [sketch, params, seed, compositionAspect, renderState.kind],
   );
 
@@ -382,6 +400,7 @@ export function LiveCanvas({
     inputRevisionRef.current = inputRevision;
     captureRequestRef.current = fillCaptureRequest;
     onFillCapturedRef.current = onFillCaptured;
+    onDisplayedSceneCommittedRef.current = onDisplayedSceneCommitted;
   }, [
     preparedFrame,
     renderState,
@@ -391,6 +410,7 @@ export function LiveCanvas({
     inputRevision,
     fillCaptureRequest,
     onFillCaptured,
+    onDisplayedSceneCommitted,
   ]);
 
   // The latest `t` the loop has drawn (0 for a static Sketch). The resize re-fit
@@ -447,7 +467,7 @@ export function LiveCanvas({
       request === null ||
       servedCaptureTokensRef.current.has(request.token) ||
       snapshot.renderMode !== "fill" ||
-      snapshot.inputRevision !== request.inputRevision
+      snapshot.sourceInputRevision !== request.inputRevision
     ) {
       return;
     }
@@ -459,8 +479,22 @@ export function LiveCanvas({
       inputRevision: request.inputRevision,
       scene: snapshot.scene,
       t: snapshot.t,
+      sourceInputRevision: snapshot.sourceInputRevision,
+      ...(snapshot.contentRevision === undefined
+        ? {}
+        : { contentRevision: snapshot.contentRevision }),
     });
   }, []);
+
+  const commitDisplayedScene = useCallback(
+    (snapshot: DisplayedSceneSnapshot, retainAsFill: boolean) => {
+      displayedSceneRef.current = snapshot;
+      if (retainAsFill) displayedFillRef.current = snapshot;
+      if (retainAsFill) answerCapture(snapshot);
+      onDisplayedSceneCommittedRef.current?.(snapshot);
+    },
+    [answerCapture],
+  );
 
   const commitFillFrame = useCallback(
     (scene: Scene, t: number) => {
@@ -471,12 +505,11 @@ export function LiveCanvas({
         tolerance: toleranceRef.current,
         includeFrame: includeFrameRef.current,
         inputRevision: inputRevisionRef.current,
+        sourceInputRevision: inputRevisionRef.current,
       };
-      displayedSceneRef.current = snapshot;
-      displayedFillRef.current = snapshot;
-      answerCapture(snapshot);
+      commitDisplayedScene(snapshot, true);
     },
-    [answerCapture],
+    [commitDisplayedScene],
   );
 
   // Only live Fill derives geometry. Held Fill and completed Outline are
@@ -502,15 +535,19 @@ export function LiveCanvas({
         renderMode: state.kind === "outline" ? "outline" : "fill",
         tolerance: toleranceRef.current,
         includeFrame: includeFrameRef.current,
-        inputRevision: inputRevisionRef.current,
+        ...(state.sourceInputRevision === undefined
+          ? {}
+          : {
+              inputRevision: state.sourceInputRevision,
+              sourceInputRevision: state.sourceInputRevision,
+            }),
+        ...(state.contentRevision === undefined
+          ? {}
+          : { contentRevision: state.contentRevision }),
       };
-      displayedSceneRef.current = snapshot;
-      if (state.kind === "fill-held") {
-        displayedFillRef.current = snapshot;
-        answerCapture(snapshot);
-      }
+      commitDisplayedScene(snapshot, state.kind === "fill-held");
     },
-    [answerCapture],
+    [commitDisplayedScene],
   );
 
   // Geometry-only changes repaint the exact displayed Scene. They never sample
