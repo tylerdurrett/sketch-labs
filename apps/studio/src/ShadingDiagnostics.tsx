@@ -32,10 +32,11 @@ function formatPercent(value: number): string {
 
 function formatDuration(milliseconds: number): string {
   if (milliseconds < 1_000) return `${Math.round(milliseconds)} ms`;
-  if (milliseconds < 60_000) return `${(milliseconds / 1_000).toFixed(1)} s`;
+  const roundedSeconds = Math.round(milliseconds / 1_000);
+  if (roundedSeconds < 60) return `${(milliseconds / 1_000).toFixed(1)} s`;
 
-  const minutes = Math.floor(milliseconds / 60_000);
-  const seconds = Math.round((milliseconds % 60_000) / 1_000);
+  const minutes = Math.floor(roundedSeconds / 60);
+  const seconds = roundedSeconds % 60;
   return seconds === 0 ? `${minutes} min` : `${minutes} min ${seconds} s`;
 }
 
@@ -57,6 +58,7 @@ function ProgressSummary({
   readonly progress: ScribbleProgress | null;
 }) {
   if (progress === null) return <>Preparing</>;
+  if (progress.terminal) return <>Preparation complete</>;
   return <>Preparing {Math.round(progressPercent(progress))}%</>;
 }
 
@@ -70,14 +72,7 @@ function SummaryStatuses({ displayed, preparation }: ShadingDiagnosticsProps) {
         >
           Displayed result: stale
         </span>
-      ) : displayed?.diagnostics.termination === "budget-exhausted" ? (
-        <span
-          role="status"
-          className="rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-amber-200"
-        >
-          Current result: budget exhausted
-        </span>
-      ) : displayed !== null ? (
+      ) : displayed?.diagnostics.termination === "completed" ? (
         <span
           role="status"
           className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-emerald-200"
@@ -86,8 +81,22 @@ function SummaryStatuses({ displayed, preparation }: ShadingDiagnosticsProps) {
         </span>
       ) : null}
 
+      {displayed?.diagnostics.termination === "budget-exhausted" ? (
+        <span
+          role="status"
+          className="rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-amber-200"
+        >
+          {displayed.freshness === "current"
+            ? "Current result: budget exhausted"
+            : "Displayed result: budget exhausted"}
+        </span>
+      ) : null}
+
       {preparation.kind === "preparing" ? (
-        <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground">
+        <span
+          role={preparation.progress?.terminal === true ? "status" : undefined}
+          className="rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground"
+        >
           <ProgressSummary progress={preparation.progress} />
         </span>
       ) : preparation.kind === "failure" ? (
@@ -186,13 +195,20 @@ function PreparingLane({
   >;
   readonly replacing: boolean;
 }) {
-  const laneName = replacing ? "Preparing replacement" : "Preparing result";
   const { progress, eta } = preparation;
+  const complete = progress?.terminal === true;
+  const laneName = complete
+    ? replacing
+      ? "Replacement prepared"
+      : "Result prepared"
+    : replacing
+      ? "Preparing replacement"
+      : "Preparing result";
 
   return (
     <section
       aria-label={laneName}
-      aria-busy="true"
+      aria-busy={!complete}
       className="min-w-0 space-y-2"
     >
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -205,7 +221,9 @@ function PreparingLane({
       ) : (
         <div className="space-y-1">
           <div className="flex items-baseline justify-between gap-3 text-xs">
-            <span className="text-muted-foreground">Progress</span>
+            <span className="text-muted-foreground">
+              {complete ? "Work budget used" : "Progress"}
+            </span>
             <span className="tabular-nums">
               {Math.round(progressPercent(progress))}% (
               {progress.completedWorkUnits.toLocaleString()} of{" "}
@@ -213,8 +231,14 @@ function PreparingLane({
             </span>
           </div>
           <progress
-            aria-label={`${laneName} progress`}
-            aria-valuetext={`${Math.round(progressPercent(progress))}% complete`}
+            aria-label={
+              complete ? `${laneName} work budget used` : `${laneName} progress`
+            }
+            aria-valuetext={
+              complete
+                ? `Preparation complete; ${progress.completedWorkUnits.toLocaleString()} of ${progress.totalWorkUnits.toLocaleString()} work-budget units used`
+                : `${Math.round(progressPercent(progress))}% complete`
+            }
             className="block h-1.5 w-full accent-foreground"
             max={Math.max(1, progress.totalWorkUnits)}
             value={
@@ -225,14 +249,23 @@ function PreparingLane({
           />
         </div>
       )}
-      <div className="flex items-baseline justify-between gap-3 text-xs">
-        <span className="text-muted-foreground">Estimated time remaining</span>
-        <span>
-          {eta.kind === "estimating"
-            ? "Estimating…"
-            : formatDuration(eta.remainingMs)}
-        </span>
-      </div>
+      {complete ? (
+        <div className="flex items-baseline justify-between gap-3 text-xs">
+          <span className="text-muted-foreground">Preparation status</span>
+          <span>Complete</span>
+        </div>
+      ) : (
+        <div className="flex items-baseline justify-between gap-3 text-xs">
+          <span className="text-muted-foreground">
+            Estimated time remaining
+          </span>
+          <span>
+            {eta.kind === "estimating"
+              ? "Estimating…"
+              : formatDuration(eta.remainingMs)}
+          </span>
+        </div>
+      )}
     </section>
   );
 }

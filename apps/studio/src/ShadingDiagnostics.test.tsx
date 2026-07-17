@@ -71,7 +71,7 @@ describe("ShadingDiagnostics", () => {
     const el = mount({
       displayed: {
         freshness: "stale",
-        diagnostics: converged,
+        diagnostics: exhausted,
         computeTimeMs: 842,
       },
       preparation: {
@@ -90,10 +90,16 @@ describe("ShadingDiagnostics", () => {
     const summary = details.querySelector("summary")!;
     expect(summary.textContent).toContain("Shading diagnostics");
     expect(summary.textContent).toContain("Displayed result: stale");
+    expect(summary.textContent).toContain("Displayed result: budget exhausted");
     expect(summary.textContent).toContain("Preparing 25%");
-    expect(summary.querySelector('[role="status"]')?.textContent).toContain(
+    expect(
+      [...summary.querySelectorAll('[role="status"]')].map(
+        (status) => status.textContent,
+      ),
+    ).toEqual([
       "Displayed result: stale",
-    );
+      "Displayed result: budget exhausted",
+    ]);
 
     expand(el);
     expect(details.open).toBe(true);
@@ -223,6 +229,47 @@ describe("ShadingDiagnostics", () => {
     ).toBeNull();
   });
 
+  it("presents an early terminal snapshot as complete and keeps its percentage as budget usage", () => {
+    const el = mount({
+      displayed: {
+        freshness: "stale",
+        diagnostics: converged,
+        computeTimeMs: 500,
+      },
+      preparation: {
+        kind: "preparing",
+        progress: {
+          completedWorkUnits: 1,
+          totalWorkUnits: 6,
+          terminal: true,
+        },
+        eta: { kind: "remaining", revision: 1, remainingMs: 0 },
+      },
+    });
+
+    const summary = el.querySelector("summary")!;
+    expect(summary.textContent).toContain("Displayed result: stale");
+    expect(summary.textContent).toContain("Preparation complete");
+    expect(summary.textContent).not.toContain("Preparing 17%");
+
+    expand(el);
+    const prepared = lane(el, "Replacement prepared");
+    expect(prepared.getAttribute("aria-busy")).toBe("false");
+    expect(prepared.textContent).toContain("Work budget used");
+    expect(prepared.textContent).toContain("17% (1 of 6 work units)");
+    expect(prepared.textContent).toContain("Preparation statusComplete");
+    expect(prepared.textContent).not.toContain("Estimated time remaining");
+    const budget = prepared.querySelector("progress")!;
+    expect(budget.getAttribute("aria-label")).toBe(
+      "Replacement prepared work budget used",
+    );
+    expect(budget.getAttribute("aria-valuetext")).toBe(
+      "Preparation complete; 1 of 6 work-budget units used",
+    );
+    expect(budget.value).toBe(1);
+    expect(budget.max).toBe(6);
+  });
+
   it("attributes a safe preparation failure without erasing the stale display warning", () => {
     const el = mount({
       displayed: {
@@ -243,7 +290,11 @@ describe("ShadingDiagnostics", () => {
       [...summary.querySelectorAll('[role="status"]')].map(
         (status) => status.textContent,
       ),
-    ).toEqual(["Displayed result: stale", "Preparation failed"]);
+    ).toEqual([
+      "Displayed result: stale",
+      "Displayed result: budget exhausted",
+      "Preparation failed",
+    ]);
 
     expand(el);
     const retained = lane(el, "Displayed result (stale)");
@@ -266,5 +317,21 @@ describe("ShadingDiagnostics", () => {
     expect(el.textContent).toContain("No shading result yet.");
     expect(el.querySelector("section")).toBeNull();
     expect(el.querySelector("progress")).toBeNull();
+  });
+
+  it("normalizes rounded seconds before splitting minute durations", () => {
+    const el = mount({
+      displayed: {
+        freshness: "current",
+        diagnostics: converged,
+        computeTimeMs: 119_999,
+      },
+      preparation: { kind: "idle" },
+    });
+    expand(el);
+
+    const displayed = lane(el, "Displayed result");
+    expect(displayed.textContent).toContain("Compute time2 min");
+    expect(displayed.textContent).not.toContain("1 min 60 s");
   });
 });
