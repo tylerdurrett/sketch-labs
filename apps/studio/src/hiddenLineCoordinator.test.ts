@@ -595,11 +595,13 @@ describe("HiddenLineCoordinator", () => {
       const coordinator = new HiddenLineCoordinator(() => workers.shift()!);
       const first = coordinator.start(identity());
       firstWorker.emit(eventType, payload);
+      firstWorker.emit(eventType, payload);
       await expect(first).resolves.toMatchObject({
         status: "failure",
         error: expect.stringContaining(expected),
       });
       expect(firstWorker.terminate).toHaveBeenCalledOnce();
+      expect(coordinator.cancel()).toBe(false);
 
       const second = coordinator.start(identity(2));
       secondWorker.emit("message", successfulResponse(secondWorker));
@@ -630,7 +632,7 @@ describe("HiddenLineCoordinator", () => {
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
-  it("reports constructor and postMessage failures without a fallback", async () => {
+  it("reports a constructor failure without creating an active job", async () => {
     const constructorFailure = new HiddenLineCoordinator(() => {
       throw new Error("workers unavailable");
     });
@@ -639,7 +641,10 @@ describe("HiddenLineCoordinator", () => {
       jobId: 1,
       error: "workers unavailable",
     });
+    expect(constructorFailure.busy).toBe(false);
+  });
 
+  it("reports a postMessage failure and terminates exactly once", async () => {
     const worker = new FakeWorker();
     worker.postMessage = () => {
       throw new Error("clone failed");
@@ -650,6 +655,8 @@ describe("HiddenLineCoordinator", () => {
       jobId: 1,
       error: "clone failed",
     });
+    worker.emit("error", new Event("error"));
+    postFailure.cancel();
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
