@@ -11,8 +11,10 @@
 declare module "node:fs/promises" {
   export function lstat(path: string): Promise<{
     isSymbolicLink(): boolean;
+    isFile(): boolean;
   }>;
   export function readdir(path: string): Promise<string[]>;
+  export function realpath(path: string): Promise<string>;
   export function readFile(path: string): Promise<Uint8Array>;
   export function readFile(path: string, encoding: "utf-8"): Promise<string>;
   export function mkdir(
@@ -25,6 +27,11 @@ declare module "node:fs/promises" {
     encoding: "utf-8",
   ): Promise<void>;
   export function writeFile(path: string, data: Uint8Array): Promise<void>;
+  export function writeFile(
+    path: string,
+    data: Uint8Array,
+    options: { flag: "wx" },
+  ): Promise<void>;
   // Used only by the tests, to stage and tear down a temp sketchesRoot.
   export function mkdtemp(prefix: string): Promise<string>;
   export function rm(
