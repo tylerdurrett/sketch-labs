@@ -4694,6 +4694,105 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["Tone Calibration", toneCalibration],
+    ["Scribble Moon", scribbleMoon],
+  ] as const)(
+    "keeps %s preparation stable across physical-only edits and replaces it at the frame-aspect boundary",
+    async (_name, sketch) => {
+      autoFireOutlineComputed = false;
+      const generate = vi.fn(sketch.generate);
+      const el = mount(<SketchControls sketch={{ ...sketch, generate }} />);
+      const firstFrame = lastCompositionFrame!;
+      const firstScene: Scene = {
+        ...preparedScene(31),
+        space: { ...firstFrame },
+      };
+      await completeScribble(0, firstScene);
+
+      clickButton(el, "Outline");
+      expect(outlineJob.starts).toBe(1);
+      const initialOutline = outlineJob.lastIdentity;
+      expect(initialOutline).toMatchObject({
+        sourceKind: "completed-scene-sketch",
+        compositionFrame: firstFrame,
+        sourceScene: firstScene,
+        outlineTarget: {
+          toolWidthMillimeters: 0.3,
+          millimetersPerSceneUnit: 0.18,
+        },
+      });
+      act(() => lastOnOutlineComputed?.());
+
+      const margin = el.querySelector<HTMLInputElement>(
+        'input[aria-label="Linked paper margin (mm)"]',
+      )!;
+      act(() => margin.focus());
+      setInput(margin, "20");
+      act(() => margin.blur());
+
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(lastCompositionFrame).toBe(firstFrame);
+      expect(outlineJob.starts).toBe(2);
+      expect(outlineJob.lastIdentity).toEqual({
+        ...initialOutline,
+        outlineTarget: {
+          toolWidthMillimeters: 0.3,
+          millimetersPerSceneUnit: 0.16,
+        },
+      });
+      act(() => lastOnOutlineComputed?.());
+
+      const toolWidth = el.querySelector<HTMLInputElement>(
+        'input[aria-label="Tool width (mm)"]',
+      )!;
+      act(() => toolWidth.focus());
+      setInput(toolWidth, "0.5");
+      act(() => toolWidth.blur());
+
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(lastCompositionFrame).toBe(firstFrame);
+      expect(outlineJob.starts).toBe(3);
+      expect(outlineJob.lastIdentity).toEqual({
+        ...initialOutline,
+        outlineTarget: {
+          toolWidthMillimeters: 0.5,
+          millimetersPerSceneUnit: 0.16,
+        },
+      });
+      act(() => lastOnOutlineComputed?.());
+
+      const width = el.querySelector<HTMLInputElement>(
+        'input[aria-label="Paper width (mm)"]',
+      )!;
+      act(() => width.focus());
+      setInput(width, "300");
+      act(() => width.blur());
+
+      expect(lastCompositionFrame).not.toBe(firstFrame);
+      expect(scribbleJob.starts).toHaveLength(2);
+      expect(scribbleJob.starts[1]?.identity.compositionFrame).toEqual(
+        lastCompositionFrame,
+      );
+      expect(outlineJob.starts).toBe(3);
+
+      const replacementScene: Scene = {
+        ...preparedScene(32),
+        space: { ...lastCompositionFrame! },
+      };
+      await completeScribble(1, replacementScene);
+      await flush();
+      expect(outlineJob.starts).toBe(4);
+      expect(outlineJob.lastIdentity).toMatchObject({
+        sourceKind: "completed-scene-sketch",
+        compositionFrame: lastCompositionFrame!,
+        sourceScene: replacementScene,
+        outlineTarget: { toolWidthMillimeters: 0.5 },
+      });
+      expect(generate).not.toHaveBeenCalled();
+    },
+  );
+
   it("waits for a cache re-promotion to repaint before re-enabling export", async () => {
     const el = mount(<SketchControls sketch={toneCalibration} />);
     await completeScribble(0, preparedScene(1));

@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   clipSceneToBounds,
+  createScribbleMoonStructuralScene,
+  DEFAULT_COMPOSITION_FRAME,
   defaultParams,
   grassHills,
   hiddenLinePass,
   registry,
   renderPlotterSVG,
+  scribbleMoon,
   toneCalibration,
   type ParamSchema,
   type PlotProfile,
@@ -65,6 +68,46 @@ const hybridSource: Scene = {
     },
   ],
 };
+
+const completedToneCalibration: Scene = {
+  space: DEFAULT_COMPOSITION_FRAME,
+  primitives: [
+    {
+      points: [
+        [5, 8],
+        [12, 8.02],
+        [19, 7.98],
+        [26, 8],
+      ],
+      closed: false,
+      stroke: { color: "navy", width: 0.75 },
+      hiddenLineRole: "source",
+    },
+  ],
+};
+
+const completedScribbleMoon: Scene = (() => {
+  const structural = createScribbleMoonStructuralScene(
+    DEFAULT_COMPOSITION_FRAME,
+  );
+  return {
+    space: structural.space,
+    primitives: [
+      ...structural.primitives,
+      {
+        points: [
+          [5, 8],
+          [12, 8.02],
+          [19, 7.98],
+          [26, 8],
+        ],
+        closed: false,
+        stroke: { color: "navy", width: 0.75 },
+        hiddenLineRole: "source",
+      },
+    ],
+  };
+})();
 
 function request(includeFrame = false, tolerance = 0) {
   return {
@@ -914,6 +957,98 @@ describe("hidden-line export worker runtime", () => {
       scene: preview.scene,
     });
   });
+
+  it.each([
+    ["Tone Calibration", toneCalibration, completedToneCalibration],
+    ["Scribble Moon", scribbleMoon, completedScribbleMoon],
+  ] as const)(
+    "reuses %s's exact completed and simplified preview Scene for plotter export",
+    (_name, sketch, completed) => {
+      const target = {
+        toolWidthMillimeters: 0.5,
+        millimetersPerSceneUnit: 0.25,
+      };
+      const identity = createOutlineComputeIdentity({
+        sketchId: sketch.id,
+        schema: sketch.schema,
+        params: defaultParams(sketch.schema),
+        seed: "prepared-result",
+        sampledT: 0,
+        compositionFrame: completed.space,
+        tolerance: 0.1,
+        includeFrame: false,
+        sourceScene: completed,
+        outlineTarget: target,
+      });
+      const generate = vi.fn(sketch.generate);
+      const registryGet = vi
+        .spyOn(registry, "get")
+        .mockReturnValue({ ...sketch, generate });
+      const derive = vi.fn((...args: Parameters<typeof outlineScene>) =>
+        outlineScene(...args),
+      );
+
+      try {
+        const preview = handleHiddenLineWorkerMessage(
+          {
+            type: "preview",
+            jobKind: "preview",
+            owner: "outline-preview",
+            jobId: 31,
+            identity,
+          },
+          { derive },
+        );
+        expect(preview).toMatchObject({
+          type: "complete",
+          jobKind: "preview",
+          identity,
+        });
+        if (preview?.type !== "complete" || preview.jobKind !== "preview") {
+          throw new Error("expected preview completion");
+        }
+
+        const specialized = sketch.deriveOutlineSource!(
+          structuredClone(completed),
+          target,
+        );
+        const expected = outlineScene(specialized, 0.1, false);
+        expect(preview.scene).toEqual(expected);
+        expect(derive).toHaveBeenCalledOnce();
+        expect(derive).toHaveBeenCalledWith(
+          specialized,
+          0.1,
+          false,
+          undefined,
+        );
+
+        const exported = handleHiddenLineWorkerMessage(
+          exportRequest({
+            identity,
+            profile: {
+              width: 220,
+              height: 220,
+              insets: { top: 10, right: 10, bottom: 10, left: 10 },
+              includeFrame: false,
+              toolWidthMillimeters: 0.5,
+            },
+            reusableOutline: { identity, scene: preview.scene },
+          }),
+          { derive },
+        );
+
+        expect(exported).toMatchObject({
+          type: "complete",
+          jobKind: "export",
+          completedOutline: { identity, scene: expected },
+        });
+        expect(derive).toHaveBeenCalledOnce();
+        expect(generate).not.toHaveBeenCalled();
+      } finally {
+        registryGet.mockRestore();
+      }
+    },
+  );
 
   it.each([
     [
