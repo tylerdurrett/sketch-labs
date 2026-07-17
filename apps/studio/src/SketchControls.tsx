@@ -56,6 +56,7 @@ import {
 } from "./historyShortcuts";
 import {
   LiveCanvas,
+  type DisplayedSceneSnapshot,
   type FillCapture,
   type LiveCanvasHandle,
   type LiveCanvasRenderState,
@@ -83,6 +84,11 @@ import {
 import { PresetControls } from "./PresetControls";
 import { SeedControl } from "./SeedControl";
 import { SimplifyControl } from "./SimplifyControl";
+import { selectCurrentScribbleResult } from "./scribbleSession";
+import {
+  useScribblePreparation,
+  type ScribbleAuthoredState,
+} from "./useScribblePreparation";
 
 function formatOutlineEta(remainingMs: number): string {
   const seconds = Math.max(1, Math.ceil(remainingMs / 1_000));
@@ -154,6 +160,22 @@ function outlineInputsChanged(
   ) {
     return true;
   }
+  return !plotDrawableAspectsEquivalent(
+    previousDrawable.width / previousDrawable.height,
+    nextDrawable.width / nextDrawable.height,
+  );
+}
+
+/** Whether an edit changes the time-invariant Scribble worker identity. */
+function scribbleInputsChanged(
+  previous: StudioEditState,
+  next: StudioEditState,
+): boolean {
+  if (!sameParams(previous.params, next.params) || previous.seed !== next.seed) {
+    return true;
+  }
+  const previousDrawable = plotDrawableRectangle(previous.profile);
+  const nextDrawable = plotDrawableRectangle(next.profile);
   return !plotDrawableAspectsEquivalent(
     previousDrawable.width / previousDrawable.height,
     nextDrawable.width / nextDrawable.height,
@@ -296,6 +318,44 @@ export function SketchControls({
     [drawableAspectIdentity],
   );
 
+  const hasScribblePreparation = sketch.generateScribbleArtwork !== undefined;
+  const scribbleInputRevisionRef = useRef(0);
+  const scribblePreparation = useScribblePreparation({
+    sketch,
+    enabled: hasScribblePreparation,
+    initial: {
+      params: history.present.params,
+      seed: history.present.seed,
+      compositionFrame,
+      inputRevision: scribbleInputRevisionRef.current,
+    },
+  });
+  const currentScribble = selectCurrentScribbleResult(
+    scribblePreparation.session,
+  );
+  const [acknowledgedScribble, setAcknowledgedScribble] = useState<{
+    readonly sourceInputRevision: number;
+    readonly contentRevision: number;
+  } | null>(null);
+  const scribblePaintIsCurrent =
+    currentScribble !== null &&
+    acknowledgedScribble?.sourceInputRevision ===
+      currentScribble.sourceInputRevision &&
+    acknowledgedScribble.contentRevision === currentScribble.contentRevision;
+  const emptyScribbleScene = useMemo<Scene>(
+    () => ({ space: compositionFrame, primitives: [] }),
+    [compositionFrame],
+  );
+
+  const authoredScribbleState = (
+    edit: StudioEditState = historyRef.current.present,
+  ): ScribbleAuthoredState => ({
+    params: edit.params,
+    seed: edit.seed,
+    compositionFrame: resolvePlotCompositionFrame(edit.profile),
+    inputRevision: scribbleInputRevisionRef.current,
+  });
+
   // Sample-source derivation intentionally reads the live transaction preview
   // params and Composition Frame directly. Seed, timeline, profile magnitude,
   // and the Outline session are absent from this capability seam.
@@ -396,17 +456,44 @@ export function SketchControls({
   };
 
   const requestOutlineForCurrentInputs = (): void => {
-    dispatchOutline({ type: "request-outline" });
+    dispatchOutline({
+      type: "request-outline",
+      launch: !hasScribblePreparation || scribblePaintIsCurrent,
+      ...(scribblePaintIsCurrent && currentScribble !== null
+        ? {
+            provenance: {
+              sourceInputRevision: currentScribble.sourceInputRevision,
+              contentRevision: currentScribble.contentRevision,
+            },
+          }
+        : {}),
+    });
   };
 
   const updateHistory = (
     transition: (current: EditHistory) => EditHistory,
     launchOutline = true,
-  ): boolean => {
+    scribbleAction: "preview" | "atomic" | null = null,
+  ): void => {
     const current = historyRef.current;
     const next = transition(current);
-    if (next === current) return false;
+    if (next === current) return;
     historyRef.current = next;
+    const scribbleChanged = scribbleInputsChanged(current.present, next.present);
+    if (hasScribblePreparation && scribbleChanged) {
+      scribbleInputRevisionRef.current += 1;
+    }
+    if (hasScribblePreparation && scribbleAction === "preview") {
+      scribblePreparation.previewAuthoredState(
+        authoredScribbleState(next.present),
+      );
+    } else if (
+      hasScribblePreparation &&
+      scribbleAction === "atomic" &&
+      scribbleChanged
+    ) {
+      scribblePreparation.requestAtomic(authoredScribbleState(next.present));
+    }
     const invalidated = outlineInputsChanged(
       current.present,
       next.present,
@@ -414,10 +501,12 @@ export function SketchControls({
     );
     if (invalidated) {
       cancelOutlineCoordinator();
-      dispatchOutline({ type: "inputs-changed", launch: launchOutline });
+      dispatchOutline({
+        type: "inputs-changed",
+        launch: launchOutline && !hasScribblePreparation,
+      });
     }
     setHistory(next);
-    return invalidated;
   };
 
   // History belongs to this keyed Sketch session, so its keyboard listener does
@@ -443,7 +532,11 @@ export function SketchControls({
       if (command === "undo" ? !canUndo(current) : !canRedo(current)) return;
 
       event.preventDefault();
-      updateHistory(command === "undo" ? undoEdit : redoEdit);
+      updateHistory(
+        command === "undo" ? undoEdit : redoEdit,
+        true,
+        "atomic",
+      );
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -458,6 +551,7 @@ export function SketchControls({
       (current) =>
         previewEditState(current, { ...current.present, [key]: value }),
       false,
+      "preview",
     );
   };
 
@@ -465,8 +559,11 @@ export function SketchControls({
     key: Key,
     value: StudioEditState[Key],
   ): void => {
-    updateHistory((current) =>
-      commitEditState(current, { ...current.present, [key]: value }),
+    updateHistory(
+      (current) =>
+        commitEditState(current, { ...current.present, [key]: value }),
+      true,
+      "atomic",
     );
   };
 
@@ -477,15 +574,22 @@ export function SketchControls({
     cancelOutlineCoordinator();
     dispatchOutline({ type: "transaction-began" });
     updateHistory(beginEditTransaction, false);
+    if (hasScribblePreparation) scribblePreparation.beginTransaction();
   };
   const settleTransaction = (
     transition: (current: EditHistory) => EditHistory,
   ): void => {
     updateHistory(transition, false);
+    if (hasScribblePreparation) {
+      scribblePreparation.settleTransaction(authoredScribbleState());
+    }
     // Settlement belongs to the session reducer: outside export it resamples the
     // final Fill exactly once; during export it retains only a deferred request,
     // which the export terminal action releases after relinquishing the slot.
-    dispatchOutline({ type: "transaction-settled" });
+    dispatchOutline({
+      type: "transaction-settled",
+      launch: !hasScribblePreparation,
+    });
   };
   const commitTransaction = (): void => settleTransaction(commitEditTransaction);
   const cancelTransaction = (): void => settleTransaction(cancelEditTransaction);
@@ -580,6 +684,10 @@ export function SketchControls({
       identity,
       scene: capture.scene,
       t: capture.t,
+      sourceInputRevision: capture.sourceInputRevision,
+      ...(capture.contentRevision === undefined
+        ? {}
+        : { contentRevision: capture.contentRevision }),
     });
     if (next.active?.token !== capture.token) return;
     const reportFailure = (detail: string): void => {
@@ -619,16 +727,61 @@ export function SketchControls({
       });
   };
 
+  const onDisplayedSceneCommitted = (
+    snapshot: DisplayedSceneSnapshot,
+  ): void => {
+    if (
+      currentScribble === null ||
+      snapshot.renderMode !== "fill" ||
+      snapshot.sourceInputRevision !== currentScribble.sourceInputRevision ||
+      snapshot.contentRevision !== currentScribble.contentRevision
+    ) {
+      return;
+    }
+    const provenance = {
+      sourceInputRevision: currentScribble.sourceInputRevision,
+      contentRevision: currentScribble.contentRevision,
+    };
+    setAcknowledgedScribble((current) =>
+      current?.sourceInputRevision === provenance.sourceInputRevision &&
+      current.contentRevision === provenance.contentRevision
+        ? current
+        : provenance,
+    );
+    dispatchOutline({ type: "source-ready", provenance });
+  };
+
   const renderState: LiveCanvasRenderState =
     toneSource !== undefined
       ? { kind: "tone-reference", source: toneSource }
-      : outlineSession.phase.kind === "fill-live"
+      : hasScribblePreparation && outlineSession.phase.kind === "fill-live"
+        ? scribblePreparation.session.displayed === null
+          ? { kind: "fill-held", scene: emptyScribbleScene, t: 0 }
+          : {
+              kind: "fill-held",
+              scene: scribblePreparation.session.displayed.scene,
+              t: 0,
+              sourceInputRevision:
+                scribblePreparation.session.displayed.sourceInputRevision,
+              contentRevision:
+                scribblePreparation.session.displayed.contentRevision,
+            }
+        : outlineSession.phase.kind === "fill-live"
         ? { kind: "fill-live" }
         : outlineSession.phase.kind === "fill-held-pending"
           ? {
               kind: "fill-held",
               scene: outlineSession.phase.scene,
               t: outlineSession.phase.t,
+              ...(outlineSession.phase.sourceInputRevision === undefined
+                ? {}
+                : {
+                    sourceInputRevision:
+                      outlineSession.phase.sourceInputRevision,
+                  }),
+              ...(outlineSession.phase.contentRevision === undefined
+                ? {}
+                : { contentRevision: outlineSession.phase.contentRevision }),
             }
           : outlineSession.phase;
 
@@ -666,16 +819,19 @@ export function SketchControls({
     // falls back to this Sketch's default / the Harness fallback. `applyPreset`
     // passes the stored profile through verbatim WITHOUT resolving the fallback —
     // resolving it here at the session boundary is #267's job.
-    updateHistory((historyState) =>
-      commitEditState(historyState, {
-        ...current,
-        params: sameParams(current.params, state.params)
-          ? current.params
-          : state.params,
-        seed: state.seed,
-        locks: new Set(state.locks),
-        profile: resolvedProfile,
-      }),
+    updateHistory(
+      (historyState) =>
+        commitEditState(historyState, {
+          ...current,
+          params: sameParams(current.params, state.params)
+            ? current.params
+            : state.params,
+          seed: state.seed,
+          locks: new Set(state.locks),
+          profile: resolvedProfile,
+        }),
+      true,
+      "atomic",
     );
   };
 
@@ -960,6 +1116,7 @@ export function SketchControls({
             inputRevision={outlineSession.inputRevision}
             fillCaptureRequest={outlineSession.capture}
             onFillCaptured={onFillCaptured}
+            onDisplayedSceneCommitted={onDisplayedSceneCommitted}
             renderState={renderState}
             tolerance={tolerance}
           />

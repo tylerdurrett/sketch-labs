@@ -21,6 +21,7 @@ import {
   leafField,
   renderPlotterSVG,
   resolvePlotCompositionFrame,
+  scribbleMoon,
   toneCalibration,
   type ParamSchema,
   type CoordinateSpace,
@@ -91,6 +92,43 @@ const outlineJob = vi.hoisted(() => ({
     succeed: () => void;
     fail: (detail?: string) => void;
     cancel: () => void;
+  },
+}));
+const scribbleJob = vi.hoisted(() => ({
+  coordinators: 0,
+  disposals: 0,
+  cancelCount: 0,
+  starts: [] as Array<{
+    identity: import("./scribbleComputeProtocol").ScribbleComputeIdentity;
+    resolve: (result: unknown) => void;
+  }>,
+}));
+
+vi.mock("./scribbleCoordinator", () => ({
+  ScribbleCoordinator: class {
+    private disposed = false;
+
+    constructor() {
+      scribbleJob.coordinators += 1;
+    }
+
+    start(identity: import("./scribbleComputeProtocol").ScribbleComputeIdentity) {
+      return new Promise((resolve) => {
+        scribbleJob.starts.push({ identity, resolve });
+      });
+    }
+
+    cancel() {
+      scribbleJob.cancelCount += 1;
+      return true;
+    }
+
+    dispose() {
+      if (this.disposed) return;
+      this.disposed = true;
+      scribbleJob.disposals += 1;
+      this.cancel();
+    }
   },
 }));
 
@@ -329,6 +367,7 @@ vi.mock("./LiveCanvas", () => ({
     inputRevision = 0,
     fillCaptureRequest,
     onFillCaptured,
+    onDisplayedSceneCommitted,
   }: {
     sketch: Parameters<typeof SketchControls>[0]["sketch"];
     params: Record<string, unknown>;
@@ -338,14 +377,22 @@ vi.mock("./LiveCanvas", () => ({
       scene?: unknown;
       t?: number;
       source?: ToneSource;
+      sourceInputRevision?: number;
+      contentRevision?: number;
     };
     tolerance?: number;
     compositionFrame: CoordinateSpace;
     profile: PlotProfile;
     handleRef?: Ref<LiveCanvasHandle>;
     inputRevision?: number;
-    fillCaptureRequest?: { token: number; inputRevision: number } | null;
+    fillCaptureRequest?: {
+      token: number;
+      inputRevision: number;
+      sourceInputRevision?: number;
+      contentRevision?: number;
+    } | null;
     onFillCaptured?: (capture: unknown) => void;
+    onDisplayedSceneCommitted?: (snapshot: DisplayedSceneSnapshot) => void;
   }) => {
     const capturedFrame = (): DisplayedSceneSnapshot =>
       fakeDisplayedScene ?? {
@@ -396,14 +443,44 @@ vi.mock("./LiveCanvas", () => ({
         onFillCaptured?.({
           ...fillCaptureRequest,
           scene:
-            fakeFillCaptureScene ?? {
+            fakeFillCaptureScene ??
+            (renderState?.scene as Scene | undefined) ?? {
               space: compositionFrame,
               primitives: [],
             },
           t: fakeCurrentT,
+          sourceInputRevision:
+            fillCaptureRequest.sourceInputRevision ??
+            fillCaptureRequest.inputRevision,
+          ...(fillCaptureRequest.contentRevision === undefined
+            ? {}
+            : { contentRevision: fillCaptureRequest.contentRevision }),
         });
       }
     }, [fillCaptureRequest?.token]);
+    useEffect(() => {
+      if (
+        renderState?.scene === undefined ||
+        renderState.sourceInputRevision === undefined ||
+        renderState.contentRevision === undefined
+      ) {
+        return;
+      }
+      onDisplayedSceneCommitted?.({
+        scene: renderState.scene as Scene,
+        t: renderState.t ?? 0,
+        renderMode: renderState.kind === "outline" ? "outline" : "fill",
+        tolerance: tolerance ?? 0,
+        includeFrame: profile.includeFrame,
+        inputRevision: renderState.sourceInputRevision,
+        sourceInputRevision: renderState.sourceInputRevision,
+        contentRevision: renderState.contentRevision,
+      });
+    }, [
+      renderState?.kind,
+      renderState?.sourceInputRevision,
+      renderState?.contentRevision,
+    ]);
     useEffect(() => {
       if (outlineJob.active !== null && autoFireOutlineComputed) {
         lastOnOutlineComputed?.();
@@ -417,6 +494,10 @@ vi.mock("./LiveCanvas", () => ({
         data-tolerance={String(tolerance)}
         data-include-frame={String(profile.includeFrame)}
         data-input-revision={String(inputRevision)}
+        data-source-input-revision={String(
+          renderState?.sourceInputRevision ?? "",
+        )}
+        data-content-revision={String(renderState?.contentRevision ?? "")}
       >
         {String(seed)}
       </div>
@@ -555,6 +636,10 @@ beforeEach(() => {
   outlineJob.active = null;
   outlineJob.lastIdentity = null;
   outlineJob.lastCompletedScene = null;
+  scribbleJob.coordinators = 0;
+  scribbleJob.disposals = 0;
+  scribbleJob.cancelCount = 0;
+  scribbleJob.starts = [];
   vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
   // Sensible defaults so a mount's list-on-mount effect resolves quietly; the
   // save/reload tests override loadPreset/savePreset per case.
@@ -4187,6 +4272,154 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(plotterScene.primitives.map(({ points }) => points)).toEqual(
       ordinary.primitives.map(({ points }) => points),
     );
+  });
+});
+
+describe("SketchControls — Scribble preparation composition (#318)", () => {
+  const diagnostics = {
+    termination: "completed" as const,
+    residualError: 0.01,
+    pathLength: 12,
+    polylineCount: 2,
+    penLiftCount: 1,
+  };
+
+  async function completeScribble(index: number, scene: Scene): Promise<void> {
+    const job = scribbleJob.starts[index];
+    if (job === undefined) throw new Error(`no Scribble job ${index}`);
+    await act(async () => {
+      job.resolve({
+        status: "success",
+        jobId: index + 1,
+        identity: job.identity,
+        scene,
+        diagnostics,
+        computeTimeMs: 5,
+      });
+      await Promise.resolve();
+    });
+  }
+
+  function preparedScene(label: number): Scene {
+    return {
+      space: { width: 100, height: 100 },
+      primitives: [{ points: [[label, label], [label + 1, label + 1]] }],
+    };
+  }
+
+  it("holds empty/current/stale artwork and settles one latest edit without main-thread generation", async () => {
+    const generate = vi.fn(toneCalibration.generate);
+    const sketch = { ...toneCalibration, generate };
+    const el = mount(<SketchControls sketch={sketch} />);
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(canvas.dataset.renderState).toBe("fill-held");
+    expect(canvas.dataset.contentRevision).toBe("");
+    expect(generate).not.toHaveBeenCalled();
+
+    await completeScribble(0, preparedScene(1));
+    expect(canvas.dataset.sourceInputRevision).toBe("0");
+    expect(canvas.dataset.contentRevision).toBe("1");
+
+    const density = paramInput(el, "pathDensity");
+    act(() => density.focus());
+    setInput(density, "2");
+    setInput(density, "3");
+    expect(canvas.dataset.sourceInputRevision).toBe("0");
+    expect(canvas.dataset.contentRevision).toBe("1");
+    expect(scribbleJob.starts).toHaveLength(1);
+
+    act(() => density.blur());
+    expect(scribbleJob.starts).toHaveLength(2);
+    expect(scribbleJob.starts[1]!.identity.params).toContainEqual({
+      key: "pathDensity",
+      value: 3,
+    });
+    expect(generate).not.toHaveBeenCalled();
+
+    await completeScribble(1, preparedScene(2));
+    expect(canvas.dataset.sourceInputRevision).toBe("2");
+    expect(canvas.dataset.contentRevision).toBe("2");
+  });
+
+  it("keeps Scribble Moon Tone live during previews and launches only on settle", () => {
+    const el = mount(<SketchControls sketch={scribbleMoon} />);
+    clickButton(el, "Tone");
+    const originalSource = lastToneSource;
+    const lightAngle = paramInput(el, "lightAngle");
+
+    act(() => lightAngle.focus());
+    setInput(lightAngle, "180");
+
+    expect(lastToneSource).not.toBeNull();
+    expect(lastToneSource).not.toBe(originalSource);
+    expect(scribbleJob.starts).toHaveLength(1);
+    act(() => lightAngle.blur());
+    expect(scribbleJob.starts).toHaveLength(2);
+    expect(scribbleJob.starts[1]!.identity.params).toContainEqual({
+      key: "lightAngle",
+      value: 180,
+    });
+  });
+
+  it("waits for the current paint before Outline and preserves its provenance", async () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    await completeScribble(0, preparedScene(1));
+
+    const density = paramInput(el, "pathDensity");
+    act(() => density.focus());
+    setInput(density, "4");
+    act(() => density.blur());
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(0);
+    expect(canvas.dataset.sourceInputRevision).toBe("0");
+
+    await completeScribble(1, preparedScene(2));
+    await flush();
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.lastIdentity?.params).toContainEqual({
+      key: "pathDensity",
+      value: 4,
+    });
+
+    act(() => lastOnOutlineComputed?.());
+    expect(canvas.dataset.renderMode).toBe("outline");
+    expect(canvas.dataset.sourceInputRevision).toBe("1");
+    expect(canvas.dataset.contentRevision).toBe("2");
+
+    act(() => density.focus());
+    setInput(density, "5");
+    expect(canvas.dataset.renderMode).toBe("fill");
+    expect(canvas.dataset.sourceInputRevision).toBe("1");
+    expect(canvas.dataset.contentRevision).toBe("2");
+    expect(outlineJob.starts).toBe(1);
+  });
+
+  it("disposes each Scribble coordinator across StrictMode and keyed switches", () => {
+    mount(
+      <StrictMode>
+        <SketchControls key="calibration" sketch={toneCalibration} />
+      </StrictMode>,
+    );
+    expect(scribbleJob.coordinators).toBe(2);
+    expect(scribbleJob.disposals).toBe(1);
+
+    act(() => {
+      root!.render(
+        <StrictMode>
+          <SketchControls key="moon" sketch={scribbleMoon} />
+        </StrictMode>,
+      );
+    });
+    expect(scribbleJob.coordinators).toBe(4);
+    expect(scribbleJob.disposals).toBe(3);
+
+    act(() => root!.unmount());
+    root = null;
+    expect(scribbleJob.disposals).toBe(4);
   });
 });
 

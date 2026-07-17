@@ -57,6 +57,10 @@ export interface DisplayedSceneSnapshot {
 export interface FillCaptureRequest {
   readonly token: number;
   readonly inputRevision: number;
+  /** Provenance expected from caller-owned Fill geometry, when distinct. */
+  readonly sourceInputRevision?: number;
+  /** Exact caller-owned content expected to answer this request. */
+  readonly contentRevision?: number;
 }
 
 export interface FillCapture extends FillCaptureRequest {
@@ -467,7 +471,10 @@ export function LiveCanvas({
       request === null ||
       servedCaptureTokensRef.current.has(request.token) ||
       snapshot.renderMode !== "fill" ||
-      snapshot.sourceInputRevision !== request.inputRevision
+      snapshot.sourceInputRevision !==
+        (request.sourceInputRevision ?? request.inputRevision) ||
+      (request.contentRevision !== undefined &&
+        snapshot.contentRevision !== request.contentRevision)
     ) {
       return;
     }

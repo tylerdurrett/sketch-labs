@@ -52,6 +52,8 @@ export interface UseScribblePreparationOptions {
   readonly initial: ScribbleAuthoredState;
   readonly workerFactory?: ScribbleWorkerFactory;
   readonly coordinatorFactory?: ScribblePreparationCoordinatorFactory;
+  /** Keeps the hook composable for Sketches without the optional capability. */
+  readonly enabled?: boolean;
 }
 
 export interface ScribblePreparationProgress {
@@ -108,6 +110,7 @@ export function useScribblePreparation({
   initial,
   workerFactory = createScribbleWorker,
   coordinatorFactory = defaultCoordinatorFactory,
+  enabled = true,
 }: UseScribblePreparationOptions): UseScribblePreparationResult {
   // A keyed Sketch mount owns these injected factories for its whole lifetime.
   // Capturing them once also prevents an inline test factory from replacing a
@@ -202,6 +205,7 @@ export function useScribblePreparation({
   const requestAtomic = settleTransaction;
 
   useEffect(() => {
+    if (!enabled) return;
     const generation = nextCoordinatorGenerationRef.current++;
     const { coordinatorFactory: createCoordinator, workerFactory: createWorker } =
       factoriesRef.current;
@@ -230,7 +234,7 @@ export function useScribblePreparation({
         });
       }
     };
-  }, [dispatch]);
+  }, [dispatch, enabled]);
 
   useEffect(() => {
     // Read the synchronous reducer mirror rather than this effect's render
@@ -238,7 +242,7 @@ export function useScribblePreparation({
     // replacement request produced by the rehearsal coordinator's cleanup.
     const pending = sessionRef.current.pending;
     const owner = coordinatorRef.current;
-    if (pending === null || owner === null) return;
+    if (!enabled || pending === null || owner === null) return;
 
     const started = startedRequestRef.current;
     if (
@@ -325,7 +329,7 @@ export function useScribblePreparation({
         }
       })
       .catch(reportFailure);
-  }, [dispatch, session.pending]);
+  }, [dispatch, enabled, session.pending]);
 
   return {
     session,

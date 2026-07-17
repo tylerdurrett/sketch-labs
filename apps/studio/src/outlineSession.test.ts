@@ -179,6 +179,63 @@ describe("outlineSessionReducer", () => {
     expect(reused.active).toBeNull();
   });
 
+  it("waits for acknowledged Scribble content and preserves provenance through completion", () => {
+    const waiting = outlineSessionReducer(createOutlineSessionState(), {
+      type: "request-outline",
+      launch: false,
+    });
+    expect(waiting.capture).toBeNull();
+
+    const provenance = { sourceInputRevision: 4, contentRevision: 7 };
+    const requested = outlineSessionReducer(waiting, {
+      type: "source-ready",
+      provenance,
+    });
+    expect(requested.capture).toMatchObject(provenance);
+
+    const active = outlineSessionReducer(requested, {
+      type: "fill-captured",
+      token: requested.capture!.token,
+      inputRevision: requested.inputRevision,
+      identity: identity(),
+      scene: fill,
+      t: 2,
+      ...provenance,
+    });
+    expect(active.phase).toMatchObject({
+      kind: "fill-held-pending",
+      ...provenance,
+    });
+    expect(active.active).toMatchObject(provenance);
+
+    const complete = outlineSessionReducer(active, {
+      type: "succeeded",
+      token: active.active!.token,
+      identity: active.active!.identity,
+      scene: outline,
+    });
+    expect(complete.phase).toMatchObject({ kind: "outline", ...provenance });
+    expect(complete.cache).toMatchObject(provenance);
+
+    const fillMode = outlineSessionReducer(complete, { type: "request-fill" });
+    const changedProvenance = { sourceInputRevision: 5, contentRevision: 8 };
+    const changedRequest = outlineSessionReducer(fillMode, {
+      type: "request-outline",
+      provenance: changedProvenance,
+    });
+    const notReused = outlineSessionReducer(changedRequest, {
+      type: "fill-captured",
+      token: changedRequest.capture!.token,
+      inputRevision: changedRequest.inputRevision,
+      identity: identity(),
+      scene: fill,
+      t: 2,
+      ...changedProvenance,
+    });
+    expect(notReused.active).not.toBeNull();
+    expect(notReused.phase).toMatchObject(changedProvenance);
+  });
+
   it("keeps desired Outline through transaction previews and launches once on settle", () => {
     const outlined = activeSession();
     const begun = outlineSessionReducer(outlined, {
