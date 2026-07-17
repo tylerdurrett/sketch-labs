@@ -29,7 +29,17 @@
 
 import type { PlotProfile } from './plotProfile'
 import type { CoordinateSpace, Scene } from './scene'
+import type { ShadingTermination } from './shadingStrategy'
+import {
+  penLiftCount,
+  polylineCount,
+  totalPathLength,
+} from './shadingStrategy'
 import type { ToneSource } from './shadingFields'
+import type {
+  ScribbleObserver,
+  ScribbleResult,
+} from './scribbleStrategy/index'
 
 /**
  * The single value feeding all of a Sketch's internal randomness.
@@ -253,6 +263,39 @@ export interface OutlineTarget {
   readonly millimetersPerSceneUnit: number
 }
 
+/** Scalar diagnostics for one complete Scribble artwork preparation. */
+export interface ScribbleDiagnostics {
+  /** Truthful convergence or deterministic safety-budget stop condition. */
+  readonly termination: ShadingTermination
+  /** Remaining normalized source error after the last accepted segment. */
+  readonly residualError: number
+  /** Sum of Scribble segment lengths in Composition Frame units. */
+  readonly pathLength: number
+  /** Number of generated Scribble polylines, excluding structural artwork. */
+  readonly polylineCount: number
+  /** Pen lifts between generated Scribble polylines. */
+  readonly penLiftCount: number
+}
+
+/** One complete Scene plus compact diagnostics, without duplicate geometry. */
+export interface ScribbleArtwork {
+  readonly scene: Scene
+  readonly diagnostics: ScribbleDiagnostics
+}
+
+/** Derive immutable scalar diagnostics from a completed Scribble pass. */
+export function createScribbleDiagnostics(
+  result: Readonly<ScribbleResult>,
+): ScribbleDiagnostics {
+  return Object.freeze({
+    termination: result.termination,
+    residualError: result.residualError,
+    pathLength: totalPathLength(result.polylines),
+    polylineCount: polylineCount(result.polylines),
+    penLiftCount: penLiftCount(result.polylines),
+  })
+}
+
 /**
  * Fields every Sketch carries regardless of variant: its Parameter Schema and
  * optional time metadata. Shared base for the stateless/stateful members so the
@@ -323,6 +366,20 @@ export interface StatelessSketch extends SketchBase {
    *   {@link DEFAULT_COMPOSITION_FRAME}.
    */
   generate(params: Params, seed: Seed, t: number, frame: CoordinateSpace): Scene
+
+  /**
+   * Optionally prepare this Sketch's complete Scribble-backed artwork.
+   *
+   * The observer is diagnostic only. Implementations return the same complete
+   * Scene as cold `generate`, alongside scalar Scribble metrics; they do not
+   * duplicate the generated polylines outside the Scene.
+   */
+  generateScribbleArtwork?(
+    params: Params,
+    seed: Seed,
+    frame: CoordinateSpace,
+    observer?: ScribbleObserver,
+  ): ScribbleArtwork
 
   /**
    * Optionally split time-invariant preparation from repeated sampling in `t`.
