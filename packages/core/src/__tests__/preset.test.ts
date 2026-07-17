@@ -271,6 +271,27 @@ describe('applyPreset', () => {
     expect(state.params).toEqual({ count: 30, radius: 12 })
   })
 
+  it('preserves a stored Image Asset ID and defaults only an absent one', () => {
+    const assetSchema: ParamSchema = {
+      image: { kind: 'image-asset', default: 'portrait-default' },
+    }
+    const stored = makePreset(
+      'photo-scribble',
+      'stored',
+      { image: 'missing-but-authored-id' },
+      1,
+      new Set(),
+    )
+    const absent = makePreset('photo-scribble', 'absent', {}, 1, new Set())
+
+    expect(applyPreset(assetSchema, stored).params).toEqual({
+      image: 'missing-but-authored-id',
+    })
+    expect(applyPreset(assetSchema, absent).params).toEqual({
+      image: 'portrait-default',
+    })
+  })
+
   it('loads an out-of-bounds value AS-IS, unclamped', () => {
     const preset = makePreset(
       'circles',

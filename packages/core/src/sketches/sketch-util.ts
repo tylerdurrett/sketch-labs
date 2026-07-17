@@ -6,7 +6,13 @@
  * package's surface.
  */
 
-import type { ColorParamSpec, NumberParamSpec, Params, ParamSpec } from '../sketch'
+import type {
+  ColorParamSpec,
+  ImageAssetParamSpec,
+  NumberParamSpec,
+  Params,
+  ParamSpec,
+} from '../sketch'
 import type { Point } from '../types'
 
 // The fixed 1000×1000 WIDTH/HEIGHT extent was retired in issue #252: every Sketch
@@ -16,18 +22,18 @@ import type { Point } from '../types'
 
 /**
  * The keys of a frozen schema `S` whose spec is the {@link ParamSpec} member
- * with discriminant `K` — the type-level filter behind {@link numberParam} /
- * {@link colorParam}.
+ * with discriminant `K` — the type-level filter behind {@link numberParam},
+ * {@link colorParam}, and {@link imageAssetParam}.
  *
- * Since {@link ColorParamSpec} joined the union, a schema may MIX kinds (e.g.
- * leaf-field's numeric knobs plus its two color knobs), so a helper constrained
- * to `Record<string, NumberParamSpec>` would reject the whole schema. Instead
- * each helper takes any `Record<string, ParamSpec>` schema and narrows its `key`
- * to just the keys of the RIGHT kind: a mapped conditional keeps each matching
- * key and drops the rest to `never`, so e.g. `colorParam(params, schema,
- * 'density')` on leaf-field is a compile error while `'discColor'` is accepted.
- * A `satisfies`-frozen schema preserves each spec's literal `kind`, which is
- * what makes the filter precise.
+ * Since non-numeric members joined the union, a schema may MIX kinds (e.g.
+ * numeric controls plus color and Image Asset selections), so a helper
+ * constrained to `Record<string, NumberParamSpec>` would reject the whole
+ * schema. Instead each helper takes any `Record<string, ParamSpec>` schema and
+ * narrows its `key` to just the keys of the RIGHT kind: a mapped conditional
+ * keeps each matching key and drops the rest to `never`, so e.g.
+ * `colorParam(params, schema, 'density')` on leaf-field is a compile error while
+ * `'discColor'` is accepted. A `satisfies`-frozen schema preserves each spec's
+ * literal `kind`, which is what makes the filter precise.
  */
 type KeysOfKind<
   S extends Record<string, ParamSpec>,
@@ -72,6 +78,22 @@ export function colorParam<S extends Record<string, ParamSpec>>(
   // Same proof as numberParam's: the key exists and KeysOfKind pins its spec to
   // the `kind: 'color'` member.
   return (schema[key]! as ColorParamSpec).default
+}
+
+/**
+ * Read a stable Image Asset ID, falling back to the schema default when the
+ * caller left the knob unset (or set it to a non-string). The ID is preserved as
+ * authored: this helper neither resolves nor validates it, so an unavailable ID
+ * cannot be silently replaced with different image bytes.
+ */
+export function imageAssetParam<S extends Record<string, ParamSpec>>(
+  params: Params,
+  schema: S,
+  key: KeysOfKind<S, 'image-asset'>,
+): string {
+  const value = params[key as string]
+  if (typeof value === 'string') return value
+  return (schema[key]! as ImageAssetParamSpec).default
 }
 
 /** Axis-aligned bounding box of a list of points. */

@@ -68,6 +68,13 @@ describe('defaultParams', () => {
     }
     expect(defaultParams(schema)).toEqual({ count: 24, ink: '#1a2b3c' })
   })
+
+  it('seeds an Image Asset param with its stable string ID default', () => {
+    const schema: ParamSchema = {
+      image: { kind: 'image-asset', default: 'portrait-a1b2c3d4' },
+    }
+    expect(defaultParams(schema)).toEqual({ image: 'portrait-a1b2c3d4' })
+  })
 })
 
 describe('randomize', () => {
@@ -137,6 +144,32 @@ describe('randomize', () => {
     }
     const next = randomize(schema, { ink: '#c0ffee' }, new Set(['ink']), scriptedRand([]))
     expect(next.ink).toBe('#c0ffee')
+  })
+
+  it('passes an unlocked Image Asset ID through without consuming randomness', () => {
+    const schema: ParamSchema = {
+      image: { kind: 'image-asset', default: 'portrait-default' },
+    }
+    const next = randomize(
+      schema,
+      { image: 'portrait-selected' },
+      new Set(),
+      scriptedRand([]),
+    )
+    expect(next.image).toBe('portrait-selected')
+  })
+
+  it('passes a locked Image Asset ID through untouched too', () => {
+    const schema: ParamSchema = {
+      image: { kind: 'image-asset', default: 'portrait-default' },
+    }
+    const next = randomize(
+      schema,
+      { image: 'portrait-selected' },
+      new Set(['image']),
+      scriptedRand([]),
+    )
+    expect(next.image).toBe('portrait-selected')
   })
 
   it('passes non-rolled keys present in params but absent from schema through unchanged', () => {

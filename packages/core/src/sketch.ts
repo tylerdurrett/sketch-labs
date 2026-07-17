@@ -55,7 +55,7 @@ export type Seed = string | number
 /**
  * A numeric knob's declaration — a continuous (or whole-number) range with a
  * default. The founding {@link ParamSpec} member (issue #47), joined by
- * {@link ColorParamSpec}.
+ * {@link ColorParamSpec} and {@link ImageAssetParamSpec}.
  *
  * `integer` and `step` are ORTHOGONAL and answer different questions:
  *
@@ -116,18 +116,41 @@ export interface ColorParamSpec {
 }
 
 /**
+ * An Image Asset knob's declaration — a stable logical asset ID with a default.
+ *
+ * The string is an identity, never a file path or decoded raster payload. Core
+ * intentionally does not validate or resolve it here: the Parameter Schema and
+ * Preset spine must preserve even an unavailable ID verbatim so a caller never
+ * reproduces different bytes by silently substituting another asset.
+ *
+ * Randomize NEVER changes an Image Asset selection (see {@link randomize}). Like
+ * a color, it has no numeric range to sample; its current string passes through
+ * every roll unchanged, whether or not a generic persisted Lock names it.
+ */
+export interface ImageAssetParamSpec {
+  /** Discriminant. The open {@link ParamSpec} union is keyed on this. */
+  kind: 'image-asset'
+  /** The stable logical Image Asset ID seeded by {@link defaultParams}. */
+  default: string
+}
+
+/**
  * One tweakable knob's declaration within a {@link ParamSchema}.
  *
  * An OPEN union discriminated on `kind`, mirroring the open {@link Sketch} union
  * in this same file: {@link NumberParamSpec} (`kind: 'number'`, the founding
- * member, issue #47) and {@link ColorParamSpec} (`kind: 'color'`, the first
- * non-numeric widening, ADR-0010) are the inhabited members today, and future
- * control kinds (boolean, enum, …) join as new `kind`-tagged members WITHOUT
- * reworking these — purely additive. The control panel, Randomize, and Preset
- * shape are derived views that widen alongside the union; affordances such as
- * numeric-only Lock remain meaningful only for the kinds they affect.
+ * member, issue #47), {@link ColorParamSpec} (`kind: 'color'`, the first
+ * non-numeric widening, ADR-0010), and {@link ImageAssetParamSpec}
+ * (`kind: 'image-asset'`) are the inhabited members today. Future control kinds
+ * (boolean, enum, …) join as new `kind`-tagged members WITHOUT reworking these —
+ * purely additive. The control panel, Randomize, and Preset shape are derived
+ * views that widen alongside the union; affordances such as numeric-only Lock
+ * remain meaningful only for the kinds they affect.
  */
-export type ParamSpec = NumberParamSpec | ColorParamSpec
+export type ParamSpec =
+  | NumberParamSpec
+  | ColorParamSpec
+  | ImageAssetParamSpec
 
 /**
  * The single declaration a Sketch makes of its tweakable knobs — the spine of
@@ -181,20 +204,20 @@ export function defaultParams(schema: ParamSchema): Params {
  * Randomize-exclusion only), and any non-numeric spec the `kind` check doesn't
  * roll. For `kind: 'color'` this pass-through is a STATED CONTRACT, not an
  * accident of the implementation (ADR-0010): a color is a deliberate aesthetic
- * choice — there is no meaningful "uniform roll" over a hex color the way there
- * is over a numeric `[min, max]` — so Randomize is numeric-only for now and a
- * color param survives every roll untouched, locked or not. (A future palette
- * mechanism, if colors ever should roll, would be its own decision.) This is
- * PER-PARAM only — there are deliberately NO cross-param constraints (CONTEXT.md
- * "Deliberately deferred"); a Sketch owns its own inter-param coherence inside
- * `generate`.
+ * choice, not a numeric range. The same is true for `kind: 'image-asset'`: its
+ * string is a stable asset selection, so Randomize must never replace it. Thus
+ * Randomize is numeric-only for now and both string-valued kinds survive every
+ * roll untouched, locked or not. (A future palette or asset-selection mechanism
+ * would be its own decision.) This is PER-PARAM only — there are deliberately NO
+ * cross-param constraints (CONTEXT.md "Deliberately deferred"); a Sketch owns
+ * its own inter-param coherence inside `generate`.
  *
  * @param schema - The Sketch's Parameter Schema.
  * @param params - The current inhabited param values; NOT mutated.
  * @param locks - The generic set of locked param keys; only READ (the Studio
  *   owns the lock state). A locked numeric key keeps its current value. A
- *   persisted color key is harmless and inert because colors already pass
- *   through every roll; callers need not filter or migrate it.
+ *   persisted color or Image Asset key is harmless and inert because both kinds
+ *   already pass through every roll; callers need not filter or migrate it.
  * @param rand - Injected uniform `[0, 1)` source (matches `value()` in
  *   `random.ts`).
  * @returns A NEW {@link Params}; unlocked numeric keys re-rolled, the rest as-is.
