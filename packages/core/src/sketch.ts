@@ -7,11 +7,13 @@
  *
  * Two design decisions are load-bearing here:
  *
- * - ADR-0002: a Sketch's output is a pure function of `(params, seed, t, frame)`.
- *   The stateless author writes `generate`; randomness flows from the explicit
- *   `Seed`, never from `Math.random()` or the clock, and the drawable rectangle
- *   arrives as an explicit {@link CoordinateSpace} Composition Frame rather than
- *   being self-declared by the Sketch.
+ * - ADR-0002: a Sketch's output is a pure function of its explicit generation
+ *   inputs. The stateless author writes `generate`; randomness flows from the
+ *   explicit `Seed`, never from `Math.random()` or the clock, and the drawable
+ *   rectangle arrives as an explicit {@link CoordinateSpace} Composition Frame
+ *   rather than being self-declared by the Sketch. ADR-0014 adds only an optional
+ *   synchronous environment of pre-resolved immutable inputs; fetching and
+ *   decoding remain outside the pure generation call.
  * - ADR-0003: a stateful (simulation) Sketch is a deterministic fold the Harness
  *   drives — `initial(params, seed)` + fixed-`dt` `step(state)` + `draw(state)`.
  *   The top-level `Sketch` type is therefore an OPEN union so that future
@@ -27,6 +29,7 @@
  * that have no real frame yet pass {@link DEFAULT_COMPOSITION_FRAME}.
  */
 
+import type { SketchEnvironment } from './imageAssets'
 import type { PlotProfile } from './plotProfile'
 import type { CoordinateSpace, Scene } from './scene'
 import type { ShadingTermination } from './shadingStrategy'
@@ -364,17 +367,26 @@ export interface SketchBase {
    * Seed, time, output resolution, and physical-output values are deliberately
    * absent. The target is authored only from Parameter Schema values and the
    * scale-independent Composition Frame, so re-seeding may vary future strategy
-   * geometry without changing what that strategy is asked to match.
+   * geometry without changing what that strategy is asked to match. A final
+   * environment argument may synchronously expose Image Assets that the caller
+   * already resolved and decoded; no fetching or decoding enters this hook.
    */
-  generateToneSource?(params: Params, frame: CoordinateSpace): ToneSource
+  generateToneSource?(
+    params: Params,
+    frame: CoordinateSpace,
+    environment?: SketchEnvironment,
+  ): ToneSource
 }
 
 /**
  * A stateless Sketch (ADR-0002): its entire output is a pure
- * `generate(params, seed, t, frame) → Scene`. Same inputs, same frame, always —
- * no per-frame or cross-frame mutable state. The one function serves every caller
- * (live exploration, Remotion, plotter export); only how the Harness samples `t`
- * and which Composition Frame it supplies varies.
+ * `generate(params, seed, t, frame, environment?) → Scene`. Same inputs, same
+ * frame, always — no per-frame or cross-frame mutable state. An optional
+ * environment contains only synchronous, pre-resolved immutable inputs; async
+ * loading remains the caller's concern (ADR-0014). The one function serves every
+ * caller (live exploration, Remotion, plotter export); only how the Harness
+ * samples `t`, which Composition Frame it supplies, and which assets it resolves
+ * vary.
  */
 export interface StatelessSketch extends SketchBase {
   /**
@@ -387,8 +399,15 @@ export interface StatelessSketch extends SketchBase {
    * @param frame - The Composition Frame: the drawable rectangle to compose into.
    *   The source of layout truth; callers with no real frame yet pass
    *   {@link DEFAULT_COMPOSITION_FRAME}.
+   * @param environment - Optional synchronous, pre-resolved Harness inputs.
    */
-  generate(params: Params, seed: Seed, t: number, frame: CoordinateSpace): Scene
+  generate(
+    params: Params,
+    seed: Seed,
+    t: number,
+    frame: CoordinateSpace,
+    environment?: SketchEnvironment,
+  ): Scene
 
   /**
    * Optionally prepare this Sketch's complete Scribble-backed artwork.
@@ -402,20 +421,27 @@ export interface StatelessSketch extends SketchBase {
     seed: Seed,
     frame: CoordinateSpace,
     observer?: ScribbleObserver,
+    environment?: SketchEnvironment,
   ): ScribbleArtwork
 
   /**
    * Optionally split time-invariant preparation from repeated sampling in `t`.
    *
-   * The Composition Frame is time-invariant, so it joins the `(params, seed)`
-   * prep spine and is captured when the sampler is built. The returned sampler is
-   * owned by the caller that requested it. It must remain a pure function of `t`:
-   * preparation may retain immutable data derived from `(params, seed, frame)`,
-   * but it may not accumulate frame-to-frame state. Callers that sample
-   * sequentially can retain one sampler until params, seed, or frame change;
+   * The Composition Frame and optional environment are time-invariant, so they
+   * join the `(params, seed)` prep spine and are captured when the sampler is
+   * built. The returned sampler is owned by the caller that requested it. It
+   * must remain a pure function of `t`: preparation may retain immutable data
+   * derived from `(params, seed, frame, environment)`, but it may not accumulate
+   * frame-to-frame state. Callers that sample sequentially can retain one sampler
+   * until params, seed, frame, or resolved environment inputs change;
    * random-access callers can continue using {@link generate} unchanged.
    */
-  prepare?(params: Params, seed: Seed, frame: CoordinateSpace): PreparedFrame
+  prepare?(
+    params: Params,
+    seed: Seed,
+    frame: CoordinateSpace,
+    environment?: SketchEnvironment,
+  ): PreparedFrame
 
   /**
    * Optionally derive a representation-specific source Scene for on-demand
@@ -433,6 +459,7 @@ export interface StatelessSketch extends SketchBase {
     t: number,
     frame: CoordinateSpace,
     target: OutlineTarget,
+    environment?: SketchEnvironment,
   ): Scene
 
   /**
@@ -453,25 +480,31 @@ export interface StatelessSketch extends SketchBase {
 }
 
 /**
- * A caller-owned, deterministic sampler for one fixed `(params, seed, frame)`
- * triple. The Composition Frame is captured when the sampler is built, so the
+ * A caller-owned, deterministic sampler for one fixed
+ * `(params, seed, frame, environment)` input. The Composition Frame and any
+ * resolved environment inputs are captured when the sampler is built, so the
  * sampler stays a pure function of `t` alone.
  */
 export type PreparedFrame = (t: number) => Scene
 
 /** A stateless Sketch that provides the optional prepared-frame fast path. */
 export interface PreparedStatelessSketch extends StatelessSketch {
-  prepare(params: Params, seed: Seed, frame: CoordinateSpace): PreparedFrame
+  prepare(
+    params: Params,
+    seed: Seed,
+    frame: CoordinateSpace,
+    environment?: SketchEnvironment,
+  ): PreparedFrame
 }
 
 /**
  * Define a prepared stateless Sketch without duplicating cold and warm frame logic.
  *
- * `generate(params, seed, t, frame)` is derived mechanically as
- * `prepare(params, seed, frame)(t)`. The public ADR-0002 contract therefore
- * remains the source of truth for every random-access caller, while sequential
- * Harness callers can explicitly retain the prepared sampler. No cache lives in
- * the Sketch.
+ * `generate(params, seed, t, frame, environment)` is derived mechanically as
+ * `prepare(params, seed, frame, environment)(t)`. The public ADR-0002 contract
+ * therefore remains the source of truth for every random-access caller, while
+ * sequential Harness callers can explicitly retain the prepared sampler. No
+ * cache lives in the Sketch.
  */
 export function definePreparedSketch(
   definition: SketchBase &
@@ -481,13 +514,18 @@ export function definePreparedSketch(
       | 'generateOutlineSource'
       | 'generateScribbleArtwork'
     > & {
-      prepare(params: Params, seed: Seed, frame: CoordinateSpace): PreparedFrame
+      prepare(
+        params: Params,
+        seed: Seed,
+        frame: CoordinateSpace,
+        environment?: SketchEnvironment,
+      ): PreparedFrame
     },
 ): PreparedStatelessSketch {
   return {
     ...definition,
-    generate(params, seed, t, frame) {
-      return definition.prepare(params, seed, frame)(t)
+    generate(params, seed, t, frame, environment) {
+      return definition.prepare(params, seed, frame, environment)(t)
     },
   }
 }
@@ -498,17 +536,19 @@ export function definePreparedSketch(
  * Sketches without a specialized preparation seam receive a zero-state adapter
  * over their existing `generate`; prepared Sketches hand back their optimized,
  * caller-owned sampler. Either path has identical observable frame semantics. The
- * Composition Frame is captured here and threaded to both paths.
+ * Composition Frame and optional pre-resolved environment are captured here and
+ * threaded to both paths.
  */
 export function prepareSketch(
   sketch: StatelessSketch,
   params: Params,
   seed: Seed,
   frame: CoordinateSpace,
+  environment?: SketchEnvironment,
 ): PreparedFrame {
   return (
-    sketch.prepare?.(params, seed, frame) ??
-    ((t) => sketch.generate(params, seed, t, frame))
+    sketch.prepare?.(params, seed, frame, environment) ??
+    ((t) => sketch.generate(params, seed, t, frame, environment))
   )
 }
 
