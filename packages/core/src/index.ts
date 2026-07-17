@@ -14,6 +14,21 @@ export * from './polygonClip'
 export * from './hiddenLine'
 export * from './scene'
 export * from './compositionFrame'
+export * from './shadingFields'
+export * from './shadingStrategy'
+export {
+  scribbleStrategy,
+  type ScribbleObserver,
+  type ScribbleProgress,
+  type ScribbleResult,
+  type ScribbleStrategyInput,
+} from './scribbleStrategy/index'
+export {
+  defaultScribbleControls,
+  scribbleControlSchema,
+  type ScribbleControlName,
+  type ScribbleControls,
+} from './scribbleStrategy/types'
 export * from './plotProfile'
 export * from './plotMapping'
 export * from './plotterSvg'
@@ -31,4 +46,6 @@ export * from './sketches/scatter'
 export * from './sketches/flow-field'
 export * from './sketches/leaf-field'
 export * from './sketches/grass-hills'
+export * from './sketches/scribble-moon'
+export * from './sketches/tone-calibration'
 export * from './registry'

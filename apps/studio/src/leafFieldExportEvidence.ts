@@ -1,5 +1,6 @@
 import {
   applyPreset,
+  deserialize,
   leafField,
   plotDrawableRectangle,
   resolveCompositionFrame,
@@ -198,10 +199,10 @@ function etaSummary(
 
 async function runAll() {
   const capturedAt = new Date().toISOString();
-  const preset = applyPreset(leafField.schema, {
-    ...busyLeavesBalls,
-    version: 2,
-  });
+  const preset = applyPreset(
+    leafField.schema,
+    deserialize({ ...busyLeavesBalls, version: 2 }),
+  );
   assert(preset.profile !== undefined, "busy-leaves-balls must carry a Plot Profile");
   const drawable = plotDrawableRectangle(preset.profile);
   const compositionFrame = resolveCompositionFrame(drawable.width / drawable.height);

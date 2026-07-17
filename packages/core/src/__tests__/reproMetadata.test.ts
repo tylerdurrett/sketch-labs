@@ -18,6 +18,7 @@ const profile: PlotProfile = {
   height: 210,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
   includeFrame: true,
+  toolWidthMillimeters: 0.3,
 }
 
 describe('reproFilenameStem', () => {
@@ -181,6 +182,7 @@ describe('buildReproMetadata', () => {
       height: 210,
       insets: { top: 10, right: 10, bottom: 10, left: 10 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     }
     const json = buildReproMetadata({
       sketchId: 'circles',

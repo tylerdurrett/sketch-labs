@@ -21,6 +21,7 @@ const profile: PlotProfile = {
   height: 297,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
   includeFrame: false,
+  toolWidthMillimeters: 0.3,
 };
 
 let container: HTMLDivElement;
@@ -223,6 +224,38 @@ describe("PaperSection", () => {
     expect(events).toEqual(["begin", "preview", "commit"]);
   });
 
+  it("previews and commits a positive physical tool width transactionally", () => {
+    const { el, events, profile: controlled } = mountTransactional();
+    const toolWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Tool width (mm)"]',
+    )!;
+
+    focusInput(toolWidth);
+    setInput(toolWidth, "0.5");
+    blurInput(toolWidth);
+
+    expect(events).toEqual(["begin", "preview", "commit"]);
+    expect(controlled().toolWidthMillimeters).toBe(0.5);
+  });
+
+  it("keeps an invalid tool width local and converts inch edits to millimeters", () => {
+    window.localStorage.setItem(PAPER_DISPLAY_UNIT_STORAGE_KEY, "in");
+    const { el, events, profile: controlled } = mountTransactional();
+    const toolWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Tool width (in)"]',
+    )!;
+
+    focusInput(toolWidth);
+    setInput(toolWidth, "0");
+    expect(events).toEqual(["begin"]);
+    expect(controlled().toolWidthMillimeters).toBe(0.3);
+    setInput(toolWidth, "0.02");
+    blurInput(toolWidth);
+
+    expect(events).toEqual(["begin", "preview", "commit"]);
+    expect(controlled().toolWidthMillimeters).toBeCloseTo(0.508);
+  });
+
   it("restores the focus snapshot on Escape without a later blur commit", () => {
     const { el, events, profile: controlled } = mountTransactional();
     const width = el.querySelector<HTMLInputElement>(
@@ -279,6 +312,7 @@ describe("PaperSection", () => {
           left: expect.any(Number),
         }),
         includeFrame: expect.any(Boolean),
+        toolWidthMillimeters: expect.any(Number),
       });
     }
   });
@@ -524,6 +558,7 @@ describe("PaperSection", () => {
         ...dimensions,
         insets: { top: 1, right: 2, bottom: 3, left: 4 },
         includeFrame: false,
+        toolWidthMillimeters: 0.3,
       };
       const { el } = mount(onChange, initialProfile);
 
@@ -534,6 +569,7 @@ describe("PaperSection", () => {
         height: 200,
         insets: initialProfile.insets,
         includeFrame: false,
+        toolWidthMillimeters: 0.3,
       };
       expect(onChange).toHaveBeenCalledWith(accepted);
 
@@ -567,6 +603,7 @@ describe("PaperSection", () => {
       height: 210,
       insets: profile.insets,
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     });
   });
 
@@ -590,6 +627,7 @@ describe("PaperSection", () => {
       height: 209.804,
       insets: current.insets,
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     });
   });
 
@@ -635,6 +673,7 @@ describe("PaperSection", () => {
       height: 297,
       insets: profile.insets,
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     });
     expect(el.querySelector('[role="alert"]')).toBeNull();
 
@@ -669,6 +708,7 @@ describe("PaperSection", () => {
       height: 297,
       insets: profile.insets,
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     });
   });
 
@@ -707,6 +747,7 @@ describe("PaperSection", () => {
       height: 300,
       insets: profile.insets,
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     });
     expect(el.querySelector('[role="alert"]')).toBeNull();
   });
@@ -718,6 +759,7 @@ describe("PaperSection", () => {
       height: 200,
       insets: { top: 80, right: 80, bottom: 80, left: 80 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     };
     const { el } = mount(onChange, tight);
 
@@ -750,6 +792,7 @@ describe("PaperSection", () => {
       height: 210,
       insets: asymmetric.insets,
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     });
   });
 
@@ -760,6 +803,7 @@ describe("PaperSection", () => {
       height: 199.8,
       insets: { top: 1, right: 2, bottom: 3, left: 4 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     };
     const { el } = mount(onChange, nearSquare);
     const button = [...el.querySelectorAll("button")].find(
@@ -775,6 +819,7 @@ describe("PaperSection", () => {
       height: 200.2,
       insets: nearSquare.insets,
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     });
   });
 
@@ -785,6 +830,7 @@ describe("PaperSection", () => {
       height: 100,
       insets: { top: 10, right: 110, bottom: 10, left: 110 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     };
     const { el } = mount(onChange, swapWouldExhaust);
     const button = [...el.querySelectorAll("button")].find((candidate) =>

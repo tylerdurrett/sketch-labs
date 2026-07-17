@@ -29,9 +29,11 @@ import type { LiveCanvasHandle } from "./LiveCanvas";
 vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
     params,
+    renderState,
     handleRef,
   }: {
     params: Readonly<Record<string, unknown>>;
+    renderState?: { kind: string };
     handleRef?: Ref<LiveCanvasHandle>;
   }) => {
     useImperativeHandle(handleRef, () => ({
@@ -47,7 +49,13 @@ vi.mock("./LiveCanvas", () => ({
         inputRevision: 0,
       }),
     }));
-    return <div data-testid="canvas" data-params={JSON.stringify(params)} />;
+    return (
+      <div
+        data-testid="canvas"
+        data-params={JSON.stringify(params)}
+        data-render-state={renderState?.kind ?? "fill-live"}
+      />
+    );
   },
 }));
 
@@ -196,6 +204,7 @@ describe("App — keyed edit-history sessions", () => {
   it("cannot traverse an old sketch's history after switching or fresh remounting", () => {
     vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
     mountApp();
+    selectOption("Scribble Moon");
     const firstSketch = trigger().textContent!;
     const input = document.querySelector<HTMLInputElement>(
       '#inspector input[id^="control-"]',
@@ -240,13 +249,94 @@ describe("App — keyed edit-history sessions", () => {
   });
 });
 
+describe("App — Tone Calibration integration (#324)", () => {
+  it("opens on Scribble controls and resets its diagnostic view after switching", () => {
+    mountApp();
+
+    expect(trigger().textContent).toBe("Tone Calibration");
+    expect(
+      [...document.querySelectorAll('#inspector input[id^="control-"]')].map(
+        (input) => input.id,
+      ),
+    ).toEqual([
+      "control-pathDensity",
+      "control-scribbleScale",
+      "control-momentum",
+      "control-chaos",
+      "control-toneFidelity",
+    ]);
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-params"),
+    ).toBe(
+      JSON.stringify({
+        pathDensity: 1,
+        scribbleScale: 1,
+        momentum: 0.75,
+        chaos: 0.25,
+        toneFidelity: 0.9,
+      }),
+    );
+    expect(
+      [...document.querySelectorAll("summary")].find(
+        (summary) => summary.textContent?.includes("Paper"),
+      ),
+    ).toBeDefined();
+    expect(document.querySelector("#sketch-seed")).not.toBeNull();
+    expect(document.querySelector("#sketch-tolerance")).not.toBeNull();
+    const buttonLabels = [...document.querySelectorAll("button")].map(
+      (button) => button.textContent,
+    );
+    expect(buttonLabels).toEqual(
+      expect.arrayContaining([
+        "New seed",
+        "Randomize",
+        "Export PNG",
+        "Export SVG",
+        "Export Hidden-line SVG",
+      ]),
+    );
+
+    const tone = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Tone",
+    )!;
+    act(() => tone.click());
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-render-state"),
+    ).toBe("tone-reference");
+
+    selectOption("Circles");
+    selectOption("Tone Calibration");
+
+    expect(
+      [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) => button.textContent === "Fill",
+      )?.getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-render-state"),
+    ).toBe("fill-held");
+    expect(
+      document.querySelectorAll('#inspector input[id^="control-"]'),
+    ).toHaveLength(5);
+  });
+});
+
 describe("App — hidden-line navigation guard (#289)", () => {
   it("disables Sketch navigation for the full active interval with the exact reason", () => {
     mountApp();
-    const outlineToggle = document.querySelector<HTMLButtonElement>(
+    // Use an immediate live-Fill Sketch here. Scribble-capable Sketches now
+    // intentionally defer Outline until current worker geometry is painted.
+    selectOption("Circles");
+    const outlineChoice = document.querySelector<HTMLButtonElement>(
       'button[aria-label="Toggle outline render mode"]',
     )!;
-    act(() => outlineToggle.click());
+    act(() => outlineChoice.click());
 
     expect(trigger().disabled).toBe(true);
     expect(trigger().getAttribute("aria-describedby")).toBe(
@@ -262,12 +352,14 @@ describe("App — hidden-line navigation guard (#289)", () => {
       "Finish or cancel the hidden-line job before switching Sketches.",
     );
 
-    act(() => outlineToggle.click());
+    act(() => outlineChoice.click());
     expect(trigger().disabled).toBe(false);
   });
 
   it("guards navigation for an export while inspector collapse remains available", async () => {
     mountApp();
+    // Export readiness is immediate for an ordinary live-Fill Sketch.
+    selectOption("Circles");
     const exportButton = [...document.querySelectorAll("button")].find(
       (button) => button.textContent === "Export Hidden-line SVG",
     ) as HTMLButtonElement;

@@ -8,6 +8,7 @@ const profile: PlotProfile = {
   height: 160,
   insets: { top: 20, right: 30, bottom: 40, left: 10 },
   includeFrame: false,
+  toolWidthMillimeters: 0.3,
 }
 
 const scene: Scene = {
@@ -91,6 +92,7 @@ describe('renderPlotterSVG', () => {
       height: 1.4,
       insets: { top: 0.2, right: 0.1, bottom: 0.2, left: 0.1 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     }
     const noisyScene: Scene = {
       space: { width: 2 / 3, height: 1 },
@@ -126,6 +128,7 @@ describe('renderPlotterSVG', () => {
       height: 180,
       insets: { top: 20.05, right: 60.2, bottom: 40.1, left: 0.1 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     }
     const decimalScene: Scene = {
       space: { width: 239.7, height: 119.85 },
@@ -157,6 +160,7 @@ describe('renderPlotterSVG', () => {
       height: 0.00002,
       insets: { top: 0, right: 0, bottom: 0, left: 0 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     }
     const tinyScene: Scene = {
       space: { width: 2, height: 1 },

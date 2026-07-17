@@ -18,6 +18,7 @@ const profile: PlotProfile = {
   height: 210,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
   includeFrame: true,
+  toolWidthMillimeters: 0.3,
 }
 
 describe('makePreset', () => {
@@ -55,6 +56,7 @@ describe('makePreset', () => {
       height: 210,
       insets: { top: 10, right: 10, bottom: 10, left: 10 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     }
     const preset = makePreset('circles', 'p', {}, 42, new Set(), live)
     expect(preset.profile).not.toBe(live)

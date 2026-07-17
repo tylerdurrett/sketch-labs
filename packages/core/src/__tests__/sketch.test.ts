@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   defaultParams,
@@ -10,6 +10,12 @@ import {
 import type { Params, ParamSchema, StatelessSketch } from '../sketch'
 import type { Scene } from '../scene'
 import { DEFAULT_COMPOSITION_FRAME } from '../compositionFrame'
+import {
+  createShadingMask,
+  createToneField,
+  sampleEffectiveTone,
+} from '../shadingFields'
+import type { ScribbleProgress } from '../scribbleStrategy'
 
 /**
  * A scripted `rand` stub: yields the given values in order, so a test can pin
@@ -216,5 +222,123 @@ describe('caller-owned prepared frames', () => {
     expect(adapted(1)).toEqual(sceneAt(1))
     expect(adapted(2)).toEqual(sceneAt(2))
     expect(generated).toBe(2)
+  })
+
+  it('preserves an optional Scribble artwork capability on a prepared Sketch', () => {
+    const progress: ScribbleProgress[] = []
+    const artworkScene = sceneAt(7)
+    const sketch = definePreparedSketch({
+      id: 'prepared-scribble',
+      name: 'Prepared Scribble',
+      schema: {},
+      prepare() {
+        return sceneAt
+      },
+      generateScribbleArtwork(_params, _seed, _frame, observer) {
+        observer?.({
+          completedWorkUnits: 2,
+          totalWorkUnits: 2,
+          terminal: true,
+        })
+        return {
+          scene: artworkScene,
+          diagnostics: {
+            termination: 'completed',
+            residualError: 0,
+            pathLength: 1,
+            polylineCount: 1,
+            penLiftCount: 0,
+          },
+        }
+      },
+    })
+
+    expect(
+      sketch.generateScribbleArtwork?.(
+        {},
+        'seed',
+        DEFAULT_COMPOSITION_FRAME,
+        (snapshot) => progress.push(snapshot),
+      ),
+    ).toEqual({
+      scene: artworkScene,
+      diagnostics: {
+        termination: 'completed',
+        residualError: 0,
+        pathLength: 1,
+        polylineCount: 1,
+        penLiftCount: 0,
+      },
+    })
+    expect(progress).toEqual([
+      { completedWorkUnits: 2, totalWorkUnits: 2, terminal: true },
+    ])
+  })
+
+  it('preserves completed-Scene Outline derivation on a prepared Sketch', () => {
+    const completed = sceneAt(7)
+    const derived = sceneAt(9)
+    const deriveOutlineSource = vi.fn(() => derived)
+    const sketch = definePreparedSketch({
+      id: 'prepared-outline',
+      name: 'Prepared Outline',
+      schema: {},
+      prepare() {
+        return sceneAt
+      },
+      deriveOutlineSource,
+    })
+    const target = {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    }
+
+    expect(sketch.deriveOutlineSource?.(completed, target)).toBe(derived)
+    expect(deriveOutlineSource).toHaveBeenCalledOnce()
+    expect(deriveOutlineSource).toHaveBeenCalledWith(completed, target)
+  })
+})
+
+describe('optional tone-source capability', () => {
+  const emptyScene = (): Scene => ({
+    space: DEFAULT_COMPOSITION_FRAME,
+    primitives: [],
+  })
+
+  it('leaves an ordinary Sketch valid without the capability', () => {
+    const ordinary: StatelessSketch = {
+      id: 'ordinary',
+      name: 'Ordinary',
+      schema: {},
+      generate: emptyScene,
+    }
+
+    expect(ordinary.generateToneSource).toBeUndefined()
+  })
+
+  it('lets a tone-aware Sketch derive a source from only params and frame', () => {
+    const toneAware: StatelessSketch = {
+      id: 'tone-aware',
+      name: 'Tone aware',
+      schema: {
+        tone: { kind: 'number', min: 0, max: 1, default: 0.5 },
+      },
+      generate: emptyScene,
+      generateToneSource(params, frame) {
+        const tone = params.tone as number
+        return {
+          toneField: createToneField(([x]) => tone * (x / frame.width)),
+          shadingMask: createShadingMask(() => 1),
+        }
+      },
+    }
+
+    const source = toneAware.generateToneSource?.(
+      { tone: 0.8 },
+      DEFAULT_COMPOSITION_FRAME,
+    )
+
+    expect(source).toBeDefined()
+    expect(source && sampleEffectiveTone(source, [500, 500])).toBe(0.4)
   })
 })

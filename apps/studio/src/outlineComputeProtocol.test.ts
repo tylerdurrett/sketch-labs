@@ -11,6 +11,7 @@ import {
   isOutlineComputeResponse,
   mutableScene,
   outlineComputeIdentitiesEqual,
+  type CompletedSceneOutlineComputeIdentity,
   type LegacyOutlineComputeIdentity,
   type SpecializedOutlineComputeIdentity,
 } from "./outlineComputeProtocol";
@@ -77,6 +78,24 @@ function targetedIdentity(): SpecializedOutlineComputeIdentity {
   });
 }
 
+function completedSceneIdentity(): CompletedSceneOutlineComputeIdentity {
+  return createOutlineComputeIdentity({
+    sketchId: "triangles",
+    schema,
+    params: { zeta: 3, alpha: "#abcdef" },
+    seed: "seed",
+    sampledT: 1.5,
+    compositionFrame: { width: 120, height: 90 },
+    tolerance: 0.25,
+    includeFrame: true,
+    sourceScene: scene,
+    outlineTarget: {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    },
+  });
+}
+
 function changed(
   update: (copy: Record<string, any>) => void,
 ): LegacyOutlineComputeIdentity {
@@ -91,6 +110,14 @@ function changedTargeted(
   const copy = structuredClone(targetedIdentity()) as Record<string, any>;
   update(copy);
   return copy as unknown as SpecializedOutlineComputeIdentity;
+}
+
+function changedCompleted(
+  update: (copy: Record<string, any>) => void,
+): CompletedSceneOutlineComputeIdentity {
+  const copy = structuredClone(completedSceneIdentity()) as Record<string, any>;
+  update(copy);
+  return copy as unknown as CompletedSceneOutlineComputeIdentity;
 }
 
 describe("outline compute identity", () => {
@@ -194,6 +221,38 @@ describe("outline compute identity", () => {
     expect(outlineComputeIdentitiesEqual(target, identity())).toBe(false);
   });
 
+  it("copies and keys completed-Scene specialization by both Scene and target", () => {
+    const completed = completedSceneIdentity();
+    expect(completed.sourceKind).toBe("completed-scene-sketch");
+    expect(Object.isFrozen(completed.sourceScene)).toBe(true);
+    expect(Object.isFrozen(completed.sourceScene.primitives[0]?.points[0])).toBe(
+      true,
+    );
+    expect(Object.isFrozen(completed.outlineTarget)).toBe(true);
+    expect(
+      outlineComputeIdentitiesEqual(completed, completedSceneIdentity()),
+    ).toBe(true);
+
+    for (const mutate of [
+      (copy: Record<string, any>) =>
+        (copy.sourceScene.primitives[0].points[0][0] = 2),
+      (copy: Record<string, any>) =>
+        (copy.sourceScene.primitives[0].hiddenLineRole = "both"),
+      (copy: Record<string, any>) =>
+        (copy.outlineTarget.toolWidthMillimeters = 0.31),
+      (copy: Record<string, any>) =>
+        (copy.outlineTarget.millimetersPerSceneUnit = 0.2),
+    ]) {
+      expect(
+        outlineComputeIdentitiesEqual(completed, changedCompleted(mutate)),
+      ).toBe(false);
+    }
+    expect(outlineComputeIdentitiesEqual(completed, identity())).toBe(false);
+    expect(outlineComputeIdentitiesEqual(completed, targetedIdentity())).toBe(
+      false,
+    );
+  });
+
   it("restores source and occluder roles without inventing omitted fields", () => {
     const restored = mutableScene(identity().sourceScene);
     const omitted = changed((copy) => {
@@ -278,6 +337,30 @@ describe("outline compute protocol guards", () => {
         }),
       ).toThrow(/Outline compute identity contains an invalid value/);
     }
+  });
+
+  it("validates completed-Scene identities without accepting either half alone", () => {
+    const completed = completedSceneIdentity();
+    expect(
+      isOutlineComputeRequest({ type: "compute", jobId: 1, identity: completed }),
+    ).toBe(true);
+
+    const withoutScene = structuredClone(completed) as unknown as Record<
+      string,
+      unknown
+    >;
+    delete withoutScene.sourceScene;
+    const withoutTarget = structuredClone(completed) as unknown as Record<
+      string,
+      unknown
+    >;
+    delete withoutTarget.outlineTarget;
+    expect(
+      isOutlineComputeRequest({ type: "compute", jobId: 1, identity: withoutScene }),
+    ).toBe(false);
+    expect(
+      isOutlineComputeRequest({ type: "compute", jobId: 1, identity: withoutTarget }),
+    ).toBe(false);
   });
 
   it("rejects identities that mix legacy and specialized sources", () => {
@@ -471,6 +554,7 @@ describe("outline compute protocol guards", () => {
         height: 80,
         insets: { top: 5, right: 5, bottom: 5, left: 5 },
         includeFrame: false,
+        toolWidthMillimeters: 0.3,
       },
       metadata: "test",
       includePaperMargins: true,

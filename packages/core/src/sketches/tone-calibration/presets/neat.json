@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "sketch": "tone-calibration",
+  "name": "neat",
+  "seed": 6329797832350081,
+  "params": {
+    "pathDensity": 19.7,
+    "scribbleScale": 1,
+    "momentum": 0.75,
+    "chaos": 0.25,
+    "toneFidelity": 0.9
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true
+  }
+}

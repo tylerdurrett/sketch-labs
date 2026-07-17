@@ -141,6 +141,7 @@ const A4_PROFILE: PlotProfile = {
   height: 297,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
   includeFrame: false,
+  toolWidthMillimeters: 0.3,
 };
 
 const SCALED_A4_PROFILE: PlotProfile = {
@@ -153,6 +154,7 @@ const SCALED_A4_PROFILE: PlotProfile = {
     left: A4_PROFILE.insets.left * 1.2,
   },
   includeFrame: false,
+  toolWidthMillimeters: 0.3,
 };
 
 function testSketch(defaultOutputProfile: PlotProfile) {
@@ -356,6 +358,7 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
       height: 254,
       insets: { top: 12.7, right: 12.7, bottom: 12.7, left: 12.7 },
       includeFrame: false,
+      toolWidthMillimeters: 0.3,
     };
     const expectedFrame = resolvePlotCompositionFrame(expectedProfile);
     expect(paper.querySelector("summary")?.textContent).toContain("11 × 10 in");
@@ -539,6 +542,7 @@ describe("physical plot artifact acceptance flow (#276)", () => {
       height: 180,
       insets: { top: 11, right: 23, bottom: 17, left: 29 },
       includeFrame: true,
+      toolWidthMillimeters: 0.3,
     };
     const preset: Preset = {
       version: 2,

@@ -28,6 +28,7 @@ const profile: PlotProfile = {
   height: 160,
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
   includeFrame: false,
+  toolWidthMillimeters: 0.3,
 };
 
 function identity(amount = 1) {
@@ -176,6 +177,113 @@ describe("outlineSessionReducer", () => {
       t: 2,
     });
     expect(reused.phase).toEqual({ kind: "outline", scene: outline, t: 2 });
+    expect(reused.active).toBeNull();
+  });
+
+  it("waits for acknowledged Scribble content and preserves provenance through completion", () => {
+    const waiting = outlineSessionReducer(createOutlineSessionState(), {
+      type: "request-outline",
+      launch: false,
+    });
+    expect(waiting.capture).toBeNull();
+
+    const provenance = { sourceInputRevision: 4, contentRevision: 7 };
+    const requested = outlineSessionReducer(waiting, {
+      type: "source-ready",
+      provenance,
+    });
+    expect(requested.capture).toMatchObject(provenance);
+
+    const active = outlineSessionReducer(requested, {
+      type: "fill-captured",
+      token: requested.capture!.token,
+      inputRevision: requested.inputRevision,
+      identity: identity(),
+      scene: fill,
+      t: 2,
+      ...provenance,
+    });
+    expect(active.phase).toMatchObject({
+      kind: "fill-held-pending",
+      ...provenance,
+    });
+    expect(active.active).toMatchObject(provenance);
+
+    const complete = outlineSessionReducer(active, {
+      type: "succeeded",
+      token: active.active!.token,
+      identity: active.active!.identity,
+      scene: outline,
+    });
+    expect(complete.phase).toMatchObject({ kind: "outline", ...provenance });
+    expect(complete.cache).toMatchObject(provenance);
+
+    const fillMode = outlineSessionReducer(complete, { type: "request-fill" });
+    const changedProvenance = { sourceInputRevision: 5, contentRevision: 8 };
+    const changedRequest = outlineSessionReducer(fillMode, {
+      type: "request-outline",
+      provenance: changedProvenance,
+    });
+    const notReused = outlineSessionReducer(changedRequest, {
+      type: "fill-captured",
+      token: changedRequest.capture!.token,
+      inputRevision: changedRequest.inputRevision,
+      identity: identity(),
+      scene: fill,
+      t: 2,
+      ...changedProvenance,
+    });
+    expect(notReused.active).not.toBeNull();
+    expect(notReused.phase).toMatchObject(changedProvenance);
+  });
+
+  it("keeps Scribble provenance when export refreshes an identical Outline cache", () => {
+    const provenance = { sourceInputRevision: 4, contentRevision: 7 };
+    const requested = outlineSessionReducer(createOutlineSessionState(), {
+      type: "request-outline",
+      provenance,
+    });
+    const active = outlineSessionReducer(requested, {
+      type: "fill-captured",
+      token: requested.capture!.token,
+      inputRevision: requested.inputRevision,
+      identity: identity(),
+      scene: fill,
+      t: 2,
+      ...provenance,
+    });
+    const complete = outlineSessionReducer(active, {
+      type: "succeeded",
+      token: active.active!.token,
+      identity: active.active!.identity,
+      scene: outline,
+    });
+    const exporting = outlineSessionReducer(complete, {
+      type: "request-export",
+      snapshot: exportSnapshot(),
+    });
+    const refreshed = outlineSessionReducer(exporting, {
+      type: "export-succeeded",
+      token: exporting.exportActive!.token,
+      completedOutline: { identity: identity(), scene: outline },
+    });
+    expect(refreshed.cache).toMatchObject(provenance);
+
+    const fillMode = outlineSessionReducer(refreshed, { type: "request-fill" });
+    const requestedAgain = outlineSessionReducer(fillMode, {
+      type: "request-outline",
+      provenance,
+    });
+    const reused = outlineSessionReducer(requestedAgain, {
+      type: "fill-captured",
+      token: requestedAgain.capture!.token,
+      inputRevision: requestedAgain.inputRevision,
+      identity: identity(),
+      scene: fill,
+      t: 2,
+      ...provenance,
+    });
+    expect(reused.phase).toMatchObject({ kind: "outline", ...provenance });
     expect(reused.active).toBeNull();
   });
 
