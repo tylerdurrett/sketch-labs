@@ -501,9 +501,20 @@ export function SketchControls({
     );
     if (invalidated) {
       cancelOutlineCoordinator();
+      const retainsPaintedScribble =
+        hasScribblePreparation && !scribbleChanged && scribblePaintIsCurrent;
       dispatchOutline({
         type: "inputs-changed",
         launch: launchOutline && !hasScribblePreparation,
+        ...(retainsPaintedScribble && currentScribble !== null
+          ? {
+              provenance: {
+                sourceInputRevision: currentScribble.sourceInputRevision,
+                contentRevision: currentScribble.contentRevision,
+              },
+            }
+          : {}),
+        waitForSource: hasScribblePreparation && !retainsPaintedScribble,
       });
     }
     setHistory(next);
@@ -991,7 +1002,19 @@ export function SketchControls({
           }
         : {}),
     });
-    const requested = dispatchOutline({ type: "request-export", snapshot });
+    const requested = dispatchOutline({
+      type: "request-export",
+      snapshot,
+      ...(displayed.sourceInputRevision === undefined ||
+      displayed.contentRevision === undefined
+        ? {}
+        : {
+            provenance: {
+              sourceInputRevision: displayed.sourceInputRevision,
+              contentRevision: displayed.contentRevision,
+            },
+          }),
+    });
     const active = requested.exportActive;
     if (active === null || active.snapshot !== snapshot) return;
     const coordinator = coordinatorRef.current;

@@ -236,6 +236,56 @@ describe("outlineSessionReducer", () => {
     expect(notReused.phase).toMatchObject(changedProvenance);
   });
 
+  it("keeps Scribble provenance when export refreshes an identical Outline cache", () => {
+    const provenance = { sourceInputRevision: 4, contentRevision: 7 };
+    const requested = outlineSessionReducer(createOutlineSessionState(), {
+      type: "request-outline",
+      provenance,
+    });
+    const active = outlineSessionReducer(requested, {
+      type: "fill-captured",
+      token: requested.capture!.token,
+      inputRevision: requested.inputRevision,
+      identity: identity(),
+      scene: fill,
+      t: 2,
+      ...provenance,
+    });
+    const complete = outlineSessionReducer(active, {
+      type: "succeeded",
+      token: active.active!.token,
+      identity: active.active!.identity,
+      scene: outline,
+    });
+    const exporting = outlineSessionReducer(complete, {
+      type: "request-export",
+      snapshot: exportSnapshot(),
+    });
+    const refreshed = outlineSessionReducer(exporting, {
+      type: "export-succeeded",
+      token: exporting.exportActive!.token,
+      completedOutline: { identity: identity(), scene: outline },
+    });
+    expect(refreshed.cache).toMatchObject(provenance);
+
+    const fillMode = outlineSessionReducer(refreshed, { type: "request-fill" });
+    const requestedAgain = outlineSessionReducer(fillMode, {
+      type: "request-outline",
+      provenance,
+    });
+    const reused = outlineSessionReducer(requestedAgain, {
+      type: "fill-captured",
+      token: requestedAgain.capture!.token,
+      inputRevision: requestedAgain.inputRevision,
+      identity: identity(),
+      scene: fill,
+      t: 2,
+      ...provenance,
+    });
+    expect(reused.phase).toMatchObject({ kind: "outline", ...provenance });
+    expect(reused.active).toBeNull();
+  });
+
   it("keeps desired Outline through transaction previews and launches once on settle", () => {
     const outlined = activeSession();
     const begun = outlineSessionReducer(outlined, {

@@ -42,14 +42,16 @@ export type OutlineSessionSlot =
 
 export type OutlineExportPhase = "deriving" | "finalizing";
 
-export interface OutlineExportActive {
+export interface OutlineExportActive extends OutlineSourceProvenance {
   readonly token: number;
   readonly snapshot: HiddenLineExportSnapshot;
   readonly phase: OutlineExportPhase;
 }
 
-export interface DeferredOutlineRequest {
+export interface DeferredOutlineRequest extends OutlineSourceProvenance {
   readonly inputRevision: number;
+  /** Present only while caller-owned geometry still needs a paint acknowledgement. */
+  readonly waitsForSource?: true;
 }
 
 export interface OutlineSessionState {
@@ -86,6 +88,7 @@ export type OutlineSessionAction =
   | {
       readonly type: "request-export";
       readonly snapshot: HiddenLineExportSnapshot;
+      readonly provenance?: OutlineSourceProvenance;
     }
   | {
       readonly type: "export-finalizing";
@@ -122,7 +125,12 @@ export type OutlineSessionAction =
   | { readonly type: "failed"; readonly token: number; readonly error: string }
   | { readonly type: "transaction-began" }
   | { readonly type: "transaction-settled"; readonly launch?: boolean }
-  | { readonly type: "inputs-changed"; readonly launch: boolean }
+  | {
+      readonly type: "inputs-changed";
+      readonly launch: boolean;
+      readonly provenance?: OutlineSourceProvenance;
+      readonly waitForSource?: boolean;
+    }
   | { readonly type: "dispose" };
 
 export function createOutlineSessionState(): OutlineSessionState {
@@ -190,14 +198,22 @@ function sourceProvenanceOf(
   };
 }
 
-function deferOutline(state: OutlineSessionState): OutlineSessionState {
+function deferOutline(
+  state: OutlineSessionState,
+  provenance: OutlineSourceProvenance = {},
+  waitsForSource = false,
+): OutlineSessionState {
   return {
     ...state,
     capture: null,
     active: null,
     deferredOutline:
       state.desired === "outline"
-        ? { inputRevision: state.inputRevision }
+        ? {
+            inputRevision: state.inputRevision,
+            ...sourceProvenanceOf(provenance),
+            ...(waitsForSource ? { waitsForSource: true as const } : {}),
+          }
         : null,
   };
 }
@@ -227,9 +243,14 @@ function finishExport(
     return settled;
   }
   if (settled.transactionOpen) {
-    return deferOutline(settled);
+    return deferOutline(
+      settled,
+      settled.deferredOutline,
+      settled.deferredOutline.waitsForSource === true,
+    );
   }
-  return requestCapture(settled);
+  if (settled.deferredOutline.waitsForSource === true) return settled;
+  return requestCapture(settled, settled.deferredOutline);
 }
 
 /** Pure, stale-safe state machine for one keyed Sketch's one-slot Outline work. */
@@ -240,20 +261,34 @@ export function outlineSessionReducer(
   switch (action.type) {
     case "request-outline":
       if (state.slot?.owner === "hidden-line-export") {
-        return deferOutline({
-          ...state,
-          desired: "outline",
-          phase: { kind: "fill-live" },
-          failure: null,
-        });
+        return deferOutline(
+          {
+            ...state,
+            desired: "outline",
+            phase: { kind: "fill-live" },
+            failure: null,
+          },
+          action.provenance,
+          action.launch === false,
+        );
       }
       return action.launch === false
-        ? deferOutline({ ...state, desired: "outline", failure: null })
+        ? deferOutline(
+            { ...state, desired: "outline", failure: null },
+            action.provenance,
+            true,
+          )
         : requestCapture(
             { ...state, desired: "outline" },
             action.provenance,
           );
     case "source-ready":
+      if (
+        state.desired === "outline" &&
+        state.slot?.owner === "hidden-line-export"
+      ) {
+        return deferOutline(state, action.provenance);
+      }
       if (
         state.desired !== "outline" ||
         state.transactionOpen ||
@@ -294,6 +329,7 @@ export function outlineSessionReducer(
           token,
           snapshot: action.snapshot,
           phase: "deriving",
+          ...sourceProvenanceOf(action.provenance ?? {}),
         },
         exportFailure: null,
         deferredOutline:
@@ -313,15 +349,27 @@ export function outlineSessionReducer(
         ...state,
         exportActive: { ...state.exportActive, phase: "finalizing" },
       };
-    case "export-succeeded":
+    case "export-succeeded": {
+      const exportProvenance = sourceProvenanceOf(state.exportActive ?? {});
+      const cacheProvenance =
+        exportProvenance.contentRevision === undefined &&
+        state.cache !== null &&
+        outlineComputeIdentitiesEqual(
+          state.cache.identity,
+          action.completedOutline.identity,
+        )
+          ? sourceProvenanceOf(state.cache)
+          : exportProvenance;
       return finishExport(state, action.token, {
         cache: {
           identity: action.completedOutline.identity,
           scene: mutableScene(action.completedOutline.scene),
           t: action.completedOutline.identity.sampledT,
+          ...cacheProvenance,
         },
         exportFailure: null,
       });
+    }
     case "export-cancelled":
       return finishExport(state, action.token, { exportFailure: null });
     case "export-failed":
@@ -454,7 +502,13 @@ export function outlineSessionReducer(
     case "transaction-settled": {
       const settled = { ...state, transactionOpen: false };
       if (state.slot?.owner === "hidden-line-export") {
-        return deferOutline(settled);
+        const deferred = state.deferredOutline;
+        return deferOutline(
+          settled,
+          deferred ?? {},
+          deferred?.waitsForSource === true ||
+            (deferred === null && action.launch === false),
+        );
       }
       return state.desired === "outline" && action.launch !== false
         ? requestCapture(settled)
@@ -474,7 +528,11 @@ export function outlineSessionReducer(
         failure: null,
       };
       if (state.slot?.owner === "hidden-line-export") {
-        return deferOutline(changed);
+        return deferOutline(
+          changed,
+          action.provenance,
+          action.waitForSource === true,
+        );
       }
       return action.launch && state.desired === "outline"
         ? requestCapture(changed)

@@ -4398,6 +4398,54 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(outlineJob.starts).toBe(1);
   });
 
+  it("releases an Outline-only edit after active export with the painted Scribble provenance", async () => {
+    autoFireOutlineComputed = false;
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    await completeScribble(0, preparedScene(1));
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    act(() => lastOnOutlineComputed?.());
+    expect(canvas.dataset.renderMode).toBe("outline");
+
+    fakeDisplayedScene = {
+      scene: outlineJob.lastCompletedScene!,
+      t: 0,
+      renderMode: "outline",
+      tolerance: 0,
+      includeFrame: true,
+      inputRevision: 0,
+      sourceInputRevision: 0,
+      contentRevision: 1,
+    };
+    outlineJob.exportMode = "pending";
+    clickButton(el, "Export Hidden-line SVG");
+
+    const tolerance = el.querySelector<HTMLInputElement>("#sketch-tolerance")!;
+    act(() => tolerance.focus());
+    setInput(tolerance, "1");
+    act(() => tolerance.blur());
+    expect(outlineJob.starts).toBe(1);
+
+    await act(async () => {
+      outlineJob.pendingExport!.succeed();
+      await Promise.resolve();
+    });
+    expect(outlineJob.starts).toBe(2);
+    expect(outlineJob.lastIdentity?.tolerance).toBe(1);
+    expect(canvas.dataset.sourceInputRevision).toBe("0");
+    expect(canvas.dataset.contentRevision).toBe("2");
+
+    act(() => lastOnOutlineComputed?.());
+    expect(canvas.dataset.renderMode).toBe("outline");
+    expect(
+      [...el.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) => button.textContent === "Export Hidden-line SVG",
+      )?.disabled,
+    ).toBe(false);
+  });
+
   it("disposes each Scribble coordinator across StrictMode and keyed switches", () => {
     mount(
       <StrictMode>
