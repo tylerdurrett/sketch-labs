@@ -20,11 +20,6 @@ import {
   type ScribbleArtworkExecutor,
 } from "./scribbleWorkerRuntime";
 
-const schema: ParamSchema = {
-  amount: { kind: "number", min: 0, max: 10, default: 1 },
-  ink: { kind: "color", default: "#112233" },
-};
-
 const scene: Scene = {
   space: { width: 120, height: 90 },
   primitives: [
@@ -57,13 +52,14 @@ function request(
     frame: { width: number; height: number };
   }> = {},
 ): ScribbleComputeRequest {
+  const sketchId = overrides.sketchId ?? toneCalibration.id;
   return {
     type: "compute",
     jobId: 7,
     identity: createScribbleComputeIdentity({
-      sketchId: overrides.sketchId ?? "test-scribble",
-      schema: overrides.schema ?? schema,
-      params: overrides.params ?? { amount: 4, ink: "#abcdef" },
+      sketchId,
+      schema: overrides.schema ?? toneCalibration.schema,
+      params: overrides.params ?? defaultParams(toneCalibration.schema),
       seed: "seed",
       compositionFrame: overrides.frame ?? scene.space,
     }),
@@ -85,7 +81,11 @@ describe("Scribble worker runtime", () => {
       () => clock.shift() ?? 52.75,
     );
 
-    expect(execute).toHaveBeenCalledWith(input.identity, undefined);
+    expect(execute).toHaveBeenCalledWith(
+      toneCalibration.generateScribbleArtwork,
+      input.identity,
+      undefined,
+    );
     expect(response).toEqual({
       type: "success",
       jobId: 7,
@@ -114,7 +114,11 @@ describe("Scribble worker runtime", () => {
   it("emits first, interval, and terminal progress before success", () => {
     const events: ScribbleWorkerMessage[] = [];
     const clock = [1_000, 1_000, 1_025, 1_099, 1_100, 1_150, 1_200];
-    const execute: ScribbleArtworkExecutor = (_identity, observer) => {
+    const execute: ScribbleArtworkExecutor = (
+      _generate,
+      _identity,
+      observer,
+    ) => {
       for (const completedWorkUnits of [10, 20, 30, 40, 50]) {
         observer?.({
           completedWorkUnits,
@@ -165,7 +169,11 @@ describe("Scribble worker runtime", () => {
 
   it("always emits terminal progress when its count equals an ordinary snapshot", () => {
     const progress: ScribbleProgress[] = [];
-    const execute: ScribbleArtworkExecutor = (_identity, observer) => {
+    const execute: ScribbleArtworkExecutor = (
+      _generate,
+      _identity,
+      observer,
+    ) => {
       observer?.({
         completedWorkUnits: 10,
         totalWorkUnits: 100,
@@ -203,9 +211,36 @@ describe("Scribble worker runtime", () => {
     },
   );
 
+  it.each([
+    ["missing", (params: any[]) => params.pop()],
+    ["extra", (params: any[]) => params.push({ key: "extra", value: 1 })],
+    ["reordered", (params: any[]) => params.reverse()],
+    ["wrong-kind", (params: any[]) => (params[0].value = "not-a-number")],
+  ])(
+    "rejects %s params that are structurally valid but not schema-canonical",
+    (_case, mutate) => {
+      const input = structuredClone(request()) as Record<string, any>;
+      mutate(input.identity.params);
+      const execute = vi.fn(
+        (..._args: Parameters<ScribbleArtworkExecutor>) => artwork,
+      );
+
+      expect(handleScribbleWorkerMessage(input, execute)).toMatchObject({
+        type: "failure",
+        error:
+          "Scribble request parameters do not match tone-calibration schema",
+      });
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+
   it("blocks malformed progress before posting a bounded safe failure", () => {
     const emitted = vi.fn();
-    const execute: ScribbleArtworkExecutor = (_identity, observer) => {
+    const execute: ScribbleArtworkExecutor = (
+      _generate,
+      _identity,
+      observer,
+    ) => {
       observer?.({
         completedWorkUnits: 2,
         totalWorkUnits: 1,

@@ -3,12 +3,15 @@ import {
   type Params,
   type ScribbleArtwork,
   type ScribbleObserver,
+  type StatelessSketch,
 } from "@harness/core";
 
 import {
+  createScribbleComputeIdentity,
   isScribbleComputeProgress,
   isScribbleComputeRequest,
   isScribbleComputeResponse,
+  scribbleComputeIdentitiesEqual,
   type ScribbleComputeIdentity,
   type ScribbleComputeProgress,
   type ScribbleComputeResponse,
@@ -19,8 +22,12 @@ import {
 } from "./workerProgress";
 
 type ProgressSink = (progress: ScribbleComputeProgress) => void;
+type ScribbleArtworkGenerator = NonNullable<
+  StatelessSketch["generateScribbleArtwork"]
+>;
 
 export type ScribbleArtworkExecutor = (
+  generate: ScribbleArtworkGenerator,
   identity: ScribbleComputeIdentity,
   observer?: ScribbleObserver,
 ) => ScribbleArtwork;
@@ -35,18 +42,47 @@ function paramsFromIdentity(identity: ScribbleComputeIdentity): Params {
   return params;
 }
 
-/** Resolve and execute the Sketch-owned complete Scribble preparation hook. */
-export const executeScribbleArtwork: ScribbleArtworkExecutor = (
-  identity,
-  observer,
-) => {
+function schemaMismatch(sketchId: string): TypeError {
+  return new TypeError(
+    `Scribble request parameters do not match ${sketchId} schema`,
+  );
+}
+
+function resolveScribbleGenerator(
+  identity: ScribbleComputeIdentity,
+): ScribbleArtworkGenerator {
   const sketch = registry.get(identity.sketchId);
   if (sketch.generateScribbleArtwork === undefined) {
     throw new Error(
       `Sketch ${identity.sketchId} has no Scribble artwork generator`,
     );
   }
-  return sketch.generateScribbleArtwork(
+
+  let canonicalIdentity: ScribbleComputeIdentity;
+  try {
+    canonicalIdentity = createScribbleComputeIdentity({
+      sketchId: sketch.id,
+      schema: sketch.schema,
+      params: paramsFromIdentity(identity),
+      seed: identity.seed,
+      compositionFrame: identity.compositionFrame,
+    });
+  } catch {
+    throw schemaMismatch(sketch.id);
+  }
+  if (!scribbleComputeIdentitiesEqual(identity, canonicalIdentity)) {
+    throw schemaMismatch(sketch.id);
+  }
+  return sketch.generateScribbleArtwork;
+}
+
+/** Execute the already-resolved Sketch-owned Scribble preparation hook. */
+export const executeScribbleArtwork: ScribbleArtworkExecutor = (
+  generate,
+  identity,
+  observer,
+) =>
+  generate(
     paramsFromIdentity(identity),
     identity.seed,
     {
@@ -55,7 +91,6 @@ export const executeScribbleArtwork: ScribbleArtworkExecutor = (
     },
     observer,
   );
-};
 
 function safeError(error: unknown): string {
   if (error instanceof Error) {
@@ -102,8 +137,10 @@ export function handleScribbleWorkerMessage(
   if (!isScribbleComputeRequest(value)) return null;
 
   try {
+    const generate = resolveScribbleGenerator(value.identity);
     const startedAt = now();
     const artwork = execute(
+      generate,
       value.identity,
       emitProgress === undefined
         ? undefined
