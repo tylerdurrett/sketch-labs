@@ -73,7 +73,7 @@ export interface ImageAssetSurface {
 
 /** Injectable browser operations; production defaults use global browser APIs. */
 export interface ImageAssetResolverDependencies {
-  fetch(url: string): Promise<ImageAssetFetchResponse>;
+  fetch(url: string, signal?: AbortSignal): Promise<ImageAssetFetchResponse>;
   createImageBitmap(blob: Blob): Promise<ImageAssetBitmap>;
   createSurface(width: number, height: number): ImageAssetSurface;
 }
@@ -98,7 +98,8 @@ function browserDependencies(): ImageAssetResolverDependencies {
   }
 
   return {
-    fetch: (url) => browser.fetch(url),
+    fetch: (url, signal) =>
+      signal === undefined ? browser.fetch(url) : browser.fetch(url, { signal }),
     createImageBitmap: (blob) => browser.createImageBitmap(blob),
     createSurface(width, height) {
       const surface = new browser.OffscreenCanvas!(width, height);
@@ -176,6 +177,7 @@ export function imageAssetIdSetKey(ids: Iterable<string>): string {
 export async function decodeImageAsset(
   id: string,
   dependencies?: ImageAssetResolverDependencies,
+  signal?: AbortSignal,
 ): Promise<DecodedPixels> {
   const url = imageAssetUrl(id);
   if (url === null) throw resolutionError("invalid-id");
@@ -183,7 +185,7 @@ export async function decodeImageAsset(
   const deps = dependencies ?? browserDependencies();
   let response: ImageAssetFetchResponse;
   try {
-    response = await deps.fetch(url);
+    response = await deps.fetch(url, signal);
   } catch {
     throw resolutionError("fetch-failed");
   }
@@ -256,10 +258,11 @@ export async function resolveSketchEnvironment(
   schema: ParamSchema,
   params: Params,
   dependencies?: ImageAssetResolverDependencies,
+  signal?: AbortSignal,
 ): Promise<SketchEnvironment> {
   const records = new Map<string, Readonly<DecodedPixels>>();
   for (const id of requiredImageAssetIds(schema, params)) {
-    records.set(id, await decodeImageAsset(id, dependencies));
+    records.set(id, await decodeImageAsset(id, dependencies, signal));
   }
 
   return {

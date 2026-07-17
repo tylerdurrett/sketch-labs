@@ -98,6 +98,7 @@ import {
   useScribblePreparation,
   type ScribbleAuthoredState,
 } from "./useScribblePreparation";
+import { useSketchEnvironment } from "./useSketchEnvironment";
 
 function formatOutlineEta(remainingMs: number): string {
   const seconds = Math.max(1, Math.ceil(remainingMs / 1_000));
@@ -333,11 +334,16 @@ export function SketchControls({
     [drawableAspectIdentity],
   );
 
+  const sketchEnvironment = useSketchEnvironment({
+    schema: sketch.schema,
+    params,
+  });
+
   const hasScribblePreparation = sketch.generateScribbleArtwork !== undefined;
   const scribbleInputRevisionRef = useRef(0);
   const scribblePreparation = useScribblePreparation({
     sketch,
-    enabled: hasScribblePreparation,
+    enabled: hasScribblePreparation && sketchEnvironment.ready,
     initial: {
       params: history.present.params,
       seed: history.present.seed,
@@ -408,9 +414,22 @@ export function SketchControls({
   const toneSource = useMemo(
     () =>
       toneReferenceActive
-        ? sketch.generateToneSource?.(params, compositionFrame)
+        ? sketchEnvironment.ready
+          ? sketch.generateToneSource?.(
+              params,
+              compositionFrame,
+              sketchEnvironment.environment,
+            )
+          : undefined
         : undefined,
-    [toneReferenceActive, sketch, params, compositionFrame],
+    [
+      toneReferenceActive,
+      sketch,
+      params,
+      compositionFrame,
+      sketchEnvironment.ready,
+      sketchEnvironment.environment,
+    ],
   );
 
   const [outlineSession, setOutlineSession] = useState(

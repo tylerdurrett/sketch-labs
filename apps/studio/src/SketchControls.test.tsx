@@ -31,6 +31,7 @@ import {
   type Scene,
   type ScribbleDiagnostics,
   type Seed,
+  type SketchEnvironment,
   type ToneSource,
 } from "@harness/core";
 
@@ -108,6 +109,30 @@ const scribbleJob = vi.hoisted(() => ({
       | undefined;
   }>,
 }));
+const sketchEnvironmentJob = vi.hoisted(() => ({
+  starts: [] as Array<{
+    params: Readonly<Record<string, unknown>>;
+    signal: AbortSignal;
+    resolve: (environment: import("@harness/core").SketchEnvironment) => void;
+    reject: (error: unknown) => void;
+  }>,
+}));
+
+vi.mock("./imageAssetResolver", async (importActual) => {
+  const actual = await importActual<typeof import("./imageAssetResolver")>();
+  return {
+    ...actual,
+    resolveSketchEnvironment: (
+      _schema: unknown,
+      params: Readonly<Record<string, unknown>>,
+      _dependencies: unknown,
+      signal: AbortSignal,
+    ) =>
+      new Promise((resolve, reject) => {
+        sketchEnvironmentJob.starts.push({ params, signal, resolve, reject });
+      }),
+  };
+});
 
 vi.mock("./scribbleCoordinator", () => ({
   ScribbleCoordinator: class {
@@ -670,6 +695,7 @@ beforeEach(() => {
   scribbleJob.disposals = 0;
   scribbleJob.cancelCount = 0;
   scribbleJob.starts = [];
+  sketchEnvironmentJob.starts = [];
   vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
   // Sensible defaults so a mount's list-on-mount effect resolves quietly; the
   // save/reload tests override loadPreset/savePreset per case.
@@ -4452,6 +4478,148 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     if (match === undefined) throw new Error("no Shading");
     return match;
   }
+
+  it("keys main-thread asset readiness across Tone and Scribble preparation", async () => {
+    const assetA = "portrait-alpha-000000000001";
+    const assetB = "portrait-beta-000000000002";
+    const invalidAsset = "unresolved://not-an-asset-id";
+    const schema = {
+      ...toneCalibration.schema,
+      photo: { kind: "image-asset", default: assetA },
+    } satisfies ParamSchema;
+    const toneSourceFor = vi.fn(
+      (
+        params: Readonly<Record<string, unknown>>,
+        frame: CoordinateSpace,
+        environment?: SketchEnvironment,
+      ): ToneSource => {
+        // Matching decoded bytes are a required input, not an optional fallback.
+        if (environment?.imageAssets(String(params.photo)) === undefined) {
+          throw new Error("missing matching test environment");
+        }
+        return {
+          toneField: createToneField(() => 0.5 / Math.max(frame.width, 1)),
+          shadingMask: createShadingMask(() => 1),
+        };
+      },
+    );
+    const sketch = {
+      ...toneCalibration,
+      id: "asset-scribble",
+      schema,
+      generateToneSource: toneSourceFor,
+    };
+    const pixels = {
+      width: 1,
+      height: 1,
+      data: new Uint8ClampedArray([1, 2, 3, 255]),
+    };
+    const resolvedEnvironment = (id: string): SketchEnvironment => ({
+      imageAssets: (requested) => (requested === id ? pixels : undefined),
+    });
+    const preset = (name: string, photo: string): Preset => ({
+      version: 2,
+      sketch: sketch.id,
+      name,
+      seed: 22,
+      params: { ...defaultParams(schema), photo },
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    listPresets.mockResolvedValue(["asset-b", "invalid"]);
+    loadPreset.mockImplementation(async (_sketchId, name) =>
+      name === "asset-b"
+        ? preset("asset-b", assetB)
+        : preset("invalid", invalidAsset),
+    );
+
+    const el = mount(<SketchControls sketch={sketch} />);
+    expect(sketchEnvironmentJob.starts).toHaveLength(1);
+    expect(sketchEnvironmentJob.starts[0]!.params.photo).toBe(assetA);
+    expect(scribbleJob.starts).toHaveLength(0);
+    clickButton(el, "Tone");
+    expect(toneSourceFor).not.toHaveBeenCalled();
+    expect(lastToneSource).toBeNull();
+
+    const environmentA = resolvedEnvironment(assetA);
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(environmentA);
+      await Promise.resolve();
+    });
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(toneSourceFor).toHaveBeenCalledTimes(1);
+    expect(toneSourceFor.mock.calls[0]?.[2]).toBe(environmentA);
+    expect(lastToneSource).not.toBeNull();
+
+    // Seed, Tone selection, and ordinary Scribble-param edits retain the exact
+    // same decoded environment because the opaque Image Asset ID set is equal.
+    clickButton(el, "New seed");
+    expect(scribbleJob.starts).toHaveLength(2);
+    clickButton(el, "Fill");
+    clickButton(el, "Tone");
+    const density = paramInput(el, "pathDensity");
+    act(() => density.focus());
+    setInput(density, "2");
+    act(() => density.blur());
+    expect(scribbleJob.starts).toHaveLength(3);
+    expect(sketchEnvironmentJob.starts).toHaveLength(1);
+
+    await flush();
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    const selectPreset = (name: string): void => {
+      act(() => {
+        const setter = Object.getOwnPropertyDescriptor(
+          window.HTMLSelectElement.prototype,
+          "value",
+        )!.set!;
+        setter.call(picker, name);
+        picker.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    };
+
+    selectPreset("asset-b");
+    clickButton(el, "Reload");
+    await flush();
+    expect(sketchEnvironmentJob.starts).toHaveLength(2);
+    expect(sketchEnvironmentJob.starts[1]!.params.photo).toBe(assetB);
+    expect(scribbleJob.starts).toHaveLength(3);
+    expect(lastToneSource).toBeNull();
+
+    const environmentB = resolvedEnvironment(assetB);
+    await act(async () => {
+      sketchEnvironmentJob.starts[1]!.resolve(environmentB);
+      await Promise.resolve();
+    });
+    expect(scribbleJob.starts).toHaveLength(4);
+    expect(scribbleJob.starts[3]!.identity.params).toContainEqual({
+      key: "photo",
+      value: assetB,
+    });
+    expect(toneSourceFor.mock.calls.at(-1)?.[2]).toBe(environmentB);
+    const startsAfterB = scribbleJob.starts.length;
+    await flush();
+    expect(scribbleJob.starts).toHaveLength(startsAfterB);
+
+    selectPreset("invalid");
+    clickButton(el, "Reload");
+    await flush();
+    expect(sketchEnvironmentJob.starts).toHaveLength(3);
+    expect(sketchEnvironmentJob.starts[2]!.params.photo).toBe(invalidAsset);
+    expect(historyCapture.atomic.at(-1)?.after.present.params.photo).toBe(
+      invalidAsset,
+    );
+    expect(scribbleJob.starts).toHaveLength(startsAfterB);
+    expect(lastToneSource).toBeNull();
+    await act(async () => {
+      sketchEnvironmentJob.starts[2]!.reject(new Error("invalid-id"));
+      await Promise.resolve();
+    });
+    expect(scribbleJob.starts).toHaveLength(startsAfterB);
+    expect(toneSourceFor.mock.calls.at(-1)?.[2]).toBe(environmentB);
+    expect(lastToneSource).toBeNull();
+  });
 
   it("shows diagnostics only for Scribble-capable Sketches", () => {
     const ordinary = mount(<SketchControls sketch={leafField} />);
