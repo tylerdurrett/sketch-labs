@@ -134,6 +134,16 @@ function desiredMatches(
   );
 }
 
+function isStaleInputRevision(
+  state: ScribbleSessionState,
+  sourceInputRevision: number,
+): boolean {
+  return (
+    state.sourceInputRevision !== null &&
+    sourceInputRevision < state.sourceInputRevision
+  );
+}
+
 function settleDesiredIdentity(
   state: ScribbleSessionState,
   identity: ScribbleComputeIdentity,
@@ -245,6 +255,9 @@ export function scribbleSessionReducer(
         failure: null,
       };
     case "desired-identity-changed":
+      if (isStaleInputRevision(state, action.sourceInputRevision)) {
+        return state;
+      }
       if (
         desiredMatches(state, action.identity, action.sourceInputRevision)
       ) {
@@ -259,6 +272,9 @@ export function scribbleSessionReducer(
         failure: null,
       };
     case "transaction-settled":
+      if (isStaleInputRevision(state, action.sourceInputRevision)) {
+        return state;
+      }
       return settleDesiredIdentity(
         state,
         action.identity,

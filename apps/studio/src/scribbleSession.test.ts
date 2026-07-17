@@ -180,6 +180,54 @@ describe("scribbleSessionReducer", () => {
     ).toBe(settled);
   });
 
+  it("ignores delayed authored actions older than the pending or active generation", () => {
+    const begun = scribbleSessionReducer(completedA(), {
+      type: "transaction-began",
+    });
+    const previewed = scribbleSessionReducer(begun, {
+      type: "desired-identity-changed",
+      identity: identity(3),
+      sourceInputRevision: 12,
+    });
+    const pending = scribbleSessionReducer(previewed, {
+      type: "transaction-settled",
+      identity: identity(3),
+      sourceInputRevision: 12,
+    });
+
+    const delayedPreview = scribbleSessionReducer(pending, {
+      type: "desired-identity-changed",
+      identity: identity(2),
+      sourceInputRevision: 11,
+    });
+    expect(delayedPreview).toBe(pending);
+    expect(delayedPreview.pending?.sourceInputRevision).toBe(12);
+
+    const active = launch(pending);
+    const delayedSettle = scribbleSessionReducer(active, {
+      type: "transaction-settled",
+      identity: identity(2),
+      sourceInputRevision: 11,
+    });
+    expect(delayedSettle).toBe(active);
+    expect(delayedSettle.active?.sourceInputRevision).toBe(12);
+  });
+
+  it("cannot roll a current display back or make stale geometry exportable", () => {
+    const current = succeed(
+      launch(createScribbleSessionState(identity(3), 12)),
+    );
+    const delayed = scribbleSessionReducer(current, {
+      type: "transaction-settled",
+      identity: identity(2),
+      sourceInputRevision: 11,
+    });
+
+    expect(delayed).toBe(current);
+    expect(delayed.sourceInputRevision).toBe(12);
+    expect(selectExportableScribbleResult(delayed)).toBe(current.displayed);
+  });
+
   it("does not duplicate exact active work and advances its provenance", () => {
     const active = launch(createScribbleSessionState(identity(1), 10));
     const settled = scribbleSessionReducer(active, {
