@@ -8,6 +8,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { createServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -64,7 +65,6 @@ function fakeReq(
   options: RequestOptions = {},
 ): unknown {
   const listeners: Record<string, ((arg?: unknown) => void)[]> = {};
-  let destroyed = false;
 
   return {
     url,
@@ -75,16 +75,11 @@ function fakeReq(
       if (event === "end") {
         queueMicrotask(() => {
           for (const chunk of options.chunks ?? []) {
-            if (destroyed) return;
             for (const listener of listeners["data"] ?? []) listener(chunk);
           }
-          if (destroyed) return;
           for (const listener of listeners["end"] ?? []) listener();
         });
       }
-    },
-    destroy(): void {
-      destroyed = true;
     },
   };
 }
@@ -123,6 +118,61 @@ function post(
 function expectedId(slug: string, bytes: Uint8Array): string {
   const digest = createHash("sha256").update(bytes).digest("hex");
   return imageAssetIdFromDigest(slug, digest);
+}
+
+async function overLimitChunkedHttpRequest(
+  root: string,
+): Promise<{ readonly status: number; readonly body: string }> {
+  const server = createServer((req, res) => {
+    void handleImageAssetRequest(root, req as never, res as never);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  try {
+    const address = server.address() as { readonly port: number };
+    return await new Promise((resolve, reject) => {
+      const req = httpRequest(
+        {
+          hostname: "127.0.0.1",
+          port: address.port,
+          path: "/__api/image-assets/streamed-study",
+          method: "POST",
+          headers: { "Content-Type": "image/png" },
+        },
+        (res) => {
+          const chunks: string[] = [];
+          res.setEncoding("utf8");
+          res.on("data", (chunk: string) => chunks.push(chunk));
+          res.on("end", () =>
+            resolve({ status: res.statusCode ?? 0, body: chunks.join("") }),
+          );
+        },
+      );
+      req.on("error", reject);
+
+      void (async () => {
+        const chunk = new Uint8Array(1024 * 1024);
+        for (
+          let sent = 0;
+          sent < IMAGE_ASSET_MAX_BODY_BYTES;
+          sent += chunk.byteLength
+        ) {
+          if (!req.write(chunk)) {
+            await new Promise<void>((drain) => req.once("drain", drain));
+          }
+        }
+        req.end(new Uint8Array([0]));
+      })().catch(reject);
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error === undefined ? resolve() : reject(error)));
+    });
+  }
 }
 
 describe("Image Asset static serving", () => {
@@ -440,6 +490,14 @@ describe("Image Asset list and write API", () => {
         headers: { "content-type": "image/png" },
       },
     );
+
+    expect(res.status).toBe(413);
+    expect(res.body).toBe('{"error":"Request body too large"}');
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it("returns JSON 413 over real HTTP while draining an over-limit chunked body", async () => {
+    const res = await overLimitChunkedHttpRequest(root);
 
     expect(res.status).toBe(413);
     expect(res.body).toBe('{"error":"Request body too large"}');

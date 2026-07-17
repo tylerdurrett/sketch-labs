@@ -45,7 +45,6 @@ export interface ImageAssetRequest {
   on(event: "data", cb: (chunk: RequestChunk) => void): void;
   on(event: "end", cb: () => void): void;
   on(event: "error", cb: (error: unknown) => void): void;
-  destroy(): void;
 }
 
 /** The response half of Vite's Connect middleware. */
@@ -111,8 +110,11 @@ function readBoundedBody(req: ImageAssetRequest): Promise<Uint8Array> {
       if (settled) return;
       if (chunk.byteLength > IMAGE_ASSET_MAX_BODY_BYTES - size) {
         settled = true;
+        chunks.length = 0;
         reject(new RequestBodyTooLargeError());
-        req.destroy();
+        // Leave this data listener attached: the stream stays flowing and the
+        // settled guard drains without retaining the remainder, allowing the
+        // same HTTP connection to carry the JSON 413 response.
         return;
       }
 
