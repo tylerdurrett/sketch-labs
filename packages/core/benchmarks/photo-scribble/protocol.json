@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "issue": 336,
+  "artifactPrefix": "issue-336-trial-",
+  "frame": {
+    "width": 1000,
+    "height": 1000
+  },
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true,
+    "toolWidthMillimeters": 0.3
+  },
+  "scenarios": [
+    {
+      "scenarioId": "flowers-opaque-control",
+      "fixtureId": "flowers-opaque-portrait",
+      "captureStem": "issue-336-trial-flowers-opaque-control",
+      "seed": 2381065623916958,
+      "reseed": 2381065623916959,
+      "params": {
+        "imageAsset": "img-0672-79d639daec62",
+        "toneContrast": 0.96,
+        "toneGamma": 1,
+        "pathDensity": 20,
+        "scribbleScale": 0.35,
+        "momentum": 0.98,
+        "chaos": 0.02,
+        "toneFidelity": 0.99
+      },
+      "roles": [
+        "ordinary-opaque",
+        "mismatched-aspect",
+        "workflow-control"
+      ]
+    },
+    {
+      "scenarioId": "pinecone-dark-alpha-control",
+      "fixtureId": "pinecone-dark-alpha-portrait",
+      "captureStem": "issue-336-trial-pinecone-dark-alpha-control",
+      "seed": 5036310400360331,
+      "reseed": 5036310400360332,
+      "params": {
+        "imageAsset": "pinecone-4330aa0314f7",
+        "toneContrast": 1,
+        "toneGamma": 1,
+        "pathDensity": 20,
+        "scribbleScale": 0.5,
+        "momentum": 1,
+        "chaos": 0.72,
+        "toneFidelity": 1
+      },
+      "roles": [
+        "flat-or-dark",
+        "partial-and-fully-transparent",
+        "mismatched-aspect",
+        "workflow-control"
+      ]
+    },
+    {
+      "scenarioId": "flowers-opaque-fine",
+      "fixtureId": "flowers-opaque-portrait",
+      "captureStem": "issue-336-trial-flowers-opaque-fine",
+      "seed": 2381065623916958,
+      "reseed": 2381065623916959,
+      "params": {
+        "imageAsset": "img-0672-79d639daec62",
+        "toneContrast": 0.96,
+        "toneGamma": 1,
+        "pathDensity": 20,
+        "scribbleScale": 0.1,
+        "momentum": 0.98,
+        "chaos": 0.02,
+        "toneFidelity": 0.99
+      },
+      "roles": [
+        "budget-calibration"
+      ]
+    },
+    {
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "fixtureId": "pinecone-dark-alpha-portrait",
+      "captureStem": "issue-336-trial-pinecone-dark-alpha-fine",
+      "seed": 5036310400360331,
+      "reseed": 5036310400360332,
+      "params": {
+        "imageAsset": "pinecone-4330aa0314f7",
+        "toneContrast": 1,
+        "toneGamma": 1,
+        "pathDensity": 20,
+        "scribbleScale": 0.1,
+        "momentum": 1,
+        "chaos": 0.72,
+        "toneFidelity": 1
+      },
+      "roles": [
+        "budget-calibration"
+      ]
+    }
+  ],
+  "captureSuffixes": [
+    "studio-initial.png",
+    "tone-identity.png",
+    "tone-authored.png",
+    "fill-primary.png",
+    "fill-reseed.png",
+    "fill-reloaded.png",
+    "outline.png",
+    "ordinary.png",
+    "ordinary.svg",
+    "plotter.svg",
+    "preset.json",
+    "metrics.json"
+  ],
+  "orderedLimitCandidates": [
+    {
+      "candidateId": "current-fine-baseline",
+      "maxAcceptedSegments": 50000,
+      "maxPolylines": 4000,
+      "maxStagnations": 8000,
+      "maxRestarts": 4000
+    },
+    {
+      "candidateId": "fine-100k",
+      "maxAcceptedSegments": 100000,
+      "maxPolylines": 8000,
+      "maxStagnations": 16000,
+      "maxRestarts": 8000
+    },
+    {
+      "candidateId": "fine-250k",
+      "maxAcceptedSegments": 250000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    {
+      "candidateId": "fine-500k",
+      "maxAcceptedSegments": 500000,
+      "maxPolylines": 32000,
+      "maxStagnations": 64000,
+      "maxRestarts": 32000
+    },
+    {
+      "candidateId": "fine-1000k",
+      "maxAcceptedSegments": 1000000,
+      "maxPolylines": 64000,
+      "maxStagnations": 128000,
+      "maxRestarts": 64000
+    }
+  ],
+  "thresholds": {
+    "jobTimeoutMs": 300000,
+    "maxProgressHeartbeatGapMs": 1000,
+    "maxUiRoundtripMs": 250,
+    "maxCancellationRoundtripMs": 500,
+    "maxTerminalProgressToDisplayMs": 5000,
+    "minimumRelativeResidualImprovement": 0.2
+  },
+  "visualVerdicts": [
+    "tone-target-faithfulness",
+    "routing-legibility",
+    "letterbox-permission",
+    "alpha-permission",
+    "geometry-and-export-parity",
+    "plot-readiness"
+  ]
+}
