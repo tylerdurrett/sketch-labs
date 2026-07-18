@@ -10,6 +10,7 @@ import { imageAssetUrl } from "./imageAssetIdentity";
 /** Stable failure categories callers can use without inspecting browser errors. */
 export type ImageAssetResolutionErrorCode =
   | "invalid-id"
+  | "missing"
   | "capability-unavailable"
   | "fetch-failed"
   | "response-failed"
@@ -17,10 +18,12 @@ export type ImageAssetResolutionErrorCode =
   | "invalid-dimensions"
   | "surface-failed"
   | "context-unavailable"
-  | "readback-failed";
+  | "readback-failed"
+  | "resolution-failed";
 
 const ERROR_MESSAGES: Record<ImageAssetResolutionErrorCode, string> = {
   "invalid-id": "Image Asset ID is invalid",
+  missing: "Image Asset is missing",
   "capability-unavailable": "Browser image decoding is unavailable",
   "fetch-failed": "Image Asset fetch failed",
   "response-failed": "Image Asset response could not be read",
@@ -29,22 +32,27 @@ const ERROR_MESSAGES: Record<ImageAssetResolutionErrorCode, string> = {
   "surface-failed": "Image Asset decode surface could not be created",
   "context-unavailable": "Image Asset decode context is unavailable",
   "readback-failed": "Decoded Image Asset pixels could not be read",
+  "resolution-failed": "Image Asset resolution failed",
 };
 
 /** A bounded, browser-detail-free Image Asset resolution failure. */
 export class ImageAssetResolutionError extends Error {
   readonly code: ImageAssetResolutionErrorCode;
+  /** Exact authored ID whose resolution failed; never a repaired substitute. */
+  readonly assetId: string | undefined;
 
-  constructor(code: ImageAssetResolutionErrorCode) {
+  constructor(code: ImageAssetResolutionErrorCode, assetId?: string) {
     super(ERROR_MESSAGES[code]);
     this.name = "ImageAssetResolutionError";
     this.code = code;
+    this.assetId = assetId;
   }
 }
 
 /** Minimal browser response seam used by the resolver's unit adapters. */
 export interface ImageAssetFetchResponse {
   readonly ok: boolean;
+  readonly status: number;
   blob(): Promise<Blob>;
 }
 
@@ -80,8 +88,9 @@ export interface ImageAssetResolverDependencies {
 
 function resolutionError(
   code: ImageAssetResolutionErrorCode,
+  assetId?: string,
 ): ImageAssetResolutionError {
-  return new ImageAssetResolutionError(code);
+  return new ImageAssetResolutionError(code, assetId);
 }
 
 function browserDependencies(): ImageAssetResolverDependencies {
@@ -180,34 +189,44 @@ export async function decodeImageAsset(
   signal?: AbortSignal,
 ): Promise<DecodedPixels> {
   const url = imageAssetUrl(id);
-  if (url === null) throw resolutionError("invalid-id");
+  if (url === null) throw resolutionError("invalid-id", id);
 
-  const deps = dependencies ?? browserDependencies();
+  let deps: ImageAssetResolverDependencies;
+  try {
+    deps = dependencies ?? browserDependencies();
+  } catch {
+    throw resolutionError("capability-unavailable", id);
+  }
   let response: ImageAssetFetchResponse;
   try {
     response = await deps.fetch(url, signal);
   } catch {
-    throw resolutionError("fetch-failed");
+    throw resolutionError("fetch-failed", id);
   }
-  if (!response.ok) throw resolutionError("fetch-failed");
+  if (!response.ok) {
+    throw resolutionError(
+      response.status === 404 ? "missing" : "fetch-failed",
+      id,
+    );
+  }
 
   let blob: Blob;
   try {
     blob = await response.blob();
   } catch {
-    throw resolutionError("response-failed");
+    throw resolutionError("response-failed", id);
   }
 
   let bitmap: ImageAssetBitmap;
   try {
     bitmap = await deps.createImageBitmap(blob);
   } catch {
-    throw resolutionError("decode-failed");
+    throw resolutionError("decode-failed", id);
   }
 
   try {
     if (!hasValidDimensions(bitmap)) {
-      throw resolutionError("invalid-dimensions");
+      throw resolutionError("invalid-dimensions", id);
     }
 
     const { width, height } = bitmap;
@@ -215,28 +234,28 @@ export async function decodeImageAsset(
     try {
       surface = deps.createSurface(width, height);
     } catch {
-      throw resolutionError("surface-failed");
+      throw resolutionError("surface-failed", id);
     }
 
     let context: ImageAssetReadbackContext | null;
     try {
       context = surface.getContext("2d");
     } catch {
-      throw resolutionError("context-unavailable");
+      throw resolutionError("context-unavailable", id);
     }
-    if (context === null) throw resolutionError("context-unavailable");
+    if (context === null) throw resolutionError("context-unavailable", id);
 
     try {
       context.drawImage(bitmap, 0, 0);
       const imageData = context.getImageData(0, 0, width, height);
       const data = new Uint8ClampedArray(imageData.data);
       if (data.length !== width * height * 4) {
-        throw resolutionError("readback-failed");
+        throw resolutionError("readback-failed", id);
       }
       return { width, height, data };
     } catch (error: unknown) {
       if (error instanceof ImageAssetResolutionError) throw error;
-      throw resolutionError("readback-failed");
+      throw resolutionError("readback-failed", id);
     }
   } finally {
     // Closing is cleanup only: a browser-specific close error must not replace

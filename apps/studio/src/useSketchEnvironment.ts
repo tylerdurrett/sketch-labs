@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   ParamSchema,
@@ -7,6 +7,7 @@ import type {
 } from "@harness/core";
 
 import {
+  ImageAssetResolutionError,
   imageAssetIdSetKey,
   requiredImageAssetIds,
   resolveSketchEnvironment,
@@ -24,16 +25,30 @@ export interface UseSketchEnvironmentOptions {
   readonly resolver?: SketchEnvironmentResolver;
 }
 
+export type SketchEnvironmentResolutionStatus =
+  | "loading"
+  | "resolved"
+  | "missing"
+  | "error";
+
 export interface UseSketchEnvironmentResult {
+  /** Explicit lifecycle for the current exact ID set and retry attempt. */
+  readonly status: SketchEnvironmentResolutionStatus;
   /** Canonical identity of the current schema-declared Image Asset set. */
   readonly key: string;
+  /** Descriptive alias for `key`, exposed to resolution-state consumers. */
+  readonly resolutionKey: string;
   readonly requiredIds: readonly string[];
   /** True synchronously for asset-free inputs, or after this exact key resolves. */
   readonly ready: boolean;
   /** Present only when it was resolved for the exact current key. */
   readonly environment: SketchEnvironment | undefined;
   /** Bounded resolution failure for the current key; broader UX belongs to #335. */
-  readonly error: Error | null;
+  readonly error: ImageAssetResolutionError | null;
+  /** Exact authored ID that failed, when the resolver can identify one. */
+  readonly failedId: string | null;
+  /** Start a fresh attempt for the same IDs without mutating authored params. */
+  readonly retry: () => void;
 }
 
 const defaultResolver: SketchEnvironmentResolver = (schema, params, signal) =>
@@ -43,13 +58,14 @@ interface ResolutionState {
   readonly key: string;
   readonly generation: number;
   readonly environment?: SketchEnvironment;
-  readonly error?: Error;
+  readonly error?: ImageAssetResolutionError;
+  readonly failedId?: string;
 }
 
-function safeResolutionError(error: unknown): Error {
-  return error instanceof Error
+function safeResolutionError(error: unknown): ImageAssetResolutionError {
+  return error instanceof ImageAssetResolutionError
     ? error
-    : new Error("Image Asset resolution failed");
+    : new ImageAssetResolutionError("resolution-failed");
 }
 
 /**
@@ -66,10 +82,16 @@ export function useSketchEnvironment({
 }: UseSketchEnvironmentOptions): UseSketchEnvironmentResult {
   const requiredIds = requiredImageAssetIds(schema, params);
   const key = imageAssetIdSetKey(requiredIds);
-  const currentIdentityRef = useRef({ key, generation: 1 });
-  if (currentIdentityRef.current.key !== key) {
+  const [retryGeneration, setRetryGeneration] = useState(0);
+  const retry = useCallback(() => setRetryGeneration((value) => value + 1), []);
+  const currentIdentityRef = useRef({ key, retryGeneration, generation: 1 });
+  if (
+    currentIdentityRef.current.key !== key ||
+    currentIdentityRef.current.retryGeneration !== retryGeneration
+  ) {
     currentIdentityRef.current = {
       key,
+      retryGeneration,
       generation: currentIdentityRef.current.generation + 1,
     };
   }
@@ -99,7 +121,15 @@ export function useSketchEnvironment({
         ) {
           return;
         }
-        setResolution({ key, generation, error: safeResolutionError(error) });
+        const safeError = safeResolutionError(error);
+        const failedId =
+          safeError.assetId ??
+          (requiredIds.length === 1 ? requiredIds[0] : undefined);
+        setResolution(
+          failedId === undefined
+            ? { key, generation, error: safeError }
+            : { key, generation, error: safeError, failedId },
+        );
       },
     );
 
@@ -111,11 +141,15 @@ export function useSketchEnvironment({
 
   if (requiredIds.length === 0) {
     return {
+      status: "resolved",
       key,
+      resolutionKey: key,
       requiredIds,
       ready: true,
       environment: undefined,
       error: null,
+      failedId: null,
+      retry,
     };
   }
 
@@ -124,11 +158,24 @@ export function useSketchEnvironment({
       ? resolution
       : null;
   const environment = currentResolution?.environment;
+  const error = currentResolution?.error ?? null;
+  const status =
+    environment !== undefined
+      ? "resolved"
+      : error?.code === "missing"
+        ? "missing"
+        : error === null
+          ? "loading"
+          : "error";
   return {
+    status,
     key,
+    resolutionKey: key,
     requiredIds,
     ready: environment !== undefined,
     environment,
-    error: currentResolution?.error ?? null,
+    error,
+    failedId: currentResolution?.failedId ?? null,
+    retry,
   };
 }

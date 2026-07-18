@@ -9,6 +9,7 @@ import type {
   SketchEnvironment,
 } from "@harness/core";
 
+import { ImageAssetResolutionError } from "./imageAssetResolver";
 import {
   useSketchEnvironment,
   type SketchEnvironmentResolver,
@@ -110,6 +111,11 @@ describe("useSketchEnvironment", () => {
       />,
     );
     expect(latest).toMatchObject({ requiredIds: [A], ready: false });
+    expect(latest).toMatchObject({
+      status: "loading",
+      resolutionKey: JSON.stringify([A]),
+      failedId: null,
+    });
 
     render(
       <Probe
@@ -186,20 +192,100 @@ describe("useSketchEnvironment", () => {
     expect(latest!.environment).toBeUndefined();
   });
 
+  it("rejects a pending first A completion after A to B to A", async () => {
+    const controlled = controlledResolver();
+    mount(<Probe params={{ source: A }} resolver={controlled.resolver} />);
+    render(<Probe params={{ source: B }} resolver={controlled.resolver} />);
+    render(<Probe params={{ source: A }} resolver={controlled.resolver} />);
+
+    const staleA = environment(A);
+    await settle(() => controlled.calls[0]!.resolve(staleA));
+    expect(latest).toMatchObject({ status: "loading", requiredIds: [A] });
+    expect(latest!.environment).toBeUndefined();
+
+    const currentA = environment(A);
+    await settle(() => controlled.calls[2]!.resolve(currentA));
+    expect(latest).toMatchObject({ status: "resolved", ready: true });
+    expect(latest!.environment).toBe(currentA);
+  });
+
+  it("models 404 as missing and retries the exact ID without changing params", async () => {
+    const controlled = controlledResolver();
+    mount(<Probe params={{ source: A }} resolver={controlled.resolver} />);
+    await settle(() =>
+      controlled.calls[0]!.reject(new ImageAssetResolutionError("missing", A)),
+    );
+
+    expect(latest).toMatchObject({
+      status: "missing",
+      ready: false,
+      requiredIds: [A],
+      failedId: A,
+    });
+    expect(latest!.error).toEqual(new ImageAssetResolutionError("missing", A));
+
+    act(() => latest!.retry());
+    expect(controlled.calls).toHaveLength(2);
+    expect(controlled.calls[0]!.signal.aborted).toBe(true);
+    expect(controlled.calls[1]!.params.source).toBe(A);
+    expect(latest).toMatchObject({
+      status: "loading",
+      requiredIds: [A],
+      failedId: null,
+    });
+
+    const resolved = environment(A);
+    await settle(() => controlled.calls[1]!.resolve(resolved));
+    expect(latest).toMatchObject({ status: "resolved", ready: true });
+    expect(latest!.environment).toBe(resolved);
+  });
+
+  it("does not let a retired retry generation replace the current attempt", async () => {
+    const controlled = controlledResolver();
+    mount(<Probe params={{ source: A }} resolver={controlled.resolver} />);
+    act(() => latest!.retry());
+
+    const stale = environment(A);
+    await settle(() => controlled.calls[0]!.resolve(stale));
+    expect(latest).toMatchObject({ status: "loading", ready: false });
+    expect(latest!.environment).toBeUndefined();
+
+    const current = environment(A);
+    await settle(() => controlled.calls[1]!.resolve(current));
+    expect(latest!.environment).toBe(current);
+  });
+
   it("fails a nonconforming opaque string without substitution", async () => {
     const controlled = controlledResolver();
     const invalid = "unresolved://not-an-asset-id";
     mount(<Probe params={{ source: invalid }} resolver={controlled.resolver} />);
     expect(controlled.calls[0]!.params.source).toBe(invalid);
 
-    const failure = new Error("Image Asset ID is invalid");
+    const failure = new ImageAssetResolutionError("invalid-id", invalid);
     await settle(() => controlled.calls[0]!.reject(failure));
     expect(latest).toMatchObject({
       requiredIds: [invalid],
       ready: false,
       error: failure,
+      status: "error",
+      failedId: invalid,
     });
     expect(latest!.environment).toBeUndefined();
+  });
+
+  it("bounds unexpected resolver details as a safe error", async () => {
+    const controlled = controlledResolver();
+    mount(<Probe params={{ source: A }} resolver={controlled.resolver} />);
+    await settle(() =>
+      controlled.calls[0]!.reject(new Error("private URL detail")),
+    );
+
+    expect(latest).toMatchObject({
+      status: "error",
+      failedId: A,
+      error: new ImageAssetResolutionError("resolution-failed"),
+    });
+    expect(latest!.error!.message).not.toContain("private URL detail");
   });
 
   it("makes asset-free sketches ready synchronously without resolving", () => {
@@ -216,7 +302,14 @@ describe("useSketchEnvironment", () => {
     );
 
     expect(controlled.calls).toHaveLength(0);
-    expect(latest).toMatchObject({ requiredIds: [], ready: true, error: null });
+    expect(latest).toMatchObject({
+      status: "resolved",
+      resolutionKey: "[]",
+      requiredIds: [],
+      ready: true,
+      error: null,
+      failedId: null,
+    });
     expect(latest!.environment).toBeUndefined();
   });
 });
