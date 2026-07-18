@@ -342,12 +342,23 @@ export function SketchControls({
     schema: sketch.schema,
     params,
   });
+  // Resolution state is usable only for the exact authored ID-set identity.
+  // Asset-free Sketches resolve synchronously through this same gate.
+  const exactEnvironmentReady =
+    sketchEnvironment.status === "resolved" &&
+    sketchEnvironment.ready &&
+    sketchEnvironment.resolutionKey === sketchEnvironment.key;
+  const unavailableEnvironmentStatus = exactEnvironmentReady
+    ? null
+    : sketchEnvironment.status === "resolved"
+      ? ("error" as const)
+      : sketchEnvironment.status;
 
   const hasScribblePreparation = sketch.generateScribbleArtwork !== undefined;
   const scribbleInputRevisionRef = useRef(0);
   const scribblePreparation = useScribblePreparation({
     sketch,
-    enabled: hasScribblePreparation && sketchEnvironment.ready,
+    enabled: hasScribblePreparation && exactEnvironmentReady,
     initial: {
       params: history.present.params,
       seed: history.present.seed,
@@ -355,21 +366,22 @@ export function SketchControls({
       inputRevision: scribbleInputRevisionRef.current,
     },
   });
-  const currentScribble = selectCurrentScribbleResult(
-    scribblePreparation.session,
-  );
+  const currentScribble = exactEnvironmentReady
+    ? selectCurrentScribbleResult(scribblePreparation.session)
+    : null;
   const displayedShadingDiagnostics: DisplayedShadingDiagnostics | null =
-    scribblePreparation.session.displayed === null
+    !exactEnvironmentReady || scribblePreparation.session.displayed === null
       ? null
       : {
           freshness: currentScribble === null ? "stale" : "current",
           diagnostics: scribblePreparation.session.displayed.diagnostics,
           computeTimeMs: scribblePreparation.session.displayed.computeTimeMs,
         };
-  const activeScribbleToken =
-    scribblePreparation.session.active?.token ??
-    scribblePreparation.session.pending?.token ??
-    null;
+  const activeScribbleToken = exactEnvironmentReady
+    ? (scribblePreparation.session.active?.token ??
+        scribblePreparation.session.pending?.token ??
+        null)
+    : null;
   const shadingPreparationDiagnostics: ShadingPreparationDiagnostics =
     activeScribbleToken !== null
       ? {
@@ -394,6 +406,7 @@ export function SketchControls({
   const acknowledgedScribbleRef = useRef(acknowledgedScribble);
   acknowledgedScribbleRef.current = acknowledgedScribble;
   const scribblePaintIsCurrent =
+    exactEnvironmentReady &&
     currentScribble !== null &&
     acknowledgedScribble?.sourceInputRevision ===
       currentScribble.sourceInputRevision &&
@@ -418,7 +431,7 @@ export function SketchControls({
   const toneSource = useMemo(
     () =>
       toneReferenceActive
-        ? sketchEnvironment.ready
+        ? exactEnvironmentReady
           ? sketch.generateToneSource?.(
               params,
               compositionFrame,
@@ -431,7 +444,7 @@ export function SketchControls({
       sketch,
       params,
       compositionFrame,
-      sketchEnvironment.ready,
+      exactEnvironmentReady,
       sketchEnvironment.environment,
     ],
   );
@@ -838,7 +851,13 @@ export function SketchControls({
   };
 
   const renderState: LiveCanvasRenderState =
-    toneSource !== undefined
+    unavailableEnvironmentStatus !== null
+      ? {
+          kind: "unavailable",
+          status: unavailableEnvironmentStatus,
+          unresolvedAssetIds: sketchEnvironment.requiredIds,
+        }
+      : toneSource !== undefined
       ? { kind: "tone-reference", source: toneSource }
       : hasScribblePreparation && outlineSession.phase.kind === "fill-live"
         ? scribblePreparation.session.displayed === null
@@ -1310,6 +1329,11 @@ export function SketchControls({
           }}
           onToggleLock={toggleLock}
           imageAssetLongEdgeCap={imageAssetLongEdgeCap}
+          imageAssetResolution={{
+            status: sketchEnvironment.status,
+            failedId: sketchEnvironment.failedId,
+            retry: sketchEnvironment.retry,
+          }}
         />
         <div className="flex flex-wrap gap-2">
           <Button

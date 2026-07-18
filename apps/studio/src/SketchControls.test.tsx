@@ -42,6 +42,7 @@ import type {
 } from "./LiveCanvas";
 import { mutableScene } from "./outlineComputeProtocol";
 import { outlineScene } from "./outlineScene";
+import { ImageAssetResolutionError } from "./imageAssetResolver";
 import { isScribbleComputeIdentity } from "./scribbleComputeProtocol";
 import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
@@ -439,6 +440,8 @@ vi.mock("./LiveCanvas", () => ({
       source?: ToneSource;
       sourceInputRevision?: number;
       contentRevision?: number;
+      status?: string;
+      unresolvedAssetIds?: readonly string[];
     };
     tolerance?: number;
     compositionFrame: CoordinateSpace;
@@ -578,6 +581,10 @@ vi.mock("./LiveCanvas", () => ({
           renderState?.sourceInputRevision ?? "",
         )}
         data-content-revision={String(renderState?.contentRevision ?? "")}
+        data-unavailable-status={renderState?.status ?? ""}
+        data-unresolved-asset-ids={
+          renderState?.unresolvedAssetIds?.join("|") ?? ""
+        }
       >
         {String(seed)}
       </div>
@@ -4926,6 +4933,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     );
 
     const el = mount(<SketchControls sketch={sketch} />);
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
     expect(sketchEnvironmentJob.starts).toHaveLength(1);
     expect(sketchEnvironmentJob.starts[0]!.params.photo).toBe(assetA);
     expect(scribbleJob.starts).toHaveLength(0);
@@ -5011,6 +5019,200 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(scribbleJob.starts).toHaveLength(startsAfterB);
     expect(toneSourceFor.mock.calls.at(-1)?.[2]).toBe(environmentB);
     expect(lastToneSource).toBeNull();
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("error");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(invalidAsset);
+    expect(el.textContent).toContain("Image Asset is unavailable");
+  });
+
+  it("fails closed through loading and missing, then retries the unchanged exact ID once", async () => {
+    const generateToneSource = vi.fn(
+      (
+        ...args: Parameters<
+          NonNullable<typeof photoScribble.generateToneSource>
+        >
+      ) => photoScribble.generateToneSource!(...args),
+    );
+    const el = mount(
+      <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+    );
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("loading");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetA);
+    expect(el.textContent).toContain("Loading exact Image Asset");
+    expect(scribbleJob.starts).toHaveLength(0);
+
+    clickButton(el, "Tone");
+    expect(generateToneSource).not.toHaveBeenCalled();
+    expect(lastToneSource).toBeNull();
+
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.reject(
+        new ImageAssetResolutionError("missing", assetA),
+      );
+      await Promise.resolve();
+    });
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("missing");
+    expect(el.textContent).toContain("Image Asset is missing");
+    expect(scribbleJob.starts).toHaveLength(0);
+
+    clickButton(el, "Retry exact asset");
+    expect(sketchEnvironmentJob.starts).toHaveLength(2);
+    expect(sketchEnvironmentJob.starts[1]!.params.imageAsset).toBe(assetA);
+    expect(canvas.dataset.unavailableStatus).toBe("loading");
+
+    const recovered = resolvedAssetEnvironment(assetA, 143);
+    await act(async () => {
+      sketchEnvironmentJob.starts[1]!.resolve(recovered);
+      await Promise.resolve();
+    });
+
+    expect(generateToneSource).toHaveBeenCalledTimes(1);
+    expect(generateToneSource.mock.calls[0]?.[2]).toBe(recovered);
+    expect(canvas.dataset.renderState).toBe("tone-reference");
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(scribbleJob.starts[0]!.identity.params).toContainEqual({
+      key: "imageAsset",
+      value: assetA,
+    });
+    await flush();
+    expect(scribbleJob.starts).toHaveLength(1);
+  });
+
+  it("rejects obsolete environment and worker completions without changing current presentation", async () => {
+    const assetC = "portrait-charlie-cccccccccccc";
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+      {
+        id: assetC,
+        name: "portrait charlie",
+        url: `/image-assets/${assetC}.png`,
+      },
+    ]);
+    const generateToneSource = vi.fn(
+      (
+        ...args: Parameters<
+          NonNullable<typeof photoScribble.generateToneSource>
+        >
+      ) => photoScribble.generateToneSource!(...args),
+    );
+    const el = mount(
+      <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+    );
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const selectManagedAsset = async (name: string): Promise<void> => {
+      if (el.textContent?.includes("Choose image")) {
+        clickButton(el, "Choose image");
+        await flush();
+      }
+      const choice = [
+        ...el.querySelectorAll<HTMLButtonElement>(
+          '[aria-label="Image Assets"] button',
+        ),
+      ].find((button) => button.textContent?.includes(name));
+      if (choice === undefined) throw new Error(`no ${name} choice`);
+      act(() => choice.click());
+    };
+
+    const environmentA = resolvedAssetEnvironment(assetA, 32);
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(environmentA);
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(40));
+    clickButton(el, "Tone");
+    expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentA);
+
+    // Leave a same-environment replacement active so its late completion races
+    // the two subsequent exact-asset selections.
+    clickButton(el, "New seed");
+    expect(scribbleJob.starts).toHaveLength(2);
+    await selectManagedAsset("portrait beta");
+    const obsoleteEnvironment = sketchEnvironmentJob.starts[1]!;
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetB);
+    expect(shadingDisclosure(el).textContent).not.toContain("Converged");
+    expect(lastToneSource).toBeNull();
+    expect(scribbleJob.cancelCount).toBeGreaterThan(0);
+
+    await selectManagedAsset("portrait charlie");
+    expect(obsoleteEnvironment.signal.aborted).toBe(true);
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetC);
+    const currentEnvironment = sketchEnvironmentJob.starts[2]!;
+
+    await act(async () => {
+      obsoleteEnvironment.resolve(resolvedAssetEnvironment(assetB, 128));
+      await Promise.resolve();
+    });
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetC);
+    expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentA);
+    expect(scribbleJob.starts).toHaveLength(2);
+
+    const environmentC = resolvedAssetEnvironment(assetC, 224);
+    await act(async () => {
+      currentEnvironment.resolve(environmentC);
+      await Promise.resolve();
+    });
+    expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentC);
+    expect(scribbleJob.starts).toHaveLength(3);
+    expect(scribbleJob.starts[2]!.identity.params).toContainEqual({
+      key: "imageAsset",
+      value: assetC,
+    });
+
+    clickButton(el, "Fill");
+    expect(canvas.dataset.renderState).toBe("fill-held");
+    expect(shadingDisclosure(el).textContent).toContain(
+      "Displayed result: stale",
+    );
+    const presentationBeforeLateWorker = {
+      sourceInputRevision: canvas.dataset.sourceInputRevision,
+      contentRevision: canvas.dataset.contentRevision,
+      diagnostics: shadingDisclosure(el).textContent,
+      toneCalls: generateToneSource.mock.calls.length,
+    };
+
+    await completeScribble(1, preparedScene(99));
+    expect(canvas.dataset.sourceInputRevision).toBe(
+      presentationBeforeLateWorker.sourceInputRevision,
+    );
+    expect(canvas.dataset.contentRevision).toBe(
+      presentationBeforeLateWorker.contentRevision,
+    );
+    expect(shadingDisclosure(el).textContent).toBe(
+      presentationBeforeLateWorker.diagnostics,
+    );
+    expect(generateToneSource).toHaveBeenCalledTimes(
+      presentationBeforeLateWorker.toneCalls,
+    );
+    expect(scribbleJob.starts).toHaveLength(3);
+
+    await completeScribble(2, preparedScene(41));
+    expect(shadingDisclosure(el).textContent).not.toContain(
+      "Displayed result: stale",
+    );
+    expect(canvas.dataset.contentRevision).not.toBe(
+      presentationBeforeLateWorker.contentRevision,
+    );
+  });
+
+  it("keeps asset-free Scribble sketches on the existing immediate path", () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+
+    expect(sketchEnvironmentJob.starts).toHaveLength(0);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(canvas.dataset.renderState).toBe("fill-held");
+    expect(canvas.dataset.unavailableStatus).toBe("");
+    expect(el.textContent).not.toContain("Loading exact Image Asset");
   });
 
   it("shows diagnostics only for Scribble-capable Sketches", () => {
