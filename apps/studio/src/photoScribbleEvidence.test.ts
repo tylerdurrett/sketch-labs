@@ -155,6 +155,7 @@ class FakeEvidenceWorker {
       smoothedEmittedPoints: 2,
       smoothedEmittedPolylines: 1,
       serializedArtworkBytes: 100,
+      targetHash: null,
       workerDurationMs: this.config.purpose === "measurement" ? 1 : null,
       responseReadyEpochMs: Date.now(),
     };
@@ -570,5 +571,12 @@ describe("Photo Scribble evidence page seams", () => {
     expect(
       await canonicalBrowserScribbleTargetHash(source, frame, controls),
     ).toBe(canonicalScribbleTargetHash(source, frame, controls));
+  });
+
+  it("matches the frozen Node target hash from the already-prepared model", async () => {
+    const resolution = resolvePhotoScribbleBenchmark(params, frame, environment);
+    expect(await canonicalBrowserScribbleTargetHash(resolution.model)).toBe(
+      canonicalScribbleTargetHash(resolution.source, frame, resolution.controls),
+    );
   });
 });

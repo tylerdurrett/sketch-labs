@@ -325,6 +325,7 @@ function summarizeRawRecord(raw) {
       residualError: raw.observation.result?.diagnostics?.residualError ?? null,
       mainWallDurationMs: raw.observation.measurement?.mainWallDurationMs ?? null,
     },
+    artifacts: raw.artifacts ?? null,
     note: 'Raw observations are preserved in the sibling .raw.json file; this summary makes no adoption decision.',
   }
 }
@@ -410,6 +411,7 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, in
           equivalence: result.equivalence,
           observation: result.observation,
           runtime: result.runtime ?? null,
+          artifacts: result.artifacts ?? null,
         }
       } catch (error) {
         failure = normalizedFailure(error)
@@ -425,6 +427,7 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, in
           equivalence: failure.partial.equivalence ?? null,
           observation: failure.partial.observation ?? null,
           runtime: failure.partial.runtime ?? null,
+          artifacts: failure.partial.artifacts ?? null,
         }
       }
       const committed = store.commit(job, raw)

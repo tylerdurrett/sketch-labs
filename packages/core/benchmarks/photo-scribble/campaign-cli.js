@@ -32,7 +32,7 @@ const manifest = JSON.parse(manifestBytes)
 
 // Validate all scenario/candidate inputs before resolving Puppeteer.
 validateCampaignManifest(manifest, protocol)
-const boundary = await createDefaultBrowserBoundary(root)
+const boundary = await createDefaultBrowserBoundary(root, outputRoot)
 const result = await runCampaign({
   manifest,
   protocol,

@@ -1,4 +1,12 @@
-import { photoScribble, type Params } from "@harness/core";
+import {
+  drawSceneFitted,
+  photoScribble,
+  renderPlotterSVG,
+  renderToSVG,
+  type Canvas2DContext,
+  type Params,
+  type Scene,
+} from "@harness/core";
 
 import protocolJson from "../../../packages/core/benchmarks/photo-scribble/protocol.json";
 import type { ScribbleExecutionLimits } from "../../../packages/core/src/scribbleStrategy/orchestrator";
@@ -22,6 +30,9 @@ import {
   ScribbleCoordinator,
   type ScribbleWorkerPort,
 } from "./scribbleCoordinator";
+import { resolveSketchEnvironment } from "./imageAssetResolver";
+import { outlineScene } from "./outlineScene";
+import { rasterizeToneReference } from "./toneReference";
 
 interface Scenario {
   readonly scenarioId: string;
@@ -36,6 +47,18 @@ interface Candidate extends ScribbleExecutionLimits {
 
 const protocol = protocolJson as unknown as {
   readonly frame: { readonly width: number; readonly height: number };
+  readonly profile: {
+    readonly width: number;
+    readonly height: number;
+    readonly insets: {
+      readonly top: number;
+      readonly right: number;
+      readonly bottom: number;
+      readonly left: number;
+    };
+    readonly includeFrame: boolean;
+    readonly toolWidthMillimeters: number;
+  };
   readonly scenarios: readonly Scenario[];
   readonly orderedLimitCandidates: readonly Candidate[];
 };
@@ -65,6 +88,53 @@ let activeEvidenceCoordinator: ScribbleCoordinator | null = null;
  */
 export function abortActivePhotoScribbleEvidence(): boolean {
   return activeEvidenceCoordinator?.cancel() ?? false;
+}
+
+interface BinaryArtifactMetric {
+  readonly sha256: string;
+  readonly byteLength: number;
+}
+
+interface VectorArtifactMetric extends BinaryArtifactMetric {
+  readonly pathCount: number;
+  readonly containsRasterImage: boolean;
+  readonly containsDiagnosticMarker: boolean;
+}
+
+interface PresentationEvidence {
+  readonly tone: BinaryArtifactMetric;
+  readonly fillCanvas: BinaryArtifactMetric & {
+    readonly width: number;
+    readonly height: number;
+    readonly paintDurationMs: number;
+    readonly validState: boolean;
+  };
+  readonly outlineCanvas: BinaryArtifactMetric & {
+    readonly width: number;
+    readonly height: number;
+    readonly derivationDurationMs: number;
+    readonly paintDurationMs: number;
+    readonly validState: boolean;
+  };
+  readonly exports: {
+    readonly png: BinaryArtifactMetric & { readonly durationMs: number };
+    readonly ordinarySvg: VectorArtifactMetric & { readonly durationMs: number };
+    readonly outlinePlotterSvg: VectorArtifactMetric & { readonly durationMs: number };
+  };
+  readonly geometryAndExportParity: boolean;
+  readonly terminalProgressToDisplayMs: number;
+  readonly uiRoundtrips: {
+    readonly status: "not-applicable";
+    readonly reason: string;
+  };
+}
+
+interface CancellationEvidence {
+  readonly startedAfterNonTerminalProgress: boolean;
+  readonly coordinatorAcknowledged: boolean;
+  readonly outcome: "cancelled" | "failure" | "success";
+  readonly roundtripMs: number;
+  readonly lateReplacementObserved: boolean;
 }
 
 export interface PhotoScribbleEvidenceRun {
@@ -106,6 +176,8 @@ export interface PhotoScribbleEvidenceRun {
     };
   } | null;
   readonly telemetry: PhotoScribbleEvidenceTelemetry;
+  readonly presentation: PresentationEvidence | null;
+  readonly cancellation: CancellationEvidence | null;
   readonly protocolBoundary: {
     readonly invalidMessageCount: number;
     readonly allCoordinatorMessagesValid: boolean;
@@ -199,6 +271,7 @@ interface WorkerTrace {
   requestPostedAtMs: number | null;
   progressReceiptTimesMs: number[];
   terminalProgressCount: number;
+  terminalProgressReceivedAtMs: number | null;
   finalResponseReceivedAtMs: number | null;
   finalReceiptEpochMs: number | null;
 }
@@ -226,7 +299,10 @@ function createEvidenceWorker(
           if (!isScribbleWorkerMessage(event.data)) trace.invalidMessages++;
           if (isScribbleComputeProgress(event.data)) {
             trace.progressReceiptTimesMs.push(receivedAt);
-            if (event.data.snapshot.terminal) trace.terminalProgressCount++;
+            if (event.data.snapshot.terminal) {
+              trace.terminalProgressCount++;
+              trace.terminalProgressReceivedAtMs = receivedAt;
+            }
           }
           if (
             typeof event.data === "object" &&
@@ -243,6 +319,235 @@ function createEvidenceWorker(
         worker.addEventListener(type, listener as EventListener);
       }
     },
+  };
+}
+
+async function sha256(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+  return [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function blobMetric(blob: Blob): Promise<BinaryArtifactMetric> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return { sha256: await sha256(bytes), byteLength: bytes.byteLength };
+}
+
+function canvasById(id: string): HTMLCanvasElement {
+  const canvas = document.querySelector<HTMLCanvasElement>(`#${id}`);
+  if (canvas === null) throw new Error(`Evidence canvas ${id} is missing`);
+  return canvas;
+}
+
+function canvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const context = canvas.getContext("2d");
+  if (context === null) throw new Error("Evidence Canvas2D context is unavailable");
+  return context;
+}
+
+function canvasBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob === null) reject(new Error("Evidence Canvas PNG encoding failed"));
+      else resolve(blob);
+    }, "image/png");
+  });
+}
+
+async function textMetric(value: string): Promise<VectorArtifactMetric> {
+  const bytes = new TextEncoder().encode(value);
+  return {
+    sha256: await sha256(bytes),
+    byteLength: bytes.byteLength,
+    pathCount: (value.match(/<path\b/g) ?? []).length,
+    containsRasterImage: /<image\b/i.test(value),
+    containsDiagnosticMarker: /diagnostic|source-pixel/i.test(value),
+  };
+}
+
+function nextFrame(): Promise<number> {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+async function presentEvidence(
+  scenario: Scenario,
+  scene: Scene,
+  trace: WorkerTrace,
+): Promise<PresentationEvidence> {
+  const toneCanvas = canvasById("evidence-tone");
+  const fillCanvas = canvasById("evidence-fill");
+  const outlineCanvas = canvasById("evidence-outline");
+
+  const fillContext = canvasContext(fillCanvas);
+  const fillPaintStarted = performance.now();
+  drawSceneFitted(
+    fillContext as unknown as Canvas2DContext,
+    scene,
+    fillCanvas.width,
+    fillCanvas.height,
+  );
+  const fillPaintDurationMs = performance.now() - fillPaintStarted;
+  const displayedAt = await nextFrame();
+  const terminalProgressToDisplayMs = Math.max(
+    0,
+    displayedAt - (trace.terminalProgressReceivedAtMs ?? displayedAt),
+  );
+  const pngStarted = performance.now();
+  const fillBlob = await canvasBlob(fillCanvas);
+  const pngDurationMs = performance.now() - pngStarted;
+  const fillMetric = await blobMetric(fillBlob);
+
+  const environment = await resolveSketchEnvironment(
+    photoScribble.schema,
+    scenario.params,
+  );
+  const toneSource = photoScribble.generateToneSource?.(
+    scenario.params,
+    protocol.frame,
+    environment,
+  );
+  if (toneSource === undefined) throw new Error("Photo Scribble Tone source is unavailable");
+  const toneRaster = rasterizeToneReference(
+    toneSource,
+    protocol.frame,
+    toneCanvas.width,
+    toneCanvas.height,
+  );
+  canvasContext(toneCanvas).putImageData(
+    new ImageData(
+      Uint8ClampedArray.from(toneRaster.data),
+      toneRaster.width,
+      toneRaster.height,
+    ),
+    0,
+    0,
+  );
+  const tone = await blobMetric(await canvasBlob(toneCanvas));
+
+  const ordinaryStarted = performance.now();
+  const ordinarySvgSource = renderToSVG(scene);
+  const ordinarySvg = {
+    ...(await textMetric(ordinarySvgSource)),
+    durationMs: performance.now() - ordinaryStarted,
+  };
+
+  const outlineStarted = performance.now();
+  const outlined = outlineScene(scene, 0, protocol.profile.includeFrame);
+  const derivationDurationMs = performance.now() - outlineStarted;
+  const outlineContext = canvasContext(outlineCanvas);
+  const outlinePaintStarted = performance.now();
+  drawSceneFitted(
+    outlineContext as unknown as Canvas2DContext,
+    outlined,
+    outlineCanvas.width,
+    outlineCanvas.height,
+  );
+  const outlinePaintDurationMs = performance.now() - outlinePaintStarted;
+  const outlineMetric = await blobMetric(await canvasBlob(outlineCanvas));
+
+  const plotterStarted = performance.now();
+  const plotterSource = renderPlotterSVG(outlined, protocol.profile);
+  const outlinePlotterSvg = {
+    ...(await textMetric(plotterSource)),
+    durationMs: performance.now() - plotterStarted,
+  };
+  const validCanvas = (canvas: HTMLCanvasElement) => {
+    try {
+      return canvasContext(canvas).getImageData(0, 0, 1, 1).data.length === 4;
+    } catch {
+      return false;
+    }
+  };
+
+  return {
+    tone,
+    fillCanvas: {
+      ...fillMetric,
+      width: fillCanvas.width,
+      height: fillCanvas.height,
+      paintDurationMs: fillPaintDurationMs,
+      validState: validCanvas(fillCanvas),
+    },
+    outlineCanvas: {
+      ...outlineMetric,
+      width: outlineCanvas.width,
+      height: outlineCanvas.height,
+      derivationDurationMs,
+      paintDurationMs: outlinePaintDurationMs,
+      validState: validCanvas(outlineCanvas),
+    },
+    exports: {
+      png: { ...fillMetric, durationMs: pngDurationMs },
+      ordinarySvg,
+      outlinePlotterSvg,
+    },
+    geometryAndExportParity:
+      ordinarySvg.pathCount === scene.primitives.length &&
+      outlinePlotterSvg.pathCount === outlined.primitives.filter(
+        (primitive) => primitive.stroke !== undefined && primitive.points.length >= 2,
+      ).length,
+    terminalProgressToDisplayMs,
+    uiRoundtrips: {
+      status: "not-applicable",
+      reason: "The isolated fine-budget evidence page has no Studio inspector; fixed Studio interaction probes belong to the promotion control pass.",
+    },
+  };
+}
+
+async function cancellationEvidence(
+  identity: ReturnType<typeof createScribbleComputeIdentity>,
+  profile: PhotoScribbleEvidenceProfile,
+  runId: string,
+): Promise<CancellationEvidence> {
+  const trace: WorkerTrace = {
+    invalidMessages: 0,
+    requestPostedAtMs: null,
+    progressReceiptTimesMs: [],
+    terminalProgressCount: 0,
+    terminalProgressReceivedAtMs: null,
+    finalResponseReceivedAtMs: null,
+    finalReceiptEpochMs: null,
+  };
+  const config: PhotoScribbleEvidenceWorkerConfig = {
+    schemaVersion: 1,
+    runId: `${runId}-cancellation`,
+    telemetryChannel: `${runId}-cancellation-telemetry`,
+    purpose: "measurement",
+    profile,
+  };
+  const coordinator = new ScribbleCoordinator(() => createEvidenceWorker(config, trace));
+  let resolveFirst!: () => void;
+  const firstProgress = new Promise<void>((resolve) => (resolveFirst = resolve));
+  let sawNonTerminal = false;
+  const outcome = coordinator.start(identity, ({ snapshot }) => {
+    if (!snapshot.terminal && !sawNonTerminal) {
+      sawNonTerminal = true;
+      resolveFirst();
+    }
+  });
+  await Promise.race([
+    firstProgress,
+    new Promise<void>((_, reject) =>
+      window.setTimeout(
+        () => reject(new Error("Cancellation probe saw no non-terminal progress")),
+        5_000,
+      ),
+    ),
+  ]);
+  const started = performance.now();
+  const acknowledged = coordinator.cancel();
+  const settled = await outcome;
+  const roundtripMs = performance.now() - started;
+  await nextFrame();
+  await nextFrame();
+  coordinator.dispose();
+  return {
+    startedAfterNonTerminalProgress: sawNonTerminal,
+    coordinatorAcknowledged: acknowledged,
+    outcome: settled.status,
+    roundtripMs,
+    lateReplacementObserved: settled.status !== "cancelled",
   };
 }
 
@@ -318,6 +623,7 @@ async function runPhotoScribbleEvidenceOperation(
     requestPostedAtMs: null,
     progressReceiptTimesMs: [],
     terminalProgressCount: 0,
+    terminalProgressReceivedAtMs: null,
     finalResponseReceivedAtMs: null,
     finalReceiptEpochMs: null,
   };
@@ -363,6 +669,15 @@ async function runPhotoScribbleEvidenceOperation(
       diagnostics: outcome.diagnostics,
     });
     const finalReceipt = trace.finalReceiptEpochMs ?? Date.now();
+    const afterMemory = memorySample();
+    const presentation =
+      purpose === "measurement" && profile.kind === "injected"
+        ? await presentEvidence(scenario, outcome.scene, trace)
+        : null;
+    const cancellation =
+      purpose === "measurement" && profile.kind === "injected"
+        ? await cancellationEvidence(identity, profile, runId)
+        : null;
     return {
     schemaVersion: 1,
     campaignId,
@@ -395,10 +710,12 @@ async function runPhotoScribbleEvidenceOperation(
             memory: {
               scope: "page-main-process-only-worker-heap-unavailable",
               before: beforeMemory,
-              after: memorySample(),
+              after: afterMemory,
             },
           },
     telemetry: workerTelemetry,
+    presentation,
+    cancellation,
     protocolBoundary: {
       invalidMessageCount: trace.invalidMessages,
       allCoordinatorMessagesValid: trace.invalidMessages === 0,

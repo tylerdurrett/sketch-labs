@@ -63,21 +63,44 @@ async function digest(bytes: Uint8Array): Promise<string> {
     .join("");
 }
 
-/** Browser twin of the benchmark-only canonical source-target oracle. */
-export async function canonicalBrowserScribbleTargetHash(
+interface CanonicalTargetModel {
+  readonly lattice: {
+    readonly frame: { readonly width: number; readonly height: number };
+    readonly columns: number;
+    readonly rows: number;
+    readonly cellWidth: number;
+    readonly cellHeight: number;
+    readonly cellArea: number;
+    readonly sampleCount: number;
+  };
+  samples(): readonly { readonly tone: number; readonly permission: number }[];
+}
+
+export function canonicalBrowserScribbleTargetHash(
+  model: CanonicalTargetModel,
+): Promise<string>;
+export function canonicalBrowserScribbleTargetHash(
   source: ToneSource,
   frame: Readonly<CoordinateSpace>,
   controls: Readonly<ScribbleControls>,
-): Promise<string> {
-  const model = createScribbleModel(source, frame, controls);
-  const { lattice } = model;
-  const hash = new CanonicalBytes();
+): Promise<string>;
 
+/** Browser SHA-256 mirror of the frozen Node target oracle. */
+export async function canonicalBrowserScribbleTargetHash(
+  sourceOrModel: ToneSource | CanonicalTargetModel,
+  frame?: Readonly<CoordinateSpace>,
+  controls?: Readonly<ScribbleControls>,
+): Promise<string> {
+  const model = frame === undefined || controls === undefined
+    ? sourceOrModel as CanonicalTargetModel
+    : createScribbleModel(sourceOrModel as ToneSource, frame, controls);
+  const hash = new CanonicalBytes();
+  const { lattice } = model;
   hash.tag("photo-scribble-target-v1");
   hash.tag("frame-width");
-  hash.number(frame.width);
+  hash.number(lattice.frame.width);
   hash.tag("frame-height");
-  hash.number(frame.height);
+  hash.number(lattice.frame.height);
   hash.tag("lattice-frame-width");
   hash.number(lattice.frame.width);
   hash.tag("lattice-frame-height");
@@ -95,7 +118,6 @@ export async function canonicalBrowserScribbleTargetHash(
   hash.tag("lattice-sample-count");
   hash.number(lattice.sampleCount);
   hash.tag("row-major-tone-permission-effective-tone");
-
   const samples = model.samples();
   if (samples.length !== lattice.sampleCount) {
     throw new Error(

@@ -7,9 +7,12 @@
     <style>
       body { font: 16px/1.4 system-ui, sans-serif; margin: 24px; }
       #gamma-captures { display: grid; grid-template-columns: repeat(2, 540px); gap: 24px; }
-      figure { box-sizing: border-box; width: 540px; overflow: hidden; margin: 0; padding: 12px; border: 1px solid #999; background: white; }
+      #gamma-captures figure { box-sizing: border-box; width: 540px; overflow: hidden; margin: 0; padding: 12px; border: 1px solid #999; background: white; }
       figcaption { min-height: 24px; font-weight: 600; }
-      canvas { display: block; width: 512px; height: 512px; image-rendering: auto; }
+      #gamma-captures canvas { display: block; width: 512px; height: 512px; image-rendering: auto; }
+      .captures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+      .captures figure { margin: 0; }
+      .captures canvas { display: block; width: 100%; height: auto; border: 1px solid #ccc; background: white; }
     </style>
   </head>
   <body>
@@ -23,6 +26,11 @@
       <section aria-label="Source-only gamma calibration Tone references">
         <h2>Source-only gamma calibration</h2>
         <div id="gamma-captures"></div>
+      </section>
+      <section class="captures" aria-label="Evidence captures">
+        <figure><figcaption>Tone</figcaption><canvas id="evidence-tone" width="1000" height="1000"></canvas></figure>
+        <figure><figcaption>Fill</figcaption><canvas id="evidence-fill" width="1000" height="1000"></canvas></figure>
+        <figure><figcaption>Outline</figcaption><canvas id="evidence-outline" width="1000" height="1000"></canvas></figure>
       </section>
     </main>
     <script type="module" src="/src/photoScribbleEvidence.ts"></script>

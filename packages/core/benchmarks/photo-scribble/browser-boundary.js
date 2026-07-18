@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { CampaignOperationError } from './campaign-runner.js'
@@ -170,6 +170,30 @@ function validateRun(run, expected) {
       run.telemetry.rawAcceptedSegments ===
         run.telemetry.execution.counters.acceptedSegments,
     `${expected.label} required raw injected solver telemetry is missing`)
+    evidenceAssertion(/^[0-9a-f]{64}$/.test(run.telemetry.targetHash ?? ''),
+      `${expected.label} canonical target hash is missing`)
+    evidenceAssertion(isRecord(run.presentation) &&
+      /^[0-9a-f]{64}$/.test(run.presentation.tone?.sha256 ?? '') &&
+      run.presentation.tone.byteLength > 0 &&
+      run.presentation.fillCanvas?.validState === true &&
+      run.presentation.outlineCanvas?.validState === true &&
+      run.presentation.geometryAndExportParity === true &&
+      Number.isFinite(run.presentation.terminalProgressToDisplayMs) &&
+      run.presentation.exports?.png?.byteLength > 0 &&
+      run.presentation.exports?.ordinarySvg?.byteLength > 0 &&
+      run.presentation.exports?.outlinePlotterSvg?.byteLength > 0 &&
+      run.presentation.exports.ordinarySvg.containsRasterImage === false &&
+      run.presentation.exports.ordinarySvg.containsDiagnosticMarker === false &&
+      run.presentation.exports.outlinePlotterSvg.containsRasterImage === false &&
+      run.presentation.exports.outlinePlotterSvg.containsDiagnosticMarker === false,
+    `${expected.label} Canvas/export presentation evidence is missing or invalid`)
+    evidenceAssertion(isRecord(run.cancellation) &&
+      run.cancellation.startedAfterNonTerminalProgress === true &&
+      run.cancellation.coordinatorAcknowledged === true &&
+      run.cancellation.outcome === 'cancelled' &&
+      Number.isFinite(run.cancellation.roundtripMs) &&
+      run.cancellation.lateReplacementObserved === false,
+    `${expected.label} cancellation/latest-result evidence is missing or invalid`)
   } else {
     evidenceAssertion(run.measurement === null,
       `${expected.label} equivalence proof must be unmeasured`)
@@ -283,6 +307,8 @@ export function createBrowserBoundary({
   browserFactory,
   url,
   fetchImpl = fetch,
+  captureRoot,
+  projectRoot,
 }) {
   let server = null
   let browser = null
@@ -395,6 +421,37 @@ export function createBrowserBoundary({
           tuple: job.tuple,
           identityHash: partial.equivalence.production.identityHash,
         })
+        if (captureRoot !== undefined) {
+          const directory = resolve(
+            captureRoot,
+            campaignId,
+            job.scenarioId,
+            `${job.candidateId}--${job.tupleToken}`,
+          )
+          mkdirSync(directory, { recursive: true })
+          const captures = [
+            ['#evidence-tone', 'tone-authored.png'],
+            ['#evidence-fill', 'fill-primary.png'],
+            ['#evidence-outline', 'outline.png'],
+          ]
+          partial.artifacts = []
+          for (const [selector, suffix] of captures) {
+            const element = await page.$(selector)
+            evidenceAssertion(element !== null, `capture target ${selector} is missing`)
+            const path = resolve(
+              directory,
+              `${job.captureStem}--${job.candidateId}--${job.tupleToken}--${suffix}`,
+            )
+            await element.screenshot({ path })
+            const byteLength = statSync(path).size
+            evidenceAssertion(byteLength > 0, `capture ${suffix} is empty`)
+            partial.artifacts.push({
+              kind: suffix,
+              path: relative(projectRoot ?? captureRoot, path),
+              byteLength,
+            })
+          }
+        }
         return partial
       } catch (error) {
         if (error instanceof CampaignOperationError && Object.keys(error.partial).length === 0) {
@@ -430,7 +487,7 @@ export function createBrowserBoundary({
   }
 }
 
-export async function createDefaultBrowserBoundary(root, port = 4318) {
+export async function createDefaultBrowserBoundary(root, captureRoot, port = 4318) {
   const vite = resolve(root, 'apps/studio/node_modules/.bin/vite')
   if (!existsSync(vite)) throw new Error('Use the existing locked Studio install')
   const puppeteerEntry = resolve(
@@ -444,6 +501,8 @@ export async function createDefaultBrowserBoundary(root, port = 4318) {
   const url = `http://127.0.0.1:${port}/photo-scribble-evidence.html`
   return createBrowserBoundary({
     url,
+    captureRoot,
+    projectRoot: root,
     serverFactory: async () => spawn(vite, [
       '--config',
       resolve(root, 'packages/core/benchmarks/photo-scribble/studio-worker.vite.config.ts'),

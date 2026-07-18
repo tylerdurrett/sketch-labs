@@ -35,6 +35,8 @@ export interface PhotoScribbleEvidenceTelemetry {
   readonly smoothedEmittedPoints: number;
   readonly smoothedEmittedPolylines: number;
   readonly serializedArtworkBytes: number;
+  /** Canonical production target; null only for the one-pass measured production generator. */
+  readonly targetHash: string | null;
   /** Worker duration is retained only for measured, single-solve runs. */
   readonly workerDurationMs: number | null;
   /** Epoch proxy sampled immediately before the product response is posted. */

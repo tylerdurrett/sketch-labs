@@ -8,6 +8,7 @@ import {
 import type { ScribbleExecutionLimits } from "../../../packages/core/src/scribbleStrategy/orchestrator";
 import type { ScribbleExecutionObservation } from "../../../packages/core/src/scribbleStrategy/orchestrator";
 import type { ScribbleArtworkExecutor } from "./scribbleWorkerRuntime";
+import { canonicalBrowserScribbleTargetHash } from "./photoScribbleEvidenceHash";
 import type {
   PhotoScribbleEvidenceProfile,
   PhotoScribbleEvidenceWorkerConfig,
@@ -39,6 +40,7 @@ export interface PhotoScribbleEvidenceExecution {
   readonly effectiveLimits: Readonly<ScribbleExecutionLimits> | null;
   readonly productionResolverSelectedEffectiveTuple: boolean | null;
   readonly execution: Readonly<ScribbleExecutionObservation> | null;
+  readonly targetHash: Promise<string> | null;
 }
 
 export interface PhotoScribbleEvidenceExecutionDependencies {
@@ -96,6 +98,10 @@ export function executePhotoScribbleEvidenceArtwork(
       productionResolverSelectedEffectiveTuple:
         resolution === null ? null : true,
       execution: null,
+      targetHash:
+        resolution === null
+          ? null
+          : canonicalBrowserScribbleTargetHash(resolution.model),
     };
   }
 
@@ -127,5 +133,6 @@ export function executePhotoScribbleEvidenceArtwork(
       config.profile.limits,
     ),
     execution,
+    targetHash: canonicalBrowserScribbleTargetHash(resolution.model),
   };
 }

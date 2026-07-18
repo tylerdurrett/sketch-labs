@@ -13,7 +13,7 @@ declare const self: DedicatedWorkerGlobalScope;
 const config = parsePhotoScribbleEvidenceWorkerConfig(self.name);
 const telemetryChannel = new BroadcastChannel(config.telemetryChannel);
 let pendingTelemetry:
-  | Omit<PhotoScribbleEvidenceTelemetry, "responseReadyEpochMs">
+  | Promise<Omit<PhotoScribbleEvidenceTelemetry, "responseReadyEpochMs">>
   | undefined;
 
 function pointsIn(artwork: { readonly scene: { readonly primitives: readonly { readonly points: readonly unknown[] }[] } }): number {
@@ -39,7 +39,7 @@ const executeEvidenceArtwork: ScribbleArtworkExecutor = (
   );
   const { artwork, execution } = evidence;
   const serializedArtwork = JSON.stringify(artwork);
-  pendingTelemetry = {
+  pendingTelemetry = (async () => ({
     schemaVersion: 1,
     runId: config.runId,
     sketchId: "photo-scribble",
@@ -56,9 +56,10 @@ const executeEvidenceArtwork: ScribbleArtworkExecutor = (
     smoothedEmittedPolylines: artwork.scene.primitives.length,
     serializedArtworkBytes: new TextEncoder().encode(serializedArtwork)
       .byteLength,
+    targetHash: evidence.targetHash === null ? null : await evidence.targetHash,
     workerDurationMs:
       config.purpose === "measurement" ? performance.now() - startedAt : null,
-  };
+  }))();
   return artwork;
 };
 
@@ -67,11 +68,12 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
     event.data,
     executeEvidenceArtwork,
     (progress) => self.postMessage(progress),
-  ).then((response) => {
+  ).then(async (response) => {
     if (response === null) return;
     if (pendingTelemetry !== undefined) {
+      const telemetry = await pendingTelemetry;
       telemetryChannel.postMessage({
-        ...pendingTelemetry,
+        ...telemetry,
         responseReadyEpochMs: Date.now(),
       } satisfies PhotoScribbleEvidenceTelemetry);
       pendingTelemetry = undefined;
