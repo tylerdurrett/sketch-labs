@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T232816Z",
+  "phase": "machine-ceiling",
+  "jobs": [
+    {
+      "scenarioId": "flowers-opaque-fine",
+      "candidateId": "machine-1000k"
+    },
+    {
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "candidateId": "machine-1000k"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T232556Z",
+  "completed": [
+    {
+      "jobKey": "flowers-opaque-fine/machine-500k--s500000-p16000-g32000-r16000",
+      "status": "completed",
+      "rawRecord": "issue-336-20260718T232556Z/flowers-opaque-fine/machine-500k--s500000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--machine-500k--s500000-p16000-g32000-r16000--attempt-0001.raw.json",
+      "summary": "issue-336-20260718T232556Z/flowers-opaque-fine/machine-500k--s500000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--machine-500k--s500000-p16000-g32000-r16000--attempt-0001.summary.json"
+    },
+    {
+      "jobKey": "pinecone-dark-alpha-fine/machine-500k--s500000-p16000-g32000-r16000",
+      "status": "completed",
+      "rawRecord": "issue-336-20260718T232556Z/pinecone-dark-alpha-fine/machine-500k--s500000-p16000-g32000-r16000/issue-336-trial-pinecone-dark-alpha-fine--machine-500k--s500000-p16000-g32000-r16000--attempt-0001.raw.json",
+      "summary": "issue-336-20260718T232556Z/pinecone-dark-alpha-fine/machine-500k--s500000-p16000-g32000-r16000/issue-336-trial-pinecone-dark-alpha-fine--machine-500k--s500000-p16000-g32000-r16000--attempt-0001.summary.json"
+    }
+  ],
+  "nextJobKey": null,
+  "campaignFailures": [],
+  "updatedAt": "2026-07-18T23:27:46.980Z"
+}
