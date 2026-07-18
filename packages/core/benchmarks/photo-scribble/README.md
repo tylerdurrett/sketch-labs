@@ -26,6 +26,31 @@ This focused project is what enforces the `keyof` inventories in
 `hash-oracles.ts`; a new Scene or Scribble diagnostics field fails the command
 until its canonical encoding is defined.
 
+## Real-worker evidence page
+
+`apps/studio/photo-scribble-evidence.html` is the benchmark-only Vite entry. It
+constructs the real `ScribbleCoordinator` and a fresh real DedicatedWorker for
+each run. Worker profile selection travels in the benchmark Worker's name and
+raw solver telemetry travels on a run-specific `BroadcastChannel`; the
+coordinator still receives only the unchanged strict product protocol.
+
+Build it without running a campaign:
+
+```sh
+apps/studio/node_modules/.bin/vite build \
+  --config packages/core/benchmarks/photo-scribble/studio-worker.vite.config.ts
+```
+
+The page exposes `window.__PHOTO_SCRIBBLE_EVIDENCE__` with `runProduction`,
+`runCandidate`, and `runExactEquivalence`. Every call requires a non-empty
+`rightsEvidence` identifier and remains blocked while the gate below is
+unsatisfied. Exact equivalence runs the registered production generator and an
+injected run at the explicitly reported production-resolved four-limit tuple,
+then compares the full identity, canonical Scene, and canonical diagnostics
+hashes. `performance.memory`, when present, is labeled page/main-process only;
+worker heap is unavailable, so duration, geometry counts, serialized bytes,
+and response-ready-to-main-receipt latency are recorded as proxies.
+
 The committed opaque flowers cover an ordinary photo and a `3:4` source in a
 square frame. The dark alpha pinecone covers Tone adjustment, a `2:3` source,
 276,857 fully transparent pixels, and 2,860 partial alpha pixels. Git proves
