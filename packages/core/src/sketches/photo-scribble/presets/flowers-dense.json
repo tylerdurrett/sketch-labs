@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "sketch": "photo-scribble",
+  "name": "flowers-dense",
+  "seed": 2381065623916958,
+  "params": {
+    "imageAsset": "img-0672-79d639daec62",
+    "toneContrast": 0.96,
+    "toneGamma": 1,
+    "pathDensity": 20,
+    "scribbleScale": 0.35,
+    "momentum": 0.98,
+    "chaos": 0.02,
+    "toneFidelity": 0.99
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true,
+    "toolWidthMillimeters": 0.3
+  }
+}

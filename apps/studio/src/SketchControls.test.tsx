@@ -20,6 +20,7 @@ import {
   HARNESS_FALLBACK_PLOT_PROFILE,
   hiddenLinePass,
   leafField,
+  photoScribble,
   renderPlotterSVG,
   resolvePlotCompositionFrame,
   scribbleMoon,
@@ -41,6 +42,7 @@ import type {
 } from "./LiveCanvas";
 import { mutableScene } from "./outlineComputeProtocol";
 import { outlineScene } from "./outlineScene";
+import { isScribbleComputeIdentity } from "./scribbleComputeProtocol";
 import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
 
@@ -117,6 +119,29 @@ const sketchEnvironmentJob = vi.hoisted(() => ({
     reject: (error: unknown) => void;
   }>,
 }));
+const managedImageAssetJob = vi.hoisted(() => ({
+  list: vi.fn(),
+  normalize: vi.fn(),
+  import: vi.fn(),
+}));
+
+vi.mock("./imageAssetsClient", async (importActual) => {
+  const actual = await importActual<typeof import("./imageAssetsClient")>();
+  return {
+    ...actual,
+    listImageAssets: managedImageAssetJob.list,
+    importImageAsset: managedImageAssetJob.import,
+  };
+});
+
+vi.mock("./imageAssetNormalization", async (importActual) => {
+  const actual =
+    await importActual<typeof import("./imageAssetNormalization")>();
+  return {
+    ...actual,
+    normalizeImageAsset: managedImageAssetJob.normalize,
+  };
+});
 
 vi.mock("./imageAssetResolver", async (importActual) => {
   const actual = await importActual<typeof import("./imageAssetResolver")>();
@@ -696,6 +721,16 @@ beforeEach(() => {
   scribbleJob.cancelCount = 0;
   scribbleJob.starts = [];
   sketchEnvironmentJob.starts = [];
+  managedImageAssetJob.list.mockReset().mockResolvedValue([]);
+  managedImageAssetJob.normalize.mockReset().mockResolvedValue({
+    png: new Blob([MINIMAL_PNG], { type: "image/png" }),
+    width: 1,
+    height: 1,
+  });
+  managedImageAssetJob.import.mockReset().mockResolvedValue({
+    id: "imported-image-bbbbbbbbbbbb",
+    created: true,
+  });
   vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
   // Sensible defaults so a mount's list-on-mount effect resolves quietly; the
   // save/reload tests override loadPreset/savePreset per case.
@@ -775,6 +810,19 @@ function clickButton(el: HTMLElement, text: string): void {
   act(() => {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
+}
+
+function containsBinaryPayload(value: unknown): boolean {
+  if (
+    value instanceof Blob ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value)
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) return value.some(containsBinaryPayload);
+  if (typeof value !== "object" || value === null) return false;
+  return Object.values(value).some(containsBinaryPayload);
 }
 
 function reportOutlineProgress(
@@ -4479,9 +4527,289 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     return match;
   }
 
+  const assetA = "portrait-alpha-000000000001";
+  const assetB = "portrait-beta-bbbbbbbbbbbb";
+
+  function resolvedAssetEnvironment(
+    id: string,
+    gray: number,
+  ): SketchEnvironment {
+    const pixels = {
+      width: 1,
+      height: 1,
+      data: new Uint8ClampedArray([gray, gray, gray, 255]),
+    };
+    return {
+      imageAssets: (requested) => (requested === id ? pixels : undefined),
+    };
+  }
+
+  function managedPhotoScribble(
+    generateToneSource: NonNullable<typeof photoScribble.generateToneSource>,
+  ) {
+    return {
+      ...photoScribble,
+      schema: {
+        ...photoScribble.schema,
+        imageAsset: { kind: "image-asset", default: assetA },
+      } satisfies ParamSchema,
+      generateToneSource,
+    };
+  }
+
+  function chooseImageFile(el: HTMLElement, name = "Imported Beta.webp"): void {
+    const input = el.querySelector<HTMLInputElement>('input[type="file"]');
+    if (input === null) throw new Error("no Image Asset file input");
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [new File(["source"], name, { type: "image/webp" })],
+    });
+    act(() => input.dispatchEvent(new Event("change", { bubbles: true })));
+  }
+
+  it("carries an imported Photo Scribble asset through one undoable atomic edit into exact Tone and payload-free worker inputs", async () => {
+    const generateToneSource = vi.fn(
+      (
+        ...args: Parameters<
+          NonNullable<typeof photoScribble.generateToneSource>
+        >
+      ) =>
+        photoScribble.generateToneSource!(...args),
+    );
+    managedImageAssetJob.import.mockResolvedValueOnce({
+      id: assetB,
+      created: true,
+    });
+    const el = mount(
+      <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+    );
+    const environmentA = resolvedAssetEnvironment(assetA, 32);
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(environmentA);
+      await Promise.resolve();
+    });
+    expect(scribbleJob.starts).toHaveLength(1);
+    clickButton(el, "Tone");
+    expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentA);
+    expect(lastToneSource).not.toBeNull();
+
+    clickButton(el, "Choose image");
+    await flush();
+    chooseImageFile(el);
+    clickButton(el, "Import Image Asset");
+    await flush();
+    await flush();
+    await flush();
+
+    expect(managedImageAssetJob.normalize).toHaveBeenCalledTimes(1);
+    expect(managedImageAssetJob.import).toHaveBeenCalledTimes(1);
+    expect(
+      el.querySelector('[aria-label="imageAsset image asset identity"]')
+        ?.textContent,
+    ).toBe(assetB);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.before.present.params.imageAsset).toBe(
+      assetA,
+    );
+    expect(historyCapture.atomic[0]!.after.present.params.imageAsset).toBe(
+      assetB,
+    );
+
+    // B makes A unusable in the selection render itself. The replacement
+    // resolver owns a fresh signal, and no B worker request can escape while
+    // that exact decoded environment remains unresolved.
+    expect(sketchEnvironmentJob.starts).toHaveLength(2);
+    expect(sketchEnvironmentJob.starts[0]!.signal.aborted).toBe(true);
+    expect(sketchEnvironmentJob.starts[1]!.params.imageAsset).toBe(assetB);
+    expect(lastToneSource).toBeNull();
+    expect(scribbleJob.starts).toHaveLength(1);
+
+    const environmentB = resolvedAssetEnvironment(assetB, 224);
+    await act(async () => {
+      sketchEnvironmentJob.starts[1]!.resolve(environmentB);
+      await Promise.resolve();
+    });
+
+    expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentB);
+    expect(lastToneSource).not.toBeNull();
+    expect(scribbleJob.starts).toHaveLength(2);
+    const workerIdentity = scribbleJob.starts[1]!.identity;
+    expect(isScribbleComputeIdentity(workerIdentity)).toBe(true);
+    expect(workerIdentity.params).toContainEqual({
+      key: "imageAsset",
+      value: assetB,
+    });
+    expect(Object.keys(workerIdentity)).toEqual([
+      "sketchId",
+      "params",
+      "seed",
+      "compositionFrame",
+    ]);
+    expect(containsBinaryPayload(workerIdentity)).toBe(false);
+    expect(
+      workerIdentity.params.every(
+        ({ value }) => typeof value === "string" || typeof value === "number",
+      ),
+    ).toBe(true);
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(
+      el.querySelector('[aria-label="imageAsset image asset identity"]')
+        ?.textContent,
+    ).toBe(assetA);
+    expect(sketchEnvironmentJob.starts).toHaveLength(3);
+    expect(sketchEnvironmentJob.starts[1]!.signal.aborted).toBe(true);
+    expect(scribbleJob.starts).toHaveLength(2);
+
+    const environmentAAfterUndo = resolvedAssetEnvironment(assetA, 32);
+    await act(async () => {
+      sketchEnvironmentJob.starts[2]!.resolve(environmentAAfterUndo);
+      await Promise.resolve();
+    });
+    expect(scribbleJob.starts).toHaveLength(3);
+    expect(scribbleJob.starts[2]!.identity.params).toContainEqual({
+      key: "imageAsset",
+      value: assetA,
+    });
+  });
+
+  it("routes a persisted asset reselected after catalog refresh through the same exact environment gate", async () => {
+    managedImageAssetJob.list
+      .mockResolvedValueOnce([
+        {
+          id: assetA,
+          name: "portrait alpha",
+          url: `/image-assets/${assetA}.png`,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: assetA,
+          name: "portrait alpha",
+          url: `/image-assets/${assetA}.png`,
+        },
+        {
+          id: assetB,
+          name: "portrait beta",
+          url: `/image-assets/${assetB}.png`,
+        },
+      ]);
+    const generateToneSource = vi.fn(
+      (
+        ...args: Parameters<
+          NonNullable<typeof photoScribble.generateToneSource>
+        >
+      ) =>
+        photoScribble.generateToneSource!(...args),
+    );
+    const el = mount(
+      <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+    );
+    const environmentA = resolvedAssetEnvironment(assetA, 64);
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(environmentA);
+      await Promise.resolve();
+    });
+    clickButton(el, "Tone");
+
+    clickButton(el, "Choose image");
+    await flush();
+    clickButton(el, "Refresh");
+    await flush();
+    const persistedB = [
+      ...el.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Image Assets"] button',
+      ),
+    ].find((button) => button.textContent?.includes("portrait beta"));
+    if (persistedB === undefined) throw new Error("no persisted B choice");
+    act(() => persistedB.click());
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.after.present.params.imageAsset).toBe(
+      assetB,
+    );
+    expect(sketchEnvironmentJob.starts).toHaveLength(2);
+    expect(sketchEnvironmentJob.starts[0]!.signal.aborted).toBe(true);
+    expect(lastToneSource).toBeNull();
+    expect(scribbleJob.starts).toHaveLength(1);
+
+    const environmentB = resolvedAssetEnvironment(assetB, 192);
+    await act(async () => {
+      sketchEnvironmentJob.starts[1]!.resolve(environmentB);
+      await Promise.resolve();
+    });
+    expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentB);
+    expect(scribbleJob.starts).toHaveLength(2);
+    expect(scribbleJob.starts[1]!.identity.params).toContainEqual({
+      key: "imageAsset",
+      value: assetB,
+    });
+    expect(containsBinaryPayload(scribbleJob.starts[1]!.identity)).toBe(false);
+  });
+
+  it.each([
+    ["list", "Could not load the Image Asset library."],
+    ["normalize", "Could not prepare the selected image."],
+    ["import", "Could not import the prepared Image Asset."],
+  ] as const)(
+    "keeps A live and starts no replacement environment or worker after a managed asset %s failure",
+    async (phase, message) => {
+      if (phase === "list") {
+        managedImageAssetJob.list.mockRejectedValueOnce(new Error("offline"));
+      } else if (phase === "normalize") {
+        managedImageAssetJob.normalize.mockRejectedValueOnce(
+          new Error("decode failed"),
+        );
+      } else {
+        managedImageAssetJob.import.mockRejectedValueOnce(
+          new Error("write failed"),
+        );
+      }
+      const generateToneSource = vi.fn(
+        (
+          ...args: Parameters<
+            NonNullable<typeof photoScribble.generateToneSource>
+          >
+        ) =>
+          photoScribble.generateToneSource!(...args),
+      );
+      const el = mount(
+        <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+      );
+      const environmentA = resolvedAssetEnvironment(assetA, 96);
+      await act(async () => {
+        sketchEnvironmentJob.starts[0]!.resolve(environmentA);
+        await Promise.resolve();
+      });
+      clickButton(el, "Tone");
+
+      clickButton(el, "Choose image");
+      await flush();
+      if (phase !== "list") {
+        chooseImageFile(el, `Failure ${phase}.png`);
+        clickButton(el, "Import Image Asset");
+        await flush();
+        await flush();
+      }
+
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain(message);
+      expect(
+        el.querySelector('[aria-label="imageAsset image asset identity"]')
+          ?.textContent,
+      ).toBe(assetA);
+      expect(historyCapture.atomic).toHaveLength(0);
+      expect(sketchEnvironmentJob.starts).toHaveLength(1);
+      expect(sketchEnvironmentJob.starts[0]!.signal.aborted).toBe(false);
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentA);
+      expect(lastToneSource).not.toBeNull();
+    },
+  );
+
   it("keys main-thread asset readiness across Tone and Scribble preparation", async () => {
-    const assetA = "portrait-alpha-000000000001";
-    const assetB = "portrait-beta-000000000002";
+    const presetAssetB = "portrait-beta-000000000002";
     const invalidAsset = "unresolved://not-an-asset-id";
     const schema = {
       ...toneCalibration.schema,
@@ -4529,7 +4857,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     listPresets.mockResolvedValue(["asset-b", "invalid"]);
     loadPreset.mockImplementation(async (_sketchId, name) =>
       name === "asset-b"
-        ? preset("asset-b", assetB)
+        ? preset("asset-b", presetAssetB)
         : preset("invalid", invalidAsset),
     );
 
@@ -4583,11 +4911,11 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     clickButton(el, "Reload");
     await flush();
     expect(sketchEnvironmentJob.starts).toHaveLength(2);
-    expect(sketchEnvironmentJob.starts[1]!.params.photo).toBe(assetB);
+    expect(sketchEnvironmentJob.starts[1]!.params.photo).toBe(presetAssetB);
     expect(scribbleJob.starts).toHaveLength(3);
     expect(lastToneSource).toBeNull();
 
-    const environmentB = resolvedEnvironment(assetB);
+    const environmentB = resolvedEnvironment(presetAssetB);
     await act(async () => {
       sketchEnvironmentJob.starts[1]!.resolve(environmentB);
       await Promise.resolve();
@@ -4595,7 +4923,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(scribbleJob.starts).toHaveLength(4);
     expect(scribbleJob.starts[3]!.identity.params).toContainEqual({
       key: "photo",
-      value: assetB,
+      value: presetAssetB,
     });
     expect(toneSourceFor.mock.calls.at(-1)?.[2]).toBe(environmentB);
     const startsAfterB = scribbleJob.starts.length;

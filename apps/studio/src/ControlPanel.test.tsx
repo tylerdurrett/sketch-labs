@@ -34,6 +34,8 @@ afterEach(() => {
   container = null;
   root = null;
   vi.clearAllMocks();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const numberSpec = (over: Record<string, unknown> = {}): ParamSpec =>
@@ -154,6 +156,145 @@ describe("ControlPanel", () => {
     expect(html).toContain(`src="/image-assets/${value}.png"`);
     expect(html).not.toContain("unsupported control kind");
     expect(html).not.toContain('aria-label="source lock"');
+  });
+
+  it("routes an Image Asset choice through the ordinary lock-free setter", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({
+        ok: true,
+        text: () =>
+          Promise.resolve(JSON.stringify(["apple-tree-bbbbbbbbbbbb"])),
+      } as Response),
+    );
+    const onChange = vi.fn();
+    const onBegin = vi.fn();
+    const onPreview = vi.fn();
+    const onCommit = vi.fn();
+    const el = mount(
+      <ControlPanel
+        schema={{
+          source: {
+            kind: "image-asset",
+            default: "default-aaaaaaaaaaaa",
+          },
+        }}
+        params={{ source: "current-cccccccccccc" }}
+        locks={new Set(["source"])}
+        onChange={onChange}
+        editHistory={{
+          onBegin,
+          onPreview,
+          onCommit,
+          onCancel: vi.fn(),
+        }}
+        onToggleLock={vi.fn()}
+      />,
+    );
+
+    act(() => {
+      [...el.querySelectorAll<HTMLButtonElement>("button")]
+        .find((candidate) => candidate.textContent === "Choose image")!
+        .click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      el.querySelector<HTMLButtonElement>(
+        '[aria-label="Image Assets"] button',
+      )!.click();
+    });
+
+    expect(onChange).toHaveBeenCalledWith(
+      "source",
+      "apple-tree-bbbbbbbbbbbb",
+    );
+    expect(onBegin).not.toHaveBeenCalled();
+    expect(onPreview).not.toHaveBeenCalled();
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(el.querySelector('[aria-label="source lock"]')).toBeNull();
+  });
+
+  it("forwards a non-default Image Asset cap into browser normalization", async () => {
+    const bitmap = {
+      width: 1_000,
+      height: 500,
+      close: vi.fn(),
+    };
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(bitmap));
+    const drawImage = vi.fn();
+    vi.spyOn(window.HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      drawImage,
+    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(window.HTMLCanvasElement.prototype, "toBlob").mockImplementation(
+      (callback: BlobCallback) => {
+        callback(new Blob(["normalized"], { type: "image/png" }));
+      },
+    );
+    vi.stubGlobal("fetch", (_url: string, init?: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify(
+              init?.method === "POST"
+                ? { id: "control-import-bbbbbbbbbbbb", created: true }
+                : [],
+            ),
+          ),
+      } as Response),
+    );
+    const onChange = vi.fn();
+    const el = mount(
+      <ControlPanel
+        schema={{
+          source: {
+            kind: "image-asset",
+            default: "default-aaaaaaaaaaaa",
+          },
+        }}
+        params={{ source: "current-cccccccccccc" }}
+        locks={new Set()}
+        onChange={onChange}
+        onToggleLock={() => {}}
+        imageAssetLongEdgeCap={777}
+      />,
+    );
+    act(() => {
+      [...el.querySelectorAll<HTMLButtonElement>("button")]
+        .find((candidate) => candidate.textContent === "Choose image")!
+        .click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const fileInput = el.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(fileInput, "files", {
+      configurable: true,
+      value: [new File(["source"], "Large.webp")],
+    });
+    act(() =>
+      fileInput.dispatchEvent(new Event("change", { bubbles: true })),
+    );
+    act(() => {
+      [...el.querySelectorAll<HTMLButtonElement>("button")]
+        .find((candidate) => candidate.textContent === "Import Image Asset")!
+        .click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 777, 389);
+    expect(onChange).toHaveBeenCalledWith(
+      "source",
+      "control-import-bbbbbbbbbbbb",
+    );
+    expect(bitmap.close).toHaveBeenCalledTimes(1);
   });
 
   it("falls image-asset back only for a missing or nonstring runtime value", () => {

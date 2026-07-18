@@ -6,10 +6,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   IMAGE_ASSET_HASH_HEX_LENGTH,
+  IMAGE_ASSET_MAX_SLUG_LENGTH,
   imageAssetDisplayName,
   imageAssetIdFromDigest,
   imageAssetUrl,
+  isCanonicalImageAssetSlug,
   isImageAssetId,
+  isImageAssetSlugDraftWithinLimit,
   normalizeImageAssetSlug,
   parseImageAssetId,
 } from "./imageAssetIdentity";
@@ -29,6 +32,18 @@ describe("Image Asset identity", () => {
     expect(normalizeImageAssetSlug("🌲")).toBe("image");
   });
 
+  it("shares one browser-safe canonical slug bound", () => {
+    const edge = "a".repeat(IMAGE_ASSET_MAX_SLUG_LENGTH);
+    const overlong = `${edge}a`;
+
+    expect(IMAGE_ASSET_MAX_SLUG_LENGTH).toBe(100);
+    expect(isImageAssetSlugDraftWithinLimit(edge)).toBe(true);
+    expect(isImageAssetSlugDraftWithinLimit(overlong)).toBe(false);
+    expect(isCanonicalImageAssetSlug(edge)).toBe(true);
+    expect(isCanonicalImageAssetSlug(overlong)).toBe(false);
+    expect(isCanonicalImageAssetSlug("Pine Cone")).toBe(false);
+  });
+
   it("builds an ID from exactly one lowercase SHA-256 digest", () => {
     const digest = "0123456789abcdef".repeat(4);
 
@@ -42,6 +57,12 @@ describe("Image Asset identity", () => {
     expect(() =>
       imageAssetIdFromDigest("pinecone", digest.slice(0, 63)),
     ).toThrow(/64 lowercase SHA-256 hex/);
+    expect(() =>
+      imageAssetIdFromDigest(
+        "a".repeat(IMAGE_ASSET_MAX_SLUG_LENGTH + 1),
+        digest,
+      ),
+    ).toThrow(/100 characters or fewer/);
   });
 
   it("strictly parses only canonical IDs split at the final hash suffix", () => {
@@ -58,6 +79,7 @@ describe("Image Asset identity", () => {
       "pine-cone-0123456789abc",
       "pine-cone-0123456789ab.png",
       "0123456789ab",
+      `${"a".repeat(IMAGE_ASSET_MAX_SLUG_LENGTH + 1)}-0123456789ab`,
       "",
     ]) {
       expect(parseImageAssetId(invalid)).toBeNull();

@@ -64,7 +64,7 @@ export default defineConfig({
     // against the single sketchesRoot knob above.
     presetsPlugin(sketchesRoot),
     sketchesStaticPlugin(sketchesRoot),
-    // Read-only, exact-ID static serving for committed Image Assets.
+    // Bounded list/write middleware plus exact-ID static Image Asset serving.
     imageAssetsPlugin(imageAssetsRoot),
   ],
   server: {
