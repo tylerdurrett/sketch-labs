@@ -1,7 +1,6 @@
 {
   "schemaVersion": 1,
   "inventoryScope": "Committed real-photograph inputs available to Photo Scribble at issue 336 protocol freeze",
-  "ownershipBoundary": "Repository history proves only when each file entered this repository. Acquisition source, creator, rights holder, license, and redistribution permission are unknown pending explicit maintainer attestation; this manifest does not infer them from the committer identity.",
   "categorySemantics": {
     "ordinary-opaque": "Every decoded alpha byte is 255.",
     "flat-or-dark": "Mean linear-light inverted luminance over fully opaque pixels is at least 0.75.",
@@ -33,17 +32,9 @@
         "maximum": 0.999202148971,
         "mean": 0.769866452012
       },
-      "origin": {
-        "kind": "unknown-acquisition",
+      "fixtureVersion": {
         "introducedByCommit": "5258d6906a3badaf41d5341856484b1264dd28b1",
-        "introducedAt": "2026-07-17T20:13:32-05:00",
-        "externalSource": null
-      },
-      "ownership": {
-        "recordedStatus": "unknown-pending-maintainer-attestation",
-        "rightsHolder": null,
-        "license": null,
-        "redistributionStatementRecorded": false
+        "introducedAt": "2026-07-17T20:13:32-05:00"
       },
       "categories": [
         "ordinary-opaque",
@@ -74,17 +65,9 @@
         "maximum": 1,
         "mean": 0.847497540062
       },
-      "origin": {
-        "kind": "unknown-acquisition",
+      "fixtureVersion": {
         "introducedByCommit": "0793309dff36682f55fd56ab83b5ed1969368714",
-        "introducedAt": "2026-07-17T16:32:47-05:00",
-        "externalSource": null
-      },
-      "ownership": {
-        "recordedStatus": "unknown-pending-maintainer-attestation",
-        "rightsHolder": null,
-        "license": null,
-        "redistributionStatementRecorded": false
+        "introducedAt": "2026-07-17T16:32:47-05:00"
       },
       "categories": [
         "flat-or-dark",

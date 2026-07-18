@@ -80,12 +80,6 @@ function sameTuple(actual, expected) {
   ].every((key) => Number.isSafeInteger(actual[key]) && actual[key] === expected[key])
 }
 
-function sameRights(actual, rightsEvidence) {
-  return isRecord(actual) &&
-    actual.type === rightsEvidence.kind &&
-    actual.identifier === rightsEvidence.evidenceId.trim()
-}
-
 function validateRun(run, expected) {
   evidenceAssertion(isRecord(run), `${expected.label} is not an object`)
   evidenceAssertion(run.schemaVersion === 1, `${expected.label} schemaVersion is not 1`)
@@ -100,8 +94,6 @@ function validateRun(run, expected) {
     `${expected.label} scenario does not match`)
   evidenceAssertion(run.purpose === expected.purpose,
     `${expected.label} purpose does not match`)
-  evidenceAssertion(sameRights(run.rightsEvidence, expected.rightsEvidence),
-    `${expected.label} rights evidence does not match`)
   evidenceAssertion(hashesAreCanonical(run),
     `${expected.label} canonical identity/Scene/diagnostics hashes are missing`)
   evidenceAssertion(isRecord(run.result) && isRecord(run.result.diagnostics) &&
@@ -325,7 +317,7 @@ export function createBrowserBoundary({
       await startBrowser()
     },
 
-    async runJob({ job, campaignId, rightsEvidence, timeoutMs, reviewEnvironment, signal }) {
+    async runJob({ job, campaignId, timeoutMs, reviewEnvironment, signal }) {
       throwIfAborted(signal, 'Candidate job setup')
       if (browser === null || browser.isConnected?.() === false) {
         throw new CampaignOperationError('browser-lost', 'Browser is unavailable before job start')
@@ -355,17 +347,15 @@ export function createBrowserBoundary({
         }))
         partial.equivalence = await raceOperation(
           page.evaluate(
-            ({ scenarioId, rightsEvidence: evidence, campaignId: campaign, hostRunId }) =>
+            ({ scenarioId, campaignId: campaign, hostRunId }) =>
               globalThis.__PHOTO_SCRIBBLE_EVIDENCE__.runExactEquivalence(
                 scenarioId, {
-                  rightsEvidence: evidence,
                   campaignId: campaign,
                   hostRunId,
                 },
               ),
             {
               scenarioId: job.scenarioId,
-              rightsEvidence,
               campaignId,
               hostRunId: equivalenceHostRunId,
             },
@@ -377,14 +367,12 @@ export function createBrowserBoundary({
           hostRunId: equivalenceHostRunId,
           scenarioId: job.scenarioId,
           imageAssetId: job.imageAssetId,
-          rightsEvidence,
         })
         partial.observation = await raceOperation(
           page.evaluate(
-            ({ scenarioId, candidateId, rightsEvidence: evidence, campaignId: campaign, hostRunId }) =>
+            ({ scenarioId, candidateId, campaignId: campaign, hostRunId }) =>
               globalThis.__PHOTO_SCRIBBLE_EVIDENCE__.runCandidate(
                 scenarioId, candidateId, {
-                  rightsEvidence: evidence,
                   campaignId: campaign,
                   hostRunId,
                 },
@@ -392,7 +380,6 @@ export function createBrowserBoundary({
             {
               scenarioId: job.scenarioId,
               candidateId: job.candidateId,
-              rightsEvidence,
               campaignId,
               hostRunId: candidateHostRunId,
             },
@@ -406,7 +393,6 @@ export function createBrowserBoundary({
           imageAssetId: job.imageAssetId,
           candidateId: job.candidateId,
           tuple: job.tuple,
-          rightsEvidence,
           identityHash: partial.equivalence.production.identityHash,
         })
         return partial

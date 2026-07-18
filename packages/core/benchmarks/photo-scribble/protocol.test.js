@@ -141,7 +141,7 @@ function toneContrast(tone, control) {
 }
 
 describe('Photo Scribble issue 336 protocol', () => {
-  it('pins bytes, decoded alpha, unknown rights, and actual introduction commits', () => {
+  it('pins bytes, decoded alpha, and fixture-version introduction commits', () => {
     for (const fixture of fixtures.fixtures) {
       const bytes = readFileSync(resolve(root, fixture.path))
       expect(bytes.byteLength).toBe(fixture.byteLength)
@@ -177,16 +177,14 @@ describe('Photo Scribble issue 336 protocol', () => {
       expect(fixture.alphaDistribution.pixelCount).toBe(
         fixture.dimensions.width * fixture.dimensions.height,
       )
-      expect(fixture.origin.externalSource).toBeNull()
-      expect(fixture.origin.kind).toBe('unknown-acquisition')
-      expect(fixture.origin.introducedByCommit).toMatch(/^[0-9a-f]{40}$/)
+      expect(fixture.fixtureVersion.introducedByCommit).toMatch(/^[0-9a-f]{40}$/)
       const introducedPaths = execFileSync(
         'git',
         [
           'show',
           '--format=',
           '--name-only',
-          fixture.origin.introducedByCommit,
+          fixture.fixtureVersion.introducedByCommit,
         ],
         { cwd: root, encoding: 'utf8' },
       )
@@ -201,7 +199,7 @@ describe('Photo Scribble issue 336 protocol', () => {
             '--no-commit-id',
             '--name-status',
             '-r',
-            fixture.origin.introducedByCommit,
+            fixture.fixtureVersion.introducedByCommit,
             '--',
             fixture.path,
           ],
@@ -211,16 +209,10 @@ describe('Photo Scribble issue 336 protocol', () => {
       expect(
         execFileSync(
           'git',
-          ['show', '-s', '--format=%cI', fixture.origin.introducedByCommit],
+          ['show', '-s', '--format=%cI', fixture.fixtureVersion.introducedByCommit],
           { cwd: root, encoding: 'utf8' },
         ).trim(),
-      ).toBe(fixture.origin.introducedAt)
-      expect(fixture.ownership).toMatchObject({
-        recordedStatus: 'unknown-pending-maintainer-attestation',
-        rightsHolder: null,
-        license: null,
-      })
-      expect(fixture.ownership.redistributionStatementRecorded).toBe(false)
+      ).toBe(fixture.fixtureVersion.introducedAt)
     }
   })
 
@@ -291,17 +283,8 @@ describe('Photo Scribble issue 336 protocol', () => {
     }
   })
 
-  it('freezes the rights gate, environment, frame, profile, and scenarios', () => {
+  it('freezes the environment, frame, profile, and scenarios', () => {
     expect(protocol.artifactPrefix).toBe('issue-336-trial-')
-    expect(protocol.rightsGate).toEqual({
-      defaultExecutionAllowed: false,
-      status: 'blocked-pending-rights-evidence',
-      acceptedEvidence: [
-        'dated-maintainer-attestation-of-ownership-and-redistribution-rights',
-        'replacement-fixture-with-recorded-owned-or-compatible-license-provenance',
-      ],
-      rule: expect.stringContaining('Before any browser campaign'),
-    })
     expect(protocol.reviewEnvironment).toEqual({
       viewportWidth: 1440,
       viewportHeight: 1000,

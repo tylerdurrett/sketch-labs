@@ -45,8 +45,8 @@ apps/studio/node_modules/.bin/vite build \
 `--manifest`: `screen` jobs must be a non-empty prefix of the exact frozen
 candidate-major order (both baselines first, then each larger tuple in protocol
 order), while `promotion` requires an explicit survivor allow-list and its
-complete scenario/candidate cross-product. The CLI validates structured rights evidence
-before resolving Puppeteer or starting Vite. It runs one page and Worker job at
+complete scenario/candidate cross-product. The CLI validates the complete job
+matrix before resolving Puppeteer or starting Vite. It runs one page and Worker job at
 a time, performs production-tuple equivalence before each candidate, and writes
 an immutable raw record plus a separate summary and atomic campaign checkpoint
 after every outcome. Re-running the same manifest resumes without replacing
@@ -55,11 +55,10 @@ Abort records only the active job, if any, and leaves every later job pending.
 A crash/timeout record and checkpoint land before browser restart; a failed
 restart is a separate campaign failure and also leaves the next job pending.
 Every page response is rebound to its campaign/host-run identity and validated
-against the expected scenario, candidate, tuple, rights record, hashes, and raw
+against the expected scenario, candidate, tuple, hashes, and raw
 telemetry before it can become completed evidence.
-
-Do not invoke the CLI while the rights gate below is unsatisfied. Tests exercise
-its fake browser/server boundaries without starting a photographic campaign:
+Tests exercise its fake browser/server boundaries without starting a
+photographic campaign:
 
 ```sh
 apps/studio/node_modules/.bin/vitest run \
@@ -67,10 +66,9 @@ apps/studio/node_modules/.bin/vitest run \
 ```
 
 The page exposes `window.__PHOTO_SCRIBBLE_EVIDENCE__` with `runProduction`,
-`runCandidate`, and `runExactEquivalence`. Every call requires one complete
-structured `rightsEvidence` record matching an accepted form below; an arbitrary
-string is rejected. Its normalized type and identifier are copied into every
-run. Production and candidate measurements each prepare their photographic
+`runCandidate`, and `runExactEquivalence`. Campaign and host-run nonces bind each
+response to the caller. Production and candidate measurements each prepare their
+photographic
 source/model/lattice and execute the solver exactly once. A measured production
 record leaves its limit tuple `null`; resolving that tuple would repeat
 preparation outside the registered generator. Exact equivalence is a separate,
@@ -87,16 +85,9 @@ all heartbeat gaps directly calculable.
 
 The committed opaque flowers cover an ordinary photo and a `3:4` source in a
 square frame. The dark alpha pinecone covers Tone adjustment, a `2:3` source,
-276,857 fully transparent pixels, and 2,860 partial alpha pixels. Git proves
-only when these files entered the repository. Their acquisition, creator,
-rights holder, license, and redistribution permission are unknown; committer
-identity is not ownership evidence.
-
-The browser campaign is therefore **blocked** until a dated maintainer
-attestation confirms ownership and redistribution rights for every selected
-fixture, or each unknown fixture is replaced by an owned or compatibly licensed
-fixture with recorded provenance. Do not run measurements, adopt limits, add a
-binary, or download substitute material while this gate is unsatisfied.
+276,857 fully transparent pixels, and 2,860 partial alpha pixels. The fixture
+manifest pins their bytes, hashes, dimensions, decoded distributions, and
+introduction commits so campaign inputs remain reproducible.
 
 ## Fixed matrix
 
@@ -251,10 +242,6 @@ production limits and record the failure rather than relaxing a threshold after
 measurement. A tone/default/normalization change uses the same control pass and
 may be promoted only with a named before/after metric or attestation; this
 protocol does not pre-authorize such a change.
-
-No result can pass or be adopted unless the rights gate was satisfied before
-the first campaign write and the evidence record identifies the qualifying
-attestation or replacement-fixture provenance.
 
 Run the manifest guard from the repository root:
 

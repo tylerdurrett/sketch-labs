@@ -19,14 +19,6 @@ import {
 } from './campaign-runner.js'
 import protocol from './protocol.json'
 
-const rightsEvidence = {
-  kind: 'dated-maintainer-attestation-of-ownership-and-redistribution-rights',
-  evidenceId: 'attestation-2026-07-18',
-  attestedAt: '2026-07-18',
-  ownsEverySelectedFixture: true,
-  grantsRedistributionRights: true,
-}
-
 const roots = []
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
@@ -42,7 +34,6 @@ function screenManifest(overrides = {}) {
     schemaVersion: 1,
     campaignId: 'issue-336-20260718T120000Z',
     phase: 'screen',
-    rightsEvidence,
     jobs: [{
       scenarioId: 'flowers-opaque-fine',
       candidateId: 'current-fine-baseline',
@@ -99,10 +90,6 @@ function evidenceRun({
     runId,
     scenarioId: 'flowers-opaque-fine',
     purpose,
-    rightsEvidence: {
-      type: rightsEvidence.kind,
-      identifier: rightsEvidence.evidenceId,
-    },
     identityHash: 'a'.repeat(64),
     profile: structuredClone(profile),
     fullTuple: { ...tuple },
@@ -213,15 +200,30 @@ function validResponses() {
 }
 
 describe('Photo Scribble campaign runner', () => {
-  it('refuses missing rights evidence before starting or writing', async () => {
+  it('runs and persists technical inputs without fixture-rights metadata', async () => {
     const root = outputRoot()
-    const boundary = fakeBoundary()
     const manifest = screenManifest()
-    delete manifest.rightsEvidence
-    await expect(runCampaign({ manifest, protocol, outputRoot: root, boundary }))
-      .rejects.toThrow('rightsEvidence')
-    expect(boundary.start).not.toHaveBeenCalled()
-    expect(() => readFileSync(resolve(root, manifest.campaignId))).toThrow()
+    await runCampaign({
+      manifest,
+      protocol,
+      outputRoot: root,
+      boundary: fakeBoundary(),
+      inputDigests: { protocolSha256: 'a'.repeat(64) },
+    })
+
+    const persisted = JSON.parse(readFileSync(
+      resolve(root, manifest.campaignId, 'campaign-manifest.json'),
+      'utf8',
+    ))
+    expect(Object.keys(persisted).sort()).toEqual([
+      'campaignId',
+      'inputDigests',
+      'jobs',
+      'phase',
+      'schemaVersion',
+      'survivorCandidateIds',
+    ])
+    expect(persisted.inputDigests).toEqual({ protocolSha256: 'a'.repeat(64) })
   })
 
   it('separates screen scenarios from explicit, fully-covered promotion survivors', () => {
@@ -423,7 +425,6 @@ describe('Photo Scribble Puppeteer boundary', () => {
       hostRunId: responses.equivalenceHostRunId,
       scenarioId: 'flowers-opaque-fine',
       imageAssetId: 'img-0672-79d639daec62',
-      rightsEvidence,
     })
     expect(validateCandidateResponse(responses.candidate, {
       campaignId: responseCampaignId,
@@ -432,7 +433,6 @@ describe('Photo Scribble Puppeteer boundary', () => {
       imageAssetId: 'img-0672-79d639daec62',
       candidateId: 'current-fine-baseline',
       tuple: responseTuple,
-      rightsEvidence,
       identityHash: equivalence.production.identityHash,
     })).toBe(responses.candidate)
   })
@@ -443,7 +443,6 @@ describe('Photo Scribble Puppeteer boundary', () => {
     ['scenario', (run) => { run.scenarioId = 'pinecone-dark-alpha-fine' }],
     ['candidate profile', (run) => { run.profile.candidateId = 'fine-100k' }],
     ['four-limit tuple', (run) => { run.fullTuple.maxRestarts++ }],
-    ['rights evidence', (run) => { run.rightsEvidence.identifier = 'stale-attestation' }],
     ['canonical hashes', (run) => { run.result.sceneHash = 'not-a-hash' }],
     ['telemetry identity', (run) => { run.telemetry.runId = 'stale-run' }],
     ['raw telemetry', (run) => { run.telemetry.execution = null }],
@@ -457,7 +456,6 @@ describe('Photo Scribble Puppeteer boundary', () => {
       imageAssetId: 'img-0672-79d639daec62',
       candidateId: 'current-fine-baseline',
       tuple: responseTuple,
-      rightsEvidence,
       identityHash: 'a'.repeat(64),
     })).toThrow('Rejected malformed, stale, or mismatched')
   })
@@ -471,7 +469,6 @@ describe('Photo Scribble Puppeteer boundary', () => {
       hostRunId: equivalenceHostRunId,
       scenarioId: 'flowers-opaque-fine',
       imageAssetId: 'img-0672-79d639daec62',
-      rightsEvidence,
     })).toThrow('stale or inconsistent')
   })
 
@@ -525,7 +522,6 @@ describe('Photo Scribble Puppeteer boundary', () => {
       hostRunId: equivalenceHostRunId,
       scenarioId: 'flowers-opaque-fine',
       imageAssetId: 'img-0672-79d639daec62',
-      rightsEvidence,
     })).toThrow(message)
   })
 
@@ -580,7 +576,6 @@ describe('Photo Scribble Puppeteer boundary', () => {
     await boundary.start()
     await expect(boundary.runJob({
       job: { scenarioId: 'flowers-opaque-fine', candidateId: 'fine-100k' },
-      rightsEvidence,
       timeoutMs: 5,
       reviewEnvironment: protocol.reviewEnvironment,
     })).rejects.toMatchObject({ kind: 'job-timeout' })

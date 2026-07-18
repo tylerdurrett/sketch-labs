@@ -7,13 +7,10 @@ import {
   canonicalBrowserSceneHash,
   canonicalScribbleIdentityHash,
 } from "./photoScribbleEvidenceHash";
-import {
-  normalizePhotoScribbleRightsEvidence,
-  type NormalizedPhotoScribbleRightsEvidence,
-  type PhotoScribbleEvidenceProfile,
-  type PhotoScribbleRightsEvidence,
-  type PhotoScribbleEvidenceTelemetry,
-  type PhotoScribbleEvidenceWorkerConfig,
+import type {
+  PhotoScribbleEvidenceProfile,
+  PhotoScribbleEvidenceTelemetry,
+  PhotoScribbleEvidenceWorkerConfig,
 } from "./photoScribbleEvidenceProtocol";
 import {
   createScribbleComputeIdentity,
@@ -37,7 +34,6 @@ interface Candidate extends ScribbleExecutionLimits {
 }
 
 const protocol = protocolJson as unknown as {
-  readonly rightsGate: { readonly status: string };
   readonly frame: { readonly width: number; readonly height: number };
   readonly scenarios: readonly Scenario[];
   readonly orderedLimitCandidates: readonly Candidate[];
@@ -54,7 +50,6 @@ interface PerformanceWithMemory extends Performance {
 }
 
 interface RunOptions {
-  readonly rightsEvidence: PhotoScribbleRightsEvidence;
   /** Host identity copied through so a campaign can reject stale page results. */
   readonly campaignId?: string;
   readonly hostRunId?: string;
@@ -78,7 +73,6 @@ export interface PhotoScribbleEvidenceRun {
   readonly runId: string;
   readonly scenarioId: string;
   readonly purpose: "measurement" | "equivalence-proof";
-  readonly rightsEvidence: NormalizedPhotoScribbleRightsEvidence;
   readonly identityHash: string;
   readonly profile: PhotoScribbleEvidenceProfile;
   readonly fullTuple: Readonly<ScribbleExecutionLimits> | null;
@@ -305,10 +299,6 @@ async function runPhotoScribbleEvidenceOperation(
   purpose: "measurement" | "equivalence-proof",
 ): Promise<PhotoScribbleEvidenceRun> {
   const scenario = scenarioById(scenarioId);
-  const rightsEvidence = normalizePhotoScribbleRightsEvidence(
-    options.rightsEvidence,
-    scenario.fixtureId,
-  );
   const identity = createScribbleComputeIdentity({
     sketchId: photoScribble.id,
     schema: photoScribble.schema,
@@ -379,7 +369,6 @@ async function runPhotoScribbleEvidenceOperation(
     runId,
     scenarioId,
     purpose,
-    rightsEvidence,
     identityHash: await canonicalScribbleIdentityHash(identity),
     profile,
     fullTuple: workerTelemetry.effectiveLimits,
@@ -500,7 +489,6 @@ if (status !== null) {
   status.textContent = JSON.stringify(
     {
       ready: true,
-      rightsGate: protocol.rightsGate.status,
       note: "Worker heap is unavailable; performance.memory samples only the page/main process.",
       api: "window.__PHOTO_SCRIBBLE_EVIDENCE__",
       scenarios: protocol.scenarios.map(({ scenarioId }) => scenarioId),

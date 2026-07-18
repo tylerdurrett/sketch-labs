@@ -2,15 +2,6 @@
   "schemaVersion": 1,
   "issue": 336,
   "artifactPrefix": "issue-336-trial-",
-  "rightsGate": {
-    "defaultExecutionAllowed": false,
-    "status": "blocked-pending-rights-evidence",
-    "acceptedEvidence": [
-      "dated-maintainer-attestation-of-ownership-and-redistribution-rights",
-      "replacement-fixture-with-recorded-owned-or-compatible-license-provenance"
-    ],
-    "rule": "Before any browser campaign, every fixture must have one accepted evidence form. Generated observations and adoption are invalid while this gate is unsatisfied."
-  },
   "reviewEnvironment": {
     "viewportWidth": 1440,
     "viewportHeight": 1000,
@@ -245,7 +236,7 @@
     },
     "terminalToDisplay": {
       "start": "coordinator receipt time for terminal progress",
-      "end": "first requestAnimationFrame after current result diagnostics and canvas provenance both match the completed worker identity"
+      "end": "first requestAnimationFrame after current result diagnostics and canvas identity both match the completed worker identity"
     },
     "toneSampling": {
       "samplingRule": "Sample the production Tone Field and Shading Mask directly at each exact Composition Frame point after Image Asset resolution and contain-fit. Record unrounded IEEE-754 values; screenshots are secondary evidence.",

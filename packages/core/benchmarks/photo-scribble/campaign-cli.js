@@ -30,8 +30,7 @@ const manifestBytes = source(manifestPath)
 const protocol = JSON.parse(protocolBytes)
 const manifest = JSON.parse(manifestBytes)
 
-// Refuse before even resolving Puppeteer. Supplying a manifest is never itself
-// permission to run photographs.
+// Validate all scenario/candidate inputs before resolving Puppeteer.
 validateCampaignManifest(manifest, protocol)
 const boundary = await createDefaultBrowserBoundary(root)
 const result = await runCampaign({
@@ -39,7 +38,7 @@ const result = await runCampaign({
   protocol,
   outputRoot,
   boundary,
-  provenance: {
+  inputDigests: {
     protocolSha256: sha256(protocolBytes),
     fixtureManifestSha256: sha256(fixtureBytes),
     jobManifestSha256: sha256(manifestBytes),

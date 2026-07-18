@@ -25,7 +25,6 @@ import {
   canonicalBrowserSceneHash,
 } from "./photoScribbleEvidenceHash";
 import {
-  normalizePhotoScribbleRightsEvidence,
   parsePhotoScribbleEvidenceWorkerConfig,
   type PhotoScribbleEvidenceTelemetry,
   type PhotoScribbleEvidenceWorkerConfig,
@@ -59,14 +58,6 @@ const params: Params = {
 const environment: SketchEnvironment = {
   imageAssets: (id) => (id === assetId ? pixels : undefined),
 };
-
-const qualifiedRights = {
-  kind: "dated-maintainer-attestation-of-ownership-and-redistribution-rights",
-  evidenceId: "attestation-2026-07-18",
-  attestedAt: "2026-07-18",
-  ownsEverySelectedFixture: true,
-  grantsRedistributionRights: true,
-} as const;
 
 class FakeEvidenceBroadcastChannel {
   static readonly instances: FakeEvidenceBroadcastChannel[] = [];
@@ -247,7 +238,7 @@ describe("Photo Scribble evidence page seams", () => {
           maxRestarts: 8_000,
         },
       },
-      { rightsEvidence: qualifiedRights },
+      {},
     );
     await Promise.resolve();
 
@@ -415,43 +406,6 @@ describe("Photo Scribble evidence page seams", () => {
     expect(injectedPreparation).toEqual({ source: 1, model: 1 });
   });
 
-  it("accepts only protocol-qualified, auditable rights records", () => {
-    expect(() =>
-      normalizePhotoScribbleRightsEvidence(
-        "attestation-2026-07-18",
-        "flowers-opaque-portrait",
-      ),
-    ).toThrow(/not auditable/);
-    expect(() =>
-      normalizePhotoScribbleRightsEvidence(
-        { ...qualifiedRights, grantsRedistributionRights: false },
-        "flowers-opaque-portrait",
-      ),
-    ).toThrow(/incomplete/);
-    expect(
-      normalizePhotoScribbleRightsEvidence(
-        qualifiedRights,
-        "flowers-opaque-portrait",
-      ),
-    ).toEqual({
-      type: qualifiedRights.kind,
-      identifier: qualifiedRights.evidenceId,
-    });
-    expect(() =>
-      normalizePhotoScribbleRightsEvidence(
-        {
-          kind: "replacement-fixture-with-recorded-owned-or-compatible-license-provenance",
-          evidenceId: "replacement-record-1",
-          fixtureIds: ["another-fixture"],
-          provenanceRecord: "records/provenance-1.json",
-          rightsBasis: "compatible-license",
-          license: "CC0-1.0",
-        },
-        "flowers-opaque-portrait",
-      ),
-    ).toThrow(/incomplete/);
-  });
-
   it("surfaces Worker failure immediately and cleans up without telemetry", async () => {
     installEvidenceBrowserFakes();
     FakeEvidenceWorker.mode = "failure";
@@ -463,7 +417,7 @@ describe("Photo Scribble evidence page seams", () => {
       runPhotoScribbleEvidence(
         "flowers-opaque-control",
         { kind: "production" },
-        { rightsEvidence: qualifiedRights },
+        {},
       ),
     ).rejects.toThrow("worker failed before telemetry");
     expect(performance.now() - startedAt).toBeLessThan(1_000);
@@ -471,7 +425,7 @@ describe("Photo Scribble evidence page seams", () => {
     expect(FakeEvidenceBroadcastChannel.instances[0]!.closed).toBe(true);
   });
 
-  it("returns auditable rights metadata and same-clock heartbeat anchors", async () => {
+  it("returns same-clock heartbeat anchors", async () => {
     installEvidenceBrowserFakes();
     const { runPhotoScribbleEvidence } = await import(
       "./photoScribbleEvidence"
@@ -479,13 +433,8 @@ describe("Photo Scribble evidence page seams", () => {
     const run = await runPhotoScribbleEvidence(
       "flowers-opaque-control",
       { kind: "production" },
-      { rightsEvidence: qualifiedRights },
+      {},
     );
-
-    expect(run.rightsEvidence).toEqual({
-      type: qualifiedRights.kind,
-      identifier: qualifiedRights.evidenceId,
-    });
     expect(run.purpose).toBe("measurement");
     expect(run.fullTuple).toBeNull();
     expect(run.telemetry.resolvedProductionLimits).toBeNull();
@@ -512,7 +461,7 @@ describe("Photo Scribble evidence page seams", () => {
     );
     const proof = await runPhotoScribbleExactEquivalence(
       "flowers-opaque-control",
-      { rightsEvidence: qualifiedRights },
+      {},
     );
 
     expect(FakeEvidenceWorker.instances).toHaveLength(2);

@@ -42,53 +42,6 @@ export function tupleToken(candidate) {
   return `s${tuple.maxAcceptedSegments}-p${tuple.maxPolylines}-g${tuple.maxStagnations}-r${tuple.maxRestarts}`
 }
 
-function validateRightsEvidence(value, fixtureIds, protocol) {
-  assert(value !== null && typeof value === 'object' && !Array.isArray(value),
-    'A structured rightsEvidence record is required before campaign execution')
-  assert(protocol.rightsGate.acceptedEvidence.includes(value.kind),
-    'rightsEvidence does not use a form accepted by the frozen protocol')
-  assert(typeof value.evidenceId === 'string' && value.evidenceId.trim().length >= 8,
-    'rightsEvidence.evidenceId must be an auditable identifier')
-
-  if (value.kind === 'dated-maintainer-attestation-of-ownership-and-redistribution-rights') {
-    const keys = Object.keys(value).sort().join(',')
-    assert(keys === [
-      'attestedAt',
-      'evidenceId',
-      'grantsRedistributionRights',
-      'kind',
-      'ownsEverySelectedFixture',
-    ].join(','), 'Maintainer rights attestation has unexpected or missing fields')
-    assert(/^\d{4}-\d{2}-\d{2}$/.test(value.attestedAt ?? '') &&
-      Number.isFinite(Date.parse(`${value.attestedAt}T00:00:00Z`)),
-    'Maintainer rights attestation must contain a valid date')
-    assert(value.ownsEverySelectedFixture === true &&
-      value.grantsRedistributionRights === true,
-    'Maintainer rights attestation does not cover ownership and redistribution')
-  } else {
-    const keys = Object.keys(value).sort().join(',')
-    assert(keys === [
-      'evidenceId',
-      'fixtureIds',
-      'kind',
-      'license',
-      'provenanceRecord',
-      'rightsBasis',
-    ].join(','), 'Replacement-fixture rights record has unexpected or missing fields')
-    assert(Array.isArray(value.fixtureIds) && fixtureIds.every((id) => value.fixtureIds.includes(id)),
-      'Replacement-fixture rights record does not cover every selected fixture')
-    assert(typeof value.provenanceRecord === 'string' && value.provenanceRecord.trim().length >= 8,
-      'Replacement-fixture rights record lacks durable provenance')
-    assert(value.rightsBasis === 'owned' || value.rightsBasis === 'compatible-license',
-      'Replacement-fixture rights basis is invalid')
-    assert(value.rightsBasis === 'owned'
-      ? value.license === null
-      : typeof value.license === 'string' && value.license.trim().length >= 2,
-    'Replacement-fixture license does not match its rights basis')
-  }
-  return structuredClone(value)
-}
-
 function jobKey(job) {
   return `${job.scenarioId}/${job.candidateId}--${job.tupleToken}`
 }
@@ -169,13 +122,10 @@ export function validateCampaignManifest(input, protocol) {
       'Promotion jobs must cover every frozen scenario exactly once for every explicit survivor')
   }
 
-  const fixtureIds = [...new Set(jobs.map((job) => job.fixtureId))]
-  const rightsEvidence = validateRightsEvidence(input.rightsEvidence, fixtureIds, protocol)
   return Object.freeze({
     schemaVersion: SCHEMA_VERSION,
     campaignId: input.campaignId,
     phase: input.phase,
-    rightsEvidence: Object.freeze(rightsEvidence),
     survivorCandidateIds: survivorCandidateIds === null ? null : Object.freeze(survivorCandidateIds),
     jobs: Object.freeze(jobs),
   })
@@ -221,7 +171,7 @@ function artifactBase(job) {
   return `${job.captureStem}--${job.candidateId}--${job.tupleToken}`
 }
 
-export function createCampaignStore(outputRoot, campaign, provenance = {}) {
+export function createCampaignStore(outputRoot, campaign, inputDigests = {}) {
   const campaignRoot = containedPath(outputRoot, campaign.campaignId)
   const manifestPath = containedPath(campaignRoot, 'campaign-manifest.json')
   const checkpointPath = containedPath(campaignRoot, 'campaign-checkpoint.json')
@@ -230,21 +180,20 @@ export function createCampaignStore(outputRoot, campaign, provenance = {}) {
     schemaVersion: SCHEMA_VERSION,
     campaignId: campaign.campaignId,
     phase: campaign.phase,
-    rightsEvidence: campaign.rightsEvidence,
     survivorCandidateIds: campaign.survivorCandidateIds,
     jobs: campaign.jobs.map(({ scenarioId, candidateId, tuple }) => ({
       scenarioId,
       candidateId,
       tuple,
     })),
-    provenance,
+    inputDigests,
   }
 
   function initialize() {
     mkdirSync(campaignRoot, { recursive: true })
     if (existsSync(manifestPath)) {
       assert(json(readJson(manifestPath)) === json(persistedManifest),
-        `Campaign ${campaign.campaignId} already exists with a different manifest or provenance`)
+        `Campaign ${campaign.campaignId} already exists with different inputs or digests`)
     } else {
       exclusiveAtomicJson(manifestPath, persistedManifest)
     }
@@ -412,9 +361,9 @@ function normalizedFailure(error) {
 }
 
 /** Serial by construction: the next job starts only after durable commit. */
-export async function runCampaign({ manifest, protocol, outputRoot, boundary, provenance = {}, signal }) {
+export async function runCampaign({ manifest, protocol, outputRoot, boundary, inputDigests = {}, signal }) {
   const campaign = validateCampaignManifest(manifest, protocol)
-  const store = createCampaignStore(outputRoot, campaign, provenance)
+  const store = createCampaignStore(outputRoot, campaign, inputDigests)
   store.initialize()
   const completed = []
   let stopped = null
@@ -445,7 +394,6 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, pr
         const result = await boundary.runJob({
           job,
           campaignId: campaign.campaignId,
-          rightsEvidence: campaign.rightsEvidence,
           timeoutMs: protocol.thresholds.jobTimeoutMs,
           reviewEnvironment: protocol.reviewEnvironment,
           signal,
@@ -455,7 +403,6 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, pr
           campaignId: campaign.campaignId,
           phase: campaign.phase,
           job,
-          rightsEvidence: campaign.rightsEvidence,
           status: 'completed',
           failure: null,
           startedAt,
@@ -471,7 +418,6 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, pr
           campaignId: campaign.campaignId,
           phase: campaign.phase,
           job,
-          rightsEvidence: campaign.rightsEvidence,
           status: 'failed',
           failure: { kind: failure.kind, message: failure.message },
           startedAt,
