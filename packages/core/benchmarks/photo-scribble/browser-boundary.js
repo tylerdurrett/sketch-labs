@@ -12,7 +12,14 @@ function delay(ms) {
   return new Promise((done) => setTimeout(done, ms))
 }
 
-async function raceOperation(operation, { page, timeoutMs, signal, label }) {
+export async function raceOperation(operation, { page, timeoutMs, signal, label }) {
+  if (signal?.aborted) {
+    operation.catch(() => {})
+    await page.evaluate(
+      () => globalThis.__PHOTO_SCRIBBLE_EVIDENCE__?.abortActive(),
+    ).catch(() => false)
+    throw new CampaignOperationError('campaign-aborted', `${label} was aborted`)
+  }
   let timer
   let abortListener
   const timeout = new Promise((_, reject) => {
@@ -41,6 +48,200 @@ async function raceOperation(operation, { page, timeoutMs, signal, label }) {
   } finally {
     clearTimeout(timer)
     if (abortListener !== undefined) signal.removeEventListener('abort', abortListener)
+  }
+}
+
+function evidenceAssertion(condition, message) {
+  if (!condition) {
+    throw new CampaignOperationError(
+      'invalid-evidence-response',
+      `Rejected malformed, stale, or mismatched page evidence: ${message}`,
+    )
+  }
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function hashesAreCanonical(run) {
+  const hash = /^[0-9a-f]{64}$/
+  return hash.test(run.identityHash ?? '') &&
+    hash.test(run.result?.sceneHash ?? '') &&
+    hash.test(run.result?.diagnosticsHash ?? '')
+}
+
+function sameTuple(actual, expected) {
+  return isRecord(actual) && [
+    'maxAcceptedSegments',
+    'maxPolylines',
+    'maxStagnations',
+    'maxRestarts',
+  ].every((key) => Number.isSafeInteger(actual[key]) && actual[key] === expected[key])
+}
+
+function sameRights(actual, rightsEvidence) {
+  return isRecord(actual) &&
+    actual.type === rightsEvidence.kind &&
+    actual.identifier === rightsEvidence.evidenceId.trim()
+}
+
+function validateRun(run, expected) {
+  evidenceAssertion(isRecord(run), `${expected.label} is not an object`)
+  evidenceAssertion(run.schemaVersion === 1, `${expected.label} schemaVersion is not 1`)
+  evidenceAssertion(run.campaignId === expected.campaignId,
+    `${expected.label} campaign identity does not match`)
+  evidenceAssertion(run.hostRunId === expected.hostRunId,
+    `${expected.label} host run identity does not match`)
+  evidenceAssertion(typeof run.runId === 'string' &&
+    run.runId.startsWith(`${expected.hostRunId}-`),
+  `${expected.label} page run identity does not match`)
+  evidenceAssertion(run.scenarioId === expected.scenarioId,
+    `${expected.label} scenario does not match`)
+  evidenceAssertion(run.purpose === expected.purpose,
+    `${expected.label} purpose does not match`)
+  evidenceAssertion(sameRights(run.rightsEvidence, expected.rightsEvidence),
+    `${expected.label} rights evidence does not match`)
+  evidenceAssertion(hashesAreCanonical(run),
+    `${expected.label} canonical identity/Scene/diagnostics hashes are missing`)
+  evidenceAssertion(isRecord(run.result) && isRecord(run.result.diagnostics) &&
+    (run.result.diagnostics.termination === 'completed' ||
+      run.result.diagnostics.termination === 'budget-exhausted') &&
+    Number.isFinite(run.result.diagnostics.residualError) &&
+    Number.isFinite(run.result.diagnostics.pathLength) &&
+    Number.isSafeInteger(run.result.diagnostics.polylineCount) &&
+    Number.isSafeInteger(run.result.diagnostics.penLiftCount) &&
+    Number.isSafeInteger(run.result.primitiveCount) && run.result.primitiveCount >= 0 &&
+    Number.isSafeInteger(run.result.smoothedPointCount) && run.result.smoothedPointCount >= 0 &&
+    Number.isSafeInteger(run.result.serializedResultBytes) && run.result.serializedResultBytes > 0,
+  `${expected.label} result counters or diagnostics are malformed`)
+  evidenceAssertion(isRecord(run.telemetry) && run.telemetry.schemaVersion === 1 &&
+    run.telemetry.runId === run.runId && run.telemetry.purpose === expected.purpose &&
+    run.telemetry.sketchId === 'photo-scribble' &&
+    run.telemetry.imageAssetId === expected.imageAssetId &&
+    Number.isSafeInteger(run.telemetry.smoothedEmittedPoints) &&
+    run.telemetry.smoothedEmittedPoints === run.result.smoothedPointCount &&
+    Number.isSafeInteger(run.telemetry.smoothedEmittedPolylines) &&
+    run.telemetry.smoothedEmittedPolylines === run.result.primitiveCount &&
+    Number.isSafeInteger(run.telemetry.serializedArtworkBytes) &&
+    run.telemetry.serializedArtworkBytes > 0 &&
+    Number.isFinite(run.telemetry.responseReadyEpochMs),
+  `${expected.label} telemetry identity does not match`)
+  evidenceAssertion(isRecord(run.protocolBoundary) &&
+    run.protocolBoundary.invalidMessageCount === 0 &&
+    run.protocolBoundary.allCoordinatorMessagesValid === true,
+  `${expected.label} crossed an invalid product-protocol boundary`)
+
+  if (expected.profile.kind === 'production') {
+    evidenceAssertion(run.profile?.kind === 'production' &&
+      run.telemetry.profile?.kind === 'production',
+    `${expected.label} is not the production profile`)
+  } else {
+    evidenceAssertion(run.profile?.kind === 'injected' &&
+      run.profile.candidateId === expected.profile.candidateId &&
+      sameTuple(run.profile.limits, expected.profile.limits),
+    `${expected.label} injected profile does not match`)
+    evidenceAssertion(run.telemetry.profile?.kind === 'injected' &&
+      run.telemetry.profile.candidateId === expected.profile.candidateId &&
+      sameTuple(run.telemetry.profile.limits, expected.profile.limits),
+    `${expected.label} telemetry profile does not match`)
+  }
+  evidenceAssertion(sameTuple(run.fullTuple, expected.tuple),
+    `${expected.label} full four-limit tuple does not match`)
+  evidenceAssertion(sameTuple(run.telemetry.effectiveLimits, expected.tuple),
+    `${expected.label} telemetry tuple does not match`)
+  evidenceAssertion(
+    sameTuple(
+      run.telemetry.resolvedProductionLimits,
+      run.telemetry.resolvedProductionLimits,
+    ) && typeof run.telemetry.productionResolverSelectedEffectiveTuple === 'boolean',
+    `${expected.label} resolved production tuple telemetry is malformed`,
+  )
+  if (expected.purpose === 'measurement') {
+    evidenceAssertion(isRecord(run.measurement) &&
+      Number.isFinite(run.measurement.coordinatorComputeTimeMs) &&
+      Number.isFinite(run.measurement.mainWallDurationMs) &&
+      isRecord(run.measurement.heartbeat) &&
+      Array.isArray(run.measurement.heartbeat.progressReceiptTimesMs) &&
+      Number.isFinite(run.measurement.heartbeat.maximumGapMs),
+    `${expected.label} required measurement/heartbeat telemetry is missing`)
+    evidenceAssertion(Number.isFinite(run.telemetry.workerDurationMs) &&
+      isRecord(run.telemetry.execution) &&
+      (run.telemetry.execution.stopCause === 'threshold-reached' ||
+        run.telemetry.execution.stopCause === 'budget-reached') &&
+      isRecord(run.telemetry.execution.counters) &&
+      ['acceptedSegments', 'emittedPolylines', 'stagnations', 'restarts'].every(
+        (key) => Number.isSafeInteger(run.telemetry.execution.counters[key]) &&
+          run.telemetry.execution.counters[key] >= 0,
+      ) &&
+      Number.isSafeInteger(run.telemetry.rawAcceptedSegments) &&
+      run.telemetry.rawAcceptedSegments ===
+        run.telemetry.execution.counters.acceptedSegments,
+    `${expected.label} required raw injected solver telemetry is missing`)
+  } else {
+    evidenceAssertion(run.measurement === null,
+      `${expected.label} equivalence proof must be unmeasured`)
+    evidenceAssertion(run.telemetry.workerDurationMs === null,
+      `${expected.label} equivalence Worker duration must be unmeasured`)
+  }
+}
+
+export function validateEquivalenceResponse(value, expected) {
+  evidenceAssertion(isRecord(value) && value.scenarioId === expected.scenarioId,
+    'equivalence wrapper scenario does not match')
+  evidenceAssertion(value.identityHashMatches === true &&
+    value.productionResolverSelectedTuple === true &&
+    value.sceneHashMatches === true && value.diagnosticsHashMatches === true,
+  'equivalence proof did not match')
+  evidenceAssertion(sameTuple(value.resolvedTuple, value.production?.fullTuple),
+    'equivalence resolved tuple does not match production')
+  const tuple = value.resolvedTuple
+  validateRun(value.production, {
+    ...expected,
+    label: 'equivalence production run',
+    purpose: 'equivalence-proof',
+    profile: { kind: 'production' },
+    tuple,
+  })
+  validateRun(value.injectedResolvedTuple, {
+    ...expected,
+    label: 'equivalence injected run',
+    purpose: 'equivalence-proof',
+    profile: {
+      kind: 'injected',
+      candidateId: 'resolved-production-tuple-equivalence',
+      limits: tuple,
+    },
+    tuple,
+  })
+  evidenceAssertion(
+    value.production.identityHash === value.injectedResolvedTuple.identityHash &&
+      value.production.runId !== value.injectedResolvedTuple.runId,
+    'equivalence run identities are stale or inconsistent',
+  )
+  return value
+}
+
+export function validateCandidateResponse(value, expected) {
+  validateRun(value, {
+    ...expected,
+    label: 'candidate measurement',
+    purpose: 'measurement',
+    profile: {
+      kind: 'injected',
+      candidateId: expected.candidateId,
+      limits: expected.tuple,
+    },
+    tuple: expected.tuple,
+  })
+  evidenceAssertion(value.identityHash === expected.identityHash,
+    'candidate identity hash does not match its equivalence preflight')
+  return value
+}
+
+function throwIfAborted(signal, label) {
+  if (signal?.aborted) {
+    throw new CampaignOperationError('campaign-aborted', `${label} was aborted`)
   }
 }
 
@@ -83,57 +284,90 @@ export function createBrowserBoundary({
       await startBrowser()
     },
 
-    async runJob({ job, rightsEvidence, timeoutMs, reviewEnvironment, signal }) {
+    async runJob({ job, campaignId, rightsEvidence, timeoutMs, reviewEnvironment, signal }) {
+      throwIfAborted(signal, 'Candidate job setup')
       if (browser === null || browser.isConnected?.() === false) {
         throw new CampaignOperationError('browser-lost', 'Browser is unavailable before job start')
       }
       const page = await browser.newPage()
       const partial = {}
       try {
+        const jobHostId = `${campaignId}-${String(job.ordinal).padStart(4, '0')}-${crypto.randomUUID()}`
+        const equivalenceHostRunId = `${jobHostId}-equivalence`
+        const candidateHostRunId = `${jobHostId}-candidate`
         await page.setViewport({
           width: reviewEnvironment.viewportWidth,
           height: reviewEnvironment.viewportHeight,
           deviceScaleFactor: reviewEnvironment.deviceScaleFactor,
         })
+        throwIfAborted(signal, 'Candidate job setup')
         page.setDefaultTimeout(timeoutMs)
         await page.goto(url, { waitUntil: 'networkidle0' })
+        throwIfAborted(signal, 'Candidate job setup')
         await page.waitForFunction(
           () => globalThis.__PHOTO_SCRIBBLE_EVIDENCE__ !== undefined,
         )
+        throwIfAborted(signal, 'Candidate job setup')
         partial.runtime = await page.evaluate(() => ({
           userAgent: navigator.userAgent,
           platform: navigator.platform,
         }))
         partial.equivalence = await raceOperation(
           page.evaluate(
-            ({ scenarioId, rightsEvidence: evidence }) =>
+            ({ scenarioId, rightsEvidence: evidence, campaignId: campaign, hostRunId }) =>
               globalThis.__PHOTO_SCRIBBLE_EVIDENCE__.runExactEquivalence(
-                scenarioId, { rightsEvidence: evidence },
+                scenarioId, {
+                  rightsEvidence: evidence,
+                  campaignId: campaign,
+                  hostRunId,
+                },
               ),
-            { scenarioId: job.scenarioId, rightsEvidence },
+            {
+              scenarioId: job.scenarioId,
+              rightsEvidence,
+              campaignId,
+              hostRunId: equivalenceHostRunId,
+            },
           ),
           { page, timeoutMs, signal, label: 'Production tuple equivalence proof' },
         )
-        if (!partial.equivalence.identityHashMatches ||
-          !partial.equivalence.productionResolverSelectedTuple ||
-          !partial.equivalence.sceneHashMatches ||
-          !partial.equivalence.diagnosticsHashMatches) {
-          throw new CampaignOperationError(
-            'equivalence-proof-failed',
-            'Production/injected tuple equivalence proof did not match',
-            partial,
-          )
-        }
+        partial.equivalence = validateEquivalenceResponse(partial.equivalence, {
+          campaignId,
+          hostRunId: equivalenceHostRunId,
+          scenarioId: job.scenarioId,
+          imageAssetId: job.imageAssetId,
+          rightsEvidence,
+        })
         partial.observation = await raceOperation(
           page.evaluate(
-            ({ scenarioId, candidateId, rightsEvidence: evidence }) =>
+            ({ scenarioId, candidateId, rightsEvidence: evidence, campaignId: campaign, hostRunId }) =>
               globalThis.__PHOTO_SCRIBBLE_EVIDENCE__.runCandidate(
-                scenarioId, candidateId, { rightsEvidence: evidence },
+                scenarioId, candidateId, {
+                  rightsEvidence: evidence,
+                  campaignId: campaign,
+                  hostRunId,
+                },
               ),
-            { scenarioId: job.scenarioId, candidateId: job.candidateId, rightsEvidence },
+            {
+              scenarioId: job.scenarioId,
+              candidateId: job.candidateId,
+              rightsEvidence,
+              campaignId,
+              hostRunId: candidateHostRunId,
+            },
           ),
           { page, timeoutMs, signal, label: 'Candidate measurement' },
         )
+        partial.observation = validateCandidateResponse(partial.observation, {
+          campaignId,
+          hostRunId: candidateHostRunId,
+          scenarioId: job.scenarioId,
+          imageAssetId: job.imageAssetId,
+          candidateId: job.candidateId,
+          tuple: job.tuple,
+          rightsEvidence,
+          identityHash: partial.equivalence.production.identityHash,
+        })
         return partial
       } catch (error) {
         if (error instanceof CampaignOperationError && Object.keys(error.partial).length === 0) {

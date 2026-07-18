@@ -42,14 +42,21 @@ apps/studio/node_modules/.bin/vite build \
 ```
 
 `campaign-cli.js` is the recoverable browser host. It accepts only an explicit
-`--manifest`: `screen` jobs are restricted to the frozen fine scenarios, while
-`promotion` requires an explicit survivor allow-list and its complete
-scenario/candidate cross-product. The CLI validates structured rights evidence
+`--manifest`: `screen` jobs must be a non-empty prefix of the exact frozen
+candidate-major order (both baselines first, then each larger tuple in protocol
+order), while `promotion` requires an explicit survivor allow-list and its
+complete scenario/candidate cross-product. The CLI validates structured rights evidence
 before resolving Puppeteer or starting Vite. It runs one page and Worker job at
 a time, performs production-tuple equivalence before each candidate, and writes
 an immutable raw record plus a separate summary and atomic campaign checkpoint
 after every outcome. Re-running the same manifest resumes without replacing
 existing evidence; a campaign-ID collision with different inputs is refused.
+Abort records only the active job, if any, and leaves every later job pending.
+A crash/timeout record and checkpoint land before browser restart; a failed
+restart is a separate campaign failure and also leaves the next job pending.
+Every page response is rebound to its campaign/host-run identity and validated
+against the expected scenario, candidate, tuple, rights record, hashes, and raw
+telemetry before it can become completed evidence.
 
 Do not invoke the CLI while the rights gate below is unsatisfied. Tests exercise
 its fake browser/server boundaries without starting a photographic campaign:

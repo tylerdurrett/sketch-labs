@@ -55,6 +55,9 @@ interface PerformanceWithMemory extends Performance {
 
 interface RunOptions {
   readonly rightsEvidence: PhotoScribbleRightsEvidence;
+  /** Host identity copied through so a campaign can reject stale page results. */
+  readonly campaignId?: string;
+  readonly hostRunId?: string;
 }
 
 let activeEvidenceCoordinator: ScribbleCoordinator | null = null;
@@ -70,6 +73,8 @@ export function abortActivePhotoScribbleEvidence(): boolean {
 
 export interface PhotoScribbleEvidenceRun {
   readonly schemaVersion: 1;
+  readonly campaignId: string | null;
+  readonly hostRunId: string | null;
   readonly runId: string;
   readonly scenarioId: string;
   readonly purpose: "measurement" | "equivalence-proof";
@@ -311,7 +316,9 @@ async function runPhotoScribbleEvidenceOperation(
     seed: scenario.seed,
     compositionFrame: protocol.frame,
   });
-  const runId = `issue-336-${scenarioId}-${crypto.randomUUID()}`;
+  const campaignId = options.campaignId ?? null;
+  const hostRunId = options.hostRunId ?? null;
+  const runId = `${hostRunId ?? `issue-336-${scenarioId}`}-${crypto.randomUUID()}`;
   const telemetryChannelName = `${runId}-telemetry`;
   const channel = new BroadcastChannel(telemetryChannelName);
   const telemetry = telemetryWaiter(channel, runId);
@@ -367,6 +374,8 @@ async function runPhotoScribbleEvidenceOperation(
     const finalReceipt = trace.finalReceiptEpochMs ?? Date.now();
     return {
     schemaVersion: 1,
+    campaignId,
+    hostRunId,
     runId,
     scenarioId,
     purpose,

@@ -2,6 +2,7 @@ import {
   existsSync,
   linkSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -124,6 +125,7 @@ export function validateCampaignManifest(input, protocol) {
       ordinal: index + 1,
       scenarioId: scenario.scenarioId,
       fixtureId: scenario.fixtureId,
+      imageAssetId: scenario.params.imageAsset,
       captureStem: scenario.captureStem,
       candidateId: candidate.candidateId,
       tuple: Object.freeze(tupleFor(candidate)),
@@ -135,7 +137,20 @@ export function validateCampaignManifest(input, protocol) {
     'Campaign contains a duplicate scenario/candidate/tuple job')
 
   let survivorCandidateIds = null
-  if (input.phase === 'promotion') {
+  if (input.phase === 'screen') {
+    assert(input.survivorCandidateIds === undefined,
+      'Screen manifests cannot preselect promotion survivors')
+    const fineScenarios = protocol.scenarios.filter(
+      (scenario) => scenario.roles.includes('budget-calibration'),
+    )
+    const frozenOrder = protocol.orderedLimitCandidates.flatMap((candidate) =>
+      fineScenarios.map((scenario) =>
+        `${scenario.scenarioId}/${candidate.candidateId}--${tupleToken(candidate)}`,
+      ),
+    )
+    assert(keys.every((key, index) => key === frozenOrder[index]),
+      'Screen jobs must be a non-empty prefix of the frozen candidate/scenario order')
+  } else {
     assert(Array.isArray(input.survivorCandidateIds) && input.survivorCandidateIds.length > 0,
       'Promotion requires an explicit non-empty survivorCandidateIds allow-list')
     survivorCandidateIds = [...input.survivorCandidateIds]
@@ -152,9 +167,6 @@ export function validateCampaignManifest(input, protocol) {
     }
     assert(required.size === keys.length && keys.every((key) => required.has(key)),
       'Promotion jobs must cover every frozen scenario exactly once for every explicit survivor')
-  } else {
-    assert(input.survivorCandidateIds === undefined,
-      'Screen manifests cannot preselect promotion survivors')
   }
 
   const fixtureIds = [...new Set(jobs.map((job) => job.fixtureId))]
@@ -213,6 +225,7 @@ export function createCampaignStore(outputRoot, campaign, provenance = {}) {
   const campaignRoot = containedPath(outputRoot, campaign.campaignId)
   const manifestPath = containedPath(campaignRoot, 'campaign-manifest.json')
   const checkpointPath = containedPath(campaignRoot, 'campaign-checkpoint.json')
+  const failureDirectory = containedPath(campaignRoot, 'campaign-failures')
   const persistedManifest = {
     schemaVersion: SCHEMA_VERSION,
     campaignId: campaign.campaignId,
@@ -297,15 +310,48 @@ export function createCampaignStore(outputRoot, campaign, provenance = {}) {
         )
         return next === undefined ? null : jobKey(next)
       })(),
+      campaignFailures: existsSync(failureDirectory)
+        ? readdirSync(failureDirectory)
+          .filter((name) => name.endsWith('.raw.json'))
+          .sort()
+          .map((name) => relative(outputRoot, containedPath(failureDirectory, name)))
+        : [],
       updatedAt: new Date().toISOString(),
     })
+  }
+
+  function recordCampaignFailure(job, failure) {
+    const safeJob = jobKey(job).replaceAll('/', '--')
+    const path = containedPath(
+      failureDirectory,
+      `restart-after--${safeJob}--attempt-0001.raw.json`,
+    )
+    exclusiveAtomicJson(path, {
+      schemaVersion: SCHEMA_VERSION,
+      campaignId: campaign.campaignId,
+      kind: 'browser-restart-failed',
+      afterJobKey: jobKey(job),
+      failure,
+      recordedAt: new Date().toISOString(),
+      resume: 'The failed job is durable. Start the same campaign again; the next job remains pending.',
+    })
+    checkpoint()
+    return path
   }
 
   function cleanupEmptyCampaign() {
     if (!existsSync(manifestPath)) rmSync(campaignRoot, { recursive: true, force: true })
   }
 
-  return { campaignRoot, initialize, recover, commit, checkpoint, cleanupEmptyCampaign }
+  return {
+    campaignRoot,
+    initialize,
+    recover,
+    commit,
+    checkpoint,
+    recordCampaignFailure,
+    cleanupEmptyCampaign,
+  }
 }
 
 function summarizeRawRecord(raw) {
@@ -338,7 +384,6 @@ function normalizedFailure(error) {
   if (error instanceof CampaignOperationError) {
     return { kind: error.kind, message: error.message, restartBrowser: [
       'job-timeout',
-      'campaign-aborted',
       'page-crash',
       'browser-lost',
       'suspected-oom',
@@ -372,6 +417,7 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, pr
   const store = createCampaignStore(outputRoot, campaign, provenance)
   store.initialize()
   const completed = []
+  let stopped = null
   let boundaryAttempted = false
   try {
     boundaryAttempted = true
@@ -382,14 +428,23 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, pr
         completed.push(recovered.summary)
         continue
       }
+      if (signal?.aborted) {
+        stopped = {
+          kind: 'campaign-aborted',
+          resume: 'No job was active; remaining jobs are pending and resumable.',
+        }
+        break
+      }
       const startedAt = new Date().toISOString()
       let raw
+      let failure = null
       try {
         if (signal?.aborted) {
           throw new CampaignOperationError('campaign-aborted', 'Campaign was aborted before the job started')
         }
         const result = await boundary.runJob({
           job,
+          campaignId: campaign.campaignId,
           rightsEvidence: campaign.rightsEvidence,
           timeoutMs: protocol.thresholds.jobTimeoutMs,
           reviewEnvironment: protocol.reviewEnvironment,
@@ -410,7 +465,7 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, pr
           runtime: result.runtime ?? null,
         }
       } catch (error) {
-        const failure = normalizedFailure(error)
+        failure = normalizedFailure(error)
         raw = {
           schemaVersion: SCHEMA_VERSION,
           campaignId: campaign.campaignId,
@@ -425,13 +480,42 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, pr
           observation: failure.partial.observation ?? null,
           runtime: failure.partial.runtime ?? null,
         }
-        if (failure.restartBrowser) await boundary.restartBrowser()
       }
       const committed = store.commit(job, raw)
       completed.push(committed.summary)
+      if (failure?.kind === 'campaign-aborted') {
+        stopped = {
+          kind: 'campaign-aborted',
+          resume: 'The active job outcome is durable; remaining jobs are pending and resumable.',
+        }
+        break
+      }
+      if (failure?.restartBrowser) {
+        try {
+          await boundary.restartBrowser()
+        } catch (restartError) {
+          const normalizedRestart = normalizedFailure(restartError)
+          const campaignFailure = {
+            kind: normalizedRestart.kind,
+            message: normalizedRestart.message,
+          }
+          store.recordCampaignFailure(job, campaignFailure)
+          stopped = {
+            kind: 'browser-restart-failed',
+            failure: campaignFailure,
+            resume: 'The failed job is durable; the next job remains pending and resumable.',
+          }
+          break
+        }
+      }
     }
     store.checkpoint()
-    return { campaignId: campaign.campaignId, phase: campaign.phase, completed }
+    return {
+      campaignId: campaign.campaignId,
+      phase: campaign.phase,
+      completed,
+      stopped,
+    }
   } finally {
     if (boundaryAttempted) await boundary.close()
   }
