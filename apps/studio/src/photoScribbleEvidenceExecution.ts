@@ -1,8 +1,9 @@
 import type { Params, ScribbleArtwork } from "@harness/core";
 
 import {
-  generatePhotoScribbleBenchmarkArtwork,
+  generatePhotoScribbleBenchmarkArtworkFromResolution,
   resolvePhotoScribbleBenchmark,
+  type PhotoScribbleBenchmarkResolution,
 } from "../../../packages/core/benchmarks/photo-scribble/benchmark-artwork";
 import type { ScribbleExecutionLimits } from "../../../packages/core/src/scribbleStrategy/orchestrator";
 import type { ScribbleExecutionObservation } from "../../../packages/core/src/scribbleStrategy/orchestrator";
@@ -34,11 +35,25 @@ export interface PhotoScribbleEvidenceExecution {
   readonly artwork: ScribbleArtwork;
   readonly imageAssetId: string;
   readonly profile: PhotoScribbleEvidenceProfile;
-  readonly resolvedProductionLimits: Readonly<ScribbleExecutionLimits>;
-  readonly effectiveLimits: Readonly<ScribbleExecutionLimits>;
-  readonly productionResolverSelectedEffectiveTuple: boolean;
+  readonly resolvedProductionLimits: Readonly<ScribbleExecutionLimits> | null;
+  readonly effectiveLimits: Readonly<ScribbleExecutionLimits> | null;
+  readonly productionResolverSelectedEffectiveTuple: boolean | null;
   readonly execution: Readonly<ScribbleExecutionObservation> | null;
 }
+
+export interface PhotoScribbleEvidenceExecutionDependencies {
+  readonly resolve: (
+    params: Params,
+    frame: Parameters<typeof resolvePhotoScribbleBenchmark>[1],
+    environment: Parameters<typeof resolvePhotoScribbleBenchmark>[2],
+  ) => PhotoScribbleBenchmarkResolution;
+  readonly generateInjected: typeof generatePhotoScribbleBenchmarkArtworkFromResolution;
+}
+
+const defaultDependencies: PhotoScribbleEvidenceExecutionDependencies = {
+  resolve: resolvePhotoScribbleBenchmark,
+  generateInjected: generatePhotoScribbleBenchmarkArtworkFromResolution,
+};
 
 /** Execute exactly one solver pass for either production or an injected tuple. */
 export function executePhotoScribbleEvidenceArtwork(
@@ -47,8 +62,7 @@ export function executePhotoScribbleEvidenceArtwork(
   identity: Parameters<ScribbleArtworkExecutor>[1],
   environment: Parameters<ScribbleArtworkExecutor>[2],
   observer: Parameters<ScribbleArtworkExecutor>[3],
-  generateInjected: typeof generatePhotoScribbleBenchmarkArtwork =
-    generatePhotoScribbleBenchmarkArtwork,
+  dependencies: PhotoScribbleEvidenceExecutionDependencies = defaultDependencies,
 ): PhotoScribbleEvidenceExecution {
   if (identity.sketchId !== "photo-scribble") {
     throw new TypeError("Photo Scribble evidence Worker received another Sketch");
@@ -58,35 +72,43 @@ export function executePhotoScribbleEvidenceArtwork(
   if (typeof imageAssetId !== "string") {
     throw new TypeError("Photo Scribble evidence identity lacks an Image Asset");
   }
-  const resolution = resolvePhotoScribbleBenchmark(
-    params,
-    identity.compositionFrame,
-    environment,
-  );
   if (config.profile.kind === "production") {
+    // A measured production job performs only the registered generator's one
+    // source/model/solver preparation. Tuple discovery is deliberately moved
+    // to the separate unmeasured proof operation below.
+    const artwork = generate(
+      params,
+      identity.seed,
+      identity.compositionFrame,
+      observer,
+      environment,
+    );
+    const resolution =
+      config.purpose === "equivalence-proof"
+        ? dependencies.resolve(params, identity.compositionFrame, environment)
+        : null;
     return {
-      artwork: generate(
-        params,
-        identity.seed,
-        identity.compositionFrame,
-        observer,
-        environment,
-      ),
+      artwork,
       imageAssetId,
       profile: config.profile,
-      resolvedProductionLimits: resolution.productionLimits,
-      effectiveLimits: resolution.productionLimits,
-      productionResolverSelectedEffectiveTuple: true,
+      resolvedProductionLimits: resolution?.productionLimits ?? null,
+      effectiveLimits: resolution?.productionLimits ?? null,
+      productionResolverSelectedEffectiveTuple:
+        resolution === null ? null : true,
       execution: null,
     };
   }
 
-  let execution: ScribbleExecutionObservation | undefined;
-  const artwork = generateInjected(
+  const resolution = dependencies.resolve(
     params,
-    identity.seed,
     identity.compositionFrame,
     environment,
+  );
+  let execution: ScribbleExecutionObservation | undefined;
+  const artwork = dependencies.generateInjected(
+    resolution,
+    identity.seed,
+    identity.compositionFrame,
     config.profile.limits,
     observer,
     { executionObserver: (value) => (execution = value) },

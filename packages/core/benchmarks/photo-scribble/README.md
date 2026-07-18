@@ -45,9 +45,12 @@ The page exposes `window.__PHOTO_SCRIBBLE_EVIDENCE__` with `runProduction`,
 `runCandidate`, and `runExactEquivalence`. Every call requires one complete
 structured `rightsEvidence` record matching an accepted form below; an arbitrary
 string is rejected. Its normalized type and identifier are copied into every
-run. Production and candidate measurements each execute exactly one solver
-pass. Exact equivalence is a separate, explicitly unmeasured two-run proof: the
-registered production generator and an injected run at the reported
+run. Production and candidate measurements each prepare their photographic
+source/model/lattice and execute the solver exactly once. A measured production
+record leaves its limit tuple `null`; resolving that tuple would repeat
+preparation outside the registered generator. Exact equivalence is a separate,
+explicitly unmeasured two-run proof that records the tuple: the registered
+production generator and an injected run at the reported
 production-resolved four-limit tuple, compared by full identity plus canonical
 Scene and diagnostics hashes. Raw solver counters are `null` for the
 uninstrumented production generator and populated for injected candidates.

@@ -140,6 +140,9 @@ class FakeEvidenceWorker {
             maxStagnations: 8_000,
             maxRestarts: 4_000,
           };
+    const measuredProduction =
+      this.config.purpose === "measurement" &&
+      this.config.profile.kind === "production";
     const telemetry: PhotoScribbleEvidenceTelemetry = {
       schemaVersion: 1,
       runId: this.config.runId,
@@ -147,9 +150,11 @@ class FakeEvidenceWorker {
       imageAssetId: "img-0672-79d639daec62",
       profile: this.config.profile,
       purpose: this.config.purpose,
-      resolvedProductionLimits: limits,
-      effectiveLimits: limits,
-      productionResolverSelectedEffectiveTuple: true,
+      resolvedProductionLimits: measuredProduction ? null : limits,
+      effectiveLimits: measuredProduction ? null : limits,
+      productionResolverSelectedEffectiveTuple: measuredProduction
+        ? null
+        : true,
       execution: null,
       rawAcceptedSegments: null,
       smoothedEmittedPoints: 2,
@@ -254,6 +259,7 @@ describe("Photo Scribble evidence page seams", () => {
       }),
     ).toBe(false);
     expect("generatePhotoScribbleBenchmarkArtwork" in core).toBe(false);
+    expect("runPreparedScribbleStrategyForTesting" in core).toBe(false);
     expect("ScribbleExecutionLimits" in core).toBe(false);
   });
 
@@ -279,7 +285,7 @@ describe("Photo Scribble evidence page seams", () => {
     );
   });
 
-  it("executes exactly one solver path per production or candidate job", () => {
+  it("prepares source/model and executes exactly once per measured job", () => {
     const schema = createPhotoScribbleSchema(assetId);
     const identity = createScribbleComputeIdentity({
       sketchId: "photo-scribble",
@@ -296,13 +302,27 @@ describe("Photo Scribble evidence page seams", () => {
       undefined,
       environment,
     );
-    const productionGenerate = vi.fn(() => artwork);
+    const productionPreparation = { source: 0, model: 0 };
+    const injectedPreparation = { source: 0, model: 0 };
+    const productionGenerate = vi.fn(() => {
+      productionPreparation.source++;
+      productionPreparation.model++;
+      return artwork;
+    });
+    const resolve = vi.fn((nextParams, nextFrame, nextEnvironment) => {
+      injectedPreparation.source++;
+      injectedPreparation.model++;
+      return resolvePhotoScribbleBenchmark(
+        nextParams,
+        nextFrame,
+        nextEnvironment,
+      );
+    });
     const injectedGenerate = vi.fn(
       (
-        _params,
+        _resolution,
         _seed,
         _frame,
-        _environment,
         _limits,
         _observer,
         hooks,
@@ -333,9 +353,12 @@ describe("Photo Scribble evidence page seams", () => {
       identity,
       environment,
       undefined,
-      injectedGenerate,
+      { resolve, generateInjected: injectedGenerate },
     );
     expect(productionGenerate).toHaveBeenCalledOnce();
+    expect(productionPreparation).toEqual({ source: 1, model: 1 });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(injectedPreparation).toEqual({ source: 0, model: 0 });
     expect(injectedGenerate).not.toHaveBeenCalled();
 
     executePhotoScribbleEvidenceArtwork(
@@ -356,10 +379,12 @@ describe("Photo Scribble evidence page seams", () => {
       identity,
       environment,
       undefined,
-      injectedGenerate,
+      { resolve, generateInjected: injectedGenerate },
     );
     expect(productionGenerate).toHaveBeenCalledOnce();
     expect(injectedGenerate).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(injectedPreparation).toEqual({ source: 1, model: 1 });
   });
 
   it("accepts only protocol-qualified, auditable rights records", () => {
@@ -434,6 +459,8 @@ describe("Photo Scribble evidence page seams", () => {
       identifier: qualifiedRights.evidenceId,
     });
     expect(run.purpose).toBe("measurement");
+    expect(run.fullTuple).toBeNull();
+    expect(run.telemetry.resolvedProductionLimits).toBeNull();
     expect(run.measurement).not.toBeNull();
     const heartbeat = run.measurement!.heartbeat;
     expect(heartbeat.progressReceiptTimesMs).toHaveLength(2);

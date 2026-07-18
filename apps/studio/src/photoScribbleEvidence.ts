@@ -65,7 +65,7 @@ export interface PhotoScribbleEvidenceRun {
   readonly rightsEvidence: NormalizedPhotoScribbleRightsEvidence;
   readonly identityHash: string;
   readonly profile: PhotoScribbleEvidenceProfile;
-  readonly fullTuple: Readonly<ScribbleExecutionLimits>;
+  readonly fullTuple: Readonly<ScribbleExecutionLimits> | null;
   readonly result: {
     readonly sceneHash: string;
     readonly diagnosticsHash: string;
@@ -418,12 +418,16 @@ export async function runPhotoScribbleExactEquivalence(
     options,
     "equivalence-proof",
   );
+  const resolvedTuple = production.telemetry.resolvedProductionLimits;
+  if (resolvedTuple === null) {
+    throw new Error("Equivalence proof did not resolve the production tuple");
+  }
   const injectedResolvedTuple = await runPhotoScribbleEvidenceOperation(
     scenarioId,
     {
       kind: "injected",
       candidateId: "resolved-production-tuple-equivalence",
-      limits: production.telemetry.resolvedProductionLimits,
+      limits: resolvedTuple,
     },
     options,
     "equivalence-proof",
@@ -432,9 +436,9 @@ export async function runPhotoScribbleExactEquivalence(
     scenarioId,
     identityHashMatches:
       production.identityHash === injectedResolvedTuple.identityHash,
-    resolvedTuple: production.telemetry.resolvedProductionLimits,
+    resolvedTuple,
     productionResolverSelectedTuple:
-      production.telemetry.productionResolverSelectedEffectiveTuple,
+      production.telemetry.productionResolverSelectedEffectiveTuple === true,
     sceneHashMatches:
       production.result.sceneHash === injectedResolvedTuple.result.sceneHash,
     diagnosticsHashMatches:

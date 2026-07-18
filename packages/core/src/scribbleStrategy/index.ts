@@ -131,8 +131,10 @@ function executeScribbleStrategy(
   orchestrate: ScribbleOrchestrator,
   injectedLimits?: Readonly<ScribbleExecutionLimits>,
   executionObserver?: ScribbleStrategyTestHooks['executionObserver'],
+  preparedModel?: ScribbleModel,
 ): ScribbleResult {
-  const model = createScribbleModel(input.source, input.frame, input.controls)
+  const model =
+    preparedModel ?? createScribbleModel(input.source, input.frame, input.controls)
   const initialResidual = model.residualError()
 
   const reportExecution = (
@@ -247,5 +249,26 @@ export function runScribbleStrategyForTesting(
     hooks.orchestrate ?? runScribbleOrchestrator,
     limits,
     hooks.executionObserver,
+  )
+}
+
+/**
+ * Benchmark-only direct-module seam for a caller that already prepared the
+ * exact source/model once. Deliberately absent from the package-root exports.
+ *
+ * @internal
+ */
+export function runPreparedScribbleStrategyForTesting(
+  input: ScribbleStrategyInput,
+  model: ScribbleModel,
+  limits: Readonly<ScribbleExecutionLimits>,
+  hooks: Readonly<ScribbleStrategyTestHooks> = {},
+): ScribbleResult {
+  return executeScribbleStrategy(
+    input,
+    hooks.orchestrate ?? runScribbleOrchestrator,
+    limits,
+    hooks.executionObserver,
+    model,
   )
 }

@@ -23,9 +23,9 @@ export interface PhotoScribbleEvidenceTelemetry {
   readonly sketchId: "photo-scribble";
   readonly imageAssetId: string;
   readonly profile: PhotoScribbleEvidenceProfile;
-  readonly resolvedProductionLimits: Readonly<ScribbleExecutionLimits>;
-  readonly effectiveLimits: Readonly<ScribbleExecutionLimits>;
-  readonly productionResolverSelectedEffectiveTuple: boolean;
+  readonly resolvedProductionLimits: Readonly<ScribbleExecutionLimits> | null;
+  readonly effectiveLimits: Readonly<ScribbleExecutionLimits> | null;
+  readonly productionResolverSelectedEffectiveTuple: boolean | null;
   readonly purpose: "measurement" | "equivalence-proof";
   /** Unavailable for the uninstrumented registered production generator. */
   readonly execution: Readonly<ScribbleExecutionObservation> | null;

@@ -17,7 +17,7 @@ import {
 } from '../../src/sketch'
 import {
   resolveProductionScribbleExecutionLimits,
-  runScribbleStrategyForTesting,
+  runPreparedScribbleStrategyForTesting,
 } from '../../src/scribbleStrategy/index'
 import { createScribbleModel } from '../../src/scribbleStrategy/model'
 import type {
@@ -56,6 +56,7 @@ export function photoScribbleBenchmarkControls(
 export interface PhotoScribbleBenchmarkResolution {
   readonly source: ReturnType<typeof createPhotoScribbleSource>
   readonly controls: ScribbleControls
+  readonly model: ReturnType<typeof createScribbleModel>
   readonly productionLimits: Readonly<ScribbleExecutionLimits>
 }
 
@@ -78,6 +79,7 @@ export function resolvePhotoScribbleBenchmark(
   return {
     source,
     controls,
+    model,
     productionLimits: resolveProductionScribbleExecutionLimits(model),
   }
 }
@@ -95,15 +97,35 @@ export function generatePhotoScribbleBenchmarkArtwork(
   frame: CoordinateSpace,
   environment: SketchEnvironment,
   limits: Readonly<ScribbleExecutionLimits>,
-  observer?: Parameters<typeof runScribbleStrategyForTesting>[0]['observer'],
+  observer?: Parameters<typeof runPreparedScribbleStrategyForTesting>[0]['observer'],
   hooks: PhotoScribbleBenchmarkHooks = {},
 ): ScribbleArtwork {
-  const { source, controls } = resolvePhotoScribbleBenchmark(
+  const resolution = resolvePhotoScribbleBenchmark(
     params,
     frame,
     environment,
   )
-  const result = runScribbleStrategyForTesting(
+  return generatePhotoScribbleBenchmarkArtworkFromResolution(
+    resolution,
+    seed,
+    frame,
+    limits,
+    observer,
+    hooks,
+  )
+}
+
+/** Execute from one already-prepared source/model resolution without redoing it. */
+export function generatePhotoScribbleBenchmarkArtworkFromResolution(
+  resolution: PhotoScribbleBenchmarkResolution,
+  seed: Seed,
+  frame: CoordinateSpace,
+  limits: Readonly<ScribbleExecutionLimits>,
+  observer?: Parameters<typeof runPreparedScribbleStrategyForTesting>[0]['observer'],
+  hooks: PhotoScribbleBenchmarkHooks = {},
+): ScribbleArtwork {
+  const { source, controls, model } = resolution
+  const result = runPreparedScribbleStrategyForTesting(
     {
       source,
       frame,
@@ -111,6 +133,7 @@ export function generatePhotoScribbleBenchmarkArtwork(
       seed,
       ...(observer === undefined ? {} : { observer }),
     },
+    model,
     limits,
     hooks.executionObserver === undefined
       ? {}
