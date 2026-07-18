@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "issue": 336,
+  "decision": "select-largest-fully-passing-machine-tuple",
+  "maintainerOverride": {
+    "objective": "maximum-machine-supported-deterministic-accepted-segment-tuple",
+    "supersedesCampaignId": "issue-336-20260718T230718Z",
+    "residualVisualAndHeartbeatAreObservationsOnly": true,
+    "hardStops": [
+      "300-second-timeout",
+      "crash-or-oom",
+      "clone-or-transfer-failure",
+      "canvas-or-export-failure",
+      "unrecoverable-instability"
+    ]
+  },
+  "fullyPassingCampaigns": [
+    {
+      "campaignId": "issue-336-20260718T232556Z",
+      "candidateId": "machine-500k"
+    },
+    {
+      "campaignId": "issue-336-20260718T232816Z",
+      "candidateId": "machine-1000k"
+    }
+  ],
+  "hardBoundaryCampaignId": "issue-336-20260718T233038Z",
+  "hardBoundaryCandidateId": "machine-2000k",
+  "hardBoundaryKind": "unrecoverable-instability",
+  "candidatesNotRun": [
+    "machine-4000k",
+    "machine-8000k"
+  ],
+  "selectedCandidateId": "machine-1000k",
+  "selectedTuple": {
+    "maxAcceptedSegments": 1000000,
+    "maxPolylines": 16000,
+    "maxStagnations": 32000,
+    "maxRestarts": 16000
+  },
+  "guardConclusion": "Only maxAcceptedSegments bound at 500k and 1m; maxPolylines, maxStagnations, and maxRestarts remain at their last known non-binding values.",
+  "productionLimitsChanged": false,
+  "productionChangeDisposition": "The campaign selects the evidence-backed tuple but deliberately leaves production defaults unchanged for a separate adoption change."
+}

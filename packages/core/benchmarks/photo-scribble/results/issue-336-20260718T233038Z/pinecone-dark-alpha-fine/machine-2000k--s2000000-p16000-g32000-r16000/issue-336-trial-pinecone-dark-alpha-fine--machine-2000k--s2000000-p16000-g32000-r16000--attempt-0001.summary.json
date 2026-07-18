@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T233038Z",
+  "phase": "machine-ceiling",
+  "job": {
+    "ordinal": 2,
+    "scenarioId": "pinecone-dark-alpha-fine",
+    "fixtureId": "pinecone-dark-alpha-portrait",
+    "imageAssetId": "pinecone-4330aa0314f7",
+    "captureStem": "issue-336-trial-pinecone-dark-alpha-fine",
+    "candidateId": "machine-2000k",
+    "tuple": {
+      "maxAcceptedSegments": 2000000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    "tupleToken": "s2000000-p16000-g32000-r16000"
+  },
+  "status": "completed",
+  "failure": null,
+  "startedAt": "2026-07-18T23:37:20.993Z",
+  "finishedAt": "2026-07-18T23:38:22.005Z",
+  "equivalence": {
+    "identityHashMatches": true,
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true
+  },
+  "observation": {
+    "runId": "issue-336-20260718T233038Z-0002-26cdcf20-da4f-43b3-9c85-6894b319bc19-candidate-3f8b1ce5-c493-4b19-8d4e-7c60c9c7836f",
+    "termination": "completed",
+    "residualError": 0.00499999148722787,
+    "mainWallDurationMs": 33278.800000190735
+  },
+  "artifacts": [
+    {
+      "kind": "tone-authored.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T233038Z/pinecone-dark-alpha-fine/machine-2000k--s2000000-p16000-g32000-r16000/issue-336-trial-pinecone-dark-alpha-fine--machine-2000k--s2000000-p16000-g32000-r16000--tone-authored.png",
+      "byteLength": 226664,
+      "sha256": "4a801845cb5a53a1e08e9772c34a5eb2f3c468e745604af39c098a7f2c7f2bdd",
+      "measuredCanvasSha256": "4a801845cb5a53a1e08e9772c34a5eb2f3c468e745604af39c098a7f2c7f2bdd",
+      "pixelDimensions": {
+        "width": 1000,
+        "height": 1000
+      }
+    },
+    {
+      "kind": "fill-primary.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T233038Z/pinecone-dark-alpha-fine/machine-2000k--s2000000-p16000-g32000-r16000/issue-336-trial-pinecone-dark-alpha-fine--machine-2000k--s2000000-p16000-g32000-r16000--fill-primary.png",
+      "byteLength": 65693,
+      "sha256": "3baf294174847cb2b909e3011384a5c9d19a840e8614f705055499a5bd974de6",
+      "measuredCanvasSha256": "3baf294174847cb2b909e3011384a5c9d19a840e8614f705055499a5bd974de6",
+      "pixelDimensions": {
+        "width": 1000,
+        "height": 1000
+      }
+    },
+    {
+      "kind": "outline.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T233038Z/pinecone-dark-alpha-fine/machine-2000k--s2000000-p16000-g32000-r16000/issue-336-trial-pinecone-dark-alpha-fine--machine-2000k--s2000000-p16000-g32000-r16000--outline.png",
+      "byteLength": 65726,
+      "sha256": "3c0e4ead304b80ad4b8d1a0cfe74b426d8e10af555fe138093e8bd2245f12eef",
+      "measuredCanvasSha256": "3c0e4ead304b80ad4b8d1a0cfe74b426d8e10af555fe138093e8bd2245f12eef",
+      "pixelDimensions": {
+        "width": 1000,
+        "height": 1000
+      }
+    }
+  ],
+  "note": "Raw observations are preserved in the sibling .raw.json file; this summary makes no adoption decision."
+}

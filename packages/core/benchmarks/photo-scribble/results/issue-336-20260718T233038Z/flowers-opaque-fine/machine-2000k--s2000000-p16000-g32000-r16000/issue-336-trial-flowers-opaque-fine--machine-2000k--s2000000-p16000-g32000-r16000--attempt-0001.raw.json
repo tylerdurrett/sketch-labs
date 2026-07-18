@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T233038Z",
+  "phase": "machine-ceiling",
+  "job": {
+    "ordinal": 1,
+    "scenarioId": "flowers-opaque-fine",
+    "fixtureId": "flowers-opaque-portrait",
+    "imageAssetId": "img-0672-79d639daec62",
+    "captureStem": "issue-336-trial-flowers-opaque-fine",
+    "candidateId": "machine-2000k",
+    "tuple": {
+      "maxAcceptedSegments": 2000000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    "tupleToken": "s2000000-p16000-g32000-r16000"
+  },
+  "status": "failed",
+  "failure": {
+    "kind": "runner-failure",
+    "message": "Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed."
+  },
+  "startedAt": "2026-07-18T23:31:14.256Z",
+  "finishedAt": "2026-07-18T23:37:20.988Z",
+  "equivalence": {
+    "scenarioId": "flowers-opaque-fine",
+    "identityHashMatches": true,
+    "resolvedTuple": {
+      "maxAcceptedSegments": 50000,
+      "maxPolylines": 4000,
+      "maxStagnations": 8000,
+      "maxRestarts": 4000
+    },
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true,
+    "production": {
+      "schemaVersion": 1,
+      "campaignId": "issue-336-20260718T233038Z",
+      "hostRunId": "issue-336-20260718T233038Z-0001-9513e61c-7084-46e6-a3de-8f6b1d8ac5ae-equivalence",
+      "runId": "issue-336-20260718T233038Z-0001-9513e61c-7084-46e6-a3de-8f6b1d8ac5ae-equivalence-9c996620-135c-493b-bb4c-8fd498a281d8",
+      "scenarioId": "flowers-opaque-fine",
+      "purpose": "equivalence-proof",
+      "identityHash": "11c378e759d9912f0b37df0efe78fd06b4bfdf05e895ac10315d8e992d535d69",
+      "profile": {
+        "kind": "production"
+      },
+      "fullTuple": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      },
+      "result": {
+        "sceneHash": "e5b2930b2c9dfd62a2cf432c2dddb0db0cdecd47fabdc0ac821a55b33da1a224",
+        "diagnosticsHash": "cf3d11b61b31259d3ac27123968f7a0049442788883675d889271e28f5b50359",
+        "diagnostics": {
+          "termination": "budget-exhausted",
+          "residualError": 0.48862074687981577,
+          "pathLength": 59366.0800202358,
+          "polylineCount": 43,
+          "penLiftCount": 42
+        },
+        "primitiveCount": 43,
+        "smoothedPointCount": 200172,
+        "serializedResultBytes": 7710272
+      },
+      "measurement": null,
+      "telemetry": {
+        "schemaVersion": 1,
+        "runId": "issue-336-20260718T233038Z-0001-9513e61c-7084-46e6-a3de-8f6b1d8ac5ae-equivalence-9c996620-135c-493b-bb4c-8fd498a281d8",
+        "sketchId": "photo-scribble",
+        "imageAssetId": "img-0672-79d639daec62",
+        "profile": {
+          "kind": "production"
+        },
+        "purpose": "equivalence-proof",
+        "resolvedProductionLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "effectiveLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "productionResolverSelectedEffectiveTuple": true,
+        "execution": null,
+        "rawAcceptedSegments": null,
+        "smoothedEmittedPoints": 200172,
+        "smoothedEmittedPolylines": 43,
+        "workerDurationMs": null,
+        "serializedArtworkBytes": 7710272,
+        "targetHash": "1f3698a6fe91a53046fed7178b25ff09184db28a90ed367c466bfa77e48dd7bd",
+        "responseReadyEpochMs": 1784417476920
+      },
+      "presentation": null,
+      "cancellation": null,
+      "protocolBoundary": {
+        "invalidMessageCount": 0,
+        "allCoordinatorMessagesValid": true
+      }
+    },
+    "injectedResolvedTuple": {
+      "schemaVersion": 1,
+      "campaignId": "issue-336-20260718T233038Z",
+      "hostRunId": "issue-336-20260718T233038Z-0001-9513e61c-7084-46e6-a3de-8f6b1d8ac5ae-equivalence",
+      "runId": "issue-336-20260718T233038Z-0001-9513e61c-7084-46e6-a3de-8f6b1d8ac5ae-equivalence-e63c931d-cd45-4069-991e-603b71083380",
+      "scenarioId": "flowers-opaque-fine",
+      "purpose": "equivalence-proof",
+      "identityHash": "11c378e759d9912f0b37df0efe78fd06b4bfdf05e895ac10315d8e992d535d69",
+      "profile": {
+        "kind": "injected",
+        "candidateId": "resolved-production-tuple-equivalence",
+        "limits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        }
+      },
+      "fullTuple": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      },
+      "result": {
+        "sceneHash": "e5b2930b2c9dfd62a2cf432c2dddb0db0cdecd47fabdc0ac821a55b33da1a224",
+        "diagnosticsHash": "cf3d11b61b31259d3ac27123968f7a0049442788883675d889271e28f5b50359",
+        "diagnostics": {
+          "termination": "budget-exhausted",
+          "residualError": 0.48862074687981577,
+          "pathLength": 59366.0800202358,
+          "polylineCount": 43,
+          "penLiftCount": 42
+        },
+        "primitiveCount": 43,
+        "smoothedPointCount": 200172,
+        "serializedResultBytes": 7710272
+      },
+      "measurement": null,
+      "telemetry": {
+        "schemaVersion": 1,
+        "runId": "issue-336-20260718T233038Z-0001-9513e61c-7084-46e6-a3de-8f6b1d8ac5ae-equivalence-e63c931d-cd45-4069-991e-603b71083380",
+        "sketchId": "photo-scribble",
+        "imageAssetId": "img-0672-79d639daec62",
+        "profile": {
+          "kind": "injected",
+          "candidateId": "resolved-production-tuple-equivalence",
+          "limits": {
+            "maxAcceptedSegments": 50000,
+            "maxPolylines": 4000,
+            "maxStagnations": 8000,
+            "maxRestarts": 4000
+          }
+        },
+        "purpose": "equivalence-proof",
+        "resolvedProductionLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "effectiveLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "productionResolverSelectedEffectiveTuple": true,
+        "execution": {
+          "stopCause": "budget-reached",
+          "bindingGuard": "accepted-segment-limit",
+          "counters": {
+            "acceptedSegments": 50000,
+            "emittedPolylines": 43,
+            "stagnations": 42,
+            "restarts": 42
+          }
+        },
+        "rawAcceptedSegments": 50000,
+        "smoothedEmittedPoints": 200172,
+        "smoothedEmittedPolylines": 43,
+        "workerDurationMs": null,
+        "serializedArtworkBytes": 7710272,
+        "targetHash": "1f3698a6fe91a53046fed7178b25ff09184db28a90ed367c466bfa77e48dd7bd",
+        "responseReadyEpochMs": 1784417479791
+      },
+      "presentation": null,
+      "cancellation": null,
+      "protocolBoundary": {
+        "invalidMessageCount": 0,
+        "allCoordinatorMessagesValid": true
+      }
+    }
+  },
+  "observation": null,
+  "runtime": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/144.0.0.0 Safari/537.36",
+    "platform": "MacIntel"
+  },
+  "artifacts": null
+}

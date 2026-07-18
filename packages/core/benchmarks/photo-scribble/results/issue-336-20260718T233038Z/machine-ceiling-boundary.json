@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "issue": 336,
+  "campaignId": "issue-336-20260718T233038Z",
+  "candidateId": "machine-2000k",
+  "tuple": {
+    "maxAcceptedSegments": 2000000,
+    "maxPolylines": 16000,
+    "maxStagnations": 32000,
+    "maxRestarts": 16000
+  },
+  "boundary": {
+    "kind": "unrecoverable-instability",
+    "scenarioId": "flowers-opaque-fine",
+    "operationTimeoutMs": 300000,
+    "startedAt": "2026-07-18T23:31:14.256Z",
+    "runnerReturnedAt": "2026-07-18T23:37:20.988Z",
+    "observedElapsedMs": 366732,
+    "runnerFailure": {
+      "kind": "runner-failure",
+      "message": "Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed."
+    },
+    "durabilityFailure": "No raw outcome or campaign checkpoint existed while the first job remained externally hung beyond six minutes. Both appeared only after Puppeteer's protocol timeout returned control to the host.",
+    "hostTermination": "Termination was requested after the six-minute observation, but the host had just returned normally before the interrupt arrived.",
+    "seriesEffect": "This is the first hard boundary. The machine-ceiling series stops here; 4m and 8m are not run."
+  },
+  "postBoundaryObservation": {
+    "scenarioId": "pinecone-dark-alpha-fine",
+    "status": "completed",
+    "useInSelection": false,
+    "reason": "The old runner continued into job two because it classified the protocol timeout as a generic runner failure. Its immutable result is preserved, but a tuple is fully passing only when both scenarios pass before any hard boundary."
+  },
+  "largestFullyPassingCandidateId": "machine-1000k",
+  "largestFullyPassingTuple": {
+    "maxAcceptedSegments": 1000000,
+    "maxPolylines": 16000,
+    "maxStagnations": 32000,
+    "maxRestarts": 16000
+  }
+}
