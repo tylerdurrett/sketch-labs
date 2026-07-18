@@ -14,6 +14,18 @@ cover deterministic scalar diagnostics and deliberately exclude compute time.
 A Preset reproduces exactly only when both its Scene and diagnostics hashes
 match. These evidence helpers are not exported from `@harness/core`.
 
+Typecheck the hash oracle, its tests, and the production modules they import
+from the repository root with the package-local compiler:
+
+```sh
+packages/core/node_modules/.bin/tsc \
+  -p packages/core/benchmarks/photo-scribble/tsconfig.json
+```
+
+This focused project is what enforces the `keyof` inventories in
+`hash-oracles.ts`; a new Scene or Scribble diagnostics field fails the command
+until its canonical encoding is defined.
+
 The committed opaque flowers cover an ordinary photo and a `3:4` source in a
 square frame. The dark alpha pinecone covers Tone adjustment, a `2:3` source,
 276,857 fully transparent pixels, and 2,860 partial alpha pixels. Git proves
