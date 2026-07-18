@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T232816Z",
+  "phase": "machine-ceiling",
+  "job": {
+    "ordinal": 1,
+    "scenarioId": "flowers-opaque-fine",
+    "fixtureId": "flowers-opaque-portrait",
+    "imageAssetId": "img-0672-79d639daec62",
+    "captureStem": "issue-336-trial-flowers-opaque-fine",
+    "candidateId": "machine-1000k",
+    "tuple": {
+      "maxAcceptedSegments": 1000000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    "tupleToken": "s1000000-p16000-g32000-r16000"
+  },
+  "status": "completed",
+  "failure": null,
+  "startedAt": "2026-07-18T23:28:55.200Z",
+  "finishedAt": "2026-07-18T23:29:48.524Z",
+  "equivalence": {
+    "identityHashMatches": true,
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true
+  },
+  "observation": {
+    "runId": "issue-336-20260718T232816Z-0001-3b0f5b5a-cd2f-420e-8ef4-9a16ce77ee73-candidate-82560940-6cca-4c4e-95e9-23e651f17cae",
+    "termination": "budget-exhausted",
+    "residualError": 0.40258645777700464,
+    "mainWallDurationMs": 29331.699999809265
+  },
+  "artifacts": [
+    {
+      "kind": "tone-authored.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T232816Z/flowers-opaque-fine/machine-1000k--s1000000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--machine-1000k--s1000000-p16000-g32000-r16000--tone-authored.png",
+      "byteLength": 719978,
+      "sha256": "d9f6443b66f28391e781c15acb824632a8466e4bca8f4910bf42a6022b9b371c",
+      "measuredCanvasSha256": "d9f6443b66f28391e781c15acb824632a8466e4bca8f4910bf42a6022b9b371c",
+      "pixelDimensions": {
+        "width": 1000,
+        "height": 1000
+      }
+    },
+    {
+      "kind": "fill-primary.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T232816Z/flowers-opaque-fine/machine-1000k--s1000000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--machine-1000k--s1000000-p16000-g32000-r16000--fill-primary.png",
+      "byteLength": 488268,
+      "sha256": "571b87934f67c994f6a9854721355c25705b53f9da7f478929151e44e67702db",
+      "measuredCanvasSha256": "571b87934f67c994f6a9854721355c25705b53f9da7f478929151e44e67702db",
+      "pixelDimensions": {
+        "width": 1000,
+        "height": 1000
+      }
+    },
+    {
+      "kind": "outline.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T232816Z/flowers-opaque-fine/machine-1000k--s1000000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--machine-1000k--s1000000-p16000-g32000-r16000--outline.png",
+      "byteLength": 488071,
+      "sha256": "689cb0109cfe0b2b0fd5b96fe3edd8f32e5c241479fd0eff9721182e362578e1",
+      "measuredCanvasSha256": "689cb0109cfe0b2b0fd5b96fe3edd8f32e5c241479fd0eff9721182e362578e1",
+      "pixelDimensions": {
+        "width": 1000,
+        "height": 1000
+      }
+    }
+  ],
+  "note": "Raw observations are preserved in the sibling .raw.json file; this summary makes no adoption decision."
+}
