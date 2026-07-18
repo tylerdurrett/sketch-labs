@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T225430Z",
+  "phase": "screen",
+  "jobs": [
+    {
+      "scenarioId": "flowers-opaque-fine",
+      "candidateId": "current-fine-baseline"
+    },
+    {
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "candidateId": "current-fine-baseline"
+    },
+    {
+      "scenarioId": "flowers-opaque-fine",
+      "candidateId": "fine-100k"
+    },
+    {
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "candidateId": "fine-100k"
+    },
+    {
+      "scenarioId": "flowers-opaque-fine",
+      "candidateId": "fine-250k"
+    },
+    {
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "candidateId": "fine-250k"
+    }
+  ]
+}
