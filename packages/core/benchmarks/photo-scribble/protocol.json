@@ -2,6 +2,20 @@
   "schemaVersion": 1,
   "issue": 336,
   "artifactPrefix": "issue-336-trial-",
+  "rightsGate": {
+    "defaultExecutionAllowed": false,
+    "status": "blocked-pending-rights-evidence",
+    "acceptedEvidence": [
+      "dated-maintainer-attestation-of-ownership-and-redistribution-rights",
+      "replacement-fixture-with-recorded-owned-or-compatible-license-provenance"
+    ],
+    "rule": "Before any browser campaign, every fixture must have one accepted evidence form. Generated observations and adoption are invalid while this gate is unsatisfied."
+  },
+  "reviewEnvironment": {
+    "viewportWidth": 1440,
+    "viewportHeight": 1000,
+    "deviceScaleFactor": 1
+  },
   "frame": {
     "width": 1000,
     "height": 1000
@@ -119,6 +133,14 @@
     "preset.json",
     "metrics.json"
   ],
+  "evidenceNaming": {
+    "campaignIdPattern": "issue-336-[0-9]{8}T[0-9]{6}Z",
+    "tupleTokenTemplate": "s{maxAcceptedSegments}-p{maxPolylines}-g{maxStagnations}-r{maxRestarts}",
+    "directoryTemplate": "results/{campaignId}/{scenarioId}/{candidateId}--{tupleToken}",
+    "captureTemplate": "{captureStem}--{candidateId}--{tupleToken}--{captureSuffix}",
+    "controlCandidateId": "production-control",
+    "rule": "Every control or limit run records all four effective limits and uses the candidate ID plus complete tuple token in both its directory and filenames."
+  },
   "orderedLimitCandidates": [
     {
       "candidateId": "current-fine-baseline",
@@ -163,6 +185,68 @@
     "maxCancellationRoundtripMs": 500,
     "maxTerminalProgressToDisplayMs": 5000,
     "minimumRelativeResidualImprovement": 0.2
+  },
+  "measurement": {
+    "heartbeat": {
+      "start": "performance.now immediately before the coordinator posts the compute request to the worker",
+      "samples": "coordinator receipt time for every accepted progress message, including terminal progress",
+      "end": "coordinator receipt time for terminal progress or worker success/failure when terminal progress is absent",
+      "gaps": "request-to-first, every consecutive sample pair, and last-sample-to-end; the maximum is compared with maxProgressHeartbeatGapMs"
+    },
+    "interactionProbeEnvironment": "Run all probes while the same fine-scenario worker job is active, after the first non-terminal heartbeat and before terminal progress.",
+    "interactionProbes": [
+      {
+        "probeId": "hide-inspector",
+        "target": "button[aria-label='Hide inspector']",
+        "coordinate": {
+          "space": "target-border-box",
+          "xFraction": 0.5,
+          "yFraction": 0.5
+        },
+        "action": "single primary-pointer click",
+        "start": "page performance.now mark immediately before Puppeteer mouseDown at the resolved coordinate",
+        "end": "first requestAnimationFrame after the same button aria-label becomes Show inspector"
+      },
+      {
+        "probeId": "show-inspector",
+        "target": "button[aria-label='Show inspector']",
+        "coordinate": {
+          "space": "target-border-box",
+          "xFraction": 0.5,
+          "yFraction": 0.5
+        },
+        "action": "single primary-pointer click",
+        "start": "page performance.now mark immediately before Puppeteer mouseDown at the resolved coordinate",
+        "end": "first requestAnimationFrame after the same button aria-label becomes Hide inspector"
+      },
+      {
+        "probeId": "toggle-shading-disclosure",
+        "target": "the summary element whose direct span text is exactly Shading",
+        "coordinate": {
+          "space": "target-border-box",
+          "xFraction": 0.5,
+          "yFraction": 0.5
+        },
+        "action": "single primary-pointer click",
+        "start": "page performance.now mark immediately before Puppeteer mouseDown at the resolved coordinate",
+        "end": "first requestAnimationFrame after parent details.open changes from its pre-click value"
+      }
+    ],
+    "cancellation": {
+      "target": "input#control-chaos",
+      "coordinate": {
+        "space": "target-border-box",
+        "xFraction": 0.5,
+        "yFraction": 0.5
+      },
+      "action": "select the complete value, type a value exactly 0.01 below the scenario chaos value, and press Enter; restore the fixed scenario before the next measured job",
+      "start": "page performance.now immediately before the first input event that begins the superseding edit",
+      "end": "coordinator clock when the superseded job resolves cancelled and its worker termination has been invoked"
+    },
+    "terminalToDisplay": {
+      "start": "coordinator receipt time for terminal progress",
+      "end": "first requestAnimationFrame after current result diagnostics and canvas provenance both match the completed worker identity"
+    }
   },
   "visualVerdicts": [
     "tone-target-faithfulness",

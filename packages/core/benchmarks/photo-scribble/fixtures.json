@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "inventoryScope": "Committed real-photograph inputs available to Photo Scribble at issue 336 protocol freeze",
-  "ownershipBoundary": "Both files were supplied and committed by the repository maintainer. Repository history records no third-party URL, original capture attribution, license, or explicit redistribution statement; this manifest does not infer one.",
+  "ownershipBoundary": "Repository history proves only when each file entered this repository. Acquisition source, creator, rights holder, license, and redistribution permission are unknown pending explicit maintainer attestation; this manifest does not infer them from the committer identity.",
   "fixtures": [
     {
       "fixtureId": "flowers-opaque-portrait",
@@ -22,13 +22,15 @@
         "fullyOpaque": 3145728
       },
       "origin": {
-        "kind": "repository-maintainer-supplied",
+        "kind": "unknown-acquisition",
         "introducedByCommit": "5258d6906a3badaf41d5341856484b1264dd28b1",
         "introducedAt": "2026-07-17T20:13:32-05:00",
         "externalSource": null
       },
       "ownership": {
-        "recordedStatus": "maintainer-supplied-existing-project-fixture",
+        "recordedStatus": "unknown-pending-maintainer-attestation",
+        "rightsHolder": null,
+        "license": null,
         "redistributionStatementRecorded": false
       },
       "categories": [
@@ -55,13 +57,15 @@
         "fullyOpaque": 113499
       },
       "origin": {
-        "kind": "repository-maintainer-supplied",
+        "kind": "unknown-acquisition",
         "introducedByCommit": "0793309dff36682f55fd56ab83b5ed1969368714",
         "introducedAt": "2026-07-17T16:29:34-05:00",
         "externalSource": null
       },
       "ownership": {
-        "recordedStatus": "maintainer-supplied-existing-project-fixture",
+        "recordedStatus": "unknown-pending-maintainer-attestation",
+        "rightsHolder": null,
+        "license": null,
         "redistributionStatementRecorded": false
       },
       "categories": [

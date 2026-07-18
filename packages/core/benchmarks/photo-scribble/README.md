@@ -6,13 +6,18 @@ machine-readable frame, parameter, capture, threshold, and limit-candidate
 contract. Observations belong under `results/` and must identify the protocol
 and fixture manifest hashes they used.
 
-No new image is needed. The committed opaque flowers cover an ordinary photo
-and a `3:4` source in a square frame. The dark alpha pinecone covers Tone
-adjustment, a `2:3` source, 276,857 fully transparent pixels, and 2,860 partial
-alpha pixels. Both are existing maintainer-supplied project fixtures. History
-does **not** record an external source, original-capture attribution, license,
-or explicit redistribution statement, so the inventory deliberately makes no
-stronger ownership claim. Do not download or substitute third-party material.
+The committed opaque flowers cover an ordinary photo and a `3:4` source in a
+square frame. The dark alpha pinecone covers Tone adjustment, a `2:3` source,
+276,857 fully transparent pixels, and 2,860 partial alpha pixels. Git proves
+only when these files entered the repository. Their acquisition, creator,
+rights holder, license, and redistribution permission are unknown; committer
+identity is not ownership evidence.
+
+The browser campaign is therefore **blocked** until a dated maintainer
+attestation confirms ownership and redistribution rights for every selected
+fixture, or each unknown fixture is replaced by an owned or compatibly licensed
+fixture with recorded provenance. Do not run measurements, adopt limits, add a
+binary, or download substitute material while this gate is unsatisfied.
 
 ## Fixed matrix
 
@@ -28,21 +33,33 @@ inputs; do not tune them during measurement.
   targets at `pathDensity: 20` and `scribbleScale: 0.1`, used only for the
   ordered safety-limit comparison.
 
-For each scenario, name captures `<captureStem>--<captureSuffix>`, using the
-stem and complete suffix list in `protocol.json`. A capture is absent only when
-`metrics.json` records `not-applicable` and why. `metrics.json` records browser
-and OS versions, frame, params, seed, candidate tuple, termination, residual,
-stop guard, accepted segments, polylines/points/bytes, compute time, heartbeat
-gaps, interaction probes, cancellation latency, terminal-to-display latency,
-export hashes/counts, and memory samples when the browser exposes them. Keep
-paths repository-relative; never record a home directory or picker path.
+Every run records a candidate ID and all four effective limits. Form the tuple
+token and evidence paths exactly from `evidenceNaming` in `protocol.json`:
+
+```text
+results/<campaignId>/<scenarioId>/<candidateId>--<tupleToken>/
+<captureStem>--<candidateId>--<tupleToken>--<captureSuffix>
+```
+
+Control runs use candidate ID `production-control` and their actual production
+tuple. This makes reruns at different limits collision-proof. A capture is
+absent only when that candidate's `metrics.json` records `not-applicable` and
+why. Metrics record browser/OS versions, frame, params, seed, complete tuple,
+termination, residual, stop guard, accepted segments, polylines/points/bytes,
+compute time, every heartbeat timestamp/gap, all fixed interaction probes,
+cancellation and terminal-to-display latency, export hashes/counts, and memory
+samples when exposed. Keep paths repository-relative; never record a home
+directory or picker path.
 
 ## Trial isolation and cleanup
 
-Before starting Studio, snapshot `git status`, the two fixture hashes, and the
-names plus hashes under `assets/image-assets/` and
-`packages/core/src/sketches/photo-scribble/presets/`. Retain that snapshot with
-the raw observations outside git until review is accepted.
+Before any write or Studio startup, create a campaign-specific backup directory
+outside the repository. Copy the complete byte contents and directory layout of
+`assets/image-assets/` and
+`packages/core/src/sketches/photo-scribble/presets/` into it, then record `git
+status` plus a sorted relative-path/byte-length/SHA-256 manifest. Confirm the
+backup files reproduce that manifest before proceeding. Retain the restorable
+backup with raw observations until cleanup is verified.
 
 All temporary asset filenames, import names, Preset names, and captures start
 with exactly `issue-336-trial-`. To exercise import without risking either
@@ -50,13 +67,14 @@ committed asset, stage a byte-identical copy outside the repository under that
 prefix and select the staged copy. Never overwrite or rename the inventory
 paths.
 
-After the attestation is decided, stop Studio and remove only files that both
-(a) were absent from the pre-run snapshot and (b) start with the exact prefix.
-Re-hash the inventory and compare `git status` with the snapshot. Any changed
-pre-existing file or any unprefixed trial artifact fails cleanup and must be
-restored from the snapshot before evidence is accepted. Promote only reviewed
-observations/captures into `results/`; trial Image Assets and Presets never
-become fixtures by accident.
+After review, stop Studio. Restore every pre-existing asset and Preset from the
+external byte backup, then remove only new files that were absent from the
+manifest and start with the exact prefix. Generate a fresh sorted
+relative-path/byte-length/SHA-256 manifest and require byte-for-byte list and
+digest equality with the pre-run manifest; compare `git status` too. Any
+changed/missing pre-existing byte or unprefixed new artifact fails cleanup.
+Promote only reviewed observations/captures into `results/`; trial Image Assets
+and Presets never become fixtures by accident.
 
 ## Manual workflow pass
 
@@ -71,10 +89,12 @@ Run the two control scenarios in a production Studio browser, serially:
 3. Set the primary seed, wait for settlement, then re-seed. Tone and permission
    hashes must remain identical while routing and Fill geometry visibly change.
 4. During a fresh realistic job, make three inspector/control interaction
-   probes, start a superseding edit, and cancel once. Retained geometry must be
-   labeled stale until the latest result settles; progress is monotonic, ETA is
-   explicitly estimating or remaining, and cancellation produces no late
-   replacement.
+   probes at the fixed viewport, target-relative coordinates, actions, and
+   timing boundaries in `measurement.interactionProbes`. Cancel the active job
+   with the exact `control-chaos` superseding edit in `measurement.cancellation`.
+   Retained geometry must be labeled stale until the latest result settles;
+   progress is monotonic, ETA is explicitly estimating or remaining, and
+   cancellation produces no late replacement.
 5. Save a prefixed Preset, reload the page, and load it. Asset ID, params, seed,
    Tone hash, termination/residual, and generated geometry hash must match the
    pre-reload record exactly. Separately load a prefixed Preset with a missing
@@ -119,6 +139,14 @@ baseline residual `r0` and candidate residual `rc`, relative improvement is
 `(r0 - rc) / r0`. If `r0` is zero, the case is already converged and later
 candidates must also converge.
 
+Heartbeat timing begins immediately before the coordinator posts compute,
+includes request-to-first, every progress-message interval, and last-to-end,
+and uses coordinator receipt timestamps. The three UI round trips use a
+`1440 × 1000`, device-scale-factor `1` viewport and the exact DOM targets,
+center coordinates, actions, and page-clock start/end boundaries in
+`protocol.json`. Do not substitute a convenient interaction after seeing
+results.
+
 A candidate passes only when all of the following hold for both fine scenarios:
 
 - it terminates as `completed`, **or** its residual improvement is at least the
@@ -139,6 +167,10 @@ production limits and record the failure rather than relaxing a threshold after
 measurement. A tone/default/normalization change uses the same control pass and
 may be promoted only with a named before/after metric or attestation; this
 protocol does not pre-authorize such a change.
+
+No result can pass or be adopted unless the rights gate was satisfied before
+the first campaign write and the evidence record identifies the qualifying
+attestation or replacement-fixture provenance.
 
 Run the manifest guard from the repository root:
 
