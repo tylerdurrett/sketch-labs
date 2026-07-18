@@ -222,7 +222,12 @@ describe("useSketchEnvironment", () => {
       requiredIds: [A],
       failedId: A,
     });
-    expect(latest!.error).toEqual(new ImageAssetResolutionError("missing", A));
+    expect(latest!.error).toMatchObject({
+      name: "ImageAssetResolutionError",
+      code: "missing",
+      assetId: A,
+      message: "Image Asset is missing",
+    });
 
     act(() => latest!.retry());
     expect(controlled.calls).toHaveLength(2);
@@ -266,10 +271,10 @@ describe("useSketchEnvironment", () => {
     expect(latest).toMatchObject({
       requiredIds: [invalid],
       ready: false,
-      error: failure,
       status: "error",
       failedId: invalid,
     });
+    expect(latest!.error).toBe(failure);
     expect(latest!.environment).toBeUndefined();
   });
 
@@ -283,7 +288,12 @@ describe("useSketchEnvironment", () => {
     expect(latest).toMatchObject({
       status: "error",
       failedId: A,
-      error: new ImageAssetResolutionError("resolution-failed"),
+    });
+    expect(latest!.error).toMatchObject({
+      name: "ImageAssetResolutionError",
+      code: "resolution-failed",
+      assetId: undefined,
+      message: "Image Asset resolution failed",
     });
     expect(latest!.error!.message).not.toContain("private URL detail");
   });
