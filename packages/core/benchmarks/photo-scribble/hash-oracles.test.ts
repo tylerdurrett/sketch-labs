@@ -6,7 +6,7 @@ import { inflateSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 
 import type { DecodedPixels, SketchEnvironment } from '../../src/imageAssets'
-import type { CoordinateSpace } from '../../src/scene'
+import type { CoordinateSpace, Scene } from '../../src/scene'
 import type { Params } from '../../src/sketch'
 import {
   createPhotoScribbleSchema,
@@ -15,6 +15,7 @@ import {
 } from '../../src/sketches/photo-scribble'
 import type { ScribbleControls } from '../../src/scribbleStrategy'
 import {
+  CANONICAL_HASHED_KEYS,
   canonicalArtworkHashes,
   canonicalSceneHash,
   canonicalScribbleDiagnosticsHash,
@@ -205,6 +206,74 @@ function syntheticArtwork(seed: number) {
   )
 }
 
+/**
+ * Exercise one complete deterministic input. Seed participates in artwork
+ * routing, while the target is intentionally derived only from the production
+ * source, frame, Tone controls, and Scribble lattice controls.
+ */
+function syntheticEvidence(seed: number) {
+  const schema = createPhotoScribbleSchema(SYNTHETIC_ASSET_ID)
+  const environment: SketchEnvironment = {
+    imageAssets: (id) =>
+      id === SYNTHETIC_ASSET_ID ? SYNTHETIC_PIXELS : undefined,
+  }
+  const source = createPhotoScribbleSource(
+    SYNTHETIC_PARAMS,
+    SYNTHETIC_FRAME,
+    schema,
+    environment,
+  )
+  return {
+    seed,
+    target: canonicalScribbleTargetHash(
+      source,
+      SYNTHETIC_FRAME,
+      controlsFrom(SYNTHETIC_PARAMS),
+    ),
+    artwork: generatePhotoScribbleArtwork(
+      SYNTHETIC_PARAMS,
+      seed,
+      SYNTHETIC_FRAME,
+      schema,
+      undefined,
+      environment,
+    ),
+  }
+}
+
+const COMPLETE_SCENE: Scene = {
+  space: { width: 100, height: 80 },
+  background: { color: '#fefefe' },
+  primitives: [
+    {
+      points: [
+        [1.25, 2.5],
+        [30.75, 4.125],
+        [10.5, 25.875],
+      ],
+      closed: true,
+      fill: { color: '#123456' },
+      stroke: { color: '#abcdef', width: 0.75 },
+      hiddenLineRole: 'both',
+    },
+    {
+      points: [
+        [50, 60],
+        [70, 65],
+      ],
+      closed: false,
+      stroke: { color: 'black', width: 1.5 },
+      hiddenLineRole: 'source',
+    },
+  ],
+}
+
+function mutateCompleteScene(mutate: (scene: Scene) => void): Scene {
+  const scene = structuredClone(COMPLETE_SCENE)
+  mutate(scene)
+  return scene
+}
+
 describe('Photo Scribble canonical hash oracles', () => {
   it('pins the pre-change centered-control target for both fixed control scenarios', () => {
     const scenarioById = new Map(
@@ -231,33 +300,18 @@ describe('Photo Scribble canonical hash oracles', () => {
   })
 
   it('keeps the target seed-independent while a fixed re-seed changes routing', () => {
-    const schema = createPhotoScribbleSchema(SYNTHETIC_ASSET_ID)
-    const source = createPhotoScribbleSource(
-      SYNTHETIC_PARAMS,
-      SYNTHETIC_FRAME,
-      schema,
-      { imageAssets: () => SYNTHETIC_PIXELS },
-    )
-    const controls = controlsFrom(SYNTHETIC_PARAMS)
-    const primaryTarget = canonicalScribbleTargetHash(
-      source,
-      SYNTHETIC_FRAME,
-      controls,
-    )
-    const reseedTarget = canonicalScribbleTargetHash(
-      source,
-      SYNTHETIC_FRAME,
-      controls,
-    )
-    const primaryHashes = canonicalArtworkHashes(
-      syntheticArtwork(SYNTHETIC_PRIMARY_SEED),
-    )
-    const reseedHashes = canonicalArtworkHashes(
-      syntheticArtwork(SYNTHETIC_RESEED),
-    )
+    const primary = syntheticEvidence(SYNTHETIC_PRIMARY_SEED)
+    const reseed = syntheticEvidence(SYNTHETIC_RESEED)
+    const primaryHashes = canonicalArtworkHashes(primary.artwork)
+    const reseedHashes = canonicalArtworkHashes(reseed.artwork)
 
-    expect(reseedTarget).toBe(primaryTarget)
-    expect({ primaryTarget, primaryHashes, reseedHashes }).toEqual({
+    expect(primary.seed).not.toBe(reseed.seed)
+    expect(reseed.target).toBe(primary.target)
+    expect({
+      primaryTarget: primary.target,
+      primaryHashes,
+      reseedHashes,
+    }).toEqual({
       primaryTarget:
         'a7bc92a8e96b42aeefdff1671245528a6b907ea9c1537ed18b33b3c65f853679',
       primaryHashes: {
@@ -274,6 +328,88 @@ describe('Photo Scribble canonical hash oracles', () => {
       },
     })
     expect(reseedHashes.scene).not.toBe(primaryHashes.scene)
+  })
+
+  it('hashes every Scene contract field and remains sensitive to each value', () => {
+    expect(CANONICAL_HASHED_KEYS).toEqual({
+      scene: { space: true, primitives: true, background: true },
+      coordinateSpace: { width: true, height: true },
+      primitive: {
+        points: true,
+        closed: true,
+        fill: true,
+        stroke: true,
+        hiddenLineRole: true,
+      },
+      fill: { color: true },
+      stroke: { color: true, width: true },
+      scribbleDiagnostics: {
+        termination: true,
+        residualError: true,
+        pathLength: true,
+        polylineCount: true,
+        penLiftCount: true,
+      },
+    })
+
+    const referenceHash = canonicalSceneHash(COMPLETE_SCENE)
+    const mutations = [
+      mutateCompleteScene((scene) => {
+        scene.space.width += 1
+      }),
+      mutateCompleteScene((scene) => {
+        scene.space.height += 1
+      }),
+      mutateCompleteScene((scene) => {
+        scene.background = { color: '#ffffff' }
+      }),
+      mutateCompleteScene((scene) => {
+        delete scene.background
+      }),
+      mutateCompleteScene((scene) => {
+        scene.primitives[0]!.fill = { color: '#654321' }
+      }),
+      mutateCompleteScene((scene) => {
+        delete scene.primitives[0]!.fill
+      }),
+      mutateCompleteScene((scene) => {
+        scene.primitives[0]!.stroke = { color: '#fedcba', width: 0.75 }
+      }),
+      mutateCompleteScene((scene) => {
+        scene.primitives[0]!.stroke = { color: '#abcdef', width: 0.5 }
+      }),
+      mutateCompleteScene((scene) => {
+        delete scene.primitives[0]!.stroke
+      }),
+      mutateCompleteScene((scene) => {
+        scene.primitives[0]!.closed = false
+      }),
+      mutateCompleteScene((scene) => {
+        delete scene.primitives[0]!.closed
+      }),
+      mutateCompleteScene((scene) => {
+        scene.primitives[0]!.hiddenLineRole = 'source'
+      }),
+      mutateCompleteScene((scene) => {
+        delete scene.primitives[0]!.hiddenLineRole
+      }),
+      mutateCompleteScene((scene) => {
+        scene.primitives.reverse()
+      }),
+      mutateCompleteScene((scene) => {
+        scene.primitives[0]!.points[0]![0] += Number.EPSILON
+      }),
+      mutateCompleteScene((scene) => {
+        scene.primitives[0]!.points.reverse()
+      }),
+    ]
+
+    expect(referenceHash).toBe(
+      'f9b13945f401525f210a6e7d58b2e425503cac67d5aa1dc20c500ac8c55ca68e',
+    )
+    for (const mutation of mutations) {
+      expect(canonicalSceneHash(mutation)).not.toBe(referenceHash)
+    }
   })
 
   it('repeats identical inputs exactly and requires Scene plus diagnostics equality', () => {
@@ -295,6 +431,21 @@ describe('Photo Scribble canonical hash oracles', () => {
       canonicalSceneHash(first.scene),
     )
     expect(isExactPresetReproduction(first, changedDiagnostics)).toBe(false)
+
+    const changedScene = {
+      ...repeated,
+      scene: {
+        ...repeated.scene,
+        space: {
+          ...repeated.scene.space,
+          width: repeated.scene.space.width + 1,
+        },
+      },
+    }
+    expect(canonicalScribbleDiagnosticsHash(changedScene.diagnostics)).toBe(
+      canonicalScribbleDiagnosticsHash(first.diagnostics),
+    )
+    expect(isExactPresetReproduction(first, changedScene)).toBe(false)
   })
 
   it('excludes compute time from the canonical diagnostics hash', () => {

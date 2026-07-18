@@ -9,7 +9,13 @@
 
 import { createHash, type Hash } from 'node:crypto'
 
-import type { CoordinateSpace, Scene } from '../../src/scene'
+import type {
+  CoordinateSpace,
+  Fill,
+  Primitive,
+  Scene,
+  Stroke,
+} from '../../src/scene'
 import type {
   ScribbleArtwork,
   ScribbleDiagnostics,
@@ -19,6 +25,47 @@ import type { ScribbleControls } from '../../src/scribbleStrategy/types'
 import type { ToneSource } from '../../src/shadingFields'
 
 const textEncoder = new TextEncoder()
+
+/**
+ * Compile-time contract sentinels for every record encoded below.
+ *
+ * Adding a field to one of these production records fails the focused
+ * benchmark typecheck until the canonical encoding and this inventory are
+ * updated together. Exported only from this benchmark module so tests can also
+ * pin the inventories; none is part of the package-root contract.
+ */
+export const CANONICAL_HASHED_KEYS = Object.freeze({
+  scene: {
+    space: true,
+    primitives: true,
+    background: true,
+  } as const satisfies Record<keyof Scene, true>,
+  coordinateSpace: {
+    width: true,
+    height: true,
+  } as const satisfies Record<keyof CoordinateSpace, true>,
+  primitive: {
+    points: true,
+    closed: true,
+    fill: true,
+    stroke: true,
+    hiddenLineRole: true,
+  } as const satisfies Record<keyof Primitive, true>,
+  fill: {
+    color: true,
+  } as const satisfies Record<keyof Fill, true>,
+  stroke: {
+    color: true,
+    width: true,
+  } as const satisfies Record<keyof Stroke, true>,
+  scribbleDiagnostics: {
+    termination: true,
+    residualError: true,
+    pathLength: true,
+    polylineCount: true,
+    penLiftCount: true,
+  } as const satisfies Record<keyof ScribbleDiagnostics, true>,
+})
 
 class CanonicalHash {
   readonly #hash: Hash = createHash('sha256')
