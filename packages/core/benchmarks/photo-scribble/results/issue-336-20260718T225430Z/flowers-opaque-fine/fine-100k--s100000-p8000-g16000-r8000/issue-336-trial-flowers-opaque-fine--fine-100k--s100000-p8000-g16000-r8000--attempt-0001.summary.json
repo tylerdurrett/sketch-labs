@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T225430Z",
+  "phase": "screen",
+  "job": {
+    "ordinal": 3,
+    "scenarioId": "flowers-opaque-fine",
+    "fixtureId": "flowers-opaque-portrait",
+    "imageAssetId": "img-0672-79d639daec62",
+    "captureStem": "issue-336-trial-flowers-opaque-fine",
+    "candidateId": "fine-100k",
+    "tuple": {
+      "maxAcceptedSegments": 100000,
+      "maxPolylines": 8000,
+      "maxStagnations": 16000,
+      "maxRestarts": 8000
+    },
+    "tupleToken": "s100000-p8000-g16000-r8000"
+  },
+  "status": "completed",
+  "failure": null,
+  "startedAt": "2026-07-18T22:55:47.749Z",
+  "finishedAt": "2026-07-18T22:55:56.233Z",
+  "equivalence": {
+    "identityHashMatches": true,
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true
+  },
+  "observation": {
+    "runId": "issue-336-20260718T225430Z-0003-5101526e-f5be-4fcc-b895-ace30a5ca9d6-candidate-e5f0c34f-013e-4b62-a257-6e75a53cf8e6",
+    "termination": "budget-exhausted",
+    "residualError": 0.48408608868885594,
+    "mainWallDurationMs": 3167.0999999046326
+  },
+  "note": "Raw observations are preserved in the sibling .raw.json file; this summary makes no adoption decision."
+}

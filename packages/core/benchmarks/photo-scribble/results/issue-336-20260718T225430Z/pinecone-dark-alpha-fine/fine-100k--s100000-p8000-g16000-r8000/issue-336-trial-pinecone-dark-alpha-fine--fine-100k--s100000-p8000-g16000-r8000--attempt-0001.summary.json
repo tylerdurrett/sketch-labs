@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T225430Z",
+  "phase": "screen",
+  "job": {
+    "ordinal": 4,
+    "scenarioId": "pinecone-dark-alpha-fine",
+    "fixtureId": "pinecone-dark-alpha-portrait",
+    "imageAssetId": "pinecone-4330aa0314f7",
+    "captureStem": "issue-336-trial-pinecone-dark-alpha-fine",
+    "candidateId": "fine-100k",
+    "tuple": {
+      "maxAcceptedSegments": 100000,
+      "maxPolylines": 8000,
+      "maxStagnations": 16000,
+      "maxRestarts": 8000
+    },
+    "tupleToken": "s100000-p8000-g16000-r8000"
+  },
+  "status": "completed",
+  "failure": null,
+  "startedAt": "2026-07-18T22:55:56.236Z",
+  "finishedAt": "2026-07-18T22:56:02.799Z",
+  "equivalence": {
+    "identityHashMatches": true,
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true
+  },
+  "observation": {
+    "runId": "issue-336-20260718T225430Z-0004-2b10488c-4f08-4ec5-82e6-e76550f16054-candidate-1e84e310-36c9-4fed-9983-946f8113ae4b",
+    "termination": "budget-exhausted",
+    "residualError": 0.14372594152961568,
+    "mainWallDurationMs": 2174.2000002861023
+  },
+  "note": "Raw observations are preserved in the sibling .raw.json file; this summary makes no adoption decision."
+}

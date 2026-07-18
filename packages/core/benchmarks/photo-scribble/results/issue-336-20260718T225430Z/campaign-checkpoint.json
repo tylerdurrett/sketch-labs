@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T225430Z",
+  "completed": [
+    {
+      "jobKey": "flowers-opaque-fine/current-fine-baseline--s50000-p4000-g8000-r4000",
+      "status": "completed",
+      "rawRecord": "issue-336-20260718T225430Z/flowers-opaque-fine/current-fine-baseline--s50000-p4000-g8000-r4000/issue-336-trial-flowers-opaque-fine--current-fine-baseline--s50000-p4000-g8000-r4000--attempt-0001.raw.json",
+      "summary": "issue-336-20260718T225430Z/flowers-opaque-fine/current-fine-baseline--s50000-p4000-g8000-r4000/issue-336-trial-flowers-opaque-fine--current-fine-baseline--s50000-p4000-g8000-r4000--attempt-0001.summary.json"
+    },
+    {
+      "jobKey": "pinecone-dark-alpha-fine/current-fine-baseline--s50000-p4000-g8000-r4000",
+      "status": "completed",
+      "rawRecord": "issue-336-20260718T225430Z/pinecone-dark-alpha-fine/current-fine-baseline--s50000-p4000-g8000-r4000/issue-336-trial-pinecone-dark-alpha-fine--current-fine-baseline--s50000-p4000-g8000-r4000--attempt-0001.raw.json",
+      "summary": "issue-336-20260718T225430Z/pinecone-dark-alpha-fine/current-fine-baseline--s50000-p4000-g8000-r4000/issue-336-trial-pinecone-dark-alpha-fine--current-fine-baseline--s50000-p4000-g8000-r4000--attempt-0001.summary.json"
+    },
+    {
+      "jobKey": "flowers-opaque-fine/fine-100k--s100000-p8000-g16000-r8000",
+      "status": "completed",
+      "rawRecord": "issue-336-20260718T225430Z/flowers-opaque-fine/fine-100k--s100000-p8000-g16000-r8000/issue-336-trial-flowers-opaque-fine--fine-100k--s100000-p8000-g16000-r8000--attempt-0001.raw.json",
+      "summary": "issue-336-20260718T225430Z/flowers-opaque-fine/fine-100k--s100000-p8000-g16000-r8000/issue-336-trial-flowers-opaque-fine--fine-100k--s100000-p8000-g16000-r8000--attempt-0001.summary.json"
+    },
+    {
+      "jobKey": "pinecone-dark-alpha-fine/fine-100k--s100000-p8000-g16000-r8000",
+      "status": "completed",
+      "rawRecord": "issue-336-20260718T225430Z/pinecone-dark-alpha-fine/fine-100k--s100000-p8000-g16000-r8000/issue-336-trial-pinecone-dark-alpha-fine--fine-100k--s100000-p8000-g16000-r8000--attempt-0001.raw.json",
+      "summary": "issue-336-20260718T225430Z/pinecone-dark-alpha-fine/fine-100k--s100000-p8000-g16000-r8000/issue-336-trial-pinecone-dark-alpha-fine--fine-100k--s100000-p8000-g16000-r8000--attempt-0001.summary.json"
+    },
+    {
+      "jobKey": "flowers-opaque-fine/fine-250k--s250000-p16000-g32000-r16000",
+      "status": "completed",
+      "rawRecord": "issue-336-20260718T225430Z/flowers-opaque-fine/fine-250k--s250000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--fine-250k--s250000-p16000-g32000-r16000--attempt-0001.raw.json",
+      "summary": "issue-336-20260718T225430Z/flowers-opaque-fine/fine-250k--s250000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--fine-250k--s250000-p16000-g32000-r16000--attempt-0001.summary.json"
+    },
+    {
+      "jobKey": "pinecone-dark-alpha-fine/fine-250k--s250000-p16000-g32000-r16000",
+      "status": "completed",
+      "rawRecord": "issue-336-20260718T225430Z/pinecone-dark-alpha-fine/fine-250k--s250000-p16000-g32000-r16000/issue-336-trial-pinecone-dark-alpha-fine--fine-250k--s250000-p16000-g32000-r16000--attempt-0001.raw.json",
+      "summary": "issue-336-20260718T225430Z/pinecone-dark-alpha-fine/fine-250k--s250000-p16000-g32000-r16000/issue-336-trial-pinecone-dark-alpha-fine--fine-250k--s250000-p16000-g32000-r16000--attempt-0001.summary.json"
+    }
+  ],
+  "nextJobKey": null,
+  "campaignFailures": [],
+  "updatedAt": "2026-07-18T22:56:25.298Z"
+}

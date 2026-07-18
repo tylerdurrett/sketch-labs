@@ -1,0 +1,406 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T225430Z",
+  "phase": "screen",
+  "job": {
+    "ordinal": 6,
+    "scenarioId": "pinecone-dark-alpha-fine",
+    "fixtureId": "pinecone-dark-alpha-portrait",
+    "imageAssetId": "pinecone-4330aa0314f7",
+    "captureStem": "issue-336-trial-pinecone-dark-alpha-fine",
+    "candidateId": "fine-250k",
+    "tuple": {
+      "maxAcceptedSegments": 250000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    "tupleToken": "s250000-p16000-g32000-r16000"
+  },
+  "status": "completed",
+  "failure": null,
+  "startedAt": "2026-07-18T22:56:16.256Z",
+  "finishedAt": "2026-07-18T22:56:25.294Z",
+  "equivalence": {
+    "scenarioId": "pinecone-dark-alpha-fine",
+    "identityHashMatches": true,
+    "resolvedTuple": {
+      "maxAcceptedSegments": 50000,
+      "maxPolylines": 4000,
+      "maxStagnations": 8000,
+      "maxRestarts": 4000
+    },
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true,
+    "production": {
+      "schemaVersion": 1,
+      "campaignId": "issue-336-20260718T225430Z",
+      "hostRunId": "issue-336-20260718T225430Z-0006-ed0ffa07-0202-42bd-b640-358d19ff5787-equivalence",
+      "runId": "issue-336-20260718T225430Z-0006-ed0ffa07-0202-42bd-b640-358d19ff5787-equivalence-b0678dd7-be51-4483-99d7-94ab4e0cd9c7",
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "purpose": "equivalence-proof",
+      "identityHash": "2a62930556a24b446b7d0e2a09b78faf1d169fb7a28d95a05891cf7f00edf87c",
+      "profile": {
+        "kind": "production"
+      },
+      "fullTuple": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      },
+      "result": {
+        "sceneHash": "c9a54404df0dbdaa590db3162387968cc86981c73784c1982b3ce6cd03f63af6",
+        "diagnosticsHash": "74e9861d8cee873757540497d26a16e1cbf8c2004b520c43b27490e604758a1b",
+        "diagnostics": {
+          "termination": "budget-exhausted",
+          "residualError": 0.14826925884416006,
+          "pathLength": 57066.92521829653,
+          "polylineCount": 1,
+          "penLiftCount": 0
+        },
+        "primitiveCount": 1,
+        "smoothedPointCount": 200004,
+        "serializedResultBytes": 7699989
+      },
+      "measurement": null,
+      "telemetry": {
+        "schemaVersion": 1,
+        "runId": "issue-336-20260718T225430Z-0006-ed0ffa07-0202-42bd-b640-358d19ff5787-equivalence-b0678dd7-be51-4483-99d7-94ab4e0cd9c7",
+        "sketchId": "photo-scribble",
+        "imageAssetId": "pinecone-4330aa0314f7",
+        "profile": {
+          "kind": "production"
+        },
+        "purpose": "equivalence-proof",
+        "resolvedProductionLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "effectiveLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "productionResolverSelectedEffectiveTuple": true,
+        "execution": null,
+        "rawAcceptedSegments": null,
+        "smoothedEmittedPoints": 200004,
+        "smoothedEmittedPolylines": 1,
+        "serializedArtworkBytes": 7699989,
+        "workerDurationMs": null,
+        "responseReadyEpochMs": 1784415378719
+      },
+      "protocolBoundary": {
+        "invalidMessageCount": 0,
+        "allCoordinatorMessagesValid": true
+      }
+    },
+    "injectedResolvedTuple": {
+      "schemaVersion": 1,
+      "campaignId": "issue-336-20260718T225430Z",
+      "hostRunId": "issue-336-20260718T225430Z-0006-ed0ffa07-0202-42bd-b640-358d19ff5787-equivalence",
+      "runId": "issue-336-20260718T225430Z-0006-ed0ffa07-0202-42bd-b640-358d19ff5787-equivalence-6eef3107-657b-4e72-8bf5-4bdee222e134",
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "purpose": "equivalence-proof",
+      "identityHash": "2a62930556a24b446b7d0e2a09b78faf1d169fb7a28d95a05891cf7f00edf87c",
+      "profile": {
+        "kind": "injected",
+        "candidateId": "resolved-production-tuple-equivalence",
+        "limits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        }
+      },
+      "fullTuple": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      },
+      "result": {
+        "sceneHash": "c9a54404df0dbdaa590db3162387968cc86981c73784c1982b3ce6cd03f63af6",
+        "diagnosticsHash": "74e9861d8cee873757540497d26a16e1cbf8c2004b520c43b27490e604758a1b",
+        "diagnostics": {
+          "termination": "budget-exhausted",
+          "residualError": 0.14826925884416006,
+          "pathLength": 57066.92521829653,
+          "polylineCount": 1,
+          "penLiftCount": 0
+        },
+        "primitiveCount": 1,
+        "smoothedPointCount": 200004,
+        "serializedResultBytes": 7699989
+      },
+      "measurement": null,
+      "telemetry": {
+        "schemaVersion": 1,
+        "runId": "issue-336-20260718T225430Z-0006-ed0ffa07-0202-42bd-b640-358d19ff5787-equivalence-6eef3107-657b-4e72-8bf5-4bdee222e134",
+        "sketchId": "photo-scribble",
+        "imageAssetId": "pinecone-4330aa0314f7",
+        "profile": {
+          "kind": "injected",
+          "candidateId": "resolved-production-tuple-equivalence",
+          "limits": {
+            "maxAcceptedSegments": 50000,
+            "maxPolylines": 4000,
+            "maxStagnations": 8000,
+            "maxRestarts": 4000
+          }
+        },
+        "purpose": "equivalence-proof",
+        "resolvedProductionLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "effectiveLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "productionResolverSelectedEffectiveTuple": true,
+        "execution": {
+          "stopCause": "budget-reached",
+          "bindingGuard": "accepted-segment-limit",
+          "counters": {
+            "acceptedSegments": 50000,
+            "emittedPolylines": 1,
+            "stagnations": 0,
+            "restarts": 0
+          }
+        },
+        "rawAcceptedSegments": 50000,
+        "smoothedEmittedPoints": 200004,
+        "smoothedEmittedPolylines": 1,
+        "serializedArtworkBytes": 7699989,
+        "workerDurationMs": null,
+        "responseReadyEpochMs": 1784415380105
+      },
+      "protocolBoundary": {
+        "invalidMessageCount": 0,
+        "allCoordinatorMessagesValid": true
+      }
+    }
+  },
+  "observation": {
+    "schemaVersion": 1,
+    "campaignId": "issue-336-20260718T225430Z",
+    "hostRunId": "issue-336-20260718T225430Z-0006-ed0ffa07-0202-42bd-b640-358d19ff5787-candidate",
+    "runId": "issue-336-20260718T225430Z-0006-ed0ffa07-0202-42bd-b640-358d19ff5787-candidate-75856d8c-d40c-47d2-bee4-b2f3dd9bf97f",
+    "scenarioId": "pinecone-dark-alpha-fine",
+    "purpose": "measurement",
+    "identityHash": "2a62930556a24b446b7d0e2a09b78faf1d169fb7a28d95a05891cf7f00edf87c",
+    "profile": {
+      "kind": "injected",
+      "candidateId": "fine-250k",
+      "limits": {
+        "maxAcceptedSegments": 250000,
+        "maxPolylines": 16000,
+        "maxStagnations": 32000,
+        "maxRestarts": 16000
+      }
+    },
+    "fullTuple": {
+      "maxAcceptedSegments": 250000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    "result": {
+      "sceneHash": "86c11e0b97e7c08a969a697492e1d560e30ba43515531900172da2dfe58602c6",
+      "diagnosticsHash": "54fbd5655b9fdc2c8bd450d5ab6a9fdf5f94d62403f3b65db19b5a80c4c57e97",
+      "diagnostics": {
+        "termination": "budget-exhausted",
+        "residualError": 0.13010955791974255,
+        "pathLength": 300000.00000141445,
+        "polylineCount": 1,
+        "penLiftCount": 0
+      },
+      "primitiveCount": 1,
+      "smoothedPointCount": 250001,
+      "serializedResultBytes": 9537072
+    },
+    "measurement": {
+      "coordinatorComputeTimeMs": 4603.199999809265,
+      "mainWallDurationMs": 4749.599999904633,
+      "responseReadyToMainReceiptEpochProxyMs": 33,
+      "heartbeat": {
+        "requestPostedAtMs": 3994.7999997138977,
+        "progressReceiptTimesMs": [
+          4195.299999713898,
+          4295.400000095367,
+          4395.299999713898,
+          4495.299999713898,
+          4595.400000095367,
+          4695.400000095367,
+          4795.299999713898,
+          4895.299999713898,
+          4995.400000095367,
+          5095.400000095367,
+          5195.299999713898,
+          5295.299999713898,
+          5395.299999713898,
+          5495.299999713898,
+          5595.299999713898,
+          5695.299999713898,
+          5795.299999713898,
+          5895.299999713898,
+          5995.299999713898,
+          6095.299999713898,
+          6195.299999713898,
+          6295.299999713898,
+          6395.299999713898,
+          6495.400000095367,
+          6595.299999713898,
+          6695.299999713898,
+          6795.299999713898,
+          6895.299999713898,
+          6995.299999713898,
+          7095.299999713898,
+          7195.299999713898,
+          7295.299999713898,
+          7395.299999713898,
+          7495.299999713898,
+          7595.299999713898,
+          7695.400000095367,
+          7795.400000095367,
+          7895.299999713898,
+          7995.299999713898,
+          8095.299999713898,
+          8195.299999713898,
+          8295.299999713898,
+          8395.299999713898,
+          8495.299999713898,
+          8555.599999904633
+        ],
+        "finalResponseReceivedAtMs": 8728.199999809265,
+        "requestToFirstOrEndMs": 200.5,
+        "betweenProgressGapsMs": [
+          100.10000038146973,
+          99.89999961853027,
+          100,
+          100.10000038146973,
+          100,
+          99.89999961853027,
+          100,
+          100.10000038146973,
+          100,
+          99.89999961853027,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100.10000038146973,
+          99.89999961853027,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100.10000038146973,
+          100,
+          99.89999961853027,
+          100,
+          100,
+          100,
+          100,
+          100,
+          100,
+          60.30000019073486
+        ],
+        "lastProgressToEndMs": 172.59999990463257,
+        "maximumGapMs": 200.5,
+        "terminalProgressCount": 1
+      },
+      "memory": {
+        "scope": "page-main-process-only-worker-heap-unavailable",
+        "before": {
+          "usedJSHeapSize": 188298538,
+          "totalJSHeapSize": 258641322,
+          "jsHeapSizeLimit": 4395630592
+        },
+        "after": {
+          "usedJSHeapSize": 115880953,
+          "totalJSHeapSize": 151674377,
+          "jsHeapSizeLimit": 4395630592
+        }
+      }
+    },
+    "telemetry": {
+      "schemaVersion": 1,
+      "runId": "issue-336-20260718T225430Z-0006-ed0ffa07-0202-42bd-b640-358d19ff5787-candidate-75856d8c-d40c-47d2-bee4-b2f3dd9bf97f",
+      "sketchId": "photo-scribble",
+      "imageAssetId": "pinecone-4330aa0314f7",
+      "profile": {
+        "kind": "injected",
+        "candidateId": "fine-250k",
+        "limits": {
+          "maxAcceptedSegments": 250000,
+          "maxPolylines": 16000,
+          "maxStagnations": 32000,
+          "maxRestarts": 16000
+        }
+      },
+      "purpose": "measurement",
+      "resolvedProductionLimits": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      },
+      "effectiveLimits": {
+        "maxAcceptedSegments": 250000,
+        "maxPolylines": 16000,
+        "maxStagnations": 32000,
+        "maxRestarts": 16000
+      },
+      "productionResolverSelectedEffectiveTuple": false,
+      "execution": {
+        "stopCause": "budget-reached",
+        "bindingGuard": "accepted-segment-limit",
+        "counters": {
+          "acceptedSegments": 250000,
+          "emittedPolylines": 1,
+          "stagnations": 0,
+          "restarts": 0
+        }
+      },
+      "rawAcceptedSegments": 250000,
+      "smoothedEmittedPoints": 250001,
+      "smoothedEmittedPolylines": 1,
+      "serializedArtworkBytes": 9537072,
+      "workerDurationMs": 4603.099999904633,
+      "responseReadyEpochMs": 1784415385061
+    },
+    "protocolBoundary": {
+      "invalidMessageCount": 0,
+      "allCoordinatorMessagesValid": true
+    }
+  },
+  "runtime": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/144.0.0.0 Safari/537.36",
+    "platform": "MacIntel"
+  }
+}

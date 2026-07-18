@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "issue": 336,
+  "campaignId": "issue-336-20260718T230718Z",
+  "supersedesComputeOnlyCampaignId": "issue-336-20260718T225430Z",
+  "orderedCandidatesRun": [
+    "current-fine-baseline",
+    "fine-100k",
+    "fine-250k"
+  ],
+  "candidatesNotRun": [
+    "fine-500k",
+    "fine-1000k"
+  ],
+  "survivorCandidateIds": [],
+  "decision": "retain-current-production-limits",
+  "bindingGuards": {
+    "current-fine-baseline": "accepted-segment-limit",
+    "fine-100k": "accepted-segment-limit",
+    "fine-250k": "accepted-segment-limit"
+  },
+  "relativeResidualImprovement": {
+    "fine-100k": {
+      "flowers-opaque-fine": 0.009280527,
+      "pinecone-dark-alpha-fine": 0.030642342
+    },
+    "fine-250k": {
+      "flowers-opaque-fine": 0.037089069,
+      "pinecone-dark-alpha-fine": 0.122477856
+    }
+  },
+  "failingGates": [
+    "No larger candidate completed or reached the frozen 0.20 relative residual improvement in both fine scenarios.",
+    "The frozen maxProgressHeartbeatGapMs is 1000; observed fine-100k gaps were 1037.8 ms (flowers) and 1047.7 ms (pinecone), and fine-250k gaps were 1370.5 ms (flowers) and 1088.8 ms (pinecone).",
+    "The named visual attestation records worse plot-readiness for fine-250k in both scenarios and worse routing-legibility for the pinecone."
+  ]
+}

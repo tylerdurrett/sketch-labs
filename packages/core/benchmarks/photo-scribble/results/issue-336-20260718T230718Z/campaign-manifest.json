@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T230718Z",
+  "phase": "screen",
+  "survivorCandidateIds": null,
+  "jobs": [
+    {
+      "scenarioId": "flowers-opaque-fine",
+      "candidateId": "current-fine-baseline",
+      "tuple": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      }
+    },
+    {
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "candidateId": "current-fine-baseline",
+      "tuple": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      }
+    },
+    {
+      "scenarioId": "flowers-opaque-fine",
+      "candidateId": "fine-100k",
+      "tuple": {
+        "maxAcceptedSegments": 100000,
+        "maxPolylines": 8000,
+        "maxStagnations": 16000,
+        "maxRestarts": 8000
+      }
+    },
+    {
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "candidateId": "fine-100k",
+      "tuple": {
+        "maxAcceptedSegments": 100000,
+        "maxPolylines": 8000,
+        "maxStagnations": 16000,
+        "maxRestarts": 8000
+      }
+    },
+    {
+      "scenarioId": "flowers-opaque-fine",
+      "candidateId": "fine-250k",
+      "tuple": {
+        "maxAcceptedSegments": 250000,
+        "maxPolylines": 16000,
+        "maxStagnations": 32000,
+        "maxRestarts": 16000
+      }
+    },
+    {
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "candidateId": "fine-250k",
+      "tuple": {
+        "maxAcceptedSegments": 250000,
+        "maxPolylines": 16000,
+        "maxStagnations": 32000,
+        "maxRestarts": 16000
+      }
+    }
+  ],
+  "inputDigests": {
+    "protocolSha256": "a1a1789179834c49a4eae9c52682c6819174d57a549b1d9af13fb5b155a0ab72",
+    "fixtureManifestSha256": "ac03c48727a23c6f5579c877d0a8d0fde357c2c8170586fadce9d27f24608455",
+    "jobManifestSha256": "42df23a2a71eb84eea9b1d9f6ab5550b3de1777d58b8dc90927789245111e8c4"
+  }
+}

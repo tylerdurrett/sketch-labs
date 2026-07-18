@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T230718Z",
+  "phase": "screen",
+  "job": {
+    "ordinal": 3,
+    "scenarioId": "flowers-opaque-fine",
+    "fixtureId": "flowers-opaque-portrait",
+    "imageAssetId": "img-0672-79d639daec62",
+    "captureStem": "issue-336-trial-flowers-opaque-fine",
+    "candidateId": "fine-100k",
+    "tuple": {
+      "maxAcceptedSegments": 100000,
+      "maxPolylines": 8000,
+      "maxStagnations": 16000,
+      "maxRestarts": 8000
+    },
+    "tupleToken": "s100000-p8000-g16000-r8000"
+  },
+  "status": "completed",
+  "failure": null,
+  "startedAt": "2026-07-18T23:08:22.833Z",
+  "finishedAt": "2026-07-18T23:08:35.726Z",
+  "equivalence": {
+    "identityHashMatches": true,
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true
+  },
+  "observation": {
+    "runId": "issue-336-20260718T230718Z-0003-f4caa851-fc17-4510-a93e-9c12ab617fa2-candidate-e6815a83-b08c-4285-9a03-4fae3d8909a0",
+    "termination": "budget-exhausted",
+    "residualError": 0.48408608868885594,
+    "mainWallDurationMs": 4097.800000190735
+  },
+  "artifacts": [
+    {
+      "kind": "tone-authored.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/fine-100k--s100000-p8000-g16000-r8000/issue-336-trial-flowers-opaque-fine--fine-100k--s100000-p8000-g16000-r8000--tone-authored.png",
+      "byteLength": 158153
+    },
+    {
+      "kind": "fill-primary.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/fine-100k--s100000-p8000-g16000-r8000/issue-336-trial-flowers-opaque-fine--fine-100k--s100000-p8000-g16000-r8000--fill-primary.png",
+      "byteLength": 130302
+    },
+    {
+      "kind": "outline.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/fine-100k--s100000-p8000-g16000-r8000/issue-336-trial-flowers-opaque-fine--fine-100k--s100000-p8000-g16000-r8000--outline.png",
+      "byteLength": 130367
+    }
+  ],
+  "note": "Raw observations are preserved in the sibling .raw.json file; this summary makes no adoption decision."
+}

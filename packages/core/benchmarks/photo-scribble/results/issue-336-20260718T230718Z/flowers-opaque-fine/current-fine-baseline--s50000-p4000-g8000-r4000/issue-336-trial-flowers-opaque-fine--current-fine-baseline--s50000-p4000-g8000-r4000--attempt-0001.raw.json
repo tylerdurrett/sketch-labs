@@ -1,0 +1,427 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T230718Z",
+  "phase": "screen",
+  "job": {
+    "ordinal": 1,
+    "scenarioId": "flowers-opaque-fine",
+    "fixtureId": "flowers-opaque-portrait",
+    "imageAssetId": "img-0672-79d639daec62",
+    "captureStem": "issue-336-trial-flowers-opaque-fine",
+    "candidateId": "current-fine-baseline",
+    "tuple": {
+      "maxAcceptedSegments": 50000,
+      "maxPolylines": 4000,
+      "maxStagnations": 8000,
+      "maxRestarts": 4000
+    },
+    "tupleToken": "s50000-p4000-g8000-r4000"
+  },
+  "status": "completed",
+  "failure": null,
+  "startedAt": "2026-07-18T23:08:02.580Z",
+  "finishedAt": "2026-07-18T23:08:13.497Z",
+  "equivalence": {
+    "scenarioId": "flowers-opaque-fine",
+    "identityHashMatches": true,
+    "resolvedTuple": {
+      "maxAcceptedSegments": 50000,
+      "maxPolylines": 4000,
+      "maxStagnations": 8000,
+      "maxRestarts": 4000
+    },
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true,
+    "production": {
+      "schemaVersion": 1,
+      "campaignId": "issue-336-20260718T230718Z",
+      "hostRunId": "issue-336-20260718T230718Z-0001-302efe60-e6b0-4104-8b39-583c197f7110-equivalence",
+      "runId": "issue-336-20260718T230718Z-0001-302efe60-e6b0-4104-8b39-583c197f7110-equivalence-7494694e-e246-41ed-ae98-186dc210f87f",
+      "scenarioId": "flowers-opaque-fine",
+      "purpose": "equivalence-proof",
+      "identityHash": "11c378e759d9912f0b37df0efe78fd06b4bfdf05e895ac10315d8e992d535d69",
+      "profile": {
+        "kind": "production"
+      },
+      "fullTuple": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      },
+      "result": {
+        "sceneHash": "e5b2930b2c9dfd62a2cf432c2dddb0db0cdecd47fabdc0ac821a55b33da1a224",
+        "diagnosticsHash": "cf3d11b61b31259d3ac27123968f7a0049442788883675d889271e28f5b50359",
+        "diagnostics": {
+          "termination": "budget-exhausted",
+          "residualError": 0.48862074687981577,
+          "pathLength": 59366.0800202358,
+          "polylineCount": 43,
+          "penLiftCount": 42
+        },
+        "primitiveCount": 43,
+        "smoothedPointCount": 200172,
+        "serializedResultBytes": 7710272
+      },
+      "measurement": null,
+      "telemetry": {
+        "schemaVersion": 1,
+        "runId": "issue-336-20260718T230718Z-0001-302efe60-e6b0-4104-8b39-583c197f7110-equivalence-7494694e-e246-41ed-ae98-186dc210f87f",
+        "sketchId": "photo-scribble",
+        "imageAssetId": "img-0672-79d639daec62",
+        "profile": {
+          "kind": "production"
+        },
+        "purpose": "equivalence-proof",
+        "resolvedProductionLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "effectiveLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "productionResolverSelectedEffectiveTuple": true,
+        "execution": null,
+        "rawAcceptedSegments": null,
+        "smoothedEmittedPoints": 200172,
+        "smoothedEmittedPolylines": 43,
+        "serializedArtworkBytes": 7710272,
+        "targetHash": "1f3698a6fe91a53046fed7178b25ff09184db28a90ed367c466bfa77e48dd7bd",
+        "workerDurationMs": null,
+        "responseReadyEpochMs": 1784416086189
+      },
+      "presentation": null,
+      "cancellation": null,
+      "protocolBoundary": {
+        "invalidMessageCount": 0,
+        "allCoordinatorMessagesValid": true
+      }
+    },
+    "injectedResolvedTuple": {
+      "schemaVersion": 1,
+      "campaignId": "issue-336-20260718T230718Z",
+      "hostRunId": "issue-336-20260718T230718Z-0001-302efe60-e6b0-4104-8b39-583c197f7110-equivalence",
+      "runId": "issue-336-20260718T230718Z-0001-302efe60-e6b0-4104-8b39-583c197f7110-equivalence-9dad6099-61a3-44f5-8b60-c3a30fdbb7d8",
+      "scenarioId": "flowers-opaque-fine",
+      "purpose": "equivalence-proof",
+      "identityHash": "11c378e759d9912f0b37df0efe78fd06b4bfdf05e895ac10315d8e992d535d69",
+      "profile": {
+        "kind": "injected",
+        "candidateId": "resolved-production-tuple-equivalence",
+        "limits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        }
+      },
+      "fullTuple": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      },
+      "result": {
+        "sceneHash": "e5b2930b2c9dfd62a2cf432c2dddb0db0cdecd47fabdc0ac821a55b33da1a224",
+        "diagnosticsHash": "cf3d11b61b31259d3ac27123968f7a0049442788883675d889271e28f5b50359",
+        "diagnostics": {
+          "termination": "budget-exhausted",
+          "residualError": 0.48862074687981577,
+          "pathLength": 59366.0800202358,
+          "polylineCount": 43,
+          "penLiftCount": 42
+        },
+        "primitiveCount": 43,
+        "smoothedPointCount": 200172,
+        "serializedResultBytes": 7710272
+      },
+      "measurement": null,
+      "telemetry": {
+        "schemaVersion": 1,
+        "runId": "issue-336-20260718T230718Z-0001-302efe60-e6b0-4104-8b39-583c197f7110-equivalence-9dad6099-61a3-44f5-8b60-c3a30fdbb7d8",
+        "sketchId": "photo-scribble",
+        "imageAssetId": "img-0672-79d639daec62",
+        "profile": {
+          "kind": "injected",
+          "candidateId": "resolved-production-tuple-equivalence",
+          "limits": {
+            "maxAcceptedSegments": 50000,
+            "maxPolylines": 4000,
+            "maxStagnations": 8000,
+            "maxRestarts": 4000
+          }
+        },
+        "purpose": "equivalence-proof",
+        "resolvedProductionLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "effectiveLimits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        },
+        "productionResolverSelectedEffectiveTuple": true,
+        "execution": {
+          "stopCause": "budget-reached",
+          "bindingGuard": "accepted-segment-limit",
+          "counters": {
+            "acceptedSegments": 50000,
+            "emittedPolylines": 43,
+            "stagnations": 42,
+            "restarts": 42
+          }
+        },
+        "rawAcceptedSegments": 50000,
+        "smoothedEmittedPoints": 200172,
+        "smoothedEmittedPolylines": 43,
+        "serializedArtworkBytes": 7710272,
+        "targetHash": "1f3698a6fe91a53046fed7178b25ff09184db28a90ed367c466bfa77e48dd7bd",
+        "workerDurationMs": null,
+        "responseReadyEpochMs": 1784416089203
+      },
+      "presentation": null,
+      "cancellation": null,
+      "protocolBoundary": {
+        "invalidMessageCount": 0,
+        "allCoordinatorMessagesValid": true
+      }
+    }
+  },
+  "observation": {
+    "schemaVersion": 1,
+    "campaignId": "issue-336-20260718T230718Z",
+    "hostRunId": "issue-336-20260718T230718Z-0001-302efe60-e6b0-4104-8b39-583c197f7110-candidate",
+    "runId": "issue-336-20260718T230718Z-0001-302efe60-e6b0-4104-8b39-583c197f7110-candidate-45b7eac8-8b0f-47a7-b00f-ba6cb35d6534",
+    "scenarioId": "flowers-opaque-fine",
+    "purpose": "measurement",
+    "identityHash": "11c378e759d9912f0b37df0efe78fd06b4bfdf05e895ac10315d8e992d535d69",
+    "profile": {
+      "kind": "injected",
+      "candidateId": "current-fine-baseline",
+      "limits": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      }
+    },
+    "fullTuple": {
+      "maxAcceptedSegments": 50000,
+      "maxPolylines": 4000,
+      "maxStagnations": 8000,
+      "maxRestarts": 4000
+    },
+    "result": {
+      "sceneHash": "e5b2930b2c9dfd62a2cf432c2dddb0db0cdecd47fabdc0ac821a55b33da1a224",
+      "diagnosticsHash": "cf3d11b61b31259d3ac27123968f7a0049442788883675d889271e28f5b50359",
+      "diagnostics": {
+        "termination": "budget-exhausted",
+        "residualError": 0.48862074687981577,
+        "pathLength": 59366.0800202358,
+        "polylineCount": 43,
+        "penLiftCount": 42
+      },
+      "primitiveCount": 43,
+      "smoothedPointCount": 200172,
+      "serializedResultBytes": 7710272
+    },
+    "measurement": {
+      "coordinatorComputeTimeMs": 2384.800000190735,
+      "mainWallDurationMs": 2663.800000190735,
+      "responseReadyToMainReceiptEpochProxyMs": 24,
+      "heartbeat": {
+        "requestPostedAtMs": 6857.799999713898,
+        "progressReceiptTimesMs": [
+          7261.299999713898,
+          7361.299999713898,
+          7461.199999809265,
+          7561.199999809265,
+          7661.299999713898,
+          7768.099999904633,
+          7868,
+          7968,
+          8070.599999904633,
+          8171.599999904633,
+          8275.39999961853,
+          8376.89999961853,
+          8476.799999713898,
+          8546.299999713898
+        ],
+        "finalResponseReceivedAtMs": 9509.199999809265,
+        "requestToFirstOrEndMs": 403.5,
+        "betweenProgressGapsMs": [
+          100,
+          99.90000009536743,
+          100,
+          100.09999990463257,
+          106.80000019073486,
+          99.90000009536743,
+          100,
+          102.59999990463257,
+          101,
+          103.7999997138977,
+          101.5,
+          99.90000009536743,
+          69.5
+        ],
+        "lastProgressToEndMs": 962.9000000953674,
+        "maximumGapMs": 962.9000000953674,
+        "terminalProgressCount": 1
+      },
+      "memory": {
+        "scope": "page-main-process-only-worker-heap-unavailable",
+        "before": {
+          "usedJSHeapSize": 115652271,
+          "totalJSHeapSize": 204977519,
+          "jsHeapSizeLimit": 4395630592
+        },
+        "after": {
+          "usedJSHeapSize": 138460075,
+          "totalJSHeapSize": 215922111,
+          "jsHeapSizeLimit": 4395630592
+        }
+      }
+    },
+    "telemetry": {
+      "schemaVersion": 1,
+      "runId": "issue-336-20260718T230718Z-0001-302efe60-e6b0-4104-8b39-583c197f7110-candidate-45b7eac8-8b0f-47a7-b00f-ba6cb35d6534",
+      "sketchId": "photo-scribble",
+      "imageAssetId": "img-0672-79d639daec62",
+      "profile": {
+        "kind": "injected",
+        "candidateId": "current-fine-baseline",
+        "limits": {
+          "maxAcceptedSegments": 50000,
+          "maxPolylines": 4000,
+          "maxStagnations": 8000,
+          "maxRestarts": 4000
+        }
+      },
+      "purpose": "measurement",
+      "resolvedProductionLimits": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      },
+      "effectiveLimits": {
+        "maxAcceptedSegments": 50000,
+        "maxPolylines": 4000,
+        "maxStagnations": 8000,
+        "maxRestarts": 4000
+      },
+      "productionResolverSelectedEffectiveTuple": true,
+      "execution": {
+        "stopCause": "budget-reached",
+        "bindingGuard": "accepted-segment-limit",
+        "counters": {
+          "acceptedSegments": 50000,
+          "emittedPolylines": 43,
+          "stagnations": 42,
+          "restarts": 42
+        }
+      },
+      "rawAcceptedSegments": 50000,
+      "smoothedEmittedPoints": 200172,
+      "smoothedEmittedPolylines": 43,
+      "serializedArtworkBytes": 7710272,
+      "targetHash": "1f3698a6fe91a53046fed7178b25ff09184db28a90ed367c466bfa77e48dd7bd",
+      "workerDurationMs": 2387.2000002861023,
+      "responseReadyEpochMs": 1784416092199
+    },
+    "presentation": {
+      "tone": {
+        "sha256": "d9f6443b66f28391e781c15acb824632a8466e4bca8f4910bf42a6022b9b371c",
+        "byteLength": 719978
+      },
+      "fillCanvas": {
+        "sha256": "6a93a8133212f35338c6723e3b9c287dd4adf3d1638a93e97b53ce2f059c66d8",
+        "byteLength": 195410,
+        "width": 1000,
+        "height": 1000,
+        "paintDurationMs": 3.6999998092651367,
+        "validState": true
+      },
+      "outlineCanvas": {
+        "sha256": "91293d2551a699f6513a7b78de92217f47484778ab905d044538326684a3de84",
+        "byteLength": 195432,
+        "width": 1000,
+        "height": 1000,
+        "derivationDurationMs": 8.600000381469727,
+        "paintDurationMs": 13,
+        "validState": true
+      },
+      "exports": {
+        "png": {
+          "sha256": "6a93a8133212f35338c6723e3b9c287dd4adf3d1638a93e97b53ce2f059c66d8",
+          "byteLength": 195410,
+          "durationMs": 25.800000190734863
+        },
+        "ordinarySvg": {
+          "sha256": "33e675d48b02d83f948e3cee56298bc4db1902de4d025fdbbb3d873c26567af5",
+          "byteLength": 3740322,
+          "pathCount": 43,
+          "containsRasterImage": false,
+          "containsDiagnosticMarker": false,
+          "durationMs": 48.69999980926514
+        },
+        "outlinePlotterSvg": {
+          "sha256": "370b92f5e18812bf7845464daa9550a37f78a07b08d8097250aa95fc24bbeeee",
+          "byteLength": 3510789,
+          "pathCount": 44,
+          "containsRasterImage": false,
+          "containsDiagnosticMarker": false,
+          "durationMs": 53.799999713897705
+        }
+      },
+      "geometryAndExportParity": true,
+      "terminalProgressToDisplayMs": 984.6000002861019,
+      "uiRoundtrips": {
+        "status": "not-applicable",
+        "reason": "The isolated fine-budget evidence page has no Studio inspector; fixed Studio interaction probes belong to the promotion control pass."
+      }
+    },
+    "cancellation": {
+      "startedAfterNonTerminalProgress": true,
+      "coordinatorAcknowledged": true,
+      "outcome": "cancelled",
+      "roundtripMs": 0,
+      "lateReplacementObserved": false
+    },
+    "protocolBoundary": {
+      "invalidMessageCount": 0,
+      "allCoordinatorMessagesValid": true
+    }
+  },
+  "runtime": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/144.0.0.0 Safari/537.36",
+    "platform": "MacIntel"
+  },
+  "artifacts": [
+    {
+      "kind": "tone-authored.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/current-fine-baseline--s50000-p4000-g8000-r4000/issue-336-trial-flowers-opaque-fine--current-fine-baseline--s50000-p4000-g8000-r4000--tone-authored.png",
+      "byteLength": 158153
+    },
+    {
+      "kind": "fill-primary.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/current-fine-baseline--s50000-p4000-g8000-r4000/issue-336-trial-flowers-opaque-fine--current-fine-baseline--s50000-p4000-g8000-r4000--fill-primary.png",
+      "byteLength": 89609
+    },
+    {
+      "kind": "outline.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/current-fine-baseline--s50000-p4000-g8000-r4000/issue-336-trial-flowers-opaque-fine--current-fine-baseline--s50000-p4000-g8000-r4000--outline.png",
+      "byteLength": 89920
+    }
+  ]
+}

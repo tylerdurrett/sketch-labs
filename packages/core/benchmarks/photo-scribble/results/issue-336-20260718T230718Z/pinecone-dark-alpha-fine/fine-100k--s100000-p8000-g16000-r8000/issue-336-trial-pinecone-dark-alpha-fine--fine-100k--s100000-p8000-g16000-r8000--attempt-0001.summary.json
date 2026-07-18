@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T230718Z",
+  "phase": "screen",
+  "job": {
+    "ordinal": 4,
+    "scenarioId": "pinecone-dark-alpha-fine",
+    "fixtureId": "pinecone-dark-alpha-portrait",
+    "imageAssetId": "pinecone-4330aa0314f7",
+    "captureStem": "issue-336-trial-pinecone-dark-alpha-fine",
+    "candidateId": "fine-100k",
+    "tuple": {
+      "maxAcceptedSegments": 100000,
+      "maxPolylines": 8000,
+      "maxStagnations": 16000,
+      "maxRestarts": 8000
+    },
+    "tupleToken": "s100000-p8000-g16000-r8000"
+  },
+  "status": "completed",
+  "failure": null,
+  "startedAt": "2026-07-18T23:08:35.728Z",
+  "finishedAt": "2026-07-18T23:08:46.070Z",
+  "equivalence": {
+    "identityHashMatches": true,
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true
+  },
+  "observation": {
+    "runId": "issue-336-20260718T230718Z-0004-31935f94-cccd-4785-bacf-12ff25460131-candidate-358774b2-3a71-4144-834a-c32de10fc6e1",
+    "termination": "budget-exhausted",
+    "residualError": 0.14372594152961568,
+    "mainWallDurationMs": 3086
+  },
+  "artifacts": [
+    {
+      "kind": "tone-authored.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/pinecone-dark-alpha-fine/fine-100k--s100000-p8000-g16000-r8000/issue-336-trial-pinecone-dark-alpha-fine--fine-100k--s100000-p8000-g16000-r8000--tone-authored.png",
+      "byteLength": 53062
+    },
+    {
+      "kind": "fill-primary.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/pinecone-dark-alpha-fine/fine-100k--s100000-p8000-g16000-r8000/issue-336-trial-pinecone-dark-alpha-fine--fine-100k--s100000-p8000-g16000-r8000--fill-primary.png",
+      "byteLength": 56166
+    },
+    {
+      "kind": "outline.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/pinecone-dark-alpha-fine/fine-100k--s100000-p8000-g16000-r8000/issue-336-trial-pinecone-dark-alpha-fine--fine-100k--s100000-p8000-g16000-r8000--outline.png",
+      "byteLength": 56093
+    }
+  ],
+  "note": "Raw observations are preserved in the sibling .raw.json file; this summary makes no adoption decision."
+}

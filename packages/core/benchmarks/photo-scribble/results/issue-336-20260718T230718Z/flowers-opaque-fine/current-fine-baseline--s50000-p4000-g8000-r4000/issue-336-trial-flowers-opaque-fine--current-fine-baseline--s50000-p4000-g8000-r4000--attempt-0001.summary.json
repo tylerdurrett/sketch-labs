@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T230718Z",
+  "phase": "screen",
+  "job": {
+    "ordinal": 1,
+    "scenarioId": "flowers-opaque-fine",
+    "fixtureId": "flowers-opaque-portrait",
+    "imageAssetId": "img-0672-79d639daec62",
+    "captureStem": "issue-336-trial-flowers-opaque-fine",
+    "candidateId": "current-fine-baseline",
+    "tuple": {
+      "maxAcceptedSegments": 50000,
+      "maxPolylines": 4000,
+      "maxStagnations": 8000,
+      "maxRestarts": 4000
+    },
+    "tupleToken": "s50000-p4000-g8000-r4000"
+  },
+  "status": "completed",
+  "failure": null,
+  "startedAt": "2026-07-18T23:08:02.580Z",
+  "finishedAt": "2026-07-18T23:08:13.497Z",
+  "equivalence": {
+    "identityHashMatches": true,
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true
+  },
+  "observation": {
+    "runId": "issue-336-20260718T230718Z-0001-302efe60-e6b0-4104-8b39-583c197f7110-candidate-45b7eac8-8b0f-47a7-b00f-ba6cb35d6534",
+    "termination": "budget-exhausted",
+    "residualError": 0.48862074687981577,
+    "mainWallDurationMs": 2663.800000190735
+  },
+  "artifacts": [
+    {
+      "kind": "tone-authored.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/current-fine-baseline--s50000-p4000-g8000-r4000/issue-336-trial-flowers-opaque-fine--current-fine-baseline--s50000-p4000-g8000-r4000--tone-authored.png",
+      "byteLength": 158153
+    },
+    {
+      "kind": "fill-primary.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/current-fine-baseline--s50000-p4000-g8000-r4000/issue-336-trial-flowers-opaque-fine--current-fine-baseline--s50000-p4000-g8000-r4000--fill-primary.png",
+      "byteLength": 89609
+    },
+    {
+      "kind": "outline.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/current-fine-baseline--s50000-p4000-g8000-r4000/issue-336-trial-flowers-opaque-fine--current-fine-baseline--s50000-p4000-g8000-r4000--outline.png",
+      "byteLength": 89920
+    }
+  ],
+  "note": "Raw observations are preserved in the sibling .raw.json file; this summary makes no adoption decision."
+}

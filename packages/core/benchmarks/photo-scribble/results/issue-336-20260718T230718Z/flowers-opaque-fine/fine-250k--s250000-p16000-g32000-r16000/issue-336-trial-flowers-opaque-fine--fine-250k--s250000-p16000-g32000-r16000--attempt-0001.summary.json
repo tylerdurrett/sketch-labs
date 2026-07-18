@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260718T230718Z",
+  "phase": "screen",
+  "job": {
+    "ordinal": 5,
+    "scenarioId": "flowers-opaque-fine",
+    "fixtureId": "flowers-opaque-portrait",
+    "imageAssetId": "img-0672-79d639daec62",
+    "captureStem": "issue-336-trial-flowers-opaque-fine",
+    "candidateId": "fine-250k",
+    "tuple": {
+      "maxAcceptedSegments": 250000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    "tupleToken": "s250000-p16000-g32000-r16000"
+  },
+  "status": "completed",
+  "failure": null,
+  "startedAt": "2026-07-18T23:08:46.072Z",
+  "finishedAt": "2026-07-18T23:09:03.706Z",
+  "equivalence": {
+    "identityHashMatches": true,
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true
+  },
+  "observation": {
+    "runId": "issue-336-20260718T230718Z-0005-12b59f9b-8b0a-4581-9f63-9b034211e325-candidate-5e142292-7944-4fcb-95e0-522d159414bc",
+    "termination": "budget-exhausted",
+    "residualError": 0.4704982583732681,
+    "mainWallDurationMs": 8190.099999904633
+  },
+  "artifacts": [
+    {
+      "kind": "tone-authored.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/fine-250k--s250000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--fine-250k--s250000-p16000-g32000-r16000--tone-authored.png",
+      "byteLength": 158153
+    },
+    {
+      "kind": "fill-primary.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/fine-250k--s250000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--fine-250k--s250000-p16000-g32000-r16000--fill-primary.png",
+      "byteLength": 187452
+    },
+    {
+      "kind": "outline.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260718T230718Z/flowers-opaque-fine/fine-250k--s250000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--fine-250k--s250000-p16000-g32000-r16000--outline.png",
+      "byteLength": 187752
+    }
+  ],
+  "note": "Raw observations are preserved in the sibling .raw.json file; this summary makes no adoption decision."
+}
