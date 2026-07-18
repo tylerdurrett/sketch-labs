@@ -1992,6 +1992,70 @@ describe("SketchControls — preset save/reload wiring", () => {
     expect(lastProfile).toEqual(loadedProfile);
   });
 
+  it("reloads and re-saves the exact non-default Image Asset ID", async () => {
+    const defaultAsset = "portrait-default-000000000001";
+    const persistedAsset = "portrait-persisted-bbbbbbbbbbbb";
+    const imageSchema: ParamSchema = {
+      imageAsset: { kind: "image-asset", default: defaultAsset },
+    };
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "photo-persist",
+      name: "persisted-image",
+      seed: 321,
+      params: { imageAsset: persistedAsset },
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    listPresets.mockResolvedValue(["persisted-image"]);
+
+    const el = mount(
+      <SketchControls sketch={sketchWith("photo-persist", imageSchema)} />,
+    );
+    await flush();
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "persisted-image");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(
+      el.querySelector('[aria-label="imageAsset image asset identity"]')
+        ?.textContent,
+    ).toBe(persistedAsset);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.before.present.params.imageAsset).toBe(
+      defaultAsset,
+    );
+    expect(historyCapture.atomic[0]!.after.present.params.imageAsset).toBe(
+      persistedAsset,
+    );
+
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      "image-roundtrip",
+    );
+    clickButton(el, "Save");
+    await flush();
+
+    expect(savePreset).toHaveBeenCalledTimes(1);
+    expect(savePreset.mock.calls[0]![0]).toMatchObject({
+      version: 2,
+      sketch: "photo-persist",
+      name: "image-roundtrip",
+      seed: 321,
+      params: { imageAsset: persistedAsset },
+    });
+  });
+
   it("preserves a persisted color lock as inert data across reload and save", async () => {
     const mixedSchema: ParamSchema = {
       radius: numberSpec({ min: 0, max: 100, default: 10 }),

@@ -28,6 +28,7 @@ import type { ToneSource } from '../shadingFields'
 import type { Point } from '../types'
 
 const HEADLESS_FIXTURE_LOOKUP_KEY = 'headless-contract-fixture'
+const AUTHORED_FIXTURE_LOOKUP_KEY = 'authored-contract-fixture'
 const FRAME = { width: 48, height: 32 }
 const SOURCE_SAMPLE_POINTS = [
   [0, 0],
@@ -190,9 +191,26 @@ describe('Photo Scribble black-box contract', () => {
 
   it('reproduces Tone, Shading, termination, and geometry after a v2 Preset round-trip', () => {
     const sketch = createPhotoScribble(HEADLESS_FIXTURE_LOOKUP_KEY)
-    const params = fastParams({ toneContrast: 0.25, toneGamma: 0.75 })
+    const params = fastParams({
+      imageAsset: AUTHORED_FIXTURE_LOOKUP_KEY,
+      toneContrast: 0.25,
+      toneGamma: 0.75,
+    })
     const seed = 'persisted-photo'
-    const environment = environmentFor(FIXTURE_PIXELS)
+    const environment: SketchEnvironment = {
+      imageAssets: (id) => {
+        if (id === AUTHORED_FIXTURE_LOOKUP_KEY) return FIXTURE_PIXELS
+        if (id === HEADLESS_FIXTURE_LOOKUP_KEY) return CHANGED_PIXELS
+        return undefined
+      },
+    }
+
+    expect(environment.imageAssets(AUTHORED_FIXTURE_LOOKUP_KEY)).toBe(
+      FIXTURE_PIXELS,
+    )
+    expect(environment.imageAssets(HEADLESS_FIXTURE_LOOKUP_KEY)).toBe(
+      CHANGED_PIXELS,
+    )
 
     const before = sketch.generateScribbleArtwork!(
       params,
@@ -230,11 +248,18 @@ describe('Photo Scribble black-box contract', () => {
     )
     const afterInput = capturedInput(1)
     const afterResult = capturedResult(1)
+    const defaultSource = createPhotoScribbleSource(
+      fastParams(),
+      FRAME,
+      sketch.schema,
+      environment,
+    )
 
     expect(restored.params).toEqual(params)
-    expect(restored.params.imageAsset).toBe(HEADLESS_FIXTURE_LOOKUP_KEY)
+    expect(restored.params.imageAsset).toBe(AUTHORED_FIXTURE_LOOKUP_KEY)
     expect(restored.profile).toEqual(PROFILE)
     expect(sourceSnapshot(afterInput)).toEqual(sourceSnapshot(beforeInput))
+    expect(sourceSnapshot(afterInput)).not.toEqual(fieldSnapshot(defaultSource))
     expect(afterResult.termination).toBe(beforeResult.termination)
     expect(afterResult.residualError).toBe(beforeResult.residualError)
     expect(afterResult.polylines).toEqual(beforeResult.polylines)
