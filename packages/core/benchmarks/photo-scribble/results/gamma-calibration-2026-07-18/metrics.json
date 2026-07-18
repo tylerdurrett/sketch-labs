@@ -86,9 +86,9 @@
         "contrastMappingChanged": false,
         "levelsControlAdded": false
       },
-      "captureSelectors": {
-        "current-0.5-to-2": "#gamma-flowers-opaque-portrait-current-0.5-to-2",
-        "candidate-0.25-to-4": "#gamma-flowers-opaque-portrait-candidate-0.25-to-4"
+      "captureIds": {
+        "current-0.5-to-2": "gamma-flowers-opaque-portrait-current-0-5-to-2",
+        "candidate-0.25-to-4": "gamma-flowers-opaque-portrait-candidate-0-25-to-4"
       },
       "profiles": [
         {
@@ -2043,9 +2043,9 @@
         "contrastMappingChanged": false,
         "levelsControlAdded": false
       },
-      "captureSelectors": {
-        "current-0.5-to-2": "#gamma-pinecone-dark-alpha-portrait-current-0.5-to-2",
-        "candidate-0.25-to-4": "#gamma-pinecone-dark-alpha-portrait-candidate-0.25-to-4"
+      "captureIds": {
+        "current-0.5-to-2": "gamma-pinecone-dark-alpha-portrait-current-0-5-to-2",
+        "candidate-0.25-to-4": "gamma-pinecone-dark-alpha-portrait-candidate-0-25-to-4"
       },
       "profiles": [
         {

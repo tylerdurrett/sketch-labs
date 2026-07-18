@@ -1,7 +1,7 @@
 # Issue 336 source-only gamma calibration
 
-Date: 2026-07-18  
-Reviewer: Codex development agent (`/root/run_336_gamma`)  
+Date: 2026-07-18
+Reviewer: Codex development agent (`/root/run_336_gamma`)
 Browser: Chrome for Testing 144.0.7559.96, headless, `1440 × 1000`, device scale factor 1
 
 ## Decision

@@ -24,7 +24,12 @@ import { resolveSketchEnvironment } from "./imageAssetResolver";
 import { canonicalBrowserScribbleTargetHash } from "./photoScribbleEvidenceHash";
 import { rasterizeToneReference } from "./toneReference";
 
-type MappingId = "current-0.5-to-2" | "candidate-0.25-to-4";
+export type MappingId = "current-0.5-to-2" | "candidate-0.25-to-4";
+
+const CAPTURE_MAPPING_SLUGS: Readonly<Record<MappingId, string>> = {
+  "current-0.5-to-2": "current-0-5-to-2",
+  "candidate-0.25-to-4": "candidate-0-25-to-4",
+};
 
 interface Scenario {
   readonly scenarioId: string;
@@ -260,12 +265,19 @@ function summarizeToneReference(raster: ReturnType<typeof rasterizeToneReference
   };
 }
 
+export function photoScribbleGammaCaptureId(
+  fixtureId: string,
+  mapping: MappingId,
+): string {
+  return `gamma-${fixtureId}-${CAPTURE_MAPPING_SLUGS[mapping]}`;
+}
+
 function paintCapture(
   fixtureId: string,
   mapping: MappingId,
   raster: ReturnType<typeof rasterizeToneReference>,
 ): string {
-  const captureId = `gamma-${fixtureId}-${mapping}`;
+  const captureId = photoScribbleGammaCaptureId(fixtureId, mapping);
   const root = document.querySelector<HTMLElement>("#gamma-captures");
   if (root === null) throw new Error("Gamma evidence capture root is missing");
   const figure = document.createElement("figure");
@@ -285,7 +297,7 @@ function paintCapture(
   context.putImageData(imageData, 0, 0);
   figure.append(caption, canvas);
   root.append(figure);
-  return `#${captureId}`;
+  return captureId;
 }
 
 function profileId(mapping: MappingId, gamma: number, contrast: number, authored: boolean): string {
@@ -329,7 +341,7 @@ async function fixtureEvidence(scenario: Scenario, fixture: Fixture) {
   }
   const sortedOpaqueTone = Float64Array.from(opaqueTone).sort();
   const profiles = [];
-  const captureSelectors: Record<string, string> = {};
+  const captureIds: Record<string, string> = {};
   const probeGroup = protocol.measurement.toneSampling.scenarioProbes.find(
     (group) => group.scenarioId === scenario.scenarioId,
   );
@@ -383,7 +395,7 @@ async function fixtureEvidence(scenario: Scenario, fixture: Fixture) {
           TONE_REFERENCE_SIZE,
         );
         toneReference = summarizeToneReference(raster);
-        captureSelectors[mapping] = paintCapture(fixture.fixtureId, mapping, raster);
+        captureIds[mapping] = paintCapture(fixture.fixtureId, mapping, raster);
       }
       profiles.push({
         profileId: id,
@@ -518,7 +530,7 @@ async function fixtureEvidence(scenario: Scenario, fixture: Fixture) {
       }),
       levelsControlAdded: false,
     },
-    captureSelectors,
+    captureIds,
     profiles,
   };
 }
