@@ -443,6 +443,24 @@ describe('Scribble lift-budget accounting', () => {
     expect(result.residualError).toBeGreaterThan(0)
   })
 
+  it('performs no failed attempt when the stagnation cap is zero', () => {
+    const result = execute({
+      ...GENEROUS_LIMITS,
+      maxStagnations: 0,
+    })
+
+    expect(result.stopCause).toBe('budget-reached')
+    expect(result.bindingGuard).toBe('stagnation-limit')
+    expect(result.polylines).toEqual([])
+    expect(result.counters).toEqual({
+      acceptedSegments: 0,
+      emittedPolylines: 0,
+      stagnations: 0,
+      restarts: 0,
+    })
+    expect(result.residualError).toBeGreaterThan(0)
+  })
+
   it('retains exactly one non-empty polyline at the tiny polyline cap', () => {
     const result = execute({
       ...GENEROUS_LIMITS,

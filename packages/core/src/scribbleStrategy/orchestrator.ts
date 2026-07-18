@@ -234,6 +234,9 @@ export function runScribbleOrchestrator({
   if (limits.maxPolylines === 0) {
     return finish('budget-reached', 'polyline-limit')
   }
+  if (limits.maxStagnations === 0) {
+    return finish('budget-reached', 'stagnation-limit')
+  }
 
   let restartCell = chooseRestartCell(model, rng, rejectedStarts)
   let current = restartCell?.point
