@@ -1,0 +1,4518 @@
+{
+  "schemaVersion": 1,
+  "issue": 336,
+  "scope": "source-only-gamma-calibration",
+  "generatedAt": "2026-07-18T23:12:06.933Z",
+  "mappingComparison": {
+    "current": {
+      "exponentRange": [
+        0.5,
+        2
+      ],
+      "normalizedControlRange": [
+        0,
+        1
+      ],
+      "identity": 0.5
+    },
+    "candidate": {
+      "exponentRange": [
+        0.25,
+        4
+      ],
+      "normalizedControlRange": [
+        0,
+        1
+      ],
+      "identity": 0.5
+    },
+    "contrastRangeUnchanged": [
+      0.15,
+      1.85
+    ],
+    "authoredOrder": "gamma-before-contrast",
+    "levelsControl": "not-added"
+  },
+  "quantileRule": "nearest lower rank floor(q * (n - 1)) over every decoded sample in the named population",
+  "toneReference": {
+    "renderer": "apps/studio/src/toneReference.ts rasterizeToneReference",
+    "width": 512,
+    "height": 512,
+    "pixelCenterSampling": true
+  },
+  "fixtures": [
+    {
+      "fixtureId": "flowers-opaque-portrait",
+      "scenarioId": "flowers-opaque-control",
+      "assetId": "img-0672-79d639daec62",
+      "categories": [
+        "ordinary-opaque",
+        "mismatched-aspect"
+      ],
+      "dimensions": {
+        "width": 1536,
+        "height": 2048
+      },
+      "adapterDistribution": {
+        "decodedPixelCount": 3145728,
+        "fullyOpaque": 3145728,
+        "partialPermission": 0,
+        "zeroPermission": 0,
+        "rawOpaqueTone": {
+          "sampleCount": 3145728,
+          "quantiles": {
+            "0": 0.013368077485997554,
+            "1": 0.9992021489710435,
+            "0.01": 0.30067602659293347,
+            "0.05": 0.40270599477153324,
+            "0.1": 0.4718956585543842,
+            "0.25": 0.611214815876369,
+            "0.5": 0.8373967369367049,
+            "0.75": 0.942992503016495,
+            "0.9": 0.9730923815806456,
+            "0.95": 0.9815889006092062,
+            "0.99": 0.9909151844056786
+          }
+        }
+      },
+      "invariants": {
+        "normalizedControlRangePreserved": true,
+        "exactCenteredIdentity": true,
+        "centeredTargetHash": "87b3db52a7bed459131b18828772458da1bd5e02b3c961a3c731978107bbe24b",
+        "exactZeroToneAndPermission": true,
+        "gammaSweepMonotonicAtNonzeroProbes": true,
+        "contrastSweepMonotonicAtNonzeroProbes": true,
+        "gammaBeforeContrast": true,
+        "contrastMappingChanged": false,
+        "levelsControlAdded": false
+      },
+      "captureSelectors": {
+        "current-0.5-to-2": "#gamma-flowers-opaque-portrait-current-0.5-to-2",
+        "candidate-0.25-to-4": "#gamma-flowers-opaque-portrait-candidate-0.25-to-4"
+      },
+      "profiles": [
+        {
+          "profileId": "current-0.5-to-2--gamma-0--contrast-0",
+          "mapping": "current-0.5-to-2",
+          "exponent": 0.5,
+          "toneGamma": 0,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "39eea623611e9f93e795fe779df0dd61bb4e752b4e8fa463651f5400e0996985",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.5000555912392384,
+              "permission": 1,
+              "effectiveTone": 0.5000555912392384
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.5549029630790263,
+              "permission": 1,
+              "effectiveTone": 0.5549029630790263
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5553692284502171,
+            "quantiles": {
+              "0": 0.44234306038261256,
+              "1": 0.574940149232447,
+              "0.01": 0.5072509002889392,
+              "0.05": 0.5201886804318638,
+              "0.1": 0.5280419929808893,
+              "0.25": 0.5422703430421276,
+              "0.5": 0.5622640760762839,
+              "0.75": 0.5706617016166952,
+              "0.9": 0.5729681674738338,
+              "0.95": 0.5736127526954101,
+              "0.99": 0.5743170842506904
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5553692284501663,
+            "quantiles": {
+              "0": 0.44234306038261256,
+              "1": 0.574940149232447,
+              "0.01": 0.5072509002889392,
+              "0.05": 0.5201886804318638,
+              "0.1": 0.5280419929808893,
+              "0.25": 0.5422703430421276,
+              "0.5": 0.5622640760762839,
+              "0.75": 0.5706617016166952,
+              "0.9": 0.5729681674738338,
+              "0.95": 0.5736127526954101,
+              "0.99": 0.5743170842506904
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-0--contrast-0.5",
+          "mapping": "current-0.5-to-2",
+          "exponent": 0.5,
+          "toneGamma": 0,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "36d4a0da511fc3d21f1a764ae710583aa4a3889276d94b0a8b00657de06cc1b4",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.5003706082615894,
+              "permission": 1,
+              "effectiveTone": 0.5003706082615894
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.8660197538601752,
+              "permission": 1,
+              "effectiveTone": 0.8660197538601752
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.8691281896673614,
+            "quantiles": {
+              "0": 0.11562040255075033,
+              "1": 0.99960099488298,
+              "0.01": 0.548339335259594,
+              "0.05": 0.6345912028790922,
+              "0.1": 0.6869466198725955,
+              "0.25": 0.7818022869475179,
+              "0.5": 0.9150938405085595,
+              "0.75": 0.9710780107779678,
+              "0.9": 0.9864544498255586,
+              "0.95": 0.9907516846360678,
+              "0.99": 0.9954472283379359
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.869128189667872,
+            "quantiles": {
+              "0": 0.11562040255075033,
+              "1": 0.99960099488298,
+              "0.01": 0.548339335259594,
+              "0.05": 0.6345912028790922,
+              "0.1": 0.6869466198725955,
+              "0.25": 0.7818022869475179,
+              "0.5": 0.9150938405085595,
+              "0.75": 0.9710780107779678,
+              "0.9": 0.9864544498255586,
+              "0.95": 0.9907516846360678,
+              "0.99": 0.9954472283379359
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-0--contrast-1",
+          "mapping": "current-0.5-to-2",
+          "exponent": 0.5,
+          "toneGamma": 0,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "5bf58c1a0952b71cec759a9f231164c1765026767255cbe85327b59986e2fada",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.5006856252839404,
+              "permission": 1,
+              "effectiveTone": 0.5006856252839404
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 1,
+              "permission": 1,
+              "effectiveTone": 1
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 182,
+            "paperWhiteFraction": 0.000057856241861979164,
+            "blackPixels": 2419708,
+            "blackFraction": 0.7692044576009115,
+            "mean": 0.9628487137849566,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0.5894277702302488,
+              "0.05": 0.7489937253263206,
+              "0.1": 0.8458512467643018,
+              "0.25": 1,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 182,
+            "paperWhiteFraction": 0.000057856241861979164,
+            "blackPixels": 2419708,
+            "blackFraction": 0.7692044576009115,
+            "mean": 0.9628487137848927,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0.5894277702302488,
+              "0.05": 0.7489937253263206,
+              "0.1": 0.8458512467643018,
+              "0.25": 1,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-0.5--contrast-0",
+          "mapping": "current-0.5-to-2",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "882ae5df499c7c7bb63156f0c68ee4d9fc01f3d8b4ca3eaf5e5f8a24c548e863",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.46255561184181093,
+              "permission": 1,
+              "effectiveTone": 0.46255561184181093
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.5374985321114057,
+              "permission": 1,
+              "effectiveTone": 0.5374985321114057
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5404799678018727,
+            "quantiles": {
+              "0": 0.4270052116228996,
+              "1": 0.5748803223456566,
+              "0.01": 0.47010140398894,
+              "0.05": 0.48540589921572996,
+              "0.1": 0.49578434878315764,
+              "0.25": 0.5166822223814553,
+              "0.5": 0.5506095105405058,
+              "0.75": 0.5664488754524742,
+              "0.9": 0.5709638572370969,
+              "0.95": 0.5722383350913809,
+              "0.99": 0.5736372776608518
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5404799678018625,
+            "quantiles": {
+              "0": 0.4270052116228996,
+              "1": 0.5748803223456566,
+              "0.01": 0.47010140398894,
+              "0.05": 0.48540589921572996,
+              "0.1": 0.49578434878315764,
+              "0.25": 0.5166822223814553,
+              "0.5": 0.5506095105405058,
+              "0.75": 0.5664488754524742,
+              "0.9": 0.5709638572370969,
+              "0.95": 0.5722383350913809,
+              "0.99": 0.5736372776608518
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-0.5--contrast-0.5",
+          "mapping": "current-0.5-to-2",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "87b3db52a7bed459131b18828772458da1bd5e02b3c961a3c731978107bbe24b",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.25037074561207295,
+              "permission": 1,
+              "effectiveTone": 0.25037074561207295
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.7499902140760384,
+              "permission": 1,
+              "effectiveTone": 0.7499902140760384
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.7698664520118131,
+            "quantiles": {
+              "0": 0.013368077485997554,
+              "1": 0.9992021489710435,
+              "0.01": 0.30067602659293347,
+              "0.05": 0.40270599477153324,
+              "0.1": 0.4718956585543842,
+              "0.25": 0.611214815876369,
+              "0.5": 0.8373967369367049,
+              "0.75": 0.942992503016495,
+              "0.9": 0.9730923815806456,
+              "0.95": 0.9815889006092062,
+              "0.99": 0.9909151844056786
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.7698664520121717,
+            "quantiles": {
+              "0": 0.013368077485997554,
+              "1": 0.9992021489710435,
+              "0.01": 0.30067602659293347,
+              "0.05": 0.40270599477153324,
+              "0.1": 0.4718956585543842,
+              "0.25": 0.611214815876369,
+              "0.5": 0.8373967369367049,
+              "0.75": 0.942992503016495,
+              "0.9": 0.9730923815806456,
+              "0.95": 0.9815889006092062,
+              "0.99": 0.9909151844056786
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-0.5--contrast-1",
+          "mapping": "current-0.5-to-2",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "3bbab4b41a781832398d719d5f0bb08e54d4a564331b03d81e136a743256ed93",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.038185879382334975,
+              "permission": 1,
+              "effectiveTone": 0.038185879382334975
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.9624818960406709,
+              "permission": 1,
+              "effectiveTone": 0.9624818960406709
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 5061,
+            "paperWhiteFraction": 0.0016088485717773438,
+            "blackPixels": 1879725,
+            "blackFraction": 0.5975484848022461,
+            "mean": 0.8436202664785872,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0.13125064919692692,
+              "0.05": 0.3200060903273365,
+              "0.1": 0.44800696832561077,
+              "0.25": 0.7057474093712828,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 5061,
+            "paperWhiteFraction": 0.0016088485717773438,
+            "blackPixels": 1879725,
+            "blackFraction": 0.5975484848022461,
+            "mean": 0.8436202664784065,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0.13125064919692692,
+              "0.05": 0.3200060903273365,
+              "0.1": 0.44800696832561077,
+              "0.25": 0.7057474093712828,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-1--contrast-0",
+          "mapping": "current-0.5-to-2",
+          "exponent": 2,
+          "toneGamma": 1,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "237279a4f70cb695df5f113717b11ec70cbeabe213cddbf30663b2324a9f8aef",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.4344028265387518,
+              "permission": 1,
+              "effectiveTone": 0.4344028265387518
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.5093727981814733,
+              "permission": 1,
+              "effectiveTone": 0.5093727981814733
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5196638328391617,
+            "quantiles": {
+              "0": 0.42502680582435076,
+              "1": 0.5747607401762527,
+              "0.01": 0.43856091094515715,
+              "0.05": 0.44932581773373953,
+              "0.1": 0.4584028268843714,
+              "0.25": 0.48103753267201754,
+              "0.5": 0.5301849942548361,
+              "0.75": 0.5583852291117971,
+              "0.9": 0.5670363174635439,
+              "0.95": 0.5695275154698785,
+              "0.99": 0.572286935402861
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5196638328394118,
+            "quantiles": {
+              "0": 0.42502680582435076,
+              "1": 0.5747607401762527,
+              "0.01": 0.43856091094515715,
+              "0.05": 0.44932581773373953,
+              "0.1": 0.4584028268843714,
+              "0.25": 0.48103753267201754,
+              "0.5": 0.5301849942548361,
+              "0.75": 0.5583852291117971,
+              "0.9": 0.5670363174635439,
+              "0.95": 0.5695275154698785,
+              "0.99": 0.572286935402861
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-1--contrast-0.5",
+          "mapping": "current-0.5-to-2",
+          "exponent": 2,
+          "toneGamma": 1,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "f9f5c728aa9607776e01f43b750fc638ac11c09d933f62f1f80ed3999bb721ee",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.06268551025834534,
+              "permission": 1,
+              "effectiveTone": 0.06268551025834534
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.5624853212098219,
+              "permission": 1,
+              "effectiveTone": 0.5624853212098219
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.6310922189282152,
+            "quantiles": {
+              "0": 0.00017870549567163468,
+              "1": 0.9984049345083514,
+              "0.01": 0.09040607296771443,
+              "0.05": 0.16217211822493016,
+              "0.1": 0.22268551256247596,
+              "0.25": 0.3735835511467837,
+              "0.5": 0.701233295032241,
+              "0.75": 0.8892348607453142,
+              "0.9": 0.9469087830902928,
+              "0.95": 0.9635167697991901,
+              "0.99": 0.98191290268574
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.6310922189284961,
+            "quantiles": {
+              "0": 0.00017870549567163468,
+              "1": 0.9984049345083514,
+              "0.01": 0.09040607296771443,
+              "0.05": 0.16217211822493016,
+              "0.1": 0.22268551256247596,
+              "0.25": 0.3735835511467837,
+              "0.5": 0.701233295032241,
+              "0.75": 0.8892348607453142,
+              "0.9": 0.9469087830902928,
+              "0.95": 0.9635167697991901,
+              "0.99": 0.98191290268574
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-1--contrast-1",
+          "mapping": "current-0.5-to-2",
+          "exponent": 2,
+          "toneGamma": 1,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "2a2064cad6cfb5b70c86c89b1e786b07cf775f7525a96a7a6b55e020dc14eb29",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0,
+              "permission": 1,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.6155978442381704,
+              "permission": 1,
+              "effectiveTone": 0.6155978442381704
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 335535,
+            "paperWhiteFraction": 0.10666370391845703,
+            "blackPixels": 1305032,
+            "blackFraction": 0.41485850016276044,
+            "mean": 0.6589701477235388,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0.2661295696215499,
+              "0.5": 0.8722815958096457,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 335535,
+            "paperWhiteFraction": 0.10666370391845703,
+            "blackPixels": 1305032,
+            "blackFraction": 0.41485850016276044,
+            "mean": 0.6589701477236577,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0.2661295696215499,
+              "0.5": 0.8722815958096457,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--authored",
+          "mapping": "current-0.5-to-2",
+          "exponent": 2,
+          "toneGamma": 1,
+          "toneContrast": 0.96,
+          "authored": true,
+          "targetHash": "070fc192e94b4d4abbd5e09ea506aeea0702fe1b414699841795558ebf534f04",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0,
+              "permission": 1,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.6113488423959026,
+              "permission": 1,
+              "effectiveTone": 0.6113488423959026
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 305107,
+            "paperWhiteFraction": 0.09699090321858723,
+            "blackPixels": 1263033,
+            "blackFraction": 0.4015073776245117,
+            "mean": 0.6587561586465515,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0.005825583386332156,
+              "0.25": 0.2747258881435686,
+              "0.5": 0.8585977317474534,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 305107,
+            "paperWhiteFraction": 0.09699090321858723,
+            "blackPixels": 1263033,
+            "blackFraction": 0.4015073776245117,
+            "mean": 0.6587561586466347,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0.005825583386332156,
+              "0.25": 0.2747258881435686,
+              "0.5": 0.8585977317474534,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": {
+            "width": 512,
+            "height": 512,
+            "sampleCount": 262144,
+            "paperWhitePixels": 84541,
+            "paperWhiteFraction": 0.3224983215332031,
+            "blackPixels": 78762,
+            "blackFraction": 0.30045318603515625,
+            "mean": 0.4938691083122624,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0.4666666666666667,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          }
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0--contrast-0",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 0.25,
+          "toneGamma": 0,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "13b68059a1c18dae4e87fda4161ac284ddd6cf1533d6aba0c8e70a13bf8ba39d",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.5311053188388111,
+              "permission": 1,
+              "effectiveTone": 0.5311053188388111
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.5645902735216675,
+              "permission": 1,
+              "effectiveTone": 0.5645902735216675
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5644752127792639,
+            "quantiles": {
+              "0": 0.47600450036410397,
+              "1": 0.5749700716305325,
+              "0.01": 0.5360749073523848,
+              "0.05": 0.5444918493654675,
+              "0.1": 0.549323364445841,
+              "0.25": 0.5576293762946926,
+              "0.5": 0.5684908060171194,
+              "0.75": 0.57281493578967,
+              "0.9": 0.5739806199513047,
+              "0.95": 0.5743047651761709,
+              "0.99": 0.57465815259318
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5644752127792637,
+            "quantiles": {
+              "0": 0.47600450036410397,
+              "1": 0.5749700716305325,
+              "0.01": 0.5360749073523848,
+              "0.05": 0.5444918493654675,
+              "0.1": 0.549323364445841,
+              "0.25": 0.5576293762946926,
+              "0.5": 0.5684908060171194,
+              "0.75": 0.57281493578967,
+              "0.9": 0.5739806199513047,
+              "0.95": 0.5743047651761709,
+              "0.99": 0.57465815259318
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0--contrast-0.5",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 0.25,
+          "toneGamma": 0,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "d278dc430b2b66011e5d78d6a549e80866040bc2ba6ea9af3e8332dc63b0accb",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.7073687922587406,
+              "permission": 1,
+              "effectiveTone": 0.7073687922587406
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.9306018234777832,
+              "permission": 1,
+              "effectiveTone": 0.9306018234777832
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.929834751861054,
+            "quantiles": {
+              "0": 0.3400300024273598,
+              "1": 0.9998004775368834,
+              "0.01": 0.740499382349232,
+              "0.05": 0.7966123291031166,
+              "0.1": 0.8288224296389399,
+              "0.25": 0.884195841964617,
+              "0.5": 0.9566053734474627,
+              "0.75": 0.9854329052644669,
+              "0.9": 0.9932041330086976,
+              "0.95": 0.9953651011744724,
+              "0.99": 0.9977210172878668
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.9298347518608238,
+            "quantiles": {
+              "0": 0.3400300024273598,
+              "1": 0.9998004775368834,
+              "0.01": 0.740499382349232,
+              "0.05": 0.7966123291031166,
+              "0.1": 0.8288224296389399,
+              "0.25": 0.884195841964617,
+              "0.5": 0.9566053734474627,
+              "0.75": 0.9854329052644669,
+              "0.9": 0.9932041330086976,
+              "0.95": 0.9953651011744724,
+              "0.99": 0.9977210172878668
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0--contrast-1",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 0.25,
+          "toneGamma": 0,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "d0e6bf1127f8f0c0640e41ec3c51ef82bd0f5038b036ed155cdb709b16618237",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.8836322656786701,
+              "permission": 1,
+              "effectiveTone": 0.8836322656786701
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 1,
+              "permission": 1,
+              "effectiveTone": 1
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 3065034,
+            "blackFraction": 0.9743480682373047,
+            "mean": 0.9985274577956682,
+            "quantiles": {
+              "0": 0.20405550449061566,
+              "1": 1,
+              "0.01": 0.9449238573460791,
+              "0.05": 1,
+              "0.1": 1,
+              "0.25": 1,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 3065034,
+            "blackFraction": 0.9743480682373047,
+            "mean": 0.9985274577956679,
+            "quantiles": {
+              "0": 0.20405550449061566,
+              "1": 1,
+              "0.01": 0.9449238573460791,
+              "0.05": 1,
+              "0.1": 1,
+              "0.25": 1,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0.5--contrast-0",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "882ae5df499c7c7bb63156f0c68ee4d9fc01f3d8b4ca3eaf5e5f8a24c548e863",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.46255561184181093,
+              "permission": 1,
+              "effectiveTone": 0.46255561184181093
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.5374985321114057,
+              "permission": 1,
+              "effectiveTone": 0.5374985321114057
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5404799678018727,
+            "quantiles": {
+              "0": 0.4270052116228996,
+              "1": 0.5748803223456566,
+              "0.01": 0.47010140398894,
+              "0.05": 0.48540589921572996,
+              "0.1": 0.49578434878315764,
+              "0.25": 0.5166822223814553,
+              "0.5": 0.5506095105405058,
+              "0.75": 0.5664488754524742,
+              "0.9": 0.5709638572370969,
+              "0.95": 0.5722383350913809,
+              "0.99": 0.5736372776608518
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5404799678018625,
+            "quantiles": {
+              "0": 0.4270052116228996,
+              "1": 0.5748803223456566,
+              "0.01": 0.47010140398894,
+              "0.05": 0.48540589921572996,
+              "0.1": 0.49578434878315764,
+              "0.25": 0.5166822223814553,
+              "0.5": 0.5506095105405058,
+              "0.75": 0.5664488754524742,
+              "0.9": 0.5709638572370969,
+              "0.95": 0.5722383350913809,
+              "0.99": 0.5736372776608518
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0.5--contrast-0.5",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "87b3db52a7bed459131b18828772458da1bd5e02b3c961a3c731978107bbe24b",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.25037074561207295,
+              "permission": 1,
+              "effectiveTone": 0.25037074561207295
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.7499902140760384,
+              "permission": 1,
+              "effectiveTone": 0.7499902140760384
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.7698664520118131,
+            "quantiles": {
+              "0": 0.013368077485997554,
+              "1": 0.9992021489710435,
+              "0.01": 0.30067602659293347,
+              "0.05": 0.40270599477153324,
+              "0.1": 0.4718956585543842,
+              "0.25": 0.611214815876369,
+              "0.5": 0.8373967369367049,
+              "0.75": 0.942992503016495,
+              "0.9": 0.9730923815806456,
+              "0.95": 0.9815889006092062,
+              "0.99": 0.9909151844056786
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.7698664520121717,
+            "quantiles": {
+              "0": 0.013368077485997554,
+              "1": 0.9992021489710435,
+              "0.01": 0.30067602659293347,
+              "0.05": 0.40270599477153324,
+              "0.1": 0.4718956585543842,
+              "0.25": 0.611214815876369,
+              "0.5": 0.8373967369367049,
+              "0.75": 0.942992503016495,
+              "0.9": 0.9730923815806456,
+              "0.95": 0.9815889006092062,
+              "0.99": 0.9909151844056786
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0.5--contrast-1",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "3bbab4b41a781832398d719d5f0bb08e54d4a564331b03d81e136a743256ed93",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.038185879382334975,
+              "permission": 1,
+              "effectiveTone": 0.038185879382334975
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.9624818960406709,
+              "permission": 1,
+              "effectiveTone": 0.9624818960406709
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 5061,
+            "paperWhiteFraction": 0.0016088485717773438,
+            "blackPixels": 1879725,
+            "blackFraction": 0.5975484848022461,
+            "mean": 0.8436202664785872,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0.13125064919692692,
+              "0.05": 0.3200060903273365,
+              "0.1": 0.44800696832561077,
+              "0.25": 0.7057474093712828,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 5061,
+            "paperWhiteFraction": 0.0016088485717773438,
+            "blackPixels": 1879725,
+            "blackFraction": 0.5975484848022461,
+            "mean": 0.8436202664784065,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0.13125064919692692,
+              "0.05": 0.3200060903273365,
+              "0.1": 0.44800696832561077,
+              "0.25": 0.7057474093712828,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-1--contrast-0",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 4,
+          "toneGamma": 1,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "1a8a41c3c989416a824bbe57c50e9f360424ec6f3b47efc2113df258b92d8f73",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.4255894209794524,
+              "permission": 1,
+              "effectiveTone": 0.4255894209794524
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.4724584604864775,
+              "permission": 1,
+              "effectiveTone": 0.4724584604864775
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.496162424463335,
+            "quantiles": {
+              "0": 0.42500000479034816,
+              "1": 0.5745218619875938,
+              "0.01": 0.4262259887044165,
+              "0.05": 0.4289449693894341,
+              "0.1": 0.4324383256257819,
+              "0.25": 0.44593470045311623,
+              "0.5": 0.4987592201092661,
+              "0.75": 0.5436107956347107,
+              "0.9": 0.5594954365240309,
+              "0.95": 0.5642546848526399,
+              "0.99": 0.5696229422691104
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.49616242446325004,
+            "quantiles": {
+              "0": 0.42500000479034816,
+              "1": 0.5745218619875938,
+              "0.01": 0.4262259887044165,
+              "0.05": 0.4289449693894341,
+              "0.1": 0.4324383256257819,
+              "0.25": 0.44593470045311623,
+              "0.5": 0.4987592201092661,
+              "0.75": 0.5436107956347107,
+              "0.9": 0.5594954365240309,
+              "0.95": 0.5642546848526399,
+              "0.99": 0.5696229422691104
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-1--contrast-0.5",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 4,
+          "toneGamma": 1,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "db520d12cad788ec428af72fd2881f7620292ad06487aac578b1d377bcbb5fc6",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0.00392947319634912,
+              "permission": 1,
+              "effectiveTone": 0.00392947319634912
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.3163897365765165,
+              "permission": 1,
+              "effectiveTone": 0.3163897365765165
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.47441616308826656,
+            "quantiles": {
+              "0": 3.193565418324464e-8,
+              "1": 0.9968124132506256,
+              "0.01": 0.008173258029443705,
+              "0.05": 0.026299795929560724,
+              "0.1": 0.04958883750521264,
+              "0.25": 0.13956466968744158,
+              "0.5": 0.4917281340617739,
+              "0.75": 0.7907386375647384,
+              "0.9": 0.8966362434935391,
+              "0.95": 0.9283645656842656,
+              "0.99": 0.9641529484607356
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.4744161630884372,
+            "quantiles": {
+              "0": 3.193565418324464e-8,
+              "1": 0.9968124132506256,
+              "0.01": 0.008173258029443705,
+              "0.05": 0.026299795929560724,
+              "0.1": 0.04958883750521264,
+              "0.25": 0.13956466968744158,
+              "0.5": 0.4917281340617739,
+              "0.75": 0.7907386375647384,
+              "0.9": 0.8966362434935391,
+              "0.95": 0.9283645656842656,
+              "0.99": 0.9641529484607356
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-1--contrast-1",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 4,
+          "toneGamma": 1,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "ffa4d6eccb3d0e3f4b4379bdb64db76dde723d947d701de2874f1ef1baa4e977",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0,
+              "permission": 1,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.16032101266655552,
+              "permission": 1,
+              "effectiveTone": 0.16032101266655552
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 1042939,
+            "paperWhiteFraction": 0.33154137929280597,
+            "blackPixels": 844042,
+            "blackFraction": 0.268313725789388,
+            "mean": 0.4836162036930128,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0.4846970480142817,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 1042939,
+            "paperWhiteFraction": 0.33154137929280597,
+            "blackPixels": 844042,
+            "blackFraction": 0.268313725789388,
+            "mean": 0.4836162036930837,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0.4846970480142817,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--authored",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 4,
+          "toneGamma": 1,
+          "toneContrast": 0.96,
+          "authored": true,
+          "targetHash": "2e4a618a29d44555b3fdebffab693c1ad60571cf94565dd733787234fbd90bff",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "tone": 0,
+              "permission": 1,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "flowers-dark",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "tone": 0.17280651057935242,
+              "permission": 1,
+              "effectiveTone": 0.17280651057935242
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 1019572,
+            "paperWhiteFraction": 0.3241132100423177,
+            "blackPixels": 815483,
+            "blackFraction": 0.25923506418863934,
+            "mean": 0.4830420069551693,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0.4852595348980811,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 3145728,
+            "paperWhitePixels": 1019572,
+            "paperWhiteFraction": 0.3241132100423177,
+            "blackPixels": 815483,
+            "blackFraction": 0.25923506418863934,
+            "mean": 0.48304200695527083,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0.4852595348980811,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": {
+            "width": 512,
+            "height": 512,
+            "sampleCount": 262144,
+            "paperWhitePixels": 129467,
+            "paperWhiteFraction": 0.4938774108886719,
+            "blackPixels": 50645,
+            "blackFraction": 0.19319534301757812,
+            "mean": 0.36110573562920323,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0.023529411764705882,
+              "0.75": 0.8392156862745098,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "fixtureId": "pinecone-dark-alpha-portrait",
+      "scenarioId": "pinecone-dark-alpha-control",
+      "assetId": "pinecone-4330aa0314f7",
+      "categories": [
+        "flat-or-dark",
+        "mismatched-aspect",
+        "partial-and-fully-transparent"
+      ],
+      "dimensions": {
+        "width": 512,
+        "height": 768
+      },
+      "adapterDistribution": {
+        "decodedPixelCount": 393216,
+        "fullyOpaque": 113499,
+        "partialPermission": 2860,
+        "zeroPermission": 276857,
+        "rawOpaqueTone": {
+          "sampleCount": 113499,
+          "quantiles": {
+            "0": 0.1374905866655417,
+            "1": 1,
+            "0.01": 0.3746854624621905,
+            "0.05": 0.5121823290986416,
+            "0.1": 0.5975509614385577,
+            "0.25": 0.7409455313565945,
+            "0.5": 0.915484282596583,
+            "0.75": 0.9858339948138979,
+            "0.9": 0.9974619694524652,
+            "0.95": 0.9989850664724094,
+            "0.99": 1
+          }
+        }
+      },
+      "invariants": {
+        "normalizedControlRangePreserved": true,
+        "exactCenteredIdentity": true,
+        "centeredTargetHash": "61adf9a26fb4cd376a9a6f745226d206f94779537e2f4df9f770bb3484bb496c",
+        "exactZeroToneAndPermission": true,
+        "gammaSweepMonotonicAtNonzeroProbes": true,
+        "contrastSweepMonotonicAtNonzeroProbes": true,
+        "gammaBeforeContrast": true,
+        "contrastMappingChanged": false,
+        "levelsControlAdded": false
+      },
+      "captureSelectors": {
+        "current-0.5-to-2": "#gamma-pinecone-dark-alpha-portrait-current-0.5-to-2",
+        "candidate-0.25-to-4": "#gamma-pinecone-dark-alpha-portrait-candidate-0.25-to-4"
+      },
+      "profiles": [
+        {
+          "profileId": "current-0.5-to-2--gamma-0--contrast-0",
+          "mapping": "current-0.5-to-2",
+          "exponent": 0.5,
+          "toneGamma": 0,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "4ae7072089368358befecc1cf39a5617e43784f1e41ff49480e39e3615d4a2de",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.5001495204520796,
+              "permission": 1,
+              "effectiveTone": 0.5001495204520796
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.5549040190613863,
+              "permission": 1,
+              "effectiveTone": 0.5549040190613863
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 0.575,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.5643931331633713,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.03098628966387136
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.562325123269454,
+            "quantiles": {
+              "0": 0.480619584679991,
+              "1": 0.575,
+              "0.01": 0.5168173344494343,
+              "0.05": 0.5323503721685185,
+              "0.1": 0.5409521307797642,
+              "0.25": 0.5541172895298045,
+              "0.5": 0.5685214142851969,
+              "0.75": 0.5739337600522887,
+              "0.9": 0.5748095267754373,
+              "0.95": 0.5749238606614344,
+              "0.99": 0.575
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.16433116843460294,
+            "quantiles": {
+              "0": 0,
+              "1": 0.575,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.5448259753893036,
+              "0.9": 0.5724947665310122,
+              "0.95": 0.5745389295454849,
+              "0.99": 0.5749561081294292
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-0--contrast-0.5",
+          "mapping": "current-0.5-to-2",
+          "exponent": 0.5,
+          "toneGamma": 0,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "2f6bd38a41b25f2b80fca7ae00c038c7925bf0c263e7887baf61994f036238a4",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.5009968030138641,
+              "permission": 1,
+              "effectiveTone": 0.5009968030138641
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.8660267937425757,
+              "permission": 1,
+              "effectiveTone": 0.8660267937425757
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.9292875544224749,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.051019708870253526
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 1442,
+            "blackFraction": 0.012704957752931744,
+            "mean": 0.9155008217967374,
+            "quantiles": {
+              "0": 0.3707972311999399,
+              "1": 1,
+              "0.01": 0.612115562996229,
+              "0.05": 0.7156691477901235,
+              "0.1": 0.7730142051984282,
+              "0.25": 0.860781930198697,
+              "0.5": 0.9568094285679792,
+              "0.75": 0.9928917336819246,
+              "0.9": 0.9987301785029153,
+              "0.95": 0.999492404409563,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 1442,
+            "blackFraction": 0.0036671956380208335,
+            "mean": 0.2673808581404942,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.8003927997019157,
+              "0.9": 0.9832984435400814,
+              "0.95": 0.9969261969698993,
+              "0.99": 0.9997073875295284
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-0--contrast-1",
+          "mapping": "current-0.5-to-2",
+          "exponent": 0.5,
+          "toneGamma": 0,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "ea637bb021d35bf761628913dfddec63ccc3c6dab002f223d8c0369727ac814e",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.5018440855756485,
+              "permission": 1,
+              "effectiveTone": 0.5018440855756485
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 1,
+              "permission": 1,
+              "effectiveTone": 1
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 1,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.054901960784313725
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 102525,
+            "blackFraction": 0.9033119234530701,
+            "mean": 0.986964557356322,
+            "quantiles": {
+              "0": 0.2609748777198888,
+              "1": 1,
+              "0.01": 0.7074137915430238,
+              "0.05": 0.8989879234117284,
+              "0.1": 1,
+              "0.25": 1,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 102525,
+            "blackFraction": 0.26073455810546875,
+            "mean": 0.2884457781627031,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-0.5--contrast-0",
+          "mapping": "current-0.5-to-2",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "3e0a48220b0dfc5215739efe52498484a80e43a153f4ea3b5ba55e679a16cf07",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.4626496694945169,
+              "permission": 1,
+              "effectiveTone": 0.4626496694945169
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.5375003611220068,
+              "permission": 1,
+              "effectiveTone": 0.5375003611220068
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 0.575,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.5545363038206756,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.030445130405841014
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5521246310092214,
+            "quantiles": {
+              "0": 0.44562358799983126,
+              "1": 0.575,
+              "0.01": 0.48120281936932857,
+              "0.05": 0.5018273493647962,
+              "0.1": 0.5146326442157837,
+              "0.25": 0.5361418297034892,
+              "0.5": 0.5623226423894875,
+              "0.75": 0.5728750992220847,
+              "0.9": 0.5746192954178698,
+              "0.95": 0.5748477599708615,
+              "0.99": 0.575
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.16132504653571414,
+            "quantiles": {
+              "0": 0,
+              "1": 0.575,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.5208635014119888,
+              "0.9": 0.570031374360252,
+              "0.95": 0.57407927633073,
+              "0.99": 0.5749122291021672
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-0.5--contrast-0.5",
+          "mapping": "current-0.5-to-2",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "61adf9a26fb4cd376a9a6f745226d206f94779537e2f4df9f770bb3484bb496c",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.25099779663011257,
+              "permission": 1,
+              "effectiveTone": 0.25099779663011257
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.7500024074800458,
+              "permission": 1,
+              "effectiveTone": 0.7500024074800458
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.8635753588045042,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.04741198048338455
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 1442,
+            "blackFraction": 0.012704957752931744,
+            "mean": 0.8474975400619834,
+            "quantiles": {
+              "0": 0.1374905866655417,
+              "1": 1,
+              "0.01": 0.3746854624621905,
+              "0.05": 0.5121823290986416,
+              "0.1": 0.5975509614385577,
+              "0.25": 0.7409455313565945,
+              "0.5": 0.915484282596583,
+              "0.75": 0.9858339948138979,
+              "0.9": 0.9974619694524652,
+              "0.95": 0.9989850664724094,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 1442,
+            "blackFraction": 0.0036671956380208335,
+            "mean": 0.247340045481262,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.642006902525538,
+              "0.9": 0.9668758290683468,
+              "0.95": 0.9938618422048664,
+              "0.99": 0.9994148606811145
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-0.5--contrast-1",
+          "mapping": "current-0.5-to-2",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "b8e37ade21a260677f004ea19b1e28ca0b643cc44963f30b1859859a7c4fbf5c",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.03934592376570828,
+              "permission": 1,
+              "effectiveTone": 0.03934592376570828
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.9625044538380847,
+              "permission": 1,
+              "effectiveTone": 0.9625044538380847
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 1,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.054901960784313725
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 45,
+            "paperWhiteFraction": 0.00039647926413448575,
+            "blackPixels": 80979,
+            "blackFraction": 0.7134776517854783,
+            "mean": 0.9213065222436659,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0.26816810555505244,
+              "0.05": 0.522537308832487,
+              "0.1": 0.6804692786613317,
+              "0.25": 0.9457492330096997,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276903,
+            "paperWhiteFraction": 0.7042007446289062,
+            "blackPixels": 80979,
+            "blackFraction": 0.20594024658203125,
+            "mean": 0.26901912793906296,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.7623722122042309,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-1--contrast-0",
+          "mapping": "current-0.5-to-2",
+          "exponent": 2,
+          "toneGamma": 1,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "502617dc490181cd892d7806de843f8bd0db41f6b9d3778105bddec185d63f07",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.4344499840869757,
+              "permission": 1,
+              "effectiveTone": 0.4344499840869757
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.5093755416838797,
+              "permission": 1,
+              "effectiveTone": 0.5093755416838797
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 0.575,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.5368643600501493,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.02947490604196898
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5368154024015147,
+            "quantiles": {
+              "0": 0.42783554921324524,
+              "1": 0.575,
+              "0.01": 0.4460583793670758,
+              "0.05": 0.4643496107361364,
+              "0.1": 0.4785600727274217,
+              "0.25": 0.5073500420655959,
+              "0.5": 0.550716720752207,
+              "0.75": 0.5707802997996093,
+              "0.9": 0.5742395570755986,
+              "0.95": 0.5746956744552326,
+              "0.99": 0.575
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.15681630177961753,
+            "quantiles": {
+              "0": 0,
+              "1": 0.575,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.48644211884503913,
+              "0.9": 0.5652273303254904,
+              "0.95": 0.5731642042086276,
+              "0.99": 0.5748245095625377
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-1--contrast-0.5",
+          "mapping": "current-0.5-to-2",
+          "exponent": 2,
+          "toneGamma": 1,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "c6e6e67f2fec7436cead2d82b5ba465061265388715d8a33879585cc5009e2ce",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.06299989391317135,
+              "permission": 1,
+              "effectiveTone": 0.06299989391317135
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.5625036112258646,
+              "permission": 1,
+              "effectiveTone": 0.5625036112258646
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.7457624003343282,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.040943818057570955
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 1442,
+            "blackFraction": 0.012704957752931744,
+            "mean": 0.7454360160104722,
+            "quantiles": {
+              "0": 0.018903661421634833,
+              "1": 1,
+              "0.01": 0.14038919578050554,
+              "0.05": 0.2623307382409092,
+              "0.1": 0.35706715151614465,
+              "0.25": 0.5490002804373061,
+              "0.5": 0.8381114716813802,
+              "0.75": 0.9718686653307285,
+              "0.9": 0.9949303805039907,
+              "0.95": 0.9979711630348842,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 1442,
+            "blackFraction": 0.0036671956380208335,
+            "mean": 0.2172817471072379,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.4149458550293923,
+              "0.9": 0.9348694438812787,
+              "0.95": 0.9877613613908508,
+              "0.99": 0.9988300637502515
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--gamma-1--contrast-1",
+          "mapping": "current-0.5-to-2",
+          "exponent": 2,
+          "toneGamma": 1,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "3a4237f5fe2b4d9bbcfc9160feb24c27a7d1c89ad2e108e8e3dd1e79a4bad2c7",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0,
+              "permission": 1,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.6156316807678495,
+              "permission": 1,
+              "effectiveTone": 0.6156316807678495
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.9546604406185071,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.05241273007317294
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 4142,
+            "paperWhiteFraction": 0.03649371360100089,
+            "blackPixels": 64655,
+            "blackFraction": 0.569652596058115,
+            "mean": 0.7844790358509113,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0.060311865745682036,
+              "0.1": 0.23557423030486763,
+              "0.25": 0.5906505188090163,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 281117,
+            "paperWhiteFraction": 0.7149175008138021,
+            "blackPixels": 64655,
+            "blackFraction": 0.1644261678059896,
+            "mean": 0.22863919378220096,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.3468798376752906,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "current-0.5-to-2--authored",
+          "mapping": "current-0.5-to-2",
+          "exponent": 2,
+          "toneGamma": 1,
+          "toneContrast": 1,
+          "authored": true,
+          "targetHash": "3a4237f5fe2b4d9bbcfc9160feb24c27a7d1c89ad2e108e8e3dd1e79a4bad2c7",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0,
+              "permission": 1,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.6156316807678495,
+              "permission": 1,
+              "effectiveTone": 0.6156316807678495
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.9546604406185071,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.05241273007317294
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 4142,
+            "paperWhiteFraction": 0.03649371360100089,
+            "blackPixels": 64655,
+            "blackFraction": 0.569652596058115,
+            "mean": 0.7844790358509113,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0.060311865745682036,
+              "0.1": 0.23557423030486763,
+              "0.25": 0.5906505188090163,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 281117,
+            "paperWhiteFraction": 0.7149175008138021,
+            "blackPixels": 64655,
+            "blackFraction": 0.1644261678059896,
+            "mean": 0.22863919378220096,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.3468798376752906,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": {
+            "width": 512,
+            "height": 512,
+            "sampleCount": 262144,
+            "paperWhitePixels": 211558,
+            "paperWhiteFraction": 0.8070297241210938,
+            "blackPixels": 28303,
+            "blackFraction": 0.10796737670898438,
+            "mean": 0.15286230947456902,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          }
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0--contrast-0",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 0.25,
+          "toneGamma": 0,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "b39f8e340dd08f9a0381f6d466b75749880114dd3efd2f36d35d6b53c470f613",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.5311716914615753,
+              "permission": 1,
+              "effectiveTone": 0.5311716914615753
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.5645908408858116,
+              "permission": 1,
+              "effectiveTone": 0.5645908408858116
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 0.575,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.5695993429255669,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.03127212078807034
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5683042216625227,
+            "quantiles": {
+              "0": 0.5163396830627228,
+              "1": 0.575,
+              "0.01": 0.5423567218671992,
+              "0.05": 0.5518958463673173,
+              "0.1": 0.5568818396025952,
+              "0.25": 0.5641675013409047,
+              "0.5": 0.5717249540561506,
+              "0.75": 0.5744659292542729,
+              "0.9": 0.5749047331351336,
+              "0.95": 0.5749619254984917,
+              "0.99": 0.575
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.16609371206093973,
+            "quantiles": {
+              "0": 0,
+              "1": 0.575,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.5590295081034811,
+              "0.9": 0.5737421089659946,
+              "0.95": 0.5747692873449785,
+              "0.99": 0.5749780524590661
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0--contrast-0.5",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 0.25,
+          "toneGamma": 0,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "a6bfc793083752a249b2cd6fbe7f5603e7a813852fa812fb92c904ba8c2337e9",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.707811276410502,
+              "permission": 1,
+              "effectiveTone": 0.707811276410502
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.9306056059054102,
+              "permission": 1,
+              "effectiveTone": 0.9306056059054102
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.9639956195037791,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.0529252496982467
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 1442,
+            "blackFraction": 0.012704957752931744,
+            "mean": 0.9553614777504281,
+            "quantiles": {
+              "0": 0.608931220418152,
+              "1": 1,
+              "0.01": 0.7823781457813281,
+              "0.05": 0.8459723091154482,
+              "0.1": 0.879212264017301,
+              "0.25": 0.9277833422726973,
+              "0.5": 0.978166360374338,
+              "0.75": 0.9964395283618191,
+              "0.9": 0.9993648875675568,
+              "0.95": 0.9997461699899445,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 1442,
+            "blackFraction": 0.0036671956380208335,
+            "mean": 0.27913114898270475,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.8942476871765311,
+              "0.9": 0.9916140597732979,
+              "0.95": 0.9984619156331899,
+              "0.99": 0.9998536830604408
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0--contrast-1",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 0.25,
+          "toneGamma": 0,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "b80559c696efcdd371be93519dab47817dc2195d00b3996092dc4d6863f45f4d",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.8844508613594286,
+              "permission": 1,
+              "effectiveTone": 0.8844508613594286
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 1,
+              "permission": 1,
+              "effectiveTone": 1
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 1,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.054901960784313725
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 112724,
+            "blackFraction": 0.9931717460065728,
+            "mean": 0.999650904840999,
+            "quantiles": {
+              "0": 0.7015227577735811,
+              "1": 1,
+              "0.01": 1,
+              "0.05": 1,
+              "0.1": 1,
+              "0.25": 1,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 112724,
+            "blackFraction": 0.2866719563802083,
+            "mean": 0.2921910638996037,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0.5--contrast-0",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "3e0a48220b0dfc5215739efe52498484a80e43a153f4ea3b5ba55e679a16cf07",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.4626496694945169,
+              "permission": 1,
+              "effectiveTone": 0.4626496694945169
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.5375003611220068,
+              "permission": 1,
+              "effectiveTone": 0.5375003611220068
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 0.575,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.5545363038206756,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.030445130405841014
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5521246310092214,
+            "quantiles": {
+              "0": 0.44562358799983126,
+              "1": 0.575,
+              "0.01": 0.48120281936932857,
+              "0.05": 0.5018273493647962,
+              "0.1": 0.5146326442157837,
+              "0.25": 0.5361418297034892,
+              "0.5": 0.5623226423894875,
+              "0.75": 0.5728750992220847,
+              "0.9": 0.5746192954178698,
+              "0.95": 0.5748477599708615,
+              "0.99": 0.575
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.16132504653571414,
+            "quantiles": {
+              "0": 0,
+              "1": 0.575,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.5208635014119888,
+              "0.9": 0.570031374360252,
+              "0.95": 0.57407927633073,
+              "0.99": 0.5749122291021672
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0.5--contrast-0.5",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "61adf9a26fb4cd376a9a6f745226d206f94779537e2f4df9f770bb3484bb496c",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.25099779663011257,
+              "permission": 1,
+              "effectiveTone": 0.25099779663011257
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.7500024074800458,
+              "permission": 1,
+              "effectiveTone": 0.7500024074800458
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.8635753588045042,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.04741198048338455
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 1442,
+            "blackFraction": 0.012704957752931744,
+            "mean": 0.8474975400619834,
+            "quantiles": {
+              "0": 0.1374905866655417,
+              "1": 1,
+              "0.01": 0.3746854624621905,
+              "0.05": 0.5121823290986416,
+              "0.1": 0.5975509614385577,
+              "0.25": 0.7409455313565945,
+              "0.5": 0.915484282596583,
+              "0.75": 0.9858339948138979,
+              "0.9": 0.9974619694524652,
+              "0.95": 0.9989850664724094,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 1442,
+            "blackFraction": 0.0036671956380208335,
+            "mean": 0.247340045481262,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.642006902525538,
+              "0.9": 0.9668758290683468,
+              "0.95": 0.9938618422048664,
+              "0.99": 0.9994148606811145
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-0.5--contrast-1",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 1,
+          "toneGamma": 0.5,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "b8e37ade21a260677f004ea19b1e28ca0b643cc44963f30b1859859a7c4fbf5c",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.03934592376570828,
+              "permission": 1,
+              "effectiveTone": 0.03934592376570828
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.9625044538380847,
+              "permission": 1,
+              "effectiveTone": 0.9625044538380847
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 1,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.054901960784313725
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 45,
+            "paperWhiteFraction": 0.00039647926413448575,
+            "blackPixels": 80979,
+            "blackFraction": 0.7134776517854783,
+            "mean": 0.9213065222436659,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0.26816810555505244,
+              "0.05": 0.522537308832487,
+              "0.1": 0.6804692786613317,
+              "0.25": 0.9457492330096997,
+              "0.5": 1,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276903,
+            "paperWhiteFraction": 0.7042007446289062,
+            "blackPixels": 80979,
+            "blackFraction": 0.20594024658203125,
+            "mean": 0.26901912793906296,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.7623722122042309,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-1--contrast-0",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 4,
+          "toneGamma": 1,
+          "toneContrast": 0,
+          "authored": false,
+          "targetHash": "3db941f4fc43c8e898598cc369694030606c8d09989fdcaa19020f7eecf4ad9b",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.4255953479949606,
+              "permission": 1,
+              "effectiveTone": 0.4255953479949606
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.4724615468963208,
+              "permission": 1,
+              "effectiveTone": 0.4724615468963208
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 0.575,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.5084242336628628,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.027913487338353252
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.5178097300951224,
+            "quantiles": {
+              "0": 0.42505360226227157,
+              "1": 0.575,
+              "0.01": 0.4279563689437846,
+              "0.05": 0.4353226124339031,
+              "0.1": 0.444124542603778,
+              "0.25": 0.4702101961880361,
+              "0.5": 0.5303646258445893,
+              "0.75": 0.5666793053977597,
+              "0.9": 0.5734829693074723,
+              "0.95": 0.5743919663373799,
+              "0.99": 0.575
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 0,
+            "blackFraction": 0,
+            "mean": 0.1512268163778711,
+            "quantiles": {
+              "0": 0,
+              "1": 0.575,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.4502073139525231,
+              "0.9": 0.5560913611347614,
+              "0.95": 0.571350876058506,
+              "0.99": 0.5746492244376997
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-1--contrast-0.5",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 4,
+          "toneGamma": 1,
+          "toneContrast": 0.5,
+          "authored": false,
+          "targetHash": "0b70d6c069050bf4418399d664801e5f44ff7917e2c5522e6f8e366a53d2301f",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0.003968986633070844,
+              "permission": 1,
+              "effectiveTone": 0.003968986633070844
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.31641031264213865,
+              "permission": 1,
+              "effectiveTone": 0.31641031264213865
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.5561615577524187,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.030534360033466126
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 0,
+            "paperWhiteFraction": 0,
+            "blackPixels": 1442,
+            "blackFraction": 0.012704957752931744,
+            "mean": 0.6187315339677903,
+            "quantiles": {
+              "0": 0.00035734841514380514,
+              "1": 1,
+              "0.01": 0.019709126291897118,
+              "0.05": 0.06881741622602042,
+              "0.1": 0.1274969506918534,
+              "0.25": 0.3014013079202408,
+              "0.5": 0.702430838963929,
+              "0.75": 0.9445287026517314,
+              "0.9": 0.9898864620498157,
+              "0.95": 0.9959464422491994,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 276857,
+            "paperWhiteFraction": 0.7040837605794271,
+            "blackPixels": 1442,
+            "blackFraction": 0.0036671956380208335,
+            "mean": 0.18001851109557568,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0.17483442188435194,
+              "0.9": 0.8739808771028913,
+              "0.95": 0.9756725070567068,
+              "0.99": 0.9976614962513315
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--gamma-1--contrast-1",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 4,
+          "toneGamma": 1,
+          "toneContrast": 1,
+          "authored": false,
+          "targetHash": "2e422794ad1109f647d24353a10826312671a2de04baa6eeba629d91aac577fa",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0,
+              "permission": 1,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.16035907838795654,
+              "permission": 1,
+              "effectiveTone": 0.16035907838795654
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.6038988818419746,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.033155232728578996
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 21746,
+            "paperWhiteFraction": 0.19159640173041173,
+            "blackPixels": 50784,
+            "blackFraction": 0.44744006555123833,
+            "mean": 0.6249761398075749,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0.13259241965244545,
+              "0.5": 0.8744970520832687,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 299402,
+            "paperWhiteFraction": 0.7614186604817709,
+            "blackPixels": 50784,
+            "blackFraction": 0.129150390625,
+            "mean": 0.18170923524154922,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": null
+        },
+        {
+          "profileId": "candidate-0.25-to-4--authored",
+          "mapping": "candidate-0.25-to-4",
+          "exponent": 4,
+          "toneGamma": 1,
+          "toneContrast": 1,
+          "authored": true,
+          "targetHash": "2e422794ad1109f647d24353a10826312671a2de04baa6eeba629d91aac577fa",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "tone": 0,
+              "permission": 1,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-dark",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "tone": 0.16035907838795654,
+              "permission": 1,
+              "effectiveTone": 0.16035907838795654
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "tone": 1,
+              "permission": 0,
+              "effectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "tone": 0.6038988818419746,
+              "permission": 0.054901960784313725,
+              "effectiveTone": 0.033155232728578996
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "tone": 0,
+              "permission": 0,
+              "effectiveTone": 0
+            }
+          ],
+          "adjustedOpaqueTone": {
+            "sampleCount": 113499,
+            "paperWhitePixels": 21746,
+            "paperWhiteFraction": 0.19159640173041173,
+            "blackPixels": 50784,
+            "blackFraction": 0.44744006555123833,
+            "mean": 0.6249761398075749,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0.13259241965244545,
+              "0.5": 0.8744970520832687,
+              "0.75": 1,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "effectiveToneOverAllDecodedPixels": {
+            "sampleCount": 393216,
+            "paperWhitePixels": 299402,
+            "paperWhiteFraction": 0.7614186604817709,
+            "blackPixels": 50784,
+            "blackFraction": 0.129150390625,
+            "mean": 0.18170923524154922,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0,
+              "0.9": 1,
+              "0.95": 1,
+              "0.99": 1
+            }
+          },
+          "toneReference": {
+            "width": 512,
+            "height": 512,
+            "sampleCount": 262144,
+            "paperWhitePixels": 219825,
+            "paperWhiteFraction": 0.8385658264160156,
+            "blackPixels": 21881,
+            "blackFraction": 0.08346939086914062,
+            "mean": 0.12015578326057261,
+            "quantiles": {
+              "0": 0,
+              "1": 1,
+              "0.01": 0,
+              "0.05": 0,
+              "0.1": 0,
+              "0.25": 0,
+              "0.5": 0,
+              "0.75": 0,
+              "0.9": 0.796078431372549,
+              "0.95": 1,
+              "0.99": 1
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

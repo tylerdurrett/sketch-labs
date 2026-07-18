@@ -7,6 +7,7 @@ import {
   canonicalBrowserSceneHash,
   canonicalScribbleIdentityHash,
 } from "./photoScribbleEvidenceHash";
+import { runPhotoScribbleGammaEvidence } from "./photoScribbleGammaEvidence";
 import type {
   PhotoScribbleEvidenceProfile,
   PhotoScribbleEvidenceTelemetry,
@@ -477,6 +478,7 @@ const globalEvidence = {
       options,
     ),
   runExactEquivalence: runPhotoScribbleExactEquivalence,
+  runGammaCalibration: runPhotoScribbleGammaEvidence,
   abortActive: abortActivePhotoScribbleEvidence,
 };
 

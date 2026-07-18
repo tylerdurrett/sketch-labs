@@ -1,6 +1,14 @@
 /** Browser implementation of the issue #336 canonical SHA-256 encodings. */
 
-import type { Scene, ScribbleDiagnostics } from "@harness/core";
+import type {
+  CoordinateSpace,
+  Scene,
+  ScribbleControls,
+  ScribbleDiagnostics,
+  ToneSource,
+} from "@harness/core";
+
+import { createScribbleModel } from "../../../packages/core/src/scribbleStrategy/model";
 
 import type { ScribbleComputeIdentity } from "./scribbleComputeProtocol";
 
@@ -53,6 +61,53 @@ async function digest(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(hash)]
     .map((value) => value.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/** Browser twin of the benchmark-only canonical source-target oracle. */
+export async function canonicalBrowserScribbleTargetHash(
+  source: ToneSource,
+  frame: Readonly<CoordinateSpace>,
+  controls: Readonly<ScribbleControls>,
+): Promise<string> {
+  const model = createScribbleModel(source, frame, controls);
+  const { lattice } = model;
+  const hash = new CanonicalBytes();
+
+  hash.tag("photo-scribble-target-v1");
+  hash.tag("frame-width");
+  hash.number(frame.width);
+  hash.tag("frame-height");
+  hash.number(frame.height);
+  hash.tag("lattice-frame-width");
+  hash.number(lattice.frame.width);
+  hash.tag("lattice-frame-height");
+  hash.number(lattice.frame.height);
+  hash.tag("lattice-columns");
+  hash.number(lattice.columns);
+  hash.tag("lattice-rows");
+  hash.number(lattice.rows);
+  hash.tag("lattice-cell-width");
+  hash.number(lattice.cellWidth);
+  hash.tag("lattice-cell-height");
+  hash.number(lattice.cellHeight);
+  hash.tag("lattice-cell-area");
+  hash.number(lattice.cellArea);
+  hash.tag("lattice-sample-count");
+  hash.number(lattice.sampleCount);
+  hash.tag("row-major-tone-permission-effective-tone");
+
+  const samples = model.samples();
+  if (samples.length !== lattice.sampleCount) {
+    throw new Error(
+      `Scribble lattice declared ${lattice.sampleCount} samples, received ${samples.length}`,
+    );
+  }
+  for (const sample of samples) {
+    hash.number(sample.tone);
+    hash.number(sample.permission);
+    hash.number(sample.tone * sample.permission);
+  }
+  return digest(hash.bytes());
 }
 
 export async function canonicalBrowserSceneHash(scene: Scene): Promise<string> {

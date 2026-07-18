@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as core from "@harness/core";
 import {
   createPhotoScribbleSchema,
+  createPhotoScribbleSource,
   generatePhotoScribbleArtwork,
   type DecodedPixels,
   type Params,
@@ -17,12 +18,14 @@ import {
 import {
   canonicalSceneHash,
   canonicalScribbleDiagnosticsHash,
+  canonicalScribbleTargetHash,
 } from "../../../packages/core/benchmarks/photo-scribble/hash-oracles";
 import type { ScribbleExecutionObservation } from "../../../packages/core/src/scribbleStrategy/orchestrator";
 import { executePhotoScribbleEvidenceArtwork } from "./photoScribbleEvidenceExecution";
 import {
   canonicalBrowserDiagnosticsHash,
   canonicalBrowserSceneHash,
+  canonicalBrowserScribbleTargetHash,
 } from "./photoScribbleEvidenceHash";
 import {
   parsePhotoScribbleEvidenceWorkerConfig,
@@ -547,5 +550,25 @@ describe("Photo Scribble evidence page seams", () => {
     expect(await canonicalBrowserDiagnosticsHash(diagnostics)).toBe(
       canonicalScribbleDiagnosticsHash(diagnostics),
     );
+  });
+
+  it("matches the frozen Node target hash encoding without running geometry", async () => {
+    const schema = createPhotoScribbleSchema(assetId);
+    const source = createPhotoScribbleSource(
+      params,
+      frame,
+      schema,
+      environment,
+    );
+    const controls = {
+      pathDensity: Number(params.pathDensity),
+      scribbleScale: Number(params.scribbleScale),
+      momentum: Number(params.momentum),
+      chaos: Number(params.chaos),
+      toneFidelity: Number(params.toneFidelity),
+    };
+    expect(
+      await canonicalBrowserScribbleTargetHash(source, frame, controls),
+    ).toBe(canonicalScribbleTargetHash(source, frame, controls));
   });
 });
