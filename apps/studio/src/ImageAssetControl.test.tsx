@@ -139,6 +139,112 @@ describe("ImageAssetControl", () => {
     expect(host.querySelector("code")?.textContent).toBe(malformed);
   });
 
+  it.each([
+    [
+      "missing",
+      "Image Asset is missing. The exact selected ID remains active.",
+    ],
+    [
+      "error",
+      "Image Asset is unavailable. The exact selected ID remains active.",
+    ],
+  ] as const)(
+    "shows an exact %s state without a broken thumbnail or fallback selection",
+    (status, message) => {
+      const value = "unresolved-image-abcdef012345";
+      const retry = vi.fn();
+      const onChange = vi.fn();
+      const el = mount(
+        <ImageAssetControl
+          paramKey="source"
+          value={value}
+          onChange={onChange}
+          resolution={{ status, failedId: value, retry }}
+        />,
+      );
+
+      expect(el.querySelector("img")).toBeNull();
+      expect(el.querySelector('[role="alert"]')?.textContent).toBe(message);
+      expect(el.querySelector("code")?.textContent).toBe(value);
+      expect(el.textContent).not.toContain("default");
+
+      act(() => button(el, "Retry exact asset").click());
+      expect(retry).toHaveBeenCalledTimes(1);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(operations.list).not.toHaveBeenCalled();
+    },
+  );
+
+  it("shows loading for the exact selection, then its resolved thumbnail", () => {
+    const value = "pending-image-abcdef012345";
+    const retry = vi.fn();
+    const renderControl = (status: "loading" | "resolved") => (
+      <ImageAssetControl
+        paramKey="source"
+        value={value}
+        onChange={() => {}}
+        resolution={{ status, failedId: null, retry }}
+      />
+    );
+    const el = mount(renderControl("loading"));
+
+    expect(el.querySelector("img")).toBeNull();
+    expect(el.querySelector('[role="status"]')?.textContent).toBe(
+      "Loading exact Image Asset…",
+    );
+    expect(el.querySelector("code")?.textContent).toBe(value);
+
+    act(() => root!.render(renderControl("resolved")));
+    expect(el.querySelector('[role="status"]')).toBeNull();
+    expect(el.querySelector("img")?.getAttribute("src")).toBe(
+      `/image-assets/${value}.png`,
+    );
+  });
+
+  it("limits a known failure to rows selecting the failed exact ID", () => {
+    const value = "healthy-image-abcdef012345";
+    const html = renderToStaticMarkup(
+      <ImageAssetControl
+        paramKey="source"
+        value={value}
+        onChange={() => {}}
+        resolution={{
+          status: "missing",
+          failedId: "missing-sibling-aaaaaaaaaaaa",
+          retry: () => {},
+        }}
+      />,
+    );
+
+    expect(html).toContain(`src="/image-assets/${value}.png"`);
+    expect(html).not.toContain("Image Asset is missing");
+    expect(html).not.toContain("Retry exact asset");
+  });
+
+  it("keeps resolution retry independent from an open managed library", async () => {
+    const value = "missing-image-abcdef012345";
+    const retry = vi.fn();
+    const onChange = vi.fn();
+    const el = mount(
+      <ImageAssetControl
+        paramKey="source"
+        value={value}
+        onChange={onChange}
+        resolution={{ status: "missing", failedId: value, retry }}
+      />,
+    );
+
+    act(() => button(el, "Choose image").click());
+    await flush();
+    expect(operations.list).toHaveBeenCalledTimes(1);
+
+    act(() => button(el, "Retry exact asset").click());
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(operations.list).toHaveBeenCalledTimes(1);
+    expect(el.querySelector('input[type="file"]')).not.toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("does not list or render import UI until the library is opened", async () => {
     const el = mount(
       <ImageAssetControl

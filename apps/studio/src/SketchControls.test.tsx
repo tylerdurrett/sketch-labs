@@ -42,6 +42,7 @@ import type {
 } from "./LiveCanvas";
 import { mutableScene } from "./outlineComputeProtocol";
 import { outlineScene } from "./outlineScene";
+import { ImageAssetResolutionError } from "./imageAssetResolver";
 import { isScribbleComputeIdentity } from "./scribbleComputeProtocol";
 import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
@@ -439,6 +440,8 @@ vi.mock("./LiveCanvas", () => ({
       source?: ToneSource;
       sourceInputRevision?: number;
       contentRevision?: number;
+      status?: string;
+      unresolvedAssetIds?: readonly string[];
     };
     tolerance?: number;
     compositionFrame: CoordinateSpace;
@@ -578,6 +581,10 @@ vi.mock("./LiveCanvas", () => ({
           renderState?.sourceInputRevision ?? "",
         )}
         data-content-revision={String(renderState?.contentRevision ?? "")}
+        data-unavailable-status={renderState?.status ?? ""}
+        data-unresolved-asset-ids={
+          renderState?.unresolvedAssetIds?.join("|") ?? ""
+        }
       >
         {String(seed)}
       </div>
@@ -1990,6 +1997,70 @@ describe("SketchControls — preset save/reload wiring", () => {
       "999",
     );
     expect(lastProfile).toEqual(loadedProfile);
+  });
+
+  it("reloads and re-saves the exact non-default Image Asset ID", async () => {
+    const defaultAsset = "portrait-default-000000000001";
+    const persistedAsset = "portrait-persisted-bbbbbbbbbbbb";
+    const imageSchema: ParamSchema = {
+      imageAsset: { kind: "image-asset", default: defaultAsset },
+    };
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: "photo-persist",
+      name: "persisted-image",
+      seed: 321,
+      params: { imageAsset: persistedAsset },
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    listPresets.mockResolvedValue(["persisted-image"]);
+
+    const el = mount(
+      <SketchControls sketch={sketchWith("photo-persist", imageSchema)} />,
+    );
+    await flush();
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "persisted-image");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(
+      el.querySelector('[aria-label="imageAsset image asset identity"]')
+        ?.textContent,
+    ).toBe(persistedAsset);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.before.present.params.imageAsset).toBe(
+      defaultAsset,
+    );
+    expect(historyCapture.atomic[0]!.after.present.params.imageAsset).toBe(
+      persistedAsset,
+    );
+
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      "image-roundtrip",
+    );
+    clickButton(el, "Save");
+    await flush();
+
+    expect(savePreset).toHaveBeenCalledTimes(1);
+    expect(savePreset.mock.calls[0]![0]).toMatchObject({
+      version: 2,
+      sketch: "photo-persist",
+      name: "image-roundtrip",
+      seed: 321,
+      params: { imageAsset: persistedAsset },
+    });
   });
 
   it("preserves a persisted color lock as inert data across reload and save", async () => {
@@ -4567,6 +4638,25 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     act(() => input.dispatchEvent(new Event("change", { bubbles: true })));
   }
 
+  async function openAssetBChoice(el: HTMLElement): Promise<HTMLButtonElement> {
+    clickButton(el, "Choose image");
+    await flush();
+    const choice = [
+      ...el.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Image Assets"] button',
+      ),
+    ].find((button) => button.textContent?.includes("portrait beta"));
+    if (choice === undefined) throw new Error("no portrait beta choice");
+    return choice;
+  }
+
+  function exposeAndClick(buttons: readonly HTMLButtonElement[]): void {
+    for (const button of buttons) {
+      button.disabled = false;
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    }
+  }
+
   it("carries an imported Photo Scribble asset through one undoable atomic edit into exact Tone and payload-free worker inputs", async () => {
     const generateToneSource = vi.fn(
       (
@@ -4862,6 +4952,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     );
 
     const el = mount(<SketchControls sketch={sketch} />);
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
     expect(sketchEnvironmentJob.starts).toHaveLength(1);
     expect(sketchEnvironmentJob.starts[0]!.params.photo).toBe(assetA);
     expect(scribbleJob.starts).toHaveLength(0);
@@ -4947,6 +5038,589 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(scribbleJob.starts).toHaveLength(startsAfterB);
     expect(toneSourceFor.mock.calls.at(-1)?.[2]).toBe(environmentB);
     expect(lastToneSource).toBeNull();
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("error");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(invalidAsset);
+    expect(el.textContent).toContain("Image Asset is unavailable");
+  });
+
+  it("fails closed through loading and missing, then retries the unchanged exact ID once", async () => {
+    const generateToneSource = vi.fn(
+      (
+        ...args: Parameters<
+          NonNullable<typeof photoScribble.generateToneSource>
+        >
+      ) => photoScribble.generateToneSource!(...args),
+    );
+    const el = mount(
+      <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+    );
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("loading");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetA);
+    expect(el.textContent).toContain("Loading exact Image Asset");
+    expect(scribbleJob.starts).toHaveLength(0);
+
+    clickButton(el, "Tone");
+    expect(generateToneSource).not.toHaveBeenCalled();
+    expect(lastToneSource).toBeNull();
+
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.reject(
+        new ImageAssetResolutionError("missing", assetA),
+      );
+      await Promise.resolve();
+    });
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("missing");
+    expect(el.textContent).toContain("Image Asset is missing");
+    expect(scribbleJob.starts).toHaveLength(0);
+
+    clickButton(el, "Retry exact asset");
+    expect(sketchEnvironmentJob.starts).toHaveLength(2);
+    expect(sketchEnvironmentJob.starts[1]!.params.imageAsset).toBe(assetA);
+    expect(canvas.dataset.unavailableStatus).toBe("loading");
+
+    const recovered = resolvedAssetEnvironment(assetA, 143);
+    await act(async () => {
+      sketchEnvironmentJob.starts[1]!.resolve(recovered);
+      await Promise.resolve();
+    });
+
+    expect(generateToneSource).toHaveBeenCalledTimes(1);
+    expect(generateToneSource.mock.calls[0]?.[2]).toBe(recovered);
+    expect(canvas.dataset.renderState).toBe("tone-reference");
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(scribbleJob.starts[0]!.identity.params).toContainEqual({
+      key: "imageAsset",
+      value: assetA,
+    });
+    await flush();
+    expect(scribbleJob.starts).toHaveLength(1);
+  });
+
+  it("ignores late A, then retries unchanged B into exactly one B job", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    const generateToneSource = vi.fn(
+      (
+        ...args: Parameters<
+          NonNullable<typeof photoScribble.generateToneSource>
+        >
+      ) => photoScribble.generateToneSource!(...args),
+    );
+    const el = mount(
+      <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+    );
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const pendingA = sketchEnvironmentJob.starts[0]!;
+    const choice = await openAssetBChoice(el);
+
+    act(() => choice.click());
+    const pendingB = sketchEnvironmentJob.starts[1]!;
+    expect(pendingA.signal.aborted).toBe(true);
+    expect(pendingB.params.imageAsset).toBe(assetB);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.after.present.params.imageAsset).toBe(
+      assetB,
+    );
+    expect(scribbleJob.starts).toHaveLength(0);
+
+    await act(async () => {
+      pendingB.reject(new ImageAssetResolutionError("missing", assetB));
+      await Promise.resolve();
+    });
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("missing");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetB);
+    expect(
+      el.querySelector('[aria-label="imageAsset image asset identity"]')
+        ?.textContent,
+    ).toBe(assetB);
+    clickButton(el, "Tone");
+    expect(generateToneSource).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingA.resolve(resolvedAssetEnvironment(assetA, 32));
+      await Promise.resolve();
+    });
+    expect(canvas.dataset.unavailableStatus).toBe("missing");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetB);
+    expect(scribbleJob.starts).toHaveLength(0);
+
+    const historyAfterSelection = historyCapture.atomic[0]!.after;
+    clickButton(el, "Retry exact asset");
+    expect(sketchEnvironmentJob.starts).toHaveLength(3);
+    expect(sketchEnvironmentJob.starts[2]!.params.imageAsset).toBe(assetB);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.after).toBe(historyAfterSelection);
+    expect(
+      el.querySelector('[aria-label="imageAsset image asset identity"]')
+        ?.textContent,
+    ).toBe(assetB);
+
+    const recoveredB = resolvedAssetEnvironment(assetB, 224);
+    await act(async () => {
+      sketchEnvironmentJob.starts[2]!.resolve(recoveredB);
+      await Promise.resolve();
+    });
+    expect(generateToneSource).toHaveBeenCalledTimes(1);
+    expect(generateToneSource.mock.calls[0]?.[2]).toBe(recoveredB);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(scribbleJob.starts[0]!.identity.params).toContainEqual({
+      key: "imageAsset",
+      value: assetB,
+    });
+    await flush();
+    expect(scribbleJob.starts).toHaveLength(1);
+  });
+
+  it("keeps a malformed authored ID visible and handler-guards every unavailable action", async () => {
+    const malformed = "../Portrait Beta.png?raw=1";
+    listPresets.mockResolvedValue(["malformed"]);
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: photoScribble.id,
+      name: "malformed",
+      seed: 22,
+      params: {
+        ...defaultParams(photoScribble.schema),
+        imageAsset: malformed,
+      },
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    const generateToneSource = vi.fn(
+      (
+        ...args: Parameters<
+          NonNullable<typeof photoScribble.generateToneSource>
+        >
+      ) => photoScribble.generateToneSource!(...args),
+    );
+    const toBlob = vi.fn();
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+    );
+    await flush();
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "malformed");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(sketchEnvironmentJob.starts.at(-1)?.params.imageAsset).toBe(
+      malformed,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts
+        .at(-1)!
+        .reject(new ImageAssetResolutionError("invalid-id", malformed));
+      await Promise.resolve();
+    });
+
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    expect(
+      el.querySelector('[aria-label="imageAsset image asset identity"]')
+        ?.textContent,
+    ).toBe(malformed);
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("error");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(malformed);
+    expect(generateToneSource).not.toHaveBeenCalled();
+    expect(scribbleJob.starts).toHaveLength(0);
+
+    const guarded = [
+      exportButton(el, "Export PNG"),
+      exportButton(el, "Export SVG"),
+      exportButton(el, "Outline"),
+      exportButton(el, "Export Hidden-line SVG"),
+    ];
+    expect(guarded.every(({ disabled }) => disabled)).toBe(true);
+    act(() => exposeAndClick(guarded));
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(plotterExportCapture.current).toBeNull();
+    expect(outlineJob.starts).toBe(0);
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("disables and handler-guards every export and Outline until the exact asset resolves", async () => {
+    const toBlob = vi.fn();
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    const guarded = [
+      exportButton(el, "Export PNG"),
+      exportButton(el, "Export SVG"),
+      exportButton(el, "Outline"),
+      exportButton(el, "Export Hidden-line SVG"),
+    ];
+
+    expect(guarded.every(({ disabled }) => disabled)).toBe(true);
+    act(() => exposeAndClick(guarded));
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.starts).toBe(0);
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+    for (const button of guarded) button.disabled = true;
+
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.reject(
+        new ImageAssetResolutionError("missing", assetA),
+      );
+      await Promise.resolve();
+    });
+    const missingGuards = [
+      exportButton(el, "Export PNG"),
+      exportButton(el, "Export SVG"),
+      exportButton(el, "Outline"),
+      exportButton(el, "Export Hidden-line SVG"),
+    ];
+    expect(missingGuards.every(({ disabled }) => disabled)).toBe(true);
+    act(() => exposeAndClick(missingGuards));
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(outlineJob.starts).toBe(0);
+    expect(outlineJob.exportStarts).toBe(0);
+
+    clickButton(el, "Retry exact asset");
+    await act(async () => {
+      sketchEnvironmentJob.starts[1]!.resolve(
+        resolvedAssetEnvironment(assetA, 128),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(50));
+    expect(
+      ["Export PNG", "Export SVG", "Outline", "Export Hidden-line SVG"].map(
+        (label) => exportButton(el, label).disabled,
+      ),
+    ).toEqual([false, false, false, false]);
+  });
+
+  it("rejects forced same-batch exports and Outline after the authored asset ID changes", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    const toBlob = vi.fn();
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 64),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(51));
+    const choice = await openAssetBChoice(el);
+    const forced = [
+      exportButton(el, "Export PNG"),
+      exportButton(el, "Export SVG"),
+      exportButton(el, "Outline"),
+      exportButton(el, "Export Hidden-line SVG"),
+    ];
+
+    act(() => {
+      choice.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      exposeAndClick(forced);
+    });
+    await flush();
+
+    expect(historyCapture.atomic.at(-1)?.after.present.params.imageAsset).toBe(
+      assetB,
+    );
+    expect(sketchEnvironmentJob.starts.at(-1)?.params.imageAsset).toBe(assetB);
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.starts).toBe(0);
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("drops PNG metadata and download when asset availability changes in flight", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    let resolveBytes!: (value: ArrayBuffer) => void;
+    const bytes = new Promise<ArrayBuffer>((resolve) => {
+      resolveBytes = resolve;
+    });
+    const pendingBlob = new Blob([MINIMAL_PNG], { type: "image/png" });
+    vi.spyOn(pendingBlob, "arrayBuffer").mockReturnValue(bytes);
+    fakeCanvasToBlob = ((callback: BlobCallback) => {
+      callback(pendingBlob);
+    }) as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 64),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(52));
+    const choice = await openAssetBChoice(el);
+
+    clickButton(el, "Export PNG");
+    expect(pendingBlob.arrayBuffer).toHaveBeenCalledOnce();
+    act(() => choice.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await act(async () => {
+      resolveBytes(MINIMAL_PNG.slice().buffer);
+      await Promise.resolve();
+    });
+
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("cancels Outline completion when asset availability changes in flight", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    autoFireOutlineComputed = false;
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 64),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(53));
+    const choice = await openAssetBChoice(el);
+
+    clickButton(el, "Outline");
+    const active = outlineJob.active;
+    expect(active).not.toBeNull();
+    act(() => choice.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(outlineJob.active).toBeNull();
+    await act(async () => {
+      active!.resolve({
+        status: "success",
+        jobId: 1,
+        identity: active!.identity,
+        scene: preparedScene(99),
+      });
+      await Promise.resolve();
+    });
+
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(exportButton(el, "Outline").getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  it("cancels hidden-line finalization and download when asset availability changes in flight", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    outlineJob.exportMode = "pending";
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 64),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(54));
+    const choice = await openAssetBChoice(el);
+
+    clickButton(el, "Export Hidden-line SVG");
+    const pending = outlineJob.pendingExport;
+    expect(pending).not.toBeNull();
+    act(() => choice.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await flush();
+    expect(outlineJob.pendingExport).toBeNull();
+    pending!.succeed();
+    await flush();
+
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(el.textContent).not.toContain("Preparing SVG");
+  });
+
+  it("rejects obsolete environment and worker completions without changing current presentation", async () => {
+    const assetC = "portrait-charlie-cccccccccccc";
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+      {
+        id: assetC,
+        name: "portrait charlie",
+        url: `/image-assets/${assetC}.png`,
+      },
+    ]);
+    const generateToneSource = vi.fn(
+      (
+        ...args: Parameters<
+          NonNullable<typeof photoScribble.generateToneSource>
+        >
+      ) => photoScribble.generateToneSource!(...args),
+    );
+    const el = mount(
+      <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+    );
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const selectManagedAsset = async (name: string): Promise<void> => {
+      if (el.textContent?.includes("Choose image")) {
+        clickButton(el, "Choose image");
+        await flush();
+      }
+      const choice = [
+        ...el.querySelectorAll<HTMLButtonElement>(
+          '[aria-label="Image Assets"] button',
+        ),
+      ].find((button) => button.textContent?.includes(name));
+      if (choice === undefined) throw new Error(`no ${name} choice`);
+      act(() => choice.click());
+    };
+
+    const environmentA = resolvedAssetEnvironment(assetA, 32);
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(environmentA);
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(40));
+    clickButton(el, "Tone");
+    expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentA);
+
+    // Leave a same-environment replacement active so its late completion races
+    // the two subsequent exact-asset selections.
+    clickButton(el, "New seed");
+    expect(scribbleJob.starts).toHaveLength(2);
+    await selectManagedAsset("portrait beta");
+    const obsoleteEnvironment = sketchEnvironmentJob.starts[1]!;
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetB);
+    expect(shadingDisclosure(el).textContent).not.toContain("Converged");
+    expect(lastToneSource).toBeNull();
+    expect(scribbleJob.cancelCount).toBeGreaterThan(0);
+
+    await selectManagedAsset("portrait charlie");
+    expect(obsoleteEnvironment.signal.aborted).toBe(true);
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetC);
+    const currentEnvironment = sketchEnvironmentJob.starts[2]!;
+
+    await act(async () => {
+      obsoleteEnvironment.resolve(resolvedAssetEnvironment(assetB, 128));
+      await Promise.resolve();
+    });
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetC);
+    expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentA);
+    expect(scribbleJob.starts).toHaveLength(2);
+
+    const environmentC = resolvedAssetEnvironment(assetC, 224);
+    await act(async () => {
+      currentEnvironment.resolve(environmentC);
+      await Promise.resolve();
+    });
+    expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentC);
+    expect(scribbleJob.starts).toHaveLength(3);
+    expect(scribbleJob.starts[2]!.identity.params).toContainEqual({
+      key: "imageAsset",
+      value: assetC,
+    });
+
+    clickButton(el, "Fill");
+    expect(canvas.dataset.renderState).toBe("fill-held");
+    expect(shadingDisclosure(el).textContent).toContain(
+      "Displayed result: stale",
+    );
+    const presentationBeforeLateWorker = {
+      sourceInputRevision: canvas.dataset.sourceInputRevision,
+      contentRevision: canvas.dataset.contentRevision,
+      diagnostics: shadingDisclosure(el).textContent,
+      toneCalls: generateToneSource.mock.calls.length,
+    };
+
+    await completeScribble(1, preparedScene(99));
+    expect(canvas.dataset.sourceInputRevision).toBe(
+      presentationBeforeLateWorker.sourceInputRevision,
+    );
+    expect(canvas.dataset.contentRevision).toBe(
+      presentationBeforeLateWorker.contentRevision,
+    );
+    expect(shadingDisclosure(el).textContent).toBe(
+      presentationBeforeLateWorker.diagnostics,
+    );
+    expect(generateToneSource).toHaveBeenCalledTimes(
+      presentationBeforeLateWorker.toneCalls,
+    );
+    expect(scribbleJob.starts).toHaveLength(3);
+
+    await completeScribble(2, preparedScene(41));
+    expect(shadingDisclosure(el).textContent).not.toContain(
+      "Displayed result: stale",
+    );
+    expect(canvas.dataset.contentRevision).not.toBe(
+      presentationBeforeLateWorker.contentRevision,
+    );
+  });
+
+  it("keeps asset-free Scribble sketches on the existing immediate path", () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+
+    expect(sketchEnvironmentJob.starts).toHaveLength(0);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(canvas.dataset.renderState).toBe("fill-held");
+    expect(canvas.dataset.unavailableStatus).toBe("");
+    expect(el.textContent).not.toContain("Loading exact Image Asset");
   });
 
   it("shows diagnostics only for Scribble-capable Sketches", () => {

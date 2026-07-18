@@ -11,6 +11,8 @@ vi.mock('../scribbleStrategy/index', async (importOriginal) => {
 })
 
 import type { DecodedPixels, SketchEnvironment } from '../imageAssets'
+import type { PlotProfile } from '../plotProfile'
+import { applyPreset, deserialize, makePreset, serialize } from '../preset'
 import { defaultParams, type Params } from '../sketch'
 import type {
   ScribbleResult,
@@ -26,6 +28,7 @@ import type { ToneSource } from '../shadingFields'
 import type { Point } from '../types'
 
 const HEADLESS_FIXTURE_LOOKUP_KEY = 'headless-contract-fixture'
+const AUTHORED_FIXTURE_LOOKUP_KEY = 'authored-contract-fixture'
 const FRAME = { width: 48, height: 32 }
 const SOURCE_SAMPLE_POINTS = [
   [0, 0],
@@ -73,6 +76,14 @@ const CHANGED_PIXELS: DecodedPixels = {
     0, 255, 0, 255,
     240, 240, 240, 255,
   ]),
+}
+
+const PROFILE: PlotProfile = {
+  width: FRAME.width,
+  height: FRAME.height,
+  insets: { top: 0, right: 0, bottom: 0, left: 0 },
+  includeFrame: true,
+  toolWidthMillimeters: 0.3,
 }
 
 function environmentFor(pixels: Readonly<DecodedPixels>): SketchEnvironment {
@@ -176,6 +187,84 @@ describe('Photo Scribble black-box contract', () => {
       firstResult.polylines,
     )
     expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+  })
+
+  it('reproduces Tone, Shading, termination, and geometry after a v2 Preset round-trip', () => {
+    const sketch = createPhotoScribble(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const params = fastParams({
+      imageAsset: AUTHORED_FIXTURE_LOOKUP_KEY,
+      toneContrast: 0.25,
+      toneGamma: 0.75,
+    })
+    const seed = 'persisted-photo'
+    const environment: SketchEnvironment = {
+      imageAssets: (id) => {
+        if (id === AUTHORED_FIXTURE_LOOKUP_KEY) return FIXTURE_PIXELS
+        if (id === HEADLESS_FIXTURE_LOOKUP_KEY) return CHANGED_PIXELS
+        return undefined
+      },
+    }
+
+    expect(environment.imageAssets(AUTHORED_FIXTURE_LOOKUP_KEY)).toBe(
+      FIXTURE_PIXELS,
+    )
+    expect(environment.imageAssets(HEADLESS_FIXTURE_LOOKUP_KEY)).toBe(
+      CHANGED_PIXELS,
+    )
+
+    const before = sketch.generateScribbleArtwork!(
+      params,
+      seed,
+      FRAME,
+      undefined,
+      environment,
+    )
+    const beforeInput = capturedInput(0)
+    const beforeResult = capturedResult(0)
+
+    const loaded = deserialize(
+      JSON.parse(
+        JSON.stringify(
+          serialize(
+            makePreset(
+              sketch.id,
+              'persisted-photo',
+              params,
+              seed,
+              new Set(['imageAsset']),
+              PROFILE,
+            ),
+          ),
+        ),
+      ),
+    )
+    const restored = applyPreset(sketch.schema, loaded)
+    const after = sketch.generateScribbleArtwork!(
+      restored.params,
+      restored.seed,
+      FRAME,
+      undefined,
+      environment,
+    )
+    const afterInput = capturedInput(1)
+    const afterResult = capturedResult(1)
+    const defaultSource = createPhotoScribbleSource(
+      fastParams(),
+      FRAME,
+      sketch.schema,
+      environment,
+    )
+
+    expect(restored.params).toEqual(params)
+    expect(restored.params.imageAsset).toBe(AUTHORED_FIXTURE_LOOKUP_KEY)
+    expect(restored.profile).toEqual(PROFILE)
+    expect(sourceSnapshot(afterInput)).toEqual(sourceSnapshot(beforeInput))
+    expect(sourceSnapshot(afterInput)).not.toEqual(fieldSnapshot(defaultSource))
+    expect(afterResult.termination).toBe(beforeResult.termination)
+    expect(afterResult.residualError).toBe(beforeResult.residualError)
+    expect(afterResult.polylines).toEqual(beforeResult.polylines)
+    expect(after.diagnostics).toEqual(before.diagnostics)
+    expect(after.scene).toEqual(before.scene)
   })
 
   it('changes routing by Seed alone while source snapshots remain exact', () => {

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import type { PlotProfile } from '../plotProfile'
-import { PRESET_VERSION } from '../preset'
+import { applyPreset, deserialize, PRESET_VERSION } from '../preset'
 import { buildReproMetadata, reproFilenameStem } from '../reproMetadata'
+import type { ParamSchema } from '../sketch'
 
 /**
  * These prove the embedded payload reuses the {@link Preset} envelope (no new
@@ -194,5 +195,35 @@ describe('buildReproMetadata', () => {
     live.width = 999
     live.insets.top = 999
     expect(JSON.parse(json).profile).toEqual(profile)
+  })
+
+  it('captures an unresolved Image Asset ID as ordinary v2 Preset state that applies exactly', () => {
+    const unresolvedImageAsset = 'unresolved/opaque ID?variant=🌲'
+    const schema: ParamSchema = {
+      imageAsset: {
+        kind: 'image-asset',
+        default: 'bundled-default-000000000000',
+      },
+    }
+    const payload = JSON.parse(
+      buildReproMetadata({
+        sketchId: 'photo-scribble',
+        seed: 'metadata-asset-seed',
+        params: { imageAsset: unresolvedImageAsset },
+        locks: new Set(['imageAsset']),
+        profile,
+      }),
+    )
+
+    expect(payload.version).toBe(PRESET_VERSION)
+    expect(payload.params.imageAsset).toBe(unresolvedImageAsset)
+    expect(
+      applyPreset(schema, deserialize(payload)),
+    ).toEqual({
+      params: { imageAsset: unresolvedImageAsset },
+      seed: 'metadata-asset-seed',
+      locks: ['imageAsset'],
+      profile,
+    })
   })
 })

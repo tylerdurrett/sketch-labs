@@ -7,7 +7,6 @@ import {
   imageAssetIdSetKey,
   type ImageAssetBitmap,
   type ImageAssetResolverDependencies,
-  ImageAssetResolutionError,
   requiredImageAssetIds,
   resolveSketchEnvironment,
 } from "./imageAssetResolver";
@@ -19,6 +18,7 @@ const PIXELS = new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8]);
 
 function adapter(overrides: {
   readonly ok?: boolean;
+  readonly status?: number;
   readonly width?: number;
   readonly height?: number;
   readonly pixels?: Uint8ClampedArray;
@@ -50,6 +50,7 @@ function adapter(overrides: {
         events.push(`fetch:${url}`);
         return {
           ok: overrides.ok ?? true,
+          status: overrides.status ?? (overrides.ok === false ? 500 : 200),
           async blob() {
             events.push("blob");
             return BLOB;
@@ -92,9 +93,12 @@ function adapter(overrides: {
 
 describe("browser Image Asset decoding", () => {
   it("fails boundedly when jsdom has no real browser decoding capabilities", async () => {
-    await expect(decodeImageAsset(ID)).rejects.toEqual(
-      new ImageAssetResolutionError("capability-unavailable"),
-    );
+    await expect(decodeImageAsset(ID)).rejects.toMatchObject({
+      name: "ImageAssetResolutionError",
+      code: "capability-unavailable",
+      assetId: ID,
+      message: "Browser image decoding is unavailable",
+    });
   });
 
   it("runs the exact browser pipeline with decoded dimensions and owned bytes", async () => {
@@ -145,7 +149,12 @@ describe("browser Image Asset decoding", () => {
 
     await expect(
       decodeImageAsset("../private.png", dependencies),
-    ).rejects.toEqual(new ImageAssetResolutionError("invalid-id"));
+    ).rejects.toMatchObject({
+      name: "ImageAssetResolutionError",
+      code: "invalid-id",
+      assetId: "../private.png",
+      message: "Image Asset ID is invalid",
+    });
     expect(fetch).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
   });
@@ -154,11 +163,36 @@ describe("browser Image Asset decoding", () => {
     const { dependencies, close } = adapter({ ok: false });
     const createBitmap = vi.spyOn(dependencies, "createImageBitmap");
 
-    await expect(decodeImageAsset(ID, dependencies)).rejects.toEqual(
-      new ImageAssetResolutionError("fetch-failed"),
-    );
+    await expect(decodeImageAsset(ID, dependencies)).rejects.toMatchObject({
+      name: "ImageAssetResolutionError",
+      code: "fetch-failed",
+      assetId: ID,
+      message: "Image Asset fetch failed",
+    });
     expect(createBitmap).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it("classifies only an HTTP 404 as missing and preserves the exact ID", async () => {
+    const missing = adapter({ ok: false, status: 404 });
+    const failed = adapter({ ok: false, status: 410 });
+
+    await expect(
+      decodeImageAsset(ID, missing.dependencies),
+    ).rejects.toMatchObject({
+      name: "ImageAssetResolutionError",
+      code: "missing",
+      assetId: ID,
+      message: "Image Asset is missing",
+    });
+    await expect(
+      decodeImageAsset(ID, failed.dependencies),
+    ).rejects.toMatchObject({
+      name: "ImageAssetResolutionError",
+      code: "fetch-failed",
+      assetId: ID,
+      message: "Image Asset fetch failed",
+    });
   });
 });
 
@@ -224,5 +258,44 @@ describe("schema Image Asset resolution", () => {
     expect(first.imageAssets("missing-abcdef012345")).toBeUndefined();
     expect(firstAdapter.close).toHaveBeenCalledTimes(1);
     expect(secondAdapter.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("identifies the exact failing ID when resolving several assets", async () => {
+    const { dependencies } = adapter({ ok: false, status: 404 });
+
+    await expect(
+      resolveSketchEnvironment(schema, {}, dependencies),
+    ).rejects.toMatchObject({
+      name: "ImageAssetResolutionError",
+      code: "missing",
+      assetId: ID,
+      message: "Image Asset is missing",
+    });
+  });
+
+  it("consults only a present unresolved ID, never its default or a same-name alternate", async () => {
+    const authored = "pine-cone-ffffffffffff";
+    const sameNameAlternate = "pine-cone-eeeeeeeeeeee";
+    const events: string[] = [];
+    const { dependencies } = adapter({ ok: false, status: 404, events });
+    const singleSchema = {
+      source: { kind: "image-asset", default: ID },
+    } satisfies ParamSchema;
+
+    await expect(
+      resolveSketchEnvironment(
+        singleSchema,
+        { source: authored },
+        dependencies,
+      ),
+    ).rejects.toMatchObject({
+      name: "ImageAssetResolutionError",
+      code: "missing",
+      assetId: authored,
+    });
+
+    expect(events).toEqual([`fetch:/image-assets/${authored}.png`]);
+    expect(events.join("|")).not.toContain(ID);
+    expect(events.join("|")).not.toContain(sameNameAlternate);
   });
 });

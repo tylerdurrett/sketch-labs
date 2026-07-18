@@ -158,6 +158,76 @@ describe("ControlPanel", () => {
     expect(html).not.toContain('aria-label="source lock"');
   });
 
+  it("wires exact Image Asset resolution state and retry without edit history", () => {
+    const value = "missing-image-0123456789ab";
+    const retry = vi.fn();
+    const onChange = vi.fn();
+    const onBegin = vi.fn();
+    const el = mount(
+      <ControlPanel
+        schema={{
+          source: { kind: "image-asset", default: "default-aaaaaaaaaaaa" },
+        }}
+        params={{ source: value }}
+        locks={new Set()}
+        onChange={onChange}
+        editHistory={{
+          onBegin,
+          onPreview: vi.fn(),
+          onCommit: vi.fn(),
+          onCancel: vi.fn(),
+        }}
+        onToggleLock={() => {}}
+        imageAssetResolution={{
+          status: "missing",
+          failedId: value,
+          retry,
+        }}
+      />,
+    );
+
+    expect(el.querySelector("img")).toBeNull();
+    expect(el.querySelector("code")?.textContent).toBe(value);
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+      "Image Asset is missing",
+    );
+    act(() => {
+      [...el.querySelectorAll<HTMLButtonElement>("button")]
+        .find((candidate) => candidate.textContent === "Retry exact asset")!
+        .click();
+    });
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onBegin).not.toHaveBeenCalled();
+  });
+
+  it("marks only the exact failed Image Asset in a multi-asset schema", () => {
+    const missing = "missing-image-0123456789ab";
+    const healthy = "healthy-image-abcdef012345";
+    const html = renderToStaticMarkup(
+      <ControlPanel
+        schema={{
+          first: { kind: "image-asset", default: "default-aaaaaaaaaaaa" },
+          second: { kind: "image-asset", default: "default-bbbbbbbbbbbb" },
+        }}
+        params={{ first: missing, second: healthy }}
+        locks={new Set()}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+        imageAssetResolution={{
+          status: "error",
+          failedId: missing,
+          retry: () => {},
+        }}
+      />,
+    );
+
+    expect((html.match(/Image Asset is unavailable/g) ?? []).length).toBe(1);
+    expect((html.match(/Retry exact asset/g) ?? []).length).toBe(1);
+    expect(html).not.toContain(`/image-assets/${missing}.png`);
+    expect(html).toContain(`/image-assets/${healthy}.png`);
+  });
+
   it("routes an Image Asset choice through the ordinary lock-free setter", async () => {
     vi.stubGlobal("fetch", () =>
       Promise.resolve({

@@ -19,8 +19,17 @@ import {
   proposeImageAssetSlug,
 } from "./imageAssetNormalization";
 import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
+import type { SketchEnvironmentResolutionStatus } from "./useSketchEnvironment";
 
 type FailurePhase = "list" | "normalize" | "import";
+
+/** Exact-resolution state shared by every schema-derived Image Asset row. */
+export interface ImageAssetControlResolution {
+  readonly status: SketchEnvironmentResolutionStatus;
+  readonly failedId: string | null;
+  /** Retry resolution without authoring a new param value. */
+  readonly retry: () => void;
+}
 
 /** Props for the schema-derived Image Asset picker/import control. */
 export interface ImageAssetControlProps {
@@ -32,6 +41,8 @@ export interface ImageAssetControlProps {
   onChange: (value: string) => void;
   /** Longest normalized source edge, supplied by the Studio shell. */
   imageAssetLongEdgeCap?: number;
+  /** Resolution lifecycle for the current exact schema-declared asset set. */
+  resolution?: ImageAssetControlResolution | undefined;
 }
 
 function failureMessage(phase: FailurePhase, error: unknown): string {
@@ -78,9 +89,20 @@ export function ImageAssetControl({
   value,
   onChange,
   imageAssetLongEdgeCap = STUDIO_IMAGE_ASSET_LONG_EDGE_CAP,
+  resolution,
 }: ImageAssetControlProps) {
   const displayName = imageAssetDisplayName(value);
   const url = imageAssetUrl(value);
+  const resolutionStatus = resolution?.status ?? "resolved";
+  const failureAffectsValue =
+    resolution?.failedId === null || resolution?.failedId === value;
+  const presentationStatus =
+    (resolutionStatus === "missing" || resolutionStatus === "error") &&
+    !failureAffectsValue
+      ? "resolved"
+      : resolutionStatus;
+  const showThumbnail =
+    presentationStatus === "resolved" && url !== null && displayName !== null;
   const [open, setOpen] = useState(false);
   const [assets, setAssets] = useState<ManagedImageAsset[]>([]);
   const [loading, setLoading] = useState(false);
@@ -237,7 +259,7 @@ export function ImageAssetControl({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-3">
-        {url !== null && displayName !== null ? (
+        {showThumbnail ? (
           <img
             src={url}
             alt={`${displayName} image asset thumbnail`}
@@ -257,7 +279,31 @@ export function ImageAssetControl({
           >
             {value}
           </code>
+          {presentationStatus === "loading" ? (
+            <div role="status" className="text-sm text-muted-foreground">
+              Loading exact Image Asset…
+            </div>
+          ) : presentationStatus === "missing" ? (
+            <div role="alert" className="text-sm text-destructive">
+              Image Asset is missing. The exact selected ID remains active.
+            </div>
+          ) : presentationStatus === "error" ? (
+            <div role="alert" className="text-sm text-destructive">
+              Image Asset is unavailable. The exact selected ID remains active.
+            </div>
+          ) : null}
         </div>
+        {presentationStatus === "missing" ||
+        presentationStatus === "error" ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={resolution?.retry}
+          >
+            Retry exact asset
+          </Button>
+        ) : null}
         <Button
           type="button"
           variant="outline"

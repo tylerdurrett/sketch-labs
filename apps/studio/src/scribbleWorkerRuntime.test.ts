@@ -450,10 +450,11 @@ describe("Scribble worker runtime", () => {
     const execute = vi.fn(
       (..._args: Parameters<ScribbleArtworkExecutor>) => artwork,
     );
+    const emitProgress = vi.fn();
     const response = await handleScribbleWorkerMessage(
       request(),
       execute,
-      undefined,
+      emitProgress,
       () => 0,
       async () => {
         throw new Error(`decode ${"x".repeat(700)}`);
@@ -461,6 +462,7 @@ describe("Scribble worker runtime", () => {
     );
 
     expect(execute).not.toHaveBeenCalled();
+    expect(emitProgress).not.toHaveBeenCalled();
     expect(response).toMatchObject({ type: "failure" });
     if (response?.type !== "failure") throw new Error("expected failure");
     expect(response.error).toHaveLength(500);

@@ -2,7 +2,10 @@ import type { ParamSchema, Params, ParamSpec } from "@harness/core";
 
 import { ColorControl } from "./ColorControl";
 import type { EditTransactionLifecycle } from "./editHistory";
-import { ImageAssetControl } from "./ImageAssetControl";
+import {
+  ImageAssetControl,
+  type ImageAssetControlResolution,
+} from "./ImageAssetControl";
 import { NumberControl } from "./NumberControl";
 import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
 
@@ -40,6 +43,8 @@ export interface ControlPanelProps {
   onToggleLock: (key: string) => void;
   /** Longest normalized source edge for Image Asset imports. */
   imageAssetLongEdgeCap?: number;
+  /** Exact-resolution lifecycle shared by schema-declared Image Assets. */
+  imageAssetResolution?: ImageAssetControlResolution;
 }
 
 /**
@@ -62,6 +67,7 @@ function renderControl(
   onChange: (key: string, value: number | string) => void,
   onToggleLock: (key: string) => void,
   imageAssetLongEdgeCap: number,
+  imageAssetResolution?: ImageAssetControlResolution,
   editHistory?: EditTransactionLifecycle<Params>,
 ) {
   const rowHistory = editHistory
@@ -107,6 +113,7 @@ function renderControl(
           value={typeof value === "string" ? value : spec.default}
           onChange={(next) => onChange(key, next)}
           imageAssetLongEdgeCap={imageAssetLongEdgeCap}
+          resolution={imageAssetResolution}
         />
       );
     default:
@@ -140,6 +147,7 @@ export function ControlPanel({
   editHistory,
   onToggleLock,
   imageAssetLongEdgeCap = STUDIO_IMAGE_ASSET_LONG_EDGE_CAP,
+  imageAssetResolution,
 }: ControlPanelProps) {
   return (
     <div className="flex flex-col gap-4">
@@ -153,6 +161,7 @@ export function ControlPanel({
           onChange,
           onToggleLock,
           imageAssetLongEdgeCap,
+          imageAssetResolution,
           editHistory,
         ),
       )}
