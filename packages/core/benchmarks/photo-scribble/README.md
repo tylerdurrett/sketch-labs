@@ -84,8 +84,13 @@ Run the two control scenarios in a production Studio browser, serially:
    selection, name/thumbnail reuse, reload, and no machine-local path in UI or
    saved data. Return to the inventory asset before fixed captures.
 2. Capture Tone at centered `0.5 / 0.5` and at the authored values. Increasing
-   either control must be monotonic at fixed probes; centered values are
-   identity; fully transparent permission and exact zero tone remain zero.
+   either control must follow the fixed `0 / 0.5 / 1` sweeps at the exact source
+   pixels and derived frame points in `measurement.toneSampling`. Sample the
+   production Tone Field and Shading Mask directly, without screenshot
+   quantization. Centered values equal raw tone; gamma decreases; contrast
+   decreases at named light probes and increases at named dark probes. Check
+   all nine control pairs at each named letterbox/transparent zero probe and
+   the exact `14 / 255` permission at the pinecone partial-alpha probe.
 3. Set the primary seed, wait for settlement, then re-seed. Tone and permission
    hashes must remain identical while routing and Fill geometry visibly change.
 4. During a fresh realistic job, make three inspector/control interaction

@@ -39,7 +39,7 @@ function paeth(left, above, upperLeft) {
   return aboveDistance <= upperLeftDistance ? above : upperLeft
 }
 
-function pngAlphaDistribution(bytes, { width, height }) {
+function decodePng(bytes, { width, height }) {
   const chunks = []
   let offset = 8
   while (offset < bytes.length) {
@@ -58,6 +58,7 @@ function pngAlphaDistribution(bytes, { width, height }) {
   const stride = width * 4
   const previous = Buffer.alloc(stride)
   const current = Buffer.alloc(stride)
+  const rgba = Buffer.alloc(stride * height)
   const counts = { fullyTransparent: 0, partial: 0, fullyOpaque: 0 }
   let source = 0
   for (let row = 0; row < height; row += 1) {
@@ -87,10 +88,56 @@ function pngAlphaDistribution(bytes, { width, height }) {
       else if (current[alpha] === 255) counts.fullyOpaque += 1
       else counts.partial += 1
     }
+    current.copy(rgba, row * stride)
     previous.set(current)
   }
   expect(source).toBe(inflated.length)
-  return counts
+  return { counts, rgba }
+}
+
+function srgbByteToLinear(byte) {
+  const encoded = byte / 255
+  return encoded <= 0.04045
+    ? encoded / 12.92
+    : ((encoded + 0.055) / 1.055) ** 2.4
+}
+
+function rawTone(rgba, width, x, y) {
+  const offset = (y * width + x) * 4
+  return (
+    1 -
+    (0.2126 * srgbByteToLinear(rgba[offset]) +
+      0.7152 * srgbByteToLinear(rgba[offset + 1]) +
+      0.0722 * srgbByteToLinear(rgba[offset + 2]))
+  )
+}
+
+function opaqueToneDistribution(rgba) {
+  let sampleCount = 0
+  let minimum = Infinity
+  let maximum = -Infinity
+  let total = 0
+  for (let offset = 0; offset < rgba.length; offset += 4) {
+    if (rgba[offset + 3] !== 255) continue
+    const tone =
+      1 -
+      (0.2126 * srgbByteToLinear(rgba[offset]) +
+        0.7152 * srgbByteToLinear(rgba[offset + 1]) +
+        0.0722 * srgbByteToLinear(rgba[offset + 2]))
+    sampleCount += 1
+    minimum = Math.min(minimum, tone)
+    maximum = Math.max(maximum, tone)
+    total += tone
+  }
+  return { sampleCount, minimum, maximum, mean: total / sampleCount }
+}
+
+function toneGamma(tone, control) {
+  return tone ** 2 ** (2 * (control - 0.5))
+}
+
+function toneContrast(tone, control) {
+  return Math.max(0, Math.min(1, 0.5 + (tone - 0.5) * (0.15 + 1.7 * control)))
 }
 
 describe('Photo Scribble issue 336 protocol', () => {
@@ -106,11 +153,22 @@ describe('Photo Scribble issue 336 protocol', () => {
         width: fixture.dimensions.width,
         height: fixture.dimensions.height,
       })
-      expect(pngAlphaDistribution(bytes, fixture.dimensions)).toEqual({
+      const decoded = decodePng(bytes, fixture.dimensions)
+      expect(decoded.counts).toEqual({
         fullyTransparent: fixture.alphaDistribution.fullyTransparent,
         partial: fixture.alphaDistribution.partial,
         fullyOpaque: fixture.alphaDistribution.fullyOpaque,
       })
+      const toneStats = opaqueToneDistribution(decoded.rgba)
+      expect(toneStats.sampleCount).toBe(
+        fixture.opaqueToneDistribution.sampleCount,
+      )
+      for (const key of ['minimum', 'maximum', 'mean']) {
+        expect(toneStats[key]).toBeCloseTo(
+          fixture.opaqueToneDistribution[key],
+          11,
+        )
+      }
       expect(
         fixture.alphaDistribution.fullyTransparent +
           fixture.alphaDistribution.partial +
@@ -135,12 +193,69 @@ describe('Photo Scribble issue 336 protocol', () => {
         .trim()
         .split('\n')
       expect(introducedPaths).toContain(fixture.path)
+      expect(
+        execFileSync(
+          'git',
+          [
+            'diff-tree',
+            '--no-commit-id',
+            '--name-status',
+            '-r',
+            fixture.origin.introducedByCommit,
+            '--',
+            fixture.path,
+          ],
+          { cwd: root, encoding: 'utf8' },
+        ).trim(),
+      ).toBe(`A\t${fixture.path}`)
+      expect(
+        execFileSync(
+          'git',
+          ['show', '-s', '--format=%cI', fixture.origin.introducedByCommit],
+          { cwd: root, encoding: 'utf8' },
+        ).trim(),
+      ).toBe(fixture.origin.introducedAt)
       expect(fixture.ownership).toMatchObject({
         recordedStatus: 'unknown-pending-maintainer-attestation',
         rightsHolder: null,
         license: null,
       })
       expect(fixture.ownership.redistributionStatementRecorded).toBe(false)
+    }
+  })
+
+  it('keeps fixture identity unique and declared categories byte-derived', () => {
+    expect(new Set(fixtures.fixtures.map(({ fixtureId }) => fixtureId)).size).toBe(
+      fixtures.fixtures.length,
+    )
+    expect(new Set(fixtures.fixtures.map(({ path }) => path)).size).toBe(
+      fixtures.fixtures.length,
+    )
+    for (const fixture of fixtures.fixtures) {
+      const decoded = decodePng(
+        readFileSync(resolve(root, fixture.path)),
+        fixture.dimensions,
+      )
+      const categories = new Set(fixture.categories)
+      if (categories.has('ordinary-opaque')) {
+        expect(decoded.counts).toEqual({
+          fullyTransparent: 0,
+          partial: 0,
+          fullyOpaque: fixture.alphaDistribution.pixelCount,
+        })
+      }
+      if (categories.has('flat-or-dark')) {
+        expect(opaqueToneDistribution(decoded.rgba).mean).toBeGreaterThanOrEqual(
+          0.75,
+        )
+      }
+      if (categories.has('mismatched-aspect')) {
+        expect(fixture.dimensions.width).not.toBe(fixture.dimensions.height)
+      }
+      if (categories.has('partial-and-fully-transparent')) {
+        expect(decoded.counts.fullyTransparent).toBeGreaterThan(0)
+        expect(decoded.counts.partial).toBeGreaterThan(0)
+      }
     }
   })
 
@@ -349,6 +464,81 @@ describe('Photo Scribble issue 336 protocol', () => {
       start: expect.stringContaining('immediately before'),
       end: expect.stringContaining('resolves cancelled'),
     })
+  })
+
+  it('pins Tone probes to decoded texels and proves the declared comparisons', () => {
+    const fixtureByScenario = new Map(
+      protocol.scenarios.map((scenario) => [scenario.scenarioId, scenario]),
+    )
+    const probeIds = new Set()
+    for (const group of protocol.measurement.toneSampling.scenarioProbes) {
+      const scenario = fixtureByScenario.get(group.scenarioId)
+      expect(scenario.roles).toContain('workflow-control')
+      const fixture = fixtures.fixtures.find(
+        ({ fixtureId }) => fixtureId === scenario.fixtureId,
+      )
+      const decoded = decodePng(
+        readFileSync(resolve(root, fixture.path)),
+        fixture.dimensions,
+      )
+      const scale = Math.min(
+        protocol.frame.width / fixture.dimensions.width,
+        protocol.frame.height / fixture.dimensions.height,
+      )
+      const left = (protocol.frame.width - fixture.dimensions.width * scale) / 2
+      const top = (protocol.frame.height - fixture.dimensions.height * scale) / 2
+      for (const probe of group.probes) {
+        expect(probeIds.has(probe.probeId)).toBe(false)
+        probeIds.add(probe.probeId)
+        if (probe.sourcePixel === null) {
+          expect(probe.framePoint.x < left || probe.framePoint.y < top).toBe(true)
+          expect(probe.expectedEffectiveTone).toBe(0)
+          continue
+        }
+        const { x, y } = probe.sourcePixel
+        expect(probe.framePoint.x).toBeCloseTo(left + (x + 0.5) * scale, 11)
+        expect(probe.framePoint.y).toBeCloseTo(top + (y + 0.5) * scale, 11)
+        const offset = (y * fixture.dimensions.width + x) * 4
+        expect(decoded.rgba[offset + 3]).toBe(probe.expectedAlphaByte)
+        const permission = decoded.rgba[offset + 3] / 255
+        expect(permission).toBeCloseTo(probe.expectedAlphaByte / 255, 12)
+        if (probe.expectedEffectiveTone === 0) {
+          const tone = rawTone(decoded.rgba, fixture.dimensions.width, x, y)
+          for (const gamma of [0, 0.5, 1]) {
+            for (const contrast of [0, 0.5, 1]) {
+              expect(
+                toneContrast(toneGamma(tone, gamma), contrast) * permission,
+              ).toBe(0)
+            }
+          }
+        }
+        if (probe.expectedRawTone !== undefined) {
+          const tone = rawTone(decoded.rgba, fixture.dimensions.width, x, y)
+          expect(tone).toBeCloseTo(probe.expectedRawTone, 11)
+          const gamma = [0, 0.5, 1].map((control) => toneGamma(tone, control))
+          expect(gamma[0]).toBeGreaterThan(gamma[1])
+          expect(gamma[1]).toBeGreaterThan(gamma[2])
+          expect(gamma[1]).toBeCloseTo(tone, 12)
+          const contrast = [0, 0.5, 1].map((control) =>
+            toneContrast(tone, control),
+          )
+          expect(contrast[1]).toBeCloseTo(tone, 12)
+          if (tone < 0.5) {
+            expect(contrast[0]).toBeGreaterThan(contrast[1])
+            expect(contrast[1]).toBeGreaterThan(contrast[2])
+          } else {
+            expect(contrast[0]).toBeLessThan(contrast[1])
+            expect(contrast[1]).toBeLessThan(contrast[2])
+          }
+        }
+      }
+    }
+    expect(protocol.measurement.toneSampling).toMatchObject({
+      gammaSweep: { toneGammaValues: [0, 0.5, 1], fixedToneContrast: 0.5 },
+      contrastSweep: { toneContrastValues: [0, 0.5, 1], fixedToneGamma: 0.5 },
+      comparisonTolerance: 1e-12,
+    })
+    expect(protocol.measurement.toneSampling.rules).toHaveLength(5)
   })
 
   it('pins ordered tuples and collision-proof evidence names', () => {

@@ -246,6 +246,151 @@
     "terminalToDisplay": {
       "start": "coordinator receipt time for terminal progress",
       "end": "first requestAnimationFrame after current result diagnostics and canvas provenance both match the completed worker identity"
+    },
+    "toneSampling": {
+      "samplingRule": "Sample the production Tone Field and Shading Mask directly at each exact Composition Frame point after Image Asset resolution and contain-fit. Record unrounded IEEE-754 values; screenshots are secondary evidence.",
+      "pixelCenterRule": "For source pixel (x,y), frame point is (fitLeft + (x + 0.5) * fitScale, fitTop + (y + 0.5) * fitScale).",
+      "gammaSweep": {
+        "toneGammaValues": [
+          0,
+          0.5,
+          1
+        ],
+        "fixedToneContrast": 0.5
+      },
+      "contrastSweep": {
+        "toneContrastValues": [
+          0,
+          0.5,
+          1
+        ],
+        "fixedToneGamma": 0.5
+      },
+      "comparisonTolerance": 1e-12,
+      "rules": [
+        "At every nonzero tone probe, the centered 0.5 control output equals raw tone within tolerance.",
+        "Gamma outputs are strictly decreasing at controls 0, 0.5, 1 for every probe with raw tone strictly between 0 and 1.",
+        "Contrast outputs are strictly decreasing for light probes with raw tone below 0.5 and strictly increasing for dark probes with raw tone above 0.5.",
+        "At every zero-region probe, permission and effective mask-weighted tone remain exactly 0 for all nine gamma/contrast pairs from values 0, 0.5, 1.",
+        "At the partial-alpha probe, permission equals expectedAlphaByte / 255 within tolerance and effective tone equals adjusted tone multiplied by permission."
+      ],
+      "scenarioProbes": [
+        {
+          "scenarioId": "flowers-opaque-control",
+          "probes": [
+            {
+              "probeId": "flowers-light",
+              "region": "opaque light flower texel",
+              "sourcePixel": {
+                "x": 63,
+                "y": 59
+              },
+              "framePoint": {
+                "x": 156.005859375,
+                "y": 29.052734375
+              },
+              "expectedAlphaByte": 255,
+              "expectedRawTone": 0.250370745612
+            },
+            {
+              "probeId": "flowers-dark",
+              "region": "opaque dark flower texel",
+              "sourcePixel": {
+                "x": 622,
+                "y": 47
+              },
+              "framePoint": {
+                "x": 428.955078125,
+                "y": 23.193359375
+              },
+              "expectedAlphaByte": 255,
+              "expectedRawTone": 0.749990214076
+            },
+            {
+              "probeId": "flowers-left-letterbox-zero",
+              "region": "left contain-fit letterbox",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "expectedAlphaByte": 0,
+              "expectedEffectiveTone": 0
+            }
+          ]
+        },
+        {
+          "scenarioId": "pinecone-dark-alpha-control",
+          "probes": [
+            {
+              "probeId": "pinecone-light",
+              "region": "opaque light pinecone texel",
+              "sourcePixel": {
+                "x": 177,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 397.7864583333333,
+                "y": 271.484375
+              },
+              "expectedAlphaByte": 255,
+              "expectedRawTone": 0.25099779663
+            },
+            {
+              "probeId": "pinecone-dark",
+              "region": "opaque dark pinecone texel",
+              "sourcePixel": {
+                "x": 309,
+                "y": 208
+              },
+              "framePoint": {
+                "x": 569.6614583333333,
+                "y": 271.484375
+              },
+              "expectedAlphaByte": 255,
+              "expectedRawTone": 0.75000240748
+            },
+            {
+              "probeId": "pinecone-transparent-zero",
+              "region": "fully transparent source texel",
+              "sourcePixel": {
+                "x": 0,
+                "y": 0
+              },
+              "framePoint": {
+                "x": 167.31770833333334,
+                "y": 0.6510416666666666
+              },
+              "expectedAlphaByte": 0,
+              "expectedEffectiveTone": 0
+            },
+            {
+              "probeId": "pinecone-partial-alpha",
+              "region": "partial-alpha boundary texel",
+              "sourcePixel": {
+                "x": 256,
+                "y": 103
+              },
+              "framePoint": {
+                "x": 500.6510416666667,
+                "y": 134.765625
+              },
+              "expectedAlphaByte": 14
+            },
+            {
+              "probeId": "pinecone-left-letterbox-zero",
+              "region": "left contain-fit letterbox",
+              "sourcePixel": null,
+              "framePoint": {
+                "x": 50,
+                "y": 500
+              },
+              "expectedAlphaByte": 0,
+              "expectedEffectiveTone": 0
+            }
+          ]
+        }
+      ]
     }
   },
   "visualVerdicts": [

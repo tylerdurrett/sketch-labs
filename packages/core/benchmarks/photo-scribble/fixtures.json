@@ -2,6 +2,12 @@
   "schemaVersion": 1,
   "inventoryScope": "Committed real-photograph inputs available to Photo Scribble at issue 336 protocol freeze",
   "ownershipBoundary": "Repository history proves only when each file entered this repository. Acquisition source, creator, rights holder, license, and redistribution permission are unknown pending explicit maintainer attestation; this manifest does not infer them from the committer identity.",
+  "categorySemantics": {
+    "ordinary-opaque": "Every decoded alpha byte is 255.",
+    "flat-or-dark": "Mean linear-light inverted luminance over fully opaque pixels is at least 0.75.",
+    "mismatched-aspect": "Decoded width/height differs from the fixed 1:1 protocol frame.",
+    "partial-and-fully-transparent": "Decoded alpha includes at least one byte equal to 0 and at least one byte strictly between 0 and 255."
+  },
   "fixtures": [
     {
       "fixtureId": "flowers-opaque-portrait",
@@ -20,6 +26,12 @@
         "fullyTransparent": 0,
         "partial": 0,
         "fullyOpaque": 3145728
+      },
+      "opaqueToneDistribution": {
+        "sampleCount": 3145728,
+        "minimum": 0.013368077486,
+        "maximum": 0.999202148971,
+        "mean": 0.769866452012
       },
       "origin": {
         "kind": "unknown-acquisition",
@@ -56,10 +68,16 @@
         "partial": 2860,
         "fullyOpaque": 113499
       },
+      "opaqueToneDistribution": {
+        "sampleCount": 113499,
+        "minimum": 0.137490586666,
+        "maximum": 1,
+        "mean": 0.847497540062
+      },
       "origin": {
         "kind": "unknown-acquisition",
         "introducedByCommit": "0793309dff36682f55fd56ab83b5ed1969368714",
-        "introducedAt": "2026-07-17T16:29:34-05:00",
+        "introducedAt": "2026-07-17T16:32:47-05:00",
         "externalSource": null
       },
       "ownership": {
