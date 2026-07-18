@@ -16,6 +16,7 @@ import { isMaskPermittedPolyline } from './mask'
 import { createScribbleModel } from './model'
 import {
   runScribbleOrchestrator,
+  type ScribbleExecutionObservation,
   type ScribbleExecutionLimits,
   type ScribbleObserver,
   type ScribbleOrchestratorInput,
@@ -46,9 +47,17 @@ export interface ScribbleResult extends ShadingResult {
   readonly residualError: number
 }
 
-type ScribbleOrchestrator = (
+export type ScribbleOrchestrator = (
   input: ScribbleOrchestratorInput,
 ) => ScribbleOrchestratorOutcome
+
+/** Direct-module hooks used only by deterministic tests and benchmarks. */
+export interface ScribbleStrategyTestHooks {
+  readonly orchestrate?: ScribbleOrchestrator
+  readonly executionObserver?: (
+    observation: Readonly<ScribbleExecutionObservation>,
+  ) => void
+}
 
 // The ordinary work budget follows the normalized model: finer lattices and
 // lower per-pass coverage both require proportionally more deposited segments.
@@ -60,8 +69,8 @@ const HARD_MAX_RESTARTS = 4_000
 const SEGMENTS_PER_DENSITY_WEIGHTED_SAMPLE = 2
 const FULL_WORK_BUDGET_SCALE = 0.5
 
-function productionLimits(
-  model: Readonly<ScribbleModel>,
+export function resolveProductionScribbleExecutionLimits(
+  model: Readonly<Pick<ScribbleModel, 'controls' | 'lattice'>>,
 ): Readonly<ScribbleExecutionLimits> {
   // Very fine scales multiply lattice and output-point counts quadratically.
   // Until generation moves off the synchronous Studio path, taper the
@@ -121,9 +130,21 @@ function executeScribbleStrategy(
   input: ScribbleStrategyInput,
   orchestrate: ScribbleOrchestrator,
   injectedLimits?: Readonly<ScribbleExecutionLimits>,
+  executionObserver?: ScribbleStrategyTestHooks['executionObserver'],
 ): ScribbleResult {
   const model = createScribbleModel(input.source, input.frame, input.controls)
   const initialResidual = model.residualError()
+
+  const reportExecution = (
+    observation: Readonly<ScribbleExecutionObservation>,
+  ): void => {
+    if (executionObserver === undefined) return
+    try {
+      executionObserver(observation)
+    } catch {
+      // Internal diagnostics cannot change strategy geometry or termination.
+    }
+  }
 
   // No random draw or E1 call is necessary when the authored source has no
   // permission-weighted demand at the model's declared working resolution.
@@ -140,6 +161,18 @@ function executeScribbleStrategy(
         // Observers are diagnostic only and cannot change strategy results.
       }
     }
+    reportExecution(
+      Object.freeze({
+        stopCause: 'threshold-reached',
+        bindingGuard: null,
+        counters: Object.freeze({
+          acceptedSegments: 0,
+          emittedPolylines: 0,
+          stagnations: 0,
+          restarts: 0,
+        }),
+      }),
+    )
     return { polylines: [], termination: 'completed', residualError: 0 }
   }
 
@@ -147,7 +180,8 @@ function executeScribbleStrategy(
     model,
     rng: createRandom(input.seed),
     residualThreshold: model.scales.completionThreshold,
-    limits: injectedLimits ?? productionLimits(model),
+    limits:
+      injectedLimits ?? resolveProductionScribbleExecutionLimits(model),
     ...(input.observer === undefined ? {} : { observer: input.observer }),
   })
 
@@ -158,6 +192,14 @@ function executeScribbleStrategy(
   ) {
     throw new Error('Scribble orchestrator produced an invalid residual error')
   }
+
+  reportExecution(
+    Object.freeze({
+      stopCause: outcome.stopCause,
+      bindingGuard: outcome.bindingGuard,
+      counters: outcome.counters,
+    }),
+  )
 
   const polylines = smoothScribblePolylines(
     outcome.polylines,
@@ -198,7 +240,12 @@ export function scribbleStrategy(input: ScribbleStrategyInput): ScribbleResult {
 export function runScribbleStrategyForTesting(
   input: ScribbleStrategyInput,
   limits: Readonly<ScribbleExecutionLimits>,
-  orchestrate: ScribbleOrchestrator = runScribbleOrchestrator,
+  hooks: Readonly<ScribbleStrategyTestHooks> = {},
 ): ScribbleResult {
-  return executeScribbleStrategy(input, orchestrate, limits)
+  return executeScribbleStrategy(
+    input,
+    hooks.orchestrate ?? runScribbleOrchestrator,
+    limits,
+    hooks.executionObserver,
+  )
 }

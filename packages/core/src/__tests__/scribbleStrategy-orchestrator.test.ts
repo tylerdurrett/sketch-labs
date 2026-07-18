@@ -77,16 +77,18 @@ describe('Scribble pass orchestration', () => {
 
     expect(result.polylines).toEqual([])
     expect(result.residualError).toBeCloseTo(0.2, 12)
-    expect(result.acceptedSegments).toBe(0)
+    expect(result.counters.acceptedSegments).toBe(0)
     expect(result.stopCause).toBe('threshold-reached')
+    expect(result.bindingGuard).toBeNull()
     expect(snapshots).toEqual([
       { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
     ])
     expect(Object.keys(result)).toEqual([
       'polylines',
       'residualError',
-      'acceptedSegments',
       'stopCause',
+      'bindingGuard',
+      'counters',
     ])
   })
 
@@ -103,7 +105,7 @@ describe('Scribble pass orchestration', () => {
     expect(result.stopCause).toBe('threshold-reached')
     expect(result.residualError).toBeLessThanOrEqual(0.55)
     expect(result.residualError).toBeLessThan(initialError)
-    expect(result.acceptedSegments).toBeGreaterThan(0)
+    expect(result.counters.acceptedSegments).toBeGreaterThan(0)
   })
 
   it('keeps growing a long polyline before lifting from viable demand', () => {
@@ -118,7 +120,7 @@ describe('Scribble pass orchestration', () => {
     expect(Math.max(...result.polylines.map((line) => line.length))).toBeGreaterThan(
       10,
     )
-    expect(result.acceptedSegments).toBe(
+    expect(result.counters.acceptedSegments).toBe(
       result.polylines.reduce((sum, line) => sum + line.length - 1, 0),
     )
   })
@@ -223,7 +225,7 @@ describe('Scribble pass orchestration', () => {
       limits: GENEROUS_LIMITS,
     })
 
-    expect(result.acceptedSegments).toBeGreaterThan(0)
+    expect(result.counters.acceptedSegments).toBeGreaterThan(0)
     expect(result.polylines[0]![0]![0]).toBeGreaterThan(70)
     expect(result.polylines[0]![0]![1]).toBeGreaterThan(70)
   })
@@ -244,7 +246,7 @@ describe('Scribble pass orchestration', () => {
     const repeated = execute()
 
     expect(first.stopCause).toBe('budget-reached')
-    expect(first.acceptedSegments).toBe(1)
+    expect(first.counters.acceptedSegments).toBe(1)
     expect(first.polylines).toHaveLength(1)
     expect(first.polylines[0]).toHaveLength(2)
     expect(first.polylines[0]![0]).not.toEqual(first.polylines[0]![1])
@@ -259,7 +261,7 @@ describe('Scribble pass orchestration', () => {
       limits: { ...GENEROUS_LIMITS, maxAcceptedSegments: 1 },
     })
 
-    expect(result.acceptedSegments).toBe(1)
+    expect(result.counters.acceptedSegments).toBe(1)
     expect(result.residualError).toBeLessThanOrEqual(0.999_824)
     expect(result.stopCause).toBe('threshold-reached')
   })
@@ -337,7 +339,7 @@ describe('Scribble pass progress observation', () => {
       expect(intermediate[index]!.terminal).toBe(false)
     }
     expect(snapshots.at(-1)!.completedWorkUnits).toBeGreaterThanOrEqual(
-      result.acceptedSegments,
+      result.counters.acceptedSegments,
     )
   })
 
@@ -381,7 +383,7 @@ describe('Scribble pass progress observation', () => {
       observer: (progress) => snapshots.push(progress),
     })
 
-    expect(result.acceptedSegments).toBe(0)
+    expect(result.counters.acceptedSegments).toBe(0)
     expect(result.stopCause).toBe('budget-reached')
     expect(snapshots).toEqual([
       { completedWorkUnits: 1, totalWorkUnits: 4, terminal: false },
@@ -430,8 +432,14 @@ describe('Scribble lift-budget accounting', () => {
     })
 
     expect(result.stopCause).toBe('budget-reached')
+    expect(result.bindingGuard).toBe('polyline-limit')
     expect(result.polylines).toEqual([])
-    expect(result.acceptedSegments).toBe(0)
+    expect(result.counters).toEqual({
+      acceptedSegments: 0,
+      emittedPolylines: 0,
+      stagnations: 0,
+      restarts: 0,
+    })
     expect(result.residualError).toBeGreaterThan(0)
   })
 
@@ -442,9 +450,14 @@ describe('Scribble lift-budget accounting', () => {
     })
 
     expect(result.stopCause).toBe('budget-reached')
+    expect(result.bindingGuard).toBe('polyline-limit')
     expect(result.polylines).toHaveLength(1)
     expect(result.polylines[0]!.length).toBeGreaterThan(1)
-    expect(result.acceptedSegments).toBe(result.polylines[0]!.length - 1)
+    expect(result.counters.acceptedSegments).toBe(
+      result.polylines[0]!.length - 1,
+    )
+    expect(result.counters.emittedPolylines).toBe(1)
+    expect(result.counters.stagnations).toBeGreaterThan(0)
     expect(result.residualError).toBeGreaterThan(0)
   })
 
@@ -455,9 +468,13 @@ describe('Scribble lift-budget accounting', () => {
     })
 
     expect(result.stopCause).toBe('budget-reached')
+    expect(result.bindingGuard).toBe('restart-limit')
     expect(result.polylines).toHaveLength(1)
     expect(result.polylines[0]!.length).toBeGreaterThan(1)
-    expect(result.acceptedSegments).toBe(result.polylines[0]!.length - 1)
+    expect(result.counters.acceptedSegments).toBe(
+      result.polylines[0]!.length - 1,
+    )
+    expect(result.counters.restarts).toBe(0)
     expect(result.residualError).toBeGreaterThan(0)
   })
 
@@ -468,9 +485,46 @@ describe('Scribble lift-budget accounting', () => {
     })
 
     expect(result.stopCause).toBe('budget-reached')
+    expect(result.bindingGuard).toBe('stagnation-limit')
     expect(result.polylines).toHaveLength(1)
     expect(result.polylines[0]!.length).toBeGreaterThan(1)
-    expect(result.acceptedSegments).toBe(result.polylines[0]!.length - 1)
+    expect(result.counters.acceptedSegments).toBe(
+      result.polylines[0]!.length - 1,
+    )
+    expect(result.counters.stagnations).toBe(1)
     expect(result.residualError).toBeGreaterThan(0)
+  })
+
+  it('attributes accepted-segment and no-viable-restart stops exactly', () => {
+    const segmentLimited = runScribbleOrchestrator({
+      model: model(() => 1),
+      rng: createRandom('attributed-segment-limit'),
+      residualThreshold: 0,
+      limits: { ...GENEROUS_LIMITS, maxAcceptedSegments: 1 },
+    })
+    const noViableRestart = runScribbleOrchestrator({
+      model: model(
+        () => 1,
+        ([x, y]) => (x < 1.2 && y < 1.2 ? 1 : 0),
+      ),
+      rng: createRandom('attributed-no-restart'),
+      residualThreshold: 0,
+      limits: GENEROUS_LIMITS,
+    })
+
+    expect(segmentLimited.bindingGuard).toBe('accepted-segment-limit')
+    expect(segmentLimited.counters).toEqual({
+      acceptedSegments: 1,
+      emittedPolylines: 1,
+      stagnations: 0,
+      restarts: 0,
+    })
+    expect(noViableRestart.bindingGuard).toBe('no-viable-restart')
+    expect(noViableRestart.counters).toEqual({
+      acceptedSegments: 0,
+      emittedPolylines: 0,
+      stagnations: 1,
+      restarts: 0,
+    })
   })
 })

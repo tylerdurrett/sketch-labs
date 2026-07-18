@@ -5,6 +5,7 @@ import { totalPathLength } from '../shadingStrategy'
 import { createShadingMask, type ToneSource } from '../shadingFields'
 import {
   defaultScribbleControls,
+  resolveProductionScribbleExecutionLimits,
   runScribbleStrategyForTesting,
   scribbleControlSchema,
   scribbleStrategy,
@@ -13,8 +14,17 @@ import {
   type ScribbleResult,
   type ScribbleStrategyInput,
 } from '../scribbleStrategy/index'
-import { createScribbleModel } from '../scribbleStrategy/model'
-import type { ScribbleExecutionLimits } from '../scribbleStrategy/orchestrator'
+import {
+  createScribbleModel,
+  resolveScribbleLattice,
+  resolveScribbleScales,
+} from '../scribbleStrategy/model'
+import type {
+  ScribbleExecutionLimits,
+  ScribbleExecutionObservation,
+  ScribbleOrchestratorOutcome,
+  ScribbleOrchestratorStopCause,
+} from '../scribbleStrategy/orchestrator'
 import type { ScribbleControls } from '../scribbleStrategy/types'
 import type { Point, Polyline } from '../types'
 import {
@@ -33,6 +43,30 @@ const TINY_LIMITS: ScribbleExecutionLimits = {
   maxPolylines: 1,
   maxStagnations: 1,
   maxRestarts: 0,
+}
+
+function outcome(
+  polylines: Polyline[],
+  residualError: number,
+  stopCause: ScribbleOrchestratorStopCause,
+): ScribbleOrchestratorOutcome {
+  const acceptedSegments = polylines.reduce(
+    (sum, polyline) => sum + Math.max(0, polyline.length - 1),
+    0,
+  )
+  return {
+    polylines,
+    residualError,
+    stopCause,
+    bindingGuard:
+      stopCause === 'threshold-reached' ? null : 'accepted-segment-limit',
+    counters: Object.freeze({
+      acceptedSegments,
+      emittedPolylines: polylines.length,
+      stagnations: 0,
+      restarts: 0,
+    }),
+  }
 }
 
 function input(
@@ -54,6 +88,19 @@ function source(
   shadingMask = FULL_MASK,
 ): ToneSource {
   return { toneField, shadingMask }
+}
+
+function highDensityProductionLimitsAtScale(
+  scribbleScale: number,
+): Readonly<ScribbleExecutionLimits> {
+  const controls = {
+    ...defaultScribbleControls,
+    pathDensity: scribbleControlSchema.pathDensity.max,
+    scribbleScale,
+  }
+  const scales = resolveScribbleScales(FRAME, controls)
+  const lattice = resolveScribbleLattice(FRAME, scales.residualSpacing)
+  return resolveProductionScribbleExecutionLimits({ controls, lattice })
 }
 
 function points(polylines: readonly Polyline[]): Point[] {
@@ -140,6 +187,7 @@ describe('public Scribble strategy boundary', () => {
     expect(core.scribbleControlSchema).toBe(scribbleControlSchema)
     expect(core.defaultScribbleControls).toBe(defaultScribbleControls)
     expect('runScribbleStrategyForTesting' in core).toBe(false)
+    expect('resolveProductionScribbleExecutionLimits' in core).toBe(false)
     expectTypeOf<ScribbleStrategyInput>().toMatchTypeOf<
       core.ShadingStrategyInput<ScribbleControls>
     >()
@@ -171,14 +219,15 @@ describe('public Scribble strategy boundary', () => {
       runScribbleStrategyForTesting(
         input(source(), 'threshold-map', { toneFidelity }),
         TINY_LIMITS,
-        (orchestratorInput) => {
-          thresholds.push(orchestratorInput.residualThreshold)
-          return {
-            polylines: [],
-            residualError: orchestratorInput.model.residualError(),
-            acceptedSegments: 0,
-            stopCause: 'threshold-reached',
-          }
+        {
+          orchestrate: (orchestratorInput) => {
+            thresholds.push(orchestratorInput.residualThreshold)
+            return outcome(
+              [],
+              orchestratorInput.model.residualError(),
+              'threshold-reached',
+            )
+          },
         },
       )
     }
@@ -196,9 +245,11 @@ describe('public Scribble strategy boundary', () => {
     const result = runScribbleStrategyForTesting(
       input(source(constantTone(0))),
       TINY_LIMITS,
-      () => {
-        calls++
-        throw new Error('E1 must not run')
+      {
+        orchestrate: () => {
+          calls++
+          throw new Error('E1 must not run')
+        },
       },
     )
 
@@ -278,14 +329,11 @@ describe('public Scribble strategy boundary', () => {
       const result = runScribbleStrategyForTesting(
         input(source(), stopCause),
         TINY_LIMITS,
-        ({ model }) => {
-          calls++
-          return {
-            polylines: [],
-            residualError: model.residualError(),
-            acceptedSegments: 0,
-            stopCause,
-          }
+        {
+          orchestrate: ({ model }) => {
+            calls++
+            return outcome([], model.residualError(), stopCause)
+          },
         },
       )
 
@@ -310,6 +358,51 @@ describe('public Scribble strategy boundary', () => {
     expectValidResult(first)
   })
 
+  it('observes injected limits without changing deterministic geometry', () => {
+    const strategyInput = input(
+      source(constantTone(1)),
+      'internal-execution-observation',
+    )
+    const observations: ScribbleExecutionObservation[] = []
+    const unobserved = runScribbleStrategyForTesting(
+      strategyInput,
+      TINY_LIMITS,
+    )
+    const observed = runScribbleStrategyForTesting(
+      strategyInput,
+      TINY_LIMITS,
+      {
+        executionObserver: (observation) => observations.push(observation),
+      },
+    )
+    const throwing = runScribbleStrategyForTesting(
+      strategyInput,
+      TINY_LIMITS,
+      {
+        executionObserver: () => {
+          throw new Error('benchmark observer failure')
+        },
+      },
+    )
+
+    expect(observed).toEqual(unobserved)
+    expect(throwing).toEqual(unobserved)
+    expect(observations).toEqual([
+      {
+        stopCause: 'budget-reached',
+        bindingGuard: 'accepted-segment-limit',
+        counters: {
+          acceptedSegments: 1,
+          emittedPolylines: 1,
+          stagnations: 0,
+          restarts: 0,
+        },
+      },
+    ])
+    expect(Object.isFrozen(observations[0])).toBe(true)
+    expect(Object.isFrozen(observations[0]!.counters)).toBe(true)
+  })
+
   it('refines sharp solver corners into deterministic curved output', () => {
     const raw: Polyline = [
       [10, 10],
@@ -321,12 +414,10 @@ describe('public Scribble strategy boundary', () => {
       runScribbleStrategyForTesting(
         input(source(), 'smooth-public-geometry'),
         TINY_LIMITS,
-        ({ model }) => ({
-          polylines: [raw],
-          residualError: model.residualError(),
-          acceptedSegments: raw.length - 1,
-          stopCause: 'budget-reached',
-        }),
+        {
+          orchestrate: ({ model }) =>
+            outcome([raw], model.residualError(), 'budget-reached'),
+        },
       )
 
     const result = execute()
@@ -351,12 +442,10 @@ describe('public Scribble strategy boundary', () => {
     const result = runScribbleStrategyForTesting(
       input(source(constantTone(1), cornerMask), 'mask-safe-smoothing'),
       TINY_LIMITS,
-      ({ model }) => ({
-        polylines: [raw],
-        residualError: model.residualError(),
-        acceptedSegments: raw.length - 1,
-        stopCause: 'budget-reached',
-      }),
+      {
+        orchestrate: ({ model }) =>
+          outcome([raw], model.residualError(), 'budget-reached'),
+      },
     )
 
     expect(result.polylines).toEqual([raw])
@@ -368,18 +457,64 @@ describe('public Scribble strategy boundary', () => {
       runScribbleStrategyForTesting(
         input(source(constantTone(1), thinZeroBarrierMask(FRAME))),
         TINY_LIMITS,
-        ({ model }) => {
-          calls++
-          return {
-            polylines: [[[25, 50], [75, 50]]],
-            residualError: model.residualError(),
-            acceptedSegments: 1,
-            stopCause: 'budget-reached',
-          }
+        {
+          orchestrate: ({ model }) => {
+            calls++
+            return outcome(
+              [[[25, 50], [75, 50]]],
+              model.residualError(),
+              'budget-reached',
+            )
+          },
         },
       ),
     ).toThrow(/invalid geometry/)
     expect(calls).toBe(1)
+  })
+})
+
+describe('internal Scribble execution-limit seam', () => {
+  it.each([
+    [0.1, 50_000, 4_000, 8_000, 4_000],
+    [0.2, 100_000, 4_000, 8_000, 4_000],
+    [0.25, 125_000, 4_000, 8_000, 4_000],
+    [0.5, 250_000, 4_000, 8_000, 4_000],
+    [1, 219_040, 4_000, 8_000, 4_000],
+    [2, 54_760, 4_000, 8_000, 4_000],
+  ] as const)(
+    'pins the production tuple at Scribble scale %s',
+    (
+      scribbleScale,
+      maxAcceptedSegments,
+      maxPolylines,
+      maxStagnations,
+      maxRestarts,
+    ) => {
+      expect(highDensityProductionLimitsAtScale(scribbleScale)).toEqual({
+        maxAcceptedSegments,
+        maxPolylines,
+        maxStagnations,
+        maxRestarts,
+      })
+    },
+  )
+
+  it('reproduces production geometry when supplied the production tuple', () => {
+    const strategyInput = input(
+      source(horizontalGradientTone(FRAME)),
+      'production-limit-injection',
+      { scribbleScale: 1.5 },
+    )
+    const strategyModel = createScribbleModel(
+      strategyInput.source,
+      strategyInput.frame,
+      strategyInput.controls,
+    )
+    const limits = resolveProductionScribbleExecutionLimits(strategyModel)
+
+    expect(
+      runScribbleStrategyForTesting(strategyInput, limits),
+    ).toEqual(scribbleStrategy(strategyInput))
   })
 })
 

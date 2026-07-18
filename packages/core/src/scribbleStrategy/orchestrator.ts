@@ -45,12 +45,36 @@ export type ScribbleOrchestratorStopCause =
   | 'threshold-reached'
   | 'budget-reached'
 
+/** The exact internal condition that prevented another solver work unit. */
+export type ScribbleExecutionBindingGuard =
+  | 'accepted-segment-limit'
+  | 'polyline-limit'
+  | 'stagnation-limit'
+  | 'restart-limit'
+  | 'no-viable-restart'
+
+/** Raw solver counters, before smoothing or public policy translation. */
+export interface ScribbleExecutionCounters {
+  readonly acceptedSegments: number
+  readonly emittedPolylines: number
+  readonly stagnations: number
+  readonly restarts: number
+}
+
+/** Internal terminal diagnostics for benchmarks and direct-module tests. */
+export interface ScribbleExecutionObservation {
+  readonly stopCause: ScribbleOrchestratorStopCause
+  readonly bindingGuard: ScribbleExecutionBindingGuard | null
+  readonly counters: Readonly<ScribbleExecutionCounters>
+}
+
 /** Raw solver state, before a public strategy assigns authored policy. */
 export interface ScribbleOrchestratorOutcome {
   readonly polylines: Polyline[]
   readonly residualError: number
-  readonly acceptedSegments: number
   readonly stopCause: ScribbleOrchestratorStopCause
+  readonly bindingGuard: ScribbleExecutionBindingGuard | null
+  readonly counters: Readonly<ScribbleExecutionCounters>
 }
 
 interface RestartCell {
@@ -182,17 +206,33 @@ export function runScribbleOrchestrator({
 
   const finish = (
     stopCause: ScribbleOrchestratorStopCause,
+    bindingGuard: ScribbleExecutionBindingGuard | null,
   ): ScribbleOrchestratorOutcome => {
     reportProgress(true)
-    return { polylines, residualError, acceptedSegments, stopCause }
+    const counters: ScribbleExecutionCounters = Object.freeze({
+      acceptedSegments,
+      emittedPolylines: polylines.length,
+      stagnations,
+      restarts,
+    })
+    return {
+      polylines,
+      residualError,
+      stopCause,
+      bindingGuard,
+      counters,
+    }
   }
 
   if (residualError <= residualThreshold) {
-    return finish('threshold-reached')
+    return finish('threshold-reached', null)
   }
 
-  if (limits.maxAcceptedSegments === 0 || limits.maxPolylines === 0) {
-    return finish('budget-reached')
+  if (limits.maxAcceptedSegments === 0) {
+    return finish('budget-reached', 'accepted-segment-limit')
+  }
+  if (limits.maxPolylines === 0) {
+    return finish('budget-reached', 'polyline-limit')
   }
 
   let restartCell = chooseRestartCell(model, rng, rejectedStarts)
@@ -228,10 +268,10 @@ export function runScribbleOrchestrator({
 
       // Completion always wins when the same accepted segment reaches a cap.
       if (residualError <= residualThreshold) {
-        return finish('threshold-reached')
+        return finish('threshold-reached', null)
       }
       if (acceptedSegments >= limits.maxAcceptedSegments) {
-        return finish('budget-reached')
+        return finish('budget-reached', 'accepted-segment-limit')
       }
 
       continue
@@ -245,20 +285,24 @@ export function runScribbleOrchestrator({
     activePolyline = undefined
     heading = undefined
 
-    if (
-      stagnations >= limits.maxStagnations ||
-      restarts >= limits.maxRestarts ||
-      polylines.length >= limits.maxPolylines
-    ) {
-      break
+    if (stagnations >= limits.maxStagnations) {
+      return finish('budget-reached', 'stagnation-limit')
+    }
+    if (restarts >= limits.maxRestarts) {
+      return finish('budget-reached', 'restart-limit')
+    }
+    if (polylines.length >= limits.maxPolylines) {
+      return finish('budget-reached', 'polyline-limit')
     }
 
     restartCell = chooseRestartCell(model, rng, rejectedStarts)
-    if (restartCell === undefined) break
+    if (restartCell === undefined) {
+      return finish('budget-reached', 'no-viable-restart')
+    }
 
     current = restartCell.point
     restarts++
   }
 
-  return finish('budget-reached')
+  return finish('budget-reached', 'no-viable-restart')
 }
