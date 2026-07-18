@@ -83,7 +83,17 @@ export type LiveCanvasRenderState =
       SuppliedSceneProvenance)
   | ({ readonly kind: "outline"; readonly scene: Scene; readonly t: number } &
       SuppliedSceneProvenance)
-  | { readonly kind: "tone-reference"; readonly source: ToneSource };
+  | { readonly kind: "tone-reference"; readonly source: ToneSource }
+  | {
+      /**
+       * Fail-closed presentation for authored Image Asset IDs that are not yet
+       * usable. The IDs stay caller-owned and exact; LiveCanvas only presents
+       * them and never repairs, resolves, or substitutes one.
+       */
+      readonly kind: "unavailable";
+      readonly status: "loading" | "missing" | "error";
+      readonly unresolvedAssetIds: readonly string[];
+    };
 
 const LIVE_FILL_RENDER_STATE: LiveCanvasRenderState = { kind: "fill-live" };
 
@@ -162,8 +172,9 @@ export interface LiveCanvasProps {
   /** Reports a Scene only after that exact Scene was successfully painted. */
   onDisplayedSceneCommitted?: (snapshot: DisplayedSceneSnapshot) => void;
   /**
-   * Selects live Fill sampling, caller-owned held/Outline geometry, or a
-   * pixel-native Tone reference. No non-live state invokes the Sketch generator.
+   * Selects live Fill sampling, caller-owned held/Outline geometry, a
+   * pixel-native Tone reference, or an explicit fail-closed unavailable state.
+   * No non-live state invokes the Sketch generator.
    */
   renderState?: LiveCanvasRenderState;
   /** Export identity metadata retained in the displayed-scene handle. */
@@ -238,6 +249,19 @@ function paintToneReference(
   imageData.data.set(raster.data);
   ctx.putImageData(imageData, 0, 0);
   return true;
+}
+
+/** Remove every previously painted pixel without deriving replacement content. */
+function neutralizeCanvas(canvas: HTMLCanvasElement): void {
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) {
+    // Assigning a canvas dimension clears its backing store even when no 2D
+    // context is available. Retain the current export resolution.
+    canvas.width = canvas.width;
+    return;
+  }
+  ctx.resetTransform();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
 /**
@@ -441,6 +465,21 @@ export function LiveCanvas({
     [],
   );
 
+  // Unavailable Image Asset input is a hard content boundary, not merely an
+  // overlay. Clear both retained snapshots in a layout effect so a newly supplied
+  // capture request cannot observe the previous Fill from the passive capture
+  // effect below. Neutralize the actual backing store in the same pre-paint phase
+  // so getCanvas()/PNG cannot expose stale artwork either.
+  useLayoutEffect(() => {
+    if (renderState.kind !== "unavailable") return;
+    displayedSceneRef.current = null;
+    displayedFillRef.current = null;
+    const canvas = canvasRef.current;
+    if (canvas === null) return;
+    sizeToBox(canvas, window.devicePixelRatio || 1);
+    neutralizeCanvas(canvas);
+  }, [renderState]);
+
   // The transport's PLAYING gate. An animated Sketch mounts playing (ADR-0005):
   // the rAF loop drives `t` and the scrubber thumb follows. Grabbing the scrubber
   // flips this to `false`, pausing the loop so `t` is held at the scrubbed frame.
@@ -568,6 +607,7 @@ export function LiveCanvas({
       paintToneReference(canvas, state.source, compositionFrameRef.current);
       return;
     }
+    if (state.kind === "unavailable") return;
     const displayed = displayedSceneRef.current;
     if (displayed !== null) paintFrame(canvas, displayed.scene);
   }, []);
@@ -581,14 +621,20 @@ export function LiveCanvas({
     rebuildAndDrawFillAt(tRef.current);
   }, [rebuildAndDrawFillAt]);
 
-  // Supplied geometry freezes time at its captured t. Tone reference suspends
-  // geometry without touching time, so returning to artwork resumes unchanged.
+  // Supplied geometry freezes time at its captured t. Tone and unavailable
+  // states suspend geometry without touching time, so returning to artwork
+  // resumes unchanged.
   useEffect(() => {
     if (renderState.kind === "fill-live") {
       resumeTRef.current = tRef.current;
       return;
     }
-    if (renderState.kind === "tone-reference") return;
+    if (
+      renderState.kind === "tone-reference" ||
+      renderState.kind === "unavailable"
+    ) {
+      return;
+    }
     tRef.current = renderState.t;
     resumeTRef.current = renderState.t;
     if (scrubberRef.current !== null) {
@@ -688,7 +734,12 @@ export function LiveCanvas({
   // Static live Fill derives synchronously. Supplied held/Outline geometry paints
   // atomically as-is. Neither path is sent through hidden-line work.
   useEffect(() => {
-    if (renderState.kind === "tone-reference") return;
+    if (
+      renderState.kind === "tone-reference" ||
+      renderState.kind === "unavailable"
+    ) {
+      return;
+    }
     const canvas = canvasRef.current;
     if (canvas === null) return;
     sizeToBox(canvas, window.devicePixelRatio || 1);
@@ -806,6 +857,18 @@ export function LiveCanvas({
   // for an animated Sketch (`sketch.time` present); a static Sketch renders the
   // canvas alone in the same layout — no clock, no bar (exactly as before).
   const time = sketch.time;
+  const unavailableState =
+    renderState.kind === "unavailable" ? renderState : null;
+  const unavailableSubject =
+    unavailableState?.unresolvedAssetIds.length === 1
+      ? "Image Asset"
+      : "Image Assets";
+  const unavailableMessage =
+    unavailableState?.status === "loading"
+      ? `${unavailableSubject} loading`
+      : unavailableState?.status === "missing"
+        ? `${unavailableSubject} unavailable`
+        : `${unavailableSubject} could not be loaded`;
   return (
     <div className="live-canvas-layout">
       <div className="live-canvas-stage">
@@ -823,12 +886,41 @@ export function LiveCanvas({
           aria-label="Plot sheet preview"
         >
           <div className="plot-drawable">
-            <canvas ref={canvasRef} className="live-canvas" style={paperStyle} />
+            <canvas
+              ref={canvasRef}
+              className="live-canvas"
+              style={paperStyle}
+              aria-hidden={unavailableState === null ? undefined : true}
+            />
+            {unavailableState !== null && (
+              <div
+                className="live-canvas-unavailable"
+                role={unavailableState.status === "loading" ? "status" : "alert"}
+                aria-live={
+                  unavailableState.status === "loading" ? "polite" : "assertive"
+                }
+                aria-atomic="true"
+              >
+                <strong className="live-canvas-unavailable__message">
+                  {unavailableMessage}
+                </strong>
+                <span className="live-canvas-unavailable__label">
+                  {unavailableState.unresolvedAssetIds.length === 1
+                    ? "Unresolved ID"
+                    : "Unresolved IDs"}
+                </span>
+                <span className="live-canvas-unavailable__ids">
+                  {unavailableState.unresolvedAssetIds.map((id, index) => (
+                    <code key={`${index}:${id}`}>{id}</code>
+                  ))}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
       {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
-      {time !== undefined && (
+      {time !== undefined && unavailableState === null && (
         <div className="transport">
           <button
             type="button"

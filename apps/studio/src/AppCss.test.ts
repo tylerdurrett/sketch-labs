@@ -30,6 +30,14 @@ describe("full-sheet preview geometry CSS", () => {
     expect(drawable).toMatch(/bottom:\s*var\(--plot-inset-bottom/);
     expect(drawable).toMatch(/left:\s*var\(--plot-inset-left/);
   });
+
+  it("covers the drawable rectangle with unavailable-state feedback", () => {
+    const unavailable = declarations(".live-canvas-unavailable");
+
+    expect(unavailable).toMatch(/position:\s*absolute/);
+    expect(unavailable).toMatch(/inset:\s*0/);
+    expect(unavailable).toMatch(/background:\s*#fff/);
+  });
 });
 
 describe("viewport scroll ownership", () => {

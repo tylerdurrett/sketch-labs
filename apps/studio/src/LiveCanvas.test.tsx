@@ -1260,6 +1260,146 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
   });
 });
 
+describe("LiveCanvas unavailable Image Asset state (#335)", () => {
+  it.each([
+    ["loading", "status", "Image Assets loading"],
+    ["missing", "alert", "Image Assets unavailable"],
+    ["error", "alert", "Image Assets could not be loaded"],
+  ] as const)(
+    "presents bounded %s feedback with every exact unresolved ID",
+    (status, role, message) => {
+      const { sketch, prepare, generate } = explicitlyPreparedSketch({
+        duration: 10,
+        mode: "loop",
+      });
+      const unresolvedAssetIds = [
+        "first-asset-000000000001",
+        "second-asset-000000000002",
+      ];
+      const el = mount(
+        <LiveCanvas
+          sketch={sketch}
+          params={{ value: 1 }}
+          seed={1}
+          renderState={{ kind: "unavailable", status, unresolvedAssetIds }}
+        />,
+      );
+
+      const feedback = el.querySelector(`[role="${role}"]`);
+      expect(feedback?.textContent).toContain(message);
+      expect(
+        [...el.querySelectorAll(".live-canvas-unavailable__ids code")].map(
+          (node) => node.textContent,
+        ),
+      ).toEqual(unresolvedAssetIds);
+      expect(canvasEl(el).getAttribute("aria-hidden")).toBe("true");
+      expect(el.querySelector(".transport")).toBeNull();
+      expect(prepare).not.toHaveBeenCalled();
+      expect(generate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("clears stale pixels and every capture seam before an unavailable request can observe them", () => {
+    const { ctx, counts, reset } = recordingContext();
+    useRecordingContext(ctx);
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const handle = createRef<LiveCanvasHandle>();
+    const onFillCaptured = vi.fn();
+    const params = {};
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        inputRevision={4}
+      />,
+    );
+    tick(1000);
+    expect(handle.current?.captureDisplayedFrame()).not.toBeNull();
+    const draws = generate.mock.calls.length;
+    reset();
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={1}
+          inputRevision={4}
+          fillCaptureRequest={{ token: 99, inputRevision: 4 }}
+          onFillCaptured={onFillCaptured}
+          renderState={{
+            kind: "unavailable",
+            status: "missing",
+            unresolvedAssetIds: ["missing-asset-000000000004"],
+          }}
+        />,
+      );
+    });
+
+    expect(counts.clearRect).toBe(1);
+    expect(counts.fill ?? 0).toBe(0);
+    expect(counts.stroke ?? 0).toBe(0);
+    expect(counts.fillRect ?? 0).toBe(0);
+    expect(counts.putImageData ?? 0).toBe(0);
+    expect(handle.current?.getDisplayedScene()).toBeNull();
+    expect(handle.current?.captureDisplayedFrame()).toBeNull();
+    expect(handle.current?.getCanvas()).toBe(canvasEl(el));
+    expect(onFillCaptured).not.toHaveBeenCalled();
+    tick(5000);
+    expect(generate).toHaveBeenCalledTimes(draws);
+    expect(onFillCaptured).not.toHaveBeenCalled();
+  });
+
+  it("resumes ordinary preparation and rendering when the exact input resolves", () => {
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const handle = createRef<LiveCanvasHandle>();
+    const params = { value: 2 };
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={3}
+        renderState={{
+          kind: "unavailable",
+          status: "loading",
+          unresolvedAssetIds: ["recovering-asset-000000000005"],
+        }}
+      />,
+    );
+    expect(prepare).not.toHaveBeenCalled();
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={3}
+          renderState={{ kind: "fill-live" }}
+        />,
+      );
+    });
+    expect(prepare).toHaveBeenCalledOnce();
+    tick(750);
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(handle.current?.captureDisplayedFrame()).toMatchObject({
+      t: 0.75,
+      renderMode: "fill",
+    });
+    expect(el.querySelector(".live-canvas-unavailable")).toBeNull();
+    expect(el.querySelector(".transport")).not.toBeNull();
+    expect(canvasEl(el).hasAttribute("aria-hidden")).toBe(false);
+  });
+});
+
 describe("LiveCanvas Tone reference pixels (#316)", () => {
   it("bypasses Sketch generation and the Scene renderer and exposes no displayed Scene", () => {
     const { ctx, counts, images } = pixelRecordingContext();
