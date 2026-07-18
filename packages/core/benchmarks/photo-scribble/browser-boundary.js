@@ -189,13 +189,9 @@ function validateRun(run, expected) {
 export function validateEquivalenceResponse(value, expected) {
   evidenceAssertion(isRecord(value) && value.scenarioId === expected.scenarioId,
     'equivalence wrapper scenario does not match')
-  evidenceAssertion(value.identityHashMatches === true &&
-    value.productionResolverSelectedTuple === true &&
-    value.sceneHashMatches === true && value.diagnosticsHashMatches === true,
-  'equivalence proof did not match')
-  evidenceAssertion(sameTuple(value.resolvedTuple, value.production?.fullTuple),
-    'equivalence resolved tuple does not match production')
-  const tuple = value.resolvedTuple
+  // The production run is authoritative. The wrapper tuple and booleans are
+  // checked only after every nested fact has independently agreed.
+  const tuple = value.production?.fullTuple
   validateRun(value.production, {
     ...expected,
     label: 'equivalence production run',
@@ -214,10 +210,55 @@ export function validateEquivalenceResponse(value, expected) {
     },
     tuple,
   })
+  const production = value.production
+  const injected = value.injectedResolvedTuple
+  const identityMatches = production.identityHash === injected.identityHash
+  const sceneMatches = production.result.sceneHash === injected.result.sceneHash
+  const diagnosticsMatches =
+    production.result.diagnosticsHash === injected.result.diagnosticsHash
+  const productionTupleMatches =
+    sameTuple(tuple, value.resolvedTuple) &&
+    sameTuple(tuple, production.fullTuple) &&
+    sameTuple(tuple, production.telemetry.resolvedProductionLimits) &&
+    sameTuple(tuple, production.telemetry.effectiveLimits)
+  const injectedTupleMatches =
+    sameTuple(tuple, injected.fullTuple) &&
+    sameTuple(tuple, injected.telemetry.resolvedProductionLimits) &&
+    sameTuple(tuple, injected.telemetry.effectiveLimits)
+  const productionResolverComputed = sameTuple(
+    production.telemetry.resolvedProductionLimits,
+    production.telemetry.effectiveLimits,
+  )
+  const injectedResolverComputed = sameTuple(
+    injected.telemetry.resolvedProductionLimits,
+    injected.telemetry.effectiveLimits,
+  )
+
+  evidenceAssertion(production.runId !== injected.runId,
+    'equivalence run identities are stale or inconsistent')
+  evidenceAssertion(identityMatches,
+    'nested production and injected identity hashes do not match')
+  evidenceAssertion(sceneMatches,
+    'nested production and injected Scene hashes do not match')
+  evidenceAssertion(diagnosticsMatches,
+    'nested production and injected diagnostics hashes do not match')
+  evidenceAssertion(productionTupleMatches && injectedTupleMatches,
+    'nested resolved/effective complete tuples do not match')
   evidenceAssertion(
-    value.production.identityHash === value.injectedResolvedTuple.identityHash &&
-      value.production.runId !== value.injectedResolvedTuple.runId,
-    'equivalence run identities are stale or inconsistent',
+    production.telemetry.productionResolverSelectedEffectiveTuple ===
+      productionResolverComputed &&
+      productionResolverComputed === true &&
+      injected.telemetry.productionResolverSelectedEffectiveTuple ===
+        injectedResolverComputed &&
+      injectedResolverComputed === true,
+    'nested production resolver attribution is inconsistent with tuple equality',
+  )
+  evidenceAssertion(
+    value.identityHashMatches === identityMatches &&
+      value.sceneHashMatches === sceneMatches &&
+      value.diagnosticsHashMatches === diagnosticsMatches &&
+      value.productionResolverSelectedTuple === productionResolverComputed,
+    'equivalence wrapper assertions contradict nested evidence',
   )
   return value
 }

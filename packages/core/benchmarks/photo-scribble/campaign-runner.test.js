@@ -104,8 +104,8 @@ function evidenceRun({
       identifier: rightsEvidence.evidenceId,
     },
     identityHash: 'a'.repeat(64),
-    profile,
-    fullTuple: tuple,
+    profile: structuredClone(profile),
+    fullTuple: { ...tuple },
     result: {
       sceneHash: 'b'.repeat(64),
       diagnosticsHash: 'c'.repeat(64),
@@ -142,9 +142,9 @@ function evidenceRun({
       sketchId: 'photo-scribble',
       imageAssetId: 'img-0672-79d639daec62',
       purpose,
-      profile,
-      resolvedProductionLimits: responseTuple,
-      effectiveLimits: tuple,
+      profile: structuredClone(profile),
+      resolvedProductionLimits: { ...responseTuple },
+      effectiveLimits: { ...tuple },
       productionResolverSelectedEffectiveTuple: true,
       execution: purpose === 'measurement' ? {
         stopCause: 'threshold-reached',
@@ -191,7 +191,7 @@ function validResponses() {
   const equivalence = {
     scenarioId: 'flowers-opaque-fine',
     identityHashMatches: true,
-    resolvedTuple: responseTuple,
+    resolvedTuple: { ...responseTuple },
     productionResolverSelectedTuple: true,
     sceneHashMatches: true,
     diagnosticsHashMatches: true,
@@ -473,6 +473,60 @@ describe('Photo Scribble Puppeteer boundary', () => {
       imageAssetId: 'img-0672-79d639daec62',
       rightsEvidence,
     })).toThrow('stale or inconsistent')
+  })
+
+  it.each([
+    [
+      'lying wrapper booleans',
+      (value) => { value.sceneHashMatches = false },
+      'wrapper assertions contradict nested evidence',
+    ],
+    [
+      'mismatched nested Scene hashes despite a true wrapper flag',
+      (value) => { value.injectedResolvedTuple.result.sceneHash = 'd'.repeat(64) },
+      'nested production and injected Scene hashes do not match',
+    ],
+    [
+      'mismatched nested diagnostics hashes despite a true wrapper flag',
+      (value) => { value.injectedResolvedTuple.result.diagnosticsHash = 'd'.repeat(64) },
+      'nested production and injected diagnostics hashes do not match',
+    ],
+    [
+      'mismatched nested resolved tuples',
+      (value) => {
+        value.injectedResolvedTuple.telemetry.resolvedProductionLimits.maxRestarts++
+      },
+      'nested resolved/effective complete tuples do not match',
+    ],
+    [
+      'a mismatched wrapper resolved tuple',
+      (value) => { value.resolvedTuple.maxAcceptedSegments++ },
+      'nested resolved/effective complete tuples do not match',
+    ],
+    [
+      'mismatched nested effective tuples',
+      (value) => {
+        value.injectedResolvedTuple.telemetry.effectiveLimits.maxPolylines++
+      },
+      'telemetry tuple does not match',
+    ],
+    [
+      'a lying resolver-selection flag',
+      (value) => {
+        value.injectedResolvedTuple.telemetry.productionResolverSelectedEffectiveTuple = false
+      },
+      'resolver attribution is inconsistent',
+    ],
+  ])('rejects equivalence authority from %s', (_label, mutate, message) => {
+    const { equivalence, equivalenceHostRunId } = structuredClone(validResponses())
+    mutate(equivalence)
+    expect(() => validateEquivalenceResponse(equivalence, {
+      campaignId: responseCampaignId,
+      hostRunId: equivalenceHostRunId,
+      scenarioId: 'flowers-opaque-fine',
+      imageAssetId: 'img-0672-79d639daec62',
+      rightsEvidence,
+    })).toThrow(message)
   })
 
   it('rejects an operation immediately when its signal was already aborted', async () => {
