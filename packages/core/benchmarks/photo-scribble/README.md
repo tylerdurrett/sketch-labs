@@ -42,14 +42,20 @@ apps/studio/node_modules/.bin/vite build \
 ```
 
 The page exposes `window.__PHOTO_SCRIBBLE_EVIDENCE__` with `runProduction`,
-`runCandidate`, and `runExactEquivalence`. Every call requires a non-empty
-`rightsEvidence` identifier and remains blocked while the gate below is
-unsatisfied. Exact equivalence runs the registered production generator and an
-injected run at the explicitly reported production-resolved four-limit tuple,
-then compares the full identity, canonical Scene, and canonical diagnostics
-hashes. `performance.memory`, when present, is labeled page/main-process only;
-worker heap is unavailable, so duration, geometry counts, serialized bytes,
-and response-ready-to-main-receipt latency are recorded as proxies.
+`runCandidate`, and `runExactEquivalence`. Every call requires one complete
+structured `rightsEvidence` record matching an accepted form below; an arbitrary
+string is rejected. Its normalized type and identifier are copied into every
+run. Production and candidate measurements each execute exactly one solver
+pass. Exact equivalence is a separate, explicitly unmeasured two-run proof: the
+registered production generator and an injected run at the reported
+production-resolved four-limit tuple, compared by full identity plus canonical
+Scene and diagnostics hashes. Raw solver counters are `null` for the
+uninstrumented production generator and populated for injected candidates.
+`performance.memory`, when present, is labeled page/main-process only; worker
+heap is unavailable, so duration, geometry counts, serialized bytes, and
+response-ready-to-main-receipt latency are recorded as proxies. Main-clock
+request-post, every progress receipt, and final-response receipt anchors make
+all heartbeat gaps directly calculable.
 
 The committed opaque flowers cover an ordinary photo and a `3:4` source in a
 square frame. The dark alpha pinecone covers Tone adjustment, a `2:3` source,

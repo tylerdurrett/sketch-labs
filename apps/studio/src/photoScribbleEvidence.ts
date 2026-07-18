@@ -8,22 +8,26 @@ import {
   canonicalScribbleIdentityHash,
 } from "./photoScribbleEvidenceHash";
 import {
+  normalizePhotoScribbleRightsEvidence,
+  type NormalizedPhotoScribbleRightsEvidence,
   type PhotoScribbleEvidenceProfile,
+  type PhotoScribbleRightsEvidence,
   type PhotoScribbleEvidenceTelemetry,
   type PhotoScribbleEvidenceWorkerConfig,
 } from "./photoScribbleEvidenceProtocol";
 import {
   createScribbleComputeIdentity,
+  isScribbleComputeProgress,
   isScribbleWorkerMessage,
 } from "./scribbleComputeProtocol";
 import {
   ScribbleCoordinator,
-  type ScribbleProgressUpdate,
   type ScribbleWorkerPort,
 } from "./scribbleCoordinator";
 
 interface Scenario {
   readonly scenarioId: string;
+  readonly fixtureId: string;
   readonly seed: string | number;
   readonly params: Params;
 }
@@ -50,13 +54,15 @@ interface PerformanceWithMemory extends Performance {
 }
 
 interface RunOptions {
-  readonly rightsEvidence: string;
+  readonly rightsEvidence: PhotoScribbleRightsEvidence;
 }
 
 export interface PhotoScribbleEvidenceRun {
   readonly schemaVersion: 1;
   readonly runId: string;
   readonly scenarioId: string;
+  readonly purpose: "measurement" | "equivalence-proof";
+  readonly rightsEvidence: NormalizedPhotoScribbleRightsEvidence;
   readonly identityHash: string;
   readonly profile: PhotoScribbleEvidenceProfile;
   readonly fullTuple: Readonly<ScribbleExecutionLimits>;
@@ -67,24 +73,31 @@ export interface PhotoScribbleEvidenceRun {
     readonly primitiveCount: number;
     readonly smoothedPointCount: number;
     readonly serializedResultBytes: number;
+  };
+  readonly measurement: {
     readonly coordinatorComputeTimeMs: number;
     readonly mainWallDurationMs: number;
     readonly responseReadyToMainReceiptEpochProxyMs: number;
-  };
-  readonly progress: {
-    readonly count: number;
-    readonly terminalCount: number;
-    readonly receiptTimesMs: readonly number[];
-  };
+    readonly heartbeat: {
+      readonly requestPostedAtMs: number;
+      readonly progressReceiptTimesMs: readonly number[];
+      readonly finalResponseReceivedAtMs: number;
+      readonly requestToFirstOrEndMs: number;
+      readonly betweenProgressGapsMs: readonly number[];
+      readonly lastProgressToEndMs: number | null;
+      readonly maximumGapMs: number;
+      readonly terminalProgressCount: number;
+    };
+    readonly memory: {
+      readonly scope: "page-main-process-only-worker-heap-unavailable";
+      readonly before: MainProcessMemory | null;
+      readonly after: MainProcessMemory | null;
+    };
+  } | null;
   readonly telemetry: PhotoScribbleEvidenceTelemetry;
   readonly protocolBoundary: {
     readonly invalidMessageCount: number;
     readonly allCoordinatorMessagesValid: boolean;
-  };
-  readonly memory: {
-    readonly scope: "page-main-process-only-worker-heap-unavailable";
-    readonly before: MainProcessMemory | null;
-    readonly after: MainProcessMemory | null;
   };
 }
 
@@ -93,7 +106,6 @@ export interface PhotoScribbleExactEquivalence {
   readonly identityHashMatches: boolean;
   readonly resolvedTuple: Readonly<ScribbleExecutionLimits>;
   readonly productionResolverSelectedTuple: boolean;
-  readonly productionOracleExactValueEquality: boolean;
   readonly sceneHashMatches: boolean;
   readonly diagnosticsHashMatches: boolean;
   readonly production: PhotoScribbleEvidenceRun;
@@ -109,14 +121,6 @@ function memorySample(): MainProcessMemory | null {
         totalJSHeapSize: memory.totalJSHeapSize,
         jsHeapSizeLimit: memory.jsHeapSizeLimit,
       };
-}
-
-function assertRightsEvidence(options: RunOptions): void {
-  if (options.rightsEvidence.trim().length < 8) {
-    throw new Error(
-      `Browser execution blocked: ${protocol.rightsGate.status}. Supply the dated attestation or replacement-fixture provenance identifier.`,
-    );
-  }
 }
 
 function scenarioById(scenarioId: string): Scenario {
@@ -144,9 +148,20 @@ function profileForCandidate(candidateId: string): PhotoScribbleEvidenceProfile 
   };
 }
 
-function telemetryPromise(channel: BroadcastChannel, runId: string) {
-  return new Promise<PhotoScribbleEvidenceTelemetry>((resolve, reject) => {
-    const timeout = window.setTimeout(
+interface TelemetryWaiter {
+  readonly promise: Promise<PhotoScribbleEvidenceTelemetry>;
+  readonly cancel: () => void;
+}
+
+function telemetryWaiter(
+  channel: BroadcastChannel,
+  runId: string,
+): TelemetryWaiter {
+  let timeout = 0;
+  let rejectWait: ((reason: Error) => void) | undefined;
+  const promise = new Promise<PhotoScribbleEvidenceTelemetry>((resolve, reject) => {
+    rejectWait = reject;
+    timeout = window.setTimeout(
       () => reject(new Error(`Telemetry timed out for ${runId}`)),
       300_000,
     );
@@ -154,14 +169,32 @@ function telemetryPromise(channel: BroadcastChannel, runId: string) {
       const value = event.data as Partial<PhotoScribbleEvidenceTelemetry>;
       if (value.runId !== runId || value.schemaVersion !== 1) return;
       window.clearTimeout(timeout);
+      rejectWait = undefined;
       resolve(value as PhotoScribbleEvidenceTelemetry);
     });
   });
+  return {
+    promise,
+    cancel() {
+      window.clearTimeout(timeout);
+      rejectWait?.(new Error(`Telemetry wait cancelled for ${runId}`));
+      rejectWait = undefined;
+    },
+  };
+}
+
+interface WorkerTrace {
+  invalidMessages: number;
+  requestPostedAtMs: number | null;
+  progressReceiptTimesMs: number[];
+  terminalProgressCount: number;
+  finalResponseReceivedAtMs: number | null;
+  finalReceiptEpochMs: number | null;
 }
 
 function createEvidenceWorker(
   config: PhotoScribbleEvidenceWorkerConfig,
-  trace: { invalidMessages: number; finalReceiptEpochMs: number | null },
+  trace: WorkerTrace,
 ): ScribbleWorkerPort {
   const worker = new Worker(
     new URL("./photoScribbleEvidenceWorker.ts", import.meta.url),
@@ -169,6 +202,7 @@ function createEvidenceWorker(
   );
   return {
     postMessage(message) {
+      trace.requestPostedAtMs = performance.now();
       worker.postMessage(message);
     },
     terminate() {
@@ -177,13 +211,19 @@ function createEvidenceWorker(
     addEventListener(type, listener) {
       if (type === "message") {
         worker.addEventListener("message", (event: MessageEvent<unknown>) => {
+          const receivedAt = performance.now();
           if (!isScribbleWorkerMessage(event.data)) trace.invalidMessages++;
+          if (isScribbleComputeProgress(event.data)) {
+            trace.progressReceiptTimesMs.push(receivedAt);
+            if (event.data.snapshot.terminal) trace.terminalProgressCount++;
+          }
           if (
             typeof event.data === "object" &&
             event.data !== null &&
             "type" in event.data &&
             (event.data.type === "success" || event.data.type === "failure")
           ) {
+            trace.finalResponseReceivedAtMs = receivedAt;
             trace.finalReceiptEpochMs = Date.now();
           }
           listener(event);
@@ -192,6 +232,36 @@ function createEvidenceWorker(
         worker.addEventListener(type, listener as EventListener);
       }
     },
+  };
+}
+
+function heartbeatMeasurement(trace: WorkerTrace) {
+  const request = trace.requestPostedAtMs;
+  const end = trace.finalResponseReceivedAtMs;
+  if (request === null || end === null) {
+    throw new Error("Evidence Worker trace lacks request/response anchors");
+  }
+  const receipts = [...trace.progressReceiptTimesMs];
+  const requestToFirstOrEndMs = (receipts[0] ?? end) - request;
+  const betweenProgressGapsMs = receipts
+    .slice(1)
+    .map((receipt, index) => receipt - receipts[index]!);
+  const lastProgressToEndMs =
+    receipts.length === 0 ? null : end - receipts[receipts.length - 1]!;
+  const gaps = [
+    requestToFirstOrEndMs,
+    ...betweenProgressGapsMs,
+    ...(lastProgressToEndMs === null ? [] : [lastProgressToEndMs]),
+  ];
+  return {
+    requestPostedAtMs: request,
+    progressReceiptTimesMs: receipts,
+    finalResponseReceivedAtMs: end,
+    requestToFirstOrEndMs,
+    betweenProgressGapsMs,
+    lastProgressToEndMs,
+    maximumGapMs: Math.max(0, ...gaps),
+    terminalProgressCount: trace.terminalProgressCount,
   };
 }
 
@@ -204,8 +274,25 @@ export async function runPhotoScribbleEvidence(
   profile: PhotoScribbleEvidenceProfile,
   options: RunOptions,
 ): Promise<PhotoScribbleEvidenceRun> {
-  assertRightsEvidence(options);
+  return runPhotoScribbleEvidenceOperation(
+    scenarioId,
+    profile,
+    options,
+    "measurement",
+  );
+}
+
+async function runPhotoScribbleEvidenceOperation(
+  scenarioId: string,
+  profile: PhotoScribbleEvidenceProfile,
+  options: RunOptions,
+  purpose: "measurement" | "equivalence-proof",
+): Promise<PhotoScribbleEvidenceRun> {
   const scenario = scenarioById(scenarioId);
+  const rightsEvidence = normalizePhotoScribbleRightsEvidence(
+    options.rightsEvidence,
+    scenario.fixtureId,
+  );
   const identity = createScribbleComputeIdentity({
     sketchId: photoScribble.id,
     schema: photoScribble.schema,
@@ -216,41 +303,58 @@ export async function runPhotoScribbleEvidence(
   const runId = `issue-336-${scenarioId}-${crypto.randomUUID()}`;
   const telemetryChannelName = `${runId}-telemetry`;
   const channel = new BroadcastChannel(telemetryChannelName);
-  const telemetry = telemetryPromise(channel, runId);
-  const trace = { invalidMessages: 0, finalReceiptEpochMs: null as number | null };
+  const telemetry = telemetryWaiter(channel, runId);
+  const trace: WorkerTrace = {
+    invalidMessages: 0,
+    requestPostedAtMs: null,
+    progressReceiptTimesMs: [],
+    terminalProgressCount: 0,
+    finalResponseReceivedAtMs: null,
+    finalReceiptEpochMs: null,
+  };
   const config: PhotoScribbleEvidenceWorkerConfig = {
     schemaVersion: 1,
     runId,
     telemetryChannel: telemetryChannelName,
+    purpose,
     profile,
   };
   const coordinator = new ScribbleCoordinator(() =>
     createEvidenceWorker(config, trace),
   );
-  const progress: Array<{ readonly update: ScribbleProgressUpdate; readonly at: number }> = [];
   const beforeMemory = memorySample();
   const startedAt = performance.now();
-  const outcome = await coordinator.start(identity, (update) => {
-    progress.push({ update, at: performance.now() });
-  });
-  const wallDurationMs = performance.now() - startedAt;
-  const workerTelemetry = await telemetry;
-  channel.close();
-  coordinator.dispose();
-  if (outcome.status !== "success") {
-    throw new Error(
-      outcome.status === "failure" ? outcome.error : "Evidence job was cancelled",
-    );
-  }
-  const serializedResult = JSON.stringify({
-    scene: outcome.scene,
-    diagnostics: outcome.diagnostics,
-  });
-  const finalReceipt = trace.finalReceiptEpochMs ?? Date.now();
-  return {
+  try {
+    const successfulOutcome = coordinator
+      .start(identity)
+      .then((outcome) => {
+        if (outcome.status !== "success") {
+          throw new Error(
+            outcome.status === "failure"
+              ? outcome.error
+              : "Evidence job was cancelled",
+          );
+        }
+        return outcome;
+      });
+    // Promise.all rejects immediately on a Worker failure; it never waits for
+    // the absent telemetry timeout before surfacing the original failure.
+    const [outcome, workerTelemetry] = await Promise.all([
+      successfulOutcome,
+      telemetry.promise,
+    ]);
+    const wallDurationMs = performance.now() - startedAt;
+    const serializedResult = JSON.stringify({
+      scene: outcome.scene,
+      diagnostics: outcome.diagnostics,
+    });
+    const finalReceipt = trace.finalReceiptEpochMs ?? Date.now();
+    return {
     schemaVersion: 1,
     runId,
     scenarioId,
+    purpose,
+    rightsEvidence,
     identityHash: await canonicalScribbleIdentityHash(identity),
     profile,
     fullTuple: workerTelemetry.effectiveLimits,
@@ -261,42 +365,60 @@ export async function runPhotoScribbleEvidence(
       primitiveCount: outcome.scene.primitives.length,
       smoothedPointCount: countPoints(outcome.scene.primitives),
       serializedResultBytes: new TextEncoder().encode(serializedResult).byteLength,
-      coordinatorComputeTimeMs: outcome.computeTimeMs,
-      mainWallDurationMs: wallDurationMs,
-      responseReadyToMainReceiptEpochProxyMs: Math.max(
-        0,
-        finalReceipt - workerTelemetry.responseReadyEpochMs,
-      ),
     },
-    progress: {
-      count: progress.length,
-      terminalCount: progress.filter(({ update }) => update.snapshot.terminal)
-        .length,
-      receiptTimesMs: progress.map(({ at }) => at),
-    },
+    measurement:
+      purpose === "equivalence-proof"
+        ? null
+        : {
+            coordinatorComputeTimeMs: outcome.computeTimeMs,
+            mainWallDurationMs: wallDurationMs,
+            responseReadyToMainReceiptEpochProxyMs: Math.max(
+              0,
+              finalReceipt - workerTelemetry.responseReadyEpochMs,
+            ),
+            heartbeat: heartbeatMeasurement(trace),
+            memory: {
+              scope: "page-main-process-only-worker-heap-unavailable",
+              before: beforeMemory,
+              after: memorySample(),
+            },
+          },
     telemetry: workerTelemetry,
     protocolBoundary: {
       invalidMessageCount: trace.invalidMessages,
       allCoordinatorMessagesValid: trace.invalidMessages === 0,
     },
-    memory: {
-      scope: "page-main-process-only-worker-heap-unavailable",
-      before: beforeMemory,
-      after: memorySample(),
-    },
-  };
+    };
+  } finally {
+    try {
+      telemetry.cancel();
+    } catch {
+      // Cleanup cannot replace the original Worker/telemetry/hash failure.
+    }
+    try {
+      channel.close();
+    } catch {
+      // Cleanup cannot replace the original Worker/telemetry/hash failure.
+    }
+    try {
+      coordinator.dispose();
+    } catch {
+      // Cleanup cannot replace the original Worker/telemetry/hash failure.
+    }
+  }
 }
 
 export async function runPhotoScribbleExactEquivalence(
   scenarioId: string,
   options: RunOptions,
 ): Promise<PhotoScribbleExactEquivalence> {
-  const production = await runPhotoScribbleEvidence(
+  const production = await runPhotoScribbleEvidenceOperation(
     scenarioId,
     { kind: "production" },
     options,
+    "equivalence-proof",
   );
-  const injectedResolvedTuple = await runPhotoScribbleEvidence(
+  const injectedResolvedTuple = await runPhotoScribbleEvidenceOperation(
     scenarioId,
     {
       kind: "injected",
@@ -304,6 +426,7 @@ export async function runPhotoScribbleExactEquivalence(
       limits: production.telemetry.resolvedProductionLimits,
     },
     options,
+    "equivalence-proof",
   );
   return {
     scenarioId,
@@ -312,9 +435,6 @@ export async function runPhotoScribbleExactEquivalence(
     resolvedTuple: production.telemetry.resolvedProductionLimits,
     productionResolverSelectedTuple:
       production.telemetry.productionResolverSelectedEffectiveTuple,
-    productionOracleExactValueEquality:
-      production.telemetry.productionOracle.executed &&
-      production.telemetry.productionOracle.exactArtworkValueEquality,
     sceneHashMatches:
       production.result.sceneHash === injectedResolvedTuple.result.sceneHash,
     diagnosticsHashMatches:
