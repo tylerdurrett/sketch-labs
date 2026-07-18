@@ -57,6 +57,17 @@ interface RunOptions {
   readonly rightsEvidence: PhotoScribbleRightsEvidence;
 }
 
+let activeEvidenceCoordinator: ScribbleCoordinator | null = null;
+
+/**
+ * Benchmark-host emergency stop. A Puppeteer timeout cannot cancel a promise
+ * already executing in the page, so the host calls this seam before closing
+ * the page. ScribbleCoordinator.cancel() synchronously terminates its Worker.
+ */
+export function abortActivePhotoScribbleEvidence(): boolean {
+  return activeEvidenceCoordinator?.cancel() ?? false;
+}
+
 export interface PhotoScribbleEvidenceRun {
   readonly schemaVersion: 1;
   readonly runId: string;
@@ -322,6 +333,11 @@ async function runPhotoScribbleEvidenceOperation(
   const coordinator = new ScribbleCoordinator(() =>
     createEvidenceWorker(config, trace),
   );
+  if (activeEvidenceCoordinator !== null) {
+    coordinator.dispose();
+    throw new Error("A Photo Scribble evidence operation is already active");
+  }
+  activeEvidenceCoordinator = coordinator;
   const beforeMemory = memorySample();
   const startedAt = performance.now();
   try {
@@ -405,6 +421,9 @@ async function runPhotoScribbleEvidenceOperation(
     } catch {
       // Cleanup cannot replace the original Worker/telemetry/hash failure.
     }
+    if (activeEvidenceCoordinator === coordinator) {
+      activeEvidenceCoordinator = null;
+    }
   }
 }
 
@@ -460,6 +479,7 @@ const globalEvidence = {
       options,
     ),
   runExactEquivalence: runPhotoScribbleExactEquivalence,
+  abortActive: abortActivePhotoScribbleEvidence,
 };
 
 Object.assign(window, {

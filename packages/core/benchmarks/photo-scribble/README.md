@@ -41,6 +41,24 @@ apps/studio/node_modules/.bin/vite build \
   --config packages/core/benchmarks/photo-scribble/studio-worker.vite.config.ts
 ```
 
+`campaign-cli.js` is the recoverable browser host. It accepts only an explicit
+`--manifest`: `screen` jobs are restricted to the frozen fine scenarios, while
+`promotion` requires an explicit survivor allow-list and its complete
+scenario/candidate cross-product. The CLI validates structured rights evidence
+before resolving Puppeteer or starting Vite. It runs one page and Worker job at
+a time, performs production-tuple equivalence before each candidate, and writes
+an immutable raw record plus a separate summary and atomic campaign checkpoint
+after every outcome. Re-running the same manifest resumes without replacing
+existing evidence; a campaign-ID collision with different inputs is refused.
+
+Do not invoke the CLI while the rights gate below is unsatisfied. Tests exercise
+its fake browser/server boundaries without starting a photographic campaign:
+
+```sh
+apps/studio/node_modules/.bin/vitest run \
+  packages/core/benchmarks/photo-scribble/campaign-runner.test.js
+```
+
 The page exposes `window.__PHOTO_SCRIBBLE_EVIDENCE__` with `runProduction`,
 `runCandidate`, and `runExactEquivalence`. Every call requires one complete
 structured `rightsEvidence` record matching an accepted form below; an arbitrary

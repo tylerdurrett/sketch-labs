@@ -100,7 +100,7 @@ class FakeEvidenceBroadcastChannel {
 }
 
 class FakeEvidenceWorker {
-  static mode: "success" | "failure" = "success";
+  static mode: "success" | "failure" | "pending" = "success";
   static readonly instances: FakeEvidenceWorker[] = [];
   readonly listeners = new Map<string, Array<(event: any) => void>>();
   readonly config: PhotoScribbleEvidenceWorkerConfig;
@@ -122,6 +122,7 @@ class FakeEvidenceWorker {
   }
 
   postMessage(request: any): void {
+    if (FakeEvidenceWorker.mode === "pending") return;
     if (FakeEvidenceWorker.mode === "failure") {
       this.emit({
         type: "failure",
@@ -230,6 +231,33 @@ afterEach(() => {
 });
 
 describe("Photo Scribble evidence page seams", () => {
+  it("exposes an emergency abort that cancels the coordinator and terminates its Worker", async () => {
+    installEvidenceBrowserFakes();
+    FakeEvidenceWorker.mode = "pending";
+    const evidenceModule = await import("./photoScribbleEvidence");
+    const operation = evidenceModule.runPhotoScribbleEvidence(
+      "flowers-opaque-fine",
+      {
+        kind: "injected",
+        candidateId: "fine-100k",
+        limits: {
+          maxAcceptedSegments: 100_000,
+          maxPolylines: 8_000,
+          maxStagnations: 16_000,
+          maxRestarts: 8_000,
+        },
+      },
+      { rightsEvidence: qualifiedRights },
+    );
+    await Promise.resolve();
+
+    expect(evidenceModule.abortActivePhotoScribbleEvidence()).toBe(true);
+    await expect(operation).rejects.toThrow("cancelled");
+    expect(FakeEvidenceWorker.instances).toHaveLength(1);
+    expect(FakeEvidenceWorker.instances[0]?.terminated).toBe(true);
+    expect(evidenceModule.abortActivePhotoScribbleEvidence()).toBe(false);
+  });
+
   it("keeps limits out of every strict product protocol shape", () => {
     const schema = createPhotoScribbleSchema(assetId);
     const identity = createScribbleComputeIdentity({
