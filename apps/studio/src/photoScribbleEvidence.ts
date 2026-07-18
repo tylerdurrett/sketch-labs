@@ -1,4 +1,5 @@
 import {
+  computePlotMapping,
   drawSceneFitted,
   photoScribble,
   renderPlotterSVG,
@@ -61,6 +62,7 @@ const protocol = protocolJson as unknown as {
   };
   readonly scenarios: readonly Scenario[];
   readonly orderedLimitCandidates: readonly Candidate[];
+  readonly machineCeilingCandidates: readonly Candidate[];
 };
 
 interface MainProcessMemory {
@@ -122,14 +124,31 @@ interface PresentationEvidence {
     readonly outlinePlotterSvg: VectorArtifactMetric & { readonly durationMs: number };
   };
   readonly geometryAndExportParity: boolean;
+  readonly exportGeometry: {
+    readonly ordinaryAuthoritativeHash: string;
+    readonly ordinaryExportHash: string;
+    readonly ordinarySvgMatchesAuthoritativeScene: boolean;
+    readonly outlineSceneHash: string;
+    readonly plotterAuthoritativeHash: string;
+    readonly plotterExportHash: string;
+    readonly plotterSvgMatchesOutlineScene: boolean;
+  };
   readonly terminalProgressToDisplayMs: number;
   readonly uiRoundtrips: {
     readonly status: "not-applicable";
     readonly reason: string;
   };
+  /** Removed by the host after exact-byte persistence and SHA-256 verification. */
+  readonly capturePayloads: {
+    readonly tonePngDataUrl: string;
+    readonly fillPngDataUrl: string;
+    readonly outlinePngDataUrl: string;
+  };
 }
 
 interface CancellationEvidence {
+  readonly scope: "direct-coordinator-cancel-after-progress";
+  readonly exercisesSupersedingControlEdit: false;
   readonly startedAfterNonTerminalProgress: boolean;
   readonly coordinatorAcknowledged: boolean;
   readonly outcome: "cancelled" | "failure" | "success";
@@ -157,6 +176,9 @@ export interface PhotoScribbleEvidenceRun {
   };
   readonly measurement: {
     readonly coordinatorComputeTimeMs: number;
+    /** Product response receipt, before deferred benchmark target/export evidence. */
+    readonly coordinatorResultDurationMs: number;
+    /** Instrumented envelope through deferred benchmark telemetry; not product latency. */
     readonly mainWallDurationMs: number;
     readonly responseReadyToMainReceiptEpochProxyMs: number;
     readonly heartbeat: {
@@ -215,7 +237,10 @@ function scenarioById(scenarioId: string): Scenario {
 }
 
 function profileForCandidate(candidateId: string): PhotoScribbleEvidenceProfile {
-  const candidate = protocol.orderedLimitCandidates.find(
+  const candidate = [
+    ...protocol.orderedLimitCandidates,
+    ...protocol.machineCeilingCandidates,
+  ].find(
     (value) => value.candidateId === candidateId,
   );
   if (candidate === undefined) throw new Error(`Unknown candidate ${candidateId}`);
@@ -334,6 +359,20 @@ async function blobMetric(blob: Blob): Promise<BinaryArtifactMetric> {
   return { sha256: await sha256(bytes), byteLength: bytes.byteLength };
 }
 
+function blobDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") resolve(reader.result);
+      else reject(new Error("Evidence PNG data URL encoding failed"));
+    });
+    reader.addEventListener("error", () =>
+      reject(new Error("Evidence PNG data URL encoding failed")),
+    );
+    reader.readAsDataURL(blob);
+  });
+}
+
 function canvasById(id: string): HTMLCanvasElement {
   const canvas = document.querySelector<HTMLCanvasElement>(`#${id}`);
   if (canvas === null) throw new Error(`Evidence canvas ${id} is missing`);
@@ -364,6 +403,31 @@ async function textMetric(value: string): Promise<VectorArtifactMetric> {
     containsRasterImage: /<image\b/i.test(value),
     containsDiagnosticMarker: /diagnostic|source-pixel/i.test(value),
   };
+}
+
+const round4 = (value: number): number => Math.round(value * 10_000) / 10_000;
+
+function svgPathGeometry(svg: string): Array<{
+  readonly points: readonly [number, number][];
+  readonly closed: boolean;
+}> {
+  return [...svg.matchAll(/<path\b[^>]*\bd="([^"]*)"[^>]*>/g)].map((match) => {
+    const data = match[1] ?? "";
+    const numbers = (data.match(/-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?/gi) ?? [])
+      .map(Number);
+    if (numbers.length % 2 !== 0 || numbers.some((value) => !Number.isFinite(value))) {
+      throw new Error("Evidence SVG path has malformed coordinates");
+    }
+    const points: [number, number][] = [];
+    for (let index = 0; index < numbers.length; index += 2) {
+      points.push([numbers[index]!, numbers[index + 1]!]);
+    }
+    return { points, closed: /(?:^|\s)Z(?:\s|$)/i.test(data) };
+  });
+}
+
+async function geometryHash(value: unknown): Promise<string> {
+  return sha256(new TextEncoder().encode(JSON.stringify(value)));
 }
 
 function nextFrame(): Promise<number> {
@@ -423,7 +487,8 @@ async function presentEvidence(
     0,
     0,
   );
-  const tone = await blobMetric(await canvasBlob(toneCanvas));
+  const toneBlob = await canvasBlob(toneCanvas);
+  const tone = await blobMetric(toneBlob);
 
   const ordinaryStarted = performance.now();
   const ordinarySvgSource = renderToSVG(scene);
@@ -431,6 +496,15 @@ async function presentEvidence(
     ...(await textMetric(ordinarySvgSource)),
     durationMs: performance.now() - ordinaryStarted,
   };
+  const ordinaryAuthoritative = scene.primitives
+    .filter((primitive) => primitive.points.length >= 1)
+    .map((primitive) => ({
+      points: primitive.points.map(([x, y]) => [round4(x), round4(y)] as [number, number]),
+      closed: primitive.closed === true,
+    }));
+  const ordinaryExport = svgPathGeometry(ordinarySvgSource);
+  const ordinaryAuthoritativeHash = await geometryHash(ordinaryAuthoritative);
+  const ordinaryExportHash = await geometryHash(ordinaryExport);
 
   const outlineStarted = performance.now();
   const outlined = outlineScene(scene, 0, protocol.profile.includeFrame);
@@ -444,7 +518,8 @@ async function presentEvidence(
     outlineCanvas.height,
   );
   const outlinePaintDurationMs = performance.now() - outlinePaintStarted;
-  const outlineMetric = await blobMetric(await canvasBlob(outlineCanvas));
+  const outlineBlob = await canvasBlob(outlineCanvas);
+  const outlineMetric = await blobMetric(outlineBlob);
 
   const plotterStarted = performance.now();
   const plotterSource = renderPlotterSVG(outlined, protocol.profile);
@@ -452,6 +527,26 @@ async function presentEvidence(
     ...(await textMetric(plotterSource)),
     durationMs: performance.now() - plotterStarted,
   };
+  const mapping = computePlotMapping(outlined.space, protocol.profile);
+  const plotterAuthoritative = outlined.primitives
+    .filter((primitive) => primitive.stroke !== undefined && primitive.points.length >= 2)
+    .map((primitive) => {
+      const points = primitive.points.map(([x, y]) => [
+        round4(mapping.offsetX + x * mapping.scale),
+        round4(mapping.offsetY + y * mapping.scale),
+      ] as [number, number]);
+      if (
+        primitive.closed === true &&
+        (points.at(-1)?.[0] !== points[0]?.[0] || points.at(-1)?.[1] !== points[0]?.[1])
+      ) {
+        points.push(points[0]!);
+      }
+      return { points, closed: false };
+    });
+  const plotterExport = svgPathGeometry(plotterSource);
+  const plotterAuthoritativeHash = await geometryHash(plotterAuthoritative);
+  const plotterExportHash = await geometryHash(plotterExport);
+  const outlineSceneHash = await canonicalBrowserSceneHash(outlined);
   const validCanvas = (canvas: HTMLCanvasElement) => {
     try {
       return canvasContext(canvas).getImageData(0, 0, 1, 1).data.length === 4;
@@ -483,14 +578,28 @@ async function presentEvidence(
       outlinePlotterSvg,
     },
     geometryAndExportParity:
-      ordinarySvg.pathCount === scene.primitives.length &&
-      outlinePlotterSvg.pathCount === outlined.primitives.filter(
-        (primitive) => primitive.stroke !== undefined && primitive.points.length >= 2,
-      ).length,
+      ordinaryAuthoritativeHash === ordinaryExportHash &&
+      plotterAuthoritativeHash === plotterExportHash,
+    exportGeometry: {
+      ordinaryAuthoritativeHash,
+      ordinaryExportHash,
+      ordinarySvgMatchesAuthoritativeScene:
+        ordinaryAuthoritativeHash === ordinaryExportHash,
+      outlineSceneHash,
+      plotterAuthoritativeHash,
+      plotterExportHash,
+      plotterSvgMatchesOutlineScene:
+        plotterAuthoritativeHash === plotterExportHash,
+    },
     terminalProgressToDisplayMs,
     uiRoundtrips: {
       status: "not-applicable",
       reason: "The isolated fine-budget evidence page has no Studio inspector; fixed Studio interaction probes belong to the promotion control pass.",
+    },
+    capturePayloads: {
+      tonePngDataUrl: await blobDataUrl(toneBlob),
+      fillPngDataUrl: await blobDataUrl(fillBlob),
+      outlinePngDataUrl: await blobDataUrl(outlineBlob),
     },
   };
 }
@@ -543,6 +652,8 @@ async function cancellationEvidence(
   await nextFrame();
   coordinator.dispose();
   return {
+    scope: "direct-coordinator-cancel-after-progress",
+    exercisesSupersedingControlEdit: false,
     startedAfterNonTerminalProgress: sawNonTerminal,
     coordinatorAcknowledged: acknowledged,
     outcome: settled.status,
@@ -644,6 +755,7 @@ async function runPhotoScribbleEvidenceOperation(
   activeEvidenceCoordinator = coordinator;
   const beforeMemory = memorySample();
   const startedAt = performance.now();
+  let coordinatorResultDurationMs: number | null = null;
   try {
     const successfulOutcome = coordinator
       .start(identity)
@@ -655,6 +767,7 @@ async function runPhotoScribbleEvidenceOperation(
               : "Evidence job was cancelled",
           );
         }
+        coordinatorResultDurationMs = performance.now() - startedAt;
         return outcome;
       });
     // Promise.all rejects immediately on a Worker failure; it never waits for
@@ -701,6 +814,8 @@ async function runPhotoScribbleEvidenceOperation(
         ? null
         : {
             coordinatorComputeTimeMs: outcome.computeTimeMs,
+            coordinatorResultDurationMs:
+              coordinatorResultDurationMs ?? wallDurationMs,
             mainWallDurationMs: wallDurationMs,
             responseReadyToMainReceiptEpochProxyMs: Math.max(
               0,
@@ -813,7 +928,7 @@ if (status !== null) {
       scenarios: protocol.scenarios.map(({ scenarioId }) => scenarioId),
       candidates: protocol.orderedLimitCandidates.map(({ candidateId }) =>
         candidateId,
-      ),
+      ).concat(protocol.machineCeilingCandidates.map(({ candidateId }) => candidateId)),
     },
     null,
     2,

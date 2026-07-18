@@ -249,3 +249,22 @@ Run the manifest guard from the repository root:
 apps/studio/node_modules/.bin/vitest run \
   packages/core/benchmarks/photo-scribble/protocol.test.js
 ```
+
+## Maintainer machine-ceiling override — 2026-07-18
+
+The maintainer explicitly superseded the residual, visual-no-worse, and
+heartbeat adoption gates for the budget-ceiling decision. They remain recorded
+observations, not stop conditions. `machine-ceiling` manifests run exactly one
+candidate across both fine scenarios, serially. The accepted-segment cap doubles
+through `machineCeilingCandidates`; the other three guards stay at the last
+known non-binding 250k values unless raw `bindingGuard` evidence requires raising
+only the newly binding guard.
+
+Expansion stops only at a real 300-second timeout, browser/Worker crash,
+suspected OOM, clone/transfer failure, Canvas/export failure, or unrecoverable
+instability. The largest complete tuple before that boundary wins. Exact Canvas
+PNGs are persisted from their 1000 × 1000 backing bytes and SHA-256-bound to the
+measured Canvas metrics; Puppeteer CSS screenshots are not campaign captures.
+The isolated cancellation observation is only a direct coordinator cancellation
+after progress. It does not claim to exercise the Studio's `#control-chaos`
+superseding edit, stale-retention UI, or inspector round trips.

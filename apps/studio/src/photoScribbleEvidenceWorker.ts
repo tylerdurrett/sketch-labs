@@ -12,9 +12,16 @@ declare const self: DedicatedWorkerGlobalScope;
 
 const config = parsePhotoScribbleEvidenceWorkerConfig(self.name);
 const telemetryChannel = new BroadcastChannel(config.telemetryChannel);
-let pendingTelemetry:
-  | Promise<Omit<PhotoScribbleEvidenceTelemetry, "responseReadyEpochMs">>
-  | undefined;
+interface PendingTelemetry {
+  readonly base: Omit<
+    PhotoScribbleEvidenceTelemetry,
+    "responseReadyEpochMs" | "serializedArtworkBytes" | "targetHash"
+  >;
+  readonly artwork: ReturnType<ScribbleArtworkExecutor>;
+  readonly targetHash: (() => Promise<string>) | null;
+}
+
+let pendingTelemetry: PendingTelemetry | undefined;
 
 function pointsIn(artwork: { readonly scene: { readonly primitives: readonly { readonly points: readonly unknown[] }[] } }): number {
   return artwork.scene.primitives.reduce(
@@ -38,28 +45,28 @@ const executeEvidenceArtwork: ScribbleArtworkExecutor = (
     observer,
   );
   const { artwork, execution } = evidence;
-  const serializedArtwork = JSON.stringify(artwork);
-  pendingTelemetry = (async () => ({
-    schemaVersion: 1,
-    runId: config.runId,
-    sketchId: "photo-scribble",
-    imageAssetId: evidence.imageAssetId,
-    profile: evidence.profile,
-    purpose: config.purpose,
-    resolvedProductionLimits: evidence.resolvedProductionLimits,
-    effectiveLimits: evidence.effectiveLimits,
-    productionResolverSelectedEffectiveTuple:
-      evidence.productionResolverSelectedEffectiveTuple,
-    execution,
-    rawAcceptedSegments: execution?.counters.acceptedSegments ?? null,
-    smoothedEmittedPoints: pointsIn(artwork),
-    smoothedEmittedPolylines: artwork.scene.primitives.length,
-    serializedArtworkBytes: new TextEncoder().encode(serializedArtwork)
-      .byteLength,
-    targetHash: evidence.targetHash === null ? null : await evidence.targetHash,
-    workerDurationMs:
-      config.purpose === "measurement" ? performance.now() - startedAt : null,
-  }))();
+  pendingTelemetry = {
+    base: {
+      schemaVersion: 1,
+      runId: config.runId,
+      sketchId: "photo-scribble",
+      imageAssetId: evidence.imageAssetId,
+      profile: evidence.profile,
+      purpose: config.purpose,
+      resolvedProductionLimits: evidence.resolvedProductionLimits,
+      effectiveLimits: evidence.effectiveLimits,
+      productionResolverSelectedEffectiveTuple:
+        evidence.productionResolverSelectedEffectiveTuple,
+      execution,
+      rawAcceptedSegments: execution?.counters.acceptedSegments ?? null,
+      smoothedEmittedPoints: pointsIn(artwork),
+      smoothedEmittedPolylines: artwork.scene.primitives.length,
+      workerDurationMs:
+        config.purpose === "measurement" ? performance.now() - startedAt : null,
+    },
+    artwork,
+    targetHash: evidence.targetHash,
+  };
   return artwork;
 };
 
@@ -70,15 +77,21 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
     (progress) => self.postMessage(progress),
   ).then(async (response) => {
     if (response === null) return;
-    if (pendingTelemetry !== undefined) {
-      const telemetry = await pendingTelemetry;
-      telemetryChannel.postMessage({
-        ...telemetry,
-        responseReadyEpochMs: Date.now(),
-      } satisfies PhotoScribbleEvidenceTelemetry);
-      pendingTelemetry = undefined;
-    }
+    const pending = pendingTelemetry;
+    pendingTelemetry = undefined;
+    const responseReadyEpochMs = Date.now();
     self.postMessage(response);
+    if (pending !== undefined) {
+      const serializedArtwork = JSON.stringify(pending.artwork);
+      telemetryChannel.postMessage({
+        ...pending.base,
+        serializedArtworkBytes: new TextEncoder().encode(serializedArtwork)
+          .byteLength,
+        targetHash:
+          pending.targetHash === null ? null : await pending.targetHash(),
+        responseReadyEpochMs,
+      } satisfies PhotoScribbleEvidenceTelemetry);
+    }
   });
 });
 

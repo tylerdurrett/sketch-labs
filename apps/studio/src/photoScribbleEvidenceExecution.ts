@@ -40,7 +40,8 @@ export interface PhotoScribbleEvidenceExecution {
   readonly effectiveLimits: Readonly<ScribbleExecutionLimits> | null;
   readonly productionResolverSelectedEffectiveTuple: boolean | null;
   readonly execution: Readonly<ScribbleExecutionObservation> | null;
-  readonly targetHash: Promise<string> | null;
+  /** Deferred until after the product success response is posted. */
+  readonly targetHash: (() => Promise<string>) | null;
 }
 
 export interface PhotoScribbleEvidenceExecutionDependencies {
@@ -101,7 +102,7 @@ export function executePhotoScribbleEvidenceArtwork(
       targetHash:
         resolution === null
           ? null
-          : canonicalBrowserScribbleTargetHash(resolution.model),
+          : () => canonicalBrowserScribbleTargetHash(resolution.model),
     };
   }
 
@@ -133,6 +134,6 @@ export function executePhotoScribbleEvidenceArtwork(
       config.profile.limits,
     ),
     execution,
-    targetHash: canonicalBrowserScribbleTargetHash(resolution.model),
+    targetHash: () => canonicalBrowserScribbleTargetHash(resolution.model),
   };
 }

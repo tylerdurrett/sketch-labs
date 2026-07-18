@@ -1,10 +1,11 @@
-# Photo Scribble fine-budget visual attestation — 2026-07-18
+# Photo Scribble fine-budget visual attestation — 2026-07-18 (superseded)
 
 - Reviewer: Codex (`easy-auto/336-budget-screen` block 6)
 - Reference: each scenario's named `current-fine-baseline` Fill, Tone, and
   Outline captures in this campaign.
-- Review scale: original 1000 × 1000 capture and the frozen 200 × 200 mm Plot
-  Profile.
+- Review scale: the committed Puppeteer captures were CSS-scaled to approximately
+  463 × 463 pixels. They were not exact 1000 × 1000 Canvas bytes. This historical
+  visual review is retained but is not machine-ceiling adoption authority.
 - Verdict vocabulary: `better`, `equal`, or `worse`, exactly as frozen in the
   protocol. A single `worse` rejects a candidate.
 

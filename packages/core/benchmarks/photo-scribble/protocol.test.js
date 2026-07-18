@@ -608,4 +608,18 @@ describe('Photo Scribble issue 336 protocol', () => {
       controlCandidateId: 'production-control',
     })
   })
+
+  it('pins the maintainer-authorized machine-ceiling sequence without raising non-binding guards', () => {
+    expect(protocol.machineCeilingCandidates).toEqual(
+      [500000, 1000000, 2000000, 4000000, 8000000].map(
+        (maxAcceptedSegments) => ({
+          candidateId: `machine-${maxAcceptedSegments / 1000}k`,
+          maxAcceptedSegments,
+          maxPolylines: 16000,
+          maxStagnations: 32000,
+          maxRestarts: 16000,
+        }),
+      ),
+    )
+  })
 })

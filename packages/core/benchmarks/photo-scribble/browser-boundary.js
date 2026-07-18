@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -80,6 +81,18 @@ function sameTuple(actual, expected) {
   ].every((key) => Number.isSafeInteger(actual[key]) && actual[key] === expected[key])
 }
 
+function decodePngDataUrl(value, label) {
+  evidenceAssertion(typeof value === 'string' &&
+    value.startsWith('data:image/png;base64,'), `${label} PNG payload is missing`)
+  const bytes = Buffer.from(value.slice('data:image/png;base64,'.length), 'base64')
+  evidenceAssertion(bytes.length > 0, `${label} PNG payload is empty`)
+  return bytes
+}
+
+function sha256(bytes) {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
 function validateRun(run, expected) {
   evidenceAssertion(isRecord(run), `${expected.label} is not an object`)
   evidenceAssertion(run.schemaVersion === 1, `${expected.label} schemaVersion is not 1`)
@@ -152,6 +165,7 @@ function validateRun(run, expected) {
   if (expected.purpose === 'measurement') {
     evidenceAssertion(isRecord(run.measurement) &&
       Number.isFinite(run.measurement.coordinatorComputeTimeMs) &&
+      Number.isFinite(run.measurement.coordinatorResultDurationMs) &&
       Number.isFinite(run.measurement.mainWallDurationMs) &&
       isRecord(run.measurement.heartbeat) &&
       Array.isArray(run.measurement.heartbeat.progressReceiptTimesMs) &&
@@ -178,6 +192,8 @@ function validateRun(run, expected) {
       run.presentation.fillCanvas?.validState === true &&
       run.presentation.outlineCanvas?.validState === true &&
       run.presentation.geometryAndExportParity === true &&
+      run.presentation.exportGeometry?.ordinarySvgMatchesAuthoritativeScene === true &&
+      run.presentation.exportGeometry?.plotterSvgMatchesOutlineScene === true &&
       Number.isFinite(run.presentation.terminalProgressToDisplayMs) &&
       run.presentation.exports?.png?.byteLength > 0 &&
       run.presentation.exports?.ordinarySvg?.byteLength > 0 &&
@@ -187,7 +203,15 @@ function validateRun(run, expected) {
       run.presentation.exports.outlinePlotterSvg.containsRasterImage === false &&
       run.presentation.exports.outlinePlotterSvg.containsDiagnosticMarker === false,
     `${expected.label} Canvas/export presentation evidence is missing or invalid`)
+    evidenceAssertion(
+      typeof run.presentation.capturePayloads?.tonePngDataUrl === 'string' &&
+        typeof run.presentation.capturePayloads?.fillPngDataUrl === 'string' &&
+        typeof run.presentation.capturePayloads?.outlinePngDataUrl === 'string',
+      `${expected.label} exact Canvas PNG payloads are missing`,
+    )
     evidenceAssertion(isRecord(run.cancellation) &&
+      run.cancellation.scope === 'direct-coordinator-cancel-after-progress' &&
+      run.cancellation.exercisesSupersedingControlEdit === false &&
       run.cancellation.startedAfterNonTerminalProgress === true &&
       run.cancellation.coordinatorAcknowledged === true &&
       run.cancellation.outcome === 'cancelled' &&
@@ -430,27 +454,39 @@ export function createBrowserBoundary({
           )
           mkdirSync(directory, { recursive: true })
           const captures = [
-            ['#evidence-tone', 'tone-authored.png'],
-            ['#evidence-fill', 'fill-primary.png'],
-            ['#evidence-outline', 'outline.png'],
+            ['tonePngDataUrl', 'tone-authored.png', partial.observation.presentation.tone.sha256],
+            ['fillPngDataUrl', 'fill-primary.png', partial.observation.presentation.fillCanvas.sha256],
+            ['outlinePngDataUrl', 'outline.png', partial.observation.presentation.outlineCanvas.sha256],
           ]
           partial.artifacts = []
-          for (const [selector, suffix] of captures) {
-            const element = await page.$(selector)
-            evidenceAssertion(element !== null, `capture target ${selector} is missing`)
+          for (const [payloadKey, suffix, measuredSha256] of captures) {
+            const bytes = decodePngDataUrl(
+              partial.observation.presentation.capturePayloads?.[payloadKey],
+              suffix,
+            )
+            const contentSha256 = sha256(bytes)
+            evidenceAssertion(contentSha256 === measuredSha256,
+              `capture ${suffix} does not match its measured full-resolution Canvas hash`)
             const path = resolve(
               directory,
               `${job.captureStem}--${job.candidateId}--${job.tupleToken}--${suffix}`,
             )
-            await element.screenshot({ path })
-            const byteLength = statSync(path).size
-            evidenceAssertion(byteLength > 0, `capture ${suffix} is empty`)
+            if (existsSync(path)) {
+              evidenceAssertion(sha256(readFileSync(path)) === contentSha256,
+                `existing immutable capture ${suffix} differs`)
+            } else {
+              writeFileSync(path, bytes, { flag: 'wx' })
+            }
             partial.artifacts.push({
               kind: suffix,
               path: relative(projectRoot ?? captureRoot, path),
-              byteLength,
+              byteLength: bytes.length,
+              sha256: contentSha256,
+              measuredCanvasSha256: measuredSha256,
+              pixelDimensions: { width: 1000, height: 1000 },
             })
           }
+          delete partial.observation.presentation.capturePayloads
         }
         return partial
       } catch (error) {

@@ -13,6 +13,8 @@
     "fine-1000k"
   ],
   "survivorCandidateIds": [],
+  "supersededByMaintainerMachineCeilingOverride": true,
+  "earlyStopWasProtocolAuthorized": false,
   "decision": "retain-current-production-limits",
   "bindingGuards": {
     "current-fine-baseline": "accepted-segment-limit",
@@ -30,8 +32,8 @@
     }
   },
   "failingGates": [
-    "No larger candidate completed or reached the frozen 0.20 relative residual improvement in both fine scenarios.",
-    "The frozen maxProgressHeartbeatGapMs is 1000; observed fine-100k gaps were 1037.8 ms (flowers) and 1047.7 ms (pinecone), and fine-250k gaps were 1370.5 ms (flowers) and 1088.8 ms (pinecone).",
+    "No larger candidate completed or reached the then-applied 0.20 relative residual improvement in both fine scenarios.",
     "The named visual attestation records worse plot-readiness for fine-250k in both scenarios and worse routing-legibility for the pinecone."
-  ]
+  ],
+  "correctedHeartbeatObservation": "Actual between-progress gaps were at most 111 ms. The prior >1000 ms maximum values were terminal-progress-to-final-response observer overhead from benchmark target hashing/serialization and were not a production responsiveness failure."
 }

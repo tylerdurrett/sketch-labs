@@ -54,13 +54,20 @@ export function validateCampaignManifest(input, protocol) {
   assert(typeof input.campaignId === 'string' &&
     new RegExp(`^(?:${protocol.evidenceNaming.campaignIdPattern})$`).test(input.campaignId),
   'Campaign ID does not match the frozen protocol pattern')
-  assert(input.phase === 'screen' || input.phase === 'promotion',
-    'Campaign phase must be screen or promotion')
+  assert(
+    input.phase === 'screen' || input.phase === 'promotion' ||
+      input.phase === 'machine-ceiling',
+    'Campaign phase must be screen, promotion, or machine-ceiling',
+  )
   assert(Array.isArray(input.jobs) && input.jobs.length > 0,
     'Campaign manifest must contain at least one explicit job')
 
   const scenarios = new Map(protocol.scenarios.map((scenario) => [scenario.scenarioId, scenario]))
-  const candidates = new Map(protocol.orderedLimitCandidates.map((candidate) => [candidate.candidateId, candidate]))
+  const machineCeilingCandidates = protocol.machineCeilingCandidates ?? []
+  const candidates = new Map(
+    [...protocol.orderedLimitCandidates, ...machineCeilingCandidates]
+      .map((candidate) => [candidate.candidateId, candidate]),
+  )
   const jobs = input.jobs.map((inputJob, index) => {
     assert(inputJob !== null && typeof inputJob === 'object' && !Array.isArray(inputJob),
       `Job ${index} must be an object`)
@@ -70,9 +77,9 @@ export function validateCampaignManifest(input, protocol) {
     const candidate = candidates.get(inputJob.candidateId)
     assert(scenario !== undefined, `Job ${index} names unknown scenario ${inputJob.scenarioId}`)
     assert(candidate !== undefined, `Job ${index} names unknown candidate ${inputJob.candidateId}`)
-    if (input.phase === 'screen') {
+    if (input.phase === 'screen' || input.phase === 'machine-ceiling') {
       assert(scenario.roles.includes('budget-calibration'),
-        `Screen job ${index} is not a fine budget-calibration scenario`)
+        `${input.phase} job ${index} is not a fine budget-calibration scenario`)
     }
     return Object.freeze({
       ordinal: index + 1,
@@ -103,6 +110,23 @@ export function validateCampaignManifest(input, protocol) {
     )
     assert(keys.every((key, index) => key === frozenOrder[index]),
       'Screen jobs must be a non-empty prefix of the frozen candidate/scenario order')
+  } else if (input.phase === 'machine-ceiling') {
+    assert(input.survivorCandidateIds === undefined,
+      'Machine-ceiling manifests cannot preselect promotion survivors')
+    const fineScenarios = protocol.scenarios.filter(
+      (scenario) => scenario.roles.includes('budget-calibration'),
+    )
+    assert(jobs.length === fineScenarios.length,
+      'Machine-ceiling manifests must contain both fine scenarios exactly once')
+    const candidateId = jobs[0]?.candidateId
+    assert(machineCeilingCandidates.some((candidate) => candidate.candidateId === candidateId),
+      'Machine-ceiling manifest candidate is not in the explicit machine sequence')
+    const candidate = candidates.get(candidateId)
+    const required = fineScenarios.map((scenario) =>
+      `${scenario.scenarioId}/${candidateId}--${tupleToken(candidate)}`,
+    )
+    assert(keys.every((key, index) => key === required[index]),
+      'Machine-ceiling jobs must contain the two fine scenarios in frozen order for one candidate')
   } else {
     assert(Array.isArray(input.survivorCandidateIds) && input.survivorCandidateIds.length > 0,
       'Promotion requires an explicit non-empty survivorCandidateIds allow-list')

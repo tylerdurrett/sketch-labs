@@ -169,6 +169,43 @@
       "maxRestarts": 64000
     }
   ],
+  "machineCeilingCandidates": [
+    {
+      "candidateId": "machine-500k",
+      "maxAcceptedSegments": 500000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    {
+      "candidateId": "machine-1000k",
+      "maxAcceptedSegments": 1000000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    {
+      "candidateId": "machine-2000k",
+      "maxAcceptedSegments": 2000000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    {
+      "candidateId": "machine-4000k",
+      "maxAcceptedSegments": 4000000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    {
+      "candidateId": "machine-8000k",
+      "maxAcceptedSegments": 8000000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    }
+  ],
   "thresholds": {
     "jobTimeoutMs": 300000,
     "maxProgressHeartbeatGapMs": 1000,

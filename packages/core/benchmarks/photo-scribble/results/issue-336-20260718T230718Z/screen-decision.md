@@ -1,4 +1,9 @@
-# Photo Scribble fine-budget screen decision — issue #336
+# Photo Scribble fine-budget screen decision — issue #336 (superseded)
+
+This decision is not adoption authority. On 2026-07-18 the maintainer explicitly
+overrode its residual, visual, and heartbeat gates and required a machine-ceiling
+campaign. Stopping before 500k/1m was not authorized by the original protocol's
+“if none passes” rule. The raw records remain immutable observations.
 
 The exact frozen six-job prefix ran serially in Chromium through the real
 `ScribbleCoordinator` and a fresh real DedicatedWorker per operation. No
@@ -48,10 +53,11 @@ scenarios.
   round trips are explicitly `not-applicable` here and remain promotion-control
   checks. No candidate reached promotion eligibility.
 
-The heartbeat gate failed verbatim: **“no non-terminal progress heartbeat gap
-exceeds 1,000 ms.”** Observed maximum gaps were 1037.8/1047.7 ms for fine-100k
-(flowers/pinecone) and 1370.5/1088.8 ms for fine-250k. Baseline maxima were
-962.9/969.0 ms.
+Heartbeat correction: actual between-progress gaps were at most 111 ms. The
+previously reported 1037.8–1370.5 ms maxima were entirely the
+terminal-progress-to-final-response interval, inflated by benchmark-only target
+hashing and artwork serialization after terminal progress. They are instrumented
+observer overhead, not a production responsiveness failure.
 
 ## Visual decision
 
@@ -60,4 +66,5 @@ candidate has no visible regression but cannot overcome the quantitative and
 heartbeat gates. The 250k candidate is additionally rejected for worse plot
 readiness in both scenarios and worse routing legibility on the pinecone.
 
-Result: no promotion manifest, no production-limit change, and no 500k/1m run.
+Historical result: no production-limit change. The omitted 500k/1m work is now
+superseded by the maintainer-authorized machine-ceiling series.

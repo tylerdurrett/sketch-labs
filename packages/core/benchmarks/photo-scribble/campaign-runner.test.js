@@ -109,6 +109,7 @@ function evidenceRun({
     },
     measurement: purpose === 'measurement' ? {
       coordinatorComputeTimeMs: 1,
+      coordinatorResultDurationMs: 2,
       mainWallDurationMs: 2,
       responseReadyToMainReceiptEpochProxyMs: 0,
       heartbeat: {
@@ -161,10 +162,26 @@ function evidenceRun({
         outlinePlotterSvg: { sha256: '3'.repeat(64), byteLength: 10, durationMs: 1, pathCount: 1, containsRasterImage: false, containsDiagnosticMarker: false },
       },
       geometryAndExportParity: true,
+      exportGeometry: {
+        ordinaryAuthoritativeHash: '4'.repeat(64),
+        ordinaryExportHash: '4'.repeat(64),
+        ordinarySvgMatchesAuthoritativeScene: true,
+        outlineSceneHash: '5'.repeat(64),
+        plotterAuthoritativeHash: '6'.repeat(64),
+        plotterExportHash: '6'.repeat(64),
+        plotterSvgMatchesOutlineScene: true,
+      },
       terminalProgressToDisplayMs: 2,
       uiRoundtrips: { status: 'not-applicable', reason: 'promotion only' },
+      capturePayloads: {
+        tonePngDataUrl: 'data:image/png;base64,AA==',
+        fillPngDataUrl: 'data:image/png;base64,AA==',
+        outlinePngDataUrl: 'data:image/png;base64,AA==',
+      },
     } : null,
     cancellation: purpose === 'measurement' ? {
+      scope: 'direct-coordinator-cancel-after-progress',
+      exercisesSupersedingControlEdit: false,
       startedAfterNonTerminalProgress: true,
       coordinatorAcknowledged: true,
       outcome: 'cancelled',
@@ -284,6 +301,35 @@ describe('Photo Scribble campaign runner', () => {
       expect(() => validateCampaignManifest(screenManifest({ jobs }), protocol))
         .toThrow('non-empty prefix')
     }
+  })
+
+  it('accepts one explicit two-scenario machine-ceiling tuple at a time', () => {
+    const manifest = screenManifest({
+      phase: 'machine-ceiling',
+      jobs: [
+        { scenarioId: 'flowers-opaque-fine', candidateId: 'machine-500k' },
+        { scenarioId: 'pinecone-dark-alpha-fine', candidateId: 'machine-500k' },
+      ],
+    })
+    const campaign = validateCampaignManifest(manifest, protocol)
+    expect(campaign.jobs.map(({ tuple }) => tuple)).toEqual([
+      {
+        maxAcceptedSegments: 500000,
+        maxPolylines: 16000,
+        maxStagnations: 32000,
+        maxRestarts: 16000,
+      },
+      {
+        maxAcceptedSegments: 500000,
+        maxPolylines: 16000,
+        maxStagnations: 32000,
+        maxRestarts: 16000,
+      },
+    ])
+    manifest.jobs[1].candidateId = 'machine-1000k'
+    expect(() => validateCampaignManifest(manifest, protocol)).toThrow(
+      'one candidate',
+    )
   })
 
   it('runs serially, checkpoints each outcome, and closes the boundary', async () => {
