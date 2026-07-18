@@ -6,6 +6,14 @@ machine-readable frame, parameter, capture, threshold, and limit-candidate
 contract. Observations belong under `results/` and must identify the protocol
 and fixture manifest hashes they used.
 
+`hash-oracles.ts` defines the exact benchmark-only SHA-256 encodings used for
+determinism evidence. The target hash contains frame/lattice metadata followed
+by every production-model tone, permission, and effective-tone sample in
+row-major order. Scene hashes cover the complete Scene IR; diagnostics hashes
+cover deterministic scalar diagnostics and deliberately exclude compute time.
+A Preset reproduces exactly only when both its Scene and diagnostics hashes
+match. These evidence helpers are not exported from `@harness/core`.
+
 The committed opaque flowers cover an ordinary photo and a `3:4` source in a
 square frame. The dark alpha pinecone covers Tone adjustment, a `2:3` source,
 276,857 fully transparent pixels, and 2,860 partial alpha pixels. Git proves
