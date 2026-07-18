@@ -54,6 +54,7 @@ import {
   fieldOwnsHistoryShortcut,
   historyShortcutFor,
 } from "./historyShortcuts";
+import { exactEnvironmentReady } from "./exactEnvironmentReadiness";
 import {
   LiveCanvas,
   type DisplayedSceneSnapshot,
@@ -342,13 +343,20 @@ export function SketchControls({
     schema: sketch.schema,
     params,
   });
+  const sketchEnvironmentRef = useRef(sketchEnvironment);
+  sketchEnvironmentRef.current = sketchEnvironment;
   // Resolution state is usable only for the exact authored ID-set identity.
+  // Recompute from the imperative history mirror so an authored edit and a
+  // forced export in one React batch cannot reuse the prior resolved bytes.
+  const environmentReadyNow = (): boolean =>
+    exactEnvironmentReady(
+      sketch.schema,
+      historyRef.current.present.params,
+      sketchEnvironmentRef.current,
+    );
   // Asset-free Sketches resolve synchronously through this same gate.
-  const exactEnvironmentReady =
-    sketchEnvironment.status === "resolved" &&
-    sketchEnvironment.ready &&
-    sketchEnvironment.resolutionKey === sketchEnvironment.key;
-  const unavailableEnvironmentStatus = exactEnvironmentReady
+  const environmentReady = environmentReadyNow();
+  const unavailableEnvironmentStatus = environmentReady
     ? null
     : sketchEnvironment.status === "resolved"
       ? ("error" as const)
@@ -358,7 +366,7 @@ export function SketchControls({
   const scribbleInputRevisionRef = useRef(0);
   const scribblePreparation = useScribblePreparation({
     sketch,
-    enabled: hasScribblePreparation && exactEnvironmentReady,
+    enabled: hasScribblePreparation && environmentReady,
     initial: {
       params: history.present.params,
       seed: history.present.seed,
@@ -366,18 +374,18 @@ export function SketchControls({
       inputRevision: scribbleInputRevisionRef.current,
     },
   });
-  const currentScribble = exactEnvironmentReady
+  const currentScribble = environmentReady
     ? selectCurrentScribbleResult(scribblePreparation.session)
     : null;
   const displayedShadingDiagnostics: DisplayedShadingDiagnostics | null =
-    !exactEnvironmentReady || scribblePreparation.session.displayed === null
+    !environmentReady || scribblePreparation.session.displayed === null
       ? null
       : {
           freshness: currentScribble === null ? "stale" : "current",
           diagnostics: scribblePreparation.session.displayed.diagnostics,
           computeTimeMs: scribblePreparation.session.displayed.computeTimeMs,
         };
-  const activeScribbleToken = exactEnvironmentReady
+  const activeScribbleToken = environmentReady
     ? (scribblePreparation.session.active?.token ??
         scribblePreparation.session.pending?.token ??
         null)
@@ -406,7 +414,7 @@ export function SketchControls({
   const acknowledgedScribbleRef = useRef(acknowledgedScribble);
   acknowledgedScribbleRef.current = acknowledgedScribble;
   const scribblePaintIsCurrent =
-    exactEnvironmentReady &&
+    environmentReady &&
     currentScribble !== null &&
     acknowledgedScribble?.sourceInputRevision ===
       currentScribble.sourceInputRevision &&
@@ -431,7 +439,7 @@ export function SketchControls({
   const toneSource = useMemo(
     () =>
       toneReferenceActive
-        ? exactEnvironmentReady
+        ? environmentReady
           ? sketch.generateToneSource?.(
               params,
               compositionFrame,
@@ -444,7 +452,7 @@ export function SketchControls({
       sketch,
       params,
       compositionFrame,
-      exactEnvironmentReady,
+      environmentReady,
       sketchEnvironment.environment,
     ],
   );
@@ -537,7 +545,27 @@ export function SketchControls({
     }
   };
 
+  const cancelUnavailableEnvironmentWork = (): void => {
+    if (environmentReadyNow()) return;
+    const current = outlineSessionRef.current;
+    if (current.slot !== null) cancelCoordinator();
+    if (current.exportActive !== null) {
+      dispatchOutline({
+        type: "export-cancelled",
+        token: current.exportActive.token,
+      });
+    }
+    if (current.capture !== null || current.active !== null) {
+      dispatchOutline({ type: "cancelled" });
+    }
+  };
+
+  useEffect(() => {
+    cancelUnavailableEnvironmentWork();
+  }, [environmentReady]);
+
   const requestOutlineForCurrentInputs = (): void => {
+    if (!environmentReadyNow()) return;
     dispatchOutline({
       type: "request-outline",
       launch: !hasScribblePreparation || scribblePaintIsCurrent,
@@ -561,6 +589,7 @@ export function SketchControls({
     const next = transition(current);
     if (next === current) return;
     historyRef.current = next;
+    cancelUnavailableEnvironmentWork();
     const scribbleChanged = scribbleInputsChanged(current.present, next.present);
     if (hasScribblePreparation && scribbleChanged) {
       scribbleInputRevisionRef.current += 1;
@@ -588,7 +617,8 @@ export function SketchControls({
         hasScribblePreparation && !scribbleChanged && scribblePaintIsCurrent;
       dispatchOutline({
         type: "inputs-changed",
-        launch: launchOutline && !hasScribblePreparation,
+        launch:
+          environmentReadyNow() && launchOutline && !hasScribblePreparation,
         ...(retainsPaintedScribble && currentScribble !== null
           ? {
               provenance: {
@@ -682,7 +712,7 @@ export function SketchControls({
     // which the export terminal action releases after relinquishing the slot.
     dispatchOutline({
       type: "transaction-settled",
-      launch: !hasScribblePreparation,
+      launch: environmentReadyNow() && !hasScribblePreparation,
     });
   };
   const commitTransaction = (): void => settleTransaction(commitEditTransaction);
@@ -718,6 +748,7 @@ export function SketchControls({
       cancelOutlineCoordinator();
       dispatchOutline({ type: "request-fill" });
     } else {
+      if (!environmentReadyNow()) return;
       requestOutlineForCurrentInputs();
     }
   };
@@ -732,6 +763,7 @@ export function SketchControls({
 
   const selectOutline = (): void => {
     setToneReferenceActive(false);
+    if (!environmentReadyNow()) return;
     if (outlineSessionRef.current.desired !== "outline") {
       requestOutlineForCurrentInputs();
     }
@@ -748,6 +780,10 @@ export function SketchControls({
   };
 
   const onFillCaptured = (capture: FillCapture): void => {
+    if (!environmentReadyNow()) {
+      cancelUnavailableEnvironmentWork();
+      return;
+    }
     const current = outlineSessionRef.current;
     if (
       current.capture?.token !== capture.token ||
@@ -801,10 +837,18 @@ export function SketchControls({
         // session token, rather than coordinator/job identity alone, owns UI
         // progress so an old worker can never repaint a newer request.
         if (outlineSessionRef.current.active?.token !== capture.token) return;
+        if (!environmentReadyNow()) {
+          cancelUnavailableEnvironmentWork();
+          return;
+        }
         setOutlineProgress({ token: capture.token, update });
       })
       .then((result) => {
         if (coordinatorRef.current !== coordinator) return;
+        if (!environmentReadyNow()) {
+          cancelUnavailableEnvironmentWork();
+          return;
+        }
         if (result.status === "success") {
           dispatchOutline({
             type: "succeeded",
@@ -818,6 +862,10 @@ export function SketchControls({
       })
       .catch((error: unknown) => {
         if (coordinatorRef.current !== coordinator) return;
+        if (!environmentReadyNow()) {
+          cancelUnavailableEnvironmentWork();
+          return;
+        }
         reportFailure(error instanceof Error ? error.message : "Outline worker failed");
       });
   };
@@ -825,6 +873,7 @@ export function SketchControls({
   const onDisplayedSceneCommitted = (
     snapshot: DisplayedSceneSnapshot,
   ): void => {
+    if (!environmentReadyNow()) return;
     const latestScribble = selectCurrentScribbleResult(
       scribblePreparation.getSessionSnapshot(),
     );
@@ -955,6 +1004,7 @@ export function SketchControls({
   const sameScribbleExportRevision = (
     expected: ReturnType<typeof captureCurrentScribbleExport>,
   ): boolean => {
+    if (!environmentReadyNow()) return false;
     if (!hasScribblePreparation) return true;
     if (expected === null) return false;
     const current = captureCurrentScribbleExport();
@@ -976,7 +1026,7 @@ export function SketchControls({
   // Sketch passes the captured `t` (the last-drawn moment from the handle), a
   // static Sketch omits `t` entirely so the name carries no segment.
   const exportPng = () => {
-    if (toneReferenceActiveRef.current) return;
+    if (toneReferenceActiveRef.current || !environmentReadyNow()) return;
     const handle = canvasHandle.current;
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
@@ -1001,6 +1051,7 @@ export function SketchControls({
     if (!sameScribbleExportRevision(scribbleExport)) return;
     canvas.toBlob((blob) => {
       if (blob === null) return;
+      if (!sameScribbleExportRevision(scribbleExport)) return;
       const filename = exportFilename({ sketchId: sketch.id, seed, t }, "png");
       // Splice the iTXt reproduction chunk into the PNG bytes before saving, so
       // the downloaded file traces back to this exact frame. Byte work is core's
@@ -1029,7 +1080,7 @@ export function SketchControls({
   // PNG path does, so the regenerated Scene and the `-t{t}` filename segment both
   // reflect the same displayed moment (static Sketches pass `undefined`, not 0).
   const exportSvg = () => {
-    if (toneReferenceActiveRef.current) return;
+    if (toneReferenceActiveRef.current || !environmentReadyNow()) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
     const scribbleExport = captureCurrentScribbleExport();
@@ -1068,7 +1119,13 @@ export function SketchControls({
   // export envelope before handing it to the worker. No completion callback
   // reads React state or the live canvas again.
   const exportHiddenLineSvg = () => {
-    if (toneReferenceActiveRef.current || hiddenLineBusy) return;
+    if (
+      toneReferenceActiveRef.current ||
+      hiddenLineBusy ||
+      !environmentReadyNow()
+    ) {
+      return;
+    }
     const handle = canvasHandle.current;
     if (handle == null) return;
     const capturedDisplayed = handle.captureDisplayedFrame();
@@ -1177,6 +1234,10 @@ export function SketchControls({
         if (outlineSessionRef.current.exportActive?.token !== active.token) {
           return;
         }
+        if (!environmentReadyNow()) {
+          cancelUnavailableEnvironmentWork();
+          return;
+        }
         if (update.phase === "finalizing") {
           dispatchOutline({ type: "export-finalizing", token: active.token });
         } else {
@@ -1188,6 +1249,10 @@ export function SketchControls({
           coordinatorRef.current !== coordinator ||
           outlineSessionRef.current.exportActive?.token !== active.token
         ) {
+          return;
+        }
+        if (!environmentReadyNow()) {
+          cancelUnavailableEnvironmentWork();
           return;
         }
         if (result.status === "success") {
@@ -1217,6 +1282,10 @@ export function SketchControls({
           coordinatorRef.current !== coordinator ||
           outlineSessionRef.current.exportActive?.token !== active.token
         ) {
+          return;
+        }
+        if (!environmentReadyNow()) {
+          cancelUnavailableEnvironmentWork();
           return;
         }
         const detail =
@@ -1404,7 +1473,7 @@ export function SketchControls({
               aria-busy={outlineBusy}
               aria-label="Toggle outline render mode"
               onClick={toggleRenderMode}
-              disabled={exportBusy}
+              disabled={exportBusy || !environmentReady}
             >
               {outlineSession.desired === "outline" ? "Outline" : "Fill"}
             </Button>
@@ -1445,7 +1514,7 @@ export function SketchControls({
                 }
                 aria-busy={outlineBusy}
                 onClick={selectOutline}
-                disabled={exportBusy}
+                disabled={exportBusy || !environmentReady}
               >
                 Outline
               </Button>
@@ -1564,6 +1633,7 @@ export function SketchControls({
             onClick={exportPng}
             disabled={
               toneReferenceActive ||
+              !environmentReady ||
               (!scribblePaintIsCurrent && hasScribblePreparation)
             }
           >
@@ -1577,6 +1647,7 @@ export function SketchControls({
             onClick={exportSvg}
             disabled={
               toneReferenceActive ||
+              !environmentReady ||
               (!scribblePaintIsCurrent && hasScribblePreparation)
             }
           >
@@ -1592,6 +1663,7 @@ export function SketchControls({
                 onClick={exportHiddenLineSvg}
                 disabled={
                   toneReferenceActive ||
+                  !environmentReady ||
                   hiddenLineBusy ||
                   (!scribblePaintIsCurrent && hasScribblePreparation)
                 }

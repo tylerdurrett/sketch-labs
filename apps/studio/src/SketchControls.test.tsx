@@ -4638,6 +4638,25 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     act(() => input.dispatchEvent(new Event("change", { bubbles: true })));
   }
 
+  async function openAssetBChoice(el: HTMLElement): Promise<HTMLButtonElement> {
+    clickButton(el, "Choose image");
+    await flush();
+    const choice = [
+      ...el.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Image Assets"] button',
+      ),
+    ].find((button) => button.textContent?.includes("portrait beta"));
+    if (choice === undefined) throw new Error("no portrait beta choice");
+    return choice;
+  }
+
+  function exposeAndClick(buttons: readonly HTMLButtonElement[]): void {
+    for (const button of buttons) {
+      button.disabled = false;
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    }
+  }
+
   it("carries an imported Photo Scribble asset through one undoable atomic edit into exact Tone and payload-free worker inputs", async () => {
     const generateToneSource = vi.fn(
       (
@@ -5080,6 +5099,234 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     });
     await flush();
     expect(scribbleJob.starts).toHaveLength(1);
+  });
+
+  it("disables and handler-guards every export and Outline until the exact asset resolves", async () => {
+    const toBlob = vi.fn();
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    const guarded = [
+      exportButton(el, "Export PNG"),
+      exportButton(el, "Export SVG"),
+      exportButton(el, "Outline"),
+      exportButton(el, "Export Hidden-line SVG"),
+    ];
+
+    expect(guarded.every(({ disabled }) => disabled)).toBe(true);
+    act(() => exposeAndClick(guarded));
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.starts).toBe(0);
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+    for (const button of guarded) button.disabled = true;
+
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.reject(
+        new ImageAssetResolutionError("missing", assetA),
+      );
+      await Promise.resolve();
+    });
+    const missingGuards = [
+      exportButton(el, "Export PNG"),
+      exportButton(el, "Export SVG"),
+      exportButton(el, "Outline"),
+      exportButton(el, "Export Hidden-line SVG"),
+    ];
+    expect(missingGuards.every(({ disabled }) => disabled)).toBe(true);
+    act(() => exposeAndClick(missingGuards));
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(outlineJob.starts).toBe(0);
+    expect(outlineJob.exportStarts).toBe(0);
+
+    clickButton(el, "Retry exact asset");
+    await act(async () => {
+      sketchEnvironmentJob.starts[1]!.resolve(
+        resolvedAssetEnvironment(assetA, 128),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(50));
+    expect(
+      ["Export PNG", "Export SVG", "Outline", "Export Hidden-line SVG"].map(
+        (label) => exportButton(el, label).disabled,
+      ),
+    ).toEqual([false, false, false, false]);
+  });
+
+  it("rejects forced same-batch exports and Outline after the authored asset ID changes", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    const toBlob = vi.fn();
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 64),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(51));
+    const choice = await openAssetBChoice(el);
+    const forced = [
+      exportButton(el, "Export PNG"),
+      exportButton(el, "Export SVG"),
+      exportButton(el, "Outline"),
+      exportButton(el, "Export Hidden-line SVG"),
+    ];
+
+    act(() => {
+      choice.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      exposeAndClick(forced);
+    });
+    await flush();
+
+    expect(historyCapture.atomic.at(-1)?.after.present.params.imageAsset).toBe(
+      assetB,
+    );
+    expect(sketchEnvironmentJob.starts.at(-1)?.params.imageAsset).toBe(assetB);
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.starts).toBe(0);
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("drops PNG metadata and download when asset availability changes in flight", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    let resolveBytes!: (value: ArrayBuffer) => void;
+    const bytes = new Promise<ArrayBuffer>((resolve) => {
+      resolveBytes = resolve;
+    });
+    const pendingBlob = new Blob([MINIMAL_PNG], { type: "image/png" });
+    vi.spyOn(pendingBlob, "arrayBuffer").mockReturnValue(bytes);
+    fakeCanvasToBlob = ((callback: BlobCallback) => {
+      callback(pendingBlob);
+    }) as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 64),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(52));
+    const choice = await openAssetBChoice(el);
+
+    clickButton(el, "Export PNG");
+    expect(pendingBlob.arrayBuffer).toHaveBeenCalledOnce();
+    act(() => choice.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await act(async () => {
+      resolveBytes(MINIMAL_PNG.slice().buffer);
+      await Promise.resolve();
+    });
+
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("cancels Outline completion when asset availability changes in flight", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    autoFireOutlineComputed = false;
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 64),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(53));
+    const choice = await openAssetBChoice(el);
+
+    clickButton(el, "Outline");
+    const active = outlineJob.active;
+    expect(active).not.toBeNull();
+    act(() => choice.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(outlineJob.active).toBeNull();
+    await act(async () => {
+      active!.resolve({
+        status: "success",
+        jobId: 1,
+        identity: active!.identity,
+        scene: preparedScene(99),
+      });
+      await Promise.resolve();
+    });
+
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(exportButton(el, "Outline").getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  it("cancels hidden-line finalization and download when asset availability changes in flight", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    outlineJob.exportMode = "pending";
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 64),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(54));
+    const choice = await openAssetBChoice(el);
+
+    clickButton(el, "Export Hidden-line SVG");
+    const pending = outlineJob.pendingExport;
+    expect(pending).not.toBeNull();
+    act(() => choice.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await flush();
+    expect(outlineJob.pendingExport).toBeNull();
+    pending!.succeed();
+    await flush();
+
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(el.textContent).not.toContain("Preparing SVG");
   });
 
   it("rejects obsolete environment and worker completions without changing current presentation", async () => {
