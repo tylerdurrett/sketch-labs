@@ -272,4 +272,30 @@ describe("schema Image Asset resolution", () => {
       message: "Image Asset is missing",
     });
   });
+
+  it("consults only a present unresolved ID, never its default or a same-name alternate", async () => {
+    const authored = "pine-cone-ffffffffffff";
+    const sameNameAlternate = "pine-cone-eeeeeeeeeeee";
+    const events: string[] = [];
+    const { dependencies } = adapter({ ok: false, status: 404, events });
+    const singleSchema = {
+      source: { kind: "image-asset", default: ID },
+    } satisfies ParamSchema;
+
+    await expect(
+      resolveSketchEnvironment(
+        singleSchema,
+        { source: authored },
+        dependencies,
+      ),
+    ).rejects.toMatchObject({
+      name: "ImageAssetResolutionError",
+      code: "missing",
+      assetId: authored,
+    });
+
+    expect(events).toEqual([`fetch:/image-assets/${authored}.png`]);
+    expect(events.join("|")).not.toContain(ID);
+    expect(events.join("|")).not.toContain(sameNameAlternate);
+  });
 });

@@ -5101,6 +5101,167 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(scribbleJob.starts).toHaveLength(1);
   });
 
+  it("ignores late A, then retries unchanged B into exactly one B job", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "portrait beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    const generateToneSource = vi.fn(
+      (
+        ...args: Parameters<
+          NonNullable<typeof photoScribble.generateToneSource>
+        >
+      ) => photoScribble.generateToneSource!(...args),
+    );
+    const el = mount(
+      <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+    );
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const pendingA = sketchEnvironmentJob.starts[0]!;
+    const choice = await openAssetBChoice(el);
+
+    act(() => choice.click());
+    const pendingB = sketchEnvironmentJob.starts[1]!;
+    expect(pendingA.signal.aborted).toBe(true);
+    expect(pendingB.params.imageAsset).toBe(assetB);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.after.present.params.imageAsset).toBe(
+      assetB,
+    );
+    expect(scribbleJob.starts).toHaveLength(0);
+
+    await act(async () => {
+      pendingB.reject(new ImageAssetResolutionError("missing", assetB));
+      await Promise.resolve();
+    });
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("missing");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetB);
+    expect(
+      el.querySelector('[aria-label="imageAsset image asset identity"]')
+        ?.textContent,
+    ).toBe(assetB);
+    clickButton(el, "Tone");
+    expect(generateToneSource).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingA.resolve(resolvedAssetEnvironment(assetA, 32));
+      await Promise.resolve();
+    });
+    expect(canvas.dataset.unavailableStatus).toBe("missing");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(assetB);
+    expect(scribbleJob.starts).toHaveLength(0);
+
+    const historyAfterSelection = historyCapture.atomic[0]!.after;
+    clickButton(el, "Retry exact asset");
+    expect(sketchEnvironmentJob.starts).toHaveLength(3);
+    expect(sketchEnvironmentJob.starts[2]!.params.imageAsset).toBe(assetB);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.after).toBe(historyAfterSelection);
+    expect(
+      el.querySelector('[aria-label="imageAsset image asset identity"]')
+        ?.textContent,
+    ).toBe(assetB);
+
+    const recoveredB = resolvedAssetEnvironment(assetB, 224);
+    await act(async () => {
+      sketchEnvironmentJob.starts[2]!.resolve(recoveredB);
+      await Promise.resolve();
+    });
+    expect(generateToneSource).toHaveBeenCalledTimes(1);
+    expect(generateToneSource.mock.calls[0]?.[2]).toBe(recoveredB);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(scribbleJob.starts[0]!.identity.params).toContainEqual({
+      key: "imageAsset",
+      value: assetB,
+    });
+    await flush();
+    expect(scribbleJob.starts).toHaveLength(1);
+  });
+
+  it("keeps a malformed authored ID visible and handler-guards every unavailable action", async () => {
+    const malformed = "../Portrait Beta.png?raw=1";
+    listPresets.mockResolvedValue(["malformed"]);
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: photoScribble.id,
+      name: "malformed",
+      seed: 22,
+      params: {
+        ...defaultParams(photoScribble.schema),
+        imageAsset: malformed,
+      },
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    const generateToneSource = vi.fn(
+      (
+        ...args: Parameters<
+          NonNullable<typeof photoScribble.generateToneSource>
+        >
+      ) => photoScribble.generateToneSource!(...args),
+    );
+    const toBlob = vi.fn();
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+    );
+    await flush();
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "malformed");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(sketchEnvironmentJob.starts.at(-1)?.params.imageAsset).toBe(
+      malformed,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts
+        .at(-1)!
+        .reject(new ImageAssetResolutionError("invalid-id", malformed));
+      await Promise.resolve();
+    });
+
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    expect(
+      el.querySelector('[aria-label="imageAsset image asset identity"]')
+        ?.textContent,
+    ).toBe(malformed);
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("error");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(malformed);
+    expect(generateToneSource).not.toHaveBeenCalled();
+    expect(scribbleJob.starts).toHaveLength(0);
+
+    const guarded = [
+      exportButton(el, "Export PNG"),
+      exportButton(el, "Export SVG"),
+      exportButton(el, "Outline"),
+      exportButton(el, "Export Hidden-line SVG"),
+    ];
+    expect(guarded.every(({ disabled }) => disabled)).toBe(true);
+    act(() => exposeAndClick(guarded));
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(plotterExportCapture.current).toBeNull();
+    expect(outlineJob.starts).toBe(0);
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
   it("disables and handler-guards every export and Outline until the exact asset resolves", async () => {
     const toBlob = vi.fn();
     fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
