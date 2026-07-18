@@ -13,12 +13,22 @@ function delay(ms) {
   return new Promise((done) => setTimeout(done, ms))
 }
 
+async function settleWithin(operation, timeoutMs = ABORT_CLEANUP_TIMEOUT_MS) {
+  operation.catch(() => {})
+  let timer
+  const expired = new Promise((done) => {
+    timer = setTimeout(done, timeoutMs)
+  })
+  await Promise.race([operation, expired])
+  clearTimeout(timer)
+}
+
 export async function raceOperation(operation, { page, timeoutMs, signal, label }) {
   if (signal?.aborted) {
     operation.catch(() => {})
-    await page.evaluate(
+    await settleWithin(page.evaluate(
       () => globalThis.__PHOTO_SCRIBBLE_EVIDENCE__?.abortActive(),
-    ).catch(() => false)
+    ).catch(() => false))
     throw new CampaignOperationError('campaign-aborted', `${label} was aborted`)
   }
   let timer
@@ -40,10 +50,9 @@ export async function raceOperation(operation, { page, timeoutMs, signal, label 
   } catch (error) {
     if (error instanceof CampaignOperationError) {
       operation.catch(() => {})
-      await Promise.race([
+      await settleWithin(
         page.evaluate(() => globalThis.__PHOTO_SCRIBBLE_EVIDENCE__?.abortActive()).catch(() => false),
-        delay(ABORT_CLEANUP_TIMEOUT_MS),
-      ])
+      )
     }
     throw error
   } finally {
@@ -344,7 +353,27 @@ export function createBrowserBoundary({
   async function closeBrowser() {
     const current = browser
     browser = null
-    await current?.close().catch(() => {})
+    if (current === null) return
+    const close = Promise.resolve().then(() => current.close()).catch(() => {})
+    await settleWithin(close)
+    if (current.isConnected?.() !== false) current.process?.()?.kill('SIGKILL')
+  }
+
+  function forceClose() {
+    const currentBrowser = browser
+    const currentServer = server
+    browser = null
+    server = null
+    try {
+      currentBrowser?.process?.()?.kill('SIGKILL')
+    } catch {
+      // Continue to the independently owned server process.
+    }
+    try {
+      if (currentServer?.exitCode === null) currentServer.kill('SIGKILL')
+    } catch {
+      // The host watchdog must never await or throw from emergency cleanup.
+    }
   }
 
   return {
@@ -499,8 +528,11 @@ export function createBrowserBoundary({
         }
         throw error
       } finally {
-        await page.evaluate(() => globalThis.__PHOTO_SCRIBBLE_EVIDENCE__?.abortActive()).catch(() => false)
-        await page.close().catch(() => {})
+        await settleWithin(
+          page.evaluate(() => globalThis.__PHOTO_SCRIBBLE_EVIDENCE__?.abortActive())
+            .catch(() => false),
+        )
+        await settleWithin(page.close().catch(() => {}))
       }
     },
 
@@ -511,15 +543,17 @@ export function createBrowserBoundary({
 
     async close() {
       await closeBrowser()
-      if (server?.exitCode === null) server.kill('SIGTERM')
-      if (server !== null) {
-        await Promise.race([
-          new Promise((done) => server.once('exit', done)),
-          delay(ABORT_CLEANUP_TIMEOUT_MS),
-        ])
+      const currentServer = server
+      if (currentServer?.exitCode === null) {
+        const exited = new Promise((done) => currentServer.once('exit', done))
+        currentServer.kill('SIGTERM')
+        await settleWithin(exited)
+        if (currentServer.exitCode === null) currentServer.kill('SIGKILL')
       }
       server = null
     },
+
+    forceClose,
   }
 }
 

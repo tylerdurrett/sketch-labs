@@ -13,6 +13,8 @@ import { dirname, relative, resolve, sep } from 'node:path'
 
 const SCHEMA_VERSION = 1
 const SAFE_ID = /^[a-z0-9][a-z0-9-]*$/
+const HOST_WATCHDOG_GRACE_MS = 5_000
+const BOUNDARY_CLEANUP_TIMEOUT_MS = 2_000
 
 export class CampaignValidationError extends Error {}
 
@@ -385,14 +387,64 @@ function normalizedFailure(error) {
   }
 }
 
+function watchdog(operation, timeoutMs, label) {
+  let timer
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new CampaignOperationError(
+      'unrecoverable-instability',
+      `${label} did not settle within the ${timeoutMs} ms host watchdog`,
+    )), timeoutMs)
+  })
+  operation.catch(() => {})
+  return Promise.race([operation, expired]).finally(() => clearTimeout(timer))
+}
+
+async function closeBoundary(boundary, { force, timeoutMs }) {
+  if (force) {
+    try {
+      boundary.forceClose?.()
+    } catch {
+      // The bounded graceful close below is still worth attempting.
+    }
+  }
+  let timer
+  let closed = false
+  const close = Promise.resolve()
+    .then(() => boundary.close())
+    .then(() => { closed = true })
+    .catch(() => {})
+  const expired = new Promise((done) => {
+    timer = setTimeout(done, timeoutMs)
+  })
+  await Promise.race([close, expired])
+  clearTimeout(timer)
+  if (!closed) {
+    try {
+      boundary.forceClose?.()
+    } catch {
+      // forceClose is deliberately best-effort and non-awaiting.
+    }
+  }
+}
+
 /** Serial by construction: the next job starts only after durable commit. */
-export async function runCampaign({ manifest, protocol, outputRoot, boundary, inputDigests = {}, signal }) {
+export async function runCampaign({
+  manifest,
+  protocol,
+  outputRoot,
+  boundary,
+  inputDigests = {},
+  signal,
+  hostWatchdogGraceMs = HOST_WATCHDOG_GRACE_MS,
+  boundaryCleanupTimeoutMs = BOUNDARY_CLEANUP_TIMEOUT_MS,
+}) {
   const campaign = validateCampaignManifest(manifest, protocol)
   const store = createCampaignStore(outputRoot, campaign, inputDigests)
   store.initialize()
   const completed = []
   let stopped = null
   let boundaryAttempted = false
+  let forceBoundaryClose = false
   try {
     boundaryAttempted = true
     await boundary.start()
@@ -416,13 +468,18 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, in
         if (signal?.aborted) {
           throw new CampaignOperationError('campaign-aborted', 'Campaign was aborted before the job started')
         }
-        const result = await boundary.runJob({
-          job,
-          campaignId: campaign.campaignId,
-          timeoutMs: protocol.thresholds.jobTimeoutMs,
-          reviewEnvironment: protocol.reviewEnvironment,
-          signal,
-        })
+        const watchdogMs = protocol.thresholds.jobTimeoutMs + hostWatchdogGraceMs
+        const result = await watchdog(
+          Promise.resolve().then(() => boundary.runJob({
+            job,
+            campaignId: campaign.campaignId,
+            timeoutMs: protocol.thresholds.jobTimeoutMs,
+            reviewEnvironment: protocol.reviewEnvironment,
+            signal,
+          })),
+          watchdogMs,
+          `Browser job ${jobKey(job)}`,
+        )
         raw = {
           schemaVersion: SCHEMA_VERSION,
           campaignId: campaign.campaignId,
@@ -456,6 +513,15 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, in
       }
       const committed = store.commit(job, raw)
       completed.push(committed.summary)
+      if (failure?.kind === 'unrecoverable-instability') {
+        forceBoundaryClose = true
+        stopped = {
+          kind: 'unrecoverable-instability',
+          failure: { kind: failure.kind, message: failure.message },
+          resume: 'The failed job is durable; later jobs remain pending. Review the host/browser instability before resuming.',
+        }
+        break
+      }
       if (failure?.kind === 'campaign-aborted') {
         stopped = {
           kind: 'campaign-aborted',
@@ -490,7 +556,12 @@ export async function runCampaign({ manifest, protocol, outputRoot, boundary, in
       stopped,
     }
   } finally {
-    if (boundaryAttempted) await boundary.close()
+    if (boundaryAttempted) {
+      await closeBoundary(boundary, {
+        force: forceBoundaryClose,
+        timeoutMs: boundaryCleanupTimeoutMs,
+      })
+    }
   }
 }
 

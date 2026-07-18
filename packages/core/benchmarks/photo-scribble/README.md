@@ -54,6 +54,10 @@ existing evidence; a campaign-ID collision with different inputs is refused.
 Abort records only the active job, if any, and leaves every later job pending.
 A crash/timeout record and checkpoint land before browser restart; a failed
 restart is a separate campaign failure and also leaves the next job pending.
+An independent host watchdog gives the browser boundary five seconds beyond the
+frozen job timeout to settle. If CDP remains stuck, it atomically records an
+`unrecoverable-instability` raw outcome, summary, and checkpoint before
+force-killing the owned browser and Studio processes; later jobs stay pending.
 Every page response is rebound to its campaign/host-run identity and validated
 against the expected scenario, candidate, tuple, hashes, and raw
 telemetry before it can become completed evidence.

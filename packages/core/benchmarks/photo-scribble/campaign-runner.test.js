@@ -65,6 +65,7 @@ function fakeBoundary(runJob = async ({ job }) => successResult(job)) {
     runJob: vi.fn(runJob),
     restartBrowser: vi.fn(async () => {}),
     close: vi.fn(async () => {}),
+    forceClose: vi.fn(),
   }
 }
 
@@ -355,6 +356,52 @@ describe('Photo Scribble campaign runner', () => {
       resolve(root, manifest.campaignId, 'campaign-checkpoint.json'), 'utf8',
     ))
     expect(checkpoint.completed).toHaveLength(2)
+  })
+
+  it('durably fails and force-closes when the browser boundary never settles', async () => {
+    const root = outputRoot()
+    const manifest = screenManifest({ jobs: [
+      { scenarioId: 'flowers-opaque-fine', candidateId: 'current-fine-baseline' },
+      { scenarioId: 'pinecone-dark-alpha-fine', candidateId: 'current-fine-baseline' },
+    ] })
+    const boundary = fakeBoundary(() => new Promise(() => {}))
+    boundary.close.mockImplementation(() => new Promise(() => {}))
+    const fastProtocol = structuredClone(protocol)
+    fastProtocol.thresholds.jobTimeoutMs = 5
+
+    const result = await runCampaign({
+      manifest,
+      protocol: fastProtocol,
+      outputRoot: root,
+      boundary,
+      hostWatchdogGraceMs: 5,
+      boundaryCleanupTimeoutMs: 5,
+    })
+
+    expect(result).toMatchObject({
+      completed: [{
+        status: 'failed',
+        failure: { kind: 'unrecoverable-instability' },
+      }],
+      stopped: { kind: 'unrecoverable-instability' },
+    })
+    expect(boundary.runJob).toHaveBeenCalledOnce()
+    expect(boundary.restartBrowser).not.toHaveBeenCalled()
+    expect(boundary.forceClose).toHaveBeenCalled()
+    const checkpoint = JSON.parse(readFileSync(
+      resolve(root, manifest.campaignId, 'campaign-checkpoint.json'), 'utf8',
+    ))
+    expect(checkpoint.completed).toHaveLength(1)
+    expect(checkpoint.completed[0]).toMatchObject({ status: 'failed' })
+    expect(checkpoint.nextJobKey).toContain('pinecone-dark-alpha-fine')
+    const raw = JSON.parse(readFileSync(
+      resolve(root, checkpoint.completed[0].rawRecord), 'utf8',
+    ))
+    expect(raw.failure).toMatchObject({ kind: 'unrecoverable-instability' })
+    const summary = JSON.parse(readFileSync(
+      resolve(root, checkpoint.completed[0].summary), 'utf8',
+    ))
+    expect(summary.failure).toEqual(raw.failure)
   })
 
   it('preserves a failed raw record, restarts after browser loss, and resumes without overwrite', async () => {
@@ -651,5 +698,32 @@ describe('Photo Scribble Puppeteer boundary', () => {
     await boundary.close()
     expect(browser.close).toHaveBeenCalledOnce()
     expect(server.kill).toHaveBeenCalledWith('SIGTERM')
+  })
+
+  it('force-kills owned browser and server processes without awaiting CDP', async () => {
+    const browserProcess = { kill: vi.fn() }
+    const browser = {
+      isConnected: () => true,
+      process: () => browserProcess,
+      close: vi.fn(() => new Promise(() => {})),
+    }
+    const server = Object.assign(new EventEmitter(), {
+      exitCode: null,
+      kill: vi.fn(),
+    })
+    const boundary = createBrowserBoundary({
+      serverFactory: async () => server,
+      browserFactory: async () => browser,
+      url: 'http://evidence.test',
+      fetchImpl: async () => ({ ok: true }),
+    })
+
+    await boundary.start()
+    boundary.forceClose()
+
+    expect(browserProcess.kill).toHaveBeenCalledWith('SIGKILL')
+    expect(server.kill).toHaveBeenCalledWith('SIGKILL')
+    await boundary.close()
+    expect(browser.close).not.toHaveBeenCalled()
   })
 })
