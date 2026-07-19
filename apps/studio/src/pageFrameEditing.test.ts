@@ -195,6 +195,31 @@ describe("Page Frame editing commands", () => {
     expect(sameStudioPhysicalScale(first, second)).toBe(true);
   });
 
+  it("detects a real physical-scale change at microscopic magnitudes", () => {
+    const pageFrame: PageFrame = {
+      x: 0,
+      y: 0,
+      width: 1_000,
+      height: 1_000,
+    };
+    const atScale = (millimetersPerUnit: number): StudioEditState => ({
+      ...state({
+        width: millimetersPerUnit * pageFrame.width,
+        height: millimetersPerUnit * pageFrame.height,
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        includeFrame: true,
+        toolWidthMillimeters: 0.3,
+      }),
+      framing: { kind: "framed", pageFrame, generationAspect: 1 },
+    });
+    const microscopic = atScale(1e-20);
+    const doubled = atScale(2e-20);
+
+    expect(studioMillimetersPerCompositionUnit(microscopic)).toBe(1e-20);
+    expect(studioMillimetersPerCompositionUnit(doubled)).toBe(2e-20);
+    expect(sameStudioPhysicalScale(microscopic, doubled)).toBe(false);
+  });
+
   it("Reset derives the full-Composition profile at current scale before atomically clearing framing", () => {
     const initial = state();
     const composition = resolveStudioCompositionFrame(initial);

@@ -79,7 +79,7 @@ export function sameStudioPhysicalScale(
   return (
     Math.abs(leftScale - rightScale) <=
     PHYSICAL_SCALE_RELATIVE_TOLERANCE *
-      Math.max(1, Math.abs(leftScale), Math.abs(rightScale))
+      Math.max(Math.abs(leftScale), Math.abs(rightScale))
   );
 }
 
