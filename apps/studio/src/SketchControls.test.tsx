@@ -55,6 +55,7 @@ import {
   type PageFrameManipulationTarget,
   type PageFramePointer,
 } from "./pageFrameManipulation";
+import type { PageFrameEditDraft } from "./pageFrameEditDraft";
 import { isScribbleComputeIdentity } from "./scribbleComputeProtocol";
 import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
@@ -453,6 +454,7 @@ let autoFireOutlineComputed = true;
 let lastCompositionFrame: CoordinateSpace | null = null;
 let lastProfile: PlotProfile | null = null;
 let lastPageFrameDraft: PageFrame | null = null;
+let lastPageFrameEditDraft: PageFrameEditDraft | null = null;
 let lastCommittedPageFrame: PageFrame | null = null;
 let lastPageFrameAspectConstraint: PageFrameAspectConstraint | null = null;
 let lastOnPageFrameDraftChange: ((frame: PageFrame) => void) | null = null;
@@ -476,6 +478,7 @@ vi.mock("./LiveCanvas", () => ({
     compositionFrame,
     profile,
     pageFrameDraft,
+    pageFrameEditDraft,
     onPageFrameDraftChange,
     pageFrameAspectConstraint,
     pageFrame,
@@ -502,6 +505,7 @@ vi.mock("./LiveCanvas", () => ({
     compositionFrame: CoordinateSpace;
     profile: PlotProfile;
     pageFrameDraft?: PageFrame | null;
+    pageFrameEditDraft?: PageFrameEditDraft | null;
     onPageFrameDraftChange?: (frame: PageFrame) => void;
     pageFrameAspectConstraint?: PageFrameAspectConstraint;
     pageFrame?: PageFrame | null;
@@ -602,7 +606,8 @@ vi.mock("./LiveCanvas", () => ({
     };
     lastCompositionFrame = compositionFrame;
     lastProfile = profile;
-    lastPageFrameDraft = pageFrameDraft ?? null;
+    lastPageFrameEditDraft = pageFrameEditDraft ?? null;
+    lastPageFrameDraft = pageFrameEditDraft?.frame ?? pageFrameDraft ?? null;
     lastCommittedPageFrame = pageFrame ?? null;
     lastPageFrameAspectConstraint = pageFrameAspectConstraint ?? null;
     lastOnPageFrameDraftChange = onPageFrameDraftChange ?? null;
@@ -853,6 +858,7 @@ beforeEach(() => {
   lastCompositionFrame = null;
   lastProfile = null;
   lastPageFrameDraft = null;
+  lastPageFrameEditDraft = null;
   lastCommittedPageFrame = null;
   lastPageFrameAspectConstraint = null;
   lastOnPageFrameDraftChange = null;
@@ -1756,6 +1762,21 @@ describe("SketchControls — central edit-history integration", () => {
 });
 
 describe("SketchControls — Page Frame edit mode", () => {
+  const fixedPageProfile: PlotProfile = {
+    width: 240,
+    height: 140,
+    insets: { top: 20, right: 20, bottom: 20, left: 20 },
+    includeFrame: true,
+    toolWidthMillimeters: 0.31,
+  };
+
+  function fixedPageSketch(id: string) {
+    return {
+      ...sketchWith(id, {}),
+      defaultOutputProfile: fixedPageProfile,
+    } as Parameters<typeof SketchControls>[0]["sketch"];
+  }
+
   function frameInput(el: HTMLElement, name: string): HTMLInputElement {
     const found = el.querySelector<HTMLInputElement>(`input[name="${name}"]`);
     if (found === null) throw new Error(`no Page Frame ${name} input`);
@@ -1810,6 +1831,10 @@ describe("SketchControls — Page Frame edit mode", () => {
     return next;
   }
 
+  function toggleFixedPage(el: HTMLElement): void {
+    act(() => frameInput(el, "keepPageSizeFixed").click());
+  }
+
   it("wires inert entry, freeform edge/corner edits, temporary Shift, numeric sync, and one atomic Apply", () => {
     const el = mount(
       <SketchControls sketch={sketchWith("frame-direct-wiring", {})} />,
@@ -1828,6 +1853,7 @@ describe("SketchControls — Page Frame edit mode", () => {
       height: composition.height,
     });
     expect(lastPageFrameAspectConstraint).toEqual({ kind: "free" });
+    expect(lastPageFrameEditDraft?.mode).toBe("scale-preserving");
     expect(historyCapture.atomic).toHaveLength(0);
     expect(outlineJob.starts).toBe(0);
     expect(
@@ -1918,6 +1944,251 @@ describe("SketchControls — Page Frame edit mode", () => {
       "x",
       "y",
     ]);
+  });
+
+  it("carries exact physical W/H through ordinary → fixed → ordinary, then applies and settles as one complete history state", () => {
+    const el = mount(
+      <SketchControls sketch={fixedPageSketch("fixed-page-orchestration")} />,
+    );
+    const originalProfile = structuredClone(lastProfile)!;
+    const composition = lastCompositionFrame!;
+    const inputRevision = el
+      .querySelector("[data-testid='canvas-seed']")
+      ?.getAttribute("data-input-revision");
+
+    clickButton(el, "Crop");
+    selectAspect(el, "4:3");
+    setInput(frameInput(el, "physical-width"), "300");
+    setInput(frameInput(el, "physical-height"), "200");
+
+    const exactProfile = {
+      ...fixedPageProfile,
+      width: 300,
+      height: 200,
+      insets: { ...fixedPageProfile.insets },
+    };
+    const ordinary = lastPageFrameEditDraft;
+    if (ordinary?.mode !== "scale-preserving") {
+      throw new Error("physical Page resize did not remain ordinary framing");
+    }
+    expect(lastProfile).toEqual(exactProfile);
+    expect(ordinary.generationAspect).toBeCloseTo(
+      composition.width / composition.height,
+      14,
+    );
+    expect(lastCompositionFrame).toBe(composition);
+    expect(historyCapture.atomic).toHaveLength(0);
+
+    toggleFixedPage(el);
+    const fixed = lastPageFrameEditDraft;
+    if (fixed?.mode !== "fixed-page") {
+      throw new Error("fixed Page mode did not open");
+    }
+    expect(fixed.profile).toEqual(exactProfile);
+    expect(lastProfile).toBe(fixed.profile);
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("free");
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.disabled,
+    ).toBe(true);
+    expect(frameInput(el, "width").disabled).toBe(true);
+    expect(frameInput(el, "height").disabled).toBe(true);
+    expect(frameInput(el, "physical-width").readOnly).toBe(true);
+    expect(frameInput(el, "physical-height").readOnly).toBe(true);
+    for (const side of ["top", "right", "bottom", "left"] as const) {
+      expect(frameInput(el, `physical-inset-${side}`).value).toBe("20");
+      expect(frameInput(el, `physical-inset-${side}`).readOnly).toBe(true);
+    }
+
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "200",
+    );
+    setInput(frameInput(el, "x"), "12.5");
+    setInput(frameInput(el, "y"), "-10");
+    const positioned = lastPageFrameEditDraft;
+    if (positioned?.mode !== "fixed-page") {
+      throw new Error("fixed Page scale did not remain active");
+    }
+    expect(positioned.compositionScale).toBeCloseTo(2, 12);
+    expect(positioned.profile).toBe(fixed.profile);
+    expect(positioned.frame.width).toBeCloseTo(fixed.fitFrame.width / 2, 12);
+    expect(positioned.frame.height).toBeCloseTo(
+      fixed.fitFrame.height / 2,
+      12,
+    );
+    expect(positioned.frame.x).toBeCloseTo(composition.width * 0.125, 12);
+    expect(positioned.frame.y).toBeCloseTo(composition.height * -0.1, 12);
+    expect(lastCompositionFrame).toBe(composition);
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(outlineJob.starts).toBe(0);
+
+    toggleFixedPage(el);
+    const rebased = lastPageFrameEditDraft;
+    if (rebased?.mode !== "scale-preserving") {
+      throw new Error("fixed Page mode did not return to ordinary framing");
+    }
+    expect(rebased.profile).toBe(positioned.profile);
+    expect(rebased.representedFrame).toEqual(positioned.frame);
+    expect(rebased.frame).toEqual(positioned.frame);
+    expect(frameInput(el, "physical-width").value).toBe("300");
+    expect(frameInput(el, "physical-height").value).toBe("200");
+    expect(frameInput(el, "physical-width").readOnly).toBe(false);
+
+    toggleFixedPage(el);
+    const reentered = lastPageFrameEditDraft;
+    if (reentered?.mode !== "fixed-page") {
+      throw new Error("fixed Page mode did not reopen");
+    }
+    expect(reentered.profile).toBe(positioned.profile);
+    expect(reentered.frame).toEqual(positioned.frame);
+    expect(reentered.compositionScale).toBeCloseTo(2, 12);
+
+    clickButton(el, "Apply");
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const appliedHistory = historyCapture.atomic[0]!.after;
+    expect(appliedHistory.past).toHaveLength(1);
+    expect(appliedHistory.future).toEqual([]);
+    expect(appliedHistory.present.profile).toBe(reentered.profile);
+    expect(appliedHistory.present.profile).toEqual(exactProfile);
+    expect(appliedHistory.present.framing).toEqual({
+      kind: "framed",
+      pageFrame: reentered.frame,
+      generationAspect: reentered.generationAspect,
+      aspectLocked: true,
+    });
+    expect(lastCommittedPageFrame).toEqual(reentered.frame);
+    expect(lastCompositionFrame).toBe(composition);
+    expect(lastPageFrameEditDraft).toBeNull();
+    expect(outlineJob.starts).toBe(0);
+    expect(
+      el
+        .querySelector("[data-testid='canvas-seed']")
+        ?.getAttribute("data-input-revision"),
+    ).toBe(inputRevision);
+
+    clickButton(el, "Crop");
+    toggleFixedPage(el);
+    const scaleInput = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Composition scale percentage"]',
+    )!;
+    act(() => scaleInput.focus());
+    expect(
+      pressHistoryShortcut(scaleInput, { ctrlKey: true }).defaultPrevented,
+    ).toBe(false);
+    expect(lastCommittedPageFrame).toEqual(reentered.frame);
+    expect(historyCapture.atomic).toHaveLength(1);
+    clickButton(el, "Cancel");
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(lastProfile).toEqual(originalProfile);
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(lastCompositionFrame).toBe(composition);
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(lastProfile).toEqual(exactProfile);
+    expect(lastCommittedPageFrame).toEqual(reentered.frame);
+    expect(lastCompositionFrame).toBe(composition);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(outlineJob.starts).toBe(0);
+  });
+
+  it("discards a fixed-page draft on Cancel without committing its preview profile or frame", () => {
+    const el = mount(
+      <SketchControls sketch={fixedPageSketch("fixed-page-cancel")} />,
+    );
+    const originalProfile = structuredClone(lastProfile);
+    const composition = lastCompositionFrame;
+
+    clickButton(el, "Crop");
+    setInput(frameInput(el, "physical-width"), "300");
+    setInput(frameInput(el, "physical-height"), "200");
+    toggleFixedPage(el);
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "175",
+    );
+    setInput(frameInput(el, "x"), "-25");
+    expect(lastProfile).not.toEqual(originalProfile);
+    expect(lastPageFrameEditDraft?.mode).toBe("fixed-page");
+
+    clickButton(el, "Cancel");
+
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(lastProfile).toEqual(originalProfile);
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(lastPageFrameEditDraft).toBeNull();
+    expect(lastCompositionFrame).toBe(composition);
+    expect(outlineJob.starts).toBe(0);
+  });
+
+  it("resets fixed-page scale to centered fit while preserving the exact locked profile through Undo and Redo", () => {
+    const el = mount(
+      <SketchControls sketch={fixedPageSketch("fixed-page-reset")} />,
+    );
+    const originalProfile = structuredClone(lastProfile);
+    const composition = lastCompositionFrame;
+
+    clickButton(el, "Crop");
+    setInput(frameInput(el, "physical-width"), "300");
+    setInput(frameInput(el, "physical-height"), "200");
+    toggleFixedPage(el);
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "150",
+    );
+    const edited = lastPageFrameEditDraft;
+    if (edited?.mode !== "fixed-page") {
+      throw new Error("fixed Page draft was not active");
+    }
+
+    clickButton(el, "Reset Frame");
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const reset = historyCapture.atomic[0]!.after.present;
+    expect(reset.profile).toBe(edited.profile);
+    expect(reset.profile).toEqual({
+      ...fixedPageProfile,
+      width: 300,
+      height: 200,
+      insets: { ...fixedPageProfile.insets },
+    });
+    expect(reset.framing).toEqual({
+      kind: "framed",
+      pageFrame: edited.fitFrame,
+      generationAspect: edited.generationAspect,
+      aspectLocked: true,
+    });
+    expect(lastCommittedPageFrame).toEqual(edited.fitFrame);
+    expect(lastCompositionFrame).toBe(composition);
+    expect(outlineJob.starts).toBe(0);
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+    expect(lastProfile).toEqual(originalProfile);
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(lastCompositionFrame).toBe(composition);
+
+    pressHistoryShortcut(window, { key: "y", ctrlKey: true });
+    expect(lastProfile).toEqual(edited.profile);
+    expect(lastCommittedPageFrame).toEqual(edited.fitFrame);
+    expect(lastCompositionFrame).toBe(composition);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(outlineJob.starts).toBe(0);
   });
 
   it("keeps common/custom constraints through Apply, Cancel, and re-entry until Freeform without persisting them", async () => {
@@ -6011,7 +6282,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     return match;
   }
 
-  it("applies and resets framing without restarting Scribble or revising painted provenance", async () => {
+  it("scales, pans, applies, and resets a fixed Page without restarting Scribble or revising painted provenance", async () => {
     const el = mount(<SketchControls sketch={toneCalibration} />);
     await completeScribble(0, preparedScene(77));
     const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
@@ -6020,14 +6291,45 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(scribbleJob.starts).toHaveLength(1);
 
     clickButton(el, "Crop");
-    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    act(() =>
+      el
+        .querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!
+        .click(),
+    );
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "150",
+    );
+    const scaled = lastPageFrameEditDraft;
+    if (scaled?.mode !== "fixed-page") {
+      throw new Error("fixed Page draft was not active");
+    }
+    act(() =>
+      lastOnPageFrameDraftChange?.({
+        ...scaled.frame,
+        x: scaled.frame.x + scaled.compositionFrame.width * 0.1,
+        y: scaled.frame.y - scaled.compositionFrame.height * 0.05,
+      }),
+    );
+    expect(lastPageFrameEditDraft?.frame).not.toEqual(scaled.frame);
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(scribbleJob.starts).toHaveLength(1);
     clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(1);
     expect(scribbleJob.starts).toHaveLength(1);
     expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
     expect(canvas.dataset.contentRevision).toBe(contentRevision);
 
     clickButton(el, "Crop");
+    act(() =>
+      el
+        .querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!
+        .click(),
+    );
     clickButton(el, "Reset Frame");
+    expect(historyCapture.atomic).toHaveLength(2);
     expect(scribbleJob.starts).toHaveLength(1);
     expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
     expect(canvas.dataset.contentRevision).toBe(contentRevision);

@@ -24,7 +24,6 @@ import {
   renderToSVG,
   resizePageFramePlotProfileProportionally,
   resolveOutputProfile,
-  type PageFrame,
   type PlotProfile,
   type Preset,
   type PresetFraming,
@@ -53,16 +52,23 @@ import {
   type StudioEditState,
 } from "./editHistory";
 import {
-  applyPageFrameEdit,
+  applyPageFrameEditDraft,
   initialPageFrameForEdit,
   recomposePageToProfile,
-  resetPageFrame,
+  resetPageFrameEditDraft,
   resolveStudioCompositionFrame,
   sameStudioPhysicalScale,
   studioGenerationAspect,
   studioMillimetersPerCompositionUnit,
   setPageAspectLocked,
 } from "./pageFrameEditing";
+import {
+  openPageFrameEditDraft,
+  pageFrameEditDraftProfile,
+  panFixedPageFrame,
+  setScalePreservingPageFrame,
+  type PageFrameEditDraft,
+} from "./pageFrameEditDraft";
 import {
   detectHistoryShortcutPlatform,
   fieldOwnsHistoryShortcut,
@@ -320,7 +326,8 @@ export function SketchControls({
   const historyRef = useRef(history);
   historyRef.current = history;
   const { params, seed, locks, profile, tolerance } = history.present;
-  const [pageFrameDraft, setPageFrameDraft] = useState<PageFrame | null>(null);
+  const [pageFrameEditDraft, setPageFrameEditDraft] =
+    useState<PageFrameEditDraft | null>(null);
   // Aspect is editing chrome, not authored state. It survives closing and
   // reopening the editor within this keyed Sketch session, but never enters
   // history, Presets, reproduction metadata, or the committed Page Frame.
@@ -331,8 +338,8 @@ export function SketchControls({
   // Page Frame percentages are relative to the Composition basis captured on
   // mode entry. Keep history fixed until Apply, Cancel, or Reset closes the mode
   // so a draft can never outlive the basis its strings describe.
-  const pageFrameDraftRef = useRef(pageFrameDraft);
-  pageFrameDraftRef.current = pageFrameDraft;
+  const pageFrameEditDraftRef = useRef(pageFrameEditDraft);
+  pageFrameEditDraftRef.current = pageFrameEditDraft;
   // Tone reference is diagnostic Studio chrome, not authored state. Keeping it
   // beside (rather than inside) the edit-history model excludes it from Undo,
   // Presets, locks, profiles, and every reproduction envelope by construction.
@@ -737,7 +744,7 @@ export function SketchControls({
       // Page Frame edit mode owns a transient draft outside Studio history.
       // Ignoring the shortcut (without preventing it) keeps global history and
       // the Composition basis stable while preserving native input Undo/Redo.
-      if (pageFrameDraftRef.current !== null) return;
+      if (pageFrameEditDraftRef.current !== null) return;
 
       const current = historyRef.current;
       if (
@@ -876,23 +883,53 @@ export function SketchControls({
   const cancelTransaction = (): void => settleTransaction(cancelEditTransaction);
 
   const openPageFrameEditor = (): void => {
-    setPageFrameDraft(initialPageFrameForEdit(historyRef.current.present));
+    const current = historyRef.current.present;
+    const draft = openPageFrameEditDraft({
+      profile: current.profile,
+      representedFrame: initialPageFrameForEdit(current),
+      compositionFrame: resolveStudioCompositionFrame(current),
+      generationAspect: studioGenerationAspect(current),
+    });
+    pageFrameEditDraftRef.current = draft;
+    setPageFrameEditDraft(draft);
   };
 
   const closePageFrameEditor = (): void => {
     restoreCropFocusRef.current = true;
-    setPageFrameDraft(null);
+    pageFrameEditDraftRef.current = null;
+    setPageFrameEditDraft(null);
   };
 
   useLayoutEffect(() => {
-    if (pageFrameDraft !== null || !restoreCropFocusRef.current) return;
+    if (pageFrameEditDraft !== null || !restoreCropFocusRef.current) return;
     restoreCropFocusRef.current = false;
     cropButtonRef.current?.focus();
-  }, [pageFrameDraft]);
+  }, [pageFrameEditDraft]);
 
-  const applyPageFrame = (frame: PageFrame): void => {
+  const updatePageFrameEditDraft = (next: PageFrameEditDraft): void => {
+    const previous = pageFrameEditDraftRef.current;
+    if (previous?.mode === "scale-preserving" && next.mode === "fixed-page") {
+      setPageFrameAspectConstraint({ kind: "free" });
+    }
+    pageFrameEditDraftRef.current = next;
+    setPageFrameEditDraft(next);
+  };
+
+  const updatePageFrameFromCanvas = (
+    frame: PageFrameEditDraft["frame"],
+  ): void => {
+    const current = pageFrameEditDraftRef.current;
+    if (current === null) return;
+    updatePageFrameEditDraft(
+      current.mode === "fixed-page"
+        ? panFixedPageFrame(current, frame)
+        : setScalePreservingPageFrame(current, frame),
+    );
+  };
+
+  const applyPageFrame = (draft: PageFrameEditDraft): void => {
     updateHistory(
-      (current) => applyPageFrameEdit(current, frame),
+      (current) => applyPageFrameEditDraft(current, draft),
       true,
       "atomic",
     );
@@ -900,7 +937,13 @@ export function SketchControls({
   };
 
   const resetFrame = (): void => {
-    updateHistory(resetPageFrame, true, "atomic");
+    const draft = pageFrameEditDraftRef.current;
+    if (draft === null) return;
+    updateHistory(
+      (current) => resetPageFrameEditDraft(current, draft),
+      true,
+      "atomic",
+    );
     closePageFrameEditor();
   };
 
@@ -1576,15 +1619,19 @@ export function SketchControls({
             params={params}
             seed={seed}
             compositionFrame={compositionFrame}
-            profile={profile}
+            profile={
+              pageFrameEditDraft === null
+                ? profile
+                : pageFrameEditDraftProfile(pageFrameEditDraft)
+            }
             inputRevision={outlineSession.inputRevision}
             fillCaptureRequest={outlineSession.capture}
             onFillCaptured={onFillCaptured}
             onDisplayedSceneCommitted={onDisplayedSceneCommitted}
             renderState={renderState}
             tolerance={tolerance}
-            pageFrameDraft={pageFrameDraft}
-            onPageFrameDraftChange={setPageFrameDraft}
+            pageFrameEditDraft={pageFrameEditDraft}
+            onPageFrameDraftChange={updatePageFrameFromCanvas}
             pageFrameAspectConstraint={pageFrameAspectConstraint}
             pageFrame={
               history.present.framing.kind === "framed"
@@ -1611,16 +1658,13 @@ export function SketchControls({
         hidden={collapsed}
       >
         {switcher}
-        {pageFrameDraft !== null ? (
+        {pageFrameEditDraft !== null ? (
           <PageFrameEditor
-            compositionFrame={compositionFrame}
-            frame={pageFrameDraft}
-            profile={profile}
-            representedFrame={initialPageFrameForEdit(history.present)}
+            editDraft={pageFrameEditDraft}
             displayUnit={readPaperDisplayUnit()}
             aspectConstraint={pageFrameAspectConstraint}
             onAspectConstraintChange={setPageFrameAspectConstraint}
-            onDraftChange={setPageFrameDraft}
+            onEditDraftChange={updatePageFrameEditDraft}
             onApply={applyPageFrame}
             onCancel={closePageFrameEditor}
             onReset={resetFrame}
