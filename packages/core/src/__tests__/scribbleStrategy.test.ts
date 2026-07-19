@@ -97,7 +97,9 @@ function maximumTurn(polyline: readonly Point[]): number {
 }
 
 function expectValidResult(result: ScribbleResult): void {
-  expect(['completed', 'budget-exhausted']).toContain(result.termination)
+  expect(['completed', 'stopped-early', 'budget-exhausted']).toContain(
+    result.termination,
+  )
   expect(Number.isFinite(result.residualError)).toBe(true)
   expect(result.residualError).toBeGreaterThanOrEqual(0)
   expect(result.residualError).toBeLessThanOrEqual(1)
@@ -182,6 +184,7 @@ describe('public Scribble strategy boundary', () => {
       'momentum',
       'chaos',
       'toneFidelity',
+      'stopPoint',
     ])
     expect(Object.keys(defaultScribbleControls)).toEqual(
       Object.keys(scribbleControlSchema),
@@ -298,9 +301,10 @@ describe('public Scribble strategy boundary', () => {
     expect(JSON.stringify(throwingObserved)).toBe(JSON.stringify(unobserved))
   })
 
-  it('calls E1 exactly once for nonzero demand and translates both stop causes', () => {
+  it('calls E1 exactly once for nonzero demand and translates all stop causes', () => {
     for (const [stopCause, termination] of [
       ['threshold-reached', 'completed'],
+      ['authored-limit-reached', 'stopped-early'],
       ['budget-reached', 'budget-exhausted'],
     ] as const) {
       let calls = 0
@@ -321,6 +325,61 @@ describe('public Scribble strategy boundary', () => {
       expect(calls).toBe(1)
       expect(result.termination).toBe(termination)
     }
+  })
+
+  it('stops nonzero demand at zero without producing geometry', () => {
+    const result = runScribbleStrategyForTesting(
+      input(source(constantTone(1)), 'zero-stop-point', { stopPoint: 0 }),
+      TINY_LIMITS,
+    )
+
+    expect(result.termination).toBe('stopped-early')
+    expect(result.polylines).toEqual([])
+    expect(result.residualError).toBe(1)
+  })
+
+  it('turns Stop point into an approximate fraction of ordinary work', () => {
+    const limits = { ...TINY_LIMITS, maxAcceptedSegments: 101 }
+    let authoredLimit: number | undefined
+
+    runScribbleStrategyForTesting(
+      input(source(), 'fractional-stop-point', { stopPoint: 50 }),
+      limits,
+      (orchestratorInput) => {
+        authoredLimit = orchestratorInput.authoredAcceptedSegmentLimit
+        return {
+          polylines: [],
+          residualError: orchestratorInput.model.residualError(),
+          acceptedSegments: 0,
+          stopCause: 'authored-limit-reached',
+        }
+      },
+    )
+
+    expect(authoredLimit).toBe(50)
+  })
+
+  it('leaves the authored cap absent at the default 100 percent', () => {
+    let receivedAuthoredLimit = true
+
+    runScribbleStrategyForTesting(
+      input(source(), 'full-stop-point', { stopPoint: 100 }),
+      TINY_LIMITS,
+      (orchestratorInput) => {
+        receivedAuthoredLimit = Object.hasOwn(
+          orchestratorInput,
+          'authoredAcceptedSegmentLimit',
+        )
+        return {
+          polylines: [],
+          residualError: orchestratorInput.model.residualError(),
+          acceptedSegments: 0,
+          stopCause: 'threshold-reached',
+        }
+      },
+    )
+
+    expect(receivedAuthoredLimit).toBe(false)
   })
 
   it('retains deterministic visible geometry when a tiny injected budget exhausts', () => {

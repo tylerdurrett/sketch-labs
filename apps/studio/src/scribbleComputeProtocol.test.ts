@@ -250,6 +250,13 @@ describe("Scribble compute protocol guards", () => {
       },
     };
     const completed = success();
+    const stoppedEarly = {
+      ...completed,
+      diagnostics: {
+        ...completed.diagnostics,
+        termination: "stopped-early",
+      },
+    };
     const failure = {
       type: "failure",
       jobId: 7,
@@ -260,6 +267,7 @@ describe("Scribble compute protocol guards", () => {
     expect(isScribbleComputeRequest(request)).toBe(true);
     expect(isScribbleComputeProgress(progress)).toBe(true);
     expect(isScribbleComputeSuccess(completed)).toBe(true);
+    expect(isScribbleComputeSuccess(stoppedEarly)).toBe(true);
     expect(isScribbleComputeFailure(failure)).toBe(true);
     expect(isScribbleComputeResponse(completed)).toBe(true);
     expect(isScribbleComputeResponse(failure)).toBe(true);

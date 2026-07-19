@@ -17,6 +17,7 @@ import type { Polyline } from '../types'
 describe('shading strategy contract', () => {
   const terminations = [
     'completed',
+    'stopped-early',
     'budget-exhausted',
   ] as const satisfies readonly ShadingTermination[]
 

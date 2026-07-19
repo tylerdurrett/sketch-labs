@@ -141,12 +141,21 @@ function executeScribbleStrategy(
     return { polylines: [], termination: 'completed', residualError: 0 }
   }
 
+  const executionLimits =
+    injectedLimits ?? resolveProductionScribbleExecutionLimits(model)
   const outcome = orchestrate({
     model,
     rng: createRandom(input.seed),
     residualThreshold: model.scales.completionThreshold,
-    limits:
-      injectedLimits ?? resolveProductionScribbleExecutionLimits(model),
+    limits: executionLimits,
+    ...(model.controls.stopPoint === 100
+      ? {}
+      : {
+          authoredAcceptedSegmentLimit: Math.floor(
+            (model.controls.stopPoint / 100) *
+              executionLimits.maxAcceptedSegments,
+          ),
+        }),
     ...(input.observer === undefined ? {} : { observer: input.observer }),
   })
 
@@ -178,7 +187,9 @@ function executeScribbleStrategy(
     termination:
       outcome.stopCause === 'threshold-reached'
         ? 'completed'
-        : 'budget-exhausted',
+        : outcome.stopCause === 'authored-limit-reached'
+          ? 'stopped-early'
+          : 'budget-exhausted',
     residualError: outcome.residualError,
   }
 }

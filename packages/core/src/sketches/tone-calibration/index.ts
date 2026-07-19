@@ -4,7 +4,7 @@
  * The analytic target in `source.ts` is fixed reference data. Normal Fill output
  * contains only black open polylines produced by the reusable Scribble Strategy:
  * the circle boundary, background, and grayscale ramps never become authored
- * guide geometry. Seed and the five strategy controls affect routes, while the
+ * guide geometry. Seed and the six strategy controls affect routes, while the
  * target and its frame-relative layout remain independent of both.
  */
 
@@ -33,7 +33,7 @@ import { createToneCalibrationSource } from './source'
 export * from './outline'
 export * from './source'
 
-/** Exactly the five shared Scribble controls; the fixed source has no controls. */
+/** Exactly the six shared Scribble controls; the fixed source has no controls. */
 export const toneCalibrationSchema = scribbleControlSchema
 
 const PREVIEW_STROKE = Object.freeze({ color: 'black', width: 1 })
@@ -45,6 +45,7 @@ function scribbleControls(params: Params): ScribbleControls {
     momentum: numberParam(params, toneCalibrationSchema, 'momentum'),
     chaos: numberParam(params, toneCalibrationSchema, 'chaos'),
     toneFidelity: numberParam(params, toneCalibrationSchema, 'toneFidelity'),
+    stopPoint: numberParam(params, toneCalibrationSchema, 'stopPoint'),
   }
 }
 

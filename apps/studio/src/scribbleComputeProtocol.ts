@@ -357,6 +357,7 @@ function isScribbleDiagnostics(value: unknown): value is ScribbleDiagnostics {
       "penLiftCount",
     ]) &&
     (value.termination === "completed" ||
+      value.termination === "stopped-early" ||
       value.termination === "budget-exhausted") &&
     isFiniteNumber(value.residualError) &&
     value.residualError >= 0 &&

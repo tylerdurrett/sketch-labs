@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DecodedPixels, SketchEnvironment } from '../imageAssets'
+import { applyPreset } from '../preset'
 import { createRasterToneSource } from '../rasterToneSource'
 import { defaultParams, type Params } from '../sketch'
 import type { ScribbleStrategyInput } from '../scribbleStrategy'
@@ -74,7 +75,7 @@ beforeEach(() => {
 })
 
 describe('Photo Scribble headless composition', () => {
-  it('declares Image Asset, exact tone controls, then the five Scribble controls', () => {
+  it('declares Image Asset, exact tone controls, then the six Scribble controls', () => {
     const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
 
     expect(Object.keys(schema)).toEqual([
@@ -86,6 +87,7 @@ describe('Photo Scribble headless composition', () => {
       'momentum',
       'chaos',
       'toneFidelity',
+      'stopPoint',
     ])
     expect(schema.imageAsset).toEqual({
       kind: 'image-asset',
@@ -108,6 +110,7 @@ describe('Photo Scribble headless composition', () => {
       momentum: 0.75,
       chaos: 0.25,
       toneFidelity: 0.9,
+      stopPoint: 100,
     })
   })
 
@@ -120,6 +123,23 @@ describe('Photo Scribble headless composition', () => {
       kind: 'image-asset',
       default: HEADLESS_FIXTURE_LOOKUP_KEY,
     })
+  })
+
+  it('loads a legacy Preset without Stop point at the full default', () => {
+    const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const legacyParams = defaultParams(schema)
+    delete legacyParams.stopPoint
+
+    const restored = applyPreset(schema, {
+      version: 1,
+      sketch: 'photo-scribble',
+      name: 'legacy-without-stop-point',
+      seed: 'legacy-seed',
+      params: legacyParams,
+      locks: [],
+    })
+
+    expect(restored.params.stopPoint).toBe(100)
   })
 
   it('exports the named production Sketch with its opaque bundled default', () => {
@@ -216,7 +236,7 @@ describe('Photo Scribble headless composition', () => {
     )
   })
 
-  it('passes the existing five Scribble controls and Seed to the Strategy', () => {
+  it('passes the six Scribble controls and Seed to the Strategy', () => {
     const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
     generatePhotoScribble(
       params({
@@ -225,6 +245,7 @@ describe('Photo Scribble headless composition', () => {
         momentum: 0.25,
         chaos: 0.75,
         toneFidelity: 0.4,
+        stopPoint: 50,
       }),
       'routing-seed',
       FRAME,
@@ -243,6 +264,7 @@ describe('Photo Scribble headless composition', () => {
           momentum: 0.25,
           chaos: 0.75,
           toneFidelity: 0.4,
+          stopPoint: 50,
         },
       }),
     )

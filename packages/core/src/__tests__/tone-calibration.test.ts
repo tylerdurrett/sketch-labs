@@ -40,6 +40,7 @@ const CONTROL_KEYS = [
   'momentum',
   'chaos',
   'toneFidelity',
+  'stopPoint',
 ]
 
 function params(overrides: Record<string, number> = {}) {
@@ -159,7 +160,7 @@ afterEach(() => {
 })
 
 describe('Tone Calibration Scribble integration', () => {
-  it('publishes exactly the five shared strategy controls and no source controls', () => {
+  it('publishes exactly the six shared strategy controls and no source controls', () => {
     expect(toneCalibration.id).toBe('tone-calibration')
     expect(toneCalibration.name).toBe('Tone Calibration')
     expect(toneCalibration.schema).toBe(toneCalibrationSchema)
@@ -171,6 +172,7 @@ describe('Tone Calibration Scribble integration', () => {
       momentum: 0.75,
       chaos: 0.25,
       toneFidelity: 0.9,
+      stopPoint: 100,
     })
     expect(toneCalibration.schema).not.toHaveProperty('limits')
   })

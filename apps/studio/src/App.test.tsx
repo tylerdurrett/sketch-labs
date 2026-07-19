@@ -325,6 +325,7 @@ describe("App — Photo Scribble integration (#333)", () => {
       "control-momentum",
       "control-chaos",
       "control-toneFidelity",
+      "control-stopPoint",
     ]);
     expect(
       document
@@ -340,6 +341,7 @@ describe("App — Photo Scribble integration (#333)", () => {
         momentum: 0.75,
         chaos: 0.25,
         toneFidelity: 0.9,
+        stopPoint: 100,
       }),
     );
     expect(
@@ -388,7 +390,7 @@ describe("App — Photo Scribble integration (#333)", () => {
     ).toBe("fill-held");
     expect(
       document.querySelectorAll('#inspector input[id^="control-"]'),
-    ).toHaveLength(7);
+    ).toHaveLength(8);
     expect(
       document.querySelector(
         '[aria-label="imageAsset image asset identity"]',

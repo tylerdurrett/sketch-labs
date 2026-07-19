@@ -66,6 +66,7 @@ describe('Scribble pass orchestration', () => {
       model: model(() => 0.2),
       rng: createRandom('already-complete'),
       residualThreshold: 0.200_001,
+      authoredAcceptedSegmentLimit: 0,
       limits: {
         maxAcceptedSegments: 0,
         maxPolylines: 0,
@@ -251,6 +252,35 @@ describe('Scribble pass orchestration', () => {
     expect(repeated).toEqual(first)
   })
 
+  it('retains exactly the authored number of accepted segments', () => {
+    const result = runScribbleOrchestrator({
+      model: model(() => 1),
+      rng: createRandom('authored-limit'),
+      residualThreshold: 0,
+      authoredAcceptedSegmentLimit: 3,
+      limits: GENEROUS_LIMITS,
+    })
+
+    expect(result.stopCause).toBe('authored-limit-reached')
+    expect(result.acceptedSegments).toBe(3)
+    expect(
+      result.polylines.reduce((sum, line) => sum + line.length - 1, 0),
+    ).toBe(3)
+  })
+
+  it('checks convergence before an authored cap reached by the same segment', () => {
+    const result = runScribbleOrchestrator({
+      model: model(() => 1),
+      rng: createRandom('authored-limit-convergence'),
+      residualThreshold: 0.999_824,
+      authoredAcceptedSegmentLimit: 1,
+      limits: GENEROUS_LIMITS,
+    })
+
+    expect(result.acceptedSegments).toBe(1)
+    expect(result.stopCause).toBe('threshold-reached')
+  })
+
   it('checks the threshold before a segment that also reaches its budget', () => {
     const result = runScribbleOrchestrator({
       model: model(() => 1),
@@ -283,6 +313,17 @@ describe('Scribble pass orchestration', () => {
         limits: { ...GENEROUS_LIMITS, maxRestarts: -1 },
       }),
     ).toThrow(/maxRestarts/)
+
+    expect(() =>
+      runScribbleOrchestrator({
+        model: residual,
+        rng: createRandom('bad-authored-limit'),
+        residualThreshold: 0.1,
+        limits: GENEROUS_LIMITS,
+        authoredAcceptedSegmentLimit:
+          GENEROUS_LIMITS.maxAcceptedSegments + 1,
+      }),
+    ).toThrow(/authoredAcceptedSegmentLimit/)
   })
 })
 
@@ -357,6 +398,24 @@ describe('Scribble pass progress observation', () => {
     })
 
     expect(result.stopCause).toBe('budget-reached')
+    expect(snapshots).toEqual([
+      { completedWorkUnits: 1, totalWorkUnits: 6, terminal: false },
+      { completedWorkUnits: 1, totalWorkUnits: 6, terminal: true },
+    ])
+  })
+
+  it('uses the authored cap in the stable progress total', () => {
+    const snapshots: ScribbleProgress[] = []
+    const result = runScribbleOrchestrator({
+      model: model(() => 1),
+      rng: createRandom('observed-authored-limit'),
+      residualThreshold: 0,
+      authoredAcceptedSegmentLimit: 1,
+      limits: { ...GENEROUS_LIMITS, maxStagnations: 5 },
+      observer: (progress) => snapshots.push(progress),
+    })
+
+    expect(result.stopCause).toBe('authored-limit-reached')
     expect(snapshots).toEqual([
       { completedWorkUnits: 1, totalWorkUnits: 6, terminal: false },
       { completedWorkUnits: 1, totalWorkUnits: 6, terminal: true },
