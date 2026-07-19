@@ -1,14 +1,14 @@
 /**
  * Physical Plot Profile derivation for Page Frame edits (ADR-0015).
  *
- * A committed Page Frame changes which Composition-coordinate extent the page
- * represents, but it must not change the uniform Scene-to-physical scale. The
- * current Plot Profile and the Page Frame represented by its drawable rectangle
- * together carry that scale. Re-deriving from that pair makes first edits,
- * repeated edits, and Reset-to-full-Composition all the same operation.
+ * Ordinary Page Frame edits preserve the uniform Scene-to-physical scale by
+ * resizing the Plot Profile around the new Composition-coordinate extent. The
+ * explicit fixed-page inverse instead locks that profile and changes the Page
+ * Frame extent proportionally, uniformly scaling the frozen Scene behind it.
  *
- * Physical plot margins are outside the drawable Page extent. They therefore
- * remain fixed in millimeters while only paper width and height grow or shrink.
+ * Physical plot margins remain outside the drawable Page extent: ordinary
+ * framing keeps them fixed while paper dimensions change, and fixed-page
+ * scaling keeps the entire profile—including those margins—exactly untouched.
  */
 
 import type { PageFrame } from './pageFrame'
