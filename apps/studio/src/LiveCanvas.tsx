@@ -1082,29 +1082,51 @@ export function LiveCanvas({
          * the sole rendered/exported pixel surface — neither margin chrome nor the
          * guide enters getCanvas()/PNG.
          */}
-        {pageFrameEditGeometry === null || pageFrameDraft === null ? (
-          <div
-            className="plot-sheet"
-            style={sheetStyle}
-            role="group"
-            aria-label="Plot sheet preview"
-          >
-            <div className="plot-drawable">{canvasSurface}</div>
-          </div>
-        ) : (
-          <div
-            className="page-frame-edit-view"
-            style={pageFrameEditGeometry.style}
-            role="group"
-            aria-label="Page Frame edit preview"
-          >
+        <div
+          className={
+            pageFrameEditGeometry === null
+              ? "plot-sheet"
+              : "page-frame-edit-view"
+          }
+          style={
+            pageFrameEditGeometry === null
+              ? sheetStyle
+              : pageFrameEditGeometry.style
+          }
+          role="group"
+          aria-label={
+            pageFrameEditGeometry === null
+              ? "Plot sheet preview"
+              : "Page Frame edit preview"
+          }
+        >
+          {pageFrameEditGeometry !== null && pageFrameDraft !== null && (
             <div
+              key="page-ground"
               ref={pageGroundRef}
               className="page-frame-edit-page-ground"
               aria-hidden="true"
             />
-            <div className="page-frame-edit-composition">{canvasSurface}</div>
+          )}
+          {/*
+           * Keep this keyed wrapper (and therefore its canvas child) at the same
+           * reconciliation position while its layout role changes. The rAF loop,
+           * ResizeObserver, DPR listener, and imperative export handle all retain
+           * the one live DOM node across Page Frame entry and settlement.
+           */}
+          <div
+            key="canvas-surface"
+            className={
+              pageFrameEditGeometry === null
+                ? "plot-drawable"
+                : "page-frame-edit-composition"
+            }
+          >
+            {canvasSurface}
+          </div>
+          {pageFrameEditGeometry !== null && pageFrameDraft !== null && (
             <svg
+              key="edit-overlay"
               className="page-frame-edit-overlay"
               viewBox={pageFrameEditGeometry.viewBox}
               preserveAspectRatio="none"
@@ -1126,8 +1148,8 @@ export function LiveCanvas({
                 vectorEffect="non-scaling-stroke"
               />
             </svg>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
       {time !== undefined && unavailableState === null && (

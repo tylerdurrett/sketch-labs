@@ -72,6 +72,17 @@ afterEach(() => {
 });
 
 describe("PageFrameEditor", () => {
+  it("focuses X on entry without stealing focus on draft rerenders", () => {
+    const { el } = mountEditor();
+    const x = input(el, "x");
+    const y = input(el, "y");
+
+    expect(document.activeElement).toBe(x);
+    act(() => y.focus());
+    setInput(y, "25");
+    expect(document.activeElement).toBe(y);
+  });
+
   it("starts from the exact supplied frame and exposes only numeric framing actions", () => {
     const { el } = mountEditor({ x: -20, y: 10, width: 300, height: 75 });
 

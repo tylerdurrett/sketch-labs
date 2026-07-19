@@ -146,6 +146,7 @@ export function PageFrameEditor({
                 name={field}
                 type="number"
                 step="any"
+                autoFocus={field === "x"}
                 value={draft[field]}
                 aria-invalid={error?.field === field || undefined}
                 aria-describedby={error?.field === field ? errorId : undefined}

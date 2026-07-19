@@ -293,6 +293,8 @@ export function SketchControls({
   historyRef.current = history;
   const { params, seed, locks, profile, tolerance } = history.present;
   const [pageFrameDraft, setPageFrameDraft] = useState<PageFrame | null>(null);
+  const cropButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreCropFocusRef = useRef(false);
   // Page Frame percentages are relative to the Composition basis captured on
   // mode entry. Keep history fixed until Apply, Cancel, or Reset closes the mode
   // so a draft can never outlive the basis its strings describe.
@@ -732,18 +734,29 @@ export function SketchControls({
     setPageFrameDraft(initialPageFrameForEdit(historyRef.current.present));
   };
 
+  const closePageFrameEditor = (): void => {
+    restoreCropFocusRef.current = true;
+    setPageFrameDraft(null);
+  };
+
+  useLayoutEffect(() => {
+    if (pageFrameDraft !== null || !restoreCropFocusRef.current) return;
+    restoreCropFocusRef.current = false;
+    cropButtonRef.current?.focus();
+  }, [pageFrameDraft]);
+
   const applyPageFrame = (frame: PageFrame): void => {
     updateHistory(
       (current) => applyPageFrameEdit(current, frame),
       true,
       "atomic",
     );
-    setPageFrameDraft(null);
+    closePageFrameEditor();
   };
 
   const resetFrame = (): void => {
     updateHistory(resetPageFrame, true, "atomic");
-    setPageFrameDraft(null);
+    closePageFrameEditor();
   };
 
   // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
@@ -1440,7 +1453,7 @@ export function SketchControls({
             initialFrame={pageFrameDraft}
             onDraftChange={setPageFrameDraft}
             onApply={applyPageFrame}
-            onCancel={() => setPageFrameDraft(null)}
+            onCancel={closePageFrameEditor}
             onReset={resetFrame}
           />
         ) : (
@@ -1477,6 +1490,7 @@ export function SketchControls({
           }}
         />
         <Button
+          ref={cropButtonRef}
           type="button"
           variant="outline"
           size="sm"

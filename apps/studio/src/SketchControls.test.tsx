@@ -1705,6 +1705,31 @@ describe("SketchControls — Page Frame edit mode", () => {
     return found;
   }
 
+  it.each(["Apply", "Cancel", "Reset Frame"] as const)(
+    "focuses the first field on entry and restores Crop after %s",
+    (action) => {
+      const el = mount(
+        <SketchControls sketch={sketchWith("frame-focus-" + action, {})} />,
+      );
+
+      clickButton(el, "Crop");
+      const x = frameInput(el, "x");
+      const y = frameInput(el, "y");
+      expect(document.activeElement).toBe(x);
+
+      act(() => y.focus());
+      setInput(y, "12.5");
+      expect(document.activeElement).toBe(y);
+
+      clickButton(el, action);
+      const crop = [...el.querySelectorAll("button")].find(
+        (button) => button.textContent === "Crop",
+      );
+      expect(crop).toBeDefined();
+      expect(document.activeElement).toBe(crop);
+    },
+  );
+
   it("applies, cancels, resets, and traverses framing as atomic history", () => {
     const el = mount(<SketchControls sketch={sketchWith("frame", {})} />);
     const originalProfile = structuredClone(lastProfile);
