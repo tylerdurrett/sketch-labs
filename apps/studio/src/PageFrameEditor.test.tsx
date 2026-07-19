@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PageFrame } from "@harness/core";
 
 import { PageFrameEditor } from "./PageFrameEditor";
+import type { PageFrameAspectConstraint } from "./pageFrameManipulation";
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -20,6 +21,7 @@ let root: Root | null = null;
 function mountEditor(initialFrame: PageFrame = FULL_FRAME) {
   const callbacks = {
     onDraftChange: vi.fn(),
+    onAspectConstraintChange: vi.fn(),
     onApply: vi.fn(),
     onCancel: vi.fn(),
     onReset: vi.fn(),
@@ -64,6 +66,17 @@ function click(el: HTMLElement, label: string): void {
   act(() => button.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 }
 
+function selectOption(el: HTMLElement, value: string): void {
+  const select = el.querySelector<HTMLSelectElement>(
+    'select[name="aspectConstraint"]',
+  );
+  if (select === null) throw new Error("No aspect constraint select");
+  act(() => {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
 afterEach(() => {
   act(() => root?.unmount());
   container?.remove();
@@ -83,7 +96,7 @@ describe("PageFrameEditor", () => {
     expect(document.activeElement).toBe(y);
   });
 
-  it("starts from the exact supplied frame and exposes only numeric framing actions", () => {
+  it("starts from the exact supplied frame and explains direct manipulation", () => {
     const { el } = mountEditor({ x: -20, y: 10, width: 300, height: 75 });
 
     expect(el.querySelector("h2")?.textContent).toBe("Edit Page Frame");
@@ -94,7 +107,65 @@ describe("PageFrameEditor", () => {
     expect(
       [...el.querySelectorAll("button")].map((button) => button.textContent),
     ).toEqual(["Apply", "Cancel", "Reset Frame"]);
-    expect(el.textContent).not.toMatch(/drag|pan|shift|aspect/i);
+    expect(el.textContent).toMatch(/drag an edge or corner/i);
+    expect(el.textContent).toMatch(/drag inside.*pan/i);
+    expect(el.textContent).toMatch(/hold shift/i);
+  });
+
+  it("syncs external frame changes into all four numeric fields", () => {
+    const { el, callbacks } = mountEditor();
+    setInput(input(el, "x"), "");
+
+    act(() => {
+      root!.render(
+        <PageFrameEditor
+          compositionFrame={COMPOSITION}
+          frame={{ x: -50, y: 25, width: 100, height: 75 }}
+          {...callbacks}
+        />,
+      );
+    });
+
+    expect(input(el, "x").value).toBe("-25");
+    expect(input(el, "y").value).toBe("25");
+    expect(input(el, "width").value).toBe("50");
+    expect(input(el, "height").value).toBe("75");
+  });
+
+  it("does not normalize a partial numeric draft when its controlled echo arrives", () => {
+    const onDraftChange = vi.fn();
+
+    function Harness() {
+      const [frame, setFrame] = useState(FULL_FRAME);
+      return (
+        <PageFrameEditor
+          compositionFrame={COMPOSITION}
+          frame={frame}
+          onDraftChange={(next) => {
+            onDraftChange(next);
+            setFrame(next);
+          }}
+          onApply={vi.fn()}
+          onCancel={vi.fn()}
+          onReset={vi.fn()}
+        />
+      );
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root!.render(<Harness />));
+
+    setInput(input(container, "x"), "001");
+
+    expect(onDraftChange).toHaveBeenLastCalledWith({
+      x: 2,
+      y: 0,
+      width: 200,
+      height: 100,
+    });
+    expect(input(container, "x").value).toBe("001");
   });
 
   it.each([
@@ -149,5 +220,112 @@ describe("PageFrameEditor", () => {
     expect(callbacks.onApply).not.toHaveBeenCalled();
     expect(callbacks.onCancel).toHaveBeenCalledOnce();
     expect(callbacks.onReset).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["1:1", 1],
+    ["4:3", 4 / 3],
+    ["3:2", 3 / 2],
+    ["16:9", 16 / 9],
+  ])("publishes the common %s aspect constraint", (preset, ratio) => {
+    const { el, callbacks } = mountEditor();
+
+    selectOption(el, preset);
+
+    expect(callbacks.onAspectConstraintChange).toHaveBeenLastCalledWith({
+      kind: "ratio",
+      ratio,
+    });
+  });
+
+  it("pairs W and H percentages under the persistent aspect until Freeform", () => {
+    const { el, callbacks } = mountEditor();
+    selectOption(el, "4:3");
+
+    setInput(input(el, "width"), "60");
+
+    expect(input(el, "height").value).toBe("90");
+    expect(callbacks.onDraftChange).toHaveBeenLastCalledWith({
+      x: 0,
+      y: 0,
+      width: 120,
+      height: 90,
+    });
+
+    setInput(input(el, "height"), "60");
+    expect(input(el, "width").value).toBe("40");
+    expect(callbacks.onDraftChange).toHaveBeenLastCalledWith({
+      x: 0,
+      y: 0,
+      width: 80,
+      height: 60,
+    });
+
+    selectOption(el, "free");
+    setInput(input(el, "width"), "50");
+
+    expect(input(el, "height").value).toBe("60");
+    expect(callbacks.onAspectConstraintChange).toHaveBeenLastCalledWith({
+      kind: "free",
+    });
+  });
+
+  it("validates and publishes a custom positive finite ratio", () => {
+    const { el, callbacks } = mountEditor();
+    selectOption(el, "custom");
+    const customWidth = input(el, "customAspectWidth");
+    const customHeight = input(el, "customAspectHeight");
+
+    expect(callbacks.onAspectConstraintChange).toHaveBeenLastCalledWith({
+      kind: "ratio",
+      ratio: 2,
+    });
+
+    setInput(customWidth, "");
+    click(el, "Use Custom Ratio");
+    expect(callbacks.onAspectConstraintChange).toHaveBeenCalledOnce();
+    expect(el.querySelector('[role="alert"]')?.textContent).toMatch(
+      /width.*greater than 0/i,
+    );
+    expect(customWidth.getAttribute("aria-invalid")).toBe("true");
+
+    setInput(customWidth, "5");
+    setInput(customHeight, "4");
+    click(el, "Use Custom Ratio");
+
+    expect(callbacks.onAspectConstraintChange).toHaveBeenLastCalledWith({
+      kind: "ratio",
+      ratio: 1.25,
+    });
+  });
+
+  it("follows externally controlled aspect changes", () => {
+    const { el, callbacks } = mountEditor();
+    const renderWithConstraint = (
+      aspectConstraint: PageFrameAspectConstraint,
+    ): void => {
+      act(() => {
+        root!.render(
+          <PageFrameEditor
+            compositionFrame={COMPOSITION}
+            frame={FULL_FRAME}
+            aspectConstraint={aspectConstraint}
+            {...callbacks}
+          />,
+        );
+      });
+    };
+
+    renderWithConstraint({ kind: "ratio", ratio: 16 / 9 });
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("16:9");
+
+    renderWithConstraint({ kind: "free" });
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("free");
   });
 });
