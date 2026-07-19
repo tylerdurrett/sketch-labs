@@ -197,9 +197,9 @@
 /*
  * Page Frame edit mode exposes the union of the frozen Composition and draft
  * Page extent. The generated canvas stays positioned in exact Composition
- * coordinates; the surrounding white/checkered surface is geometry-free page
- * padding. SVG chrome above it dims only Composition content discarded by the
- * draft and outlines the final Page boundary without adding drag affordances.
+ * coordinates; a ground layer beneath it identifies geometry-free Page padding
+ * with normal ADR-0009 precedence. SVG chrome above it dims only Composition
+ * content discarded by the draft and outlines the final Page boundary.
  */
 .page-frame-edit-view {
   position: relative;
@@ -221,10 +221,20 @@
 
 .page-frame-edit-composition {
   position: absolute;
+  z-index: 1;
   top: var(--page-frame-composition-top);
   left: var(--page-frame-composition-left);
   width: var(--page-frame-composition-width);
   height: var(--page-frame-composition-height);
+  background: #fff;
+}
+
+.page-frame-edit-page-ground {
+  position: absolute;
+  top: var(--page-frame-page-top);
+  left: var(--page-frame-page-left);
+  width: var(--page-frame-page-width);
+  height: var(--page-frame-page-height);
   background: #fff;
 }
 
@@ -235,6 +245,7 @@
   height: 100%;
   overflow: visible;
   pointer-events: none;
+  z-index: 2;
 }
 
 .page-frame-edit-discarded {

@@ -395,7 +395,12 @@ let fakeCanvasToBlob: HTMLCanvasElement["toBlob"];
 // The current-t the mocked handle reports — the export's `-t{t}` source.
 let fakeCurrentT = 0;
 // Atomic displayed-Scene snapshot exposed by the mocked LiveCanvas handle.
-let fakeDisplayedScene: DisplayedSceneSnapshot | null = null;
+type TestDisplayedSceneSnapshot = Omit<
+  DisplayedSceneSnapshot,
+  "sourceScene" | "displayedScene"
+> &
+  Partial<Pick<DisplayedSceneSnapshot, "sourceScene" | "displayedScene">>;
+let fakeDisplayedScene: TestDisplayedSceneSnapshot | null = null;
 let fakeFillCaptureScene: DisplayedSceneSnapshot["scene"] | null = null;
 // #228: the real LiveCanvas signals `onOutlineComputed` when an outline pass has
 // drawn, which the owner uses to clear its "Computing…" affordance. The mock
@@ -408,6 +413,7 @@ let autoFireOutlineComputed = true;
 let lastCompositionFrame: CoordinateSpace | null = null;
 let lastProfile: PlotProfile | null = null;
 let lastPageFrameDraft: PageFrame | null = null;
+let lastCommittedPageFrame: PageFrame | null = null;
 let lastToneSource: ToneSource | null = null;
 let autoAcknowledgeDisplayedScene = true;
 let acknowledgeDisplayedScene: (() => void) | null = null;
@@ -427,6 +433,7 @@ vi.mock("./LiveCanvas", () => ({
     compositionFrame,
     profile,
     pageFrameDraft,
+    pageFrame,
     handleRef,
     inputRevision = 0,
     fillCaptureRequest,
@@ -450,6 +457,7 @@ vi.mock("./LiveCanvas", () => ({
     compositionFrame: CoordinateSpace;
     profile: PlotProfile;
     pageFrameDraft?: PageFrame | null;
+    pageFrame?: PageFrame | null;
     handleRef?: Ref<LiveCanvasHandle>;
     inputRevision?: number;
     fillCaptureRequest?: {
@@ -461,11 +469,25 @@ vi.mock("./LiveCanvas", () => ({
     onFillCaptured?: (capture: unknown) => void;
     onDisplayedSceneCommitted?: (snapshot: DisplayedSceneSnapshot) => void;
   }) => {
-    const capturedFrame = (): DisplayedSceneSnapshot =>
-      fakeDisplayedScene ??
-      (renderState?.scene === undefined
+    const capturedFrame = (): DisplayedSceneSnapshot => {
+      if (fakeDisplayedScene !== null) {
+        return {
+          ...fakeDisplayedScene,
+          sourceScene:
+            fakeDisplayedScene.sourceScene ?? fakeDisplayedScene.scene,
+          displayedScene:
+            fakeDisplayedScene.displayedScene ?? fakeDisplayedScene.scene,
+        };
+      }
+      const scene =
+        renderState?.scene === undefined
+          ? sketch.generate(params, seed, fakeCurrentT, compositionFrame)
+          : (renderState.scene as Scene);
+      return renderState?.scene === undefined
         ? {
-            scene: sketch.generate(params, seed, fakeCurrentT, compositionFrame),
+            scene,
+            sourceScene: scene,
+            displayedScene: scene,
             t: fakeCurrentT,
             renderMode: "fill",
             tolerance: tolerance ?? 0,
@@ -473,7 +495,9 @@ vi.mock("./LiveCanvas", () => ({
             inputRevision,
           }
         : {
-            scene: renderState.scene as Scene,
+            scene,
+            sourceScene: scene,
+            displayedScene: scene,
             t: renderState.t ?? 0,
             renderMode: renderState.kind === "outline" ? "outline" : "fill",
             tolerance: tolerance ?? 0,
@@ -487,12 +511,14 @@ vi.mock("./LiveCanvas", () => ({
             ...(renderState.contentRevision === undefined
               ? {}
               : { contentRevision: renderState.contentRevision }),
-          });
+          };
+    };
     useImperativeHandle(handleRef, () => ({
       getCanvas: () =>
         ({ toBlob: fakeCanvasToBlob }) as unknown as HTMLCanvasElement,
       getCurrentT: () => fakeCurrentT,
-      getDisplayedScene: () => fakeDisplayedScene,
+      getDisplayedScene: () =>
+        fakeDisplayedScene === null ? null : capturedFrame(),
       captureDisplayedFrame: capturedFrame,
     }));
     lastOnOutlineComputed = () => {
@@ -520,20 +546,23 @@ vi.mock("./LiveCanvas", () => ({
     lastCompositionFrame = compositionFrame;
     lastProfile = profile;
     lastPageFrameDraft = pageFrameDraft ?? null;
+    lastCommittedPageFrame = pageFrame ?? null;
     lastToneSource = renderState?.source ?? null;
     // Model the outline pass finishing: fire the "computed" signal after each
     // outline render so the owner's busy label clears (unless a test opts out to
     // observe the intermediate "Computing…" state itself).
     useEffect(() => {
       if (fillCaptureRequest !== null && fillCaptureRequest !== undefined) {
+        const sourceScene =
+          fakeFillCaptureScene ??
+          (renderState?.scene as Scene | undefined) ?? {
+            space: compositionFrame,
+            primitives: [],
+          };
         onFillCaptured?.({
           ...fillCaptureRequest,
-          scene:
-            fakeFillCaptureScene ??
-            (renderState?.scene as Scene | undefined) ?? {
-              space: compositionFrame,
-              primitives: [],
-            },
+          scene: sourceScene,
+          sourceScene,
           t: fakeCurrentT,
           sourceInputRevision:
             fillCaptureRequest.sourceInputRevision ??
@@ -554,6 +583,8 @@ vi.mock("./LiveCanvas", () => ({
       }
       const snapshot: DisplayedSceneSnapshot = {
         scene: renderState.scene as Scene,
+        sourceScene: renderState.scene as Scene,
+        displayedScene: renderState.scene as Scene,
         t: renderState.t ?? 0,
         renderMode: renderState.kind === "outline" ? "outline" : "fill",
         tolerance: tolerance ?? 0,
@@ -761,6 +792,7 @@ beforeEach(() => {
   lastCompositionFrame = null;
   lastProfile = null;
   lastPageFrameDraft = null;
+  lastCommittedPageFrame = null;
   lastToneSource = null;
   autoAcknowledgeDisplayedScene = true;
   acknowledgeDisplayedScene = null;
@@ -1711,6 +1743,18 @@ describe("SketchControls — Page Frame edit mode", () => {
     expect(lastProfile).toEqual(originalProfile);
     expect(lastCompositionFrame).toEqual(originalComposition);
     expect(lastPageFrameDraft).toBeNull();
+    expect(lastCommittedPageFrame).toEqual({
+      x: 0,
+      y: 0,
+      width: originalComposition!.width,
+      height: originalComposition!.height,
+    });
+    expect(outlineJob.starts).toBe(0);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-input-revision",
+      ),
+    ).toBe("0");
 
     clickButton(el, "Crop");
     setInput(frameInput(el, "x"), "10");
@@ -1731,6 +1775,12 @@ describe("SketchControls — Page Frame edit mode", () => {
       generationAspect:
         originalComposition!.width / originalComposition!.height,
     });
+    expect(lastCommittedPageFrame).toEqual(
+      committed.framing.kind === "framed"
+        ? committed.framing.pageFrame
+        : null,
+    );
+    expect(outlineJob.starts).toBe(0);
 
     clickButton(el, "Crop");
     expect(frameInput(el, "x").value).toBe("10");
@@ -1748,6 +1798,8 @@ describe("SketchControls — Page Frame edit mode", () => {
       kind: "unframed",
     });
     expect(lastPageFrameDraft).toBeNull();
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(outlineJob.starts).toBe(0);
 
     expect(
       pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
@@ -4812,6 +4864,28 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     if (match === undefined) throw new Error("no Shading");
     return match;
   }
+
+  it("applies and resets framing without restarting Scribble or revising painted provenance", async () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await completeScribble(0, preparedScene(77));
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const sourceRevision = canvas.dataset.sourceInputRevision;
+    const contentRevision = canvas.dataset.contentRevision;
+    expect(scribbleJob.starts).toHaveLength(1);
+
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    clickButton(el, "Apply");
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
+    expect(canvas.dataset.contentRevision).toBe(contentRevision);
+
+    clickButton(el, "Crop");
+    clickButton(el, "Reset Frame");
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
+    expect(canvas.dataset.contentRevision).toBe(contentRevision);
+  });
 
   const assetA = "portrait-alpha-000000000001";
   const assetB = "portrait-beta-bbbbbbbbbbbb";
