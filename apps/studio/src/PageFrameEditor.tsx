@@ -168,20 +168,44 @@ function parseFixedPagePosition(
   const positions = {} as Record<"x" | "y", number>;
   for (const field of ["x", "y"] as const) {
     const raw = draft[field].trim();
-    const value = raw === "" ? Number.NaN : Number(raw);
-    if (!Number.isFinite(value)) {
+    const percentage = raw === "" ? Number.NaN : Number(raw);
+    if (!Number.isFinite(percentage)) {
       return {
         frame: null,
         error: { field, message: `${LABELS[field]} must be a finite number.` },
       };
     }
-    positions[field] = value;
+
+    const compositionExtent =
+      field === "x" ? compositionFrame.width : compositionFrame.height;
+    const pageExtent = field === "x" ? frame.width : frame.height;
+    const position = percentage * (compositionExtent / 100);
+    const farEdge = position + pageExtent;
+    if (!Number.isFinite(position)) {
+      return {
+        frame: null,
+        error: {
+          field,
+          message: `${LABELS[field]} must produce a finite Page position.`,
+        },
+      };
+    }
+    if (!Number.isFinite(farEdge) || farEdge <= position) {
+      return {
+        frame: null,
+        error: {
+          field,
+          message: `${LABELS[field]} must leave a finite far edge greater than its origin.`,
+        },
+      };
+    }
+    positions[field] = position;
   }
 
   return {
     frame: {
-      x: (positions.x / 100) * compositionFrame.width,
-      y: (positions.y / 100) * compositionFrame.height,
+      x: positions.x,
+      y: positions.y,
       width: frame.width,
       height: frame.height,
     },

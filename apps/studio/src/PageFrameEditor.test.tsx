@@ -120,6 +120,26 @@ function mountDraftEditor(providedDraft?: PageFrameEditDraft) {
   return { el: container, callbacks, compositionFrame };
 }
 
+function aspectMismatchedFixedDraft(): PageFrameEditDraft {
+  const compositionFrame = resolveCompositionFrame(2);
+  const representedFrame = fullCompositionPageFrame(compositionFrame);
+  const ordinary = setScalePreservingPageFrame(
+    openPageFrameEditDraft({
+      profile: PROFILE,
+      representedFrame,
+      compositionFrame,
+      generationAspect: 2,
+    }),
+    {
+      x: 17.25,
+      y: -31.75,
+      width: 997.1234567890123,
+      height: 601.9876543210987,
+    },
+  );
+  return setPageFrameEditMode(ordinary, "fixed-page");
+}
+
 function input(el: HTMLElement, name: string): HTMLInputElement {
   const found = el.querySelector<HTMLInputElement>(`input[name="${name}"]`);
   if (found === null) throw new Error(`No ${name} input`);
@@ -600,26 +620,11 @@ describe("PageFrameEditor", () => {
 
   it("preserves exact locked extents when aspect-mismatched percentages round", () => {
     const compositionFrame = resolveCompositionFrame(2);
-    const representedFrame = fullCompositionPageFrame(compositionFrame);
-    const exactFrame: PageFrame = {
-      x: 17.25,
-      y: -31.75,
-      width: 997.1234567890123,
-      height: 601.9876543210987,
-    };
-    const ordinary = setScalePreservingPageFrame(
-      openPageFrameEditDraft({
-        profile: PROFILE,
-        representedFrame,
-        compositionFrame,
-        generationAspect: 2,
-      }),
-      exactFrame,
-    );
-    const fixed = setPageFrameEditMode(ordinary, "fixed-page");
+    const fixed = aspectMismatchedFixedDraft();
     if (fixed.mode !== "fixed-page") {
       throw new Error("Expected a fixed-page edit draft");
     }
+    const exactFrame = fixed.frame;
     const { el, callbacks } = mountDraftEditor(fixed);
 
     expect(
@@ -639,4 +644,35 @@ describe("PageFrameEditor", () => {
     expect(applied?.frame.width).toBe(exactFrame.width);
     expect(applied?.frame.height).toBe(exactFrame.height);
   });
+
+  it.each([
+    ["coordinate overflow", "1e308", /finite Page position/i],
+    ["far-edge precision collapse", "1e20", /finite far edge/i],
+  ])(
+    "keeps fixed-page %s local and reachable from Apply",
+    (_case, invalidX, message) => {
+      const fixed = aspectMismatchedFixedDraft();
+      const { el, callbacks } = mountDraftEditor(fixed);
+      const x = input(el, "x");
+
+      setInput(x, invalidX);
+
+      expect(callbacks.onEditDraftChange).not.toHaveBeenCalled();
+      expect(x.value).toBe(invalidX);
+
+      click(el, "Apply");
+
+      expect(callbacks.onApply).not.toHaveBeenCalled();
+      expect(x.getAttribute("aria-invalid")).toBe("true");
+      expect(el.querySelector('[role="alert"]')?.textContent).toMatch(message);
+
+      setInput(x, "10");
+      expect(callbacks.onEditDraftChange).toHaveBeenCalledOnce();
+      click(el, "Apply");
+      expect(callbacks.onApply).toHaveBeenCalledOnce();
+      expect(callbacks.onApply.mock.lastCall?.[0].frame.width).toBe(
+        fixed.frame.width,
+      );
+    },
+  );
 });
