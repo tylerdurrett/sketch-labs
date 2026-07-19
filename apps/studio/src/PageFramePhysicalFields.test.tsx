@@ -206,4 +206,40 @@ describe("PageFramePhysicalFields", () => {
     expect(field(container, "height").value).toBe("110");
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
+
+  it("shows exact Page dimensions and every inset as immutable in fixed-page mode", () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const onFrameChange = vi.fn();
+
+    act(() =>
+      root!.render(
+        <PageFramePhysicalFields
+          profile={PROFILE}
+          representedFrame={REPRESENTED_FRAME}
+          frame={REPRESENTED_FRAME}
+          displayUnit="mm"
+          onFrameChange={onFrameChange}
+          readOnly
+        />,
+      ),
+    );
+
+    expect(field(container, "width").value).toBe("230");
+    expect(field(container, "height").value).toBe("190");
+    expect(field(container, "width").readOnly).toBe(true);
+    expect(field(container, "height").readOnly).toBe(true);
+    const expected = { top: "7", right: "11", bottom: "23", left: "19" };
+    for (const side of ["top", "right", "bottom", "left"] as const) {
+      const inset = container.querySelector<HTMLInputElement>(
+        `input[name="physical-inset-${side}"]`,
+      );
+      expect(inset?.value).toBe(expected[side]);
+      expect(inset?.readOnly).toBe(true);
+    }
+
+    setInput(field(container, "width"), "999");
+    expect(onFrameChange).not.toHaveBeenCalled();
+  });
 });

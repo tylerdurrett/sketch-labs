@@ -3,9 +3,18 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { PageFrame, PlotProfile } from "@harness/core";
+import {
+  fullCompositionPageFrame,
+  resolveCompositionFrame,
+  type PageFrame,
+  type PlotProfile,
+} from "@harness/core";
 
 import { PageFrameEditor } from "./PageFrameEditor";
+import {
+  openPageFrameEditDraft,
+  type PageFrameEditDraft,
+} from "./pageFrameEditDraft";
 import type { PageFrameAspectConstraint } from "./pageFrameManipulation";
 
 (
@@ -67,6 +76,46 @@ function mountEditor(initialFrame: PageFrame = FULL_FRAME) {
   return { el: container, callbacks };
 }
 
+function mountDraftEditor() {
+  const compositionFrame = resolveCompositionFrame(2);
+  const representedFrame = fullCompositionPageFrame(compositionFrame);
+  const initialDraft = openPageFrameEditDraft({
+    profile: PROFILE,
+    representedFrame,
+    compositionFrame,
+    generationAspect: 2,
+  });
+  const callbacks = {
+    onEditDraftChange: vi.fn<[PageFrameEditDraft], void>(),
+    onApply: vi.fn<[PageFrameEditDraft], void>(),
+    onCancel: vi.fn(),
+    onReset: vi.fn(),
+  };
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+
+  function ControlledEditor() {
+    const [editDraft, setEditDraft] = useState<PageFrameEditDraft>(initialDraft);
+    return (
+      <PageFrameEditor
+        editDraft={editDraft}
+        displayUnit="mm"
+        onEditDraftChange={(next) => {
+          callbacks.onEditDraftChange(next);
+          setEditDraft(next);
+        }}
+        onApply={callbacks.onApply}
+        onCancel={callbacks.onCancel}
+        onReset={callbacks.onReset}
+      />
+    );
+  }
+
+  act(() => root!.render(<ControlledEditor />));
+  return { el: container, callbacks, compositionFrame };
+}
+
 function input(el: HTMLElement, name: string): HTMLInputElement {
   const found = el.querySelector<HTMLInputElement>(`input[name="${name}"]`);
   if (found === null) throw new Error(`No ${name} input`);
@@ -100,6 +149,12 @@ function selectOption(el: HTMLElement, value: string): void {
   act(() => {
     select.value = value;
     select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+function setCheckbox(checkbox: HTMLInputElement, checked: boolean): void {
+  act(() => {
+    if (checkbox.checked !== checked) checkbox.click();
   });
 }
 
@@ -396,5 +451,146 @@ describe("PageFrameEditor", () => {
       el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
         ?.value,
     ).toBe("free");
+  });
+
+  it("adds an explicit fixed-Page mode only on the typed draft path", () => {
+    const legacy = mountEditor();
+    expect(input(legacy.el, "physical-width").readOnly).toBe(false);
+    expect(
+      legacy.el.querySelector('input[name="keepPageSizeFixed"]'),
+    ).toBeNull();
+
+    act(() => root!.unmount());
+    root = null;
+    legacy.el.remove();
+    container = null;
+
+    const { el, callbacks } = mountDraftEditor();
+    const keepFixed = input(el, "keepPageSizeFixed");
+
+    expect(keepFixed.checked).toBe(false);
+    setInput(input(el, "width"), "");
+    setCheckbox(keepFixed, true);
+
+    expect(callbacks.onEditDraftChange).toHaveBeenCalledOnce();
+    expect(callbacks.onEditDraftChange.mock.lastCall?.[0]).toMatchObject({
+      mode: "fixed-page",
+      profile: PROFILE,
+      compositionScale: 1,
+    });
+    expect(input(el, "width").value).toBe("100");
+    expect(el.textContent).toMatch(
+      /position the composition behind the fixed page/i,
+    );
+  });
+
+  it("locks exact physical geometry and boundary controls while keeping X/Y available", () => {
+    const { el, callbacks, compositionFrame } = mountDraftEditor();
+    setCheckbox(input(el, "keepPageSizeFixed"), true);
+
+    expect(input(el, "width").disabled).toBe(true);
+    expect(input(el, "height").disabled).toBe(true);
+    expect(input(el, "x").disabled).toBe(false);
+    expect(input(el, "y").disabled).toBe(false);
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.disabled,
+    ).toBe(true);
+    expect(input(el, "physical-width").value).toBe("220");
+    expect(input(el, "physical-height").value).toBe("120");
+    expect(input(el, "physical-width").readOnly).toBe(true);
+    expect(input(el, "physical-height").readOnly).toBe(true);
+    for (const side of ["top", "right", "bottom", "left"] as const) {
+      expect(input(el, `physical-inset-${side}`).value).toBe("10");
+      expect(input(el, `physical-inset-${side}`).readOnly).toBe(true);
+    }
+
+    setInput(input(el, "x"), "10");
+    expect(callbacks.onEditDraftChange.mock.lastCall?.[0]).toMatchObject({
+      mode: "fixed-page",
+      frame: {
+        x: compositionFrame.width * 0.1,
+        y: 0,
+        width: compositionFrame.width,
+        height: compositionFrame.height,
+      },
+    });
+  });
+
+  it("scales around the stable center and applies the complete fixed-page draft", () => {
+    const { el, callbacks, compositionFrame } = mountDraftEditor();
+    setCheckbox(input(el, "keepPageSizeFixed"), true);
+    const scale = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Composition scale percentage"]',
+    );
+    if (scale === null) throw new Error("No Composition scale percentage input");
+
+    setInput(scale, "200");
+
+    const scaled = callbacks.onEditDraftChange.mock.lastCall?.[0];
+    expect(scaled).toMatchObject({
+      mode: "fixed-page",
+      profile: PROFILE,
+      compositionScale: 2,
+    });
+    expect(scaled?.frame.x).toBeCloseTo(compositionFrame.width / 4, 12);
+    expect(scaled?.frame.y).toBeCloseTo(compositionFrame.height / 4, 12);
+    expect(scaled?.frame.width).toBeCloseTo(compositionFrame.width / 2, 12);
+    expect(scaled?.frame.height).toBeCloseTo(compositionFrame.height / 2, 12);
+
+    click(el, "Apply");
+    expect(callbacks.onApply).toHaveBeenCalledOnce();
+    expect(callbacks.onApply.mock.lastCall?.[0]).toEqual(scaled);
+  });
+
+  it("combines scale validity with numeric and physical validity at Apply", () => {
+    const { el, callbacks } = mountDraftEditor();
+    setCheckbox(input(el, "keepPageSizeFixed"), true);
+    const scale = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Composition scale percentage"]',
+    );
+    if (scale === null) throw new Error("No Composition scale percentage input");
+
+    setInput(scale, "");
+    click(el, "Apply");
+
+    expect(callbacks.onApply).not.toHaveBeenCalled();
+    expect(el.querySelector('[role="alert"]')?.textContent).toMatch(
+      /finite positive percentage/i,
+    );
+
+    setInput(scale, "125");
+    setInput(input(el, "x"), "");
+    click(el, "Apply");
+    expect(callbacks.onApply).not.toHaveBeenCalled();
+    expect(el.querySelector('[role="alert"]')?.textContent).toMatch(
+      /x must be a finite number/i,
+    );
+  });
+
+  it("returns to ordinary editing through a rebased draft transition", () => {
+    const { el, callbacks } = mountDraftEditor();
+    const keepFixed = input(el, "keepPageSizeFixed");
+    setCheckbox(keepFixed, true);
+    const scale = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Composition scale percentage"]',
+    );
+    if (scale === null) throw new Error("No Composition scale percentage input");
+    setInput(scale, "150");
+
+    setCheckbox(keepFixed, false);
+
+    const ordinary = callbacks.onEditDraftChange.mock.lastCall?.[0];
+    expect(ordinary).toMatchObject({ mode: "scale-preserving" });
+    if (ordinary?.mode !== "scale-preserving") {
+      throw new Error("Expected an ordinary edit draft");
+    }
+    expect(ordinary.profile).toEqual(PROFILE);
+    expect(ordinary.representedFrame).toEqual(ordinary.frame);
+    expect(input(el, "width").disabled).toBe(false);
+    expect(input(el, "physical-width").readOnly).toBe(false);
+    expect(
+      el.querySelector('input[aria-label="Composition scale percentage"]'),
+    ).toBeNull();
   });
 });
