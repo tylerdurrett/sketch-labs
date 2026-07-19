@@ -8,6 +8,7 @@ import {
   derivePageFramePlotProfile,
   frameScene,
   leafField,
+  resolveCompositionFrame,
   resolvePlotCompositionFrame,
   type CoordinateSpace,
   type Params,
@@ -683,6 +684,108 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
     // frame itself retained identity across the one-ULP profile quotient noise.
     clickButton(el, "Export SVG");
     expect(generate.mock.calls.at(-1)![3]).toBe(originalFrame);
+  });
+
+  it("restores a saved framed page before exporting matching ordinary and plotter v3 metadata", async () => {
+    presetClient.list.mockReset().mockResolvedValue(["framed"]);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { sketch, generate } = testSketch(A4_PROFILE);
+    const el = mount(sketch);
+    await flushPromises();
+
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    setInput(el.querySelector<HTMLInputElement>('input[name="y"]')!, "-5");
+    setInput(el.querySelector<HTMLInputElement>('input[name="width"]')!, "80");
+    setInput(el.querySelector<HTMLInputElement>('input[name="height"]')!, "110");
+    clickButton(el, "Apply");
+    setInput(
+      el.querySelector<HTMLInputElement>('input[aria-label="preset name"]')!,
+      "framed",
+    );
+    clickButton(el, "Save");
+    await flushPromises();
+    await flushPromises();
+
+    const saved = presetClient.save.mock.calls[0]![0];
+    expect(saved.version).toBe(3);
+    const framing = saved.framing;
+    if (saved.version !== 3 || framing === undefined) {
+      throw new Error("expected framed v3 preset");
+    }
+
+    // Move every relevant live axis away from the saved snapshot, including
+    // clearing the final Page, before proving Reload is the export authority.
+    const radius = el.querySelector<HTMLInputElement>("#control-radius")!;
+    act(() => radius.focus());
+    setInput(radius, "25");
+    act(() => radius.blur());
+    const paperWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    act(() => paperWidth.focus());
+    setInput(paperWidth, "333");
+    act(() => paperWidth.blur());
+    clickButton(el, "Crop");
+    clickButton(el, "Reset Frame");
+    await flushPromises();
+    expect(
+      el.querySelector('input[aria-label="Lock Page aspect"]'),
+    ).toBeNull();
+
+    presetClient.load.mockResolvedValue(saved);
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    expect([...picker.options].map((option) => option.value)).toContain("framed");
+    selectValue(picker, "framed");
+    expect(picker.value).toBe("framed");
+    clickButton(el, "Reload");
+    await flushPromises();
+    flushRaf();
+
+    expect(presetClient.load).toHaveBeenCalledWith(sketch.id, "framed");
+    expect(el.querySelector<HTMLInputElement>("#control-radius")!.value).toBe(
+      String(saved.params.radius),
+    );
+
+    const generationFrame = resolveCompositionFrame(
+      framing.generationAspect,
+    );
+    expect(generate).toHaveBeenLastCalledWith(
+      saved.params,
+      saved.seed,
+      0,
+      generationFrame,
+    );
+    const source = generate.mock.results.at(-1)!.value as Scene;
+    expect(previewCapture.paints.at(-1)!.scene).toEqual(
+      frameScene(source, framing.pageFrame),
+    );
+    expect(
+      (previewCapture.paints.at(-1)!.scene as Scene).space,
+    ).toEqual({
+      width: framing.pageFrame.width,
+      height: framing.pageFrame.height,
+    });
+
+    const expectedMetadata = {
+      ...saved,
+      name: `paper-flow-seed${saved.seed}`,
+    };
+    clickButton(el, "Export SVG");
+    expect(JSON.parse(previewCapture.ordinaryExport!.metadata!)).toEqual(
+      expectedMetadata,
+    );
+    clickButton(el, "Export Hidden-line SVG");
+    await flushPromises();
+    expect(JSON.parse(previewCapture.plotterExport!.metadata!)).toEqual(
+      expectedMetadata,
+    );
+    expect(previewCapture.plotterExport!.scene.space).toEqual({
+      width: framing.pageFrame.width,
+      height: framing.pageFrame.height,
+    });
   });
 
   it("keeps PNG usable while an aspect-changing Outline job holds the prior Fill", async () => {

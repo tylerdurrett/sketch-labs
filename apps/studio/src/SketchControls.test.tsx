@@ -3616,7 +3616,7 @@ describe("SketchControls — SVG export wiring", () => {
     // this Sketch declares no default, so it is the Harness fallback.
     const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
     expect(meta).toBeDefined();
-    expect(JSON.parse(meta!)).toMatchObject({
+    expect(JSON.parse(meta!)).toEqual({
       version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
@@ -4983,7 +4983,7 @@ describe("SketchControls — PNG export wiring", () => {
     // envelope is now a v2 record (#266) carrying the active Plot Profile (#267),
     // the Harness fallback for this default-less Sketch.
     const json = JSON.parse(readITxtText(await blobBytes(blob)));
-    expect(json).toMatchObject({
+    expect(json).toEqual({
       version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
@@ -4993,6 +4993,36 @@ describe("SketchControls — PNG export wiring", () => {
       profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
     expect("t" in json).toBe(false);
+  });
+
+  it("embeds the same framed v3 snapshot as Save in PNG iTXt", async () => {
+    const el = mount(<SketchControls sketch={staticSketch("framed-png")} />);
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    setInput(el.querySelector<HTMLInputElement>('input[name="y"]')!, "-5");
+    setInput(el.querySelector<HTMLInputElement>('input[name="width"]')!, "80");
+    setInput(el.querySelector<HTMLInputElement>('input[name="height"]')!, "110");
+    clickButton(el, "Apply");
+
+    setInput(
+      el.querySelector<HTMLInputElement>('input[aria-label="preset name"]')!,
+      "framed-authored",
+    );
+    clickButton(el, "Save");
+    await flush();
+    const saved = savePreset.mock.calls[0]![0];
+    expect(saved.version).toBe(3);
+
+    clickButton(el, "Export PNG");
+    await flush();
+
+    const [blob, filename] = downloadBlob.mock.calls[0]!;
+    const embedded = JSON.parse(readITxtText(await blobBytes(blob)));
+    expect(filename).toBe(`framed-png-seed${saved.seed}.png`);
+    expect(embedded).toEqual({
+      ...saved,
+      name: `framed-png-seed${saved.seed}`,
+    });
   });
 
   it("includes the captured -t{t} segment for a time-driven sketch", async () => {

@@ -149,6 +149,19 @@ function sameParams(
   );
 }
 
+/** Convert committed Studio framing to the persistence/export envelope shape. */
+function persistedFramingFor(
+  edit: StudioEditState,
+): PresetFraming | undefined {
+  return edit.framing.kind === "unframed"
+    ? undefined
+    : {
+        pageFrame: { ...edit.framing.pageFrame },
+        generationAspect: edit.framing.generationAspect,
+        aspectLocked: edit.framing.aspectLocked,
+      };
+}
+
 function outlineIdentitySourceFor(
   sketch: Sketch,
   edit: StudioEditState,
@@ -1161,27 +1174,31 @@ export function SketchControls({
     if (handle == null || canvas == null) return;
     const scribbleExport = captureCurrentScribbleExport();
     if (hasScribblePreparation && scribbleExport === null) return;
+    const edit = historyRef.current.present;
     // Time-gate the `-t{t}` filename segment on `sketch.time`: a time-driven
     // Sketch carries its captured moment, a static one omits `t` entirely.
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
-    // The reproduction envelope embedded into BOTH exports (issue #76), built
-    // once from the same displayed `(params, seed, locks, t)` spine. The active
-    // Plot Profile (#247) rides along too, so the exported PNG's metadata is a v2
-    // Preset carrying the physical-plot output dimensions.
+    // Build from one whole authored-state snapshot. The active Plot Profile
+    // yields v2 metadata while committed framing promotes the same envelope to
+    // v3; an unframed session still omits framing exactly.
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
-      seed,
-      params,
-      locks,
+      seed: edit.seed,
+      params: edit.params,
+      locks: edit.locks,
       t,
-      profile,
+      profile: edit.profile,
+      framing: persistedFramingFor(edit),
     });
     // Re-read the synchronous session and the canvas at the pixel side effect.
     if (!sameScribbleExportRevision(scribbleExport)) return;
     canvas.toBlob((blob) => {
       if (blob === null) return;
       if (!sameScribbleExportRevision(scribbleExport)) return;
-      const filename = exportFilename({ sketchId: sketch.id, seed, t }, "png");
+      const filename = exportFilename(
+        { sketchId: sketch.id, seed: edit.seed, t },
+        "png",
+      );
       // Splice the iTXt reproduction chunk into the PNG bytes before saving, so
       // the downloaded file traces back to this exact frame. Byte work is core's
       // (`insertPngMetadata`); the Studio only does the Blob ⇄ ArrayBuffer dance.
@@ -1246,17 +1263,17 @@ export function SketchControls({
       scribbleExport === null && !framedExport
         ? clipSceneToBounds(scene)
         : scene;
-    // Embed the same reproduction envelope as a <metadata> element (issue #76),
-    // built from the displayed `(params, seed, locks, t)` spine plus the active
-    // Plot Profile (#247) — core's `renderToSVG` does the injection (ADR-0004:
-    // serialization lives in core).
+    // Embed the same whole authored-state snapshot as a <metadata> element.
+    // Core's `renderToSVG` does the injection (ADR-0004: serialization lives in
+    // core), including optional committed framing as a v3 envelope.
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
-      seed: framedExport ? edit.seed : seed,
-      params: framedExport ? edit.params : params,
-      locks: framedExport ? edit.locks : locks,
+      seed: edit.seed,
+      params: edit.params,
+      locks: edit.locks,
       t,
-      profile: framedExport ? edit.profile : profile,
+      profile: edit.profile,
+      framing: persistedFramingFor(edit),
     });
     if (!sameScribbleExportRevision(scribbleExport)) return;
     const svg = renderToSVG(exportScene, metadata);
@@ -1267,7 +1284,7 @@ export function SketchControls({
       exportFilename(
         {
           sketchId: sketch.id,
-          seed: framedExport ? edit.seed : seed,
+          seed: edit.seed,
           t,
         },
         "svg",
@@ -1336,6 +1353,7 @@ export function SketchControls({
       locks: edit.locks,
       t,
       profile: edit.profile,
+      framing: persistedFramingFor(edit),
     });
     const filename = exportFilename(
       { sketchId: sketch.id, seed: edit.seed, t, variant: "hidden-line" },
@@ -1628,14 +1646,7 @@ export function SketchControls({
             locks={locks}
             profile={profile}
             {...(history.present.framing.kind === "framed"
-              ? {
-                  framing: {
-                    pageFrame: { ...history.present.framing.pageFrame },
-                    generationAspect:
-                      history.present.framing.generationAspect,
-                    aspectLocked: history.present.framing.aspectLocked,
-                  } satisfies PresetFraming,
-                }
+              ? { framing: persistedFramingFor(history.present)! }
               : {})}
             onReload={reloadPreset}
           />
