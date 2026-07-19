@@ -45,6 +45,15 @@ import type {
 import { mutableScene } from "./outlineComputeProtocol";
 import { outlineScene } from "./outlineScene";
 import { ImageAssetResolutionError } from "./imageAssetResolver";
+import {
+  beginPageFrameManipulation,
+  finishPageFrameManipulation,
+  updatePageFrameManipulation,
+  type PageFrameAspectConstraint,
+  type PageFrameManipulationState,
+  type PageFrameManipulationTarget,
+  type PageFramePointer,
+} from "./pageFrameManipulation";
 import { isScribbleComputeIdentity } from "./scribbleComputeProtocol";
 import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
@@ -416,6 +425,8 @@ let lastCompositionFrame: CoordinateSpace | null = null;
 let lastProfile: PlotProfile | null = null;
 let lastPageFrameDraft: PageFrame | null = null;
 let lastCommittedPageFrame: PageFrame | null = null;
+let lastPageFrameAspectConstraint: PageFrameAspectConstraint | null = null;
+let lastOnPageFrameDraftChange: ((frame: PageFrame) => void) | null = null;
 let lastToneSource: ToneSource | null = null;
 let autoAcknowledgeDisplayedScene = true;
 let acknowledgeDisplayedScene: (() => void) | null = null;
@@ -435,6 +446,8 @@ vi.mock("./LiveCanvas", () => ({
     compositionFrame,
     profile,
     pageFrameDraft,
+    onPageFrameDraftChange,
+    pageFrameAspectConstraint,
     pageFrame,
     handleRef,
     inputRevision = 0,
@@ -459,6 +472,8 @@ vi.mock("./LiveCanvas", () => ({
     compositionFrame: CoordinateSpace;
     profile: PlotProfile;
     pageFrameDraft?: PageFrame | null;
+    onPageFrameDraftChange?: (frame: PageFrame) => void;
+    pageFrameAspectConstraint?: PageFrameAspectConstraint;
     pageFrame?: PageFrame | null;
     handleRef?: Ref<LiveCanvasHandle>;
     inputRevision?: number;
@@ -553,6 +568,8 @@ vi.mock("./LiveCanvas", () => ({
     lastProfile = profile;
     lastPageFrameDraft = pageFrameDraft ?? null;
     lastCommittedPageFrame = pageFrame ?? null;
+    lastPageFrameAspectConstraint = pageFrameAspectConstraint ?? null;
+    lastOnPageFrameDraftChange = onPageFrameDraftChange ?? null;
     lastToneSource = renderState?.source ?? null;
     // Model the outline pass finishing: fire the "computed" signal after each
     // outline render so the owner's busy label clears (unless a test opts out to
@@ -800,6 +817,8 @@ beforeEach(() => {
   lastProfile = null;
   lastPageFrameDraft = null;
   lastCommittedPageFrame = null;
+  lastPageFrameAspectConstraint = null;
+  lastOnPageFrameDraftChange = null;
   lastToneSource = null;
   autoAcknowledgeDisplayedScene = true;
   acknowledgeDisplayedScene = null;
@@ -1704,6 +1723,260 @@ describe("SketchControls — Page Frame edit mode", () => {
     if (found === null) throw new Error(`no Page Frame ${name} input`);
     return found;
   }
+
+  function selectAspect(el: HTMLElement, value: string): void {
+    const select = el.querySelector<HTMLSelectElement>(
+      'select[name="aspectConstraint"]',
+    );
+    if (select === null) throw new Error("no Page Frame aspect selector");
+    act(() => {
+      select.value = value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  function publishPageFrameDraft(frame: PageFrame): void {
+    const publish = lastOnPageFrameDraftChange;
+    if (publish === null) throw new Error("LiveCanvas draft callback is absent");
+    act(() => publish(frame));
+  }
+
+  function beginGesture(
+    frame: PageFrame,
+    target: PageFrameManipulationTarget,
+    pointer: PageFramePointer,
+  ): PageFrameManipulationState {
+    if (
+      lastCompositionFrame === null ||
+      lastPageFrameAspectConstraint === null
+    ) {
+      throw new Error("LiveCanvas Page Frame props are absent");
+    }
+    return beginPageFrameManipulation({
+      frame,
+      target,
+      pointer,
+      constraint: lastPageFrameAspectConstraint,
+      compositionFrame: lastCompositionFrame,
+      shiftKey: false,
+    });
+  }
+
+  function moveGesture(
+    gesture: PageFrameManipulationState,
+    pointer: PageFramePointer,
+    shiftKey = false,
+  ): PageFrameManipulationState {
+    const next = updatePageFrameManipulation(gesture, pointer, shiftKey);
+    publishPageFrameDraft(finishPageFrameManipulation(next));
+    return next;
+  }
+
+  it("wires inert entry, freeform edge/corner edits, temporary Shift, numeric sync, and one atomic Apply", () => {
+    const el = mount(
+      <SketchControls sketch={sketchWith("frame-direct-wiring", {})} />,
+    );
+    const inputRevision = el
+      .querySelector('[data-testid="canvas-seed"]')
+      ?.getAttribute("data-input-revision");
+    const composition = structuredClone(lastCompositionFrame)!;
+
+    clickButton(el, "Crop");
+    const initial = structuredClone(lastPageFrameDraft)!;
+    expect(initial).toEqual({
+      x: 0,
+      y: 0,
+      width: composition.width,
+      height: composition.height,
+    });
+    expect(lastPageFrameAspectConstraint).toEqual({ kind: "free" });
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(outlineJob.starts).toBe(0);
+    expect(
+      el
+        .querySelector('[data-testid="canvas-seed"]')
+        ?.getAttribute("data-input-revision"),
+    ).toBe(inputRevision);
+
+    let gesture = beginGesture(
+      initial,
+      { kind: "resize", handle: "right" },
+      { x: initial.width, y: initial.height / 2 },
+    );
+    gesture = moveGesture(gesture, {
+      x: initial.width + composition.width * 0.1,
+      y: initial.height / 2,
+    });
+    expect(Number(frameInput(el, "width").value)).toBeCloseTo(110, 9);
+    expect(Number(frameInput(el, "height").value)).toBeCloseTo(100, 9);
+
+    const edgeFrame = finishPageFrameManipulation(gesture);
+    gesture = beginGesture(
+      edgeFrame,
+      { kind: "resize", handle: "bottom-right" },
+      { x: edgeFrame.width, y: edgeFrame.height },
+    );
+    gesture = moveGesture(gesture, {
+      x: edgeFrame.width + composition.width * 0.1,
+      y: edgeFrame.height + composition.height * 0.05,
+    });
+    expect(Number(frameInput(el, "width").value)).toBeCloseTo(120, 9);
+    expect(Number(frameInput(el, "height").value)).toBeCloseTo(105, 9);
+
+    const freeFrame = finishPageFrameManipulation(gesture);
+    const start = {
+      x: freeFrame.x + freeFrame.width,
+      y: freeFrame.y + freeFrame.height / 2,
+    };
+    gesture = beginGesture(
+      freeFrame,
+      { kind: "resize", handle: "right" },
+      start,
+    );
+    const lockAt = { x: start.x + composition.width * 0.05, y: start.y };
+    gesture = moveGesture(gesture, lockAt);
+    const beforeShift = finishPageFrameManipulation(gesture);
+    gesture = moveGesture(gesture, lockAt, true);
+    expect(finishPageFrameManipulation(gesture)).toEqual(beforeShift);
+    gesture = moveGesture(
+      gesture,
+      { x: lockAt.x + composition.width * 0.05, y: lockAt.y },
+      true,
+    );
+    const shifted = finishPageFrameManipulation(gesture);
+    expect(shifted.width / shifted.height).toBeCloseTo(
+      beforeShift.width / beforeShift.height,
+      12,
+    );
+    expect(Number(frameInput(el, "width").value)).toBeCloseTo(
+      (shifted.width / composition.width) * 100,
+      9,
+    );
+    expect(Number(frameInput(el, "height").value)).toBeCloseTo(
+      (shifted.height / composition.height) * 100,
+      9,
+    );
+    expect(lastPageFrameAspectConstraint).toEqual({ kind: "free" });
+    expect(historyCapture.atomic).toHaveLength(0);
+
+    clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(1);
+    const framing = historyCapture.atomic[0]!.after.present.framing;
+    if (framing.kind !== "framed") throw new Error("Apply did not frame");
+    expect(framing.pageFrame.x).toBeCloseTo(shifted.x, 9);
+    expect(framing.pageFrame.y).toBeCloseTo(shifted.y, 9);
+    expect(framing.pageFrame.width).toBeCloseTo(shifted.width, 9);
+    expect(framing.pageFrame.height).toBeCloseTo(shifted.height, 9);
+    expect(Object.keys(framing).sort()).toEqual([
+      "generationAspect",
+      "kind",
+      "pageFrame",
+    ]);
+    expect(Object.keys(framing.pageFrame).sort()).toEqual([
+      "height",
+      "width",
+      "x",
+      "y",
+    ]);
+  });
+
+  it("keeps common/custom constraints through Apply, Cancel, and re-entry until Freeform without persisting them", async () => {
+    const el = mount(
+      <SketchControls sketch={sketchWith("frame-aspect-wiring", {})} />,
+    );
+    clickButton(el, "Crop");
+    selectAspect(el, "4:3");
+    expect(lastPageFrameAspectConstraint).toEqual({
+      kind: "ratio",
+      ratio: 4 / 3,
+    });
+
+    clickButton(el, "Apply");
+    clickButton(el, "Crop");
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("4:3");
+    clickButton(el, "Cancel");
+    clickButton(el, "Crop");
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("4:3");
+
+    selectAspect(el, "custom");
+    setInput(frameInput(el, "customAspectWidth"), "5");
+    setInput(frameInput(el, "customAspectHeight"), "4");
+    clickButton(el, "Use Custom Ratio");
+    expect(lastPageFrameAspectConstraint).toEqual({
+      kind: "ratio",
+      ratio: 1.25,
+    });
+    clickButton(el, "Cancel");
+
+    setInput(
+      el.querySelector<HTMLInputElement>('input[aria-label="preset name"]')!,
+      "transient-aspect",
+    );
+    clickButton(el, "Save");
+    await flush();
+    expect(savePreset).toHaveBeenCalledOnce();
+    expect(JSON.stringify(savePreset.mock.calls[0]![0])).not.toContain(
+      "aspectConstraint",
+    );
+
+    clickButton(el, "Crop");
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("custom");
+    expect(lastPageFrameAspectConstraint).toEqual({
+      kind: "ratio",
+      ratio: 1.25,
+    });
+    selectAspect(el, "free");
+    clickButton(el, "Cancel");
+    clickButton(el, "Crop");
+    expect(lastPageFrameAspectConstraint).toEqual({ kind: "free" });
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("free");
+  });
+
+  it("routes interior pan inversely into the single Page Frame with a stationary composition basis", () => {
+    const el = mount(
+      <SketchControls sketch={sketchWith("frame-pan-wiring", {})} />,
+    );
+    const composition = structuredClone(lastCompositionFrame)!;
+    clickButton(el, "Crop");
+    const initial = structuredClone(lastPageFrameDraft)!;
+    const pointer = {
+      x: initial.width / 2,
+      y: initial.height / 2,
+    };
+    let gesture = beginGesture(initial, { kind: "pan" }, pointer);
+    gesture = moveGesture(gesture, {
+      x: pointer.x + composition.width * 0.15,
+      y: pointer.y - composition.height * 0.1,
+    });
+    const panned = finishPageFrameManipulation(gesture);
+
+    expect(panned.x).toBeCloseTo(-composition.width * 0.15, 12);
+    expect(panned.y).toBeCloseTo(composition.height * 0.1, 12);
+    expect(panned.width).toBe(initial.width);
+    expect(panned.height).toBe(initial.height);
+    expect(Number(frameInput(el, "x").value)).toBeCloseTo(-15, 9);
+    expect(Number(frameInput(el, "y").value)).toBeCloseTo(10, 9);
+    expect(lastCompositionFrame).toEqual(composition);
+
+    clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(1);
+    const framing = historyCapture.atomic[0]!.after.present.framing;
+    if (framing.kind !== "framed") throw new Error("Apply did not frame");
+    expect(framing.pageFrame).toEqual(panned);
+    expect(lastCompositionFrame).toEqual(composition);
+  });
 
   it.each(["Apply", "Cancel", "Reset Frame"] as const)(
     "focuses the first field on entry and restores Crop after %s",

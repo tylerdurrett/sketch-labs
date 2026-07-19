@@ -85,6 +85,7 @@ import {
 } from "./outlineSession";
 import { PaperSection } from "./PaperSection";
 import { PageFrameEditor } from "./PageFrameEditor";
+import type { PageFrameAspectConstraint } from "./pageFrameManipulation";
 import {
   readPlotterSvgIncludePaperMargins,
   writePlotterSvgIncludePaperMargins,
@@ -293,6 +294,11 @@ export function SketchControls({
   historyRef.current = history;
   const { params, seed, locks, profile, tolerance } = history.present;
   const [pageFrameDraft, setPageFrameDraft] = useState<PageFrame | null>(null);
+  // Aspect is editing chrome, not authored state. It survives closing and
+  // reopening the editor within this keyed Sketch session, but never enters
+  // history, Presets, reproduction metadata, or the committed Page Frame.
+  const [pageFrameAspectConstraint, setPageFrameAspectConstraint] =
+    useState<PageFrameAspectConstraint>({ kind: "free" });
   const cropButtonRef = useRef<HTMLButtonElement>(null);
   const restoreCropFocusRef = useRef(false);
   // Page Frame percentages are relative to the Composition basis captured on
@@ -1422,6 +1428,8 @@ export function SketchControls({
             renderState={renderState}
             tolerance={tolerance}
             pageFrameDraft={pageFrameDraft}
+            onPageFrameDraftChange={setPageFrameDraft}
+            pageFrameAspectConstraint={pageFrameAspectConstraint}
             pageFrame={
               history.present.framing.kind === "framed"
                 ? history.present.framing.pageFrame
@@ -1450,7 +1458,9 @@ export function SketchControls({
         {pageFrameDraft !== null ? (
           <PageFrameEditor
             compositionFrame={compositionFrame}
-            initialFrame={pageFrameDraft}
+            frame={pageFrameDraft}
+            aspectConstraint={pageFrameAspectConstraint}
+            onAspectConstraintChange={setPageFrameAspectConstraint}
             onDraftChange={setPageFrameDraft}
             onApply={applyPageFrame}
             onCancel={closePageFrameEditor}
