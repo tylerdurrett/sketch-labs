@@ -39,6 +39,7 @@ import {
   type PageFrameManipulationTarget,
   type PageFramePointer,
 } from "./pageFrameManipulation";
+import { finalizeOutlineScene } from "./outlineScene";
 
 /**
  * Which processed Scene the live preview renders (issue #219, feature #4).
@@ -57,9 +58,9 @@ export type RenderMode = "fill" | "outline";
 export interface DisplayedSceneSnapshot {
   /** Backward-compatible alias for `displayedScene`. */
   readonly scene: Scene;
-  /** Exact full-Composition Scene sampled at `t`, before Page framing. */
+  /** Exact full-Composition derivation source at `t`, before Page framing. */
   readonly sourceScene: Scene;
-  /** Exact Scene painted to the canvas, framed only for committed Fill. */
+  /** Exact Scene painted to the canvas, after cheap mode-specific finalization. */
   readonly displayedScene: Scene;
   readonly t: number;
   readonly renderMode: RenderMode;
@@ -213,7 +214,7 @@ export interface LiveCanvasProps {
   onPageFrameDraftChange?: (frame: PageFrame) => void;
   /** Persistent toolbar constraint applied to direct resize gestures. */
   pageFrameAspectConstraint?: PageFrameAspectConstraint;
-  /** Committed Page Frame applied as a paint-only Fill derivation. */
+  /** Committed Page Frame applied as a paint-only Fill/Outline derivation. */
   pageFrame?: PageFrame | null;
   /**
    * Optional ref the owner passes to obtain the read-only {@link LiveCanvasHandle}
@@ -380,6 +381,7 @@ function paintToneReference(
   canvas: HTMLCanvasElement,
   source: ToneSource,
   compositionFrame: CoordinateSpace,
+  pageFrame: PageFrame | null,
 ): boolean {
   const ctx = canvas.getContext("2d");
   if (ctx === null || canvas.width === 0 || canvas.height === 0) return false;
@@ -389,6 +391,7 @@ function paintToneReference(
     compositionFrame,
     canvas.width,
     canvas.height,
+    pageFrame,
   );
   const imageData = ctx.createImageData(raster.width, raster.height);
   imageData.data.set(raster.data);
@@ -1031,13 +1034,24 @@ export function LiveCanvas({
       : sourceScene;
   }, []);
 
+  const displayedOutlineScene = useCallback((sourceScene: Scene): Scene => {
+    const committedFrame = editingPageFrameRef.current
+      ? null
+      : pageFrameRef.current;
+    return finalizeOutlineScene(
+      sourceScene,
+      committedFrame,
+      includeFrameRef.current,
+    );
+  }, []);
+
   const syncPageGround = useCallback((sourceScene: Scene) => {
     const ground = pageGroundRef.current;
     if (ground === null) return;
     ground.style.backgroundColor = sourceScene.background?.color ?? "white";
   }, []);
 
-  // Only live Fill derives geometry. Held Fill and completed Outline are
+  // Only live Fill derives geometry. Held Fill and completed base Outline are
   // caller-owned immutable frames and travel through `paintSuppliedFrame`.
   const rebuildAndDrawFillAt = useCallback((t: number) => {
     const canvas = canvasRef.current;
@@ -1058,7 +1072,7 @@ export function LiveCanvas({
       const displayedScene =
         state.kind === "fill-held"
           ? displayedFillScene(state.scene)
-          : state.scene;
+          : displayedOutlineScene(state.scene);
       if (canvas === null || !paintFrame(canvas, displayedScene)) return;
       syncPageGround(state.scene);
       const snapshot: DisplayedSceneSnapshot = {
@@ -1081,7 +1095,12 @@ export function LiveCanvas({
       };
       commitDisplayedScene(snapshot, state.kind === "fill-held");
     },
-    [commitDisplayedScene, displayedFillScene, syncPageGround],
+    [
+      commitDisplayedScene,
+      displayedFillScene,
+      displayedOutlineScene,
+      syncPageGround,
+    ],
   );
 
   // Geometry-only changes repaint the exact displayed Scene. They never sample
@@ -1092,7 +1111,12 @@ export function LiveCanvas({
     const state = renderStateRef.current;
     if (state.kind === "tone-reference") {
       displayedSceneRef.current = null;
-      paintToneReference(canvas, state.source, compositionFrameRef.current);
+      paintToneReference(
+        canvas,
+        state.source,
+        compositionFrameRef.current,
+        editingPageFrameRef.current ? null : pageFrameRef.current,
+      );
       return;
     }
     if (state.kind === "unavailable") return;
@@ -1213,25 +1237,39 @@ export function LiveCanvas({
     syncPageGround,
   ]);
 
-  // Tone depends only on its analytic source and Composition Frame. Keeping it
-  // outside the artwork effect prevents Seed, Outline bookkeeping, and unrelated
-  // Studio state from re-sampling every backing pixel.
+  // Tone depends only on its analytic source, frozen Composition, committed Page
+  // Frame, edit-mode settlement, and backing resolution. Keeping it outside the
+  // artwork effect prevents Seed, Outline bookkeeping, and unrelated Studio
+  // state from re-sampling every backing pixel. Draft coordinates are excluded:
+  // entering edit mode returns to the full Composition once, then draft motion
+  // remains overlay-only until Apply or Reset settles a committed frame.
   useEffect(() => {
     if (toneReferenceSource === null) return;
     const canvas = canvasRef.current;
     if (canvas === null) return;
     sizeToBox(canvas, window.devicePixelRatio || 1);
     displayedSceneRef.current = null;
-    paintToneReference(canvas, toneReferenceSource, compositionFrame);
+    paintToneReference(
+      canvas,
+      toneReferenceSource,
+      compositionFrame,
+      editingPageFrame ? null : pageFrame,
+    );
   }, [
     toneReferenceSource,
     compositionAspect,
     compositionWidth,
     compositionHeight,
+    pageFrame?.x,
+    pageFrame?.y,
+    pageFrame?.width,
+    pageFrame?.height,
+    editingPageFrame,
   ]);
 
-  // Static live Fill derives synchronously. Supplied held/Outline geometry paints
-  // atomically as-is. Neither path is sent through hidden-line work.
+  // Static live Fill derives synchronously. Supplied held geometry paints as-is;
+  // supplied base Outline receives only cheap Page finalization. Neither path is
+  // sent through hidden-line work.
   useEffect(() => {
     if (
       renderState.kind === "tone-reference" ||
@@ -1265,11 +1303,12 @@ export function LiveCanvas({
     paintSuppliedFrame,
   ]);
 
-  // A frame commit/reset and entering/leaving edit mode are display-only. The
-  // retained full-Composition source is re-framed at the same exact `t`; neither
-  // Sketch preparation nor sampling participates in this path. Draft movement
-  // only changes overlay geometry and therefore is intentionally excluded.
-  const framingPaintIdentity = `${pageFrame?.x ?? "none"}:${pageFrame?.y ?? "none"}:${pageFrame?.width ?? "none"}:${pageFrame?.height ?? "none"}:${editingPageFrame}`;
+  // A frame commit/reset, entering/leaving edit mode, and toggling the optional
+  // Outline Page boundary are display-only. The retained full-Composition source
+  // is finalized at the same exact `t`; neither Sketch preparation nor sampling
+  // participates in this path. Draft movement only changes overlay geometry and
+  // therefore is intentionally excluded.
+  const framingPaintIdentity = `${pageFrame?.x ?? "none"}:${pageFrame?.y ?? "none"}:${pageFrame?.width ?? "none"}:${pageFrame?.height ?? "none"}:${editingPageFrame}:${includeFrame}`;
   const previousFramingPaintIdentityRef = useRef(framingPaintIdentity);
   useEffect(() => {
     if (previousFramingPaintIdentityRef.current === framingPaintIdentity) return;
@@ -1281,16 +1320,22 @@ export function LiveCanvas({
     const displayedScene =
       retained.renderMode === "fill"
         ? displayedFillScene(retained.sourceScene)
-        : retained.sourceScene;
+        : displayedOutlineScene(retained.sourceScene);
     if (!paintFrame(canvas, displayedScene)) return;
     syncPageGround(retained.sourceScene);
     commitDisplayedScene(
-      { ...retained, scene: displayedScene, displayedScene },
+      {
+        ...retained,
+        scene: displayedScene,
+        displayedScene,
+        includeFrame: includeFrameRef.current,
+      },
       retained.renderMode === "fill",
     );
   }, [
     framingPaintIdentity,
     displayedFillScene,
+    displayedOutlineScene,
     syncPageGround,
     commitDisplayedScene,
   ]);

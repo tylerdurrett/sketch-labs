@@ -20,7 +20,7 @@ import {
   type OutlineComputeResponse,
   type OutlineComputeIdentity,
 } from "./outlineComputeProtocol";
-import { outlineScene } from "./outlineScene";
+import { finalizeOutlineScene, outlineScene } from "./outlineScene";
 import {
   createWorkerProgressEmitter,
   type MonotonicClock,
@@ -162,7 +162,6 @@ export function handleHiddenLineWorkerMessage(
         scene: derive(
           sourceSceneForIdentity(identity),
           identity.tolerance,
-          identity.includeFrame,
           report,
         ),
       };
@@ -177,7 +176,6 @@ export function handleHiddenLineWorkerMessage(
         ? derive(
             sourceSceneForIdentity(identity),
             identity.tolerance,
-            identity.includeFrame,
             report,
           )
         : mutableScene(value.snapshot.reusableOutline.scene);
@@ -190,8 +188,13 @@ export function handleHiddenLineWorkerMessage(
     });
     const clip = dependencies.clip ?? clipSceneToBounds;
     const render = dependencies.render ?? renderPlotterSVG;
+    const finalizedScene = finalizeOutlineScene(
+      completedScene,
+      value.snapshot.pageFrame,
+      value.snapshot.profile.includeFrame,
+    );
     const svg = render(
-      clip(completedScene),
+      clip(finalizedScene),
       mutableProfile(value.snapshot.profile),
       value.snapshot.metadata,
       { includePaperMargins: value.snapshot.includePaperMargins },
@@ -246,7 +249,6 @@ export function handleOutlineWorkerMessage(
       scene: derive(
         sourceSceneForIdentity(value.identity),
         value.identity.tolerance,
-        value.identity.includeFrame,
         emitProgress === undefined
           ? undefined
           : createProgressReporter(value.jobId, emitProgress, now),

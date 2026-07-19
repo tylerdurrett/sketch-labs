@@ -1,32 +1,34 @@
 import {
   DEFAULT_STROKE,
+  frameScene,
   hiddenLinePass,
   type HiddenLineObserver,
+  type PageFrame,
   type Scene,
 } from "@harness/core";
 
 /**
- * The SINGLE preview == export seam (issue #220, feature #4).
+ * The shared preview == export Outline pipeline (issue #220, feature #4).
  *
  * The outline-mode canvas preview ({@link LiveCanvas}) and the hidden-line SVG
  * export ({@link SketchControls.exportHiddenLineSvg}) must apply the IDENTICAL
- * processing to their input Scene — that is the whole promise of
- * feature #4 ("what you see is what you plot"). Before this seam existed each
- * consumer ran its OWN Hidden-line invocation, two independent processing seams
- * that could silently drift (a pass argument or reordering on one side only).
- * Collapsing both to this one pure function makes preview == export processing
- * true BY CONSTRUCTION: there is exactly one place the input Scene is reduced.
+ * processing to their input Scene — that is the whole promise of feature #4
+ * ("what you see is what you plot"). The expensive, Page-independent stage
+ * lives in {@link outlineScene}; the cheap Page-dependent stage lives in
+ * {@link finalizeOutlineScene}. Consumers compose those stages in that order.
  *
- * It is a pure `(Scene, tolerance, includeFrame) → Scene` function: the
- * Hidden-line pass followed, when requested, by one authored Composition Frame
- * path. Appending the frame after occlusion processing keeps it from hiding any
- * source geometry. Scene sampling deliberately
- * stays caller-owned: LiveCanvas supplies its retained ADR-0012 prepared sample,
- * avoiding a redundant cold `generate`, while one-shot export may generate its
- * Scene cold. The `tolerance` (default 0, i.e. no simplification) is the studio's
- * single knob value forwarded into the pass's final Douglas–Peucker stage;
- * routing it through this one seam keeps preview and export simplified
- * IDENTICALLY.
+ * It is a pure `(Scene, tolerance) → Scene` function containing only the
+ * expensive Hidden-line pass. Scene sampling deliberately stays caller-owned:
+ * LiveCanvas supplies its retained ADR-0012 prepared sample, avoiding a
+ * redundant cold `generate`, while one-shot export may generate its Scene cold.
+ * The `tolerance` (default 0, i.e. no simplification) is the studio's single
+ * knob value forwarded into the pass's final Douglas–Peucker stage; routing it
+ * through this one seam keeps preview and export simplified IDENTICALLY.
+ *
+ * Page framing and the optional authored Page rectangle belong to
+ * {@link finalizeOutlineScene}. Keeping that cheap finalization outside this
+ * expensive seam lets framing and frame visibility change without repeating
+ * Hidden-line work (ADR-0015).
  *
  * On-demand only (feature #4 / issue #219 invariant): the Hidden-line pass is
  * expensive, so this seam is invoked ONLY from the static/on-demand redraw path
@@ -37,20 +39,35 @@ import {
 export function outlineScene(
   scene: Scene,
   tolerance = 0,
-  includeFrame = false,
   observer?: HiddenLineObserver,
 ): Scene {
-  const outlined = hiddenLinePass(
+  return hiddenLinePass(
     scene,
     observer === undefined ? { tolerance } : { tolerance, observer },
   );
-  if (!includeFrame) return outlined;
+}
 
-  const { width, height } = outlined.space;
+/**
+ * Apply committed Page framing, then optionally append its authored outline.
+ *
+ * This seam is intentionally pure and cheap: callers may toggle the Page
+ * rectangle or finalize the same retained Hidden-line result through a new Page
+ * Frame without rerunning {@link outlineScene}. With no committed Page Frame,
+ * the source Composition coordinate space remains the final Page space.
+ */
+export function finalizeOutlineScene(
+  base: Scene,
+  pageFrame: PageFrame | null,
+  includeFrame: boolean,
+): Scene {
+  const finalized = pageFrame === null ? base : frameScene(base, pageFrame);
+  if (!includeFrame) return finalized;
+
+  const { width, height } = finalized.space;
   return {
-    ...outlined,
+    ...finalized,
     primitives: [
-      ...outlined.primitives,
+      ...finalized.primitives,
       {
         points: [
           [0, 0],
@@ -59,7 +76,7 @@ export function outlineScene(
           [0, height],
           [0, 0],
         ],
-        stroke: { color: "black", width: DEFAULT_STROKE.width },
+        stroke: DEFAULT_STROKE,
       },
     ],
   };

@@ -40,7 +40,6 @@ function identity(amount = 1) {
     sampledT: 2,
     compositionFrame: fill.space,
     tolerance: 0,
-    includeFrame: false,
     sourceScene: fill,
   });
 }

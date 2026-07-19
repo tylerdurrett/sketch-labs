@@ -167,7 +167,6 @@ function outlineInputsChanged(
     !sameParams(previous.params, next.params) ||
     previous.seed !== next.seed ||
     previous.tolerance !== next.tolerance ||
-    previous.profile.includeFrame !== next.profile.includeFrame ||
     !Object.is(
       previous.profile.toolWidthMillimeters,
       next.profile.toolWidthMillimeters,
@@ -847,7 +846,6 @@ export function SketchControls({
       sampledT: capture.t,
       compositionFrame,
       tolerance: edit.tolerance,
-      includeFrame: edit.profile.includeFrame,
       ...outlineIdentitySourceFor(
         sketch,
         edit,
@@ -1121,8 +1119,9 @@ export function SketchControls({
   // geometry with core's `renderToSVG`. Unframed ordinary Sketches retain their
   // cold `generate` path exactly. A committed Page Frame instead transforms the
   // exact retained full-Composition Fill, without preparation, sampling, or
-  // generation. Scribble-capable Sketches keep serializing their acknowledged
-  // worker Scene and never regenerate expensive artwork on the main thread.
+  // generation. Scribble-capable Sketches use that same final framing pass on
+  // their acknowledged worker Scene and never regenerate expensive artwork on
+  // the main thread.
   //
   // `t` is TIME-GATED on `sketch.time` exactly as the PNG path does. Framed
   // ordinary export takes it atomically from the retained Fill record; all
@@ -1136,29 +1135,30 @@ export function SketchControls({
     if (hasScribblePreparation && scribbleExport === null) return;
     const edit = historyRef.current.present;
     const pageFrame =
-      !hasScribblePreparation && edit.framing.kind === "framed"
-        ? edit.framing.pageFrame
-        : null;
-    const framedOrdinary = pageFrame !== null;
-    const retainedFill = framedOrdinary
+      edit.framing.kind === "framed" ? edit.framing.pageFrame : null;
+    const framedExport = pageFrame !== null;
+    const retainedFill = framedExport && scribbleExport === null
       ? handle.captureDisplayedFillFrame()
       : null;
-    if (framedOrdinary && retainedFill === null) return;
+    if (framedExport && scribbleExport === null && retainedFill === null) {
+      return;
+    }
     const sampledT = retainedFill?.t ?? handle.getCurrentT();
     const t = sketch.time === undefined ? undefined : sampledT;
     // `generate` takes a concrete `t` (static Sketches conventionally get 0 and
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
+    const sourceScene =
+      scribbleExport?.result.scene ?? retainedFill?.sourceScene ?? null;
     const scene =
-      scribbleExport?.result.scene ??
-      (pageFrame !== null && retainedFill !== null
-        ? frameScene(retainedFill.sourceScene, pageFrame)
-        : sketch.generate(params, seed, t ?? 0, compositionFrame));
+      pageFrame !== null && sourceScene !== null
+        ? frameScene(sourceScene, pageFrame)
+        : sourceScene ?? sketch.generate(params, seed, t ?? 0, compositionFrame);
     // Clip the generated geometry to the canvas rectangle so the exported plot
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
     const exportScene =
-      scribbleExport === null && !framedOrdinary
+      scribbleExport === null && !framedExport
         ? clipSceneToBounds(scene)
         : scene;
     // Embed the same reproduction envelope as a <metadata> element (issue #76),
@@ -1167,11 +1167,11 @@ export function SketchControls({
     // serialization lives in core).
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
-      seed: framedOrdinary ? edit.seed : seed,
-      params: framedOrdinary ? edit.params : params,
-      locks: framedOrdinary ? edit.locks : locks,
+      seed: framedExport ? edit.seed : seed,
+      params: framedExport ? edit.params : params,
+      locks: framedExport ? edit.locks : locks,
       t,
-      profile: framedOrdinary ? edit.profile : profile,
+      profile: framedExport ? edit.profile : profile,
     });
     if (!sameScribbleExportRevision(scribbleExport)) return;
     const svg = renderToSVG(exportScene, metadata);
@@ -1182,7 +1182,7 @@ export function SketchControls({
       exportFilename(
         {
           sketchId: sketch.id,
-          seed: framedOrdinary ? edit.seed : seed,
+          seed: framedExport ? edit.seed : seed,
           t,
         },
         "svg",
@@ -1237,7 +1237,6 @@ export function SketchControls({
       sampledT: displayed.t,
       compositionFrame,
       tolerance: displayed.tolerance,
-      includeFrame: displayed.includeFrame,
       ...outlineIdentitySourceFor(
         sketch,
         edit,
@@ -1260,6 +1259,8 @@ export function SketchControls({
     const snapshot = createHiddenLineExportSnapshot({
       identity,
       profile: edit.profile,
+      pageFrame:
+        edit.framing.kind === "framed" ? edit.framing.pageFrame : null,
       metadata,
       includePaperMargins,
       filename,
