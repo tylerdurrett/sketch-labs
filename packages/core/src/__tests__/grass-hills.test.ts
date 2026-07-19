@@ -453,6 +453,46 @@ describe('grass-hills Sketch contract', () => {
       expect(baselineYs[index]).toBeGreaterThan(baselineYs[index - 1]!)
     }
   })
+
+  it('resolves ridgeSamples and terrain shaping into finite resized rings', () => {
+    const shaped = grassHills.generate(
+      {
+        ridgeSamples: 512,
+        terrainOctaves: 8,
+        terrainSharpness: 1,
+        bladeDensity: 0,
+      },
+      'shaped-resolution',
+      0,
+      WIDE,
+    )
+
+    expect(hills(shaped)).toHaveLength(10)
+    for (const primitive of hills(shaped)) {
+      expect(primitive.points).toHaveLength(512 + 6)
+      expect(
+        primitive.points.every(
+          ([x, y]) => Number.isFinite(x) && Number.isFinite(y),
+        ),
+      ).toBe(true)
+    }
+
+    expect(
+      grassHills.generate(
+        { ridgeSamples: 128, bladeDensity: 0.004 },
+        'shaped-resolution',
+        0,
+        WIDE,
+      ),
+    ).toEqual(
+      grassHills.generate(
+        { bladeDensity: 0.004 },
+        'shaped-resolution',
+        0,
+        WIDE,
+      ),
+    )
+  })
 })
 
 describe('grass-hills preparation and determinism', () => {

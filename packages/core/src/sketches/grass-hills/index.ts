@@ -8,6 +8,13 @@
  * rolling unrelated profiles; `terrainDrift` controls how far that shared
  * landscape moves between depths. Relief scales with each band's local height,
  * so distant ridges flatten with the same perspective cue as their spacing.
+ * `terrainOctaves` and `terrainRoughness` feed the shared field's fBm octave
+ * count and gain directly, while `terrainSharpness` (a ridged fold toward
+ * `1 - 2|h|`) and `terrainContrast` (a sign-preserving power curve) reshape
+ * each sampled height inside the terrain module before its clamp; their
+ * defaults structurally skip both steps, so the untouched field stays
+ * byte-identical. `ridgeSamples` sets the horizontal resolution every
+ * prepared ridgeline is resolved at.
  *
  * FOREGROUND ZOOM / COMPOSITION: `foregroundZoom` uniformly magnifies the
  * completed scene around the horizon center. Terrain, projected roots, blade
@@ -272,6 +279,13 @@ function prepareGrassHills(
   const ridgeScale = numberParam(params, schema, 'ridgeScale')
   const ridgeAmplitude = numberParam(params, schema, 'ridgeAmplitude')
   const terrainDrift = numberParam(params, schema, 'terrainDrift')
+  const terrainOctaves = Math.round(
+    numberParam(params, schema, 'terrainOctaves'),
+  )
+  const terrainRoughness = numberParam(params, schema, 'terrainRoughness')
+  const terrainContrast = numberParam(params, schema, 'terrainContrast')
+  const terrainSharpness = numberParam(params, schema, 'terrainSharpness')
+  const ridgeSamples = Math.round(numberParam(params, schema, 'ridgeSamples'))
   const bladeDensity = numberParam(params, schema, 'bladeDensity')
   const bladeLength = numberParam(params, schema, 'bladeLength')
   const bladeLengthVariance = numberParam(
@@ -298,13 +312,20 @@ function prepareGrassHills(
     depthFalloff,
   }
   const bands = layoutHillBands(hillCount, projection)
-  const terrainAt = createTerrainField(seed, { ridgeScale, terrainDrift })
+  const terrainAt = createTerrainField(seed, {
+    ridgeScale,
+    terrainDrift,
+    terrainOctaves,
+    terrainRoughness,
+    terrainContrast,
+    terrainSharpness,
+  })
   const ridges = buildRidgeBands({
     frame: preparedFrame,
     bands,
     terrainAt,
     ridgeAmplitude,
-    ridgeSamples: RIDGE_SAMPLES,
+    ridgeSamples,
   })
   const maxUnscaledBladeLength = resolveMaximumUnscaledBladeLength(
     bladeLength,

@@ -90,3 +90,131 @@ describe('grass-hills terrain field', () => {
     }
   })
 })
+
+describe('grass-hills terrain shaping', () => {
+  const SHAPING_DEFAULTS = {
+    ...SETTINGS,
+    terrainOctaves: 4,
+    terrainRoughness: 0.5,
+    terrainContrast: 1,
+    terrainSharpness: 0,
+  }
+
+  const SWEEP: Array<[number, number]> = []
+  for (let x = 0; x <= 1; x += 0.05) {
+    for (let depth = 0; depth <= 1; depth += 0.25) {
+      SWEEP.push([x, depth])
+    }
+  }
+
+  it('keeps explicit shaping defaults bit-identical to the option-free field', () => {
+    const bare = createTerrainField('shaping-defaults', SETTINGS)
+    const explicit = createTerrainField('shaping-defaults', SHAPING_DEFAULTS)
+
+    for (const [x, depth] of SWEEP) {
+      expect(explicit(x, depth)).toBe(bare(x, depth))
+    }
+  })
+
+  it('folds the field into clamped 1 - 2|fbm| at full sharpness', () => {
+    const seed = 'sharp-landscape'
+    const terrainAt = createTerrainField(seed, {
+      ...SHAPING_DEFAULTS,
+      terrainSharpness: 1,
+    })
+    const noise2D = createRandom(seed).noise2D
+
+    for (const [x, depth] of SWEEP) {
+      const height = fbm(
+        noise2D,
+        x * SETTINGS.ridgeScale,
+        depth * SETTINGS.terrainDrift,
+      )
+      const ridged = 1 - 2 * Math.abs(height)
+      // Exact expectation mirrors the blend h + s * (ridged - h) at s = 1,
+      // which floating point does not simplify bit-for-bit to `ridged`.
+      expect(terrainAt(x, depth)).toBe(
+        Math.max(-1, Math.min(1, height + (ridged - height))),
+      )
+      expect(terrainAt(x, depth)).toBeCloseTo(
+        Math.max(-1, Math.min(1, ridged)),
+        12,
+      )
+    }
+  })
+
+  it('applies a sign-preserving monotone power curve that fixes 0 and ±1', () => {
+    const seed = 'contrast-landscape'
+    const base = createTerrainField(seed, SETTINGS)
+    const sharpened = createTerrainField(seed, {
+      ...SHAPING_DEFAULTS,
+      terrainContrast: 4,
+    })
+    const softened = createTerrainField(seed, {
+      ...SHAPING_DEFAULTS,
+      terrainContrast: 0.25,
+    })
+
+    for (const [x, depth] of SWEEP) {
+      const height = base(x, depth)
+      const sharp = sharpened(x, depth)
+      const soft = softened(x, depth)
+
+      // sign(h) * |h| ** c fixes 0 and ±1; between them contrast above one
+      // compresses magnitudes toward 0 and contrast below one expands them.
+      expect(sharp).toBe(Math.sign(height) * Math.abs(height) ** 4)
+      expect(soft).toBe(Math.sign(height) * Math.abs(height) ** 0.25)
+      expect(Math.abs(sharp)).toBeLessThanOrEqual(Math.abs(height))
+      expect(Math.abs(soft)).toBeGreaterThanOrEqual(Math.abs(height))
+    }
+  })
+
+  it('collapses to the raw single-octave noise sample at one octave', () => {
+    const seed = 'single-octave-landscape'
+    const terrainAt = createTerrainField(seed, {
+      ...SHAPING_DEFAULTS,
+      terrainOctaves: 1,
+    })
+    const noise2D = createRandom(seed).noise2D
+
+    for (const [x, depth] of SWEEP) {
+      const sample = noise2D(
+        x * SETTINGS.ridgeScale,
+        depth * SETTINGS.terrainDrift,
+      )
+      expect(terrainAt(x, depth)).toBe(Math.max(-1, Math.min(1, sample)))
+    }
+  })
+
+  it('changes the field when roughness changes', () => {
+    const sample = (terrainRoughness: number) => {
+      const terrainAt = createTerrainField('rough-landscape', {
+        ...SHAPING_DEFAULTS,
+        terrainRoughness,
+      })
+      return SWEEP.map(([x, depth]) => terrainAt(x, depth))
+    }
+
+    expect(sample(0.9)).not.toEqual(sample(0.5))
+  })
+
+  it('stays deterministic and bounded with every shaping option active', () => {
+    const settings = {
+      ...SETTINGS,
+      terrainOctaves: 8,
+      terrainRoughness: 0.9,
+      terrainContrast: 2.5,
+      terrainSharpness: 0.7,
+    }
+    const first = createTerrainField('shaped-landscape', settings)
+    const second = createTerrainField('shaped-landscape', settings)
+
+    for (const [x, depth] of SWEEP) {
+      const height = first(x, depth)
+      expect(Number.isFinite(height)).toBe(true)
+      expect(height).toBeGreaterThanOrEqual(-1)
+      expect(height).toBeLessThanOrEqual(1)
+      expect(second(x, depth)).toBe(height)
+    }
+  })
+})
