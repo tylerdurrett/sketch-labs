@@ -283,7 +283,13 @@ describe("Page Frame edit draft", () => {
     ).toThrow(/generationAspect must be a finite positive/);
     expect(() =>
       openPageFrameEditDraft({ ...ENTRY, generationAspect: 4 / 3 }),
-    ).toThrow(/must match the frozen Composition Frame aspect/);
+    ).toThrow(/must exactly match the canonical frame/);
+    expect(() =>
+      openPageFrameEditDraft({
+        ...ENTRY,
+        compositionFrame: { width: 160, height: 90 },
+      }),
+    ).toThrow(/must exactly match the canonical frame/);
     expect(() =>
       openPageFrameEditDraft({
         ...ENTRY,
@@ -292,6 +298,12 @@ describe("Page Frame edit draft", () => {
     ).toThrow(/equivalent physical scales/);
 
     const valid = fixed(openPageFrameEditDraft(ENTRY));
+    expect(() =>
+      validatePageFrameEditDraft({
+        ...valid,
+        compositionFrame: { width: 160, height: 90 },
+      }),
+    ).toThrow(/must exactly match the canonical frame/);
     expect(() =>
       validatePageFrameEditDraft({
         ...valid,

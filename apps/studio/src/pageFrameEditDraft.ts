@@ -6,6 +6,7 @@ import {
   fixedPageCompositionScale,
   fullCompositionPageFrame,
   resizePageFrameFromPhysicalDimension,
+  resolveCompositionFrame,
   scaleFixedPageFrame,
   validatePageFrame,
   type CoordinateSpace,
@@ -376,10 +377,13 @@ function validateGenerationBasis(
       `${operation}: generationAspect must be a finite positive number, got ${generationAspect}`,
     );
   }
-  const representedAspect = compositionFrame.width / compositionFrame.height;
-  if (!equivalent(generationAspect, representedAspect)) {
+  const expectedCompositionFrame = resolveCompositionFrame(generationAspect);
+  if (
+    compositionFrame.width !== expectedCompositionFrame.width ||
+    compositionFrame.height !== expectedCompositionFrame.height
+  ) {
     throw new Error(
-      `${operation}: generationAspect must match the frozen Composition Frame aspect`,
+      `${operation}: compositionFrame must exactly match the canonical frame resolved from generationAspect`,
     );
   }
 }
