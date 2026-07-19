@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clipSceneToBounds,
+  computePlotMapping,
   createShadingMask,
   createScribbleMoonStructuralScene,
   createToneField,
@@ -63,6 +64,12 @@ import type { PageFrameEditDraft } from "./pageFrameEditDraft";
 import { isScribbleComputeIdentity } from "./scribbleComputeProtocol";
 import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
+import {
+  FIXED_PAGE_PARITY_COMPOSITION,
+  FIXED_PAGE_PARITY_FRAME,
+  FIXED_PAGE_PARITY_PROFILE,
+  fixedPageParityScene,
+} from "./fixedPageOutputParity.test-support";
 
 // Preview == export seam probe (issue #220): capture the Scene the export path
 // hands `renderToSVG`, so a test can prove it is the SAME processed Scene the
@@ -288,6 +295,27 @@ vi.mock("./hiddenLineCoordinator", () => ({
           processed,
           snapshot.pageFrame,
           snapshot.profile.includeFrame,
+          snapshot.identity.sourceKind === "legacy-scene"
+            ? {
+                kind: "legacy-scene",
+                target: {
+                  toolWidthMillimeters:
+                    snapshot.profile.toolWidthMillimeters,
+                  millimetersPerSceneUnit: computePlotMapping(
+                    snapshot.pageFrame === null
+                      ? snapshot.identity.compositionFrame
+                      : {
+                          width: snapshot.pageFrame.width,
+                          height: snapshot.pageFrame.height,
+                        },
+                    snapshot.profile,
+                  ).scale,
+                },
+              }
+            : {
+                kind: "physical-tool",
+                target: snapshot.identity.outlineTarget,
+              },
         ),
       );
       outlineJob.exportFinalizations += 1;
@@ -4636,11 +4664,33 @@ describe("SketchControls — SVG export wiring", () => {
 function finalizedPlotterScene(base: Scene): Scene {
   const snapshot = outlineJob.lastExportSnapshot;
   if (snapshot === null) throw new Error("expected hidden-line export snapshot");
+  const policy: OutlineFinalizationStrokePolicy =
+    snapshot.identity.sourceKind === "legacy-scene"
+      ? {
+          kind: "legacy-scene",
+          target: {
+            toolWidthMillimeters: snapshot.profile.toolWidthMillimeters,
+            millimetersPerSceneUnit: computePlotMapping(
+              snapshot.pageFrame === null
+                ? snapshot.identity.compositionFrame
+                : {
+                    width: snapshot.pageFrame.width,
+                    height: snapshot.pageFrame.height,
+                  },
+              snapshot.profile,
+            ).scale,
+          },
+        }
+      : {
+          kind: "physical-tool",
+          target: snapshot.identity.outlineTarget,
+        };
   return clipSceneToBounds(
     finalizeOutlineScene(
       base,
       snapshot.pageFrame,
       snapshot.profile.includeFrame,
+      policy,
     ),
   );
 }
@@ -4950,7 +5000,19 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     expect(generate).not.toHaveBeenCalled();
     expect(fakeDisplayedScene?.scene).toEqual(processed);
     expect(processed).toEqual(processedBefore);
-    expect(firstScene).toEqual(secondScene);
+    const firstFinalized = firstScene as Scene;
+    const secondFinalized = secondScene as Scene;
+    expect(firstFinalized.primitives.slice(0, -1)).toEqual(
+      secondFinalized.primitives.slice(0, -1),
+    );
+    expect(firstFinalized.primitives.at(-1)?.points).toEqual(
+      secondFinalized.primitives.at(-1)?.points,
+    );
+    // The worker retargets the optional Page outline in Scene units for each
+    // profile; physical serialization keeps both at the configured 0.3 mm.
+    expect(firstFinalized.primitives.at(-1)?.stroke?.width).not.toBe(
+      secondFinalized.primitives.at(-1)?.stroke?.width,
+    );
     expect(plotterExportCapture.current?.profile).toEqual(doubledProfile);
     expect(firstSvg).toContain(
       'width="200mm" height="200mm" viewBox="0 0 200 200"',
@@ -6562,6 +6624,197 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         millimetersPerSceneUnit: targetScale,
       },
     });
+  });
+
+  it("emits one asymmetric fixed Page consistently through PNG, ordinary SVG, and plotter SVG", async () => {
+    const generate = vi.fn(toneCalibration.generate);
+    const sketch = {
+      ...toneCalibration,
+      id: "fixed-page-output-parity",
+      defaultOutputProfile: FIXED_PAGE_PARITY_PROFILE,
+      generate,
+    };
+    const source = fixedPageParityScene();
+    const toBlob = vi.fn((callback: BlobCallback) => {
+      callback(new Blob([MINIMAL_PNG], { type: "image/png" }));
+    });
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(<SketchControls sketch={sketch} />);
+    await flush();
+    expect(lastCompositionFrame).toEqual(FIXED_PAGE_PARITY_COMPOSITION);
+    await completeScribble(0, source);
+
+    // Drive the public editor: 2× absolute scale, then the asymmetric origin.
+    clickButton(el, "Crop");
+    act(() => el.querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!.click());
+    setInput(
+      el.querySelector<HTMLInputElement>('input[aria-label="Composition scale percentage"]')!,
+      "200",
+    );
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "-10");
+    setInput(el.querySelector<HTMLInputElement>('input[name="y"]')!, "25");
+    expect(lastPageFrameEditDraft?.mode).toBe("fixed-page");
+    expect(lastPageFrameEditDraft?.frame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(lastProfile).toBe(lastPageFrameEditDraft?.profile);
+    clickButton(el, "Apply");
+
+    expect(lastProfile).toEqual(FIXED_PAGE_PARITY_PROFILE);
+    expect(lastCommittedPageFrame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    // Tone sees the same committed Page; placement bytes are asserted through
+    // the real LiveCanvas in its sibling parity test.
+    clickButton(el, "Tone");
+    expect(lastToneSource).not.toBeNull();
+    expect(lastCommittedPageFrame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(lastProfile).toEqual(FIXED_PAGE_PARITY_PROFILE);
+    clickButton(el, "Fill");
+
+    clickButton(el, "Export PNG");
+    await flush();
+    expect(toBlob).toHaveBeenCalledOnce();
+    const pngCall = downloadBlob.mock.calls.at(-1)!;
+    expect(pngCall[0].type).toBe("image/png");
+    const pngBytes = await new Promise<Uint8Array>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(pngCall[0]);
+    });
+    const pngText = new TextDecoder().decode(pngBytes);
+    expect(pngText).toContain('"version":3');
+    expect(pngText).toContain('"profile":{"width":323,"height":217');
+    expect(pngText).toContain(
+      `"pageFrame":{"x":${FIXED_PAGE_PARITY_FRAME.x},"y":${FIXED_PAGE_PARITY_FRAME.y},"width":${FIXED_PAGE_PARITY_FRAME.width},"height":${FIXED_PAGE_PARITY_FRAME.height}}`,
+    );
+
+    clickButton(el, "Export SVG");
+    const ordinaryBlob = downloadBlob.mock.calls.at(-1)![0];
+    const ordinarySvg = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(ordinaryBlob);
+    });
+    const expectedFramed = frameScene(source, FIXED_PAGE_PARITY_FRAME);
+    expect(exportSceneCapture.current).toEqual(expectedFramed);
+    const ordinaryDocument = new DOMParser().parseFromString(ordinarySvg, "image/svg+xml");
+    expect(ordinaryDocument.documentElement.getAttribute("viewBox")).toBe(
+      `0 0 ${FIXED_PAGE_PARITY_FRAME.width} ${FIXED_PAGE_PARITY_FRAME.height}`,
+    );
+    expect(ordinaryDocument.querySelector(":root > rect")?.getAttribute("fill")).toBe("#f4efe6");
+    expect(ordinaryDocument.querySelector(":root > path")?.getAttribute("d")).toBe(
+      "M129.0994 38.7298 L645.4972 348.5685",
+    );
+
+    clickButton(el, "Outline");
+    expect(lastCommittedPageFrame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(lastOutlineFinalizationStrokePolicy).toEqual({
+      kind: "physical-tool",
+      target: {
+        toolWidthMillimeters: 0.37,
+        millimetersPerSceneUnit: 265 / FIXED_PAGE_PARITY_FRAME.width,
+      },
+    });
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    const fixedPlotterBlob = downloadBlob.mock.calls.at(-1)![0];
+    const fixedPlotterSvg = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(fixedPlotterBlob);
+    });
+    const fixedPlotterDocument = new DOMParser().parseFromString(fixedPlotterSvg, "image/svg+xml");
+    const fixedRoot = fixedPlotterDocument.documentElement;
+    const fixedPaths = [...fixedRoot.querySelectorAll(":scope > path")];
+    expect(fixedRoot.getAttribute("width")).toBe("323mm");
+    expect(fixedRoot.getAttribute("height")).toBe("217mm");
+    expect(fixedRoot.getAttribute("viewBox")).toBe("0 0 323 217");
+    expect(fixedPaths.map((path) => path.getAttribute("d"))).toEqual([
+      "M70 34.9 L282 162.1",
+      "M17 19 L282 19 L282 178 L17 178 L17 19",
+    ]);
+    expect(fixedPaths.map((path) => path.getAttribute("stroke-width"))).toEqual(["0.37", "0.37"]);
+    expect(fixedPlotterSvg).not.toContain("#f4efe6");
+    expect(fixedPlotterSvg).not.toMatch(/<rect\b/);
+
+    // Undo the fixed operation and apply the identical frame through ordinary
+    // scale-preserving editing. Its physical scale stays unchanged, so only the
+    // paper extent/physical placement differs; the framed ordinary SVG remains
+    // the same local Page geometry.
+    expect(pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(lastCommittedPageFrame).toBeNull();
+    clickButton(el, "Fill");
+    clickButton(el, "Crop");
+    for (const [name, value] of Object.entries({
+      x: -10,
+      y: 25,
+      width: 50,
+      height: 50,
+    })) {
+      setInput(el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!, String(value));
+    }
+    expect(lastPageFrameEditDraft?.mode).toBe("scale-preserving");
+    clickButton(el, "Apply");
+    expect(lastCommittedPageFrame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(lastProfile).toEqual({
+      ...FIXED_PAGE_PARITY_PROFILE,
+      width: 190.5,
+      height: 137.5,
+    });
+    expect(
+      (lastProfile!.width - lastProfile!.insets.left - lastProfile!.insets.right) /
+        FIXED_PAGE_PARITY_FRAME.width,
+    ).toBeCloseTo(265 / FIXED_PAGE_PARITY_COMPOSITION.width, 12);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Export SVG");
+    const ordinaryScalePreservingSvg = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(downloadBlob.mock.calls.at(-1)![0]);
+    });
+    const ordinaryScalePreservingDocument = new DOMParser().parseFromString(
+      ordinaryScalePreservingSvg,
+      "image/svg+xml",
+    );
+    expect(ordinaryScalePreservingDocument.documentElement.getAttribute("viewBox")).toBe(
+      `0 0 ${FIXED_PAGE_PARITY_FRAME.width} ${FIXED_PAGE_PARITY_FRAME.height}`,
+    );
+    expect(ordinaryScalePreservingDocument.querySelector(":root > path")?.getAttribute("d")).toBe(
+      "M129.0994 38.7298 L645.4972 348.5685",
+    );
+
+    clickButton(el, "Outline");
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    const ordinaryPlotterSvg = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(downloadBlob.mock.calls.at(-1)![0]);
+    });
+    const ordinaryPlotterDocument = new DOMParser().parseFromString(
+      ordinaryPlotterSvg,
+      "image/svg+xml",
+    );
+    const ordinaryRoot = ordinaryPlotterDocument.documentElement;
+    const ordinaryPaths = [...ordinaryRoot.querySelectorAll(":scope > path")];
+    expect(ordinaryRoot.getAttribute("width")).toBe("190.5mm");
+    expect(ordinaryRoot.getAttribute("height")).toBe("137.5mm");
+    expect(ordinaryPaths.map((path) => path.getAttribute("d"))).toEqual([
+      "M43.5 26.95 L149.5 90.55",
+      "M17 19 L149.5 19 L149.5 98.5 L17 98.5 L17 19",
+    ]);
+    expect(ordinaryPaths.map((path) => path.getAttribute("stroke-width"))).toEqual([
+      "0.37",
+      "0.37",
+    ]);
   });
 
   it.each([
