@@ -6038,20 +6038,23 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(downloadBlob).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a current budget-exhausted Scribble result exportable", async () => {
-    const el = mount(<SketchControls sketch={toneCalibration} />);
-    await completeScribble(0, preparedScene(7), {
-      ...diagnostics,
-      termination: "budget-exhausted",
-      residualError: 0.3,
-    });
+  it.each(["stopped-early", "budget-exhausted"] as const)(
+    "keeps a current %s Scribble result eligible for every export",
+    async (termination) => {
+      const el = mount(<SketchControls sketch={toneCalibration} />);
+      await completeScribble(0, preparedScene(7), {
+        ...diagnostics,
+        termination,
+        residualError: 0.3,
+      });
 
-    expect(exportButton(el, "Export PNG").disabled).toBe(false);
-    expect(exportButton(el, "Export SVG").disabled).toBe(false);
-    expect(exportButton(el, "Export Hidden-line SVG").disabled).toBe(false);
-    clickButton(el, "Export SVG");
-    expect(downloadBlob).toHaveBeenCalledTimes(1);
-  });
+      expect(exportButton(el, "Export PNG").disabled).toBe(false);
+      expect(exportButton(el, "Export SVG").disabled).toBe(false);
+      expect(exportButton(el, "Export Hidden-line SVG").disabled).toBe(false);
+      clickButton(el, "Export SVG");
+      expect(downloadBlob).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("holds empty/current/stale artwork and settles one latest edit without main-thread generation", async () => {
     const generate = vi.fn(toneCalibration.generate);

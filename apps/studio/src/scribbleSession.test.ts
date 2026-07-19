@@ -32,12 +32,6 @@ const completedDiagnostics: ScribbleDiagnostics = {
   polylineCount: 3,
   penLiftCount: 2,
 };
-const exhaustedDiagnostics: ScribbleDiagnostics = {
-  ...completedDiagnostics,
-  termination: "budget-exhausted",
-  residualError: 0.2,
-};
-
 function identity(amount: number): ScribbleComputeIdentity {
   return createScribbleComputeIdentity({
     sketchId: "test",
@@ -384,27 +378,28 @@ describe("scribbleSessionReducer", () => {
     expect(selectExportableScribbleResult(failed)).toBeNull();
   });
 
-  it("exports current budget-exhausted completion but never stale completion", () => {
-    const exhausted = succeed(
-      launch(createScribbleSessionState(identity(1), 10)),
-      sceneA,
-      exhaustedDiagnostics,
-    );
-    expect(selectExportableScribbleResult(exhausted)).toBe(
-      exhausted.displayed,
-    );
+  it.each(["stopped-early", "budget-exhausted"] as const)(
+    "exports a current %s terminal result but never its stale display",
+    (termination) => {
+      const current = succeed(
+        launch(createScribbleSessionState(identity(1), 10)),
+        sceneA,
+        { ...completedDiagnostics, termination, residualError: 0.2 },
+      );
+      expect(selectExportableScribbleResult(current)).toBe(current.displayed);
 
-    const begun = scribbleSessionReducer(exhausted, {
-      type: "transaction-began",
-    });
-    expect(selectExportableScribbleResult(begun)).toBeNull();
-    const preview = scribbleSessionReducer(begun, {
-      type: "desired-identity-changed",
-      identity: identity(2),
-      sourceInputRevision: 11,
-    });
-    expect(selectExportableScribbleResult(preview)).toBeNull();
-  });
+      const begun = scribbleSessionReducer(current, {
+        type: "transaction-began",
+      });
+      expect(selectExportableScribbleResult(begun)).toBeNull();
+      const preview = scribbleSessionReducer(begun, {
+        type: "desired-identity-changed",
+        identity: identity(2),
+        sourceInputRevision: 11,
+      });
+      expect(selectExportableScribbleResult(preview)).toBeNull();
+    },
+  );
 
   it("disposal clears desired, work, display, failures, and counters", () => {
     const active = launch(createScribbleSessionState(identity(1), 10));

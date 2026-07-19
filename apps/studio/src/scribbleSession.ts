@@ -352,7 +352,10 @@ export function selectCurrentScribbleResult(
   return state.displayed;
 }
 
-/** Budget exhaustion is a truthful completion and remains exportable when current. */
+/**
+ * Intentional `stopped-early` and safety-bounded `budget-exhausted` terminal
+ * results remain valid exports when their authored provenance is current.
+ */
 export function selectExportableScribbleResult(
   state: ScribbleSessionState,
 ): DisplayedScribbleResult | null {
