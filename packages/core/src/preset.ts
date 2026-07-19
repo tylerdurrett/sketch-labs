@@ -392,7 +392,7 @@ export function applyPreset(schema: ParamSchema, preset: Preset): PresetState {
   const state: PresetState = {
     params,
     seed: preset.seed,
-    locks: preset.locks,
+    locks: [...preset.locks],
     profile:
       preset.profile === undefined
         ? undefined

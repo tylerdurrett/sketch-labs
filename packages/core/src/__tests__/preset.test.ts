@@ -536,6 +536,7 @@ describe('applyPreset', () => {
     const state = applyPreset(schema, preset)
     expect(state.seed).toBe('seed-7')
     expect(state.locks).toEqual(['count', 'radius'])
+    expect(state.locks).not.toBe(preset.locks)
   })
 
   it('surfaces a defensive copy of the stored profile for a v2 preset', () => {
