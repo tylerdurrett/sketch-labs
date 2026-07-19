@@ -136,14 +136,63 @@ const schema = {
   ridgeAmplitude: { kind: 'number', min: 0, max: 25, default: 0.8, step: 0.01 },
   /** Travel through the shared terrain field from foreground to horizon. */
   terrainDrift: { kind: 'number', min: 0, max: 8, default: 1.25, step: 0.05 },
+  /** fBm octave count for the shared terrain field. Whole-number domain. */
+  terrainOctaves: {
+    kind: 'number',
+    min: 1,
+    max: 8,
+    default: 4,
+    step: 1,
+    integer: true,
+  },
+  /** fBm per-octave gain; higher values roughen the shared terrain field. */
+  terrainRoughness: {
+    kind: 'number',
+    min: 0.1,
+    max: 0.9,
+    default: 0.5,
+    step: 0.05,
+  },
+  /** Post-fBm power curve; above one sharpens relief, below one softens. */
+  terrainContrast: { kind: 'number', min: 0.25, max: 4, default: 1, step: 0.05 },
+  /** Blend toward ridged terrain creases; zero keeps plain fBm. */
+  terrainSharpness: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
+  /** Horizontal segments used to resolve each prepared ridgeline. */
+  ridgeSamples: {
+    kind: 'number',
+    min: 64,
+    max: 1024,
+    default: RIDGE_SAMPLES,
+    step: 1,
+    integer: true,
+  },
   /** Relative density: 2 is the adopted 10k scene; 10 explores up to 50k. */
   bladeDensity: { kind: 'number', min: 0, max: 10, default: 0, step: 0.05 },
+  /** Elevation (band-height fraction) where the treeline fade begins. */
+  treelineHeight: { kind: 'number', min: 0, max: 2, default: 1, step: 0.05 },
+  /** Elevation span of the treeline fade; zero yields a hard cut. */
+  treelineFalloff: { kind: 'number', min: 0, max: 2, default: 0.5, step: 0.05 },
+  /** Fraction of blades culled above the treeline; zero disables it. */
+  treelineStrength: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
+  /** Fraction of blades culled on steep slopes; zero disables it. */
+  slopeBareness: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
   /** Nominal foreground blade length in Composition Frame units. */
   bladeLength: { kind: 'number', min: 4, max: 80, default: 28, step: 1 },
   /** Symmetric seeded variation around the nominal blade length. */
   bladeLengthVariance: { kind: 'number', min: 0, max: 40, default: 8, step: 1 },
   /** Nominal foreground blade silhouette width. */
   bladeWidth: { kind: 'number', min: 0.5, max: 12, default: 3, step: 0.1 },
+  /** Fraction of each blade sunk below its root; cuts the silhouette open. */
+  bladeRootSink: { kind: 'number', min: 0, max: 0.5, default: 0, step: 0.01 },
+  /** Maximum flank stations per blade at full scale. Whole-number domain. */
+  bladeDetail: {
+    kind: 'number',
+    min: 4,
+    max: 16,
+    default: 4,
+    step: 1,
+    integer: true,
+  },
   /** Seeded variation in how far toward the tip each blade bends. */
   stiffnessVariance: {
     kind: 'number',
