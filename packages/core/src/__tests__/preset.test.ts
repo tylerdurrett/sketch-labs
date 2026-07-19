@@ -7,6 +7,7 @@ import {
   makePreset,
   PRESET_VERSION,
   serialize,
+  type PresetFraming,
 } from '../preset'
 import type { Params, ParamSchema } from '../sketch'
 // A real, shipped on-disk v1 record — proves old presets still load unchanged.
@@ -19,6 +20,12 @@ const profile: PlotProfile = {
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
   includeFrame: true,
   toolWidthMillimeters: 0.3,
+}
+
+const framing: PresetFraming = {
+  pageFrame: { x: -20, y: 10, width: 320, height: 180 },
+  generationAspect: 4 / 3,
+  aspectLocked: true,
 }
 
 describe('makePreset', () => {
@@ -38,16 +45,32 @@ describe('makePreset', () => {
     const preset = makePreset('circles', 'p', params, 42, new Set())
     expect(preset.version).toBe(1)
     expect('profile' in preset).toBe(false)
+    expect('framing' in preset).toBe(false)
     expect(preset.params).not.toBe(params)
     expect(preset.params).toEqual({ count: 24 })
   })
 
-  it('stamps a v2 record (PRESET_VERSION) carrying the profile when one is supplied', () => {
+  it('stamps a v2 record carrying only the profile when one is supplied', () => {
     const preset = makePreset('circles', 'p', { count: 24 }, 42, new Set(), profile)
     expect(preset.version).toBe(2)
-    expect(PRESET_VERSION).toBe(2)
+    expect(PRESET_VERSION).toBe(3)
+    expect(preset.profile).toEqual(profile)
+    expect('framing' in preset).toBe(false)
+  })
+
+  it('stamps a v3 record carrying profile and framing when both are supplied', () => {
+    const preset = makePreset(
+      'circles',
+      'p',
+      { count: 24 },
+      42,
+      new Set(),
+      profile,
+      framing,
+    )
     expect(preset.version).toBe(PRESET_VERSION)
     expect(preset.profile).toEqual(profile)
+    expect(preset.framing).toEqual(framing)
   })
 
   it('defensively copies the profile (never aliases the caller’s object or its insets)', () => {
@@ -64,6 +87,47 @@ describe('makePreset', () => {
     live.width = 999
     live.insets.top = 999
     expect(preset.profile).toEqual(profile)
+  })
+
+  it('validates and defensively copies framing and its Page Frame', () => {
+    const live = {
+      pageFrame: { ...framing.pageFrame },
+      generationAspect: framing.generationAspect,
+      aspectLocked: framing.aspectLocked,
+    }
+    const preset = makePreset('circles', 'p', {}, 42, new Set(), profile, live)
+
+    expect(preset.framing).not.toBe(live)
+    expect(preset.framing?.pageFrame).not.toBe(live.pageFrame)
+    live.pageFrame.x = 999
+    live.generationAspect = 2
+    live.aspectLocked = false
+    expect(preset.framing).toEqual(framing)
+  })
+
+  it('rejects framing without the required final profile', () => {
+    expect(() =>
+      makePreset('circles', 'p', {}, 42, new Set(), undefined, framing),
+    ).toThrow(/framing.*requires.*profile/)
+  })
+
+  it.each([
+    [{ ...framing, generationAspect: 0 }, /generationAspect/],
+    [{ ...framing, generationAspect: Number.NaN }, /generationAspect/],
+    [{ ...framing, aspectLocked: 'yes' }, /aspectLocked/],
+    [{ ...framing, pageFrame: { ...framing.pageFrame, width: 0 } }, /width/],
+  ])('rejects invalid framing at creation', (invalid, message) => {
+    expect(() =>
+      makePreset(
+        'circles',
+        'p',
+        {},
+        42,
+        new Set(),
+        profile,
+        invalid as PresetFraming,
+      ),
+    ).toThrow(message)
   })
 })
 
@@ -88,6 +152,46 @@ describe('deserialize', () => {
     expect(back.profile).toEqual(profile)
   })
 
+  it('round-trips a serialized v3 Preset carrying the profile and framing exactly', () => {
+    const preset = makePreset(
+      'circles',
+      'p',
+      { count: 24 },
+      42,
+      new Set(['count']),
+      profile,
+      framing,
+    )
+    const serialized = serialize(preset)
+    const back = deserialize(serialized)
+
+    expect(back).toEqual(preset)
+    expect(back.version).toBe(PRESET_VERSION)
+    expect(back.profile).not.toBe(serialized.profile)
+    expect(back.profile?.insets).not.toBe(serialized.profile?.insets)
+    expect(back.framing).not.toBe(serialized.framing)
+    expect(back.framing?.pageFrame).not.toBe(serialized.framing?.pageFrame)
+  })
+
+  it.each([true, false])(
+    'round-trips the v3 aspect-lock state when aspectLocked=%s',
+    (aspectLocked) => {
+      const preset = makePreset(
+        'circles',
+        'p',
+        {},
+        42,
+        new Set(),
+        profile,
+        { ...framing, aspectLocked },
+      )
+
+      expect(deserialize(serialize(preset)).framing?.aspectLocked).toBe(
+        aspectLocked,
+      )
+    },
+  )
+
   it.each([true, false])(
     'round-trips an explicit includeFrame=%s without changing preset version',
     (includeFrame) => {
@@ -103,9 +207,9 @@ describe('deserialize', () => {
       const serialized = serialize(preset)
       const back = deserialize(serialized)
 
-      expect(serialized.version).toBe(PRESET_VERSION)
+      expect(serialized.version).toBe(2)
       expect(serialized.profile?.includeFrame).toBe(includeFrame)
-      expect(back.version).toBe(PRESET_VERSION)
+      expect(back.version).toBe(2)
       expect(back.profile?.includeFrame).toBe(includeFrame)
     },
   )
@@ -126,7 +230,7 @@ describe('deserialize', () => {
       profile: legacyProfile,
     })
 
-    expect(loaded.version).toBe(PRESET_VERSION)
+    expect(loaded.version).toBe(2)
     expect(loaded.profile).toEqual(profile)
     expect(loaded.profile).not.toBe(legacyProfile)
     expect(loaded.profile?.insets).not.toBe(legacyProfile.insets)
@@ -148,6 +252,23 @@ describe('deserialize', () => {
     expect(serialized.profile?.includeFrame).toBe(false)
   })
 
+  it('serializes defensive framing and Page Frame copies', () => {
+    const source = makePreset(
+      'circles',
+      'p',
+      {},
+      42,
+      new Set(),
+      profile,
+      framing,
+    )
+    const serialized = serialize(source)
+
+    expect(serialized.framing).toEqual(framing)
+    expect(serialized.framing).not.toBe(source.framing)
+    expect(serialized.framing?.pageFrame).not.toBe(source.framing?.pageFrame)
+  })
+
   it('rejects a v2 profile with a present non-boolean includeFrame value', () => {
     expect(() =>
       deserialize({
@@ -162,15 +283,25 @@ describe('deserialize', () => {
     ).toThrow(/normalizePlotProfile: includeFrame must be a boolean/)
   })
 
-  it('accepts both a v1 record (no profile) and a v2 record (with profile)', () => {
+  it('accepts v1 without profile/framing, v2 with profile only, and v3 with both', () => {
     const v1 = makePreset('circles', 'p', { count: 24 }, 42, new Set())
     const v2 = makePreset('circles', 'p', { count: 24 }, 42, new Set(), profile)
+    const v3 = makePreset(
+      'circles',
+      'p',
+      { count: 24 },
+      42,
+      new Set(),
+      profile,
+      framing,
+    )
     expect(deserialize(serialize(v1)).version).toBe(1)
     expect(deserialize(serialize(v2)).version).toBe(2)
+    expect(deserialize(serialize(v3)).version).toBe(3)
   })
 
-  it('rejects an unsupported version (not 1 or 2)', () => {
-    const bad = { ...serialize(makePreset('circles', 'p', {}, 1, new Set())), version: 3 }
+  it('rejects an unsupported version (not 1, 2, or 3)', () => {
+    const bad = { ...serialize(makePreset('circles', 'p', {}, 1, new Set())), version: 4 }
     expect(() => deserialize(bad)).toThrow(/version/)
   })
 
@@ -187,6 +318,20 @@ describe('deserialize', () => {
     expect(() => deserialize(bad)).toThrow(/version 1 record must not carry a `profile`/)
   })
 
+  it('rejects a v1 record that carries framing', () => {
+    expect(() =>
+      deserialize({
+        version: 1,
+        sketch: 'circles',
+        name: 'p',
+        seed: 1,
+        params: {},
+        locks: [],
+        framing,
+      }),
+    ).toThrow(/version 1 record must not carry `framing`/)
+  })
+
   it('rejects a v2 record missing its profile (invariant: profile ⇔ v2)', () => {
     const bad = {
       version: 2,
@@ -197,6 +342,82 @@ describe('deserialize', () => {
       locks: [],
     }
     expect(() => deserialize(bad)).toThrow(/version 2 record must carry a `profile`/)
+  })
+
+  it('rejects a v2 record that carries framing', () => {
+    expect(() =>
+      deserialize({
+        version: 2,
+        sketch: 'circles',
+        name: 'p',
+        seed: 1,
+        params: {},
+        locks: [],
+        profile,
+        framing,
+      }),
+    ).toThrow(/version 2 record must not carry `framing`/)
+  })
+
+  it('rejects a v3 record missing either its profile or framing', () => {
+    const base = {
+      version: 3,
+      sketch: 'circles',
+      name: 'p',
+      seed: 1,
+      params: {},
+      locks: [],
+    }
+    expect(() => deserialize({ ...base, framing })).toThrow(/carry a `profile`/)
+    expect(() => deserialize({ ...base, profile })).toThrow(/carry `framing`/)
+  })
+
+  it.each([
+    [{ ...framing, generationAspect: Number.POSITIVE_INFINITY }, /generationAspect/],
+    [{ ...framing, generationAspect: -1 }, /generationAspect/],
+    [{ ...framing, aspectLocked: null }, /aspectLocked/],
+    [{ ...framing, pageFrame: { ...framing.pageFrame, height: 0 } }, /height/],
+  ])('rejects malformed v3 framing', (invalid, message) => {
+    expect(() =>
+      deserialize({
+        version: 3,
+        sketch: 'circles',
+        name: 'p',
+        seed: 1,
+        params: {},
+        locks: [],
+        profile,
+        framing: invalid,
+      }),
+    ).toThrow(message)
+  })
+
+  it.each([
+    [{ version: 1, profile }, /version 1.*not.*profile/],
+    [{ version: 2 }, /version 2.*carry.*profile/],
+    [{ version: 2, profile, framing }, /version 2.*not.*framing/],
+    [{ version: 3, profile }, /version 3.*carry.*framing/],
+  ])('rejects invalid version/field combinations during serialize', (fields, message) => {
+    const base = makePreset('circles', 'p', {}, 1, new Set())
+    expect(() => serialize({ ...base, ...fields } as never)).toThrow(message)
+  })
+
+  it('rejects malformed framing during serialize', () => {
+    const preset = makePreset(
+      'circles',
+      'p',
+      {},
+      1,
+      new Set(),
+      profile,
+      framing,
+    )
+    expect(() =>
+      serialize({
+        ...preset,
+        framing: { ...framing, generationAspect: 0 },
+      }),
+    ).toThrow(/generationAspect/)
   })
 
   it('loudly rejects a structurally-broken v2 profile', () => {
@@ -317,12 +538,13 @@ describe('applyPreset', () => {
     expect(state.locks).toEqual(['count', 'radius'])
   })
 
-  it('surfaces the stored profile VERBATIM for a v2 preset (no fallback resolution)', () => {
+  it('surfaces a defensive copy of the stored profile for a v2 preset', () => {
     const preset = makePreset('circles', 'p', { count: 30 }, 1, new Set(), profile)
     const state = applyPreset(schema, preset)
     expect(state.profile).toEqual(profile)
-    // Passed through as-is — the same reference the record holds, un-resolved.
-    expect(state.profile).toBe(preset.profile)
+    expect(state.profile).not.toBe(preset.profile)
+    expect(state.profile?.insets).not.toBe(preset.profile?.insets)
+    expect('framing' in state).toBe(false)
   })
 
   it.each([true, false])(
@@ -349,11 +571,58 @@ describe('applyPreset', () => {
     const preset = makePreset('circles', 'p', { count: 30 }, 1, new Set())
     const state = applyPreset(schema, preset)
     expect(state.profile).toBeUndefined()
+    expect(state.framing).toBeUndefined()
+  })
+
+  it('applies a validated defensive framing snapshot for a v3 preset', () => {
+    const preset = makePreset(
+      'circles',
+      'p',
+      { count: 30 },
+      1,
+      new Set(),
+      profile,
+      framing,
+    )
+    const state = applyPreset(schema, preset)
+
+    expect(state.framing).toEqual(framing)
+    expect(state.framing).not.toBe(preset.framing)
+    expect(state.framing?.pageFrame).not.toBe(preset.framing?.pageFrame)
   })
 
   it('throws on a wrong-version preset even when reached directly', () => {
-    const bad = { ...makePreset('circles', 'p', {}, 1, new Set()), version: 3 as 1 }
+    const bad = { ...makePreset('circles', 'p', {}, 1, new Set()), version: 4 as 1 }
     expect(() => applyPreset(schema, bad)).toThrow(/version/)
+  })
+
+  it.each([
+    [{ version: 1, profile }, /version 1.*not.*profile/],
+    [{ version: 2 }, /version 2.*carry.*profile/],
+    [{ version: 3, profile }, /version 3.*carry.*framing/],
+  ])('rejects invalid version/field combinations during apply', (fields, message) => {
+    const base = makePreset('circles', 'p', {}, 1, new Set())
+    expect(() => applyPreset(schema, { ...base, ...fields } as never)).toThrow(
+      message,
+    )
+  })
+
+  it('rejects malformed framing during apply', () => {
+    const preset = makePreset(
+      'circles',
+      'p',
+      {},
+      1,
+      new Set(),
+      profile,
+      framing,
+    )
+    expect(() =>
+      applyPreset(schema, {
+        ...preset,
+        framing: { ...framing, aspectLocked: 'yes' as never },
+      }),
+    ).toThrow(/aspectLocked/)
   })
 })
 
@@ -402,7 +671,7 @@ describe('round-trip fidelity (no-drift case)', () => {
     const loaded = deserialize(wireValue)
     const state = applyPreset(schema, loaded)
 
-    expect(saved.version).toBe(PRESET_VERSION)
+    expect(saved.version).toBe(2)
     expect(saved.params.imageAsset).toBe(authoredImageAsset)
     expect(wireValue.params.imageAsset).toBe(authoredImageAsset)
     expect(loaded.params.imageAsset).toBe(authoredImageAsset)
@@ -438,7 +707,7 @@ describe('round-trip fidelity (no-drift case)', () => {
       ),
     )
 
-    expect(loaded.version).toBe(PRESET_VERSION)
+    expect(loaded.version).toBe(2)
     expect('imageAsset' in loaded.params).toBe(false)
     expect(applyPreset(schema, loaded).params.imageAsset).toBe(
       'bundled-default-000000000000',
