@@ -30,6 +30,8 @@ type Boundary = {
   intersection(start: Point, end: Point): Point
 }
 
+const MAX_RENDERER_MITER_LIMIT = 10
+
 function samePoint(a: Point, b: Point): boolean {
   return a[0] === b[0] && a[1] === b[1]
 }
@@ -175,6 +177,71 @@ function expandedStrokeBounds(bounds: BBox, width: number): BBox {
   ]
 }
 
+function segmentTouchesBounds(start: Point, end: Point, bounds: BBox): boolean {
+  return clipPolylinesToBox([[start, end]], bounds).length > 0
+}
+
+/**
+ * Detect authored joins whose default miter can enter the Page even though both
+ * adjacent centerline segments stay outside the half-width-expanded bounds.
+ * Canvas defaults to a miter limit of 10 (SVG's default is smaller), so that is
+ * the conservative shared-renderer ceiling.
+ */
+function hasVisibleMiterJoin(
+  source: Primitive,
+  bounds: BBox,
+  strokeBounds: BBox,
+  width: number,
+): boolean {
+  const radius = Math.max(0, width / 2)
+  if (radius === 0) return false
+
+  const ring = [...source.points]
+  if (ring.length > 1 && samePoint(ring[0]!, ring.at(-1)!)) ring.pop()
+  const closed = source.closed === true
+  if (ring.length < 3) return false
+  const start = closed ? 0 : 1
+  const end = closed ? ring.length : ring.length - 1
+
+  for (let index = start; index < end; index++) {
+    const vertex = ring[index]!
+    // lineclip retains both adjacent authored segments through a join whose
+    // vertex is already inside the ordinary half-width envelope.
+    if (pointInsideBounds(vertex, strokeBounds)) continue
+    const previous = ring[(index - 1 + ring.length) % ring.length]!
+    const next = ring[(index + 1) % ring.length]!
+    const incomingX = vertex[0] - previous[0]
+    const incomingY = vertex[1] - previous[1]
+    const outgoingX = next[0] - vertex[0]
+    const outgoingY = next[1] - vertex[1]
+    const incomingLength = Math.hypot(incomingX, incomingY)
+    const outgoingLength = Math.hypot(outgoingX, outgoingY)
+    if (incomingLength === 0 || outgoingLength === 0) continue
+
+    const normal1X = -incomingY / incomingLength
+    const normal1Y = incomingX / incomingLength
+    const normal2X = -outgoingY / outgoingLength
+    const normal2Y = outgoingX / outgoingLength
+    const denominator = 1 + normal1X * normal2X + normal1Y * normal2Y
+    if (denominator <= Number.EPSILON) continue
+
+    const miterX = ((normal1X + normal2X) * radius) / denominator
+    const miterY = ((normal1Y + normal2Y) * radius) / denominator
+    const miterLength = Math.hypot(miterX, miterY)
+    if (miterLength > MAX_RENDERER_MITER_LIMIT * width) continue
+
+    const tip1: Point = [vertex[0] + miterX, vertex[1] + miterY]
+    const tip2: Point = [vertex[0] - miterX, vertex[1] - miterY]
+    if (
+      segmentTouchesBounds(vertex, tip1, bounds) ||
+      segmentTouchesBounds(vertex, tip2, bounds)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 function strokePath(source: Primitive, bounds: BBox): Polyline {
   const points = source.points
   if (source.closed !== true || points.length < 2) return points
@@ -190,6 +257,18 @@ function strokePath(source: Primitive, bounds: BBox): Polyline {
   const start = outsideIndex < 0 ? 0 : outsideIndex
   const rotated = [...ring.slice(start), ...ring.slice(0, start)]
   return rotated.length > 0 ? [...rotated, rotated[0]!] : []
+}
+
+function copyRebasedStroke(
+  source: Primitive,
+  frame: PageFrame,
+  bounds: BBox,
+): Primitive {
+  const stroke: Primitive = { points: rebased(source.points, frame, bounds) }
+  carryClosed(source, stroke)
+  if (source.stroke !== undefined) stroke.stroke = source.stroke
+  carryRole(source, stroke)
+  return stroke
 }
 
 /**
@@ -233,6 +312,22 @@ export function frameScene(scene: Scene, frame: PageFrame): Scene {
         bounds,
         source.stroke?.width ?? 0,
       )
+      const strokePathIsIntact = source.points.every((point) =>
+        pointInsideBounds(point, strokeBounds),
+      )
+      if (
+        strokePathIsIntact ||
+        (source.stroke !== undefined &&
+          hasVisibleMiterJoin(
+            source,
+            bounds,
+            strokeBounds,
+            source.stroke.width,
+          ))
+      ) {
+        primitives.push(copyRebasedStroke(source, frame, bounds))
+        continue
+      }
       const segments = clipPolylinesToBox(
         [strokePath(source, strokeBounds)],
         strokeBounds,

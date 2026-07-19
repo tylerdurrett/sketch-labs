@@ -391,6 +391,52 @@ describe('frameScene', () => {
     ])
   })
 
+  it('preserves a default miter join that reaches into an identity Page from outside its half-width bounds', () => {
+    const source: Primitive = {
+      points: [
+        [-10, 0],
+        [-3, 5],
+        [-10, 10],
+      ],
+      stroke: { color: 'black', width: 4 },
+    }
+    const result = frameScene(sceneOf(source), {
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 80,
+    })
+
+    expect(result.primitives).toEqual([source])
+  })
+
+  it('keeps a closed ring closed when it crosses the Page but remains intact inside stroke-footprint bounds', () => {
+    const result = frameScene(
+      sceneOf({
+        points: [
+          [30, 20],
+          [19, 30],
+          [30, 40],
+        ],
+        closed: true,
+        stroke: { color: 'black', width: 4 },
+      }),
+      crop,
+    )
+
+    expect(result.primitives).toEqual([
+      {
+        points: [
+          [10, 10],
+          [-1, 20],
+          [10, 30],
+        ],
+        closed: true,
+        stroke: { color: 'black', width: 4 },
+      },
+    ])
+  })
+
   it.each([
     [
       'left edge',
