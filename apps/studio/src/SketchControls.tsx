@@ -22,7 +22,6 @@ import {
   randomize,
   renderToSVG,
   resolveOutputProfile,
-  resolvePlotCompositionFrame,
   type Preset,
   type PlotProfile,
   type CoordinateSpace,
@@ -49,6 +48,10 @@ import {
   type EditHistory,
   type StudioEditState,
 } from "./editHistory";
+import {
+  resolveStudioCompositionFrame,
+  studioGenerationAspect,
+} from "./pageFrameEditing";
 import {
   detectHistoryShortcutPlatform,
   fieldOwnsHistoryShortcut,
@@ -179,8 +182,8 @@ function outlineInputsChanged(
     return true;
   }
   return !plotDrawableAspectsEquivalent(
-    previousDrawable.width / previousDrawable.height,
-    nextDrawable.width / nextDrawable.height,
+    studioGenerationAspect(previous),
+    studioGenerationAspect(next),
   );
 }
 
@@ -192,11 +195,9 @@ function scribbleInputsChanged(
   if (!sameParams(previous.params, next.params) || previous.seed !== next.seed) {
     return true;
   }
-  const previousDrawable = plotDrawableRectangle(previous.profile);
-  const nextDrawable = plotDrawableRectangle(next.profile);
   return !plotDrawableAspectsEquivalent(
-    previousDrawable.width / previousDrawable.height,
-    nextDrawable.width / nextDrawable.height,
+    studioGenerationAspect(previous),
+    studioGenerationAspect(next),
   );
 }
 
@@ -285,6 +286,7 @@ export function SketchControls({
       seed: newSeed(Math.random),
       locks: new Set<string>(),
       profile: resolveOutputProfile(undefined, sketch.defaultOutputProfile),
+      framing: { kind: "unframed" },
       tolerance: 0,
     }),
   );
@@ -315,28 +317,28 @@ export function SketchControls({
     writePlotterSvgIncludePaperMargins(next);
   };
 
-  // Physical magnitude belongs to later device mapping. Composition depends only
-  // on the drawable rectangle's aspect, so equivalent profiles share this cache
-  // boundary and do not rebuild prepared geometry.
-  const drawable = plotDrawableRectangle(profile);
-  const drawableAspect = drawable.width / drawable.height;
+  // Physical magnitude belongs to later device mapping. Before framing,
+  // Composition follows the profile's drawable aspect; after framing it follows
+  // the original frozen generation aspect instead. Equivalent generation bases
+  // share this cache boundary and do not rebuild prepared geometry.
+  const generationAspect = studioGenerationAspect(history.present);
   // Stabilize the memo key across machine-noise-only quotient differences (for
   // example a 1.2× proportional scale of non-binary A4 dimensions/insets). The
   // same core equivalence drives commit invalidation below, so frame identity and
   // the Computing affordance cannot disagree about whether geometry changed.
-  const drawableAspectIdentityRef = useRef(drawableAspect);
+  const generationAspectIdentityRef = useRef(generationAspect);
   if (
     !plotDrawableAspectsEquivalent(
-      drawableAspectIdentityRef.current,
-      drawableAspect,
+      generationAspectIdentityRef.current,
+      generationAspect,
     )
   ) {
-    drawableAspectIdentityRef.current = drawableAspect;
+    generationAspectIdentityRef.current = generationAspect;
   }
-  const drawableAspectIdentity = drawableAspectIdentityRef.current;
+  const generationAspectIdentity = generationAspectIdentityRef.current;
   const compositionFrame = useMemo(
-    () => resolvePlotCompositionFrame(profile),
-    [drawableAspectIdentity],
+    () => resolveStudioCompositionFrame(history.present),
+    [generationAspectIdentity],
   );
 
   const sketchEnvironment = useSketchEnvironment({
@@ -429,7 +431,7 @@ export function SketchControls({
   ): ScribbleAuthoredState => ({
     params: edit.params,
     seed: edit.seed,
-    compositionFrame: resolvePlotCompositionFrame(edit.profile),
+    compositionFrame: resolveStudioCompositionFrame(edit),
     inputRevision: scribbleInputRevisionRef.current,
   });
 

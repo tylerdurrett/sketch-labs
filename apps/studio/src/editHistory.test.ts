@@ -30,6 +30,14 @@ function assertReadonlySnapshot(state: StudioEditState): void {
   state.profile.insets.left = 25;
   // @ts-expect-error Locks expose no mutating Set operations.
   state.locks.add("radius");
+  // @ts-expect-error Framing is a readonly authored axis.
+  state.framing = { kind: "unframed" };
+  if (state.framing.kind === "framed") {
+    // @ts-expect-error The frozen generation basis cannot be replaced.
+    state.framing.generationAspect = 2;
+    // @ts-expect-error Nested Page Frame geometry is readonly too.
+    state.framing.pageFrame.x = 10;
+  }
 }
 
 void assertReadonlySnapshot;
@@ -49,6 +57,7 @@ function editState(
       includeFrame: true,
       toolWidthMillimeters: 0.3,
     },
+    framing: { kind: "unframed" },
     tolerance: 0,
     ...overrides,
   };
@@ -157,6 +166,11 @@ describe("edit history", () => {
         includeFrame: false,
         toolWidthMillimeters: 0.5,
       },
+      framing: {
+        kind: "framed",
+        pageFrame: { x: -10, y: 20, width: 1_100, height: 900 },
+        generationAspect: 4 / 3,
+      },
       tolerance: 0.75,
     });
 
@@ -250,11 +264,86 @@ describe("Studio edit-state equality", () => {
       }),
     ],
     [
+      "framing mode",
+      (state: StudioEditState) => ({
+        ...state,
+        framing: {
+          kind: "framed" as const,
+          pageFrame: { x: 0, y: 0, width: 1_000, height: 1_000 },
+          generationAspect: 1,
+        },
+      }),
+    ],
+    [
       "tolerance",
       (state: StudioEditState) => ({ ...state, tolerance: 0.25 }),
     ],
   ] as const)("detects a changed %s", (_label, change) => {
     const state = editState(1);
     expect(sameStudioEditState(state, change(state))).toBe(false);
+  });
+
+  it.each([
+    [
+      "Page Frame x",
+      {
+        kind: "framed" as const,
+        pageFrame: { x: 1, y: 2, width: 3, height: 4 },
+        generationAspect: 1.5,
+      },
+    ],
+    [
+      "Page Frame y",
+      {
+        kind: "framed" as const,
+        pageFrame: { x: 0, y: 3, width: 3, height: 4 },
+        generationAspect: 1.5,
+      },
+    ],
+    [
+      "Page Frame width",
+      {
+        kind: "framed" as const,
+        pageFrame: { x: 0, y: 2, width: 4, height: 4 },
+        generationAspect: 1.5,
+      },
+    ],
+    [
+      "Page Frame height",
+      {
+        kind: "framed" as const,
+        pageFrame: { x: 0, y: 2, width: 3, height: 5 },
+        generationAspect: 1.5,
+      },
+    ],
+    [
+      "generation aspect",
+      {
+        kind: "framed" as const,
+        pageFrame: { x: 0, y: 2, width: 3, height: 4 },
+        generationAspect: 2,
+      },
+    ],
+  ] as const)("detects changed framed %s", (_label, framing) => {
+    const baselineFraming = {
+      kind: "framed" as const,
+      pageFrame: { x: 0, y: 2, width: 3, height: 4 },
+      generationAspect: 1.5,
+    };
+    const state = editState(1, {
+      framing: baselineFraming,
+    });
+
+    expect(
+      sameStudioEditState(state, {
+        ...state,
+        framing: {
+          kind: "framed",
+          pageFrame: { ...baselineFraming.pageFrame },
+          generationAspect: baselineFraming.generationAspect,
+        },
+      }),
+    ).toBe(true);
+    expect(sameStudioEditState(state, { ...state, framing })).toBe(false);
   });
 });
