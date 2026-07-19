@@ -26,6 +26,7 @@ import {
   type PageFrame,
   type PlotProfile,
   type Preset,
+  type PresetFraming,
   type OutlineTarget,
   type Scene,
   type Sketch,
@@ -274,10 +275,12 @@ export interface SketchControlsProps {
  * sketch default ?? Harness fallback), so a Sketch switch re-resolves from the
  * newly-mounted Sketch and NEVER reuses the previous Sketch's dimensions. It is
  * threaded through persistence and composition — captured into a saved Preset
- * (via `PresetControls` → `makePreset`), re-resolved on a Preset reload (a v2
+ * (via `PresetControls` → `makePreset`), re-resolved on a Preset reload (a v2/v3
  * Preset's stored profile wins; a v1 falls back to the Sketch default / Harness
- * fallback), and embedded into every export's reproduction metadata. Its drawable
- * aspect resolves the ONE Composition Frame shared by preview and vector exports.
+ * fallback), and embedded into every export's reproduction metadata. A v3 reload
+ * also restores the exact committed Page Frame and frozen generation aspect.
+ * The active drawable aspect resolves the ONE Composition Frame shared by
+ * preview and vector exports.
  */
 export function SketchControls({
   sketch,
@@ -1073,8 +1076,8 @@ export function SketchControls({
   };
 
   // Reload a saved Preset: reconcile it against the CURRENT schema via core's
-  // `applyPreset` (the authority on which keys exist), then hydrate all three
-  // state axes TOGETHER. The array→Set conversion on `locks` is this owner's
+  // `applyPreset` (the authority on which keys exist), then hydrate every
+  // authored axis TOGETHER. The array→Set conversion on `locks` is this owner's
   // job — including preserved color keys, which remain inert rather than being
   // filtered or migrated just because ColorControl has no Lock affordance.
   const reloadPreset = (preset: Preset) => {
@@ -1084,11 +1087,20 @@ export function SketchControls({
       state.profile,
       sketch.defaultOutputProfile,
     );
-    // Resolve the active profile through #265's precedence: a v2 Preset's stored
-    // profile (`state.profile`) wins; a v1 Preset (`state.profile === undefined`)
-    // falls back to this Sketch's default / the Harness fallback. `applyPreset`
-    // passes the stored profile through verbatim WITHOUT resolving the fallback —
-    // resolving it here at the session boundary is #267's job.
+    const framing =
+      state.framing === undefined
+        ? ({ kind: "unframed" } as const)
+        : ({
+            kind: "framed",
+            pageFrame: { ...state.framing.pageFrame },
+            generationAspect: state.framing.generationAspect,
+            aspectLocked: state.framing.aspectLocked,
+          } as const);
+    // Resolve the active profile through #265's precedence: a v2/v3 Preset's
+    // stored profile wins; a v1 Preset falls back to this Sketch's default / the
+    // Harness fallback. Framing absence on v1/v2 explicitly clears any prior
+    // framed state. `applyPreset` validates and copies the stored payloads but
+    // leaves Studio precedence and framing-state construction to this boundary.
     updateHistory(
       (historyState) =>
         commitEditState(historyState, {
@@ -1099,6 +1111,7 @@ export function SketchControls({
           seed: state.seed,
           locks: new Set(state.locks),
           profile: resolvedProfile,
+          framing,
         }),
       true,
       "atomic",
@@ -1614,6 +1627,16 @@ export function SketchControls({
             seed={seed}
             locks={locks}
             profile={profile}
+            {...(history.present.framing.kind === "framed"
+              ? {
+                  framing: {
+                    pageFrame: { ...history.present.framing.pageFrame },
+                    generationAspect:
+                      history.present.framing.generationAspect,
+                    aspectLocked: history.present.framing.aspectLocked,
+                  } satisfies PresetFraming,
+                }
+              : {})}
             onReload={reloadPreset}
           />
         </div>
