@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
-import { act, createRef } from "react";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { act, createRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -62,7 +65,12 @@ function LiveCanvas(
   true;
 
 const SCENE: Scene = { space: { width: 100, height: 100 }, primitives: [] };
-
+const APP_CSS_PATH = [
+  resolve(process.cwd(), "src/App.css"),
+  resolve(process.cwd(), "apps/studio/src/App.css"),
+].find(existsSync);
+if (APP_CSS_PATH === undefined) throw new Error("could not locate App.css");
+const APP_CSS = readFileSync(APP_CSS_PATH, "utf8");
 /** Build a Sketch with the given time metadata and a `generate` spy recording `t`. */
 function animatedSketch(time: TimeMetadata | undefined) {
   const generate = vi.fn((_p: unknown, _s: unknown, _t: number): Scene => SCENE);
@@ -301,6 +309,66 @@ function clickButton(el: HTMLElement, text: string): void {
   act(() => {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
+}
+
+interface PointerInit {
+  readonly x: number;
+  readonly y: number;
+  readonly pointerId?: number;
+  readonly isPrimary?: boolean;
+  readonly button?: number;
+  readonly shiftKey?: boolean;
+}
+
+/** Dispatch a pointer-shaped MouseEvent (jsdom does not construct PointerEvent). */
+function dispatchPointer(
+  target: Element,
+  type: string,
+  {
+    x,
+    y,
+    pointerId = 1,
+    isPrimary = true,
+    button = 0,
+    shiftKey = false,
+  }: PointerInit,
+): void {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: y,
+    button,
+    shiftKey,
+  });
+  Object.defineProperties(event, {
+    pointerId: { value: pointerId },
+    isPrimary: { value: isPrimary },
+  });
+  act(() => target.dispatchEvent(event));
+}
+
+function installPointerCapture(element: HTMLElement) {
+  const captured = new Set<number>();
+  const set = vi.fn((pointerId: number) => {
+    captured.add(pointerId);
+  });
+  const release = vi.fn((pointerId: number) => {
+    captured.delete(pointerId);
+  });
+  Object.defineProperties(element, {
+    setPointerCapture: { configurable: true, value: set },
+    hasPointerCapture: {
+      configurable: true,
+      value: (pointerId: number) => captured.has(pointerId),
+    },
+    releasePointerCapture: { configurable: true, value: release },
+  });
+  return {
+    set,
+    release,
+    lose: (pointerId: number) => captured.delete(pointerId),
+  };
 }
 
 beforeEach(() => {
@@ -821,6 +889,313 @@ describe("LiveCanvas Page Frame edit view", () => {
 
     expect(el.querySelector(".plot-sheet")).not.toBeNull();
     expect(el.querySelector(".page-frame-edit-view")).toBeNull();
+  });
+});
+
+describe("LiveCanvas Page Frame direct manipulation (#346)", () => {
+  const compositionFrame = { width: 200, height: 100 };
+  const initialFrame = { x: 20, y: 10, width: 100, height: 50 };
+  const manipulationParams = {};
+  const defaultManipulationSketch = spacedSketch(200, 100);
+
+  function ControlledManipulationCanvas({
+    constraint = { kind: "free" },
+    onChange = () => {},
+    sketch = defaultManipulationSketch,
+  }: {
+    constraint?: LiveCanvasProps["pageFrameAspectConstraint"];
+    onChange?: (frame: typeof initialFrame) => void;
+    sketch?: Sketch;
+  }) {
+    const [frame, setFrame] = useState(initialFrame);
+    return (
+      <LiveCanvas
+        sketch={sketch}
+        params={manipulationParams}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrameDraft={frame}
+        pageFrameAspectConstraint={constraint}
+        onPageFrameDraftChange={(next) => {
+          setFrame(next);
+          onChange(next);
+        }}
+      />
+    );
+  }
+
+  function interaction(el: HTMLElement) {
+    const view = el.querySelector<HTMLElement>(".page-frame-edit-view")!;
+    vi.spyOn(view, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 100,
+      toJSON: () => ({}),
+    });
+    const layer = el.querySelector<HTMLElement>(".page-frame-interaction")!;
+    return { view, layer, capture: installPointerCapture(layer) };
+  }
+
+  function handle(el: HTMLElement, name: string): HTMLButtonElement {
+    const button = el.querySelector<HTMLButtonElement>(
+      `[data-page-frame-handle="${name}"]`,
+    );
+    if (button === null) throw new Error(`missing ${name} handle`);
+    return button;
+  }
+
+  it("renders one interior pan target and all eight edge/corner handle hooks", () => {
+    const el = mount(<ControlledManipulationCanvas />);
+
+    expect(el.querySelectorAll(".page-frame-pan-target")).toHaveLength(1);
+    expect(el.querySelectorAll(".page-frame-resize-handle")).toHaveLength(8);
+    expect(
+      [...el.querySelectorAll<HTMLElement>(".page-frame-resize-handle")].map(
+        (node) => node.dataset.pageFrameHandle,
+      ),
+    ).toEqual([
+      "top-left",
+      "top",
+      "top-right",
+      "right",
+      "bottom-right",
+      "bottom",
+      "bottom-left",
+      "left",
+    ]);
+    expect(
+      el.querySelector(".page-frame-pan-target")?.getAttribute("aria-label"),
+    ).toBe("Pan composition within Page Frame");
+  });
+
+  it("gives the interaction targets pointer hit testing, capture-safe touch behavior, and resize cursors", () => {
+    expect(APP_CSS).toMatch(
+      /\.page-frame-pan-target\s*\{[^}]*pointer-events:\s*auto[^}]*touch-action:\s*none/s,
+    );
+    expect(APP_CSS).toMatch(
+      /\.page-frame-resize-handle\s*\{[^}]*pointer-events:\s*auto[^}]*touch-action:\s*none/s,
+    );
+    expect(APP_CSS).toMatch(
+      /data-page-frame-handle="top-left"[^}]*cursor:\s*nwse-resize/s,
+    );
+    expect(APP_CSS).toMatch(
+      /data-page-frame-handle="right"[^}]*cursor:\s*ew-resize/s,
+    );
+  });
+
+  it("freezes pointer scale and viewBox while resizing beyond the starting extent", () => {
+    const changes = vi.fn();
+    const el = mount(<ControlledManipulationCanvas onChange={changes} />);
+    const { view, layer, capture } = interaction(el);
+    const right = handle(el, "right");
+
+    dispatchPointer(right, "pointerdown", { x: 120, y: 35 });
+    expect(capture.set).toHaveBeenCalledWith(1);
+    expect(
+      el.querySelector(".page-frame-edit-overlay")?.getAttribute("viewBox"),
+    ).toBe("0 0 200 100");
+
+    // Layout changes after pointerdown do not change the captured 1px:1-unit
+    // mapping: x=140 remains +20, not +10 under this wider live rectangle.
+    vi.mocked(view.getBoundingClientRect).mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 400,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 100,
+      toJSON: () => ({}),
+    });
+    dispatchPointer(layer, "pointermove", { x: 140, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 10,
+      width: 120,
+      height: 50,
+    });
+
+    dispatchPointer(layer, "pointermove", { x: 300, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 10,
+      width: 280,
+      height: 50,
+    });
+    expect(
+      el.querySelector(".page-frame-edit-overlay")?.getAttribute("viewBox"),
+    ).toBe("0 0 200 100");
+
+    dispatchPointer(layer, "pointerup", { x: 300, y: 35 });
+    expect(capture.release).toHaveBeenCalledWith(1);
+    expect(
+      el.querySelector(".page-frame-edit-overlay")?.getAttribute("viewBox"),
+    ).toBe("0 0 300 100");
+  });
+
+  it("clamps an edge crossing without flipping and recovers outward from the immutable start", () => {
+    const changes = vi.fn();
+    const el = mount(<ControlledManipulationCanvas onChange={changes} />);
+    const { layer } = interaction(el);
+
+    dispatchPointer(handle(el, "left"), "pointerdown", { x: 20, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 200, y: 35 });
+    const crossed = changes.mock.lastCall?.[0] as typeof initialFrame;
+    expect(crossed.x).toBeLessThan(120);
+    expect(crossed.width).toBeGreaterThan(0);
+    expect(crossed.x + crossed.width).toBeCloseTo(120);
+
+    dispatchPointer(layer, "pointermove", { x: -40, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: -40,
+      y: 10,
+      width: 160,
+      height: 50,
+    });
+  });
+
+  it("pans Composition behind a stationary Page boundary and never resamples", () => {
+    const changes = vi.fn();
+    const sketch = spacedSketch(200, 100);
+    const generate = vi.mocked(sketch.generate);
+    const el = mount(
+      <ControlledManipulationCanvas onChange={changes} sketch={sketch} />,
+    );
+    const { layer } = interaction(el);
+    const drawsBefore = generate.mock.calls.length;
+
+    dispatchPointer(el.querySelector(".page-frame-pan-target")!, "pointerdown", {
+      x: 60,
+      y: 30,
+    });
+    dispatchPointer(layer, "pointermove", { x: 90, y: 50 });
+
+    expect(changes).toHaveBeenLastCalledWith({
+      x: -10,
+      y: -10,
+      width: 100,
+      height: 50,
+    });
+    const boundary = el.querySelector("[data-testid='page-frame-boundary']")!;
+    expect(boundary.getAttribute("x")).toBe("20");
+    expect(boundary.getAttribute("y")).toBe("10");
+    expect(
+      el
+        .querySelector<HTMLElement>(".page-frame-edit-view")!
+        .style.getPropertyValue("--page-frame-composition-left"),
+    ).toBe("15%");
+    expect(generate).toHaveBeenCalledTimes(drawsBefore);
+  });
+
+  it("rebases temporary Shift transitions without jumps during a freeform drag", () => {
+    const changes = vi.fn();
+    const el = mount(<ControlledManipulationCanvas onChange={changes} />);
+    const { layer } = interaction(el);
+
+    dispatchPointer(handle(el, "right"), "pointerdown", { x: 120, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 140, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 10,
+      width: 120,
+      height: 50,
+    });
+
+    dispatchPointer(layer, "pointermove", {
+      x: 140,
+      y: 35,
+      shiftKey: true,
+    });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 10,
+      width: 120,
+      height: 50,
+    });
+    dispatchPointer(layer, "pointermove", {
+      x: 164,
+      y: 35,
+      shiftKey: true,
+    });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 5,
+      width: 144,
+      height: 60,
+    });
+
+    dispatchPointer(layer, "pointermove", { x: 164, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 174, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 5,
+      width: 154,
+      height: 60,
+    });
+  });
+
+  it("keeps a persistent ratio authoritative across Shift transitions", () => {
+    const changes = vi.fn();
+    const el = mount(
+      <ControlledManipulationCanvas
+        constraint={{ kind: "ratio", ratio: 1 }}
+        onChange={changes}
+      />,
+    );
+    const { layer } = interaction(el);
+
+    dispatchPointer(handle(el, "right"), "pointerdown", { x: 120, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 150, y: 35 });
+    const withoutShift = changes.mock.lastCall?.[0];
+    dispatchPointer(layer, "pointermove", {
+      x: 150,
+      y: 35,
+      shiftKey: true,
+    });
+    expect(changes.mock.lastCall?.[0]).toEqual(withoutShift);
+    expect(withoutShift).toEqual({ x: 20, y: -30, width: 130, height: 130 });
+  });
+
+  it("filters non-primary/concurrent pointers and restores the start on cancel or lost capture", () => {
+    const changes = vi.fn();
+    const el = mount(<ControlledManipulationCanvas onChange={changes} />);
+    const { layer, capture } = interaction(el);
+    const right = handle(el, "right");
+
+    dispatchPointer(right, "pointerdown", {
+      x: 120,
+      y: 35,
+      pointerId: 2,
+      isPrimary: false,
+    });
+    dispatchPointer(right, "pointerdown", { x: 120, y: 35, button: 2 });
+    expect(capture.set).not.toHaveBeenCalled();
+
+    dispatchPointer(right, "pointerdown", { x: 120, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 180, y: 35, pointerId: 2 });
+    expect(changes).not.toHaveBeenCalled();
+    dispatchPointer(layer, "pointermove", { x: 150, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 10,
+      width: 130,
+      height: 50,
+    });
+    dispatchPointer(layer, "pointercancel", { x: 150, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith(initialFrame);
+
+    dispatchPointer(right, "pointerdown", { x: 120, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 160, y: 35 });
+    capture.lose(1);
+    dispatchPointer(layer, "lostpointercapture", { x: 160, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith(initialFrame);
+    expect(capture.set).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -206,7 +206,9 @@
   --page-frame-edit-aspect: 1;
   aspect-ratio: var(--page-frame-edit-aspect);
   width: min(100cqw, 100cqh * var(--page-frame-edit-aspect));
-  overflow: hidden;
+  /* The viewBox is frozen for the lifetime of a pointer gesture. Let an outward
+     resize remain visible until pointerup settles the union around the draft. */
+  overflow: visible;
   background-color: #fff;
   background-image:
     linear-gradient(45deg, rgb(0 0 0 / 5%) 25%, transparent 25%),
@@ -256,6 +258,120 @@
   fill: none;
   stroke: #f97316;
   stroke-width: 2px;
+}
+
+/*
+ * Pointer-only Page Frame manipulation chrome. The hit layer follows the same
+ * percentage geometry as the SVG boundary, but uses fixed-size HTML handles so
+ * every edge/corner remains usable regardless of Composition scale. Pointer
+ * capture keeps the active primary drag alive outside the hit target; disabling
+ * browser touch gestures prevents a resize/pan from becoming page scrolling.
+ */
+.page-frame-interaction {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  pointer-events: none;
+  touch-action: none;
+  user-select: none;
+}
+
+.page-frame-pan-target {
+  position: absolute;
+  top: var(--page-frame-page-top);
+  left: var(--page-frame-page-left);
+  width: var(--page-frame-page-width);
+  height: var(--page-frame-page-height);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  background: transparent;
+  color: inherit;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.page-frame-interaction[data-active] .page-frame-pan-target {
+  cursor: grabbing;
+}
+
+.page-frame-resize-handle {
+  position: absolute;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: 2px solid #f97316;
+  border-radius: 2px;
+  appearance: none;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 45%);
+  pointer-events: auto;
+  touch-action: none;
+  transform: translate(-50%, -50%);
+}
+
+.page-frame-pan-target:focus-visible,
+.page-frame-resize-handle:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.page-frame-resize-handle[data-page-frame-handle="top-left"],
+.page-frame-resize-handle[data-page-frame-handle="left"],
+.page-frame-resize-handle[data-page-frame-handle="bottom-left"] {
+  left: var(--page-frame-page-left);
+}
+
+.page-frame-resize-handle[data-page-frame-handle="top"],
+.page-frame-resize-handle[data-page-frame-handle="bottom"] {
+  left: var(--page-frame-page-center-x);
+}
+
+.page-frame-resize-handle[data-page-frame-handle="top-right"],
+.page-frame-resize-handle[data-page-frame-handle="right"],
+.page-frame-resize-handle[data-page-frame-handle="bottom-right"] {
+  left: calc(var(--page-frame-page-left) + var(--page-frame-page-width));
+}
+
+.page-frame-resize-handle[data-page-frame-handle="top-left"],
+.page-frame-resize-handle[data-page-frame-handle="top"],
+.page-frame-resize-handle[data-page-frame-handle="top-right"] {
+  top: var(--page-frame-page-top);
+}
+
+.page-frame-resize-handle[data-page-frame-handle="left"],
+.page-frame-resize-handle[data-page-frame-handle="right"] {
+  top: var(--page-frame-page-center-y);
+}
+
+.page-frame-resize-handle[data-page-frame-handle="bottom-left"],
+.page-frame-resize-handle[data-page-frame-handle="bottom"],
+.page-frame-resize-handle[data-page-frame-handle="bottom-right"] {
+  top: calc(var(--page-frame-page-top) + var(--page-frame-page-height));
+}
+
+.page-frame-resize-handle[data-page-frame-handle="top-left"],
+.page-frame-resize-handle[data-page-frame-handle="bottom-right"] {
+  cursor: nwse-resize;
+}
+
+.page-frame-resize-handle[data-page-frame-handle="top-right"],
+.page-frame-resize-handle[data-page-frame-handle="bottom-left"] {
+  cursor: nesw-resize;
+}
+
+.page-frame-resize-handle[data-page-frame-handle="top"],
+.page-frame-resize-handle[data-page-frame-handle="bottom"] {
+  cursor: ns-resize;
+}
+
+.page-frame-resize-handle[data-page-frame-handle="right"],
+.page-frame-resize-handle[data-page-frame-handle="left"] {
+  cursor: ew-resize;
 }
 
 /*
