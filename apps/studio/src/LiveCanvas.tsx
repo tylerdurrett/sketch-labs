@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   type Ref,
 } from "react";
 
@@ -27,6 +28,18 @@ import {
 } from "@harness/core";
 
 import { rasterizeToneReference } from "./toneReference";
+import {
+  PAGE_FRAME_RESIZE_HANDLES,
+  beginPageFrameManipulation,
+  cancelPageFrameManipulation,
+  finishPageFrameManipulation,
+  updatePageFrameManipulation,
+  type PageFrameAspectConstraint,
+  type PageFrameManipulationState,
+  type PageFrameManipulationTarget,
+  type PageFramePointer,
+  type PageFrameResizeHandle,
+} from "./pageFrameManipulation";
 
 /**
  * Which processed Scene the live preview renders (issue #219, feature #4).
@@ -197,6 +210,10 @@ export interface LiveCanvasProps {
   tolerance?: number;
   /** Transient Page Frame draft; present only while Studio is editing framing. */
   pageFrameDraft?: PageFrame | null;
+  /** Receives every valid direct-manipulation draft while edit mode is active. */
+  onPageFrameDraftChange?: (frame: PageFrame) => void;
+  /** Persistent toolbar constraint applied to direct resize gestures. */
+  pageFrameAspectConstraint?: PageFrameAspectConstraint;
   /** Committed Page Frame applied as a paint-only Fill derivation. */
   pageFrame?: PageFrame | null;
   /**
@@ -207,6 +224,79 @@ export interface LiveCanvasProps {
    * explicit, documented part of the contract.
    */
   handleRef?: Ref<LiveCanvasHandle>;
+}
+
+interface PageFrameViewBox {
+  readonly minX: number;
+  readonly minY: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+interface PageFramePointerBasis {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+  readonly viewBox: PageFrameViewBox;
+}
+
+interface ActivePageFrameGesture {
+  readonly pointerId: number;
+  readonly manipulation: PageFrameManipulationState;
+  /** Immutable client/layout/viewBox conversion captured at pointerdown. */
+  readonly pointerBasis: PageFramePointerBasis;
+}
+
+function pageFrameViewBox(
+  compositionFrame: CoordinateSpace,
+  frame: PageFrame,
+  compositionOffset: PageFramePointer = { x: 0, y: 0 },
+): PageFrameViewBox {
+  const minX = Math.min(compositionOffset.x, frame.x);
+  const minY = Math.min(compositionOffset.y, frame.y);
+  const maxX = Math.max(
+    compositionOffset.x + compositionFrame.width,
+    frame.x + frame.width,
+  );
+  const maxY = Math.max(
+    compositionOffset.y + compositionFrame.height,
+    frame.y + frame.height,
+  );
+  return Object.freeze({
+    minX,
+    minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  });
+}
+
+function pageFramePointerFromClient(
+  basis: PageFramePointerBasis,
+  clientX: number,
+  clientY: number,
+): PageFramePointer | null {
+  if (
+    !Number.isFinite(clientX) ||
+    !Number.isFinite(clientY) ||
+    basis.width <= 0 ||
+    basis.height <= 0
+  ) {
+    return null;
+  }
+  const x =
+    basis.viewBox.minX +
+    ((clientX - basis.left) / basis.width) * basis.viewBox.width;
+  const y =
+    basis.viewBox.minY +
+    ((clientY - basis.top) / basis.height) * basis.viewBox.height;
+  return Number.isFinite(x) && Number.isFinite(y)
+    ? Object.freeze({ x, y })
+    : null;
+}
+
+function resizeHandleLabel(handle: PageFrameResizeHandle): string {
+  return `Resize Page Frame ${handle.replace("-", " ")}`;
 }
 
 /**
@@ -350,11 +440,15 @@ export function LiveCanvas({
   renderState = LIVE_FILL_RENDER_STATE,
   tolerance = 0,
   pageFrameDraft = null,
+  onPageFrameDraftChange,
+  pageFrameAspectConstraint = { kind: "free" },
   pageFrame = null,
   handleRef,
 }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pageGroundRef = useRef<HTMLDivElement>(null);
+  const pageFrameEditViewRef = useRef<HTMLDivElement>(null);
+  const pageFrameInteractionRef = useRef<HTMLDivElement>(null);
   // The exact Scene most recently painted, exposed read-only to one-shot export.
   const displayedSceneRef = useRef<DisplayedSceneSnapshot | null>(null);
   // Capture reads Fill only: a completed Outline may be displayed while the
@@ -443,35 +537,41 @@ export function LiveCanvas({
     "--plot-inset-left": `${(profile.insets.left / profile.width) * 100}%`,
   } as CSSProperties;
 
+  const [activePageFrameGesture, setActivePageFrameGesture] =
+    useState<ActivePageFrameGesture | null>(null);
+  const activePageFrameGestureRef = useRef<ActivePageFrameGesture | null>(null);
+
   const pageFrameEditGeometry = useMemo(() => {
     if (pageFrameDraft === null) return null;
-    const minX = Math.min(0, pageFrameDraft.x);
-    const minY = Math.min(0, pageFrameDraft.y);
-    const maxX = Math.max(
-      compositionFrame.width,
-      pageFrameDraft.x + pageFrameDraft.width,
-    );
-    const maxY = Math.max(
-      compositionFrame.height,
-      pageFrameDraft.y + pageFrameDraft.height,
-    );
-    const width = maxX - minX;
-    const height = maxY - minY;
-    const intersectionX = Math.max(0, pageFrameDraft.x);
-    const intersectionY = Math.max(0, pageFrameDraft.y);
+    const manipulation = activePageFrameGesture?.manipulation ?? null;
+    const draftFrame = manipulation?.frame ?? pageFrameDraft;
+    const panning = manipulation?.target.kind === "pan";
+    const visualPageFrame = panning ? manipulation.startFrame : draftFrame;
+    const compositionOffset = panning
+      ? {
+          x: manipulation.startFrame.x - draftFrame.x,
+          y: manipulation.startFrame.y - draftFrame.y,
+        }
+      : { x: 0, y: 0 };
+    const viewBox =
+      activePageFrameGesture?.pointerBasis.viewBox ??
+      pageFrameViewBox(compositionFrame, visualPageFrame, compositionOffset);
+    const { minX, minY, width, height } = viewBox;
+    const compositionRight = compositionOffset.x + compositionFrame.width;
+    const compositionBottom = compositionOffset.y + compositionFrame.height;
+    const pageRight = visualPageFrame.x + visualPageFrame.width;
+    const pageBottom = visualPageFrame.y + visualPageFrame.height;
+    const intersectionX = Math.max(compositionOffset.x, visualPageFrame.x);
+    const intersectionY = Math.max(compositionOffset.y, visualPageFrame.y);
     const intersectionWidth = Math.max(
       0,
-      Math.min(compositionFrame.width, pageFrameDraft.x + pageFrameDraft.width) -
-        intersectionX,
+      Math.min(compositionRight, pageRight) - intersectionX,
     );
     const intersectionHeight = Math.max(
       0,
-      Math.min(
-        compositionFrame.height,
-        pageFrameDraft.y + pageFrameDraft.height,
-      ) - intersectionY,
+      Math.min(compositionBottom, pageBottom) - intersectionY,
     );
-    const compositionPath = `M 0 0 H ${compositionFrame.width} V ${compositionFrame.height} H 0 Z`;
+    const compositionPath = `M ${compositionOffset.x} ${compositionOffset.y} H ${compositionRight} V ${compositionBottom} H ${compositionOffset.x} Z`;
     const retainedPath =
       intersectionWidth > 0 && intersectionHeight > 0
         ? ` M ${intersectionX} ${intersectionY} H ${intersectionX + intersectionWidth} V ${intersectionY + intersectionHeight} H ${intersectionX} Z`
@@ -479,19 +579,171 @@ export function LiveCanvas({
     return {
       style: {
         "--page-frame-edit-aspect": width / height,
-        "--page-frame-composition-left": `${((0 - minX) / width) * 100}%`,
-        "--page-frame-composition-top": `${((0 - minY) / height) * 100}%`,
+        "--page-frame-composition-left": `${((compositionOffset.x - minX) / width) * 100}%`,
+        "--page-frame-composition-top": `${((compositionOffset.y - minY) / height) * 100}%`,
         "--page-frame-composition-width": `${(compositionFrame.width / width) * 100}%`,
         "--page-frame-composition-height": `${(compositionFrame.height / height) * 100}%`,
-        "--page-frame-page-left": `${((pageFrameDraft.x - minX) / width) * 100}%`,
-        "--page-frame-page-top": `${((pageFrameDraft.y - minY) / height) * 100}%`,
-        "--page-frame-page-width": `${(pageFrameDraft.width / width) * 100}%`,
-        "--page-frame-page-height": `${(pageFrameDraft.height / height) * 100}%`,
+        "--page-frame-page-left": `${((visualPageFrame.x - minX) / width) * 100}%`,
+        "--page-frame-page-top": `${((visualPageFrame.y - minY) / height) * 100}%`,
+        "--page-frame-page-width": `${(visualPageFrame.width / width) * 100}%`,
+        "--page-frame-page-height": `${(visualPageFrame.height / height) * 100}%`,
+        "--page-frame-page-center-x": `${((visualPageFrame.x + visualPageFrame.width / 2 - minX) / width) * 100}%`,
+        "--page-frame-page-center-y": `${((visualPageFrame.y + visualPageFrame.height / 2 - minY) / height) * 100}%`,
       } as CSSProperties,
       viewBox: `${minX} ${minY} ${width} ${height}`,
+      viewBoxValue: viewBox,
       dimPath: `${compositionPath}${retainedPath}`,
+      visualPageFrame,
     };
-  }, [compositionFrame, pageFrameDraft]);
+  }, [compositionFrame, pageFrameDraft, activePageFrameGesture]);
+
+  const publishPageFrameGesture = useCallback(
+    (gesture: ActivePageFrameGesture) => {
+      activePageFrameGestureRef.current = gesture;
+      setActivePageFrameGesture(gesture);
+      onPageFrameDraftChange?.(gesture.manipulation.frame);
+    },
+    [onPageFrameDraftChange],
+  );
+
+  const beginPageFramePointer = useCallback(
+    (
+      event: ReactPointerEvent<HTMLElement>,
+      target: PageFrameManipulationTarget,
+    ) => {
+      if (
+        pageFrameDraft === null ||
+        onPageFrameDraftChange === undefined ||
+        activePageFrameGestureRef.current !== null ||
+        !event.isPrimary ||
+        event.button !== 0
+      ) {
+        return;
+      }
+      const editView = pageFrameEditViewRef.current;
+      const interaction = pageFrameInteractionRef.current;
+      if (
+        editView === null ||
+        interaction === null ||
+        pageFrameEditGeometry === null
+      ) {
+        return;
+      }
+      const rect = editView.getBoundingClientRect();
+      const pointerBasis = Object.freeze({
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+        viewBox: pageFrameEditGeometry.viewBoxValue,
+      });
+      const pointer = pageFramePointerFromClient(
+        pointerBasis,
+        event.clientX,
+        event.clientY,
+      );
+      if (pointer === null) return;
+      const gesture = Object.freeze({
+        pointerId: event.pointerId,
+        pointerBasis,
+        manipulation: beginPageFrameManipulation({
+          frame: pageFrameDraft,
+          target,
+          pointer,
+          constraint: pageFrameAspectConstraint,
+          compositionFrame,
+          shiftKey: event.shiftKey,
+        }),
+      });
+      activePageFrameGestureRef.current = gesture;
+      setActivePageFrameGesture(gesture);
+      interaction.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    },
+    [
+      compositionFrame,
+      onPageFrameDraftChange,
+      pageFrameAspectConstraint,
+      pageFrameDraft,
+      pageFrameEditGeometry,
+    ],
+  );
+
+  const updatePageFramePointer = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const active = activePageFrameGestureRef.current;
+      if (active === null || event.pointerId !== active.pointerId) return;
+      const pointer = pageFramePointerFromClient(
+        active.pointerBasis,
+        event.clientX,
+        event.clientY,
+      );
+      if (pointer === null) return;
+      const manipulation = updatePageFrameManipulation(
+        active.manipulation,
+        pointer,
+        event.shiftKey,
+      );
+      if (manipulation === active.manipulation) return;
+      publishPageFrameGesture(Object.freeze({ ...active, manipulation }));
+      event.preventDefault();
+    },
+    [publishPageFrameGesture],
+  );
+
+  const clearPageFrameGesture = useCallback((pointerId: number) => {
+    activePageFrameGestureRef.current = null;
+    setActivePageFrameGesture(null);
+    const interaction = pageFrameInteractionRef.current;
+    if (interaction?.hasPointerCapture?.(pointerId)) {
+      interaction.releasePointerCapture(pointerId);
+    }
+  }, []);
+
+  const finishPageFramePointer = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const active = activePageFrameGestureRef.current;
+      if (active === null || event.pointerId !== active.pointerId) return;
+      const pointer = pageFramePointerFromClient(
+        active.pointerBasis,
+        event.clientX,
+        event.clientY,
+      );
+      const manipulation =
+        pointer === null
+          ? active.manipulation
+          : updatePageFrameManipulation(
+              active.manipulation,
+              pointer,
+              event.shiftKey,
+            );
+      onPageFrameDraftChange?.(finishPageFrameManipulation(manipulation));
+      clearPageFrameGesture(active.pointerId);
+      event.preventDefault();
+    },
+    [clearPageFrameGesture, onPageFrameDraftChange],
+  );
+
+  const cancelPageFramePointer = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const active = activePageFrameGestureRef.current;
+      if (active === null || event.pointerId !== active.pointerId) return;
+      onPageFrameDraftChange?.(
+        cancelPageFrameManipulation(active.manipulation),
+      );
+      clearPageFrameGesture(active.pointerId);
+      event.preventDefault();
+    },
+    [clearPageFrameGesture, onPageFrameDraftChange],
+  );
+
+  useEffect(() => {
+    if (pageFrameDraft !== null || activePageFrameGestureRef.current === null) {
+      return;
+    }
+    activePageFrameGestureRef.current = null;
+    setActivePageFrameGesture(null);
+  }, [pageFrameDraft]);
 
   // The latest caller-owned sampler follows the same post-commit ref discipline
   // as the other live inputs. The rAF effect does not depend on it, so
@@ -1083,6 +1335,7 @@ export function LiveCanvas({
          * guide enters getCanvas()/PNG.
          */}
         <div
+          ref={pageFrameEditGeometry === null ? undefined : pageFrameEditViewRef}
           className={
             pageFrameEditGeometry === null
               ? "plot-sheet"
@@ -1141,14 +1394,48 @@ export function LiveCanvas({
               <rect
                 className="page-frame-edit-boundary"
                 data-testid="page-frame-boundary"
-                x={pageFrameDraft.x}
-                y={pageFrameDraft.y}
-                width={pageFrameDraft.width}
-                height={pageFrameDraft.height}
+                x={pageFrameEditGeometry.visualPageFrame.x}
+                y={pageFrameEditGeometry.visualPageFrame.y}
+                width={pageFrameEditGeometry.visualPageFrame.width}
+                height={pageFrameEditGeometry.visualPageFrame.height}
                 vectorEffect="non-scaling-stroke"
               />
             </svg>
           )}
+          {pageFrameEditGeometry !== null &&
+            pageFrameDraft !== null &&
+            onPageFrameDraftChange !== undefined && (
+              <div
+                ref={pageFrameInteractionRef}
+                className="page-frame-interaction"
+                data-active={activePageFrameGesture === null ? undefined : ""}
+                onPointerMove={updatePageFramePointer}
+                onPointerUp={finishPageFramePointer}
+                onPointerCancel={cancelPageFramePointer}
+                onLostPointerCapture={cancelPageFramePointer}
+              >
+                <button
+                  type="button"
+                  className="page-frame-pan-target"
+                  aria-label="Pan composition within Page Frame"
+                  onPointerDown={(event) =>
+                    beginPageFramePointer(event, { kind: "pan" })
+                  }
+                />
+                {PAGE_FRAME_RESIZE_HANDLES.map((handle) => (
+                  <button
+                    key={handle}
+                    type="button"
+                    className="page-frame-resize-handle"
+                    data-page-frame-handle={handle}
+                    aria-label={resizeHandleLabel(handle)}
+                    onPointerDown={(event) =>
+                      beginPageFramePointer(event, { kind: "resize", handle })
+                    }
+                  />
+                ))}
+              </div>
+            )}
         </div>
       </div>
       {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
