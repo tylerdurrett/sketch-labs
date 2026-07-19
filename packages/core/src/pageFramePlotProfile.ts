@@ -47,6 +47,29 @@ export function derivePageFramePlotProfile(
   validatePageFrame(currentPageFrame)
   validatePageFrame(targetPageFrame)
 
+  const drawable = plotDrawableRectangle(profile)
+  const horizontalMillimetersPerUnit =
+    drawable.width / currentPageFrame.width
+  const verticalMillimetersPerUnit =
+    drawable.height / currentPageFrame.height
+
+  // Compare the two direct physical scales rather than dividing them into
+  // aspects. A very small Page extent beside fixed physical insets can lose a
+  // few ULPs when its drawable size is recovered by subtraction. Comparing the
+  // direct scales keeps that unavoidable cancellation within the existing
+  // machine-scale equivalence tolerance, so every profile emitted here remains
+  // valid input for a later edit or reset.
+  if (
+    !plotDrawableAspectsEquivalent(
+      horizontalMillimetersPerUnit,
+      verticalMillimetersPerUnit,
+    )
+  ) {
+    throw new Error(
+      'derivePageFramePlotProfile: the current Plot Profile drawable and current Page Frame must have equivalent aspects',
+    )
+  }
+
   if (
     currentPageFrame.width === targetPageFrame.width &&
     currentPageFrame.height === targetPageFrame.height
@@ -54,19 +77,7 @@ export function derivePageFramePlotProfile(
     return profile
   }
 
-  const drawable = plotDrawableRectangle(profile)
-  const drawableAspect = drawable.width / drawable.height
-  const representedAspect =
-    currentPageFrame.width / currentPageFrame.height
-
-  if (!plotDrawableAspectsEquivalent(drawableAspect, representedAspect)) {
-    throw new Error(
-      'derivePageFramePlotProfile: the current Plot Profile drawable and current Page Frame must have equivalent aspects',
-    )
-  }
-
-  const millimetersPerCompositionUnit =
-    drawable.width / currentPageFrame.width
+  const millimetersPerCompositionUnit = horizontalMillimetersPerUnit
   const targetDrawableWidth =
     targetPageFrame.width * millimetersPerCompositionUnit
   const targetDrawableHeight =

@@ -140,12 +140,53 @@ describe('derivePageFramePlotProfile', () => {
     )
   })
 
+  it('re-edits and resets a tiny emitted Page extent despite inset cancellation', () => {
+    const tinyFrame = { x: 100, y: 80, width: 12, height: 11 }
+    const tinyProfile = derivePageFramePlotProfile(
+      profile,
+      fullFrame,
+      tinyFrame,
+    )
+
+    expect(tinyProfile).toEqual({
+      ...profile,
+      width: 32.4,
+      height: 32.2,
+      insets: { ...profile.insets },
+    })
+
+    const resetProfile = derivePageFramePlotProfile(
+      tinyProfile,
+      tinyFrame,
+      fullFrame,
+    )
+    expect(resetProfile.width).toBeCloseTo(profile.width, 12)
+    expect(resetProfile.height).toBeCloseTo(profile.height, 12)
+  })
+
   it('rejects a profile whose drawable does not represent the current Page Frame aspect', () => {
     expect(() =>
       derivePageFramePlotProfile(
         profile,
         { x: 0, y: 0, width: 1_000, height: 1_000 },
         { x: 0, y: 0, width: 500, height: 500 },
+      ),
+    ).toThrow(/equivalent aspects/)
+  })
+
+  it('validates profile/frame scale consistency before an identity return', () => {
+    const inconsistentFrame = {
+      x: 0,
+      y: 0,
+      width: 1_000,
+      height: 1_000,
+    }
+
+    expect(() =>
+      derivePageFramePlotProfile(
+        profile,
+        inconsistentFrame,
+        inconsistentFrame,
       ),
     ).toThrow(/equivalent aspects/)
   })
