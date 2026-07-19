@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { deflateSync, inflateSync } from "node:zlib";
+
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   centeredFixedPageFrame,
   clipSceneToBounds,
+  crc32,
   derivePageFramePlotProfile,
   frameScene,
   leafField,
@@ -22,9 +25,16 @@ import {
 import leafFieldNice1 from "../../../packages/core/src/sketches/leaf-field/presets/nice1.json";
 
 import { SketchControls } from "./SketchControls";
+import {
+  FIXED_PAGE_PARITY_COMPOSITION,
+  FIXED_PAGE_PARITY_FRAME,
+  FIXED_PAGE_PARITY_PROFILE,
+  fixedPageParityScene,
+} from "./fixedPageOutputParity.test-support";
 
 const previewCapture = vi.hoisted(() => ({
   paints: [] as Array<{ scene: unknown; width: number; height: number }>,
+  paintThrough: false,
   ordinaryExport: null as null | {
     scene: Scene;
     metadata: string | undefined;
@@ -42,11 +52,12 @@ vi.mock("@harness/core", async (importActual) => {
   return {
     ...actual,
     drawSceneFitted: (
-      _ctx: unknown,
-      scene: unknown,
-      width: number,
-      height: number,
-    ) => previewCapture.paints.push({ scene, width, height }),
+      ...args: Parameters<typeof actual.drawSceneFitted>
+    ): ReturnType<typeof actual.drawSceneFitted> => {
+      const [, scene, width, height] = args;
+      previewCapture.paints.push({ scene, width, height });
+      if (previewCapture.paintThrough) actual.drawSceneFitted(...args);
+    },
     renderToSVG: (
       ...args: Parameters<typeof actual.renderToSVG>
     ): ReturnType<typeof actual.renderToSVG> => {
@@ -228,12 +239,242 @@ function testSketch(defaultOutputProfile: PlotProfile) {
   return { sketch, generate };
 }
 
+type Rgba = readonly [number, number, number, number];
+
+interface RasterSurface {
+  width: number;
+  height: number;
+  pixels: Uint8Array;
+}
+
+const rasterSurfaces = new WeakMap<HTMLCanvasElement, RasterSurface>();
+
+function rgba(color: string): Rgba {
+  if (/^#[0-9a-f]{6}$/i.test(color)) {
+    return [
+      Number.parseInt(color.slice(1, 3), 16),
+      Number.parseInt(color.slice(3, 5), 16),
+      Number.parseInt(color.slice(5, 7), 16),
+      255,
+    ];
+  }
+  if (color === "white") return [255, 255, 255, 255];
+  if (color === "black") return [0, 0, 0, 255];
+  throw new Error(`unsupported raster-test color ${color}`);
+}
+
+function rasterContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  let transform: readonly [number, number, number, number, number, number] = [
+    1, 0, 0, 1, 0, 0,
+  ];
+  let path: Array<readonly [number, number]> = [];
+  let pathStart: readonly [number, number] | null = null;
+  const stack: Array<{
+    transform: typeof transform;
+    fillStyle: string;
+    strokeStyle: string;
+    lineWidth: number;
+  }> = [];
+
+  const surface = (): RasterSurface => {
+    const current = rasterSurfaces.get(canvas);
+    if (
+      current !== undefined &&
+      current.width === canvas.width &&
+      current.height === canvas.height
+    ) {
+      return current;
+    }
+    const created = {
+      width: canvas.width,
+      height: canvas.height,
+      pixels: new Uint8Array(canvas.width * canvas.height * 4),
+    };
+    rasterSurfaces.set(canvas, created);
+    return created;
+  };
+  const point = (x: number, y: number): readonly [number, number] => [
+    transform[0] * x + transform[2] * y + transform[4],
+    transform[1] * x + transform[3] * y + transform[5],
+  ];
+  const paintPixel = (x: number, y: number, color: Rgba): void => {
+    const target = surface();
+    if (x < 0 || y < 0 || x >= target.width || y >= target.height) return;
+    const offset = (y * target.width + x) * 4;
+    target.pixels.set(color, offset);
+  };
+  const context = {
+    fillStyle: "black",
+    strokeStyle: "black",
+    lineWidth: 1,
+    save() {
+      stack.push({
+        transform,
+        fillStyle: context.fillStyle,
+        strokeStyle: context.strokeStyle,
+        lineWidth: context.lineWidth,
+      });
+    },
+    restore() {
+      const saved = stack.pop();
+      if (saved === undefined) return;
+      transform = saved.transform;
+      context.fillStyle = saved.fillStyle;
+      context.strokeStyle = saved.strokeStyle;
+      context.lineWidth = saved.lineWidth;
+    },
+    beginPath() {
+      path = [];
+      pathStart = null;
+    },
+    moveTo(x: number, y: number) {
+      const transformed = point(x, y);
+      path.push(transformed);
+      pathStart = transformed;
+    },
+    lineTo(x: number, y: number) {
+      path.push(point(x, y));
+    },
+    closePath() {
+      if (pathStart !== null) path.push(pathStart);
+    },
+    fill() {},
+    stroke() {
+      const color = rgba(context.strokeStyle);
+      for (let index = 1; index < path.length; index++) {
+        const from = path[index - 1]!;
+        const to = path[index]!;
+        const steps = Math.max(
+          1,
+          Math.ceil(Math.max(Math.abs(to[0] - from[0]), Math.abs(to[1] - from[1]))),
+        );
+        for (let step = 0; step <= steps; step++) {
+          const amount = step / steps;
+          paintPixel(
+            Math.round(from[0] + (to[0] - from[0]) * amount),
+            Math.round(from[1] + (to[1] - from[1]) * amount),
+            color,
+          );
+        }
+      }
+    },
+    setTransform(a: number, b: number, c: number, d: number, e: number, f: number) {
+      transform = [a, b, c, d, e, f];
+    },
+    fillRect(x: number, y: number, width: number, height: number) {
+      const color = rgba(context.fillStyle);
+      const from = point(x, y);
+      const to = point(x + width, y + height);
+      for (let py = Math.floor(from[1]); py < Math.ceil(to[1]); py++) {
+        for (let px = Math.floor(from[0]); px < Math.ceil(to[0]); px++) {
+          paintPixel(px, py, color);
+        }
+      }
+    },
+    clearRect() {
+      surface().pixels.fill(0);
+    },
+  };
+  return context as unknown as CanvasRenderingContext2D;
+}
+
+function uint32BE(value: number): number[] {
+  return [
+    (value >>> 24) & 0xff,
+    (value >>> 16) & 0xff,
+    (value >>> 8) & 0xff,
+    value & 0xff,
+  ];
+}
+
+function pngChunk(type: string, data: Uint8Array): number[] {
+  const typeBytes = Uint8Array.from([...type].map((value) => value.charCodeAt(0)));
+  const crcInput = new Uint8Array(typeBytes.length + data.length);
+  crcInput.set(typeBytes);
+  crcInput.set(data, typeBytes.length);
+  return [
+    ...uint32BE(data.length),
+    ...typeBytes,
+    ...data,
+    ...uint32BE(crc32(crcInput)),
+  ];
+}
+
+function encodeRasterPng(surface: RasterSurface): Uint8Array {
+  const scanlines = new Uint8Array(
+    surface.height * (1 + surface.width * 4),
+  );
+  for (let y = 0; y < surface.height; y++) {
+    const row = y * (1 + surface.width * 4);
+    scanlines[row] = 0;
+    scanlines.set(
+      surface.pixels.subarray(y * surface.width * 4, (y + 1) * surface.width * 4),
+      row + 1,
+    );
+  }
+  const compressed = deflateSync(scanlines);
+  return Uint8Array.from([
+    137, 80, 78, 71, 13, 10, 26, 10,
+    ...pngChunk(
+      "IHDR",
+      Uint8Array.from([
+        ...uint32BE(surface.width),
+        ...uint32BE(surface.height),
+        8,
+        6,
+        0,
+        0,
+        0,
+      ]),
+    ),
+    ...pngChunk("IDAT", compressed),
+    ...pngChunk("IEND", new Uint8Array()),
+  ]);
+}
+
+function pngChunks(bytes: Uint8Array): Array<{ type: string; data: Uint8Array }> {
+  const chunks: Array<{ type: string; data: Uint8Array }> = [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let offset = 8; offset < bytes.length; ) {
+    const length = view.getUint32(offset);
+    const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+    chunks.push({ type, data: bytes.slice(offset + 8, offset + 8 + length) });
+    offset += 12 + length;
+  }
+  return chunks;
+}
+
+function decodeRasterPng(bytes: Uint8Array): RasterSurface {
+  const chunks = pngChunks(bytes);
+  const ihdr = chunks.find(({ type }) => type === "IHDR")!.data;
+  const header = new DataView(ihdr.buffer, ihdr.byteOffset, ihdr.byteLength);
+  const width = header.getUint32(0);
+  const height = header.getUint32(4);
+  const compressed = Uint8Array.from(
+    chunks.filter(({ type }) => type === "IDAT").flatMap(({ data }) => [...data]),
+  );
+  const scanlines = inflateSync(compressed);
+  const pixels = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    const row = y * (1 + width * 4);
+    if (scanlines[row] !== 0) throw new Error("expected unfiltered test PNG row");
+    pixels.set(scanlines.subarray(row + 1, row + 1 + width * 4), y * width * 4);
+  }
+  return { width, height, pixels };
+}
+
+function pixel(surface: RasterSurface, x: number, y: number): number[] {
+  const offset = (y * surface.width + x) * 4;
+  return [...surface.pixels.slice(offset, offset + 4)];
+}
+
 let container: HTMLDivElement;
 let root: Root;
 let rafCallbacks = new Map<number, (time: number) => void>();
 let nextRafId = 1;
 let fireResizeObserver: (() => void) | null = null;
 let canvasBoxSize = 100;
+let canvasBox: { width: number; height: number } | null = null;
 let pngCanvas: HTMLCanvasElement | null = null;
 let pngSnapshotCount = 0;
 
@@ -294,6 +535,7 @@ function clickButton(el: HTMLElement, text: string): void {
 beforeEach(() => {
   window.localStorage.clear();
   previewCapture.paints = [];
+  previewCapture.paintThrough = false;
   previewCapture.ordinaryExport = null;
   previewCapture.plotterExport = null;
   presetClient.list.mockReset().mockResolvedValue([]);
@@ -304,6 +546,7 @@ beforeEach(() => {
   nextRafId = 1;
   fireResizeObserver = null;
   canvasBoxSize = 100;
+  canvasBox = null;
   pngCanvas = null;
   pngSnapshotCount = 0;
 
@@ -339,7 +582,11 @@ beforeEach(() => {
     HTMLCanvasElement.prototype,
     "getBoundingClientRect",
   ).mockImplementation(
-    () => ({ width: canvasBoxSize, height: canvasBoxSize }) as DOMRect,
+    () =>
+      ({
+        width: canvasBox?.width ?? canvasBoxSize,
+        height: canvasBox?.height ?? canvasBoxSize,
+      }) as DOMRect,
   );
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
     {} as CanvasRenderingContext2D,
@@ -446,6 +693,112 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
       el.querySelector<HTMLCanvasElement>(".plot-drawable > canvas"),
     );
     expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("downloads the shared fixed Page's exact rendered backing pixels after PNG metadata insertion", async () => {
+    previewCapture.paintThrough = true;
+    canvasBox = { width: 265, height: 159 };
+    let serializedSurface: RasterSurface | null = null;
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      function (this: HTMLCanvasElement, contextId: string) {
+        return contextId === "2d" ? rasterContext(this) : null;
+      } as HTMLCanvasElement["getContext"],
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(
+      function (this: HTMLCanvasElement, callback, type) {
+        pngCanvas = this;
+        pngSnapshotCount++;
+        const backing = rasterSurfaces.get(this);
+        if (backing === undefined) throw new Error("canvas was not painted");
+        serializedSurface = {
+          width: backing.width,
+          height: backing.height,
+          pixels: backing.pixels.slice(),
+        };
+        const encoded = encodeRasterPng(serializedSurface);
+        callback(
+          new Blob([encoded.buffer as ArrayBuffer], {
+            type: type ?? "image/png",
+          }),
+        );
+      },
+    );
+    const source = fixedPageParityScene();
+    const generate = vi.fn(() => source);
+    const sketch = {
+      id: "fixed-page-pixel-parity",
+      name: "Fixed Page pixel parity",
+      schema: {},
+      defaultOutputProfile: FIXED_PAGE_PARITY_PROFILE,
+      generate,
+    } as unknown as Sketch;
+    const el = mount(sketch);
+    await flushPromises();
+
+    clickButton(el, "Crop");
+    act(() =>
+      el
+        .querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!
+        .click(),
+    );
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "200",
+    );
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "-10");
+    setInput(el.querySelector<HTMLInputElement>('input[name="y"]')!, "25");
+    clickButton(el, "Apply");
+    flushRaf();
+
+    const expectedScene = frameScene(source, FIXED_PAGE_PARITY_FRAME);
+    expect(previewCapture.paints.at(-1)).toEqual({
+      scene: expectedScene,
+      width: 265,
+      height: 159,
+    });
+    const canvas = el.querySelector<HTMLCanvasElement>("canvas")!;
+    expect({ width: canvas.width, height: canvas.height }).toEqual({
+      width: 265,
+      height: 159,
+    });
+    const painted = rasterSurfaces.get(canvas)!;
+    expect(pixel(painted, 0, 0)).toEqual([244, 239, 230, 255]);
+    expect(pixel(painted, 53, 16)).toEqual([18, 52, 86, 255]);
+    expect(pixel(painted, 53, 15)).toEqual([244, 239, 230, 255]);
+
+    clickButton(el, "Export PNG");
+    await flushPromises();
+    await flushPromises();
+
+    expect(pngSnapshotCount).toBe(1);
+    expect(pngCanvas).toBe(canvas);
+    expect(downloadBlob).toHaveBeenCalledOnce();
+    expect(serializedSurface).not.toBeNull();
+    const downloadedBlob = downloadBlob.mock.calls[0]![0];
+    const downloadedBytes = await new Promise<Uint8Array>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(downloadedBlob);
+    });
+    const decoded = decodeRasterPng(downloadedBytes);
+    expect(decoded).toEqual(serializedSurface);
+    expect(pixel(decoded, 0, 0)).toEqual([244, 239, 230, 255]);
+    expect(pixel(decoded, 53, 16)).toEqual([18, 52, 86, 255]);
+    const metadata = pngChunks(downloadedBytes).find(
+      ({ type }) => type === "iTXt",
+    );
+    expect(new TextDecoder().decode(metadata?.data)).toContain(
+      `"pageFrame":{"x":${FIXED_PAGE_PARITY_FRAME.x},"y":${FIXED_PAGE_PARITY_FRAME.y}`,
+    );
+    expect(generate).toHaveBeenCalledWith(
+      {},
+      expect.any(Number),
+      0,
+      FIXED_PAGE_PARITY_COMPOSITION,
+    );
   });
 
   it("keeps framed Fill, PNG, ordinary SVG, and physical paper on one mixed crop/pad output", async () => {

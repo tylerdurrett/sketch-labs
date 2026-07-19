@@ -28,6 +28,12 @@ import {
   handleHiddenLineWorkerMessage,
   handleOutlineWorkerMessage,
 } from "./outlineWorkerRuntime";
+import {
+  FIXED_PAGE_PARITY_COMPOSITION,
+  FIXED_PAGE_PARITY_FRAME,
+  FIXED_PAGE_PARITY_PROFILE,
+  fixedPageParityScene,
+} from "./fixedPageOutputParity.test-support";
 
 const source: Scene = {
   space: { width: 40, height: 30 },
@@ -674,6 +680,70 @@ const reusableIdentityMismatches: ReadonlyArray<
 ];
 
 describe("hidden-line export worker runtime", () => {
+  it("derives the shared asymmetric fixed Page through Tone Calibration's registered completed-Scene source", () => {
+    const millimetersPerSceneUnit =
+      265 / FIXED_PAGE_PARITY_FRAME.width;
+    const sourceScene = fixedPageParityScene();
+    const identity = createOutlineComputeIdentity({
+      sketchId: toneCalibration.id,
+      schema: toneCalibration.schema,
+      params: defaultParams(toneCalibration.schema),
+      seed: "fixed-page-output-parity",
+      sampledT: 0,
+      compositionFrame: FIXED_PAGE_PARITY_COMPOSITION,
+      tolerance: 0,
+      sourceScene,
+      outlineTarget: {
+        toolWidthMillimeters:
+          FIXED_PAGE_PARITY_PROFILE.toolWidthMillimeters,
+        millimetersPerSceneUnit,
+      },
+    });
+
+    const response = handleHiddenLineWorkerMessage(
+      exportRequest({
+        identity,
+        profile: FIXED_PAGE_PARITY_PROFILE,
+        pageFrame: FIXED_PAGE_PARITY_FRAME,
+      }),
+    );
+
+    expect(response).toMatchObject({
+      type: "complete",
+      jobKind: "export",
+      completedOutline: {
+        identity,
+        scene: {
+          space: FIXED_PAGE_PARITY_COMPOSITION,
+          primitives: [
+            {
+              points: sourceScene.primitives[0]!.points,
+              stroke: {
+                color: "black",
+                width:
+                  FIXED_PAGE_PARITY_PROFILE.toolWidthMillimeters /
+                  millimetersPerSceneUnit,
+              },
+            },
+          ],
+        },
+      },
+    });
+    if (response?.type !== "complete" || response.jobKind !== "export") {
+      throw new Error("expected export completion");
+    }
+    const paths = response.svg.match(/<path\b[^>]*>/g) ?? [];
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).toContain('d="M70 34.9 L282 162.1"');
+    expect(paths[0]).toContain('stroke="black"');
+    expect(paths[0]).toContain('stroke-width="0.37"');
+    expect(paths[1]).toContain('d="M17 19 L282 19 L282 178 L17 178 L17 19"');
+    expect(paths[1]).toContain('stroke="black"');
+    expect(paths[1]).toContain('stroke-width="0.37"');
+    expect(response.svg).not.toContain("#123456");
+    expect(response.svg).not.toContain("#f4efe6");
+  });
+
   it("derives a cache miss through the frame-free shared seam exactly once", () => {
     const identity = exportIdentity({ tolerance: 0.25 });
     const derived = outlineScene(source, identity.tolerance);
