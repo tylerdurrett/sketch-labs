@@ -11,8 +11,17 @@ import type { ToneSource } from './shadingFields'
 import type { Seed } from './sketch'
 import type { Polyline } from './types'
 
-/** The truthful reason a shading strategy stopped producing geometry. */
-export type ShadingTermination = 'completed' | 'budget-exhausted'
+/**
+ * The truthful reason a shading strategy stopped producing geometry.
+ *
+ * `completed` means the strategy satisfied its convergence condition,
+ * `stopped-early` is an intentional authored partial result, and
+ * `budget-exhausted` means a deterministic safety guard bounded the work.
+ */
+export type ShadingTermination =
+  | 'completed'
+  | 'stopped-early'
+  | 'budget-exhausted'
 
 /** Geometry and stop condition produced by a shading strategy. */
 export interface ShadingResult {

@@ -291,7 +291,7 @@ export interface OutlineTarget {
 
 /** Scalar diagnostics for one complete Scribble artwork preparation. */
 export interface ScribbleDiagnostics {
-  /** Truthful convergence or deterministic safety-budget stop condition. */
+  /** Truthful convergence, authored early stop, or safety-budget condition. */
   readonly termination: ShadingTermination
   /** Remaining normalized source error after the last accepted segment. */
   readonly residualError: number

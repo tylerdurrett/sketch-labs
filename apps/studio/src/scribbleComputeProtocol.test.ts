@@ -267,6 +267,15 @@ describe("Scribble compute protocol guards", () => {
     expect(isScribbleWorkerMessage(completed)).toBe(true);
   });
 
+  it("accepts intentional early stops while rejecting unknown terminations", () => {
+    const stoppedEarly = structuredClone(success()) as Record<string, any>;
+    stoppedEarly.diagnostics.termination = "stopped-early";
+    expect(isScribbleComputeSuccess(stoppedEarly)).toBe(true);
+
+    stoppedEarly.diagnostics.termination = "unknown";
+    expect(isScribbleComputeSuccess(stoppedEarly)).toBe(false);
+  });
+
   it("accepts early terminal progress and keeps it compact and identity-free", () => {
     const progress = {
       type: "progress",
