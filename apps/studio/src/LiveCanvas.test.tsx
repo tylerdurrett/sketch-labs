@@ -249,6 +249,7 @@ let now = 0;
 let rafCallbacks: Array<(t: number) => void> = [];
 let nextRafId = 1;
 let fireResizeObserver: (() => void) | null = null;
+let fireDprChange: (() => void) | null = null;
 
 /** Advance the fake wall clock to `ms` and flush exactly one rAF generation. */
 function tick(ms: number): void {
@@ -307,6 +308,7 @@ beforeEach(() => {
   rafCallbacks = [];
   nextRafId = 1;
   fireResizeObserver = null;
+  fireDprChange = null;
 
   vi.spyOn(performance, "now").mockImplementation(() => now);
   vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void): number => {
@@ -335,15 +337,28 @@ beforeEach(() => {
       disconnect(): void {}
     },
   );
-  vi.spyOn(window, "matchMedia").mockImplementation(
-    (query: string) =>
-      ({
+  vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+    const listeners = new Set<EventListener>();
+    fireDprChange = () => {
+      for (const listener of listeners) listener(new Event("change"));
+    };
+    return {
         matches: false,
         media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      }) as unknown as MediaQueryList,
-  );
+      addEventListener: (
+        _type: string,
+        listener: EventListenerOrEventListenerObject,
+      ) => {
+        if (typeof listener === "function") listeners.add(listener);
+      },
+      removeEventListener: (
+        _type: string,
+        listener: EventListenerOrEventListenerObject,
+      ) => {
+        if (typeof listener === "function") listeners.delete(listener);
+      },
+    } as unknown as MediaQueryList;
+  });
   // jsdom returns `null` from getContext('2d'). Return an inert context instead:
   // a Proxy whose every method is a no-op and whose fill/strokeStyle accept
   // writes. Most tests observe generated time/geometry rather than pixels; the
@@ -839,6 +854,141 @@ describe("LiveCanvas retained Page Frame derivation (#344 PF-06)", () => {
       } as unknown as Sketch,
     };
   }
+
+  function usePerCanvasContexts() {
+    const contexts = new WeakMap<
+      HTMLCanvasElement,
+      ReturnType<typeof recordingContext>
+    >();
+    const canvases: HTMLCanvasElement[] = [];
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      function (this: HTMLCanvasElement) {
+        let context = contexts.get(this);
+        if (context === undefined) {
+          context = recordingContext();
+          contexts.set(this, context);
+          canvases.push(this);
+        }
+        return context.ctx;
+      },
+    );
+    return { contexts, canvases };
+  }
+
+  it("keeps one static canvas live through Crop entry, Cancel, Apply, Reset, resize, and DPR changes", () => {
+    let boxWidth = 100;
+    let dpr = 1;
+    vi.spyOn(
+      HTMLCanvasElement.prototype,
+      "getBoundingClientRect",
+    ).mockImplementation(
+      () => ({ width: boxWidth, height: boxWidth / 2 }) as DOMRect,
+    );
+    vi.spyOn(window, "devicePixelRatio", "get").mockImplementation(() => dpr);
+    const { contexts, canvases } = usePerCanvasContexts();
+    const handle = createRef<LiveCanvasHandle>();
+    const fixture = retainedStaticScene();
+    const params = {};
+    const render = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+    ) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrame={pageFrame}
+        pageFrameDraft={pageFrameDraft}
+      />
+    );
+    const el = mount(render(null, null));
+    const canvas = canvasEl(el);
+    const context = contexts.get(canvas)!;
+
+    const transition = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+    ) => {
+      act(() => root!.render(render(pageFrame, pageFrameDraft)));
+      expect(canvasEl(el)).toBe(canvas);
+      expect(handle.current!.getCanvas()).toBe(canvas);
+      expect(contexts.get(canvasEl(el))).toBe(context);
+    };
+
+    transition(null, crop);
+    transition(null, null);
+    transition(null, crop);
+    transition(crop, null);
+    transition(crop, crop);
+    transition(null, null);
+
+    boxWidth = 160;
+    act(() => fireResizeObserver?.());
+    expect(canvasEl(el)).toBe(canvas);
+    expect(canvas.width).toBe(160);
+
+    dpr = 2;
+    act(() => fireDprChange?.());
+    expect(canvasEl(el)).toBe(canvas);
+    expect(canvas.width).toBe(320);
+    expect(context.counts.fillRect).toBeGreaterThan(0);
+    expect(canvases).toEqual([canvas]);
+    expect(fixture.generate).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the visible animated canvas advancing across Cancel, Apply, and Reset without resetting time", () => {
+    const { contexts, canvases } = usePerCanvasContexts();
+    const handle = createRef<LiveCanvasHandle>();
+    const { sketch, generate } = animatedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const params = {};
+    const render = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+    ) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrame={pageFrame}
+        pageFrameDraft={pageFrameDraft}
+      />
+    );
+    const el = mount(render(null, null));
+    const canvas = canvasEl(el);
+    tick(0);
+    const context = contexts.get(canvas)!;
+
+    const transitionAndAdvance = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+      milliseconds: number,
+    ) => {
+      act(() => root!.render(render(pageFrame, pageFrameDraft)));
+      const paintsBeforeTick = context.counts.fillRect ?? 0;
+      tick(milliseconds);
+      expect(canvasEl(el)).toBe(canvas);
+      expect(handle.current!.getCanvas()).toBe(canvas);
+      expect(context.counts.fillRect).toBeGreaterThan(paintsBeforeTick);
+      expect(lastDrawnT(generate)).toBe(milliseconds / 1000);
+    };
+
+    transitionAndAdvance(null, crop, 500);
+    transitionAndAdvance(null, null, 1000);
+    transitionAndAdvance(null, crop, 1500);
+    transitionAndAdvance(crop, null, 2000);
+    transitionAndAdvance(crop, crop, 2500);
+    transitionAndAdvance(null, null, 3000);
+
+    expect(canvases).toEqual([canvas]);
+    expect(handle.current!.getCurrentT()).toBe(3);
+  });
 
   it.each([
     ["crop", crop],
