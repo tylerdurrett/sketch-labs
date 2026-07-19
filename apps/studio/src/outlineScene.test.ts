@@ -7,7 +7,11 @@ import {
   type Scene,
 } from "@harness/core";
 
-import { finalizeOutlineScene, outlineScene } from "./outlineScene";
+import {
+  finalizeOutlineScene,
+  outlineScene,
+  type OutlineFinalizationStrokePolicy,
+} from "./outlineScene";
 
 const source: Scene = {
   space: { width: 100, height: 80 },
@@ -23,7 +27,7 @@ const source: Scene = {
   background: { color: "ivory" },
 };
 
-function pageRectangle(width: number, height: number) {
+function pageRectangle(width: number, height: number, strokeWidth = 1) {
   return {
     points: [
       [0, 0],
@@ -32,9 +36,22 @@ function pageRectangle(width: number, height: number) {
       [0, height],
       [0, 0],
     ],
-    stroke: DEFAULT_STROKE,
+    stroke: { ...DEFAULT_STROKE, width: strokeWidth },
   };
 }
+
+const physicalToolPolicy: OutlineFinalizationStrokePolicy = {
+  kind: "physical-tool",
+  target: {
+    toolWidthMillimeters: 0.5,
+    millimetersPerSceneUnit: 0.25,
+  },
+};
+
+const legacyPolicy: OutlineFinalizationStrokePolicy = {
+  ...physicalToolPolicy,
+  kind: "legacy-scene",
+};
 
 describe("outlineScene expensive processing seam", () => {
   it("applies the exact hidden-line pass to an already-sampled Scene", () => {
@@ -146,6 +163,97 @@ describe("finalizeOutlineScene cheap Page finalization seam", () => {
 
     expect(finalized.space).toEqual({ width: 80, height: 90 });
     expect(finalized.primitives).not.toContainEqual(pageRectangle(80, 90));
+  });
+
+  it("retargets every surviving opt-in stroke to the current physical width", () => {
+    const base: Scene = {
+      ...source,
+      primitives: [
+        source.primitives[0]!,
+        {
+          points: [
+            [10, 10],
+            [20, 20],
+          ],
+          stroke: { color: "navy", width: 9 },
+        },
+        {
+          points: [
+            [5, 5],
+            [20, 5],
+            [20, 20],
+            [5, 20],
+          ],
+          closed: true,
+          fill: { color: "paper" },
+        },
+      ],
+    };
+    const before = structuredClone(base);
+
+    const finalized = finalizeOutlineScene(
+      base,
+      { x: 0, y: 0, width: 50, height: 40 },
+      false,
+      physicalToolPolicy,
+    );
+
+    expect(
+      finalized.primitives
+        .filter((primitive) => primitive.stroke !== undefined)
+        .map((primitive) => primitive.stroke),
+    ).toEqual([
+      { color: "tomato", width: 2 },
+      { color: "navy", width: 2 },
+    ]);
+    expect(
+      finalized.primitives.find((primitive) => primitive.fill !== undefined)
+        ?.stroke,
+    ).toBeUndefined();
+    expect(base).toEqual(before);
+  });
+
+  it("preserves authored legacy widths while carrying a current physical target", () => {
+    const finalized = finalizeOutlineScene(source, null, false, legacyPolicy);
+
+    expect(finalized).toBe(source);
+    expect(finalized.primitives[0]?.stroke).toEqual({
+      color: "tomato",
+      width: 2,
+    });
+  });
+
+  it.each([physicalToolPolicy, legacyPolicy])(
+    "uses the current physical width for the Harness Page outline ($kind)",
+    (policy) => {
+      const finalized = finalizeOutlineScene(source, null, true, policy);
+
+      expect(finalized.primitives.at(-1)).toEqual(
+        pageRectangle(100, 80, 2),
+      );
+      expect(finalized.primitives.at(-1)?.stroke).not.toBe(DEFAULT_STROKE);
+    },
+  );
+
+  it("rejects invalid current physical targets", () => {
+    expect(() =>
+      finalizeOutlineScene(source, null, false, {
+        kind: "physical-tool",
+        target: {
+          toolWidthMillimeters: 0,
+          millimetersPerSceneUnit: 0.2,
+        },
+      }),
+    ).toThrow(/toolWidthMillimeters must be finite and positive/);
+    expect(() =>
+      finalizeOutlineScene(source, null, true, {
+        kind: "legacy-scene",
+        target: {
+          toolWidthMillimeters: 0.3,
+          millimetersPerSceneUnit: Number.NaN,
+        },
+      }),
+    ).toThrow(/millimetersPerSceneUnit must be finite and positive/);
   });
 
   it("toggles only cheap finalization around the same retained base", () => {

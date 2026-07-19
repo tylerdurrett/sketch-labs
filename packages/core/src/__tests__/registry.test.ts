@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   createRegistry,
+  createScribbleMoonStructuralScene,
+  defaultParams,
   grassHills,
   photoScribble,
   registry,
@@ -9,7 +11,8 @@ import {
   toneCalibration,
 } from '../index'
 import { circles } from '../sketches/circles'
-import type { Sketch } from '../sketch'
+import type { OutlineTarget, Sketch } from '../sketch'
+import type { Scene } from '../scene'
 
 /** A throwaway second Sketch so tests can exercise multi-entry indexing. */
 const dummy: Sketch = {
@@ -91,5 +94,70 @@ describe('the default registry', () => {
     const names = sketches.map((sketch) => sketch.name)
     expect(new Set(ids).size).toBe(ids.length)
     expect(new Set(names).size).toBe(names.length)
+  })
+
+  it('keeps every registered physical-tool Outline source invariant across targets', () => {
+    const frame = { width: 100, height: 100 }
+    const targets = [
+      { toolWidthMillimeters: 0.3, millimetersPerSceneUnit: 0.2 },
+      { toolWidthMillimeters: 0.9, millimetersPerSceneUnit: 0.1 },
+    ] as const satisfies readonly OutlineTarget[]
+    const optIn = registry
+      .list()
+      .filter(
+        (sketch) =>
+          sketch.generateOutlineSource !== undefined ||
+          sketch.deriveOutlineSource !== undefined,
+      )
+
+    expect(optIn.map(({ id }) => id)).toEqual([
+      'grass-hills',
+      'scribble-moon',
+      'tone-calibration',
+    ])
+
+    for (const sketch of optIn) {
+      const completed: Scene =
+        sketch.id === scribbleMoon.id
+          ? createScribbleMoonStructuralScene(frame)
+          : {
+              space: frame,
+              primitives: [
+                {
+                  points: [
+                    [10, 10],
+                    [90, 90],
+                  ],
+                  stroke: { color: 'authored', width: 7 },
+                  hiddenLineRole: 'source',
+                },
+              ],
+              background: { color: 'paper' },
+            }
+      const sourceFor = (target: OutlineTarget): Scene => {
+        if (sketch.generateOutlineSource !== undefined) {
+          return sketch.generateOutlineSource(
+            defaultParams(sketch.schema),
+            'outline-target-contract',
+            0,
+            frame,
+            target,
+          )
+        }
+        return sketch.deriveOutlineSource!(completed, target)
+      }
+      const withoutStroke = (scene: Scene) => ({
+        ...scene,
+        primitives: scene.primitives.map(
+          ({ stroke: _targetDependentStroke, ...primitive }) => primitive,
+        ),
+      })
+      const [first, second] = targets.map(sourceFor)
+
+      expect(withoutStroke(second)).toEqual(withoutStroke(first))
+      expect(second.primitives.map(({ stroke }) => stroke)).not.toEqual(
+        first.primitives.map(({ stroke }) => stroke),
+      )
+    }
   })
 })
