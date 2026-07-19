@@ -3775,7 +3775,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(toggle.disabled).toBe(false);
   });
 
-  it("recomputes a specialized Outline when physical drawable scale changes", () => {
+  it("reuses specialized Outline geometry when only its physical target changes", () => {
     autoFireOutlineComputed = false;
     const generateOutlineSource = vi.fn(() => ({
       space: { width: 1_000, height: 1_000 },
@@ -3812,16 +3812,9 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(outlineJob.starts).toBe(1);
     act(() => margin.blur());
 
-    expect(outlineJob.starts).toBe(2);
+    expect(outlineJob.starts).toBe(1);
     expect(lastCompositionFrame).toBe(initialFrame);
-    expect(outlineJob.lastIdentity?.sourceKind).toBe("specialized-sketch");
-    if (outlineJob.lastIdentity?.sourceKind !== "specialized-sketch") {
-      throw new Error("expected specialized identity");
-    }
-    expect(
-      outlineJob.lastIdentity.outlineTarget.millimetersPerSceneUnit,
-    ).toBe(0.16);
-    act(() => lastOnOutlineComputed?.());
+    expect(toggle.textContent).toBe("Outline");
 
     const toolWidth = el.querySelector<HTMLInputElement>(
       'input[aria-label="Tool width (mm)"]',
@@ -3830,14 +3823,9 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     setInput(toolWidth, "0.5");
     act(() => toolWidth.blur());
 
-    expect(outlineJob.starts).toBe(3);
-    expect(outlineJob.lastIdentity?.sourceKind).toBe("specialized-sketch");
-    if (outlineJob.lastIdentity?.sourceKind !== "specialized-sketch") {
-      throw new Error("expected specialized identity");
-    }
-    expect(outlineJob.lastIdentity.outlineTarget.toolWidthMillimeters).toBe(
-      0.5,
-    );
+    expect(outlineJob.starts).toBe(1);
+    expect(lastProfile?.toolWidthMillimeters).toBe(0.5);
+    expect(toggle.textContent).toBe("Outline");
     expect(lastCompositionFrame).toBe(initialFrame);
     expect(generateOutlineSource).not.toHaveBeenCalled();
   });

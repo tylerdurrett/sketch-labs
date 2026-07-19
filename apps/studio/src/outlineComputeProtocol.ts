@@ -149,7 +149,8 @@ function copyParamValue(value: unknown, key: string): OutlineParamValue {
   throw new TypeError(`Outline parameter ${key} is not serializable`);
 }
 
-function copyScene(scene: Scene | ImmutableScene): ImmutableScene {
+/** Take a deeply immutable snapshot of completed Outline geometry. */
+export function immutableScene(scene: Scene | ImmutableScene): ImmutableScene {
   const primitives = scene.primitives.map((primitive) => {
     const copy: {
       points: ImmutablePoint[];
@@ -198,7 +199,10 @@ function copyScene(scene: Scene | ImmutableScene): ImmutableScene {
   return Object.freeze(copy);
 }
 
-function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity {
+/** Take a deeply immutable snapshot of a strict compute identity. */
+export function immutableOutlineComputeIdentity(
+  identity: OutlineComputeIdentity,
+): OutlineComputeIdentity {
   const common = {
     sketchId: identity.sketchId,
     params: Object.freeze(
@@ -219,7 +223,7 @@ function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity 
       return Object.freeze({
         ...common,
         sourceKind: "legacy-scene",
-        sourceScene: copyScene(identity.sourceScene),
+        sourceScene: immutableScene(identity.sourceScene),
       });
     case "specialized-sketch":
       return Object.freeze({
@@ -231,7 +235,7 @@ function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity 
       return Object.freeze({
         ...common,
         sourceKind: "completed-scene-sketch",
-        sourceScene: copyScene(identity.sourceScene),
+        sourceScene: immutableScene(identity.sourceScene),
         outlineTarget: Object.freeze({ ...identity.outlineTarget }),
       });
   }
@@ -273,7 +277,7 @@ export function createOutlineComputeIdentity(
     identity = Object.freeze({
       ...common,
       sourceKind: "legacy-scene",
-      sourceScene: copyScene(input.sourceScene),
+      sourceScene: immutableScene(input.sourceScene),
     });
   } else if (input.sourceScene === undefined) {
     identity = Object.freeze({
@@ -285,7 +289,7 @@ export function createOutlineComputeIdentity(
     identity = Object.freeze({
       ...common,
       sourceKind: "completed-scene-sketch",
-      sourceScene: copyScene(input.sourceScene),
+      sourceScene: immutableScene(input.sourceScene),
       outlineTarget: Object.freeze({ ...input.outlineTarget }),
     });
   }
@@ -543,7 +547,7 @@ function sceneEqual(left: ImmutableScene, right: ImmutableScene): boolean {
   });
 }
 
-export function outlineComputeIdentitiesEqual(
+function commonIdentityFieldsEqual(
   left: OutlineComputeIdentity,
   right: OutlineComputeIdentity,
 ): boolean {
@@ -562,7 +566,16 @@ export function outlineComputeIdentitiesEqual(
         Object.is(entry.key, other.key) &&
         Object.is(entry.value, other.value)
       );
-    }) &&
+    })
+  );
+}
+
+export function outlineComputeIdentitiesEqual(
+  left: OutlineComputeIdentity,
+  right: OutlineComputeIdentity,
+): boolean {
+  return (
+    commonIdentityFieldsEqual(left, right) &&
     left.sourceKind === right.sourceKind &&
     (left.sourceKind === "legacy-scene"
       ? right.sourceKind === "legacy-scene" &&
@@ -574,6 +587,39 @@ export function outlineComputeIdentitiesEqual(
           sceneEqual(left.sourceScene, right.sourceScene) &&
           targetEqual(left.outlineTarget, right.outlineTarget))
   );
+}
+
+/**
+ * Compare only fields that can affect completed Hidden-line geometry.
+ *
+ * Opted-in sketch contracts keep geometry invariant across physical targets,
+ * so their completed geometry may be reused under a newer target. Legacy
+ * Scenes make no such promise and retain their exact identity semantics.
+ */
+export function outlineGeometryIdentitiesEqual(
+  left: OutlineComputeIdentity,
+  right: OutlineComputeIdentity,
+): boolean {
+  if (
+    !commonIdentityFieldsEqual(left, right) ||
+    left.sourceKind !== right.sourceKind
+  ) {
+    return false;
+  }
+  switch (left.sourceKind) {
+    case "legacy-scene":
+      return (
+        right.sourceKind === "legacy-scene" &&
+        sceneEqual(left.sourceScene, right.sourceScene)
+      );
+    case "specialized-sketch":
+      return right.sourceKind === "specialized-sketch";
+    case "completed-scene-sketch":
+      return (
+        right.sourceKind === "completed-scene-sketch" &&
+        sceneEqual(left.sourceScene, right.sourceScene)
+      );
+  }
 }
 
 function targetEqual(
@@ -693,8 +739,8 @@ function copyCompletedOutline(
 ): CompletedOutline | undefined {
   if (candidate === undefined) return undefined;
   return Object.freeze({
-    identity: copyIdentity(candidate.identity),
-    scene: copyScene(candidate.scene),
+    identity: immutableOutlineComputeIdentity(candidate.identity),
+    scene: immutableScene(candidate.scene),
   });
 }
 
@@ -709,7 +755,7 @@ export function createHiddenLineExportSnapshot(
   if (!isOutlineComputeIdentity(input.identity)) {
     throw new TypeError("Hidden-line export identity is invalid");
   }
-  const identity = copyIdentity(input.identity);
+  const identity = immutableOutlineComputeIdentity(input.identity);
   const matchingCandidate =
     input.reusableOutline !== undefined &&
     isOutlineComputeIdentity(input.reusableOutline.identity) &&
