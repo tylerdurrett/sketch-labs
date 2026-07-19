@@ -318,6 +318,53 @@ describe('fitPageFramePlotProfileToAspect', () => {
   })
 
   it.each([
+    ['extreme portrait', 1e-16, { width: 1e-16, height: 1 }],
+    ['extreme landscape', 1e16, { width: 1, height: 1e-16 }],
+  ] as const)(
+    'fits a representable %s aspect without a unit-scale tolerance floor',
+    (_name, targetAspect, expected) => {
+      const marginlessProfile: PlotProfile = {
+        width: 1,
+        height: 1,
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        includeFrame: true,
+        toolWidthMillimeters: 0.3,
+      }
+
+      const fitted = fitPageFramePlotProfileToAspect(
+        marginlessProfile,
+        targetAspect,
+      )
+
+      expect({ width: fitted.width, height: fitted.height }).toEqual(expected)
+      const fittedDrawable = plotDrawableRectangle(fitted)
+      expect(fittedDrawable.width / fittedDrawable.height).toBe(targetAspect)
+    },
+  )
+
+  it('does not treat materially different tiny aspects as equivalent', () => {
+    const tinyAspectProfile: PlotProfile = {
+      width: 1e-16,
+      height: 1,
+      insets: { top: 0, right: 0, bottom: 0, left: 0 },
+      includeFrame: false,
+      toolWidthMillimeters: 0.3,
+    }
+
+    const fitted = fitPageFramePlotProfileToAspect(tinyAspectProfile, 2e-16)
+
+    expect(fitted).not.toBe(tinyAspectProfile)
+    expect(fitted.width).toBe(tinyAspectProfile.width)
+    expect(fitted.height).toBe(0.5)
+  })
+
+  it('rejects a target whose drawable aspect is corrupted by inset cancellation', () => {
+    expect(() =>
+      fitPageFramePlotProfileToAspect(profile, 1e-16),
+    ).toThrow(/cannot be represented with the current fixed physical insets/)
+  })
+
+  it.each([
     0,
     -1,
     Number.NaN,

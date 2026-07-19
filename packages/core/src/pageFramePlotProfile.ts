@@ -14,7 +14,7 @@
 import type { PageFrame } from './pageFrame'
 import { validatePageFrame } from './pageFrame'
 import {
-  plotDrawableAspectsEquivalent,
+  PLOT_DRAWABLE_ASPECT_RELATIVE_TOLERANCE,
   plotDrawableRectangle,
   type PlotProfile,
   validatePlotProfile,
@@ -94,7 +94,8 @@ export function derivePageFramePlotProfile(
  * profile record and avoiding arithmetic drift.
  *
  * @throws if the profile is invalid, the target aspect is not finite and
- *   strictly positive, or the fitted dimensions cannot form a valid profile.
+ *   strictly positive, or fixed-inset arithmetic cannot represent the fitted
+ *   drawable aspect accurately without enlargement.
  */
 export function fitPageFramePlotProfileToAspect(
   profile: PlotProfile,
@@ -110,7 +111,7 @@ export function fitPageFramePlotProfileToAspect(
 
   const currentDrawableAspect = drawable.width / drawable.height
   if (
-    plotDrawableAspectsEquivalent(
+    drawableAspectsStrictlyEquivalent(
       currentDrawableAspect,
       targetDrawableAspect,
     )
@@ -118,24 +119,80 @@ export function fitPageFramePlotProfileToAspect(
     return profile
   }
 
-  const targetDrawableWidth =
-    currentDrawableAspect > targetDrawableAspect
-      ? drawable.height * targetDrawableAspect
-      : drawable.width
-  const targetDrawableHeight =
-    currentDrawableAspect < targetDrawableAspect
-      ? drawable.width / targetDrawableAspect
-      : drawable.height
   const { insets } = profile
-  const fitted: PlotProfile = {
-    ...profile,
-    width: targetDrawableWidth + insets.left + insets.right,
-    height: targetDrawableHeight + insets.top + insets.bottom,
-    insets: { ...insets },
+  const fitted: PlotProfile =
+    currentDrawableAspect > targetDrawableAspect
+      ? {
+          ...profile,
+          width: Math.min(
+            profile.width,
+            drawable.height * targetDrawableAspect +
+              insets.left +
+              insets.right,
+          ),
+          height: profile.height,
+          insets: { ...insets },
+        }
+      : {
+          ...profile,
+          width: profile.width,
+          height: Math.min(
+            profile.height,
+            drawable.width / targetDrawableAspect +
+              insets.top +
+              insets.bottom,
+          ),
+          insets: { ...insets },
+        }
+
+  try {
+    validatePlotProfile(fitted)
+  } catch {
+    throw unrepresentableDrawableAspectError(operation, targetDrawableAspect)
   }
 
-  validatePlotProfile(fitted)
+  const recovered = plotDrawableRectangle(fitted)
+  if (
+    recovered.width > drawable.width ||
+    recovered.height > drawable.height ||
+    !drawableAspectsStrictlyEquivalent(
+      recovered.width / recovered.height,
+      targetDrawableAspect,
+    )
+  ) {
+    throw unrepresentableDrawableAspectError(operation, targetDrawableAspect)
+  }
   return fitted
+}
+
+/** Compare aspects relatively at their own magnitude, including below one. */
+function drawableAspectsStrictlyEquivalent(
+  left: number,
+  right: number,
+): boolean {
+  if (
+    !Number.isFinite(left) ||
+    left <= 0 ||
+    !Number.isFinite(right) ||
+    right <= 0
+  ) {
+    return false
+  }
+  if (left === right) return true
+  const scale = Math.max(Math.abs(left), Math.abs(right))
+  return (
+    Math.abs(left - right) <=
+    PLOT_DRAWABLE_ASPECT_RELATIVE_TOLERANCE * scale
+  )
+}
+
+function unrepresentableDrawableAspectError(
+  operation: string,
+  targetDrawableAspect: number,
+): Error {
+  return new Error(
+    `${operation}: target drawable aspect ${targetDrawableAspect} cannot be represented with the current fixed physical insets`,
+  )
 }
 
 /**
