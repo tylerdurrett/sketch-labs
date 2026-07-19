@@ -900,14 +900,16 @@ describe("LiveCanvas Page Frame direct manipulation (#346)", () => {
 
   function ControlledManipulationCanvas({
     constraint = { kind: "free" },
+    initial = initialFrame,
     onChange = () => {},
     sketch = defaultManipulationSketch,
   }: {
     constraint?: LiveCanvasProps["pageFrameAspectConstraint"];
+    initial?: typeof initialFrame;
     onChange?: (frame: typeof initialFrame) => void;
     sketch?: Sketch;
   }) {
-    const [frame, setFrame] = useState(initialFrame);
+    const [frame, setFrame] = useState(initial);
     return (
       <LiveCanvas
         sketch={sketch}
@@ -941,12 +943,37 @@ describe("LiveCanvas Page Frame direct manipulation (#346)", () => {
     return { view, layer, capture: installPointerCapture(layer) };
   }
 
-  function handle(el: HTMLElement, name: string): HTMLButtonElement {
-    const button = el.querySelector<HTMLButtonElement>(
+  function handle(el: HTMLElement, name: string): HTMLElement {
+    const target = el.querySelector<HTMLElement>(
       `[data-page-frame-handle="${name}"]`,
     );
-    if (button === null) throw new Error(`missing ${name} handle`);
-    return button;
+    if (target === null) throw new Error(`missing ${name} handle`);
+    return target;
+  }
+
+  function pageBoundaryClientRect(el: HTMLElement) {
+    const view = el.querySelector<HTMLElement>(".page-frame-edit-view")!;
+    const overlay = el.querySelector<SVGSVGElement>(
+      ".page-frame-edit-overlay",
+    )!;
+    const boundary = el.querySelector<SVGRectElement>(
+      "[data-testid='page-frame-boundary']",
+    )!;
+    const [minX, minY, width, height] = overlay
+      .getAttribute("viewBox")!
+      .split(" ")
+      .map(Number);
+    const client = view.getBoundingClientRect();
+    const x = Number(boundary.getAttribute("x"));
+    const y = Number(boundary.getAttribute("y"));
+    const boundaryWidth = Number(boundary.getAttribute("width"));
+    const boundaryHeight = Number(boundary.getAttribute("height"));
+    return {
+      left: client.left + ((x - minX!) / width!) * client.width,
+      top: client.top + ((y - minY!) / height!) * client.height,
+      width: (boundaryWidth / width!) * client.width,
+      height: (boundaryHeight / height!) * client.height,
+    };
   }
 
   it("renders one interior pan target and all eight edge/corner handle hooks", () => {
@@ -968,9 +995,20 @@ describe("LiveCanvas Page Frame direct manipulation (#346)", () => {
       "bottom-left",
       "left",
     ]);
+    const interactionLayer = el.querySelector(".page-frame-interaction")!;
+    const targets = interactionLayer.querySelectorAll<HTMLElement>(
+      ".page-frame-pan-target, .page-frame-resize-handle",
+    );
+    expect(interactionLayer.getAttribute("aria-hidden")).toBe("true");
+    expect(interactionLayer.querySelectorAll("button")).toHaveLength(0);
+    expect([...targets].every((target) => target.tabIndex === -1)).toBe(true);
     expect(
-      el.querySelector(".page-frame-pan-target")?.getAttribute("aria-label"),
-    ).toBe("Pan composition within Page Frame");
+      [...targets].every(
+        (target) =>
+          target.getAttribute("role") === "presentation" &&
+          target.getAttribute("aria-label") === null,
+      ),
+    ).toBe(true);
   });
 
   it("gives the interaction targets pointer hit testing, capture-safe touch behavior, and resize cursors", () => {
@@ -1091,6 +1129,108 @@ describe("LiveCanvas Page Frame direct manipulation (#346)", () => {
         .style.getPropertyValue("--page-frame-composition-left"),
     ).toBe("15%");
     expect(generate).toHaveBeenCalledTimes(drawsBefore);
+  });
+
+  it.each([
+    ["full-frame", { x: 0, y: 0, width: 200, height: 100 }, 30, 20],
+    ["inward", initialFrame, 30, 20],
+    ["outward", { x: -20, y: -10, width: 240, height: 120 }, 36, 24],
+  ])(
+    "keeps the %s Page boundary stationary after pan settlement",
+    (_label, initial, draftDx, draftDy) => {
+      const changes = vi.fn();
+      const el = mount(
+        <ControlledManipulationCanvas initial={initial} onChange={changes} />,
+      );
+      const { layer } = interaction(el);
+      const panTarget = el.querySelector(".page-frame-pan-target")!;
+      const before = pageBoundaryClientRect(el);
+
+      dispatchPointer(panTarget, "pointerdown", { x: 60, y: 30 });
+      dispatchPointer(layer, "pointermove", { x: 90, y: 50 });
+      const during = pageBoundaryClientRect(el);
+      dispatchPointer(layer, "pointerup", { x: 90, y: 50 });
+
+      expect(pageBoundaryClientRect(el)).toEqual(during);
+      expect(during).toEqual(before);
+      expect(changes).toHaveBeenLastCalledWith({
+        ...initial,
+        x: initial.x - draftDx,
+        y: initial.y - draftDy,
+      });
+    },
+  );
+
+  it("reconciles a settled pan across cancel, external drafts, and edit re-entry", () => {
+    let replaceDraft = (_frame: typeof initialFrame) => {};
+    let setEditing = (_editing: boolean) => {};
+    const changes = vi.fn();
+
+    function TransitionCanvas() {
+      const [draft, setDraft] = useState(initialFrame);
+      const [editing, updateEditing] = useState(true);
+      replaceDraft = setDraft;
+      setEditing = updateEditing;
+      return (
+        <LiveCanvas
+          sketch={defaultManipulationSketch}
+          params={manipulationParams}
+          seed={1}
+          compositionFrame={compositionFrame}
+          pageFrameDraft={editing ? draft : null}
+          onPageFrameDraftChange={(next) => {
+            setDraft(next);
+            changes(next);
+          }}
+        />
+      );
+    }
+
+    const el = mount(<TransitionCanvas />);
+    let { layer } = interaction(el);
+    dispatchPointer(el.querySelector(".page-frame-pan-target")!, "pointerdown", {
+      x: 60,
+      y: 30,
+    });
+    dispatchPointer(layer, "pointermove", { x: 90, y: 50 });
+    dispatchPointer(layer, "pointerup", { x: 90, y: 50 });
+    const settledRect = pageBoundaryClientRect(el);
+    const settledDraft = changes.mock.lastCall?.[0] as typeof initialFrame;
+
+    dispatchPointer(el.querySelector(".page-frame-pan-target")!, "pointerdown", {
+      x: 60,
+      y: 30,
+    });
+    expect(pageBoundaryClientRect(el)).toEqual(settledRect);
+    dispatchPointer(layer, "pointermove", { x: 70, y: 35 });
+    dispatchPointer(layer, "pointercancel", { x: 70, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith(settledDraft);
+    expect(pageBoundaryClientRect(el)).toEqual(settledRect);
+
+    const externalDraft = { x: 40, y: 5, width: 80, height: 40 };
+    act(() => replaceDraft(externalDraft));
+    expect(
+      el
+        .querySelector("[data-testid='page-frame-boundary']")
+        ?.getAttribute("x"),
+    ).toBe("40");
+
+    ({ layer } = interaction(el));
+    dispatchPointer(el.querySelector(".page-frame-pan-target")!, "pointerdown", {
+      x: 60,
+      y: 30,
+    });
+    dispatchPointer(layer, "pointermove", { x: 70, y: 35 });
+    dispatchPointer(layer, "pointerup", { x: 70, y: 35 });
+    const latestDraft = changes.mock.lastCall?.[0] as typeof initialFrame;
+    act(() => setEditing(false));
+    expect(el.querySelector(".page-frame-edit-view")).toBeNull();
+    act(() => setEditing(true));
+    expect(
+      el
+        .querySelector("[data-testid='page-frame-boundary']")
+        ?.getAttribute("x"),
+    ).toBe(String(latestDraft.x));
   });
 
   it("rebases temporary Shift transitions without jumps during a freeform drag", () => {

@@ -38,7 +38,6 @@ import {
   type PageFrameManipulationState,
   type PageFrameManipulationTarget,
   type PageFramePointer,
-  type PageFrameResizeHandle,
 } from "./pageFrameManipulation";
 
 /**
@@ -244,8 +243,48 @@ interface PageFramePointerBasis {
 interface ActivePageFrameGesture {
   readonly pointerId: number;
   readonly manipulation: PageFrameManipulationState;
+  /** View-only Composition translation inherited from an earlier settled pan. */
+  readonly presentationOffset: PageFramePointer;
   /** Immutable client/layout/viewBox conversion captured at pointerdown. */
   readonly pointerBasis: PageFramePointerBasis;
+}
+
+interface SettledPageFramePresentation {
+  /** Exact controlled draft values this view-only presentation describes. */
+  readonly draftFrame: PageFrame;
+  readonly compositionFrame: CoordinateSpace;
+  readonly compositionOffset: PageFramePointer;
+  readonly viewBox: PageFrameViewBox;
+}
+
+const ZERO_PAGE_FRAME_OFFSET: PageFramePointer = Object.freeze({ x: 0, y: 0 });
+
+function samePageFrame(left: PageFrame, right: PageFrame): boolean {
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height
+  );
+}
+
+function sameCoordinateSpace(
+  left: CoordinateSpace,
+  right: CoordinateSpace,
+): boolean {
+  return left.width === right.width && left.height === right.height;
+}
+
+function translatePageFrame(
+  frame: PageFrame,
+  offset: PageFramePointer,
+): PageFrame {
+  return Object.freeze({
+    x: frame.x + offset.x,
+    y: frame.y + offset.y,
+    width: frame.width,
+    height: frame.height,
+  });
 }
 
 function pageFrameViewBox(
@@ -293,10 +332,6 @@ function pageFramePointerFromClient(
   return Number.isFinite(x) && Number.isFinite(y)
     ? Object.freeze({ x, y })
     : null;
-}
-
-function resizeHandleLabel(handle: PageFrameResizeHandle): string {
-  return `Resize Page Frame ${handle.replace("-", " ")}`;
 }
 
 /**
@@ -540,21 +575,43 @@ export function LiveCanvas({
   const [activePageFrameGesture, setActivePageFrameGesture] =
     useState<ActivePageFrameGesture | null>(null);
   const activePageFrameGestureRef = useRef<ActivePageFrameGesture | null>(null);
+  const [settledPageFramePresentation, setSettledPageFramePresentation] =
+    useState<SettledPageFramePresentation | null>(null);
+  const effectiveSettledPageFramePresentation =
+    pageFrameDraft !== null &&
+    settledPageFramePresentation !== null &&
+    samePageFrame(pageFrameDraft, settledPageFramePresentation.draftFrame) &&
+    sameCoordinateSpace(
+      compositionFrame,
+      settledPageFramePresentation.compositionFrame,
+    )
+      ? settledPageFramePresentation
+      : null;
 
   const pageFrameEditGeometry = useMemo(() => {
     if (pageFrameDraft === null) return null;
     const manipulation = activePageFrameGesture?.manipulation ?? null;
     const draftFrame = manipulation?.frame ?? pageFrameDraft;
     const panning = manipulation?.target.kind === "pan";
-    const visualPageFrame = panning ? manipulation.startFrame : draftFrame;
+    const settledOffset =
+      activePageFrameGesture?.presentationOffset ??
+      effectiveSettledPageFramePresentation?.compositionOffset ??
+      ZERO_PAGE_FRAME_OFFSET;
+    const visualPageFrame = translatePageFrame(
+      panning ? manipulation.startFrame : draftFrame,
+      settledOffset,
+    );
     const compositionOffset = panning
       ? {
-          x: manipulation.startFrame.x - draftFrame.x,
-          y: manipulation.startFrame.y - draftFrame.y,
+          x:
+            settledOffset.x + manipulation.startFrame.x - draftFrame.x,
+          y:
+            settledOffset.y + manipulation.startFrame.y - draftFrame.y,
         }
-      : { x: 0, y: 0 };
+      : settledOffset;
     const viewBox =
       activePageFrameGesture?.pointerBasis.viewBox ??
+      effectiveSettledPageFramePresentation?.viewBox ??
       pageFrameViewBox(compositionFrame, visualPageFrame, compositionOffset);
     const { minX, minY, width, height } = viewBox;
     const compositionRight = compositionOffset.x + compositionFrame.width;
@@ -595,7 +652,12 @@ export function LiveCanvas({
       dimPath: `${compositionPath}${retainedPath}`,
       visualPageFrame,
     };
-  }, [compositionFrame, pageFrameDraft, activePageFrameGesture]);
+  }, [
+    compositionFrame,
+    pageFrameDraft,
+    activePageFrameGesture,
+    effectiveSettledPageFramePresentation,
+  ]);
 
   const publishPageFrameGesture = useCallback(
     (gesture: ActivePageFrameGesture) => {
@@ -646,6 +708,9 @@ export function LiveCanvas({
       const gesture = Object.freeze({
         pointerId: event.pointerId,
         pointerBasis,
+        presentationOffset:
+          effectiveSettledPageFramePresentation?.compositionOffset ??
+          ZERO_PAGE_FRAME_OFFSET,
         manipulation: beginPageFrameManipulation({
           frame: pageFrameDraft,
           target,
@@ -666,6 +731,7 @@ export function LiveCanvas({
       pageFrameAspectConstraint,
       pageFrameDraft,
       pageFrameEditGeometry,
+      effectiveSettledPageFramePresentation,
     ],
   );
 
@@ -717,11 +783,48 @@ export function LiveCanvas({
               pointer,
               event.shiftKey,
             );
-      onPageFrameDraftChange?.(finishPageFrameManipulation(manipulation));
+      const finalFrame = finishPageFrameManipulation(manipulation);
+      const compositionOffset =
+        manipulation.target.kind === "pan"
+          ? Object.freeze({
+              x:
+                active.presentationOffset.x +
+                manipulation.startFrame.x -
+                finalFrame.x,
+              y:
+                active.presentationOffset.y +
+                manipulation.startFrame.y -
+                finalFrame.y,
+            })
+          : active.presentationOffset;
+      if (compositionOffset.x === 0 && compositionOffset.y === 0) {
+        setSettledPageFramePresentation(null);
+      } else {
+        const visualPageFrame = translatePageFrame(
+          finalFrame,
+          compositionOffset,
+        );
+        setSettledPageFramePresentation(
+          Object.freeze({
+            draftFrame: finalFrame,
+            compositionFrame: Object.freeze({ ...compositionFrame }),
+            compositionOffset,
+            viewBox:
+              manipulation.target.kind === "pan"
+                ? active.pointerBasis.viewBox
+                : pageFrameViewBox(
+                    compositionFrame,
+                    visualPageFrame,
+                    compositionOffset,
+                  ),
+          }),
+        );
+      }
+      onPageFrameDraftChange?.(finalFrame);
       clearPageFrameGesture(active.pointerId);
       event.preventDefault();
     },
-    [clearPageFrameGesture, onPageFrameDraftChange],
+    [clearPageFrameGesture, compositionFrame, onPageFrameDraftChange],
   );
 
   const cancelPageFramePointer = useCallback(
@@ -738,12 +841,21 @@ export function LiveCanvas({
   );
 
   useEffect(() => {
-    if (pageFrameDraft !== null || activePageFrameGestureRef.current === null) {
+    if (pageFrameDraft === null) {
+      const active = activePageFrameGestureRef.current;
+      if (active !== null) clearPageFrameGesture(active.pointerId);
+      setSettledPageFramePresentation(null);
       return;
     }
-    activePageFrameGestureRef.current = null;
-    setActivePageFrameGesture(null);
-  }, [pageFrameDraft]);
+    if (activePageFrameGestureRef.current !== null) return;
+    setSettledPageFramePresentation((settled) =>
+      settled !== null &&
+      (!samePageFrame(pageFrameDraft, settled.draftFrame) ||
+        !sameCoordinateSpace(compositionFrame, settled.compositionFrame))
+        ? null
+        : settled,
+    );
+  }, [clearPageFrameGesture, compositionFrame, pageFrameDraft]);
 
   // The latest caller-owned sampler follows the same post-commit ref discipline
   // as the other live inputs. The rAF effect does not depend on it, so
@@ -1408,27 +1520,26 @@ export function LiveCanvas({
               <div
                 ref={pageFrameInteractionRef}
                 className="page-frame-interaction"
+                aria-hidden="true"
                 data-active={activePageFrameGesture === null ? undefined : ""}
                 onPointerMove={updatePageFramePointer}
                 onPointerUp={finishPageFramePointer}
                 onPointerCancel={cancelPageFramePointer}
                 onLostPointerCapture={cancelPageFramePointer}
               >
-                <button
-                  type="button"
+                <div
+                  role="presentation"
                   className="page-frame-pan-target"
-                  aria-label="Pan composition within Page Frame"
                   onPointerDown={(event) =>
                     beginPageFramePointer(event, { kind: "pan" })
                   }
                 />
                 {PAGE_FRAME_RESIZE_HANDLES.map((handle) => (
-                  <button
+                  <div
                     key={handle}
-                    type="button"
+                    role="presentation"
                     className="page-frame-resize-handle"
                     data-page-frame-handle={handle}
-                    aria-label={resizeHandleLabel(handle)}
                     onPointerDown={(event) =>
                       beginPageFramePointer(event, { kind: "resize", handle })
                     }
