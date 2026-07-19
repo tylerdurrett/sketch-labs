@@ -11,7 +11,8 @@
     "scribbleScale": 0.3,
     "momentum": 0.98,
     "chaos": 0.41,
-    "toneFidelity": 0.99
+    "toneFidelity": 0.99,
+    "stopPoint": 100
   },
   "locks": [],
   "profile": {

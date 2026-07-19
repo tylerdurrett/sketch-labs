@@ -79,6 +79,15 @@ function SummaryStatuses({ displayed, preparation }: ShadingDiagnosticsProps) {
         >
           Converged
         </span>
+      ) : displayed?.diagnostics.termination === "stopped-early" ? (
+        <span
+          role="status"
+          className="rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground"
+        >
+          {displayed.freshness === "current"
+            ? "Stopped early"
+            : "Displayed result: stopped early"}
+        </span>
       ) : null}
 
       {displayed?.diagnostics.termination === "budget-exhausted" ? (
@@ -157,7 +166,9 @@ function DisplayedLane({
           value={
             diagnostics.termination === "completed"
               ? "Converged"
-              : "Budget exhausted"
+              : diagnostics.termination === "stopped-early"
+                ? "Stopped early"
+                : "Budget exhausted"
           }
         />
         <Metric

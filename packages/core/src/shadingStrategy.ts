@@ -12,7 +12,10 @@ import type { Seed } from './sketch'
 import type { Polyline } from './types'
 
 /** The truthful reason a shading strategy stopped producing geometry. */
-export type ShadingTermination = 'completed' | 'budget-exhausted'
+export type ShadingTermination =
+  | 'completed'
+  | 'stopped-early'
+  | 'budget-exhausted'
 
 /** Geometry and stop condition produced by a shading strategy. */
 export interface ShadingResult {

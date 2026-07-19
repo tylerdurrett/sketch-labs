@@ -37,6 +37,11 @@ const exhaustedDiagnostics: ScribbleDiagnostics = {
   termination: "budget-exhausted",
   residualError: 0.2,
 };
+const stoppedEarlyDiagnostics: ScribbleDiagnostics = {
+  ...completedDiagnostics,
+  termination: "stopped-early",
+  residualError: 0.1,
+};
 
 function identity(amount: number): ScribbleComputeIdentity {
   return createScribbleComputeIdentity({
@@ -384,11 +389,14 @@ describe("scribbleSessionReducer", () => {
     expect(selectExportableScribbleResult(failed)).toBeNull();
   });
 
-  it("exports current budget-exhausted completion but never stale completion", () => {
+  it.each([
+    ["budget-exhausted", exhaustedDiagnostics],
+    ["stopped-early", stoppedEarlyDiagnostics],
+  ] as const)("exports current %s completion but never stale completion", (_, diagnostics) => {
     const exhausted = succeed(
       launch(createScribbleSessionState(identity(1), 10)),
       sceneA,
-      exhaustedDiagnostics,
+      diagnostics,
     );
     expect(selectExportableScribbleResult(exhausted)).toBe(
       exhausted.displayed,

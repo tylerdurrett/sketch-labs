@@ -66,7 +66,7 @@ A reusable deterministic generator that samples a **Tone Field** under a **Shadi
 _Avoid_: shader, fill renderer, shading mode
 
 **Shading Result**:
-The minimal outcome of a **Shading Strategy**: generated polylines plus a truthful termination reason distinguishing normal completion from safety-budget exhaustion.
+The minimal outcome of a **Shading Strategy**: generated polylines plus a truthful termination reason distinguishing normal completion, an authored early stop, and safety-budget exhaustion.
 _Avoid_: bare polyline array, generic metrics bag
 
 **Scribble Strategy**:
@@ -76,6 +76,10 @@ _Avoid_: single-line strategy (continuity is preferred, not absolute), random wa
 **Path density**:
 An authored **Scribble Strategy** control that changes how many drawn passes are required to satisfy a given tone without changing relative Tone Field values or consulting physical output dimensions.
 _Avoid_: physical ink density, resolution, Tool width
+
+**Stop point**:
+An authored **Scribble Strategy** control for the artistic look of an unfinished piece. It approximately limits accepted segments to a percentage of the ordinary work allowance without changing path density, tone fidelity, or the Tone Field; `100%` preserves ordinary behavior.
+_Avoid_: performance budget, density, convergence threshold
 
 **Scribble scale**:
 An authored **Scribble Strategy** control that changes its characteristic spatial detail while keeping segment length, virtual-coverage radius, residual sampling, and mask validation at coherent internal ratios.
@@ -199,6 +203,7 @@ _Avoid_: config, params, options, export options
 - A **Sketch** draws shading polylines as Hidden-line sources in painter's order; the existing **Hidden-line pass**, not the **Shading Strategy**, clips them behind nearer filled occluders alongside the Sketch's other visible contours.
 - A **Scribble Strategy** minimizes pen lifts but may return multiple polylines so disconnected or exhausted regions can be shaded without crossing a zero-permission **Shading Mask**.
 - A **Scribble Strategy** tracks the virtual coverage deposited by its paths and stops when remaining weighted tone error falls below an explicit tolerance; a maximum path budget is a deterministic safety cap, not the definition of completion.
+- **Stop point** is an authored early-stop cap for deliberate unfinishedness; it is distinct from convergence and safety-budget exhaustion, and its partial geometry remains valid artwork.
 - A **Scribble Strategy** weights remaining tone error linearly by **Shading Mask** permission for both steering and completion, so low-permission areas exert proportionally less demand while zero-permission areas exert none and remain impassable.
 - A **Scribble Strategy** deposits additive virtual coverage with a compact smooth falloff around each segment; explicit Scene-space influence radius and per-pass strength control spacing and repetition without representing physical **Tool width**.
 - Increasing **Path density** reduces the virtual coverage satisfied by each pass, producing more path length for the same **Tone Field** while preserving its relative light-dark relationships.
@@ -238,8 +243,6 @@ These are intentionally **not** pinned here — they are implementation specific
 - A **cross-param constraint** model — inter-param relationships the single-param **Parameter Schema** cannot express (e.g. `minRadius ≤ maxRadius`, params that only apply when another is enabled, sum-to-one groups). v1 **Randomize** rolls each unlocked numeric param independently within *its own* bounds, so it can hand a Sketch any in-bounds combination; a Sketch owns its own inter-param coherence inside `generate` (e.g. circles taking `Math.min`/`Math.max` of its two radii). A real constraint language is future work and deserves its own grilling before it is built.
 - A cross-strategy registry, runtime selector, and normalized control model. The first scribble implementation establishes only the minimal **Shading Strategy** boundary with its own typed controls. The second strategy is the explicit trigger to compare both real configurations, promote only proven shared controls, retain genuinely strategy-specific controls, and add runtime selection without changing Tone Field or Shading Mask producers.
 - Raster photograph ingestion as a **Tone Field** producer. The first scribble Sketch uses a procedural tone test composition so the field and strategy contracts can be tuned independently of asset handling. The next source milestone adds managed import of arbitrary local images into a configured project asset root, assigns each **Image Asset** a stable logical ID captured by Presets, and resolves identical bytes across Studio, workers, and video before decoding and sampling them behind the existing Tone Field contract; it must not expose machine-local paths or change Shading Strategy consumers.
-- A Scribble-side boundary-adherence control that remaps **Shading Mask** values. The first implementation interprets mask permission consistently and exposes softness/bleed through the procedural mask producer instead of adding a second overlapping knob. Imported alpha masks did not automatically pull this in: the photographic-source feature's manual browser review with real alpha-carrying photos is the explicit checkpoint that re-arms or retires it.
-- A mask-only Studio diagnostic alongside **Tone reference mode**. The initial reference shows the effective target because that is what the solver matches. Imported masks did not automatically pull this in either: with the default adapter the mask is straight alpha plus the letterbox zero, so the same photographic-source browser review decides whether 'paper because forbidden' vs 'paper because white' is confusing enough to warrant a separate permission view.
 - The Node/Remotion **Image Asset** loader. Core's decoded-pixels record (ADR-0014) is the seam; a pure-JS decoder joins when video first consumes a photo-backed Sketch, honoring the glossary's cross-consumer resolution promise as direction rather than as the first photographic feature's obligation.
 - Alternate raster-to-field interpretations beyond the default luminance-plus-alpha adapter: channel selection, independent mask assets, color-aware tone models, thresholding, inversion, edge-aware preprocessing, and fit/crop policy remain source-side concerns to refine with real photograph experiments; none may leak into **Shading Strategy** consumers. Tone contrast and Tone gamma graduated out of this deferral into the first photo Sketch's source controls — applied on the tone domain, exact-zero-preserving, composed inside the source adapter.
 

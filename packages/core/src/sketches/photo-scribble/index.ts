@@ -91,6 +91,7 @@ function scribbleControls(
     momentum: numberParam(params, schema, 'momentum'),
     chaos: numberParam(params, schema, 'chaos'),
     toneFidelity: numberParam(params, schema, 'toneFidelity'),
+    stopPoint: numberParam(params, schema, 'stopPoint'),
   }
 }
 

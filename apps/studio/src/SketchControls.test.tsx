@@ -4359,7 +4359,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     return match;
   }
 
-  it("shows exactly the five Scribble controls while keeping the source fixed", () => {
+  it("shows exactly the six Scribble controls while keeping the source fixed", () => {
     const el = mount(<SketchControls sketch={toneCalibration} />);
 
     expect(
@@ -4372,6 +4372,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       "control-momentum",
       "control-chaos",
       "control-toneFidelity",
+      "control-stopPoint",
     ]);
     expect(paramInput(el, "pathDensity").value).toBe("1");
     expect(paramInput(el, "pathDensity").max).toBe("20");
@@ -4380,6 +4381,9 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(paramInput(el, "momentum").value).toBe("0.75");
     expect(paramInput(el, "chaos").value).toBe("0.25");
     expect(paramInput(el, "toneFidelity").value).toBe("0.9");
+    expect(paramInput(el, "stopPoint").value).toBe("100");
+    expect(paramInput(el, "stopPoint").min).toBe("0");
+    expect(paramInput(el, "stopPoint").max).toBe("100");
     expect(
       [...el.querySelectorAll('[role="group"][aria-label="Render mode"] button')].map(
         (candidate) => candidate.textContent,
@@ -6157,6 +6161,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       "control-momentum",
       "control-chaos",
       "control-toneFidelity",
+      "control-stopPoint",
     ]);
     expect(historyCapture.atomic).toHaveLength(0);
     expect(historyCapture.transactionCommits).toHaveLength(0);

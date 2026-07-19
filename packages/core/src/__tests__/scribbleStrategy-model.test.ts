@@ -33,13 +33,14 @@ function source(
 }
 
 describe('Scribble authored controls', () => {
-  it('declares exactly the five bounded controls and derives their defaults', () => {
+  it('declares exactly the six bounded controls and derives their defaults', () => {
     expect(Object.keys(scribbleControlSchema)).toEqual([
       'pathDensity',
       'scribbleScale',
       'momentum',
       'chaos',
       'toneFidelity',
+      'stopPoint',
     ])
 
     for (const [name, spec] of Object.entries(scribbleControlSchema)) {
@@ -54,6 +55,19 @@ describe('Scribble authored controls', () => {
 
     expect(scribbleControlSchema.pathDensity.max).toBe(20)
     expect(scribbleControlSchema.scribbleScale.min).toBe(0.1)
+    expect(scribbleControlSchema.stopPoint).toMatchObject({
+      min: 0,
+      max: 100,
+      default: 100,
+      step: 1,
+      integer: true,
+    })
+  })
+
+  it('defaults, bounds, and rounds Stop point as an authored percentage', () => {
+    expect(normalizeScribbleControls({}).stopPoint).toBe(100)
+    expect(normalizeScribbleControls({ stopPoint: -1 }).stopPoint).toBe(0)
+    expect(normalizeScribbleControls({ stopPoint: 50.6 }).stopPoint).toBe(51)
   })
 
   it('uses defaults for missing/non-finite values and authored bounds otherwise', () => {

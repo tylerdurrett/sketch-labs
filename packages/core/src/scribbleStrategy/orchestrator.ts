@@ -37,12 +37,15 @@ export interface ScribbleOrchestratorInput {
   /** A normalized residual error in `[0, 1]`. */
   readonly residualThreshold: number
   readonly limits: Readonly<ScribbleExecutionLimits>
+  /** Optional authored cap, bounded by the accepted-segment safety limit. */
+  readonly authoredAcceptedSegmentLimit?: number
   /** Receives isolated snapshots after completed growth attempts and at stop. */
   readonly observer?: ScribbleObserver
 }
 
 export type ScribbleOrchestratorStopCause =
   | 'threshold-reached'
+  | 'authored-limit-reached'
   | 'budget-reached'
 
 /** Raw solver state, before a public strategy assigns authored policy. */
@@ -81,6 +84,22 @@ function assertExecutionLimits(limits: ScribbleExecutionLimits): void {
     if (!Number.isSafeInteger(value) || value < 0) {
       throw new RangeError(`${name} must be a non-negative safe integer`)
     }
+  }
+}
+
+function assertAuthoredLimit(
+  authoredLimit: number | undefined,
+  safetyLimit: number,
+): void {
+  if (
+    authoredLimit !== undefined &&
+    (!Number.isSafeInteger(authoredLimit) ||
+      authoredLimit < 0 ||
+      authoredLimit > safetyLimit)
+  ) {
+    throw new RangeError(
+      'authoredAcceptedSegmentLimit must be a non-negative safe integer within the safety limit',
+    )
   }
 }
 
@@ -149,10 +168,15 @@ export function runScribbleOrchestrator({
   rng,
   residualThreshold,
   limits,
+  authoredAcceptedSegmentLimit,
   observer,
 }: ScribbleOrchestratorInput): ScribbleOrchestratorOutcome {
   assertNormalizedThreshold(residualThreshold)
   assertExecutionLimits(limits)
+  assertAuthoredLimit(
+    authoredAcceptedSegmentLimit,
+    limits.maxAcceptedSegments,
+  )
 
   const polylines: Polyline[] = []
   const rejectedStarts = new Set<number>()
@@ -160,8 +184,9 @@ export function runScribbleOrchestrator({
   let acceptedSegments = 0
   let stagnations = 0
   let restarts = 0
-  const configuredWorkUnits =
-    limits.maxAcceptedSegments + limits.maxStagnations
+  const acceptedSegmentLimit =
+    authoredAcceptedSegmentLimit ?? limits.maxAcceptedSegments
+  const configuredWorkUnits = acceptedSegmentLimit + limits.maxStagnations
 
   const reportProgress = (terminal: boolean): void => {
     if (observer === undefined) return
@@ -189,6 +214,13 @@ export function runScribbleOrchestrator({
 
   if (residualError <= residualThreshold) {
     return finish('threshold-reached')
+  }
+
+  if (
+    acceptedSegmentLimit === 0 &&
+    authoredAcceptedSegmentLimit !== undefined
+  ) {
+    return finish('authored-limit-reached')
   }
 
   if (limits.maxAcceptedSegments === 0 || limits.maxPolylines === 0) {
@@ -229,6 +261,12 @@ export function runScribbleOrchestrator({
       // Completion always wins when the same accepted segment reaches a cap.
       if (residualError <= residualThreshold) {
         return finish('threshold-reached')
+      }
+      if (
+        authoredAcceptedSegmentLimit !== undefined &&
+        acceptedSegments >= acceptedSegmentLimit
+      ) {
+        return finish('authored-limit-reached')
       }
       if (acceptedSegments >= limits.maxAcceptedSegments) {
         return finish('budget-reached')

@@ -28,6 +28,12 @@ const exhausted: ScribbleDiagnostics = {
   residualError: 0.2,
 };
 
+const stoppedEarly: ScribbleDiagnostics = {
+  ...converged,
+  termination: "stopped-early",
+  residualError: 0.12,
+};
+
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
@@ -204,6 +210,26 @@ describe("ShadingDiagnostics", () => {
     expect(displayed.textContent).toContain("TerminationBudget exhausted");
     expect(displayed.textContent).toContain("Residual error20.00%");
     expect(displayed.textContent).toContain("Compute time1 min 5 s");
+  });
+
+  it("presents an authored early stop as a neutral finished result", () => {
+    const el = mount({
+      displayed: {
+        freshness: "current",
+        diagnostics: stoppedEarly,
+        computeTimeMs: 500,
+      },
+      preparation: { kind: "idle" },
+    });
+
+    const summaryStatus = el.querySelector('summary [role="status"]');
+    expect(summaryStatus?.textContent).toBe("Stopped early");
+    expect(summaryStatus?.className).not.toContain("amber");
+
+    expand(el);
+    const displayed = lane(el, "Displayed result");
+    expect(displayed.textContent).toContain("TerminationStopped early");
+    expect(displayed.textContent).not.toContain("safety budget");
   });
 
   it("names the initial preparation and exposes an estimating ETA", () => {
