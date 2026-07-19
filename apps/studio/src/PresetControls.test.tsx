@@ -189,7 +189,7 @@ describe("PresetControls name entry", () => {
 
     await clickSave();
 
-    const saved: Preset = {
+    const expected: Preset = {
       version: 3,
       sketch: "circles",
       name: "fixed-page",
@@ -199,7 +199,10 @@ describe("PresetControls name entry", () => {
       profile,
       framing,
     };
-    expect(presetClient.save).toHaveBeenCalledWith(saved);
+    expect(presetClient.save).toHaveBeenCalledWith(expected);
+    const saved = presetClient.save.mock.calls[0]![0];
+    expect(saved).toEqual(expected);
+    expect(saved.version).toBe(3);
     expect(Object.keys(saved.framing!).sort()).toEqual([
       "aspectLocked",
       "generationAspect",
