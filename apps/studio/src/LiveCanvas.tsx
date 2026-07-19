@@ -137,6 +137,12 @@ export interface LiveCanvasHandle {
   /** Atomically read the retained record for the last committed canvas frame. */
   captureDisplayedFrame(): DisplayedSceneSnapshot | null;
   /**
+   * Atomically read the most recent committed Fill, even while Outline is the
+   * currently displayed mode. Page-framed ordinary export consumes this exact
+   * full-Composition source instead of asking the Sketch to sample it again.
+   */
+  captureDisplayedFillFrame(): DisplayedSceneSnapshot | null;
+  /**
    * The live `<canvas>` element, or `null` before it mounts. Its backing store is
    * already DPR-sized by `sizeToBox`, so a `toBlob` snapshot is crisp by
    * construction (the displayed frame at device resolution).
@@ -553,6 +559,7 @@ export function LiveCanvas({
       getCurrentT: () => tRef.current,
       getDisplayedScene: () => displayedSceneRef.current,
       captureDisplayedFrame: () => displayedSceneRef.current,
+      captureDisplayedFillFrame: () => displayedFillRef.current,
     }),
     [],
   );
