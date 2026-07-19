@@ -225,7 +225,6 @@ async function runAll() {
     sampledT: 0,
     compositionFrame,
     tolerance: 0,
-    includeFrame: preset.profile.includeFrame,
     sourceScene,
   });
   assert(identity.sourceKind === "legacy-scene", "Leaf Field must use the legacy Scene identity");

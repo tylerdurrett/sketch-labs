@@ -82,7 +82,7 @@ vi.mock("./presetsClient", () => ({
 }));
 
 vi.mock("./hiddenLineCoordinator", async () => {
-  const { outlineScene } = await import("./outlineScene");
+  const { finalizeOutlineScene, outlineScene } = await import("./outlineScene");
   const { clipSceneToBounds, renderPlotterSVG } = await import("@harness/core");
   return {
     HiddenLineCoordinator: class {
@@ -99,7 +99,6 @@ vi.mock("./hiddenLineCoordinator", async () => {
               scene: outlineScene(
                 identity.sourceScene as Scene,
                 identity.tolerance,
-                identity.includeFrame,
               ),
             });
             return Promise.resolve();
@@ -112,10 +111,13 @@ vi.mock("./hiddenLineCoordinator", async () => {
         if (snapshot.identity.sourceKind !== "legacy-scene") {
           throw new Error("PhysicalPaperFlow uses only legacy Scene identities");
         }
-        const scene = outlineScene(
-          snapshot.identity.sourceScene as Scene,
-          snapshot.identity.tolerance,
-          snapshot.identity.includeFrame,
+        const scene = finalizeOutlineScene(
+          outlineScene(
+            snapshot.identity.sourceScene as Scene,
+            snapshot.identity.tolerance,
+          ),
+          snapshot.pageFrame,
+          snapshot.profile.includeFrame,
         );
         const payload = {
           status: "success" as const,
@@ -128,7 +130,13 @@ vi.mock("./hiddenLineCoordinator", async () => {
             { includePaperMargins: snapshot.includePaperMargins },
           ),
           filename: snapshot.filename,
-          completedOutline: { identity: snapshot.identity, scene },
+          completedOutline: {
+            identity: snapshot.identity,
+            scene: outlineScene(
+              snapshot.identity.sourceScene as Scene,
+              snapshot.identity.tolerance,
+            ),
+          },
         };
         return {
           then(resolve: (result: typeof payload) => void) {
@@ -686,8 +694,8 @@ describe("physical plot artifact acceptance flow (#276)", () => {
 
     clickButton(el, "Export Hidden-line SVG");
     const enabledExportScene = previewCapture.plotterExport!.scene;
-    // Canvas clipping is implicit in preview pixels and explicit for exported
-    // vectors; after that boundary step the geometry and styling are identical.
+    // The preview is already the one cheap finalization of the cached base;
+    // export adds only explicit vector clipping, never a second Page boundary.
     expect(enabledExportScene).toEqual(clipSceneToBounds(enabledPreview));
     expect(previewCapture.plotterExport?.profile).toEqual(profile);
     const enabledSvg = await downloadBlob.mock.calls.at(-1)![0].text();
@@ -776,9 +784,12 @@ describe("physical plot artifact acceptance flow (#276)", () => {
     act(() => frameCheckbox.click());
     flushRaf();
     const disabledPreview = previewCapture.paints.at(-1)!.scene as Scene;
-    expect(disabledPreview.primitives).toEqual(
-      enabledPreview.primitives.slice(0, -1),
-    );
+    // Frame visibility is cheap preview/export finalization state, not cached
+    // Outline input: hiding it removes exactly the final Page rectangle.
+    expect(disabledPreview).toEqual({
+      ...enabledPreview,
+      primitives: enabledPreview.primitives.slice(0, -1),
+    });
 
     clickButton(el, "Export Hidden-line SVG");
     const disabledExportScene = previewCapture.plotterExport!.scene;

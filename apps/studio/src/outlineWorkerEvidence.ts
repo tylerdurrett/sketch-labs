@@ -270,7 +270,6 @@ async function runScenario(id: string, bladeDensity: number) {
     sampledT: 0,
     compositionFrame,
     tolerance: 0,
-    includeFrame: profile.includeFrame,
     outlineTarget: {
       toolWidthMillimeters: OUTLINE_TOOL_WIDTH_MILLIMETERS,
       millimetersPerSceneUnit: computePlotMapping(

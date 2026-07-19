@@ -23,6 +23,7 @@ import {
   type LiveCanvasHandle,
   type LiveCanvasProps,
 } from "./LiveCanvas";
+import { finalizeOutlineScene } from "./outlineScene";
 
 /** Keep legacy tests terse while the production component requires an explicit frame. */
 function LiveCanvas(
@@ -1206,6 +1207,227 @@ describe("LiveCanvas retained Page Frame derivation (#344 PF-06)", () => {
   });
 });
 
+describe("LiveCanvas cached Outline Page finalization (#345 PF03)", () => {
+  const compositionFrame = { width: 200, height: 100 };
+  const crop = { x: 20, y: 10, width: 100, height: 50 };
+  const padding = { x: -20, y: -10, width: 240, height: 120 };
+  const mixed = { x: 40, y: -20, width: 200, height: 90 };
+  const source: Scene = {
+    space: compositionFrame,
+    primitives: [
+      {
+        points: [[0, 30], [200, 30]],
+        stroke: { color: "black", width: 1 },
+      },
+    ],
+    background: { color: "ivory" },
+  };
+  const outlineState = {
+    kind: "outline" as const,
+    scene: source,
+    t: 7,
+    sourceInputRevision: 23,
+    contentRevision: 41,
+  };
+  const profile = (includeFrame: boolean): PlotProfile => ({
+    ...HARNESS_FALLBACK_PLOT_PROFILE,
+    includeFrame,
+  });
+
+  it.each([
+    ["crop", crop],
+    ["padding", padding],
+    ["mixed crop and padding", mixed],
+  ] as const)(
+    "finalizes a cached Outline through %s and draws the optional boundary around the final Page",
+    (_label, frame) => {
+      const handle = createRef<LiveCanvasHandle>();
+      const { sketch, prepare, generate } = explicitlyPreparedSketch({
+        duration: 10,
+        mode: "loop",
+      });
+      const el = mount(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={{ value: 1 }}
+          seed={1}
+          compositionFrame={compositionFrame}
+          profile={profile(true)}
+          pageFrame={frame}
+          renderState={outlineState}
+        />,
+      );
+
+      const snapshot = handle.current!.captureDisplayedFrame()!;
+      expect(snapshot.sourceScene).toBe(source);
+      expect(snapshot.displayedScene).toEqual(
+        finalizeOutlineScene(source, frame, true),
+      );
+      expect(snapshot.scene).toBe(snapshot.displayedScene);
+      expect(snapshot.displayedScene.space).toEqual({
+        width: frame.width,
+        height: frame.height,
+      });
+      expect(snapshot.displayedScene.primitives.at(-1)?.points).toEqual([
+        [0, 0],
+        [frame.width, 0],
+        [frame.width, frame.height],
+        [0, frame.height],
+        [0, 0],
+      ]);
+      expect(snapshot).toMatchObject({
+        t: 7,
+        renderMode: "outline",
+        sourceInputRevision: 23,
+        contentRevision: 41,
+      });
+      expect(
+        Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+      ).toBeCloseTo(frame.width / frame.height);
+      expect(prepare).not.toHaveBeenCalled();
+      expect(generate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("re-finalizes one exact cached source across frame, edit, Apply, Reset, and includeFrame changes", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const onDisplayedSceneCommitted = vi.fn();
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const params = { value: 1 };
+    const sourceBefore = structuredClone(source);
+    const render = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+      includeFrame: boolean,
+    ) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={profile(includeFrame)}
+        pageFrame={pageFrame}
+        pageFrameDraft={pageFrameDraft}
+        renderState={outlineState}
+        onDisplayedSceneCommitted={onDisplayedSceneCommitted}
+      />
+    );
+    const el = mount(render(null, null, false));
+    const snapshots = [handle.current!.captureDisplayedFrame()!];
+    expect(snapshots[0]!.displayedScene).toBe(source);
+    expect(snapshots[0]!.includeFrame).toBe(false);
+
+    const transition = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+      includeFrame: boolean,
+    ) => {
+      act(() => root!.render(render(pageFrame, pageFrameDraft, includeFrame)));
+      const snapshot = handle.current!.captureDisplayedFrame()!;
+      snapshots.push(snapshot);
+      expect(snapshot.includeFrame).toBe(includeFrame);
+      return snapshot;
+    };
+
+    expect(transition(crop, null, false).displayedScene).toEqual(
+      finalizeOutlineScene(source, crop, false),
+    );
+    expect(transition(padding, null, false).displayedScene).toEqual(
+      finalizeOutlineScene(source, padding, false),
+    );
+
+    const editing = transition(padding, padding, false);
+    expect(editing.displayedScene).toBe(source);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(compositionFrame.width / compositionFrame.height);
+    expect(
+      el.querySelector("[data-testid='page-frame-boundary']"),
+    ).not.toBeNull();
+
+    const applied = transition(mixed, null, false);
+    expect(applied.displayedScene).toEqual(
+      finalizeOutlineScene(source, mixed, false),
+    );
+
+    const boundaryVisible = transition(mixed, null, true);
+    expect(boundaryVisible.displayedScene).toEqual(
+      finalizeOutlineScene(source, mixed, true),
+    );
+    const boundaryHiddenAgain = transition(mixed, null, false);
+    expect(boundaryHiddenAgain.displayedScene).toEqual(applied.displayedScene);
+
+    const reset = transition(null, null, false);
+    expect(reset.displayedScene).toBe(source);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(compositionFrame.width / compositionFrame.height);
+
+    for (const snapshot of snapshots) {
+      expect(snapshot.sourceScene).toBe(source);
+      expect(snapshot).toMatchObject({
+        t: 7,
+        renderMode: "outline",
+        sourceInputRevision: 23,
+        contentRevision: 41,
+      });
+    }
+    expect(outlineState.scene).toBe(source);
+    expect(source).toEqual(sourceBefore);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("shows the full Composition and its optional boundary while Page Frame editing", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{ value: 1 }}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={profile(true)}
+        pageFrame={crop}
+        pageFrameDraft={mixed}
+        renderState={outlineState}
+      />,
+    );
+
+    const displayed = handle.current!.captureDisplayedFrame()!;
+    expect(displayed.sourceScene).toBe(source);
+    expect(displayed.displayedScene).toEqual(
+      finalizeOutlineScene(source, null, true),
+    );
+    expect(displayed.displayedScene.space).toEqual(compositionFrame);
+    expect(displayed.displayedScene.primitives.at(-1)?.points).toEqual([
+      [0, 0],
+      [compositionFrame.width, 0],
+      [compositionFrame.width, compositionFrame.height],
+      [0, compositionFrame.height],
+      [0, 0],
+    ]);
+    const editBoundary = el.querySelector<SVGRectElement>(
+      "[data-testid='page-frame-boundary']",
+    )!;
+    expect(editBoundary.getAttribute("x")).toBe(String(mixed.x));
+    expect(editBoundary.getAttribute("y")).toBe(String(mixed.y));
+    expect(editBoundary.getAttribute("width")).toBe(String(mixed.width));
+    expect(editBoundary.getAttribute("height")).toBe(String(mixed.height));
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+});
+
 describe("LiveCanvas transport — one-shot range/clamp via synthetic fixture (AC4)", () => {
   it("a one-shot Sketch's scrubber clamps its range at duration", () => {
     // No real one-shot Sketch exists yet — construct the fixture to exercise the
@@ -1594,11 +1816,15 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
 
     expect(generate).not.toHaveBeenCalled();
     expect(counts.stroke ?? 0).toBeGreaterThan(0);
-    expect(handle.current?.getDisplayedScene()).toMatchObject({
-      scene: outline,
+    const displayed = handle.current?.getDisplayedScene();
+    expect(displayed).toMatchObject({
       t: 4,
       renderMode: "outline",
     });
+    expect(displayed?.sourceScene).toBe(outline);
+    expect(displayed?.scene).toEqual(
+      finalizeOutlineScene(outline, null, true),
+    );
   });
 
   it("never prepares or generates the Sketch for supplied Fill, Outline, or Tone", () => {
@@ -1694,7 +1920,10 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
       );
     });
     expect(handle.current?.getDisplayedScene()).not.toBeNull();
-    expect(handle.current?.getDisplayedScene()?.scene).toBe(outline);
+    expect(handle.current?.getDisplayedScene()?.sourceScene).toBe(outline);
+    expect(handle.current?.getDisplayedScene()?.scene).toEqual(
+      finalizeOutlineScene(outline, null, true),
+    );
   });
 
   it("repaints supplied geometry on resize without deriving or replacing it", () => {
@@ -2059,6 +2288,149 @@ describe("LiveCanvas Tone reference pixels (#316)", () => {
     expect(canvasEl(el).width).toBe(4);
     expect(sample).toHaveBeenCalledTimes(6);
     expect(images.at(-1)).toHaveLength(16);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("rasterizes the committed Page extent at its aspect with white padding outside Composition", () => {
+    const { ctx, counts, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 5, height: 1 } as DOMRect,
+    );
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const sample = vi.fn(() => 1);
+    const source: ToneSource = {
+      toneField: createToneField(sample),
+      shadingMask: createShadingMask(() => 1),
+    };
+    const frame = { x: -5, y: 2, width: 20, height: 4 };
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={{ width: 10, height: 10 }}
+        pageFrame={frame}
+        renderState={{ kind: "tone-reference", source }}
+      />,
+    );
+
+    expect(canvasEl(el)).toMatchObject({ width: 5, height: 1 });
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBe(5);
+    expect(
+      Array.from({ length: 5 }, (_, index) => images[0]![index * 4]),
+    ).toEqual([255, 0, 0, 0, 255]);
+    expect(sample).toHaveBeenCalledTimes(3);
+    expect(counts.putImageData).toBe(1);
+    expect(counts.setTransform ?? 0).toBe(0);
+    expect(counts.fillRect ?? 0).toBe(0);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("re-rasterizes only on committed framing settlement while draft motion stays overlay-only", () => {
+    const { ctx, counts, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 2, height: 2 } as DOMRect,
+    );
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const sampled: Array<readonly [number, number]> = [];
+    const source: ToneSource = {
+      toneField: createToneField((point) => {
+        sampled.push(point);
+        return 0.5;
+      }),
+      shadingMask: createShadingMask(() => 1),
+    };
+    const params = {};
+    const crop = { x: 10, y: 20, width: 40, height: 20 };
+    const movedDraft = { x: -30, y: -40, width: 160, height: 180 };
+    const applied = { x: 50, y: 5, width: 20, height: 60 };
+    const render = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+    ) => (
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={{ width: 100, height: 100 }}
+        pageFrame={pageFrame}
+        pageFrameDraft={pageFrameDraft}
+        renderState={{ kind: "tone-reference", source }}
+      />
+    );
+    const el = mount(render(null, null));
+    expect(sampled).toEqual([
+      [25, 25],
+      [75, 25],
+      [25, 75],
+      [75, 75],
+    ]);
+
+    act(() => root!.render(render(crop, null)));
+    expect(sampled.slice(-4)).toEqual([
+      [20, 25],
+      [40, 25],
+      [20, 35],
+      [40, 35],
+    ]);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBe(2);
+
+    act(() => root!.render(render(crop, crop)));
+    expect(sampled.slice(-4)).toEqual([
+      [25, 25],
+      [75, 25],
+      [25, 75],
+      [75, 75],
+    ]);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBe(1);
+
+    const paintsBeforeDraftMotion = counts.putImageData;
+    const samplesBeforeDraftMotion = sampled.length;
+    act(() => root!.render(render(crop, movedDraft)));
+    expect(counts.putImageData).toBe(paintsBeforeDraftMotion);
+    expect(sampled).toHaveLength(samplesBeforeDraftMotion);
+    expect(
+      el.querySelector("[data-testid='page-frame-boundary']")?.getAttribute("x"),
+    ).toBe(String(movedDraft.x));
+
+    act(() => root!.render(render(applied, null)));
+    expect(sampled.slice(-4)).toEqual([
+      [55, 20],
+      [65, 20],
+      [55, 50],
+      [65, 50],
+    ]);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(1 / 3);
+
+    act(() => root!.render(render(null, null)));
+    expect(sampled.slice(-4)).toEqual([
+      [25, 25],
+      [75, 25],
+      [25, 75],
+      [75, 75],
+    ]);
+    expect(counts.putImageData).toBe(5);
+    expect(images).toHaveLength(5);
+    expect(counts.setTransform ?? 0).toBe(0);
+    expect(counts.fillRect ?? 0).toBe(0);
+    expect(prepare).not.toHaveBeenCalled();
     expect(generate).not.toHaveBeenCalled();
   });
 

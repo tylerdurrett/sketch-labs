@@ -43,7 +43,7 @@ import type {
   LiveCanvasHandle,
 } from "./LiveCanvas";
 import { mutableScene } from "./outlineComputeProtocol";
-import { outlineScene } from "./outlineScene";
+import { finalizeOutlineScene, outlineScene } from "./outlineScene";
 import { ImageAssetResolutionError } from "./imageAssetResolver";
 import { isScribbleComputeIdentity } from "./scribbleComputeProtocol";
 import { SketchControls } from "./SketchControls";
@@ -243,10 +243,15 @@ vi.mock("./hiddenLineCoordinator", () => ({
                     primitives: [],
                   },
               snapshot.identity.tolerance,
-              snapshot.identity.includeFrame,
             )
           : mutableScene(snapshot.reusableOutline.scene);
-      const clipped = clipSceneToBounds(processed);
+      const clipped = clipSceneToBounds(
+        finalizeOutlineScene(
+          processed,
+          snapshot.pageFrame,
+          snapshot.profile.includeFrame,
+        ),
+      );
       outlineJob.exportFinalizations += 1;
       const payload = {
         status: "success" as const,
@@ -539,7 +544,6 @@ vi.mock("./LiveCanvas", () => ({
               primitives: [],
             },
         active.identity.tolerance,
-        active.identity.includeFrame,
       );
       outlineJob.lastCompletedScene = scene;
       active.resolve({
@@ -2895,7 +2899,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(generateOutlineSource).not.toHaveBeenCalled();
   });
 
-  it("marks Outline recomputing when the composition-frame option changes", () => {
+  it("does not rederive Outline when the final Page rectangle option changes", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -2914,6 +2918,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
 
     expect(lastProfile?.includeFrame).toBe(false);
     expect(lastCompositionFrame).toBe(initialFrame);
+    expect(outlineJob.starts).toBe(1);
     expect(
       el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
         "data-include-frame",
@@ -2923,7 +2928,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(toggle.disabled).toBe(false);
   });
 
-  it("restores includeFrame from a Preset and recomputes the visible Outline", async () => {
+  it("restores includeFrame from a Preset without rederiving visible Outline", async () => {
     autoFireOutlineComputed = false;
     listPresets.mockResolvedValue(["without-frame"]);
     const profileWithoutFrame: PlotProfile = {
@@ -2957,6 +2962,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(el.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(
       false,
     );
+    expect(outlineJob.starts).toBe(1);
     expect(toggle.textContent).toBe("Outline");
     expect(toggle.disabled).toBe(false);
   });
@@ -3302,6 +3308,18 @@ describe("SketchControls — SVG export wiring", () => {
   });
 });
 
+function finalizedPlotterScene(base: Scene): Scene {
+  const snapshot = outlineJob.lastExportSnapshot;
+  if (snapshot === null) throw new Error("expected hidden-line export snapshot");
+  return clipSceneToBounds(
+    finalizeOutlineScene(
+      base,
+      snapshot.pageFrame,
+      snapshot.profile.includeFrame,
+    ),
+  );
+}
+
 describe("SketchControls — Hidden-line SVG export wiring", () => {
   // A Scene with TWO overlapping filled squares in painter's order: the nearer
   // (second) square covers the far-left region of the farther (first) one, so
@@ -3543,7 +3561,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
   it("atomically scales the physical sheet via Preset reload while reusing the cached Outline Scene", async () => {
     listPresets.mockResolvedValue(["double"]);
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
-    const processed = outlineScene(source, 0, true);
+    const processed = outlineScene(source, 0);
     const processedBefore = structuredClone(processed);
     const generate = vi.fn(() => source);
     const el = mount(
@@ -3636,7 +3654,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
   it("reuses the exact displayed outline Scene without generating or reprocessing", () => {
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
-    const processed = outlineScene(source, 0, true);
+    const processed = outlineScene(source, 0);
     const base = hlStaticSketch("circles");
     const generate = vi.fn(() => source);
     const sketch = { ...base, generate };
@@ -3656,7 +3674,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).not.toHaveBeenCalled();
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(processed),
+      finalizedPlotterScene(processed),
     );
   });
 
@@ -3678,7 +3696,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).not.toHaveBeenCalled();
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(source, 0, true)),
+      finalizedPlotterScene(outlineScene(source, 0)),
     );
   });
 
@@ -3748,7 +3766,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).toHaveBeenCalledTimes(1);
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(source, 0, true)),
+      finalizedPlotterScene(outlineScene(source, 0)),
     );
   });
 
@@ -3770,7 +3788,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).not.toHaveBeenCalled();
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(fakeDisplayedScene.scene, 0, true)),
+      finalizedPlotterScene(outlineScene(fakeDisplayedScene.scene, 0)),
     );
   });
 
@@ -3801,7 +3819,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // the schema defaults ({ radius: 10 }); seed is the displayed seed. The
     // outline preview evaluates this SAME expression, so the two inputs match.
     expect(plotterExportCapture.current?.scene).toEqual(
-      outlineScene(
+      finalizedPlotterScene(outlineScene(
         sketch.generate(
           { radius: 10 },
           seed,
@@ -3809,8 +3827,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
         0,
-        true,
-      ),
+      )),
     );
   });
 
@@ -3883,7 +3900,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     clickButton(el, "Export Hidden-line SVG");
     const atZero = plotterExportCapture.current?.scene;
     expect(atZero).toEqual(
-      outlineScene(
+      finalizedPlotterScene(outlineScene(
         sketch.generate(
           { radius: 10 },
           seed,
@@ -3891,8 +3908,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
         0,
-        true,
-      ),
+      )),
     );
     const vertsAtZero = totalVerts(atZero);
 
@@ -3904,7 +3920,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // preview == export: the export is the SAME seam expression at tolerance 1
     // (the value LiveCanvas's outline preview also receives — asserted below).
     expect(atOne).toEqual(
-      outlineScene(
+      finalizedPlotterScene(outlineScene(
         sketch.generate(
           { radius: 10 },
           seed,
@@ -3912,8 +3928,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
         1,
-        true,
-      ),
+      )),
     );
     // ...and simplification actually reduced the exported vertex count.
     expect(totalVerts(atOne)).toBeLessThan(vertsAtZero);
@@ -3980,7 +3995,6 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
         resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
       ),
       0,
-      true,
     );
     expect(outOfBoundsPoints(seam, 100, 100)).not.toEqual([]);
 
@@ -3992,7 +4006,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     const exported = plotterExportCapture.current?.scene;
     expect(exported).not.toBeNull();
     expect(outOfBoundsPoints(exported, 100, 100)).toEqual([]);
-    expect(exported).toEqual(clipSceneToBounds(seam));
+    expect(exported).toEqual(finalizedPlotterScene(seam));
 
     const svg = await blobText(downloadBlob.mock.calls[0]![0]);
     const coordinates = [
@@ -4096,7 +4110,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     clickButton(el, "Fill");
     const startsBeforeExport = outlineJob.starts;
     fakeDisplayedScene = {
-      scene: outlineScene(source, 0, true),
+      scene: outlineScene(source, 0),
       t: 0,
       renderMode: "outline",
       tolerance: 0,
@@ -4936,7 +4950,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     clickButton(el, "Export Hidden-line SVG");
     await flush();
     expect(outlineJob.exportStarts).toBe(1);
-    expect(outlineJob.lastExportSnapshot?.identity.includeFrame).toBe(false);
+    expect(outlineJob.lastExportSnapshot?.profile.includeFrame).toBe(false);
     const plotterScene = plotterExportCapture.current?.scene as Scene;
     expect(plotterScene.primitives.length).toBeGreaterThan(0);
     expect(plotterScene.primitives.map(({ points }) => points)).toEqual(
@@ -5056,6 +5070,254 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(scribbleJob.starts).toHaveLength(1);
     expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
     expect(canvas.dataset.contentRevision).toBe(contentRevision);
+  });
+
+  it.each([
+    ["crop", { x: 25, y: 20, width: 50, height: 60 }],
+    ["padding", { x: -25, y: -10, width: 150, height: 120 }],
+    ["mixed crop and padding", { x: 25, y: -10, width: 100, height: 80 }],
+  ] as const)(
+    "frames the acknowledged Scribble Scene for %s ordinary SVG without recomputation",
+    async (_label, percentages) => {
+      const generate = vi.fn(toneCalibration.generate);
+      const el = mount(
+        <SketchControls sketch={{ ...toneCalibration, generate }} />,
+      );
+      await flush();
+      const composition = lastCompositionFrame!;
+      const source: Scene = {
+        space: { ...composition },
+        background: { color: "lavender" },
+        primitives: [
+          {
+            points: [
+              [0, composition.height / 2],
+              [composition.width, composition.height / 2],
+            ],
+            stroke: { color: "black", width: 1 },
+            hiddenLineRole: "source",
+          },
+        ],
+      };
+      await completeScribble(0, source);
+      const canvas = el.querySelector<HTMLElement>(
+        '[data-testid="canvas-seed"]',
+      )!;
+      const sourceRevision = canvas.dataset.sourceInputRevision;
+      const contentRevision = canvas.dataset.contentRevision;
+
+      clickButton(el, "Crop");
+      for (const [name, value] of Object.entries(percentages)) {
+        setInput(
+          el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+          String(value),
+        );
+      }
+      clickButton(el, "Apply");
+
+      const frame: PageFrame = {
+        x: (composition.width * percentages.x) / 100,
+        y: (composition.height * percentages.y) / 100,
+        width: (composition.width * percentages.width) / 100,
+        height: (composition.height * percentages.height) / 100,
+      };
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(generate).not.toHaveBeenCalled();
+      expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
+      expect(canvas.dataset.contentRevision).toBe(contentRevision);
+
+      clickButton(el, "Export SVG");
+
+      const expected = frameScene(source, frame);
+      expect(exportSceneCapture.current).toEqual(expected);
+      expect(exportSceneCapture.current).not.toBe(source);
+      expect((exportSceneCapture.current as Scene).space).toEqual({
+        width: frame.width,
+        height: frame.height,
+      });
+      expect((exportSceneCapture.current as Scene).background).toEqual({
+        color: "lavender",
+      });
+      expect(
+        (exportSceneCapture.current as Scene).primitives[0]?.points,
+      ).toEqual(expected.primitives[0]?.points);
+      const svg = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(downloadBlob.mock.calls.at(-1)![0]);
+      });
+      const document = new DOMParser().parseFromString(svg, "image/svg+xml");
+      const root = document.documentElement;
+      expect(root.getAttribute("viewBox")).toBe(
+        `0 0 ${frame.width} ${frame.height}`,
+      );
+      expect(root.querySelector(":scope > rect")?.getAttribute("x")).toBe("0");
+      expect(root.querySelector(":scope > rect")?.getAttribute("y")).toBe("0");
+      expect(root.querySelector(":scope > rect")?.getAttribute("fill")).toBe(
+        "lavender",
+      );
+
+      clickButton(el, "Export PNG");
+      await flush();
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(generate).not.toHaveBeenCalled();
+      expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
+      expect(canvas.dataset.contentRevision).toBe(contentRevision);
+    },
+  );
+
+  it("aborts framed Scribble SVG when the retained canvas provenance is stale", async () => {
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    await flush();
+    const source = preparedScene(78);
+    await completeScribble(0, source);
+
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    clickButton(el, "Apply");
+    fakeDisplayedScene = {
+      scene: source,
+      sourceScene: source,
+      displayedScene: source,
+      t: 0,
+      renderMode: "fill",
+      tolerance: 0,
+      includeFrame: true,
+      sourceInputRevision: 0,
+      contentRevision: 999,
+    };
+
+    clickButton(el, "Export SVG");
+
+    expect(exportSceneCapture.current).toBeNull();
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("reuses one Scribble and Outline base through repeated Page history, frame visibility, and exports", async () => {
+    autoFireOutlineComputed = false;
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    await flush();
+    const source = preparedScene(79);
+    await completeScribble(0, source);
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    act(() => lastOnOutlineComputed?.());
+
+    const composition = lastCompositionFrame!;
+    clickButton(el, "Crop");
+    for (const [name, value] of Object.entries({
+      x: 12.5,
+      y: -10,
+      width: 80,
+      height: 115,
+    })) {
+      setInput(
+        el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+        String(value),
+      );
+    }
+    clickButton(el, "Apply");
+    const expectedFrame: PageFrame = {
+      x: composition.width * 0.125,
+      y: composition.height * -0.1,
+      width: composition.width * 0.8,
+      height: composition.height * 1.15,
+    };
+
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+
+    const first = outlineJob.lastExportSnapshot!;
+    expect(first.pageFrame).toEqual(expectedFrame);
+    expect(first.pageFrame).not.toBe(lastCommittedPageFrame);
+    expect(Object.isFrozen(first.pageFrame)).toBe(true);
+    expect(first.identity).not.toHaveProperty("pageFrame");
+    expect(first.identity).not.toHaveProperty("includeFrame");
+    expect(first.reusableOutline).toBeDefined();
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.starts).toBe(1);
+
+    act(() => compositionFrameCheckbox(el).click());
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+
+    expect(outlineJob.lastExportSnapshot?.pageFrame).toEqual(expectedFrame);
+    expect(outlineJob.lastExportSnapshot?.profile.includeFrame).toBe(false);
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.starts).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    const exportAndExpectFrame = async (pageFrame: PageFrame | null) => {
+      clickButton(el, "Export Hidden-line SVG");
+      await flush();
+      expect(outlineJob.lastExportSnapshot?.pageFrame).toEqual(pageFrame);
+      expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+      expect(outlineJob.exportDerivations).toBe(0);
+      expect(outlineJob.starts).toBe(1);
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(generate).not.toHaveBeenCalled();
+    };
+
+    // Reset, Undo, and Redo traverse only cheap finalization state. Export each
+    // settled state so reuse is proven at the actual worker boundary, not merely
+    // inferred from the preview job count.
+    clickButton(el, "Crop");
+    clickButton(el, "Reset Frame");
+    await exportAndExpectFrame(null);
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    await exportAndExpectFrame(expectedFrame);
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    await exportAndExpectFrame(null);
+
+    // Re-apply an asymmetric mixed crop/pad frame, export it repeatedly, then
+    // restore the Page boundary. None is a generation or derivation identity.
+    clickButton(el, "Crop");
+    for (const [name, value] of Object.entries({
+      x: -20,
+      y: 10,
+      width: 130,
+      height: 75,
+    })) {
+      setInput(
+        el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+        String(value),
+      );
+    }
+    clickButton(el, "Apply");
+    const asymmetricFrame: PageFrame = {
+      x: composition.width * -0.2,
+      y: composition.height * 0.1,
+      width: composition.width * 1.3,
+      height: composition.height * 0.75,
+    };
+    await exportAndExpectFrame(asymmetricFrame);
+    await exportAndExpectFrame(asymmetricFrame);
+
+    act(() => compositionFrameCheckbox(el).click());
+    expect(outlineJob.lastExportSnapshot?.profile.includeFrame).toBe(false);
+    await exportAndExpectFrame(asymmetricFrame);
+    expect(outlineJob.lastExportSnapshot?.profile.includeFrame).toBe(true);
+    expect(outlineJob.exportStarts).toBe(8);
+    expect(outlineJob.exportFinalizations).toBe(8);
   });
 
   const assetA = "portrait-alpha-000000000001";
@@ -6494,7 +6756,9 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     await flush();
     expect(outlineJob.exportStarts).toBe(1);
     expect(outlineJob.exportDerivations).toBe(0);
-    expect(plotterExportCapture.current?.scene).toEqual(currentOutline);
+    expect(plotterExportCapture.current?.scene).toEqual(
+      finalizedPlotterScene(currentOutline),
+    );
     expect(downloadBlob).toHaveBeenCalledTimes(1);
   });
 
