@@ -157,6 +157,8 @@ class FakeEvidenceWorker {
       serializedArtworkBytes: 100,
       targetHash: null,
       workerDurationMs: this.config.purpose === "measurement" ? 1 : null,
+      preparationCount: 1,
+      solverPassCount: 1,
       responseReadyEpochMs: Date.now(),
     };
     FakeEvidenceBroadcastChannel.deliver(
@@ -216,6 +218,10 @@ function installEvidenceBrowserFakes(): void {
   vi.stubGlobal("document", { querySelector: () => null });
   vi.stubGlobal("BroadcastChannel", FakeEvidenceBroadcastChannel);
   vi.stubGlobal("Worker", FakeEvidenceWorker);
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callback(performance.now());
+    return 1;
+  });
 }
 
 afterEach(() => {
@@ -437,7 +443,7 @@ describe("Photo Scribble evidence page seams", () => {
     const run = await runPhotoScribbleEvidence(
       "flowers-opaque-control",
       { kind: "production" },
-      {},
+      { includePresentationEvidence: false },
     );
     expect(run.purpose).toBe("measurement");
     expect(run.fullTuple).toBeNull();

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260719T001328Z",
+  "completed": [
+    {
+      "jobKey": "flowers-opaque-fine/adopted-production--s1000000-p16000-g32000-r16000",
+      "status": "completed",
+      "rawRecord": "issue-336-20260719T001328Z/flowers-opaque-fine/adopted-production--s1000000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--adopted-production--s1000000-p16000-g32000-r16000--attempt-0001.raw.json",
+      "summary": "issue-336-20260719T001328Z/flowers-opaque-fine/adopted-production--s1000000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--adopted-production--s1000000-p16000-g32000-r16000--attempt-0001.summary.json"
+    },
+    {
+      "jobKey": "pinecone-dark-alpha-fine/adopted-production--s1000000-p16000-g32000-r16000",
+      "status": "completed",
+      "rawRecord": "issue-336-20260719T001328Z/pinecone-dark-alpha-fine/adopted-production--s1000000-p16000-g32000-r16000/issue-336-trial-pinecone-dark-alpha-fine--adopted-production--s1000000-p16000-g32000-r16000--attempt-0001.raw.json",
+      "summary": "issue-336-20260719T001328Z/pinecone-dark-alpha-fine/adopted-production--s1000000-p16000-g32000-r16000/issue-336-trial-pinecone-dark-alpha-fine--adopted-production--s1000000-p16000-g32000-r16000--attempt-0001.summary.json"
+    }
+  ],
+  "nextJobKey": null,
+  "campaignFailures": [],
+  "updatedAt": "2026-07-19T00:18:44.973Z"
+}

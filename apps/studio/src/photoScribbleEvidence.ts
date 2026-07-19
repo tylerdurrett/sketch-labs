@@ -63,6 +63,10 @@ const protocol = protocolJson as unknown as {
   readonly scenarios: readonly Scenario[];
   readonly orderedLimitCandidates: readonly Candidate[];
   readonly machineCeilingCandidates: readonly Candidate[];
+  readonly adoptedPolicyConfirmation: Candidate & {
+    readonly toneGammaExponentRange: readonly [number, number];
+    readonly centeredTargetHashes: Readonly<Record<string, string>>;
+  };
 };
 
 interface MainProcessMemory {
@@ -79,6 +83,8 @@ interface RunOptions {
   /** Host identity copied through so a campaign can reject stale page results. */
   readonly campaignId?: string;
   readonly hostRunId?: string;
+  /** Unit-test seam; campaign hosts always retain presentation evidence. */
+  readonly includePresentationEvidence?: boolean;
 }
 
 let activeEvidenceCoordinator: ScribbleCoordinator | null = null;
@@ -240,6 +246,7 @@ function profileForCandidate(candidateId: string): PhotoScribbleEvidenceProfile 
   const candidate = [
     ...protocol.orderedLimitCandidates,
     ...protocol.machineCeilingCandidates,
+    protocol.adoptedPolicyConfirmation,
   ].find(
     (value) => value.candidateId === candidateId,
   );
@@ -784,11 +791,11 @@ async function runPhotoScribbleEvidenceOperation(
     const finalReceipt = trace.finalReceiptEpochMs ?? Date.now();
     const afterMemory = memorySample();
     const presentation =
-      purpose === "measurement" && profile.kind === "injected"
+      purpose === "measurement" && options.includePresentationEvidence !== false
         ? await presentEvidence(scenario, outcome.scene, trace)
         : null;
     const cancellation =
-      purpose === "measurement" && profile.kind === "injected"
+      purpose === "measurement"
         ? await cancellationEvidence(identity, profile, runId)
         : null;
     return {
@@ -928,7 +935,10 @@ if (status !== null) {
       scenarios: protocol.scenarios.map(({ scenarioId }) => scenarioId),
       candidates: protocol.orderedLimitCandidates.map(({ candidateId }) =>
         candidateId,
-      ).concat(protocol.machineCeilingCandidates.map(({ candidateId }) => candidateId)),
+      ).concat(
+        protocol.machineCeilingCandidates.map(({ candidateId }) => candidateId),
+        protocol.adoptedPolicyConfirmation.candidateId,
+      ),
     },
     null,
     2,

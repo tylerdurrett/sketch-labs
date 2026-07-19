@@ -272,3 +272,14 @@ measured Canvas metrics; Puppeteer CSS screenshots are not campaign captures.
 The isolated cancellation observation is only a direct coordinator cancellation
 after progress. It does not claim to exercise the Studio's `#control-chaos`
 superseding edit, stale-retention UI, or inspector round trips.
+
+## Adopted-policy confirmation
+
+After the selected tuple lands in production, a `confirmation` manifest may
+contain only `adopted-production` for the two frozen fine scenarios. Each job
+runs the registered production generator twice through fresh DedicatedWorkers,
+plus a separate production-versus-injected exact-equivalence proof. The host
+requires the resolver's full tuple, frozen centered target hash, identity hash,
+Scene hash, and diagnostics hash to agree before it accepts either measured
+production run. Every run records exactly one preparation and solver pass; the
+primary run additionally persists the exact 1000 × 1000 Canvas captures.

@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260719T001328Z",
+  "phase": "confirmation",
+  "job": {
+    "ordinal": 1,
+    "scenarioId": "flowers-opaque-fine",
+    "fixtureId": "flowers-opaque-portrait",
+    "imageAssetId": "img-0672-79d639daec62",
+    "captureStem": "issue-336-trial-flowers-opaque-fine",
+    "candidateId": "adopted-production",
+    "tuple": {
+      "maxAcceptedSegments": 1000000,
+      "maxPolylines": 16000,
+      "maxStagnations": 32000,
+      "maxRestarts": 16000
+    },
+    "tupleToken": "s1000000-p16000-g32000-r16000",
+    "productionMeasurement": true,
+    "expectedTargetHash": "1f3698a6fe91a53046fed7178b25ff09184db28a90ed367c466bfa77e48dd7bd"
+  },
+  "status": "completed",
+  "failure": null,
+  "startedAt": "2026-07-19T00:14:28.458Z",
+  "finishedAt": "2026-07-19T00:17:04.539Z",
+  "equivalence": {
+    "identityHashMatches": true,
+    "productionResolverSelectedTuple": true,
+    "sceneHashMatches": true,
+    "diagnosticsHashMatches": true
+  },
+  "observation": {
+    "runId": "issue-336-20260719T001328Z-0001-818ab238-e600-4d7e-8e14-385f3158ea06-candidate-4526fe6a-4006-4b7c-afc7-7e80d9dfbd6f",
+    "termination": "budget-exhausted",
+    "residualError": 0.40258645777700464,
+    "mainWallDurationMs": 27865.699999809265
+  },
+  "repeatObservation": {
+    "runId": "issue-336-20260719T001328Z-0001-818ab238-e600-4d7e-8e14-385f3158ea06-production-repeat-b651c5c3-bf08-4337-b16e-93806273d67a",
+    "termination": "budget-exhausted",
+    "residualError": 0.40258645777700464,
+    "mainWallDurationMs": 27968.800000190735
+  },
+  "artifacts": [
+    {
+      "kind": "tone-authored.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T001328Z/flowers-opaque-fine/adopted-production--s1000000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--adopted-production--s1000000-p16000-g32000-r16000--tone-authored.png",
+      "byteLength": 719978,
+      "sha256": "d9f6443b66f28391e781c15acb824632a8466e4bca8f4910bf42a6022b9b371c",
+      "measuredCanvasSha256": "d9f6443b66f28391e781c15acb824632a8466e4bca8f4910bf42a6022b9b371c",
+      "pixelDimensions": {
+        "width": 1000,
+        "height": 1000
+      }
+    },
+    {
+      "kind": "fill-primary.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T001328Z/flowers-opaque-fine/adopted-production--s1000000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--adopted-production--s1000000-p16000-g32000-r16000--fill-primary.png",
+      "byteLength": 488268,
+      "sha256": "571b87934f67c994f6a9854721355c25705b53f9da7f478929151e44e67702db",
+      "measuredCanvasSha256": "571b87934f67c994f6a9854721355c25705b53f9da7f478929151e44e67702db",
+      "pixelDimensions": {
+        "width": 1000,
+        "height": 1000
+      }
+    },
+    {
+      "kind": "outline.png",
+      "path": "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T001328Z/flowers-opaque-fine/adopted-production--s1000000-p16000-g32000-r16000/issue-336-trial-flowers-opaque-fine--adopted-production--s1000000-p16000-g32000-r16000--outline.png",
+      "byteLength": 488071,
+      "sha256": "689cb0109cfe0b2b0fd5b96fe3edd8f32e5c241479fd0eff9721182e362578e1",
+      "measuredCanvasSha256": "689cb0109cfe0b2b0fd5b96fe3edd8f32e5c241479fd0eff9721182e362578e1",
+      "pixelDimensions": {
+        "width": 1000,
+        "height": 1000
+      }
+    }
+  ],
+  "note": "Raw observations are preserved in the sibling .raw.json file; this summary makes no adoption decision."
+}

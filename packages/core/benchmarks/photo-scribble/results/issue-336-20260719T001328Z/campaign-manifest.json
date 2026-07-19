@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260719T001328Z",
+  "phase": "confirmation",
+  "survivorCandidateIds": null,
+  "jobs": [
+    {
+      "scenarioId": "flowers-opaque-fine",
+      "candidateId": "adopted-production",
+      "tuple": {
+        "maxAcceptedSegments": 1000000,
+        "maxPolylines": 16000,
+        "maxStagnations": 32000,
+        "maxRestarts": 16000
+      }
+    },
+    {
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "candidateId": "adopted-production",
+      "tuple": {
+        "maxAcceptedSegments": 1000000,
+        "maxPolylines": 16000,
+        "maxStagnations": 32000,
+        "maxRestarts": 16000
+      }
+    }
+  ],
+  "inputDigests": {
+    "protocolSha256": "eee5a46e78cfcca0aec633d8c781b7960947efad3f5e37afe1e8674d60bfe343",
+    "fixtureManifestSha256": "ac03c48727a23c6f5579c877d0a8d0fde357c2c8170586fadce9d27f24608455",
+    "jobManifestSha256": "51d8b3a44044ccc459e8fdb60d433d30a3dc770293c14c122713c8b68b31710c"
+  }
+}

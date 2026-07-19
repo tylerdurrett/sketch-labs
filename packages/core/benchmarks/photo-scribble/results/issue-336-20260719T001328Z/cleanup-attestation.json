@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260719T001328Z",
+  "externalByteBackupCreatedBeforeHarnessWrites": true,
+  "externalByteBackupRetained": true,
+  "preRunGitStatus": [],
+  "assetAndPresetInventory": [
+    {
+      "path": "assets/image-assets/img-0672-79d639daec62.png",
+      "byteLength": 6323366,
+      "sha256": "79d639daec62a2af4a59954b9d102e51ff30d11cd14246fffc52a53250858a7d"
+    },
+    {
+      "path": "assets/image-assets/pinecone-4330aa0314f7.png",
+      "byteLength": 333669,
+      "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
+    },
+    {
+      "path": "packages/core/src/sketches/photo-scribble/presets/flowers-dense-chaotic.json",
+      "byteLength": 558,
+      "sha256": "d96c7917fa170f53cd67e66237653285098b9132823cfe95c40fd4e89d57112c"
+    },
+    {
+      "path": "packages/core/src/sketches/photo-scribble/presets/flowers-dense.json",
+      "byteLength": 554,
+      "sha256": "e74b5b72a2a44f66c86aca0d7e2117920820aff1ab8393f92b1126016ceb4e67"
+    },
+    {
+      "path": "packages/core/src/sketches/photo-scribble/presets/neat.json",
+      "byteLength": 535,
+      "sha256": "25b34ea7b25a273cf62940c5338c1328e5bb70fd4c0634abe24a4a4cebd36cd0"
+    }
+  ],
+  "postRunMatchesBackupExactly": true,
+  "newTrialAssets": [],
+  "newTrialPresets": [],
+  "unexpectedAssetOrPresetGitStatus": []
+}

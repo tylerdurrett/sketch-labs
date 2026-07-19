@@ -139,7 +139,9 @@ function validateRun(run, expected) {
     run.telemetry.smoothedEmittedPolylines === run.result.primitiveCount &&
     Number.isSafeInteger(run.telemetry.serializedArtworkBytes) &&
     run.telemetry.serializedArtworkBytes > 0 &&
-    Number.isFinite(run.telemetry.responseReadyEpochMs),
+    Number.isFinite(run.telemetry.responseReadyEpochMs) &&
+    run.telemetry.preparationCount === 1 &&
+    run.telemetry.solverPassCount === 1,
   `${expected.label} telemetry identity does not match`)
   evidenceAssertion(isRecord(run.protocolBoundary) &&
     run.protocolBoundary.invalidMessageCount === 0 &&
@@ -160,17 +162,28 @@ function validateRun(run, expected) {
       sameTuple(run.telemetry.profile.limits, expected.profile.limits),
     `${expected.label} telemetry profile does not match`)
   }
-  evidenceAssertion(sameTuple(run.fullTuple, expected.tuple),
-    `${expected.label} full four-limit tuple does not match`)
-  evidenceAssertion(sameTuple(run.telemetry.effectiveLimits, expected.tuple),
-    `${expected.label} telemetry tuple does not match`)
-  evidenceAssertion(
-    sameTuple(
-      run.telemetry.resolvedProductionLimits,
-      run.telemetry.resolvedProductionLimits,
-    ) && typeof run.telemetry.productionResolverSelectedEffectiveTuple === 'boolean',
-    `${expected.label} resolved production tuple telemetry is malformed`,
-  )
+  if (expected.measuredProduction === true) {
+    evidenceAssertion(
+      run.fullTuple === null &&
+        run.telemetry.resolvedProductionLimits === null &&
+        run.telemetry.effectiveLimits === null &&
+        run.telemetry.productionResolverSelectedEffectiveTuple === null,
+      `${expected.label} must not repeat preparation to discover its tuple`,
+    )
+  } else {
+    evidenceAssertion(sameTuple(run.fullTuple, expected.tuple),
+      `${expected.label} full four-limit tuple does not match`)
+    evidenceAssertion(sameTuple(run.telemetry.effectiveLimits, expected.tuple),
+      `${expected.label} telemetry tuple does not match`)
+    evidenceAssertion(
+      sameTuple(
+        run.telemetry.resolvedProductionLimits,
+        run.telemetry.resolvedProductionLimits,
+      ) &&
+        typeof run.telemetry.productionResolverSelectedEffectiveTuple === 'boolean',
+      `${expected.label} resolved production tuple telemetry is malformed`,
+    )
+  }
   if (expected.purpose === 'measurement') {
     evidenceAssertion(isRecord(run.measurement) &&
       Number.isFinite(run.measurement.coordinatorComputeTimeMs) &&
@@ -180,21 +193,31 @@ function validateRun(run, expected) {
       Array.isArray(run.measurement.heartbeat.progressReceiptTimesMs) &&
       Number.isFinite(run.measurement.heartbeat.maximumGapMs),
     `${expected.label} required measurement/heartbeat telemetry is missing`)
-    evidenceAssertion(Number.isFinite(run.telemetry.workerDurationMs) &&
-      isRecord(run.telemetry.execution) &&
-      (run.telemetry.execution.stopCause === 'threshold-reached' ||
-        run.telemetry.execution.stopCause === 'budget-reached') &&
-      isRecord(run.telemetry.execution.counters) &&
-      ['acceptedSegments', 'emittedPolylines', 'stagnations', 'restarts'].every(
-        (key) => Number.isSafeInteger(run.telemetry.execution.counters[key]) &&
-          run.telemetry.execution.counters[key] >= 0,
-      ) &&
-      Number.isSafeInteger(run.telemetry.rawAcceptedSegments) &&
-      run.telemetry.rawAcceptedSegments ===
-        run.telemetry.execution.counters.acceptedSegments,
-    `${expected.label} required raw injected solver telemetry is missing`)
-    evidenceAssertion(/^[0-9a-f]{64}$/.test(run.telemetry.targetHash ?? ''),
-      `${expected.label} canonical target hash is missing`)
+    evidenceAssertion(Number.isFinite(run.telemetry.workerDurationMs),
+      `${expected.label} measured Worker duration is missing`)
+    if (expected.measuredProduction === true) {
+      evidenceAssertion(
+        run.telemetry.execution === null &&
+          run.telemetry.rawAcceptedSegments === null &&
+          run.telemetry.targetHash === null,
+        `${expected.label} must remain an uninstrumented one-pass production run`,
+      )
+    } else {
+      evidenceAssertion(isRecord(run.telemetry.execution) &&
+        (run.telemetry.execution.stopCause === 'threshold-reached' ||
+          run.telemetry.execution.stopCause === 'budget-reached') &&
+        isRecord(run.telemetry.execution.counters) &&
+        ['acceptedSegments', 'emittedPolylines', 'stagnations', 'restarts'].every(
+          (key) => Number.isSafeInteger(run.telemetry.execution.counters[key]) &&
+            run.telemetry.execution.counters[key] >= 0,
+        ) &&
+        Number.isSafeInteger(run.telemetry.rawAcceptedSegments) &&
+        run.telemetry.rawAcceptedSegments ===
+          run.telemetry.execution.counters.acceptedSegments,
+      `${expected.label} required raw injected solver telemetry is missing`)
+      evidenceAssertion(/^[0-9a-f]{64}$/.test(run.telemetry.targetHash ?? ''),
+        `${expected.label} canonical target hash is missing`)
+    }
     evidenceAssertion(isRecord(run.presentation) &&
       /^[0-9a-f]{64}$/.test(run.presentation.tone?.sha256 ?? '') &&
       run.presentation.tone.byteLength > 0 &&
@@ -232,6 +255,8 @@ function validateRun(run, expected) {
       `${expected.label} equivalence proof must be unmeasured`)
     evidenceAssertion(run.telemetry.workerDurationMs === null,
       `${expected.label} equivalence Worker duration must be unmeasured`)
+    evidenceAssertion(/^[0-9a-f]{64}$/.test(run.telemetry.targetHash ?? ''),
+      `${expected.label} canonical target hash is missing`)
   }
 }
 
@@ -291,6 +316,13 @@ export function validateEquivalenceResponse(value, expected) {
     'nested production and injected Scene hashes do not match')
   evidenceAssertion(diagnosticsMatches,
     'nested production and injected diagnostics hashes do not match')
+  if (expected.expectedTargetHash !== undefined) {
+    evidenceAssertion(
+      production.telemetry.targetHash === expected.expectedTargetHash &&
+        injected.telemetry.targetHash === expected.expectedTargetHash,
+      'centered production target hash changed from the frozen fixture oracle',
+    )
+  }
   evidenceAssertion(productionTupleMatches && injectedTupleMatches,
     'nested resolved/effective complete tuples do not match')
   evidenceAssertion(
@@ -326,6 +358,24 @@ export function validateCandidateResponse(value, expected) {
   })
   evidenceAssertion(value.identityHash === expected.identityHash,
     'candidate identity hash does not match its equivalence preflight')
+  return value
+}
+
+export function validateProductionResponse(value, expected) {
+  validateRun(value, {
+    ...expected,
+    label: expected.label,
+    purpose: 'measurement',
+    profile: { kind: 'production' },
+    tuple: null,
+    measuredProduction: true,
+  })
+  evidenceAssertion(value.identityHash === expected.identityHash,
+    `${expected.label} identity hash does not match its equivalence preflight`)
+  evidenceAssertion(value.result.sceneHash === expected.sceneHash,
+    `${expected.label} Scene hash does not match the injected equivalence path`)
+  evidenceAssertion(value.result.diagnosticsHash === expected.diagnosticsHash,
+    `${expected.label} diagnostics hash does not match the injected equivalence path`)
   return value
 }
 
@@ -446,34 +496,73 @@ export function createBrowserBoundary({
           hostRunId: equivalenceHostRunId,
           scenarioId: job.scenarioId,
           imageAssetId: job.imageAssetId,
+          ...(job.expectedTargetHash === null
+            ? {}
+            : { expectedTargetHash: job.expectedTargetHash }),
         })
-        partial.observation = await raceOperation(
-          page.evaluate(
-            ({ scenarioId, candidateId, campaignId: campaign, hostRunId }) =>
-              globalThis.__PHOTO_SCRIBBLE_EVIDENCE__.runCandidate(
-                scenarioId, candidateId, {
-                  campaignId: campaign,
-                  hostRunId,
-                },
+        if (job.productionMeasurement) {
+          const productionMeasurement = async (hostRunId, label) => {
+            const value = await raceOperation(
+              page.evaluate(
+                ({ scenarioId, campaignId: campaign, hostRunId: host }) =>
+                  globalThis.__PHOTO_SCRIBBLE_EVIDENCE__.runProduction(
+                    scenarioId, { campaignId: campaign, hostRunId: host },
+                  ),
+                { scenarioId: job.scenarioId, campaignId, hostRunId },
               ),
-            {
-              scenarioId: job.scenarioId,
-              candidateId: job.candidateId,
+              { page, timeoutMs, signal, label },
+            )
+            return validateProductionResponse(value, {
               campaignId,
-              hostRunId: candidateHostRunId,
-            },
-          ),
-          { page, timeoutMs, signal, label: 'Candidate measurement' },
-        )
-        partial.observation = validateCandidateResponse(partial.observation, {
-          campaignId,
-          hostRunId: candidateHostRunId,
-          scenarioId: job.scenarioId,
-          imageAssetId: job.imageAssetId,
-          candidateId: job.candidateId,
-          tuple: job.tuple,
-          identityHash: partial.equivalence.production.identityHash,
-        })
+              hostRunId,
+              scenarioId: job.scenarioId,
+              imageAssetId: job.imageAssetId,
+              identityHash: partial.equivalence.production.identityHash,
+              sceneHash: partial.equivalence.injectedResolvedTuple.result.sceneHash,
+              diagnosticsHash:
+                partial.equivalence.injectedResolvedTuple.result.diagnosticsHash,
+              label,
+            })
+          }
+          partial.observation = await productionMeasurement(
+            candidateHostRunId,
+            'Adopted production measurement',
+          )
+          const repeatHostRunId = `${jobHostId}-production-repeat`
+          partial.repeatObservation = await productionMeasurement(
+            repeatHostRunId,
+            'Repeated adopted production measurement',
+          )
+          delete partial.repeatObservation.presentation.capturePayloads
+        } else {
+          partial.observation = await raceOperation(
+            page.evaluate(
+              ({ scenarioId, candidateId, campaignId: campaign, hostRunId }) =>
+                globalThis.__PHOTO_SCRIBBLE_EVIDENCE__.runCandidate(
+                  scenarioId, candidateId, {
+                    campaignId: campaign,
+                    hostRunId,
+                  },
+                ),
+              {
+                scenarioId: job.scenarioId,
+                candidateId: job.candidateId,
+                campaignId,
+                hostRunId: candidateHostRunId,
+              },
+            ),
+            { page, timeoutMs, signal, label: 'Candidate measurement' },
+          )
+          partial.observation = validateCandidateResponse(partial.observation, {
+            campaignId,
+            hostRunId: candidateHostRunId,
+            scenarioId: job.scenarioId,
+            imageAssetId: job.imageAssetId,
+            candidateId: job.candidateId,
+            tuple: job.tuple,
+            identityHash: partial.equivalence.production.identityHash,
+          })
+        }
         if (captureRoot !== undefined) {
           const directory = resolve(
             captureRoot,

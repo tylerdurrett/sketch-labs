@@ -622,4 +622,21 @@ describe('Photo Scribble issue 336 protocol', () => {
       ),
     )
   })
+
+  it('freezes the adopted production tuple, target oracles, and retained gamma mapping', () => {
+    expect(protocol.adoptedPolicyConfirmation).toEqual({
+      candidateId: 'adopted-production',
+      maxAcceptedSegments: 1_000_000,
+      maxPolylines: 16_000,
+      maxStagnations: 32_000,
+      maxRestarts: 16_000,
+      toneGammaExponentRange: [0.5, 2],
+      centeredTargetHashes: {
+        'flowers-opaque-fine': '1f3698a6fe91a53046fed7178b25ff09184db28a90ed367c466bfa77e48dd7bd',
+        'pinecone-dark-alpha-fine': '96738e63053982deb8f7b0afd042311f827b88280434024ad17e086826b72008',
+      },
+    })
+    expect(Math.log(toneGamma(0.5, 0)) / Math.log(0.5)).toBeCloseTo(0.5, 14)
+    expect(Math.log(toneGamma(0.5, 1)) / Math.log(0.5)).toBeCloseTo(2, 14)
+  })
 })

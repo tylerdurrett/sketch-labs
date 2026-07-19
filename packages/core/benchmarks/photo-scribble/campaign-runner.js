@@ -58,16 +58,21 @@ export function validateCampaignManifest(input, protocol) {
   'Campaign ID does not match the frozen protocol pattern')
   assert(
     input.phase === 'screen' || input.phase === 'promotion' ||
-      input.phase === 'machine-ceiling',
-    'Campaign phase must be screen, promotion, or machine-ceiling',
+      input.phase === 'machine-ceiling' || input.phase === 'confirmation',
+    'Campaign phase must be screen, promotion, machine-ceiling, or confirmation',
   )
   assert(Array.isArray(input.jobs) && input.jobs.length > 0,
     'Campaign manifest must contain at least one explicit job')
 
   const scenarios = new Map(protocol.scenarios.map((scenario) => [scenario.scenarioId, scenario]))
   const machineCeilingCandidates = protocol.machineCeilingCandidates ?? []
+  const confirmationCandidate = protocol.adoptedPolicyConfirmation
   const candidates = new Map(
-    [...protocol.orderedLimitCandidates, ...machineCeilingCandidates]
+    [
+      ...protocol.orderedLimitCandidates,
+      ...machineCeilingCandidates,
+      ...(confirmationCandidate === undefined ? [] : [confirmationCandidate]),
+    ]
       .map((candidate) => [candidate.candidateId, candidate]),
   )
   const jobs = input.jobs.map((inputJob, index) => {
@@ -92,6 +97,11 @@ export function validateCampaignManifest(input, protocol) {
       candidateId: candidate.candidateId,
       tuple: Object.freeze(tupleFor(candidate)),
       tupleToken: tupleToken(candidate),
+      productionMeasurement: input.phase === 'confirmation',
+      expectedTargetHash:
+        input.phase === 'confirmation'
+          ? confirmationCandidate?.centeredTargetHashes?.[scenario.scenarioId] ?? null
+          : null,
     })
   })
   const keys = jobs.map(jobKey)
@@ -129,6 +139,21 @@ export function validateCampaignManifest(input, protocol) {
     )
     assert(keys.every((key, index) => key === required[index]),
       'Machine-ceiling jobs must contain the two fine scenarios in frozen order for one candidate')
+  } else if (input.phase === 'confirmation') {
+    assert(input.survivorCandidateIds === undefined,
+      'Confirmation manifests cannot preselect promotion survivors')
+    assert(confirmationCandidate !== undefined,
+      'Confirmation requires one frozen adopted-policy candidate')
+    const fineScenarios = protocol.scenarios.filter(
+      (scenario) => scenario.roles.includes('budget-calibration'),
+    )
+    const required = fineScenarios.map((scenario) =>
+      `${scenario.scenarioId}/${confirmationCandidate.candidateId}--${tupleToken(confirmationCandidate)}`,
+    )
+    assert(keys.length === required.length && keys.every((key, index) => key === required[index]),
+      'Confirmation jobs must contain only the adopted tuple for both fine scenarios in frozen order')
+    assert(jobs.every((job) => /^[0-9a-f]{64}$/.test(job.expectedTargetHash ?? '')),
+      'Confirmation jobs require frozen centered target hashes')
   } else {
     assert(Array.isArray(input.survivorCandidateIds) && input.survivorCandidateIds.length > 0,
       'Promotion requires an explicit non-empty survivorCandidateIds allow-list')
@@ -351,6 +376,14 @@ function summarizeRawRecord(raw) {
       residualError: raw.observation.result?.diagnostics?.residualError ?? null,
       mainWallDurationMs: raw.observation.measurement?.mainWallDurationMs ?? null,
     },
+    repeatObservation: raw.repeatObservation === null || raw.repeatObservation === undefined
+      ? null
+      : {
+          runId: raw.repeatObservation.runId,
+          termination: raw.repeatObservation.result?.diagnostics?.termination ?? null,
+          residualError: raw.repeatObservation.result?.diagnostics?.residualError ?? null,
+          mainWallDurationMs: raw.repeatObservation.measurement?.mainWallDurationMs ?? null,
+        },
     artifacts: raw.artifacts ?? null,
     note: 'Raw observations are preserved in the sibling .raw.json file; this summary makes no adoption decision.',
   }
@@ -491,6 +524,7 @@ export async function runCampaign({
           finishedAt: new Date().toISOString(),
           equivalence: result.equivalence,
           observation: result.observation,
+          repeatObservation: result.repeatObservation ?? null,
           runtime: result.runtime ?? null,
           artifacts: result.artifacts ?? null,
         }
@@ -507,6 +541,7 @@ export async function runCampaign({
           finishedAt: new Date().toISOString(),
           equivalence: failure.partial.equivalence ?? null,
           observation: failure.partial.observation ?? null,
+          repeatObservation: failure.partial.repeatObservation ?? null,
           runtime: failure.partial.runtime ?? null,
           artifacts: failure.partial.artifacts ?? null,
         }

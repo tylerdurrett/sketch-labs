@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "issue-336-20260719T001328Z",
+  "phase": "confirmation",
+  "jobs": [
+    {
+      "scenarioId": "flowers-opaque-fine",
+      "candidateId": "adopted-production"
+    },
+    {
+      "scenarioId": "pinecone-dark-alpha-fine",
+      "candidateId": "adopted-production"
+    }
+  ]
+}

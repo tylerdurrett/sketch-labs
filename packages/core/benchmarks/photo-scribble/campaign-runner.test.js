@@ -10,6 +10,7 @@ import {
   raceOperation,
   validateCandidateResponse,
   validateEquivalenceResponse,
+  validateProductionResponse,
 } from './browser-boundary.js'
 import {
   CampaignOperationError,
@@ -149,8 +150,10 @@ function evidenceRun({
       smoothedEmittedPoints: 2,
       smoothedEmittedPolylines: 1,
       serializedArtworkBytes: 100,
-      targetHash: purpose === 'measurement' ? 'd'.repeat(64) : null,
+      targetHash: 'd'.repeat(64),
       workerDurationMs: purpose === 'measurement' ? 1 : null,
+      preparationCount: 1,
+      solverPassCount: 1,
       responseReadyEpochMs: 1,
     },
     presentation: purpose === 'measurement' ? {
@@ -330,6 +333,47 @@ describe('Photo Scribble campaign runner', () => {
     manifest.jobs[1].candidateId = 'machine-1000k'
     expect(() => validateCampaignManifest(manifest, protocol)).toThrow(
       'one candidate',
+    )
+  })
+
+  it('accepts only the adopted production tuple for confirmation', () => {
+    const manifest = screenManifest({
+      phase: 'confirmation',
+      jobs: [
+        { scenarioId: 'flowers-opaque-fine', candidateId: 'adopted-production' },
+        { scenarioId: 'pinecone-dark-alpha-fine', candidateId: 'adopted-production' },
+      ],
+    })
+    const campaign = validateCampaignManifest(manifest, protocol)
+    expect(campaign.jobs.map((job) => ({
+      productionMeasurement: job.productionMeasurement,
+      expectedTargetHash: job.expectedTargetHash,
+      tuple: job.tuple,
+    }))).toEqual([
+      {
+        productionMeasurement: true,
+        expectedTargetHash: protocol.adoptedPolicyConfirmation.centeredTargetHashes['flowers-opaque-fine'],
+        tuple: {
+          maxAcceptedSegments: 1_000_000,
+          maxPolylines: 16_000,
+          maxStagnations: 32_000,
+          maxRestarts: 16_000,
+        },
+      },
+      {
+        productionMeasurement: true,
+        expectedTargetHash: protocol.adoptedPolicyConfirmation.centeredTargetHashes['pinecone-dark-alpha-fine'],
+        tuple: {
+          maxAcceptedSegments: 1_000_000,
+          maxPolylines: 16_000,
+          maxStagnations: 32_000,
+          maxRestarts: 16_000,
+        },
+      },
+    ])
+    manifest.jobs.reverse()
+    expect(() => validateCampaignManifest(manifest, protocol)).toThrow(
+      'only the adopted tuple',
     )
   })
 
@@ -549,6 +593,46 @@ describe('Photo Scribble Puppeteer boundary', () => {
       tuple: responseTuple,
       identityHash: equivalence.production.identityHash,
     })).toBe(responses.candidate)
+  })
+
+  it('accepts a one-pass production measurement only when it matches injected equivalence', () => {
+    const responses = validResponses()
+    const hostRunId = 'host-production-measurement'
+    const production = evidenceRun({
+      hostRunId,
+      runId: `${hostRunId}-measurement`,
+      purpose: 'measurement',
+      profile: { kind: 'production' },
+    })
+    production.fullTuple = null
+    production.telemetry.resolvedProductionLimits = null
+    production.telemetry.effectiveLimits = null
+    production.telemetry.productionResolverSelectedEffectiveTuple = null
+    production.telemetry.execution = null
+    production.telemetry.rawAcceptedSegments = null
+    production.telemetry.targetHash = null
+
+    expect(validateProductionResponse(production, {
+      campaignId: responseCampaignId,
+      hostRunId,
+      scenarioId: 'flowers-opaque-fine',
+      imageAssetId: 'img-0672-79d639daec62',
+      identityHash: responses.equivalence.production.identityHash,
+      sceneHash: responses.equivalence.injectedResolvedTuple.result.sceneHash,
+      diagnosticsHash: responses.equivalence.injectedResolvedTuple.result.diagnosticsHash,
+      label: 'Adopted production measurement',
+    })).toBe(production)
+    production.result.sceneHash = '9'.repeat(64)
+    expect(() => validateProductionResponse(production, {
+      campaignId: responseCampaignId,
+      hostRunId,
+      scenarioId: 'flowers-opaque-fine',
+      imageAssetId: 'img-0672-79d639daec62',
+      identityHash: 'a'.repeat(64),
+      sceneHash: 'b'.repeat(64),
+      diagnosticsHash: 'c'.repeat(64),
+      label: 'Adopted production measurement',
+    })).toThrow('Scene hash does not match')
   })
 
   it.each([

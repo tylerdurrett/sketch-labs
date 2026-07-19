@@ -206,6 +206,21 @@
       "maxRestarts": 16000
     }
   ],
+  "adoptedPolicyConfirmation": {
+    "candidateId": "adopted-production",
+    "maxAcceptedSegments": 1000000,
+    "maxPolylines": 16000,
+    "maxStagnations": 32000,
+    "maxRestarts": 16000,
+    "toneGammaExponentRange": [
+      0.5,
+      2
+    ],
+    "centeredTargetHashes": {
+      "flowers-opaque-fine": "1f3698a6fe91a53046fed7178b25ff09184db28a90ed367c466bfa77e48dd7bd",
+      "pinecone-dark-alpha-fine": "96738e63053982deb8f7b0afd042311f827b88280434024ad17e086826b72008"
+    }
+  },
   "thresholds": {
     "jobTimeoutMs": 300000,
     "maxProgressHeartbeatGapMs": 1000,
