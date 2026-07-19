@@ -23,7 +23,10 @@ import {
   type ScribbleProgress,
 } from './orchestrator'
 import { smoothScribblePolylines } from './smooth'
-import type { ScribbleControls, ScribbleModel } from './types'
+import type {
+  ScribbleControls,
+  ScribbleLattice,
+} from './types'
 
 export {
   defaultScribbleControls,
@@ -53,26 +56,21 @@ type ScribbleOrchestrator = (
 // The ordinary work budget follows the normalized model: finer lattices and
 // lower per-pass coverage both require proportionally more deposited segments.
 // Separate hard ceilings remain as emergency guards against extreme frames.
-const HARD_MAX_ACCEPTED_SEGMENTS = 250_000
-const HARD_MAX_POLYLINES = 4_000
-const HARD_MAX_STAGNATIONS = 8_000
-const HARD_MAX_RESTARTS = 4_000
+const HARD_MAX_ACCEPTED_SEGMENTS = 1_000_000
+const HARD_MAX_POLYLINES = 16_000
+const HARD_MAX_STAGNATIONS = 32_000
+const HARD_MAX_RESTARTS = 16_000
 const SEGMENTS_PER_DENSITY_WEIGHTED_SAMPLE = 2
-const FULL_WORK_BUDGET_SCALE = 0.5
 
-function productionLimits(
-  model: Readonly<ScribbleModel>,
+/** @internal Direct-module seam for the production budget policy. */
+export function resolveProductionScribbleExecutionLimits(
+  model: Readonly<{
+    controls: Pick<ScribbleControls, 'pathDensity'>
+    lattice: Pick<ScribbleLattice, 'sampleCount'>
+  }>,
 ): Readonly<ScribbleExecutionLimits> {
-  // Very fine scales multiply lattice and output-point counts quadratically.
-  // Until generation moves off the synchronous Studio path, taper the
-  // deterministic safety cap below the former 0.5 floor so 0.1 remains useful
-  // for exploration and returns honest partial geometry instead of freezing.
-  const scaleAdjustedHardLimit = Math.floor(
-    HARD_MAX_ACCEPTED_SEGMENTS *
-      Math.min(1, model.controls.scribbleScale / FULL_WORK_BUDGET_SCALE),
-  )
   const maxAcceptedSegments = Math.min(
-    scaleAdjustedHardLimit,
+    HARD_MAX_ACCEPTED_SEGMENTS,
     Math.ceil(
       model.lattice.sampleCount *
         model.controls.pathDensity *
@@ -147,7 +145,8 @@ function executeScribbleStrategy(
     model,
     rng: createRandom(input.seed),
     residualThreshold: model.scales.completionThreshold,
-    limits: injectedLimits ?? productionLimits(model),
+    limits:
+      injectedLimits ?? resolveProductionScribbleExecutionLimits(model),
     ...(input.observer === undefined ? {} : { observer: input.observer }),
   })
 

@@ -5,6 +5,7 @@ import { totalPathLength } from '../shadingStrategy'
 import { createShadingMask, type ToneSource } from '../shadingFields'
 import {
   defaultScribbleControls,
+  resolveProductionScribbleExecutionLimits,
   runScribbleStrategyForTesting,
   scribbleControlSchema,
   scribbleStrategy,
@@ -135,6 +136,34 @@ function independentlyMaskSafe(
 }
 
 describe('public Scribble strategy boundary', () => {
+  it('gives production work the raised hard ceilings', () => {
+    expect(
+      resolveProductionScribbleExecutionLimits({
+        controls: { pathDensity: 20 },
+        lattice: { sampleCount: 100_000 },
+      }),
+    ).toEqual({
+      maxAcceptedSegments: 1_000_000,
+      maxPolylines: 16_000,
+      maxStagnations: 32_000,
+      maxRestarts: 16_000,
+    })
+  })
+
+  it('keeps ordinary production work proportional to weighted samples', () => {
+    expect(
+      resolveProductionScribbleExecutionLimits({
+        controls: { pathDensity: 1 },
+        lattice: { sampleCount: 100 },
+      }),
+    ).toEqual({
+      maxAcceptedSegments: 200,
+      maxPolylines: 200,
+      maxStagnations: 300,
+      maxRestarts: 300,
+    })
+  })
+
   it('root-exports only the intended strategy controls, result, and shared contracts', () => {
     expect(core.scribbleStrategy).toBe(scribbleStrategy)
     expect(core.scribbleControlSchema).toBe(scribbleControlSchema)
