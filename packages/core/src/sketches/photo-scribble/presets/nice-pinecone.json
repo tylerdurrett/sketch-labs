@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "sketch": "photo-scribble",
+  "name": "nice-pinecone",
+  "seed": 1506854162578149,
+  "params": {
+    "imageAsset": "pinecone-4330aa0314f7",
+    "toneContrast": 0.81,
+    "tonePivot": 1,
+    "toneGamma": 0.47,
+    "pathDensity": 20,
+    "scribbleScale": 0.75,
+    "momentum": 0.75,
+    "chaos": 0.66,
+    "toneFidelity": 1,
+    "stopPoint": 100
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true,
+    "toolWidthMillimeters": 0.3
+  }
+}

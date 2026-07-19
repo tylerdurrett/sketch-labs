@@ -81,6 +81,7 @@ describe('Photo Scribble headless composition', () => {
     expect(Object.keys(schema)).toEqual([
       'imageAsset',
       'toneContrast',
+      'tonePivot',
       'toneGamma',
       'pathDensity',
       'scribbleScale',
@@ -101,9 +102,11 @@ describe('Photo Scribble headless composition', () => {
       step: 0.01,
     })
     expect(schema.toneGamma).toEqual(schema.toneContrast)
+    expect(schema.tonePivot).toEqual(schema.toneContrast)
     expect(defaultParams(schema)).toEqual({
       imageAsset: HEADLESS_FIXTURE_LOOKUP_KEY,
       toneContrast: 0.5,
+      tonePivot: 0.5,
       toneGamma: 0.5,
       pathDensity: 1,
       scribbleScale: 1,
@@ -140,6 +143,23 @@ describe('Photo Scribble headless composition', () => {
     })
 
     expect(restored.params.stopPoint).toBe(100)
+  })
+
+  it('loads a legacy Preset without Tone pivot at the centered identity', () => {
+    const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const legacyParams = defaultParams(schema)
+    delete legacyParams.tonePivot
+
+    const restored = applyPreset(schema, {
+      version: 1,
+      sketch: 'photo-scribble',
+      name: 'legacy-without-tone-pivot',
+      seed: 'legacy-seed',
+      params: legacyParams,
+      locks: [],
+    })
+
+    expect(restored.params.tonePivot).toBe(0.5)
   })
 
   it('exports the named production Sketch with its opaque bundled default', () => {
@@ -216,7 +236,7 @@ describe('Photo Scribble headless composition', () => {
   it('applies Photo Scribble gamma then contrast to raster tone only', () => {
     const env = environment()
     const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
-    const controls = { toneGamma: 0.75, toneContrast: 0.25 }
+    const controls = { toneGamma: 0.75, toneContrast: 0.25, tonePivot: 0.35 }
     const source = createPhotoScribbleSource(
       params(controls),
       FRAME,
