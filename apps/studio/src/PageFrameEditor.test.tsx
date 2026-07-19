@@ -13,6 +13,8 @@ import {
 import { PageFrameEditor } from "./PageFrameEditor";
 import {
   openPageFrameEditDraft,
+  setPageFrameEditMode,
+  setScalePreservingPageFrame,
   type PageFrameEditDraft,
 } from "./pageFrameEditDraft";
 import type { PageFrameAspectConstraint } from "./pageFrameManipulation";
@@ -76,15 +78,17 @@ function mountEditor(initialFrame: PageFrame = FULL_FRAME) {
   return { el: container, callbacks };
 }
 
-function mountDraftEditor() {
+function mountDraftEditor(providedDraft?: PageFrameEditDraft) {
   const compositionFrame = resolveCompositionFrame(2);
   const representedFrame = fullCompositionPageFrame(compositionFrame);
-  const initialDraft = openPageFrameEditDraft({
-    profile: PROFILE,
-    representedFrame,
-    compositionFrame,
-    generationAspect: 2,
-  });
+  const initialDraft =
+    providedDraft ??
+    openPageFrameEditDraft({
+      profile: PROFILE,
+      representedFrame,
+      compositionFrame,
+      generationAspect: 2,
+    });
   const callbacks = {
     onEditDraftChange: vi.fn<[PageFrameEditDraft], void>(),
     onApply: vi.fn<[PageFrameEditDraft], void>(),
@@ -592,5 +596,47 @@ describe("PageFrameEditor", () => {
     expect(
       el.querySelector('input[aria-label="Composition scale percentage"]'),
     ).toBeNull();
+  });
+
+  it("preserves exact locked extents when aspect-mismatched percentages round", () => {
+    const compositionFrame = resolveCompositionFrame(2);
+    const representedFrame = fullCompositionPageFrame(compositionFrame);
+    const exactFrame: PageFrame = {
+      x: 17.25,
+      y: -31.75,
+      width: 997.1234567890123,
+      height: 601.9876543210987,
+    };
+    const ordinary = setScalePreservingPageFrame(
+      openPageFrameEditDraft({
+        profile: PROFILE,
+        representedFrame,
+        compositionFrame,
+        generationAspect: 2,
+      }),
+      exactFrame,
+    );
+    const fixed = setPageFrameEditMode(ordinary, "fixed-page");
+    if (fixed.mode !== "fixed-page") {
+      throw new Error("Expected a fixed-page edit draft");
+    }
+    const { el, callbacks } = mountDraftEditor(fixed);
+
+    expect(
+      (fixed.profile.width - 20) / (fixed.profile.height - 20),
+    ).not.toBe(2);
+    expect(
+      (Number(input(el, "width").value) / 100) * compositionFrame.width,
+    ).not.toBe(exactFrame.width);
+
+    setInput(input(el, "x"), "12.345");
+    const positioned = callbacks.onEditDraftChange.mock.lastCall?.[0];
+    expect(positioned?.frame.width).toBe(exactFrame.width);
+    expect(positioned?.frame.height).toBe(exactFrame.height);
+
+    click(el, "Apply");
+    const applied = callbacks.onApply.mock.lastCall?.[0];
+    expect(applied?.frame.width).toBe(exactFrame.width);
+    expect(applied?.frame.height).toBe(exactFrame.height);
   });
 });

@@ -157,6 +157,38 @@ function parseDraft(
   }
 }
 
+/** Fixed-page positioning must never round-trip its locked extents through %. */
+function parseFixedPagePosition(
+  draft: Readonly<Record<PageFrameField, string>>,
+  compositionFrame: CoordinateSpace,
+  frame: PageFrame,
+):
+  | { readonly frame: PageFrame; readonly error: null }
+  | { readonly frame: null; readonly error: PageFrameError } {
+  const positions = {} as Record<"x" | "y", number>;
+  for (const field of ["x", "y"] as const) {
+    const raw = draft[field].trim();
+    const value = raw === "" ? Number.NaN : Number(raw);
+    if (!Number.isFinite(value)) {
+      return {
+        frame: null,
+        error: { field, message: `${LABELS[field]} must be a finite number.` },
+      };
+    }
+    positions[field] = value;
+  }
+
+  return {
+    frame: {
+      x: (positions.x / 100) * compositionFrame.width,
+      y: (positions.y / 100) * compositionFrame.height,
+      width: frame.width,
+      height: frame.height,
+    },
+    error: null,
+  };
+}
+
 function sameFrame(left: PageFrame, right: PageFrame): boolean {
   return (
     left.x === right.x &&
@@ -457,7 +489,10 @@ export function PageFrameEditor(props: PageFrameEditorProps) {
     );
     setDraft(next);
     setError(null);
-    const parsed = parseDraft(next, compositionFrame);
+    const parsed =
+      controlledEditDraft?.mode === "fixed-page"
+        ? parseFixedPagePosition(next, compositionFrame, controlledFrame)
+        : parseDraft(next, compositionFrame);
     if (parsed.frame !== null) {
       emitFrame(parsed.frame);
     }
@@ -465,7 +500,10 @@ export function PageFrameEditor(props: PageFrameEditorProps) {
 
   const apply = (): void => {
     if (!physicalFieldsValid || !scaleControlValid) return;
-    const parsed = parseDraft(draft, compositionFrame);
+    const parsed =
+      controlledEditDraft?.mode === "fixed-page"
+        ? parseFixedPagePosition(draft, compositionFrame, controlledFrame)
+        : parseDraft(draft, compositionFrame);
     if (parsed.frame === null) {
       setError(parsed.error);
       return;
