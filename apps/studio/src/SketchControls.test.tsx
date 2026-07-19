@@ -5072,6 +5072,194 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(canvas.dataset.contentRevision).toBe(contentRevision);
   });
 
+  it.each([
+    ["crop", { x: 25, y: 20, width: 50, height: 60 }],
+    ["padding", { x: -25, y: -10, width: 150, height: 120 }],
+    ["mixed crop and padding", { x: 25, y: -10, width: 100, height: 80 }],
+  ] as const)(
+    "frames the acknowledged Scribble Scene for %s ordinary SVG without recomputation",
+    async (_label, percentages) => {
+      const generate = vi.fn(toneCalibration.generate);
+      const el = mount(
+        <SketchControls sketch={{ ...toneCalibration, generate }} />,
+      );
+      await flush();
+      const composition = lastCompositionFrame!;
+      const source: Scene = {
+        space: { ...composition },
+        background: { color: "lavender" },
+        primitives: [
+          {
+            points: [
+              [0, composition.height / 2],
+              [composition.width, composition.height / 2],
+            ],
+            stroke: { color: "black", width: 1 },
+            hiddenLineRole: "source",
+          },
+        ],
+      };
+      await completeScribble(0, source);
+      const canvas = el.querySelector<HTMLElement>(
+        '[data-testid="canvas-seed"]',
+      )!;
+      const sourceRevision = canvas.dataset.sourceInputRevision;
+      const contentRevision = canvas.dataset.contentRevision;
+
+      clickButton(el, "Crop");
+      for (const [name, value] of Object.entries(percentages)) {
+        setInput(
+          el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+          String(value),
+        );
+      }
+      clickButton(el, "Apply");
+
+      const frame: PageFrame = {
+        x: (composition.width * percentages.x) / 100,
+        y: (composition.height * percentages.y) / 100,
+        width: (composition.width * percentages.width) / 100,
+        height: (composition.height * percentages.height) / 100,
+      };
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(generate).not.toHaveBeenCalled();
+      expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
+      expect(canvas.dataset.contentRevision).toBe(contentRevision);
+
+      clickButton(el, "Export SVG");
+
+      const expected = frameScene(source, frame);
+      expect(exportSceneCapture.current).toEqual(expected);
+      expect(exportSceneCapture.current).not.toBe(source);
+      expect((exportSceneCapture.current as Scene).space).toEqual({
+        width: frame.width,
+        height: frame.height,
+      });
+      expect((exportSceneCapture.current as Scene).background).toEqual({
+        color: "lavender",
+      });
+      expect(
+        (exportSceneCapture.current as Scene).primitives[0]?.points,
+      ).toEqual(expected.primitives[0]?.points);
+      const svg = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(downloadBlob.mock.calls.at(-1)![0]);
+      });
+      const document = new DOMParser().parseFromString(svg, "image/svg+xml");
+      const root = document.documentElement;
+      expect(root.getAttribute("viewBox")).toBe(
+        `0 0 ${frame.width} ${frame.height}`,
+      );
+      expect(root.querySelector(":scope > rect")?.getAttribute("x")).toBe("0");
+      expect(root.querySelector(":scope > rect")?.getAttribute("y")).toBe("0");
+      expect(root.querySelector(":scope > rect")?.getAttribute("fill")).toBe(
+        "lavender",
+      );
+
+      clickButton(el, "Export PNG");
+      await flush();
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(generate).not.toHaveBeenCalled();
+      expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
+      expect(canvas.dataset.contentRevision).toBe(contentRevision);
+    },
+  );
+
+  it("aborts framed Scribble SVG when the retained canvas provenance is stale", async () => {
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    await flush();
+    const source = preparedScene(78);
+    await completeScribble(0, source);
+
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    clickButton(el, "Apply");
+    fakeDisplayedScene = {
+      scene: source,
+      sourceScene: source,
+      displayedScene: source,
+      t: 0,
+      renderMode: "fill",
+      tolerance: 0,
+      includeFrame: true,
+      sourceInputRevision: 0,
+      contentRevision: 999,
+    };
+
+    clickButton(el, "Export SVG");
+
+    expect(exportSceneCapture.current).toBeNull();
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("copies the committed frame into hidden-line finalization and reuses base Outline across framing options", async () => {
+    autoFireOutlineComputed = false;
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    await flush();
+    const source = preparedScene(79);
+    await completeScribble(0, source);
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    act(() => lastOnOutlineComputed?.());
+
+    const composition = lastCompositionFrame!;
+    clickButton(el, "Crop");
+    for (const [name, value] of Object.entries({
+      x: 12.5,
+      y: -10,
+      width: 80,
+      height: 115,
+    })) {
+      setInput(
+        el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+        String(value),
+      );
+    }
+    clickButton(el, "Apply");
+    const expectedFrame: PageFrame = {
+      x: composition.width * 0.125,
+      y: composition.height * -0.1,
+      width: composition.width * 0.8,
+      height: composition.height * 1.15,
+    };
+
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+
+    const first = outlineJob.lastExportSnapshot!;
+    expect(first.pageFrame).toEqual(expectedFrame);
+    expect(first.pageFrame).not.toBe(lastCommittedPageFrame);
+    expect(Object.isFrozen(first.pageFrame)).toBe(true);
+    expect(first.identity).not.toHaveProperty("pageFrame");
+    expect(first.identity).not.toHaveProperty("includeFrame");
+    expect(first.reusableOutline).toBeDefined();
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.starts).toBe(1);
+
+    act(() => compositionFrameCheckbox(el).click());
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+
+    expect(outlineJob.lastExportSnapshot?.pageFrame).toEqual(expectedFrame);
+    expect(outlineJob.lastExportSnapshot?.profile.includeFrame).toBe(false);
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.starts).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   const assetA = "portrait-alpha-000000000001";
   const assetB = "portrait-beta-bbbbbbbbbbbb";
 
