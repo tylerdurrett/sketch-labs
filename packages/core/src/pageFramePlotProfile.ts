@@ -14,11 +14,13 @@
 import type { PageFrame } from './pageFrame'
 import { validatePageFrame } from './pageFrame'
 import {
-  plotDrawableAspectsEquivalent,
   plotDrawableRectangle,
   type PlotProfile,
   validatePlotProfile,
 } from './plotProfile'
+
+const SCALE_RELATIVE_TOLERANCE = Number.EPSILON * 8
+const CANCELLATION_ERROR_FACTOR = 4
 
 /**
  * Derive the Plot Profile for a target Page Frame at the current physical scale.
@@ -35,8 +37,8 @@ import {
  * `currentPageFrame` and the full original Composition Frame as `targetPageFrame`.
  *
  * @throws if either input is invalid, if the current drawable and represented
- *   frame do not describe the same aspect, or if the derived physical dimensions
- *   cannot form a valid Plot Profile.
+ *   frame do not describe one uniform physical scale, or if the derived physical
+ *   dimensions cannot form a valid Plot Profile.
  */
 export function derivePageFramePlotProfile(
   profile: PlotProfile,
@@ -53,20 +55,16 @@ export function derivePageFramePlotProfile(
   const verticalMillimetersPerUnit =
     drawable.height / currentPageFrame.height
 
-  // Compare the two direct physical scales rather than dividing them into
-  // aspects. A very small Page extent beside fixed physical insets can lose a
-  // few ULPs when its drawable size is recovered by subtraction. Comparing the
-  // direct scales keeps that unavoidable cancellation within the existing
-  // machine-scale equivalence tolerance, so every profile emitted here remains
-  // valid input for a later edit or reset.
   if (
-    !plotDrawableAspectsEquivalent(
+    !physicalScalesEquivalent(
       horizontalMillimetersPerUnit,
       verticalMillimetersPerUnit,
+      profile,
+      currentPageFrame,
     )
   ) {
     throw new Error(
-      'derivePageFramePlotProfile: the current Plot Profile drawable and current Page Frame must have equivalent aspects',
+      'derivePageFramePlotProfile: the current Plot Profile drawable and current Page Frame must have equivalent physical scales',
     )
   }
 
@@ -92,4 +90,44 @@ export function derivePageFramePlotProfile(
   }
   validatePlotProfile(derived)
   return derived
+}
+
+/**
+ * Compare direct per-axis physical scales at their own magnitude.
+ *
+ * The ordinary tolerance is strictly relative, including below one; using an
+ * absolute floor would incorrectly accept materially different microscopic
+ * scales. The additional allowance models only cancellation from recovering the
+ * drawable via `paper - inset - inset`. That recovery can lose a few ULPs when a
+ * small emitted Page extent sits beside much larger fixed physical margins.
+ */
+function physicalScalesEquivalent(
+  horizontal: number,
+  vertical: number,
+  profile: PlotProfile,
+  representedFrame: PageFrame,
+): boolean {
+  const scale = Math.max(Math.abs(horizontal), Math.abs(vertical))
+  const relativeTolerance = SCALE_RELATIVE_TOLERANCE * scale
+  const horizontalCancellationTolerance =
+    (Number.EPSILON *
+      CANCELLATION_ERROR_FACTOR *
+      (Math.abs(profile.width) +
+        Math.abs(profile.insets.left) +
+        Math.abs(profile.insets.right))) /
+    representedFrame.width
+  const verticalCancellationTolerance =
+    (Number.EPSILON *
+      CANCELLATION_ERROR_FACTOR *
+      (Math.abs(profile.height) +
+        Math.abs(profile.insets.top) +
+        Math.abs(profile.insets.bottom))) /
+    representedFrame.height
+
+  return (
+    Math.abs(horizontal - vertical) <=
+    relativeTolerance +
+      horizontalCancellationTolerance +
+      verticalCancellationTolerance
+  )
 }

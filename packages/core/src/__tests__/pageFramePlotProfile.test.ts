@@ -171,7 +171,7 @@ describe('derivePageFramePlotProfile', () => {
         { x: 0, y: 0, width: 1_000, height: 1_000 },
         { x: 0, y: 0, width: 500, height: 500 },
       ),
-    ).toThrow(/equivalent aspects/)
+    ).toThrow(/equivalent physical scales/)
   })
 
   it('validates profile/frame scale consistency before an identity return', () => {
@@ -188,7 +188,26 @@ describe('derivePageFramePlotProfile', () => {
         inconsistentFrame,
         inconsistentFrame,
       ),
-    ).toThrow(/equivalent aspects/)
+    ).toThrow(/equivalent physical scales/)
+  })
+
+  it('rejects materially inconsistent scales even when both are microscopic', () => {
+    const microscopicProfile: PlotProfile = {
+      width: 1e-12,
+      height: 2e-12,
+      insets: { top: 0, right: 0, bottom: 0, left: 0 },
+      includeFrame: true,
+      toolWidthMillimeters: 0.3,
+    }
+    const squareFrame = { x: 0, y: 0, width: 1_000, height: 1_000 }
+
+    expect(() =>
+      derivePageFramePlotProfile(
+        microscopicProfile,
+        squareFrame,
+        squareFrame,
+      ),
+    ).toThrow(/equivalent physical scales/)
   })
 
   it('validates both frames and the derived physical dimensions', () => {
