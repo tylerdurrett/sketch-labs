@@ -44,7 +44,8 @@ function physicalStrokeWidth(target: Readonly<OutlineTarget>): number {
   return target.toolWidthMillimeters / target.millimetersPerSceneUnit;
 }
 
-function applyArtworkStrokePolicy(
+/** Apply only target-dependent artwork styling, without Page placement. */
+export function applyOutlineArtworkStrokePolicy(
   scene: Scene,
   policy: OutlineFinalizationStrokePolicy | undefined,
 ): Scene {
@@ -61,6 +62,42 @@ function applyArtworkStrokePolicy(
             stroke: { ...primitive.stroke, width },
           },
     ),
+  };
+}
+
+/** Apply only Page placement and its optional boundary to already-styled artwork. */
+export function finalizeStyledOutlineScene(
+  styled: Scene,
+  pageFrame: PageFrame | null,
+  includeFrame: boolean,
+  strokePolicy?: OutlineFinalizationStrokePolicy,
+): Scene {
+  const finalized = pageFrame === null ? styled : frameScene(styled, pageFrame);
+  if (!includeFrame) return finalized;
+
+  const { width, height } = finalized.space;
+  const frameStroke =
+    strokePolicy === undefined
+      ? DEFAULT_STROKE
+      : {
+          ...DEFAULT_STROKE,
+          width: physicalStrokeWidth(strokePolicy.target),
+        };
+  return {
+    ...finalized,
+    primitives: [
+      ...finalized.primitives,
+      {
+        points: [
+          [0, 0],
+          [width, 0],
+          [width, height],
+          [0, height],
+          [0, 0],
+        ],
+        stroke: frameStroke,
+      },
+    ],
   };
 }
 
@@ -125,32 +162,10 @@ export function finalizeOutlineScene(
   includeFrame: boolean,
   strokePolicy?: OutlineFinalizationStrokePolicy,
 ): Scene {
-  const styled = applyArtworkStrokePolicy(base, strokePolicy);
-  const finalized = pageFrame === null ? styled : frameScene(styled, pageFrame);
-  if (!includeFrame) return finalized;
-
-  const { width, height } = finalized.space;
-  const frameStroke =
-    strokePolicy === undefined
-      ? DEFAULT_STROKE
-      : {
-          ...DEFAULT_STROKE,
-          width: physicalStrokeWidth(strokePolicy.target),
-        };
-  return {
-    ...finalized,
-    primitives: [
-      ...finalized.primitives,
-      {
-        points: [
-          [0, 0],
-          [width, 0],
-          [width, height],
-          [0, height],
-          [0, 0],
-        ],
-        stroke: frameStroke,
-      },
-    ],
-  };
+  return finalizeStyledOutlineScene(
+    applyOutlineArtworkStrokePolicy(base, strokePolicy),
+    pageFrame,
+    includeFrame,
+    strokePolicy,
+  );
 }

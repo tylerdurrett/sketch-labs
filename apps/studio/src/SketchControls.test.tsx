@@ -44,7 +44,11 @@ import type {
   LiveCanvasHandle,
 } from "./LiveCanvas";
 import { mutableScene } from "./outlineComputeProtocol";
-import { finalizeOutlineScene, outlineScene } from "./outlineScene";
+import {
+  finalizeOutlineScene,
+  outlineScene,
+  type OutlineFinalizationStrokePolicy,
+} from "./outlineScene";
 import { ImageAssetResolutionError } from "./imageAssetResolver";
 import {
   beginPageFrameManipulation,
@@ -460,6 +464,9 @@ let lastPageFrameAspectConstraint: PageFrameAspectConstraint | null = null;
 let lastOnPageFrameDraftChange: ((frame: PageFrame) => void) | null = null;
 let lastToneSource: ToneSource | null = null;
 let lastRenderScene: Scene | null = null;
+let lastOutlineFinalizationStrokePolicy:
+  | OutlineFinalizationStrokePolicy
+  | undefined;
 let autoAcknowledgeDisplayedScene = true;
 let acknowledgeDisplayedScene: (() => void) | null = null;
 let generateDuringLiveCanvasRender = false;
@@ -476,6 +483,7 @@ vi.mock("./LiveCanvas", () => ({
     seed,
     renderState,
     tolerance,
+    outlineFinalizationStrokePolicy,
     compositionFrame,
     profile,
     pageFrameDraft,
@@ -503,6 +511,7 @@ vi.mock("./LiveCanvas", () => ({
       unresolvedAssetIds?: readonly string[];
     };
     tolerance?: number;
+    outlineFinalizationStrokePolicy?: OutlineFinalizationStrokePolicy;
     compositionFrame: CoordinateSpace;
     profile: PlotProfile;
     pageFrameDraft?: PageFrame | null;
@@ -614,6 +623,7 @@ vi.mock("./LiveCanvas", () => ({
     lastOnPageFrameDraftChange = onPageFrameDraftChange ?? null;
     lastToneSource = renderState?.source ?? null;
     lastRenderScene = (renderState?.scene as Scene | undefined) ?? null;
+    lastOutlineFinalizationStrokePolicy = outlineFinalizationStrokePolicy;
     // Model the outline pass finishing: fire the "computed" signal after each
     // outline render so the owner's busy label clears (unless a test opts out to
     // observe the intermediate "Computing…" state itself).
@@ -866,6 +876,7 @@ beforeEach(() => {
   lastOnPageFrameDraftChange = null;
   lastToneSource = null;
   lastRenderScene = null;
+  lastOutlineFinalizationStrokePolicy = undefined;
   autoAcknowledgeDisplayedScene = true;
   acknowledgeDisplayedScene = null;
   generateDuringLiveCanvasRender = false;
@@ -6459,10 +6470,15 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     clickButton(el, "Outline");
     act(() => lastOnOutlineComputed?.());
     expect(outlineJob.starts).toBe(1);
-    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBeCloseTo(
-      0.3 / 0.18,
-      12,
-    );
+    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(7);
+    expect(lastOutlineFinalizationStrokePolicy).toMatchObject({
+      kind: "physical-tool",
+      target: {
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.18,
+      },
+    });
+    const cachedOutlineScene = lastRenderScene;
 
     generate.mockClear();
     generateDuringLiveCanvasRender = true;
@@ -6485,15 +6501,16 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     const drawableWidth =
       lastProfile.width - lastProfile.insets.left - lastProfile.insets.right;
     const targetScale = drawableWidth / scaled.frame.width;
-    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBeCloseTo(
-      0.3 / targetScale,
-      12,
-    );
+    expect(lastRenderScene).toBe(cachedOutlineScene);
+    expect(lastOutlineFinalizationStrokePolicy?.target).toEqual({
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: targetScale,
+    });
     expect(outlineJob.starts).toBe(1);
     expect(scribbleJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
 
-    const styledWidth = lastRenderScene?.primitives[0]?.stroke?.width;
+    const scaledStrokePolicy = lastOutlineFinalizationStrokePolicy;
     act(() =>
       lastOnPageFrameDraftChange?.({
         ...scaled.frame,
@@ -6501,7 +6518,8 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         y: scaled.frame.y - 25,
       }),
     );
-    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(styledWidth);
+    expect(lastRenderScene).toBe(cachedOutlineScene);
+    expect(lastOutlineFinalizationStrokePolicy).toBe(scaledStrokePolicy);
     expect(outlineJob.starts).toBe(1);
     expect(scribbleJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
@@ -6528,7 +6546,8 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       }),
     );
     clickButton(el, "Apply");
-    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(styledWidth);
+    expect(lastRenderScene).toBe(cachedOutlineScene);
+    expect(lastOutlineFinalizationStrokePolicy).toBe(scaledStrokePolicy);
     expect(outlineJob.starts).toBe(1);
     expect(scribbleJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
@@ -8107,10 +8126,12 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       });
       act(() => lastOnOutlineComputed?.());
       await flush();
-      expect(lastRenderScene?.primitives[0]?.stroke?.width).toBeCloseTo(
-        0.3 / 0.18,
-        12,
-      );
+      expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(9);
+      expect(lastOutlineFinalizationStrokePolicy?.target).toEqual({
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.18,
+      });
+      const cachedOutlineScene = lastRenderScene;
 
       const margin = el.querySelector<HTMLInputElement>(
         'input[aria-label="Linked paper margin (mm)"]',
@@ -8123,10 +8144,11 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       expect(lastCompositionFrame).toBe(firstFrame);
       expect(outlineJob.starts).toBe(1);
       expect(outlineJob.lastIdentity).toBe(initialOutline);
-      expect(lastRenderScene?.primitives[0]?.stroke?.width).toBeCloseTo(
-        0.3 / 0.16,
-        12,
-      );
+      expect(lastRenderScene).toBe(cachedOutlineScene);
+      expect(lastOutlineFinalizationStrokePolicy?.target).toEqual({
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.16,
+      });
 
       const toolWidth = el.querySelector<HTMLInputElement>(
         'input[aria-label="Tool width (mm)"]',
@@ -8139,10 +8161,11 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       expect(lastCompositionFrame).toBe(firstFrame);
       expect(outlineJob.starts).toBe(1);
       expect(outlineJob.lastIdentity).toBe(initialOutline);
-      expect(lastRenderScene?.primitives[0]?.stroke?.width).toBeCloseTo(
-        0.5 / 0.16,
-        12,
-      );
+      expect(lastRenderScene).toBe(cachedOutlineScene);
+      expect(lastOutlineFinalizationStrokePolicy?.target).toEqual({
+        toolWidthMillimeters: 0.5,
+        millimetersPerSceneUnit: 0.16,
+      });
 
       expect(exportButton(el, "Export Hidden-line SVG").disabled).toBe(false);
       clickButton(el, "Export Hidden-line SVG");

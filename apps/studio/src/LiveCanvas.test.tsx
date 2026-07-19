@@ -6,6 +6,30 @@ import { act, createRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const outlineFinalizationCalls = vi.hoisted(() => ({
+  style: 0,
+  placement: 0,
+}));
+
+vi.mock("./outlineScene", async (importActual) => {
+  const actual = await importActual<typeof import("./outlineScene")>();
+  return {
+    ...actual,
+    applyOutlineArtworkStrokePolicy: (
+      ...args: Parameters<typeof actual.applyOutlineArtworkStrokePolicy>
+    ) => {
+      outlineFinalizationCalls.style += 1;
+      return actual.applyOutlineArtworkStrokePolicy(...args);
+    },
+    finalizeStyledOutlineScene: (
+      ...args: Parameters<typeof actual.finalizeStyledOutlineScene>
+    ) => {
+      outlineFinalizationCalls.placement += 1;
+      return actual.finalizeStyledOutlineScene(...args);
+    },
+  };
+});
+
 import {
   createShadingMask,
   createToneField,
@@ -379,6 +403,8 @@ function installPointerCapture(element: HTMLElement) {
 }
 
 beforeEach(() => {
+  outlineFinalizationCalls.style = 0;
+  outlineFinalizationCalls.placement = 0;
   now = 0;
   rafCallbacks = [];
   nextRafId = 1;
@@ -2144,6 +2170,114 @@ describe("LiveCanvas cached Outline Page finalization (#345 PF03)", () => {
       expect(generate).not.toHaveBeenCalled();
     },
   );
+
+  it("styles target-dependent artwork once, then gives pan one placement finalization and paint", () => {
+    const { ctx } = recordingContext();
+    useRecordingContext(ctx);
+    const handle = createRef<LiveCanvasHandle>();
+    const onDisplayedSceneCommitted = vi.fn();
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const params = { value: 1 };
+    const physicalPolicy = {
+      kind: "physical-tool" as const,
+      target: {
+        toolWidthMillimeters: 0.6,
+        millimetersPerSceneUnit: 0.2,
+      },
+    };
+    const render = (
+      frame: typeof crop,
+      policy: typeof physicalPolicy,
+    ) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={profile(true)}
+        pageFrame={frame}
+        renderState={outlineState}
+        outlineFinalizationStrokePolicy={policy}
+        onDisplayedSceneCommitted={onDisplayedSceneCommitted}
+      />
+    );
+
+    mount(render(crop, physicalPolicy));
+    const initiallyDisplayed = handle.current!.captureDisplayedFrame()!;
+    expect(initiallyDisplayed.sourceScene).toBe(source);
+    expect(
+      initiallyDisplayed.displayedScene.primitives[0]?.stroke?.width,
+    ).toBeCloseTo(3, 12);
+    expect(
+      initiallyDisplayed.displayedScene.primitives.at(-1)?.stroke?.width,
+    ).toBeCloseTo(3, 12);
+    expect(outlineFinalizationCalls).toEqual({ style: 1, placement: 1 });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+
+    outlineFinalizationCalls.style = 0;
+    outlineFinalizationCalls.placement = 0;
+    onDisplayedSceneCommitted.mockClear();
+    const panned = { ...crop, x: crop.x + 5, y: crop.y - 3 };
+    act(() => root!.render(render(panned, physicalPolicy)));
+
+    expect(outlineFinalizationCalls).toEqual({ style: 0, placement: 1 });
+    expect(onDisplayedSceneCommitted).toHaveBeenCalledOnce();
+    expect(handle.current!.captureDisplayedFrame()!.sourceScene).toBe(source);
+
+    const assertTargetRepaint = (policy: typeof physicalPolicy) => {
+      outlineFinalizationCalls.style = 0;
+      outlineFinalizationCalls.placement = 0;
+      onDisplayedSceneCommitted.mockClear();
+      act(() => root!.render(render(panned, policy)));
+      expect(outlineFinalizationCalls).toEqual({ style: 1, placement: 1 });
+      expect(onDisplayedSceneCommitted).toHaveBeenCalledOnce();
+    };
+
+    assertTargetRepaint({
+      ...physicalPolicy,
+      target: { ...physicalPolicy.target, toolWidthMillimeters: 0.5 },
+    });
+    assertTargetRepaint({
+      ...physicalPolicy,
+      target: {
+        toolWidthMillimeters: 0.5,
+        millimetersPerSceneUnit: 0.1,
+      },
+    });
+  });
+
+  it("keeps legacy artwork authored while painting the Page boundary at the current physical width", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const { sketch } = animatedSketch(undefined);
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={profile(true)}
+        pageFrame={crop}
+        renderState={outlineState}
+        outlineFinalizationStrokePolicy={{
+          kind: "legacy-scene",
+          target: {
+            toolWidthMillimeters: 0.6,
+            millimetersPerSceneUnit: 0.2,
+          },
+        }}
+      />,
+    );
+
+    const displayed = handle.current!.captureDisplayedFrame()!.displayedScene;
+    expect(displayed.primitives[0]?.stroke?.width).toBe(1);
+    expect(displayed.primitives.at(-1)?.stroke?.width).toBeCloseTo(3, 12);
+  });
 
   it("re-finalizes one exact cached source across frame, edit, Apply, Reset, and includeFrame changes", () => {
     const handle = createRef<LiveCanvasHandle>();

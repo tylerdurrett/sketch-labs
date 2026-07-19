@@ -85,7 +85,8 @@ vi.mock("./presetsClient", () => ({
 
 vi.mock("./hiddenLineCoordinator", async () => {
   const { finalizeOutlineScene, outlineScene } = await import("./outlineScene");
-  const { clipSceneToBounds, renderPlotterSVG } = await import("@harness/core");
+  const { clipSceneToBounds, computePlotMapping, renderPlotterSVG } =
+    await import("@harness/core");
   return {
     HiddenLineCoordinator: class {
       start(identity: import("./outlineComputeProtocol").OutlineComputeIdentity) {
@@ -120,6 +121,16 @@ vi.mock("./hiddenLineCoordinator", async () => {
           ),
           snapshot.pageFrame,
           snapshot.profile.includeFrame,
+          {
+            kind: "legacy-scene",
+            target: {
+              toolWidthMillimeters: snapshot.profile.toolWidthMillimeters,
+              millimetersPerSceneUnit: computePlotMapping(
+                snapshot.pageFrame ?? snapshot.identity.compositionFrame,
+                snapshot.profile as PlotProfile,
+              ).scale,
+            },
+          },
         );
         const payload = {
           status: "success" as const,

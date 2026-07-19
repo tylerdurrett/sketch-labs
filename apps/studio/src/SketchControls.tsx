@@ -92,7 +92,7 @@ import {
   mutableScene,
   outlineGeometryIdentitiesEqual,
 } from "./outlineComputeProtocol";
-import { finalizeOutlineScene } from "./outlineScene";
+import type { OutlineFinalizationStrokePolicy } from "./outlineScene";
 import {
   createOutlineSessionState,
   outlineSessionReducer,
@@ -1194,35 +1194,26 @@ export function SketchControls({
     dispatchOutline({ type: "source-ready", provenance });
   };
 
-  const outlineSceneForDisplay = useMemo<Scene | null>(() => {
-    if (
-      outlineSession.phase.kind !== "outline" ||
-      (sketch.generateOutlineSource === undefined &&
-        sketch.deriveOutlineSource === undefined)
-    ) {
-      return null;
-    }
-    // Opt-in Outline geometry is target-invariant. Repaint its physical stroke
-    // style from the current authored or transient Page target while retaining
-    // the session's immutable base geometry for reuse.
-    return finalizeOutlineScene(
-      outlineSession.phase.scene,
-      null,
-      false,
-      {
-        kind: "physical-tool",
-        target: outlineTargetFor(
-          outlineEditForPageDraft(history.present, pageFrameEditDraft),
-        ),
-      },
+  const outlineDisplayTarget = outlineTargetFor(
+    outlineEditForPageDraft(history.present, pageFrameEditDraft),
+  );
+  const outlineFinalizationStrokePolicy =
+    useMemo<OutlineFinalizationStrokePolicy>(
+      () => ({
+        kind:
+          sketch.generateOutlineSource === undefined &&
+          sketch.deriveOutlineSource === undefined
+            ? "legacy-scene"
+            : "physical-tool",
+        target: outlineDisplayTarget,
+      }),
+      [
+        sketch.generateOutlineSource,
+        sketch.deriveOutlineSource,
+        outlineDisplayTarget.toolWidthMillimeters,
+        outlineDisplayTarget.millimetersPerSceneUnit,
+      ],
     );
-  }, [
-    outlineSession.phase,
-    sketch.generateOutlineSource,
-    sketch.deriveOutlineSource,
-    history.present,
-    pageFrameEditDraft,
-  ]);
 
   const renderState: LiveCanvasRenderState =
     unavailableEnvironmentStatus !== null
@@ -1262,12 +1253,7 @@ export function SketchControls({
                 ? {}
                 : { contentRevision: outlineSession.phase.contentRevision }),
             }
-          : outlineSceneForDisplay !== null
-            ? {
-                ...outlineSession.phase,
-                scene: outlineSceneForDisplay,
-              }
-            : outlineSession.phase;
+          : outlineSession.phase;
 
   // New seed: roll a fresh arrangement, leaving every param value untouched —
   // the seed axis is independent of the param (Randomize) axis.
@@ -1733,6 +1719,9 @@ export function SketchControls({
             onDisplayedSceneCommitted={onDisplayedSceneCommitted}
             renderState={renderState}
             tolerance={tolerance}
+            outlineFinalizationStrokePolicy={
+              outlineFinalizationStrokePolicy
+            }
             pageFrameEditDraft={pageFrameEditDraft}
             onPageFrameDraftChange={updatePageFrameFromCanvas}
             pageFrameAspectConstraint={pageFrameAspectConstraint}

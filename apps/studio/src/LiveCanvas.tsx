@@ -39,7 +39,11 @@ import {
   type PageFrameManipulationTarget,
   type PageFramePointer,
 } from "./pageFrameManipulation";
-import { finalizeOutlineScene } from "./outlineScene";
+import {
+  applyOutlineArtworkStrokePolicy,
+  finalizeStyledOutlineScene,
+  type OutlineFinalizationStrokePolicy,
+} from "./outlineScene";
 import {
   validatePageFrameEditDraft,
   type FixedPageFrameEditDraft,
@@ -213,6 +217,8 @@ interface LiveCanvasBaseProps {
   renderState?: LiveCanvasRenderState;
   /** Export identity metadata retained in the displayed-scene handle. */
   tolerance?: number;
+  /** Current physical styling target used only when finalizing Outline paint. */
+  outlineFinalizationStrokePolicy?: OutlineFinalizationStrokePolicy;
   /** Receives every valid direct-manipulation draft while edit mode is active. */
   onPageFrameDraftChange?: (frame: PageFrame) => void;
   /** Persistent toolbar constraint applied to direct resize gestures. */
@@ -500,6 +506,7 @@ export function LiveCanvas({
   onDisplayedSceneCommitted,
   renderState = LIVE_FILL_RENDER_STATE,
   tolerance = 0,
+  outlineFinalizationStrokePolicy,
   pageFrameDraft = null,
   pageFrameEditDraft = null,
   onPageFrameDraftChange,
@@ -564,6 +571,10 @@ export function LiveCanvas({
     renderState.kind === "fill-held" || renderState.kind === "outline"
       ? renderState.contentRevision
       : null;
+  const outlineStrokePolicyIdentity =
+    outlineFinalizationStrokePolicy === undefined
+      ? "none"
+      : `${outlineFinalizationStrokePolicy.kind}:${outlineFinalizationStrokePolicy.target.toolWidthMillimeters}:${outlineFinalizationStrokePolicy.target.millimetersPerSceneUnit}`;
   const preparedFrame = useMemo(
     () =>
       renderState.kind === "fill-live"
@@ -964,6 +975,18 @@ export function LiveCanvas({
   // a possibly stale committed caller profile.
   const includeFrame = previewProfile.includeFrame;
   const includeFrameRef = useRef(includeFrame);
+  const outlineFinalizationStrokePolicyRef = useRef(
+    outlineFinalizationStrokePolicy,
+  );
+  const outlineStrokePolicyIdentityRef = useRef(outlineStrokePolicyIdentity);
+  // Retarget artwork only when its source or physical target changes. Page
+  // placement then remains a separate cheap pass, so pan never restyles every
+  // retained primitive.
+  const styledOutlineCacheRef = useRef<{
+    readonly sourceScene: Scene;
+    readonly policyIdentity: string;
+    readonly scene: Scene;
+  } | null>(null);
   useLayoutEffect(() => {
     preparedFrameRef.current = preparedFrame;
     renderStateRef.current = renderState;
@@ -971,6 +994,9 @@ export function LiveCanvas({
     pageFrameForPaintRef.current = pageFrameForPaint;
     toleranceRef.current = tolerance;
     includeFrameRef.current = includeFrame;
+    outlineFinalizationStrokePolicyRef.current =
+      outlineFinalizationStrokePolicy;
+    outlineStrokePolicyIdentityRef.current = outlineStrokePolicyIdentity;
     inputRevisionRef.current = inputRevision;
     captureRequestRef.current = fillCaptureRequest;
     onFillCapturedRef.current = onFillCaptured;
@@ -984,6 +1010,8 @@ export function LiveCanvas({
     editingPageFrame,
     tolerance,
     includeFrame,
+    outlineFinalizationStrokePolicy,
+    outlineStrokePolicyIdentity,
     inputRevision,
     fillCaptureRequest,
     onFillCaptured,
@@ -1119,10 +1147,30 @@ export function LiveCanvas({
   }, []);
 
   const displayedOutlineScene = useCallback((sourceScene: Scene): Scene => {
-    return finalizeOutlineScene(
-      sourceScene,
+    const policyIdentity = outlineStrokePolicyIdentityRef.current;
+    const cached = styledOutlineCacheRef.current;
+    const cacheHit =
+      cached !== null &&
+      cached.sourceScene === sourceScene &&
+      cached.policyIdentity === policyIdentity;
+    const styledScene = cacheHit
+      ? cached.scene
+      : applyOutlineArtworkStrokePolicy(
+          sourceScene,
+          outlineFinalizationStrokePolicyRef.current,
+        );
+    if (!cacheHit) {
+      styledOutlineCacheRef.current = {
+        sourceScene,
+        policyIdentity,
+        scene: styledScene,
+      };
+    }
+    return finalizeStyledOutlineScene(
+      styledScene,
       pageFrameForPaintRef.current,
       includeFrameRef.current,
+      outlineFinalizationStrokePolicyRef.current,
     );
   }, []);
 
@@ -1393,7 +1441,7 @@ export function LiveCanvas({
   // retained full-Composition source is finalized at the same exact `t`; neither
   // Sketch preparation nor sampling participates. Scale-preserving draft motion
   // remains overlay-only because its effective paint frame stays null.
-  const framingPaintIdentity = `${pageFrameForPaint?.x ?? "none"}:${pageFrameForPaint?.y ?? "none"}:${pageFrameForPaint?.width ?? "none"}:${pageFrameForPaint?.height ?? "none"}:${editingPageFrame}:${editingFixedPageFrame}:${includeFrame}`;
+  const framingPaintIdentity = `${pageFrameForPaint?.x ?? "none"}:${pageFrameForPaint?.y ?? "none"}:${pageFrameForPaint?.width ?? "none"}:${pageFrameForPaint?.height ?? "none"}:${editingPageFrame}:${editingFixedPageFrame}:${includeFrame}:${outlineStrokePolicyIdentity}`;
   const previousFramingPaintIdentityRef = useRef(framingPaintIdentity);
   useEffect(() => {
     if (previousFramingPaintIdentityRef.current === framingPaintIdentity) return;
