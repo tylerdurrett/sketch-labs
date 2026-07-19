@@ -23,6 +23,7 @@ import {
   leafField,
   photoScribble,
   renderPlotterSVG,
+  resolveCompositionFrame,
   resolvePlotCompositionFrame,
   scribbleMoon,
   toneCalibration,
@@ -2661,6 +2662,180 @@ describe("SketchControls — preset save/reload wiring", () => {
     expect(lastProfile).toEqual(loadedProfile);
   });
 
+  it("reloads v3 profile and framing together so generation and final Page use the stored snapshot", async () => {
+    const loadedProfile: PlotProfile = {
+      width: 360,
+      height: 240,
+      insets: { top: 7, right: 11, bottom: 13, left: 17 },
+      includeFrame: false,
+      toolWidthMillimeters: 0.45,
+    };
+    const loadedFraming = {
+      pageFrame: { x: -12.5, y: 8.25, width: 144.75, height: 92.5 },
+      generationAspect: 16 / 9,
+      aspectLocked: false,
+    };
+    loadPreset.mockResolvedValue({
+      version: 3,
+      sketch: "a",
+      name: "framed",
+      seed: 999,
+      params: { radius: 77, count: 88 },
+      locks: ["radius"],
+      profile: loadedProfile,
+      framing: loadedFraming,
+    });
+    listPresets.mockResolvedValue(["framed"]);
+
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    await flush();
+    const initialComposition = structuredClone(lastCompositionFrame);
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "framed");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const reload = historyCapture.atomic[0]!.after;
+    expect(reload.past).toHaveLength(1);
+    expect(reload.present.profile).toEqual(loadedProfile);
+    expect(reload.present.framing).toEqual({
+      kind: "framed",
+      ...loadedFraming,
+    });
+    expect(lastProfile).toEqual(loadedProfile);
+    expect(lastCompositionFrame).toEqual(
+      resolveCompositionFrame(loadedFraming.generationAspect),
+    );
+    expect(lastCompositionFrame).not.toEqual(initialComposition);
+    expect(lastCommittedPageFrame).toEqual(loadedFraming.pageFrame);
+    expect(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Lock Page aspect"]',
+      )?.checked,
+    ).toBe(false);
+  });
+
+  it.each([
+    ["v1", 1],
+    ["v2", 2],
+  ] as const)(
+    "a legacy %s reload explicitly clears prior v3 framing while preserving profile precedence",
+    async (_label, version) => {
+      const framedProfile: PlotProfile = {
+        width: 360,
+        height: 240,
+        insets: { top: 7, right: 11, bottom: 13, left: 17 },
+        includeFrame: false,
+        toolWidthMillimeters: 0.45,
+      };
+      const sketchDefault: PlotProfile = {
+        width: 297,
+        height: 210,
+        insets: { top: 9, right: 10, bottom: 11, left: 12 },
+        includeFrame: true,
+        toolWidthMillimeters: 0.35,
+      };
+      const v2Profile: PlotProfile = {
+        width: 210,
+        height: 297,
+        insets: { top: 14, right: 15, bottom: 16, left: 17 },
+        includeFrame: false,
+        toolWidthMillimeters: 0.25,
+      };
+      const framed: Preset = {
+        version: 3,
+        sketch: "legacy-clear",
+        name: "framed",
+        seed: 8,
+        params: { radius: 22, count: 33 },
+        locks: [],
+        profile: framedProfile,
+        framing: {
+          pageFrame: { x: 12, y: -8, width: 140, height: 90 },
+          generationAspect: 3 / 2,
+          aspectLocked: true,
+        },
+      };
+      const legacy: Preset =
+        version === 1
+          ? {
+              version: 1,
+              sketch: "legacy-clear",
+              name: "legacy",
+              seed: 9,
+              params: { radius: 44, count: 55 },
+              locks: [],
+            }
+          : {
+              version: 2,
+              sketch: "legacy-clear",
+              name: "legacy",
+              seed: 9,
+              params: { radius: 44, count: 55 },
+              locks: [],
+              profile: v2Profile,
+            };
+      loadPreset.mockImplementation(async (_id, name) =>
+        name === "framed" ? framed : legacy,
+      );
+      listPresets.mockResolvedValue(["framed", "legacy"]);
+      const sketch = {
+        ...sketchWith("legacy-clear", schema),
+        defaultOutputProfile: sketchDefault,
+      } as Parameters<typeof SketchControls>[0]["sketch"];
+      const el = mount(<SketchControls sketch={sketch} />);
+      await flush();
+
+      const picker = el.querySelector<HTMLSelectElement>(
+        'select[aria-label="saved presets"]',
+      )!;
+      const selectAndReload = async (name: string) => {
+        act(() => {
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLSelectElement.prototype,
+            "value",
+          )!.set!;
+          setter.call(picker, name);
+          picker.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        clickButton(el, "Reload");
+        await flush();
+      };
+
+      await selectAndReload("framed");
+      expect(lastCommittedPageFrame).toEqual(framed.framing?.pageFrame);
+
+      await selectAndReload("legacy");
+
+      expect(historyCapture.atomic).toHaveLength(2);
+      const legacyReload = historyCapture.atomic[1]!.after;
+      expect(legacyReload.past).toHaveLength(2);
+      expect(legacyReload.present.framing).toEqual({ kind: "unframed" });
+      expect(legacyReload.present.profile).toEqual(
+        version === 1 ? sketchDefault : v2Profile,
+      );
+      expect(lastProfile).toEqual(version === 1 ? sketchDefault : v2Profile);
+      expect(lastCommittedPageFrame).toBeNull();
+      expect(
+        el.querySelector('input[aria-label="Lock Page aspect"]'),
+      ).toBeNull();
+      expect(lastCompositionFrame).toEqual(
+        resolvePlotCompositionFrame(version === 1 ? sketchDefault : v2Profile),
+      );
+    },
+  );
+
   it("reloads and re-saves the exact non-default Image Asset ID", async () => {
     const defaultAsset = "portrait-default-000000000001";
     const persistedAsset = "portrait-persisted-bbbbbbbbbbbb";
@@ -3441,7 +3616,7 @@ describe("SketchControls — SVG export wiring", () => {
     // this Sketch declares no default, so it is the Harness fallback.
     const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
     expect(meta).toBeDefined();
-    expect(JSON.parse(meta!)).toMatchObject({
+    expect(JSON.parse(meta!)).toEqual({
       version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
@@ -4808,7 +4983,7 @@ describe("SketchControls — PNG export wiring", () => {
     // envelope is now a v2 record (#266) carrying the active Plot Profile (#267),
     // the Harness fallback for this default-less Sketch.
     const json = JSON.parse(readITxtText(await blobBytes(blob)));
-    expect(json).toMatchObject({
+    expect(json).toEqual({
       version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
@@ -4818,6 +4993,36 @@ describe("SketchControls — PNG export wiring", () => {
       profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
     expect("t" in json).toBe(false);
+  });
+
+  it("embeds the same framed v3 snapshot as Save in PNG iTXt", async () => {
+    const el = mount(<SketchControls sketch={staticSketch("framed-png")} />);
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    setInput(el.querySelector<HTMLInputElement>('input[name="y"]')!, "-5");
+    setInput(el.querySelector<HTMLInputElement>('input[name="width"]')!, "80");
+    setInput(el.querySelector<HTMLInputElement>('input[name="height"]')!, "110");
+    clickButton(el, "Apply");
+
+    setInput(
+      el.querySelector<HTMLInputElement>('input[aria-label="preset name"]')!,
+      "framed-authored",
+    );
+    clickButton(el, "Save");
+    await flush();
+    const saved = savePreset.mock.calls[0]![0];
+    expect(saved.version).toBe(3);
+
+    clickButton(el, "Export PNG");
+    await flush();
+
+    const [blob, filename] = downloadBlob.mock.calls[0]!;
+    const embedded = JSON.parse(readITxtText(await blobBytes(blob)));
+    expect(filename).toBe(`framed-png-seed${saved.seed}.png`);
+    expect(embedded).toEqual({
+      ...saved,
+      name: `framed-png-seed${saved.seed}`,
+    });
   });
 
   it("includes the captured -t{t} segment for a time-driven sketch", async () => {

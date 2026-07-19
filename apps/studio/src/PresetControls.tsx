@@ -5,6 +5,7 @@ import {
   type Params,
   type PlotProfile,
   type Preset,
+  type PresetFraming,
   type Seed,
 } from "@harness/core";
 
@@ -22,9 +23,10 @@ import { listPresets, loadPreset, savePreset } from "./presetsClient";
  *
  * The component is the studio's save/reload surface. It owns its OWN local UI
  * state — the name field, the selected preset, and the fetched name list — but
- * the live values a Save captures (`params` / `seed` / `locks`) flow IN from the
- * {@link SketchControls} owner, and a Reload's reconciled state flows back OUT
- * through {@link onReload}. It never holds the canonical param state itself.
+ * the live values a Save captures (`params` / `seed` / `locks` / profile /
+ * framing) flow IN from the {@link SketchControls} owner, and a Reload's
+ * reconciled state flows back OUT through {@link onReload}. It never holds the
+ * canonical authored state itself.
  */
 export interface PresetControlsProps {
   /** The active Sketch id slug — the folder a Preset is saved under / read from. */
@@ -42,10 +44,13 @@ export interface PresetControlsProps {
    * precedence; this component only forwards it verbatim into `makePreset`.
    */
   profile: PlotProfile;
+  /** Complete committed Page framing; when present, Save stamps a v3 record. */
+  framing?: PresetFraming;
   /**
    * Hand a freshly-loaded Preset to the owner, which reconciles it through
-   * `applyPreset` and hydrates its `params` / `seed` / `locks` / `profile` state.
-   * This component does NOT run the reconcile — that array→Set glue is the owner's.
+   * `applyPreset` and hydrates its params, seed, locks, profile, and framing.
+   * This component does NOT run the reconcile — that transport-to-Studio glue
+   * is the owner's.
    */
   onReload: (preset: Preset) => void;
 }
@@ -72,6 +77,7 @@ export function PresetControls({
   seed,
   locks,
   profile,
+  framing,
   onReload,
 }: PresetControlsProps) {
   const [nameDraft, setNameDraft] = useState<PresetNameDraft>({
@@ -100,9 +106,15 @@ export function PresetControls({
     if (names.includes(name) && !window.confirm(`Overwrite preset "${name}"?`)) {
       return;
     }
-    // Forward the active Plot Profile (#247) as the 6th arg so `makePreset`
-    // stamps a v2 record carrying it (profile present ⇔ version === 2).
-    const preset = makePreset(sketchId, name, params, seed, locks, profile);
+    const preset = makePreset(
+      sketchId,
+      name,
+      params,
+      seed,
+      locks,
+      profile,
+      framing,
+    );
     savePreset(preset)
       .then(() => {
         setError(null);

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HARNESS_FALLBACK_PLOT_PROFILE,
   type Preset,
+  type PresetFraming,
 } from "@harness/core";
 
 import { PresetControls } from "./PresetControls";
@@ -29,7 +30,10 @@ vi.mock("./presetsClient", () => ({
 let container: HTMLDivElement;
 let root: Root;
 
-async function mount(names: string[] = []): Promise<HTMLDivElement> {
+async function mount(
+  names: string[] = [],
+  framing?: PresetFraming,
+): Promise<HTMLDivElement> {
   presetClient.list.mockResolvedValue(names);
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -42,6 +46,7 @@ async function mount(names: string[] = []): Promise<HTMLDivElement> {
         seed="abc123"
         locks={new Set(["count"])}
         profile={HARNESS_FALLBACK_PLOT_PROFILE}
+        {...(framing === undefined ? {} : { framing })}
         onReload={vi.fn()}
       />,
     ),
@@ -158,6 +163,46 @@ describe("PresetControls name entry", () => {
     expect(presetClient.save.mock.calls[0]?.[0]).toMatchObject({
       sketch: "circles",
       name: "my-preset",
+    });
+  });
+
+  it("forwards exact committed framing into a v3 save", async () => {
+    const framing: PresetFraming = {
+      pageFrame: { x: -12.5, y: 8.25, width: 144.75, height: 92.5 },
+      generationAspect: 16 / 9,
+      aspectLocked: false,
+    };
+    await mount([], framing);
+    enterBrowserValue("framed");
+
+    await clickSave();
+
+    expect(presetClient.save).toHaveBeenCalledWith({
+      version: 3,
+      sketch: "circles",
+      name: "framed",
+      seed: "abc123",
+      params: { count: 12 },
+      locks: ["count"],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+      framing,
+    });
+  });
+
+  it("keeps an unframed save on the v2 transport shape", async () => {
+    await mount();
+    enterBrowserValue("unframed");
+
+    await clickSave();
+
+    expect(presetClient.save.mock.calls[0]?.[0]).toEqual({
+      version: 2,
+      sketch: "circles",
+      name: "unframed",
+      seed: "abc123",
+      params: { count: 12 },
+      locks: ["count"],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
   });
 
