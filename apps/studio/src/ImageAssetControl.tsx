@@ -363,41 +363,43 @@ export function ImageAssetControl({
           type="button"
           variant="outline"
           size="sm"
-          disabled={!canRecompose}
-          aria-describedby={
-            recomposeUnavailableReason === null
-              ? undefined
-              : recomposeUnavailableId
-          }
-          onClick={() => {
-            if (!canRecompose) return;
-            onRecomposeToImageAspect({
-              paramKey,
-              imageAssetId: value,
-              dimensions: {
-                width: imageDimensions.width,
-                height: imageDimensions.height,
-              },
-            });
-          }}
-        >
-          Recompose to this image’s aspect
-        </Button>
-        {recomposeUnavailableReason !== null ? (
-          <span id={recomposeUnavailableId} className="sr-only">
-            {recomposeUnavailableReason}
-          </span>
-        ) : null}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
           aria-expanded={open}
           onClick={toggleOpen}
         >
           {open ? "Close library" : "Choose image"}
         </Button>
       </div>
+
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="w-full"
+        disabled={!canRecompose}
+        aria-describedby={
+          recomposeUnavailableReason === null
+            ? undefined
+            : recomposeUnavailableId
+        }
+        onClick={() => {
+          if (!canRecompose) return;
+          onRecomposeToImageAspect({
+            paramKey,
+            imageAssetId: value,
+            dimensions: {
+              width: imageDimensions.width,
+              height: imageDimensions.height,
+            },
+          });
+        }}
+      >
+        Recompose to this image’s aspect
+      </Button>
+      {recomposeUnavailableReason !== null ? (
+        <span id={recomposeUnavailableId} className="sr-only">
+          {recomposeUnavailableReason}
+        </span>
+      ) : null}
 
       {open ? (
         <div className="flex flex-col gap-3 rounded-md border p-3">

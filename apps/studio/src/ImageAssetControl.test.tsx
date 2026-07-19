@@ -236,6 +236,7 @@ describe("ImageAssetControl", () => {
 
     const recompose = button(el, "Recompose to this image’s aspect");
     expect(recompose.disabled).toBe(false);
+    expect(recompose.classList.contains("w-full")).toBe(true);
     expect(recompose.hasAttribute("aria-describedby")).toBe(false);
 
     act(() => recompose.click());
