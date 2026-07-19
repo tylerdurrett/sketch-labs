@@ -31,6 +31,24 @@ export interface ImageAssetControlResolution {
   readonly retry: () => void;
 }
 
+/** Decoded pixel dimensions presented for one exact Image Asset selection. */
+export interface ImageAssetControlDimensions {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * A row-scoped presentation snapshot requesting an image-aspect recompose.
+ *
+ * The receiver must reread the current environment before mutating authored
+ * state; neither the selected ID nor dimensions are authoritative here.
+ */
+export interface ImageAssetControlRecomposeRequest {
+  readonly paramKey: string;
+  readonly imageAssetId: string;
+  readonly dimensions: ImageAssetControlDimensions;
+}
+
 /** Props for the schema-derived Image Asset picker/import control. */
 export interface ImageAssetControlProps {
   /** The param's key in the schema, used as the visible row label. */
@@ -43,6 +61,25 @@ export interface ImageAssetControlProps {
   imageAssetLongEdgeCap?: number;
   /** Resolution lifecycle for the current exact schema-declared asset set. */
   resolution?: ImageAssetControlResolution | undefined;
+  /** Decoded dimensions presented for this row's exact selected asset. */
+  imageDimensions?: ImageAssetControlDimensions | null | undefined;
+  /** Request recomposition from this row's non-authoritative snapshot. */
+  onRecomposeToImageAspect?:
+    | ((request: ImageAssetControlRecomposeRequest) => void)
+    | undefined;
+}
+
+function hasValidDimensions(
+  dimensions: ImageAssetControlDimensions | null | undefined,
+): dimensions is ImageAssetControlDimensions {
+  return (
+    dimensions !== null &&
+    dimensions !== undefined &&
+    Number.isSafeInteger(dimensions.width) &&
+    dimensions.width > 0 &&
+    Number.isSafeInteger(dimensions.height) &&
+    dimensions.height > 0
+  );
 }
 
 function failureMessage(phase: FailurePhase, error: unknown): string {
@@ -90,6 +127,8 @@ export function ImageAssetControl({
   onChange,
   imageAssetLongEdgeCap = STUDIO_IMAGE_ASSET_LONG_EDGE_CAP,
   resolution,
+  imageDimensions,
+  onRecomposeToImageAspect,
 }: ImageAssetControlProps) {
   const displayName = imageAssetDisplayName(value);
   const url = imageAssetUrl(value);
@@ -103,6 +142,22 @@ export function ImageAssetControl({
       : resolutionStatus;
   const showThumbnail =
     presentationStatus === "resolved" && url !== null && displayName !== null;
+  const canRecompose =
+    presentationStatus === "resolved" &&
+    hasValidDimensions(imageDimensions) &&
+    onRecomposeToImageAspect !== undefined;
+  const recomposeUnavailableReason = canRecompose
+    ? null
+    : presentationStatus === "loading"
+      ? "Recompose is unavailable while the exact Image Asset is loading."
+      : presentationStatus === "missing"
+        ? "Recompose is unavailable because the exact Image Asset is missing."
+        : presentationStatus === "error"
+          ? "Recompose is unavailable because the exact Image Asset could not be resolved."
+          : !hasValidDimensions(imageDimensions)
+            ? "Recompose is unavailable because decoded image dimensions are unavailable."
+            : "Recompose is unavailable in this context.";
+  const recomposeUnavailableId = `${paramKey}-image-asset-recompose-unavailable`;
   const [open, setOpen] = useState(false);
   const [assets, setAssets] = useState<ManagedImageAsset[]>([]);
   const [loading, setLoading] = useState(false);
@@ -303,6 +358,35 @@ export function ImageAssetControl({
           >
             Retry exact asset
           </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!canRecompose}
+          aria-describedby={
+            recomposeUnavailableReason === null
+              ? undefined
+              : recomposeUnavailableId
+          }
+          onClick={() => {
+            if (!canRecompose) return;
+            onRecomposeToImageAspect({
+              paramKey,
+              imageAssetId: value,
+              dimensions: {
+                width: imageDimensions.width,
+                height: imageDimensions.height,
+              },
+            });
+          }}
+        >
+          Recompose to this image’s aspect
+        </Button>
+        {recomposeUnavailableReason !== null ? (
+          <span id={recomposeUnavailableId} className="sr-only">
+            {recomposeUnavailableReason}
+          </span>
         ) : null}
         <Button
           type="button"
