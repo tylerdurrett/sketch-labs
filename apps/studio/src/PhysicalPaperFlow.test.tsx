@@ -96,13 +96,9 @@ vi.mock("./hiddenLineCoordinator", async () => {
               status: "success",
               jobId: 1,
               identity,
-              scene: finalizeOutlineScene(
-                outlineScene(
-                  identity.sourceScene as Scene,
-                  identity.tolerance,
-                ),
-                null,
-                identity.includeFrame,
+              scene: outlineScene(
+                identity.sourceScene as Scene,
+                identity.tolerance,
               ),
             });
             return Promise.resolve();

@@ -27,6 +27,7 @@ import {
 } from "@harness/core";
 
 import { rasterizeToneReference } from "./toneReference";
+import { finalizeOutlineScene } from "./outlineScene";
 
 /**
  * Which processed Scene the live preview renders (issue #219, feature #4).
@@ -45,9 +46,9 @@ export type RenderMode = "fill" | "outline";
 export interface DisplayedSceneSnapshot {
   /** Backward-compatible alias for `displayedScene`. */
   readonly scene: Scene;
-  /** Exact full-Composition Scene sampled at `t`, before Page framing. */
+  /** Exact full-Composition derivation source at `t`, before Page framing. */
   readonly sourceScene: Scene;
-  /** Exact Scene painted to the canvas, framed only for committed Fill. */
+  /** Exact Scene painted to the canvas, after cheap mode-specific finalization. */
   readonly displayedScene: Scene;
   readonly t: number;
   readonly renderMode: RenderMode;
@@ -197,7 +198,7 @@ export interface LiveCanvasProps {
   tolerance?: number;
   /** Transient Page Frame draft; present only while Studio is editing framing. */
   pageFrameDraft?: PageFrame | null;
-  /** Committed Page Frame applied as a paint-only Fill derivation. */
+  /** Committed Page Frame applied as a paint-only Fill/Outline derivation. */
   pageFrame?: PageFrame | null;
   /**
    * Optional ref the owner passes to obtain the read-only {@link LiveCanvasHandle}
@@ -667,13 +668,24 @@ export function LiveCanvas({
       : sourceScene;
   }, []);
 
+  const displayedOutlineScene = useCallback((sourceScene: Scene): Scene => {
+    const committedFrame = editingPageFrameRef.current
+      ? null
+      : pageFrameRef.current;
+    return finalizeOutlineScene(
+      sourceScene,
+      committedFrame,
+      includeFrameRef.current,
+    );
+  }, []);
+
   const syncPageGround = useCallback((sourceScene: Scene) => {
     const ground = pageGroundRef.current;
     if (ground === null) return;
     ground.style.backgroundColor = sourceScene.background?.color ?? "white";
   }, []);
 
-  // Only live Fill derives geometry. Held Fill and completed Outline are
+  // Only live Fill derives geometry. Held Fill and completed base Outline are
   // caller-owned immutable frames and travel through `paintSuppliedFrame`.
   const rebuildAndDrawFillAt = useCallback((t: number) => {
     const canvas = canvasRef.current;
@@ -694,7 +706,7 @@ export function LiveCanvas({
       const displayedScene =
         state.kind === "fill-held"
           ? displayedFillScene(state.scene)
-          : state.scene;
+          : displayedOutlineScene(state.scene);
       if (canvas === null || !paintFrame(canvas, displayedScene)) return;
       syncPageGround(state.scene);
       const snapshot: DisplayedSceneSnapshot = {
@@ -717,7 +729,12 @@ export function LiveCanvas({
       };
       commitDisplayedScene(snapshot, state.kind === "fill-held");
     },
-    [commitDisplayedScene, displayedFillScene, syncPageGround],
+    [
+      commitDisplayedScene,
+      displayedFillScene,
+      displayedOutlineScene,
+      syncPageGround,
+    ],
   );
 
   // Geometry-only changes repaint the exact displayed Scene. They never sample
@@ -866,8 +883,9 @@ export function LiveCanvas({
     compositionHeight,
   ]);
 
-  // Static live Fill derives synchronously. Supplied held/Outline geometry paints
-  // atomically as-is. Neither path is sent through hidden-line work.
+  // Static live Fill derives synchronously. Supplied held geometry paints as-is;
+  // supplied base Outline receives only cheap Page finalization. Neither path is
+  // sent through hidden-line work.
   useEffect(() => {
     if (
       renderState.kind === "tone-reference" ||
@@ -901,11 +919,12 @@ export function LiveCanvas({
     paintSuppliedFrame,
   ]);
 
-  // A frame commit/reset and entering/leaving edit mode are display-only. The
-  // retained full-Composition source is re-framed at the same exact `t`; neither
-  // Sketch preparation nor sampling participates in this path. Draft movement
-  // only changes overlay geometry and therefore is intentionally excluded.
-  const framingPaintIdentity = `${pageFrame?.x ?? "none"}:${pageFrame?.y ?? "none"}:${pageFrame?.width ?? "none"}:${pageFrame?.height ?? "none"}:${editingPageFrame}`;
+  // A frame commit/reset, entering/leaving edit mode, and toggling the optional
+  // Outline Page boundary are display-only. The retained full-Composition source
+  // is finalized at the same exact `t`; neither Sketch preparation nor sampling
+  // participates in this path. Draft movement only changes overlay geometry and
+  // therefore is intentionally excluded.
+  const framingPaintIdentity = `${pageFrame?.x ?? "none"}:${pageFrame?.y ?? "none"}:${pageFrame?.width ?? "none"}:${pageFrame?.height ?? "none"}:${editingPageFrame}:${includeFrame}`;
   const previousFramingPaintIdentityRef = useRef(framingPaintIdentity);
   useEffect(() => {
     if (previousFramingPaintIdentityRef.current === framingPaintIdentity) return;
@@ -917,16 +936,22 @@ export function LiveCanvas({
     const displayedScene =
       retained.renderMode === "fill"
         ? displayedFillScene(retained.sourceScene)
-        : retained.sourceScene;
+        : displayedOutlineScene(retained.sourceScene);
     if (!paintFrame(canvas, displayedScene)) return;
     syncPageGround(retained.sourceScene);
     commitDisplayedScene(
-      { ...retained, scene: displayedScene, displayedScene },
+      {
+        ...retained,
+        scene: displayedScene,
+        displayedScene,
+        includeFrame: includeFrameRef.current,
+      },
       retained.renderMode === "fill",
     );
   }, [
     framingPaintIdentity,
     displayedFillScene,
+    displayedOutlineScene,
     syncPageGround,
     commitDisplayedScene,
   ]);
