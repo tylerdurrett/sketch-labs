@@ -5,7 +5,6 @@ import {
   derivePaperOrientation,
   inchToMm,
   matchStandardPaper,
-  mmToInch,
   STANDARD_PAPER_NAMES,
   swapPlotOrientation,
   validatePlotProfile,
@@ -14,11 +13,32 @@ import {
 } from "@harness/core";
 
 import type { EditTransactionLifecycle } from "./editHistory";
+import {
+  formatPaperDimension as formatDimension,
+  readPaperDisplayUnit,
+  writePaperDisplayUnit,
+  type PaperDisplayUnit,
+} from "./paperDisplayUnit";
 
-/** The Studio-local preference key. Display units are never Plot Profile state. */
-export const PAPER_DISPLAY_UNIT_STORAGE_KEY = "sketch-labs.paper-display-unit";
+export { PAPER_DISPLAY_UNIT_STORAGE_KEY } from "./paperDisplayUnit";
 
-export type PaperDisplayUnit = "mm" | "in";
+export type PaperProfileCandidateSource =
+  | "width"
+  | "height"
+  | "margin"
+  | "format"
+  | "orientation";
+
+export type PaperProfileCandidateDecision =
+  | { readonly kind: "accept"; readonly profile: PlotProfile }
+  | { readonly kind: "handled"; readonly profile: PlotProfile }
+  | { readonly kind: "reject"; readonly message: string };
+
+/** Decide an aspect-affecting Paper candidate before Studio previews it. */
+export type PaperProfileCandidateRouter = (
+  candidate: PlotProfile,
+  source: PaperProfileCandidateSource,
+) => PaperProfileCandidateDecision;
 
 interface PaperSectionBaseProps {
   /** The authoritative, millimeter-canonical Plot Profile owned by Studio. */
@@ -27,6 +47,15 @@ interface PaperSectionBaseProps {
   includePaperMargins: boolean;
   /** Update Studio's export preference without changing the Plot Profile. */
   onIncludePaperMarginsChange: (includePaperMargins: boolean) => void;
+  /**
+   * Optional owner boundary for framed Page semantics. It may normalize a
+   * candidate, accept it unchanged, or reject it before any edit callback.
+   */
+  routeProfileCandidate?: PaperProfileCandidateRouter | undefined;
+  /** Controlled lock state for an existing committed Page Frame. */
+  aspectLocked?: boolean | undefined;
+  /** Commit an explicit user lock/unlock choice. */
+  onAspectLockedChange?: ((locked: boolean) => void) | undefined;
 }
 
 interface TransactionalPaperSectionProps {
@@ -46,34 +75,6 @@ interface LegacyPaperSectionProps {
 
 export type PaperSectionProps = PaperSectionBaseProps &
   (TransactionalPaperSectionProps | LegacyPaperSectionProps);
-
-/** Read the presentation-only unit preference without assuming storage is usable. */
-function readDisplayUnit(): PaperDisplayUnit {
-  if (typeof window === "undefined") return "mm";
-
-  try {
-    const stored = window.localStorage.getItem(PAPER_DISPLAY_UNIT_STORAGE_KEY);
-    return stored === "mm" || stored === "in" ? stored : "mm";
-  } catch {
-    return "mm";
-  }
-}
-
-/** Persist the presentation-only unit preference when browser storage permits it. */
-function writeDisplayUnit(unit: PaperDisplayUnit): void {
-  try {
-    window.localStorage.setItem(PAPER_DISPLAY_UNIT_STORAGE_KEY, unit);
-  } catch {
-    // Storage can be unavailable (privacy mode, denied access, quota). The
-    // in-memory preference still works for this Studio session.
-  }
-}
-
-/** Keep dimension summaries compact while preserving useful custom-size precision. */
-function formatDimension(value: number, unit: PaperDisplayUnit): string {
-  const displayed = unit === "in" ? mmToInch(value) : value;
-  return String(Number(displayed.toFixed(unit === "in" ? 3 : 2)));
-}
 
 type PaperDimension = "width" | "height";
 type PaperErrorTarget =
@@ -130,10 +131,13 @@ export function PaperSection({
   profile,
   includePaperMargins,
   onIncludePaperMarginsChange,
+  routeProfileCandidate,
+  aspectLocked,
+  onAspectLockedChange,
   ...editProps
 }: PaperSectionProps) {
   const [displayUnit, setDisplayUnit] =
-    useState<PaperDisplayUnit>(readDisplayUnit);
+    useState<PaperDisplayUnit>(readPaperDisplayUnit);
   const [dimensionDrafts, setDimensionDrafts] = useState(() => ({
     width: formatDimension(profile.width, displayUnit),
     height: formatDimension(profile.height, displayUnit),
@@ -154,7 +158,7 @@ export function PaperSection({
   const id = useId();
 
   useEffect(() => {
-    writeDisplayUnit(displayUnit);
+    writePaperDisplayUnit(displayUnit);
   }, [displayUnit]);
 
   // A controlled profile update (including a Preset reload) or a presentation-
@@ -190,6 +194,54 @@ export function PaperSection({
     } else {
       editProps.onChange(candidate);
     }
+  };
+
+  const restoreControlledDrafts = (): void => {
+    setDimensionDrafts({
+      width: formatDimension(profile.width, displayUnit),
+      height: formatDimension(profile.height, displayUnit),
+    });
+    const inset = linkedInset(profile);
+    setMarginDraft(inset === null ? "" : formatDimension(inset, displayUnit));
+    setToolWidthDraft(
+      formatDimension(profile.toolWidthMillimeters, displayUnit),
+    );
+    dirtyDimensions.current.clear();
+  };
+
+  const routeCandidate = (
+    candidate: PlotProfile,
+    source: PaperProfileCandidateSource,
+    target: PaperErrorTarget,
+  ):
+    | { readonly kind: "accept"; readonly profile: PlotProfile }
+    | { readonly kind: "handled"; readonly profile: PlotProfile }
+    | null => {
+    if (routeProfileCandidate === undefined) {
+      return { kind: "accept", profile: candidate };
+    }
+
+    const decision = routeProfileCandidate(candidate, source);
+    if (decision.kind === "reject") {
+      restoreControlledDrafts();
+      setError({ target, message: decision.message });
+      return null;
+    }
+
+    if (!sameProfile(candidate, decision.profile)) {
+      if (source === "width" || source === "height") {
+        setDimensionDrafts({
+          width: formatDimension(decision.profile.width, displayUnit),
+          height: formatDimension(decision.profile.height, displayUnit),
+        });
+      } else if (source === "margin") {
+        const inset = linkedInset(decision.profile);
+        setMarginDraft(
+          inset === null ? "" : formatDimension(inset, displayUnit),
+        );
+      }
+    }
+    return decision;
   };
 
   const beginField = (field: PaperField): void => {
@@ -251,11 +303,19 @@ export function PaperSection({
   const commitCandidate = (
     candidate: PlotProfile,
     target: PaperErrorTarget,
+    source?: PaperProfileCandidateSource,
   ): void => {
     try {
       validatePlotProfile(candidate);
+      const routed =
+        source === undefined
+          ? { kind: "accept" as const, profile: candidate }
+          : routeCandidate(candidate, source, target);
+      if (routed === null) return;
+      validatePlotProfile(routed.profile);
       setError(null);
-      preview(candidate);
+      if (routed.kind === "handled") return;
+      preview(routed.profile);
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : "Invalid paper dimensions";
@@ -293,24 +353,33 @@ export function PaperSection({
       candidate[dirty] =
         displayUnit === "in" ? inchToMm(displayValue) : displayValue;
     }
-    commitCandidate(candidate, dimension);
+    commitCandidate(candidate, dimension, dimension);
   };
 
   const commitAtomicCandidate = (
     candidate: PlotProfile,
     target: PaperErrorTarget,
+    source?: PaperProfileCandidateSource,
   ): void => {
     try {
       validatePlotProfile(candidate);
+      const routed =
+        source === undefined
+          ? { kind: "accept" as const, profile: candidate }
+          : routeCandidate(candidate, source, target);
+      if (routed === null) return;
+      validatePlotProfile(routed.profile);
       setError(null);
-      if (sameProfile(profile, candidate)) return;
+      if (routed.kind === "handled") return;
+      const accepted = routed.profile;
+      if (sameProfile(profile, accepted)) return;
       if (
         "onAtomicChange" in editProps &&
         editProps.onAtomicChange !== undefined
       ) {
-        editProps.onAtomicChange(candidate);
+        editProps.onAtomicChange(accepted);
       } else {
-        editProps.onChange(candidate);
+        editProps.onChange(accepted);
       }
     } catch (cause) {
       setError({
@@ -328,11 +397,16 @@ export function PaperSection({
     commitAtomicCandidate(
       applyStandardPaper(profile, name, derivePaperOrientation(profile)),
       "format",
+      "format",
     );
   };
 
   const swapOrientation = (): void => {
-    commitAtomicCandidate(swapPlotOrientation(profile), "orientation");
+    commitAtomicCandidate(
+      swapPlotOrientation(profile),
+      "orientation",
+      "orientation",
+    );
   };
 
   const editMargin = (draft: string): void => {
@@ -355,6 +429,7 @@ export function PaperSection({
           left: millimeters,
         },
       },
+      "margin",
       "margin",
     );
   };
@@ -483,6 +558,20 @@ export function PaperSection({
               : `Swap to ${derivePaperOrientation(profile) === "portrait" ? "landscape" : "portrait"}`}
           </button>
         </div>
+        {aspectLocked === undefined ||
+        onAspectLockedChange === undefined ? null : (
+          <label className="flex min-w-0 items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              aria-label="Lock Page aspect"
+              checked={aspectLocked}
+              onChange={(event) =>
+                onAspectLockedChange(event.target.checked)
+              }
+            />
+            <span>Lock Page aspect</span>
+          </label>
+        )}
         <label className="grid min-w-0 gap-1 text-sm">
           <span className="text-muted-foreground">linked margin</span>
           <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">

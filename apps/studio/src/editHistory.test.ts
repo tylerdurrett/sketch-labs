@@ -33,6 +33,8 @@ function assertReadonlySnapshot(state: StudioEditState): void {
   // @ts-expect-error Framing is a readonly authored axis.
   state.framing = { kind: "unframed" };
   if (state.framing.kind === "framed") {
+    // @ts-expect-error The framed Page aspect lock is authored state.
+    state.framing.aspectLocked = false;
     // @ts-expect-error The frozen generation basis cannot be replaced.
     state.framing.generationAspect = 2;
     // @ts-expect-error Nested Page Frame geometry is readonly too.
@@ -170,6 +172,7 @@ describe("edit history", () => {
         kind: "framed",
         pageFrame: { x: -10, y: 20, width: 1_100, height: 900 },
         generationAspect: 4 / 3,
+        aspectLocked: true,
       },
       tolerance: 0.75,
     });
@@ -271,6 +274,7 @@ describe("Studio edit-state equality", () => {
           kind: "framed" as const,
           pageFrame: { x: 0, y: 0, width: 1_000, height: 1_000 },
           generationAspect: 1,
+          aspectLocked: true,
         },
       }),
     ],
@@ -290,6 +294,7 @@ describe("Studio edit-state equality", () => {
         kind: "framed" as const,
         pageFrame: { x: 1, y: 2, width: 3, height: 4 },
         generationAspect: 1.5,
+        aspectLocked: true,
       },
     ],
     [
@@ -298,6 +303,7 @@ describe("Studio edit-state equality", () => {
         kind: "framed" as const,
         pageFrame: { x: 0, y: 3, width: 3, height: 4 },
         generationAspect: 1.5,
+        aspectLocked: true,
       },
     ],
     [
@@ -306,6 +312,7 @@ describe("Studio edit-state equality", () => {
         kind: "framed" as const,
         pageFrame: { x: 0, y: 2, width: 4, height: 4 },
         generationAspect: 1.5,
+        aspectLocked: true,
       },
     ],
     [
@@ -314,6 +321,7 @@ describe("Studio edit-state equality", () => {
         kind: "framed" as const,
         pageFrame: { x: 0, y: 2, width: 3, height: 5 },
         generationAspect: 1.5,
+        aspectLocked: true,
       },
     ],
     [
@@ -322,6 +330,16 @@ describe("Studio edit-state equality", () => {
         kind: "framed" as const,
         pageFrame: { x: 0, y: 2, width: 3, height: 4 },
         generationAspect: 2,
+        aspectLocked: true,
+      },
+    ],
+    [
+      "Page aspect lock",
+      {
+        kind: "framed" as const,
+        pageFrame: { x: 0, y: 2, width: 3, height: 4 },
+        generationAspect: 1.5,
+        aspectLocked: false,
       },
     ],
   ] as const)("detects changed framed %s", (_label, framing) => {
@@ -329,6 +347,7 @@ describe("Studio edit-state equality", () => {
       kind: "framed" as const,
       pageFrame: { x: 0, y: 2, width: 3, height: 4 },
       generationAspect: 1.5,
+      aspectLocked: true,
     };
     const state = editState(1, {
       framing: baselineFraming,
@@ -341,6 +360,7 @@ describe("Studio edit-state equality", () => {
           kind: "framed",
           pageFrame: { ...baselineFraming.pageFrame },
           generationAspect: baselineFraming.generationAspect,
+          aspectLocked: baselineFraming.aspectLocked,
         },
       }),
     ).toBe(true);

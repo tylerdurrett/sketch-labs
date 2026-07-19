@@ -8,8 +8,10 @@ import {
   resolveCompositionFrame,
   resolvePlotCompositionFrame,
   validatePageFrame,
+  validatePlotProfile,
   type CoordinateSpace,
   type PageFrame,
+  type PlotProfile,
 } from "@harness/core";
 
 import {
@@ -116,6 +118,7 @@ export function applyPageFrameEdit(
     kind: "framed",
     pageFrame: Object.freeze({ ...pageFrame }),
     generationAspect,
+    aspectLocked: true,
   });
 
   return commitEditState(history, { ...current, profile, framing });
@@ -139,4 +142,40 @@ export function resetPageFrame(history: EditHistory): EditHistory {
   );
 
   return commitEditState(history, { ...current, profile, framing: UNFRAMED });
+}
+
+/** Explicitly change the Page aspect lock on committed framing. */
+export function setPageAspectLocked(
+  history: EditHistory,
+  locked: boolean,
+): EditHistory {
+  const current = history.present;
+  if (
+    current.framing.kind === "unframed" ||
+    current.framing.aspectLocked === locked
+  ) {
+    return history;
+  }
+
+  const framing: StudioFramingState = Object.freeze({
+    ...current.framing,
+    aspectLocked: locked,
+  });
+  return commitEditState(history, { ...current, framing });
+}
+
+/**
+ * Replace the physical profile and clear Page framing as one recompose command.
+ * Confirmation and Scene regeneration remain caller-owned effects.
+ */
+export function recomposePageToProfile(
+  history: EditHistory,
+  profile: PlotProfile,
+): EditHistory {
+  validatePlotProfile(profile);
+  return commitEditState(history, {
+    ...history.present,
+    profile,
+    framing: UNFRAMED,
+  });
 }

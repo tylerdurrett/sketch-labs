@@ -4,17 +4,23 @@ import {
   type CoordinateSpace,
   type PageFrame,
   type PageFramePercentages,
+  type PlotProfile,
 } from "@harness/core";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "./components/ui/button";
+import { PageFramePhysicalFields } from "./PageFramePhysicalFields";
 import type { PageFrameAspectConstraint } from "./pageFrameManipulation";
+import type { PaperDisplayUnit } from "./paperDisplayUnit";
 
 type PageFrameField = keyof PageFramePercentages;
 type AspectPreset = "free" | "1:1" | "4:3" | "3:2" | "16:9" | "custom";
 
 interface PageFrameEditorBaseProps {
   compositionFrame: CoordinateSpace;
+  profile: PlotProfile;
+  representedFrame: PageFrame;
+  displayUnit: PaperDisplayUnit;
   onDraftChange: (frame: PageFrame) => void;
   onApply: (frame: PageFrame) => void;
   onCancel: () => void;
@@ -232,6 +238,9 @@ export function PageFrameEditor({
   compositionFrame,
   frame,
   initialFrame,
+  profile,
+  representedFrame,
+  displayUnit,
   onDraftChange,
   onApply,
   onCancel,
@@ -244,6 +253,7 @@ export function PageFrameEditor({
     initialDraft(controlledFrame, compositionFrame),
   );
   const [error, setError] = useState<PageFrameError | null>(null);
+  const [physicalFieldsValid, setPhysicalFieldsValid] = useState(true);
   const [uncontrolledAspectConstraint, setUncontrolledAspectConstraint] =
     useState<PageFrameAspectConstraint>({ kind: "free" });
   const aspectConstraint =
@@ -384,6 +394,7 @@ export function PageFrameEditor({
   };
 
   const apply = (): void => {
+    if (!physicalFieldsValid) return;
     const parsed = parseDraft(draft, compositionFrame);
     if (parsed.frame === null) {
       setError(parsed.error);
@@ -426,6 +437,14 @@ export function PageFrameEditor({
           </label>
         ))}
       </div>
+      <PageFramePhysicalFields
+        profile={profile}
+        representedFrame={representedFrame}
+        frame={controlledFrame}
+        displayUnit={displayUnit}
+        onFrameChange={onDraftChange}
+        onValidityChange={setPhysicalFieldsValid}
+      />
       <div className="flex flex-col gap-2">
         <label className="flex flex-col gap-1 text-sm">
           <span>Aspect ratio</span>

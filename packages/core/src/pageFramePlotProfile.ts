@@ -22,6 +22,9 @@ import {
 const SCALE_RELATIVE_TOLERANCE = Number.EPSILON * 8
 const CANCELLATION_ERROR_FACTOR = 4
 
+/** A total paper dimension that drives a physical Page resize. */
+export type PageFramePhysicalDimension = 'width' | 'height'
+
 /**
  * Derive the Plot Profile for a target Page Frame at the current physical scale.
  *
@@ -49,24 +52,11 @@ export function derivePageFramePlotProfile(
   validatePageFrame(currentPageFrame)
   validatePageFrame(targetPageFrame)
 
-  const drawable = plotDrawableRectangle(profile)
-  const horizontalMillimetersPerUnit =
-    drawable.width / currentPageFrame.width
-  const verticalMillimetersPerUnit =
-    drawable.height / currentPageFrame.height
-
-  if (
-    !physicalScalesEquivalent(
-      horizontalMillimetersPerUnit,
-      verticalMillimetersPerUnit,
-      profile,
-      currentPageFrame,
-    )
-  ) {
-    throw new Error(
-      'derivePageFramePlotProfile: the current Plot Profile drawable and current Page Frame must have equivalent physical scales',
-    )
-  }
+  const millimetersPerCompositionUnit = pageFramePhysicalScale(
+    profile,
+    currentPageFrame,
+    'derivePageFramePlotProfile',
+  )
 
   if (
     currentPageFrame.width === targetPageFrame.width &&
@@ -75,7 +65,6 @@ export function derivePageFramePlotProfile(
     return profile
   }
 
-  const millimetersPerCompositionUnit = horizontalMillimetersPerUnit
   const targetDrawableWidth =
     targetPageFrame.width * millimetersPerCompositionUnit
   const targetDrawableHeight =
@@ -93,6 +82,157 @@ export function derivePageFramePlotProfile(
 }
 
 /**
+ * Resize a locked Page's paper while retaining its drawable Page aspect.
+ *
+ * The supplied dimension is the TOTAL paper dimension, including the current
+ * fixed physical insets. After removing those insets, the opposite drawable
+ * extent is derived from `pageFrame` at one uniform scale and its insets are
+ * added back. No other Plot Profile field changes.
+ *
+ * @throws if the inputs are invalid, the requested paper dimension is exhausted
+ *   by its insets, the profile and represented Page do not have one uniform
+ *   physical scale, or the result cannot form a valid Plot Profile.
+ */
+export function resizePageFramePlotProfileProportionally(
+  profile: PlotProfile,
+  pageFrame: PageFrame,
+  dimension: PageFramePhysicalDimension,
+  millimeters: number,
+): PlotProfile {
+  const operation = 'resizePageFramePlotProfileProportionally'
+  pageFramePhysicalScale(profile, pageFrame, operation)
+  const requestedDrawable = drawableExtentFromPaperDimension(
+    profile,
+    dimension,
+    millimeters,
+    operation,
+  )
+
+  const horizontalInsets = profile.insets.left + profile.insets.right
+  const verticalInsets = profile.insets.top + profile.insets.bottom
+  const scale =
+    dimension === 'width'
+      ? requestedDrawable / pageFrame.width
+      : requestedDrawable / pageFrame.height
+  const derived: PlotProfile = {
+    ...profile,
+    width:
+      (dimension === 'width'
+        ? requestedDrawable
+        : pageFrame.width * scale) + horizontalInsets,
+    height:
+      (dimension === 'height'
+        ? requestedDrawable
+        : pageFrame.height * scale) + verticalInsets,
+    insets: { ...profile.insets },
+  }
+
+  validatePlotProfile(derived)
+  return derived
+}
+
+/**
+ * Convert an edit-mode total paper dimension into one Page Frame draft extent.
+ *
+ * `profile` and `representedFrame` establish the committed Page's uniform
+ * millimeters-per-Composition-unit scale. The requested paper dimension has its
+ * fixed physical insets removed and is converted at that scale. Only the chosen
+ * draft width or height changes; its origin and opposite extent are retained.
+ *
+ * @throws if the inputs are invalid, the requested paper dimension is exhausted
+ *   by its insets, the committed profile/frame pair does not have one uniform
+ *   physical scale, or the derived draft is invalid.
+ */
+export function resizePageFrameFromPhysicalDimension(
+  profile: PlotProfile,
+  representedFrame: PageFrame,
+  draftFrame: PageFrame,
+  dimension: PageFramePhysicalDimension,
+  millimeters: number,
+): PageFrame {
+  const operation = 'resizePageFrameFromPhysicalDimension'
+  const millimetersPerCompositionUnit = pageFramePhysicalScale(
+    profile,
+    representedFrame,
+    operation,
+  )
+  validatePageFrame(draftFrame)
+  const requestedDrawable = drawableExtentFromPaperDimension(
+    profile,
+    dimension,
+    millimeters,
+    operation,
+  )
+  const derived = {
+    ...draftFrame,
+    [dimension]: requestedDrawable / millimetersPerCompositionUnit,
+  }
+
+  validatePageFrame(derived)
+  return derived
+}
+
+function drawableExtentFromPaperDimension(
+  profile: PlotProfile,
+  dimension: PageFramePhysicalDimension,
+  millimeters: number,
+  operation: string,
+): number {
+  if (dimension !== 'width' && dimension !== 'height') {
+    throw new Error(
+      `${operation}: dimension must be "width" or "height", got ${String(dimension)}`,
+    )
+  }
+  if (!Number.isFinite(millimeters) || millimeters <= 0) {
+    throw new Error(
+      `${operation}: ${dimension} must be a finite positive total paper dimension in millimeters, got ${millimeters}`,
+    )
+  }
+
+  const insetExtent =
+    dimension === 'width'
+      ? profile.insets.left + profile.insets.right
+      : profile.insets.top + profile.insets.bottom
+  const drawableExtent = millimeters - insetExtent
+  if (drawableExtent <= 0) {
+    throw new Error(
+      `${operation}: ${dimension} ${millimeters} is exhausted by its fixed physical insets (${insetExtent}), leaving no drawable Page extent`,
+    )
+  }
+  return drawableExtent
+}
+
+/** Validate a profile/frame pair and return its uniform physical scale. */
+function pageFramePhysicalScale(
+  profile: PlotProfile,
+  representedFrame: PageFrame,
+  operation: string,
+): number {
+  validatePlotProfile(profile)
+  validatePageFrame(representedFrame)
+
+  const drawable = plotDrawableRectangle(profile)
+  const horizontalMillimetersPerUnit =
+    drawable.width / representedFrame.width
+  const verticalMillimetersPerUnit =
+    drawable.height / representedFrame.height
+
+  if (
+    !physicalScalesEquivalent(
+      horizontalMillimetersPerUnit,
+      verticalMillimetersPerUnit,
+      profile,
+      representedFrame,
+    )
+  ) {
+    throw new Error(
+      `${operation}: the current Plot Profile drawable and represented Page Frame must have equivalent physical scales`,
+    )
+  }
+  return horizontalMillimetersPerUnit
+}
+
+/**
  * Compare direct per-axis physical scales at their own magnitude.
  *
  * The ordinary tolerance is strictly relative, including below one; using an
@@ -107,6 +247,14 @@ function physicalScalesEquivalent(
   profile: PlotProfile,
   representedFrame: PageFrame,
 ): boolean {
+  if (
+    !Number.isFinite(horizontal) ||
+    horizontal <= 0 ||
+    !Number.isFinite(vertical) ||
+    vertical <= 0
+  ) {
+    return false
+  }
   const scale = Math.max(Math.abs(horizontal), Math.abs(vertical))
   const relativeTolerance = SCALE_RELATIVE_TOLERANCE * scale
   const horizontalCancellationTolerance =

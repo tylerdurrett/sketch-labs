@@ -15,6 +15,7 @@ export type StudioFramingState =
       readonly kind: "framed";
       readonly pageFrame: Readonly<PageFrame>;
       readonly generationAspect: number;
+      readonly aspectLocked: boolean;
     };
 
 /**
@@ -231,6 +232,7 @@ function sameFraming(
     Object.is(left.pageFrame.y, right.pageFrame.y) &&
     Object.is(left.pageFrame.width, right.pageFrame.width) &&
     Object.is(left.pageFrame.height, right.pageFrame.height) &&
-    Object.is(left.generationAspect, right.generationAspect)
+    Object.is(left.generationAspect, right.generationAspect) &&
+    left.aspectLocked === right.aspectLocked
   );
 }

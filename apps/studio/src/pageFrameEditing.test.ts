@@ -18,11 +18,13 @@ import {
 import {
   applyPageFrameEdit,
   initialPageFrameForEdit,
+  recomposePageToProfile,
   resetPageFrame,
   resolveStudioCompositionFrame,
   sameStudioPhysicalScale,
   studioGenerationAspect,
   studioMillimetersPerCompositionUnit,
+  setPageAspectLocked,
 } from "./pageFrameEditing";
 
 const PROFILE: PlotProfile = {
@@ -78,6 +80,7 @@ describe("Page Frame editing commands", () => {
       generationAspect:
         plotDrawableRectangle(PROFILE).width /
         plotDrawableRectangle(PROFILE).height,
+      aspectLocked: true,
     });
     expect(resolveStudioCompositionFrame(applied.present)).toEqual(
       initialComposition,
@@ -148,6 +151,7 @@ describe("Page Frame editing commands", () => {
       kind: "framed",
       pageFrame: padding,
       generationAspect: 200 / 160,
+      aspectLocked: true,
     });
     expect(resolveStudioCompositionFrame(second.present)).toEqual(composition);
   });
@@ -210,7 +214,12 @@ describe("Page Frame editing commands", () => {
         includeFrame: true,
         toolWidthMillimeters: 0.3,
       }),
-      framing: { kind: "framed", pageFrame, generationAspect: 1 },
+      framing: {
+        kind: "framed",
+        pageFrame,
+        generationAspect: 1,
+        aspectLocked: true,
+      },
     });
     const microscopic = atScale(1e-20);
     const doubled = atScale(2e-20);
@@ -251,6 +260,107 @@ describe("Page Frame editing commands", () => {
     expect(redone.present).toBe(reset.present);
     expect(redone.present.framing).toEqual({ kind: "unframed" });
     expect(redone.present.profile).toBe(reset.present.profile);
+  });
+
+  it("locks every Apply and re-Apply, even after an explicit unlock", () => {
+    const initial = state();
+    const composition = resolveStudioCompositionFrame(initial);
+    const crop = scaleFrame(composition, {
+      x: 0.1,
+      y: 0.1,
+      width: 0.8,
+      height: 0.8,
+    });
+    const applied = applyPageFrameEdit(createEditHistory(initial), crop);
+
+    expect(applied.present.framing).toMatchObject({
+      kind: "framed",
+      aspectLocked: true,
+    });
+
+    const unlocked = setPageAspectLocked(applied, false);
+    expect(unlocked.present.framing).toMatchObject({
+      kind: "framed",
+      aspectLocked: false,
+    });
+    expect(unlocked.present.profile).toBe(applied.present.profile);
+    expect(unlocked.present.params).toBe(applied.present.params);
+    expect(unlocked.present.seed).toBe(applied.present.seed);
+
+    const reapplied = applyPageFrameEdit(unlocked, crop);
+    expect(reapplied.present.framing).toMatchObject({
+      kind: "framed",
+      aspectLocked: true,
+    });
+    expect(reapplied.past).toHaveLength(3);
+  });
+
+  it("changes only a framed lock and suppresses unframed or equal commands", () => {
+    const initialHistory = createEditHistory(state());
+    expect(setPageAspectLocked(initialHistory, false)).toBe(initialHistory);
+    expect(setPageAspectLocked(initialHistory, true)).toBe(initialHistory);
+
+    const applied = applyPageFrameEdit(
+      initialHistory,
+      initialPageFrameForEdit(initialHistory.present),
+    );
+    expect(setPageAspectLocked(applied, true)).toBe(applied);
+
+    const unlocked = setPageAspectLocked(applied, false);
+    expect(unlocked.present).toEqual({
+      ...applied.present,
+      framing: { ...applied.present.framing, aspectLocked: false },
+    });
+    expect(unlocked.past).toEqual([...applied.past, applied.present]);
+
+    const relocked = setPageAspectLocked(unlocked, true);
+    expect(undoEdit(relocked).present).toBe(unlocked.present);
+    expect(redoEdit(undoEdit(relocked)).present).toBe(relocked.present);
+  });
+
+  it("atomically recomposes to a validated profile and clears all framing state", () => {
+    const initial = state();
+    const applied = applyPageFrameEdit(
+      createEditHistory(initial),
+      scaleFrame(resolveStudioCompositionFrame(initial), {
+        x: 0.1,
+        y: 0.2,
+        width: 0.7,
+        height: 0.6,
+      }),
+    );
+    const unlocked = setPageAspectLocked(applied, false);
+    const profile: PlotProfile = {
+      ...PROFILE,
+      width: 300,
+      height: 200,
+    };
+
+    const recomposed = recomposePageToProfile(unlocked, profile);
+    expect(recomposed.present).toEqual({
+      ...unlocked.present,
+      profile,
+      framing: { kind: "unframed" },
+    });
+    expect(recomposed.past).toEqual([...unlocked.past, unlocked.present]);
+
+    const undone = undoEdit(recomposed);
+    expect(undone.present).toBe(unlocked.present);
+    expect(redoEdit(undone).present).toBe(recomposed.present);
+
+    expect(() =>
+      recomposePageToProfile(recomposed, { ...profile, width: 0 }),
+    ).toThrow(/validatePlotProfile/);
+  });
+
+  it("suppresses an already-unframed recompose to an equal profile", () => {
+    const history = createEditHistory(state());
+    expect(
+      recomposePageToProfile(history, {
+        ...PROFILE,
+        insets: { ...PROFILE.insets },
+      }),
+    ).toBe(history);
   });
 
   it("keeps drafts and Cancel outside history until Apply", () => {

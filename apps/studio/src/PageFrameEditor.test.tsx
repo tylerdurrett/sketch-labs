@@ -3,7 +3,7 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { PageFrame } from "@harness/core";
+import type { PageFrame, PlotProfile } from "@harness/core";
 
 import { PageFrameEditor } from "./PageFrameEditor";
 import type { PageFrameAspectConstraint } from "./pageFrameManipulation";
@@ -14,6 +14,18 @@ import type { PageFrameAspectConstraint } from "./pageFrameManipulation";
 
 const COMPOSITION = { width: 200, height: 100 };
 const FULL_FRAME: PageFrame = { x: 0, y: 0, width: 200, height: 100 };
+const PROFILE: PlotProfile = {
+  width: 220,
+  height: 120,
+  insets: { top: 10, right: 10, bottom: 10, left: 10 },
+  includeFrame: false,
+  toolWidthMillimeters: 0.3,
+};
+const PHYSICAL_PROPS = {
+  profile: PROFILE,
+  representedFrame: FULL_FRAME,
+  displayUnit: "mm" as const,
+};
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -29,14 +41,28 @@ function mountEditor(initialFrame: PageFrame = FULL_FRAME) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => {
-    root!.render(
+
+  function ControlledEditor() {
+    const [frame, setFrame] = useState(initialFrame);
+    return (
       <PageFrameEditor
         compositionFrame={COMPOSITION}
-        initialFrame={initialFrame}
-        {...callbacks}
-      />,
+        frame={frame}
+        {...PHYSICAL_PROPS}
+        onDraftChange={(next) => {
+          callbacks.onDraftChange(next);
+          setFrame(next);
+        }}
+        onAspectConstraintChange={callbacks.onAspectConstraintChange}
+        onApply={callbacks.onApply}
+        onCancel={callbacks.onCancel}
+        onReset={callbacks.onReset}
+      />
     );
+  }
+
+  act(() => {
+    root!.render(<ControlledEditor />);
   });
   return { el: container, callbacks };
 }
@@ -121,6 +147,7 @@ describe("PageFrameEditor", () => {
         <PageFrameEditor
           compositionFrame={COMPOSITION}
           frame={{ x: -50, y: 25, width: 100, height: 75 }}
+          {...PHYSICAL_PROPS}
           {...callbacks}
         />,
       );
@@ -141,6 +168,7 @@ describe("PageFrameEditor", () => {
         <PageFrameEditor
           compositionFrame={COMPOSITION}
           frame={frame}
+          {...PHYSICAL_PROPS}
           onDraftChange={(next) => {
             onDraftChange(next);
             setFrame(next);
@@ -220,6 +248,46 @@ describe("PageFrameEditor", () => {
     expect(callbacks.onApply).not.toHaveBeenCalled();
     expect(callbacks.onCancel).toHaveBeenCalledOnce();
     expect(callbacks.onReset).toHaveBeenCalledOnce();
+  });
+
+  it("routes a physical paper edit only through the transient draft callback", () => {
+    const { el, callbacks } = mountEditor();
+
+    setInput(input(el, "physical-width"), "120");
+
+    expect(callbacks.onDraftChange).toHaveBeenLastCalledWith({
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+    });
+    expect(callbacks.onApply).not.toHaveBeenCalled();
+    expect(callbacks.onReset).not.toHaveBeenCalled();
+  });
+
+  it("blocks Apply while a physical draft is invalid, then applies its correction", () => {
+    const { el, callbacks } = mountEditor();
+    const physicalWidth = input(el, "physical-width");
+
+    setInput(physicalWidth, "");
+    click(el, "Apply");
+
+    expect(callbacks.onApply).not.toHaveBeenCalled();
+    expect(el.querySelector("h2")?.textContent).toBe("Edit Page Frame");
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+      "finite positive",
+    );
+
+    setInput(physicalWidth, "120");
+    click(el, "Apply");
+
+    expect(callbacks.onApply).toHaveBeenCalledOnce();
+    expect(callbacks.onApply).toHaveBeenCalledWith({
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+    });
   });
 
   it.each([
@@ -309,6 +377,7 @@ describe("PageFrameEditor", () => {
           <PageFrameEditor
             compositionFrame={COMPOSITION}
             frame={FULL_FRAME}
+            {...PHYSICAL_PROPS}
             aspectConstraint={aspectConstraint}
             {...callbacks}
           />,
