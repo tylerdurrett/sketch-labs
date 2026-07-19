@@ -14,6 +14,7 @@ import {
   clipSceneToBounds,
   defaultParams,
   exportFilename,
+  fitPageFramePlotProfileToAspect,
   frameScene,
   insertPngMetadata,
   newSeed,
@@ -33,6 +34,7 @@ import {
 } from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
+import type { ImageAssetControlRecomposeRequest } from "./ImageAssetControl";
 import { Button } from "./components/ui/button";
 import { downloadBlob } from "./downloadBlob";
 import {
@@ -669,6 +671,56 @@ export function SketchControls({
       });
     }
     setHistory(next);
+  };
+
+  const currentImageAssetRecord = (
+    request: ImageAssetControlRecomposeRequest,
+  ) => {
+    const spec = sketch.schema[request.paramKey];
+    if (spec?.kind !== "image-asset") return undefined;
+
+    const currentParams = historyRef.current.present.params;
+    const currentImageAssetId =
+      typeof currentParams[request.paramKey] === "string"
+        ? currentParams[request.paramKey]
+        : spec.default;
+    if (
+      currentImageAssetId !== request.imageAssetId ||
+      !environmentReadyNow()
+    ) {
+      return undefined;
+    }
+    return sketchEnvironmentRef.current.environment?.imageAssets(
+      currentImageAssetId,
+    );
+  };
+
+  const recomposeToImageAspect = (
+    request: ImageAssetControlRecomposeRequest,
+  ): void => {
+    // The row's dimensions are presentation only. Re-prove its schema, authored
+    // ID, exact resolution, and decoded record at both sides of the warning so
+    // stale callbacks and synchronous state changes fail closed.
+    if (currentImageAssetRecord(request) === undefined) return;
+    if (
+      !window.confirm(
+        "Recomposing to this image’s aspect will recompose the Scene and reset the Page Frame. Continue?",
+      )
+    ) {
+      return;
+    }
+
+    const currentRecord = currentImageAssetRecord(request);
+    if (currentRecord === undefined) return;
+    const fitted = fitPageFramePlotProfileToAspect(
+      historyRef.current.present.profile,
+      currentRecord.width / currentRecord.height,
+    );
+    updateHistory(
+      (historyState) => recomposePageToProfile(historyState, fitted),
+      true,
+      "atomic",
+    );
   };
 
   // History belongs to this keyed Sketch session, so its keyboard listener does
@@ -1612,6 +1664,16 @@ export function SketchControls({
             failedId: sketchEnvironment.failedId,
             retry: sketchEnvironment.retry,
           }}
+          getImageAssetDimensions={(imageAssetId) => {
+            if (!environmentReadyNow()) return undefined;
+            const record = sketchEnvironmentRef.current.environment?.imageAssets(
+              imageAssetId,
+            );
+            return record === undefined
+              ? undefined
+              : { width: record.width, height: record.height };
+          }}
+          onRecomposeToImageAspect={recomposeToImageAspect}
         />
         <Button
           ref={cropButtonRef}

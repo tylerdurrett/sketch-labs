@@ -137,6 +137,29 @@ const managedImageAssetJob = vi.hoisted(() => ({
   normalize: vi.fn(),
   import: vi.fn(),
 }));
+const controlPanelCapture = vi.hoisted(() => ({
+  recomposeHandlers: [] as Array<(request: {
+    readonly paramKey: string;
+    readonly imageAssetId: string;
+    readonly dimensions: { readonly width: number; readonly height: number };
+  }) => void>,
+}));
+
+vi.mock("./ControlPanel", async (importActual) => {
+  const actual = await importActual<typeof import("./ControlPanel")>();
+  const ControlPanel = actual.ControlPanel;
+  return {
+    ...actual,
+    ControlPanel: (props: Parameters<typeof ControlPanel>[0]) => {
+      if (props.onRecomposeToImageAspect !== undefined) {
+        controlPanelCapture.recomposeHandlers.push(
+          props.onRecomposeToImageAspect,
+        );
+      }
+      return <ControlPanel {...props} />;
+    },
+  };
+});
 
 vi.mock("./imageAssetsClient", async (importActual) => {
   const actual = await importActual<typeof import("./imageAssetsClient")>();
@@ -436,6 +459,7 @@ let lastOnPageFrameDraftChange: ((frame: PageFrame) => void) | null = null;
 let lastToneSource: ToneSource | null = null;
 let autoAcknowledgeDisplayedScene = true;
 let acknowledgeDisplayedScene: (() => void) | null = null;
+let generateDuringLiveCanvasRender = false;
 
 // LiveCanvas is a browser-only sink (canvas2d, ResizeObserver, matchMedia) and
 // is NOT under test here — these are wiring tests for the control state. Replace
@@ -492,6 +516,13 @@ vi.mock("./LiveCanvas", () => ({
     onFillCaptured?: (capture: unknown) => void;
     onDisplayedSceneCommitted?: (snapshot: DisplayedSceneSnapshot) => void;
   }) => {
+    if (
+      generateDuringLiveCanvasRender &&
+      renderState?.kind !== "unavailable" &&
+      renderState?.scene === undefined
+    ) {
+      sketch.generate(params, seed, fakeCurrentT, compositionFrame);
+    }
     const capturedFrame = (
       retained = fakeDisplayedScene,
     ): DisplayedSceneSnapshot => {
@@ -802,6 +833,7 @@ beforeEach(() => {
     id: "imported-image-bbbbbbbbbbbb",
     created: true,
   });
+  controlPanelCapture.recomposeHandlers = [];
   vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
   // Sensible defaults so a mount's list-on-mount effect resolves quietly; the
   // save/reload tests override loadPreset/savePreset per case.
@@ -827,6 +859,7 @@ beforeEach(() => {
   lastToneSource = null;
   autoAcknowledgeDisplayedScene = true;
   acknowledgeDisplayedScene = null;
+  generateDuringLiveCanvasRender = false;
   autoFireOutlineComputed = true;
   window.localStorage.clear();
   fakeCanvasToBlob = ((cb: BlobCallback) => {
@@ -2313,6 +2346,378 @@ describe("SketchControls — Page Frame edit mode", () => {
       portraitComposition.width / portraitComposition.height,
       14,
     );
+  });
+});
+
+describe("SketchControls — Image Asset aspect recomposition (#349)", () => {
+  const assetA = "aspect-alpha-000000000001";
+  const assetB = "aspect-beta-bbbbbbbbbbbb";
+
+  function frameInput(el: HTMLElement, name: string): HTMLInputElement {
+    const input = el.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+    if (input === null) throw new Error(`no Page Frame ${name} input`);
+    return input;
+  }
+
+  function aspectActions(el: HTMLElement): HTMLButtonElement[] {
+    return [...el.querySelectorAll<HTMLButtonElement>("button")].filter(
+      (button) => button.textContent === "Recompose to this image’s aspect",
+    );
+  }
+
+  function environmentWith(
+    dimensions: Readonly<Record<string, { width: number; height: number }>>,
+  ): SketchEnvironment {
+    const records = new Map(
+      Object.entries(dimensions).map(([id, { width, height }]) => [
+        id,
+        {
+          width,
+          height,
+          data: new Uint8ClampedArray(width * height * 4),
+        },
+      ]),
+    );
+    return { imageAssets: (id) => records.get(id) };
+  }
+
+  async function resolveCurrentEnvironment(
+    environment: SketchEnvironment,
+  ): Promise<void> {
+    await act(async () => {
+      sketchEnvironmentJob.starts.at(-1)!.resolve(environment);
+      await Promise.resolve();
+    });
+  }
+
+  function applyAsymmetricFrame(el: HTMLElement): void {
+    clickButton(el, "Crop");
+    setInput(frameInput(el, "x"), "10");
+    setInput(frameInput(el, "y"), "5");
+    setInput(frameInput(el, "width"), "70");
+    setInput(frameInput(el, "height"), "80");
+    clickButton(el, "Apply");
+  }
+
+  it("warns and leaves every authored and prepared state untouched when declined", async () => {
+    const schema = {
+      ...toneCalibration.schema,
+      image: { kind: "image-asset", default: assetA },
+    } satisfies ParamSchema;
+    const generate = vi.fn(toneCalibration.generate);
+    const sketch = {
+      ...toneCalibration,
+      id: "declined-image-aspect",
+      schema,
+      generate,
+    };
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const el = mount(<SketchControls sketch={sketch} />);
+    await resolveCurrentEnvironment(
+      environmentWith({ [assetA]: { width: 4, height: 3 } }),
+    );
+    applyAsymmetricFrame(el);
+
+    const beforeHistory = historyCapture.atomic.at(-1)!.after;
+    const beforeProfile = structuredClone(lastProfile);
+    const beforeFrame = structuredClone(lastCommittedPageFrame);
+    const beforeComposition = structuredClone(lastCompositionFrame);
+    const beforeGenerateCalls = generate.mock.calls.length;
+    const beforeOutlineStarts = outlineJob.starts;
+    const beforeScribbleStarts = scribbleJob.starts.length;
+    historyCapture.atomic.length = 0;
+
+    clickButton(el, "Recompose to this image’s aspect");
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(confirm).toHaveBeenCalledWith(
+      "Recomposing to this image’s aspect will recompose the Scene and reset the Page Frame. Continue?",
+    );
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(beforeHistory.present.framing).toEqual(
+      expect.objectContaining({ kind: "framed", aspectLocked: true }),
+    );
+    expect(lastProfile).toEqual(beforeProfile);
+    expect(lastCommittedPageFrame).toEqual(beforeFrame);
+    expect(lastCompositionFrame).toEqual(beforeComposition);
+    expect(generate).toHaveBeenCalledTimes(beforeGenerateCalls);
+    expect(outlineJob.starts).toBe(beforeOutlineStarts);
+    expect(scribbleJob.starts).toHaveLength(beforeScribbleStarts);
+  });
+
+  it("contains the decoded aspect in one atomic recompose and Undo/Redo restores full states", async () => {
+    const schema = {
+      image: { kind: "image-asset", default: assetA },
+    } satisfies ParamSchema;
+    const originalProfile: PlotProfile = {
+      width: 230,
+      height: 180,
+      insets: { top: 11, right: 17, bottom: 13, left: 19 },
+      includeFrame: true,
+      toolWidthMillimeters: 0.42,
+    };
+    const generate = vi.fn(
+      (
+        _params: Readonly<Record<string, unknown>>,
+        _seed: Seed,
+        _t: number,
+        frame: CoordinateSpace,
+      ): Scene => ({ space: frame, primitives: [] }),
+    );
+    const sketch = {
+      ...sketchWith("confirmed-image-aspect", schema),
+      defaultOutputProfile: originalProfile,
+      generate,
+    };
+    generateDuringLiveCanvasRender = true;
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const el = mount(<SketchControls sketch={sketch} />);
+    await resolveCurrentEnvironment(
+      environmentWith({ [assetA]: { width: 4, height: 2 } }),
+    );
+    applyAsymmetricFrame(el);
+
+    const before = historyCapture.atomic.at(-1)!.after;
+    const beforeProfile = before.present.profile;
+    const beforeFrame = structuredClone(lastCommittedPageFrame);
+    const beforeGenerateCalls = generate.mock.calls.length;
+    historyCapture.atomic.length = 0;
+
+    act(() =>
+      controlPanelCapture.recomposeHandlers.at(-1)!({
+        paramKey: "image",
+        imageAssetId: assetA,
+        dimensions: { width: 999, height: 1 },
+      }),
+    );
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const command = historyCapture.atomic[0]!;
+    const fitted = command.after.present.profile;
+    expect(command.before).toBe(before);
+    expect(command.after.present).toEqual({
+      ...before.present,
+      profile: {
+        ...beforeProfile,
+        height:
+          (beforeProfile.width -
+            beforeProfile.insets.left -
+            beforeProfile.insets.right) /
+            2 +
+          beforeProfile.insets.top +
+          beforeProfile.insets.bottom,
+        insets: { ...beforeProfile.insets },
+      },
+      framing: { kind: "unframed" },
+    });
+    expect(command.after.past).toEqual([...before.past, before.present]);
+    expect(command.after.future).toEqual([]);
+    expect(fitted.width).toBeLessThanOrEqual(beforeProfile.width);
+    expect(fitted.height).toBeLessThanOrEqual(beforeProfile.height);
+    expect(fitted.width).toBe(beforeProfile.width);
+    expect(fitted.insets).toEqual(beforeProfile.insets);
+    expect(
+      (fitted.width - fitted.insets.left - fitted.insets.right) /
+        (fitted.height - fitted.insets.top - fitted.insets.bottom),
+    ).toBe(2);
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(el.querySelector('input[aria-label="Lock Page aspect"]')).toBeNull();
+    expect(
+      el.querySelector('[aria-label="image image asset identity"]')
+        ?.textContent,
+    ).toBe(assetA);
+    expect(generate).toHaveBeenCalledTimes(beforeGenerateCalls + 1);
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(lastProfile).toEqual(beforeProfile);
+    expect(lastCommittedPageFrame).toEqual(beforeFrame);
+    expect(
+      el.querySelector<HTMLInputElement>('input[aria-label="Lock Page aspect"]')
+        ?.checked,
+    ).toBe(true);
+    expect(
+      el.querySelector('[aria-label="image image asset identity"]')
+        ?.textContent,
+    ).toBe(assetA);
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(lastProfile).toEqual(fitted);
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(el.querySelector('input[aria-label="Lock Page aspect"]')).toBeNull();
+    expect(
+      el.querySelector('[aria-label="image image asset identity"]')
+        ?.textContent,
+    ).toBe(assetA);
+  });
+
+  it("rejects a stored request after selection/resolution changes and keeps ordinary selection framing until an explicit action", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "aspect beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    const schema = {
+      image: { kind: "image-asset", default: assetA },
+    } satisfies ParamSchema;
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const el = mount(
+      <SketchControls sketch={sketchWith("stale-image-aspect", schema)} />,
+    );
+    await resolveCurrentEnvironment(
+      environmentWith({ [assetA]: { width: 2, height: 3 } }),
+    );
+    applyAsymmetricFrame(el);
+    const framed = historyCapture.atomic.at(-1)!.after.present;
+    const storedHandler = controlPanelCapture.recomposeHandlers.at(-1)!;
+
+    clickButton(el, "Choose image");
+    await flush();
+    const choice = [
+      ...el.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Image Assets"] button',
+      ),
+    ].find((button) => button.textContent?.includes("aspect beta"));
+    if (choice === undefined) throw new Error("no beta asset choice");
+    act(() => choice.click());
+
+    const selected = historyCapture.atomic.at(-1)!.after;
+    expect(selected.present.params.image).toBe(assetB);
+    expect(selected.present.framing).toEqual(framed.framing);
+    expect(selected.present.profile).toEqual(framed.profile);
+    expect(lastCommittedPageFrame).not.toBeNull();
+    const writesAfterSelection = historyCapture.atomic.length;
+
+    act(() =>
+      storedHandler({
+        paramKey: "image",
+        imageAssetId: assetA,
+        dimensions: { width: 999, height: 1 },
+      }),
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(historyCapture.atomic).toHaveLength(writesAfterSelection);
+
+    await resolveCurrentEnvironment(
+      environmentWith({ [assetB]: { width: 3, height: 1 } }),
+    );
+    act(() =>
+      storedHandler({
+        paramKey: "image",
+        imageAssetId: assetA,
+        dimensions: { width: 999, height: 1 },
+      }),
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(historyCapture.atomic).toHaveLength(writesAfterSelection);
+    expect(lastCommittedPageFrame).not.toBeNull();
+
+    clickButton(el, "Recompose to this image’s aspect");
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(historyCapture.atomic).toHaveLength(writesAfterSelection + 1);
+    expect(historyCapture.atomic.at(-1)!.after.present.params.image).toBe(
+      assetB,
+    );
+    expect(historyCapture.atomic.at(-1)!.after.present.framing).toEqual({
+      kind: "unframed",
+    });
+  });
+
+  it("fails closed when authored selection changes inside confirmation", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "aspect beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    const schema = {
+      image: { kind: "image-asset", default: assetA },
+    } satisfies ParamSchema;
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("confirm-race-image-aspect", schema)}
+      />,
+    );
+    await resolveCurrentEnvironment(
+      environmentWith({ [assetA]: { width: 4, height: 3 } }),
+    );
+    applyAsymmetricFrame(el);
+    const framed = historyCapture.atomic.at(-1)!.after.present;
+    clickButton(el, "Choose image");
+    await flush();
+    const choice = [
+      ...el.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Image Assets"] button',
+      ),
+    ].find((button) => button.textContent?.includes("aspect beta"));
+    if (choice === undefined) throw new Error("no beta asset choice");
+    historyCapture.atomic.length = 0;
+    const confirm = vi.spyOn(window, "confirm").mockImplementation(() => {
+      choice.click();
+      return true;
+    });
+
+    clickButton(el, "Recompose to this image’s aspect");
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.after.present.params.image).toBe(assetB);
+    expect(historyCapture.atomic[0]!.after.present.profile).toEqual(
+      framed.profile,
+    );
+    expect(historyCapture.atomic[0]!.after.present.framing).toEqual(
+      framed.framing,
+    );
+    expect(lastCommittedPageFrame).not.toBeNull();
+    expect(sketchEnvironmentJob.starts.at(-1)!.params.image).toBe(assetB);
+  });
+
+  it("uses each row's own decoded record without selecting an image implicitly", async () => {
+    const schema = {
+      portrait: { kind: "image-asset", default: assetA },
+      landscape: { kind: "image-asset", default: assetB },
+    } satisfies ParamSchema;
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const el = mount(
+      <SketchControls sketch={sketchWith("multi-image-aspect", schema)} />,
+    );
+    await resolveCurrentEnvironment(
+      environmentWith({
+        [assetA]: { width: 1, height: 2 },
+        [assetB]: { width: 4, height: 2 },
+      }),
+    );
+    expect(aspectActions(el).map((button) => button.disabled)).toEqual([
+      false,
+      false,
+    ]);
+    historyCapture.atomic.length = 0;
+
+    act(() => aspectActions(el)[1]!.click());
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const present = historyCapture.atomic[0]!.after.present;
+    expect(present.params).toEqual({ portrait: assetA, landscape: assetB });
+    const { width, height, insets } = present.profile;
+    expect(
+      (width - insets.left - insets.right) /
+        (height - insets.top - insets.bottom),
+    ).toBe(2);
+    expect(
+      el.querySelector('[aria-label="portrait image asset identity"]')
+        ?.textContent,
+    ).toBe(assetA);
+    expect(
+      el.querySelector('[aria-label="landscape image asset identity"]')
+        ?.textContent,
+    ).toBe(assetB);
   });
 });
 
