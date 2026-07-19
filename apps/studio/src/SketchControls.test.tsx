@@ -17,6 +17,7 @@ import {
   crc32,
   DEFAULT_COMPOSITION_FRAME,
   defaultParams,
+  frameScene,
   HARNESS_FALLBACK_PLOT_PROFILE,
   hiddenLinePass,
   leafField,
@@ -401,6 +402,7 @@ type TestDisplayedSceneSnapshot = Omit<
 > &
   Partial<Pick<DisplayedSceneSnapshot, "sourceScene" | "displayedScene">>;
 let fakeDisplayedScene: TestDisplayedSceneSnapshot | null = null;
+let fakeDisplayedFillScene: TestDisplayedSceneSnapshot | null = null;
 let fakeFillCaptureScene: DisplayedSceneSnapshot["scene"] | null = null;
 // #228: the real LiveCanvas signals `onOutlineComputed` when an outline pass has
 // drawn, which the owner uses to clear its "Computing…" affordance. The mock
@@ -469,14 +471,16 @@ vi.mock("./LiveCanvas", () => ({
     onFillCaptured?: (capture: unknown) => void;
     onDisplayedSceneCommitted?: (snapshot: DisplayedSceneSnapshot) => void;
   }) => {
-    const capturedFrame = (): DisplayedSceneSnapshot => {
-      if (fakeDisplayedScene !== null) {
+    const capturedFrame = (
+      retained = fakeDisplayedScene,
+    ): DisplayedSceneSnapshot => {
+      if (retained !== null) {
         return {
-          ...fakeDisplayedScene,
+          ...retained,
           sourceScene:
-            fakeDisplayedScene.sourceScene ?? fakeDisplayedScene.scene,
+            retained.sourceScene ?? retained.scene,
           displayedScene:
-            fakeDisplayedScene.displayedScene ?? fakeDisplayedScene.scene,
+            retained.displayedScene ?? retained.scene,
         };
       }
       const scene =
@@ -520,6 +524,8 @@ vi.mock("./LiveCanvas", () => ({
       getDisplayedScene: () =>
         fakeDisplayedScene === null ? null : capturedFrame(),
       captureDisplayedFrame: capturedFrame,
+      captureDisplayedFillFrame: () =>
+        capturedFrame(fakeDisplayedFillScene ?? fakeDisplayedScene),
     }));
     lastOnOutlineComputed = () => {
       const active = outlineJob.active;
@@ -785,6 +791,7 @@ beforeEach(() => {
   // cases. The blob is a real minimal PNG so the metadata byte-splice succeeds.
   fakeCurrentT = 0;
   fakeDisplayedScene = null;
+  fakeDisplayedFillScene = null;
   fakeFillCaptureScene = null;
   // #228: default to auto-firing the outline "computed" signal so the busy label
   // clears on its own; the label test opts out to observe "Computing…".
@@ -3070,6 +3077,97 @@ describe("SketchControls — SVG export wiring", () => {
     expect(filename).toBe(`waves-seed${seed}-t2.5.svg`);
   });
 
+  it.each([
+    ["crop", { x: 25, y: 20, width: 50, height: 60 }],
+    ["padding", { x: -25, y: -10, width: 150, height: 120 }],
+    ["mixed crop and padding", { x: 25, y: -10, width: 100, height: 80 }],
+  ])(
+    "frames retained animated Fill for %s without generating or resampling",
+    (_label, percentages) => {
+      const generate = vi.fn(() => {
+        throw new Error("framed SVG must not generate");
+      });
+      const sketch = {
+        ...(sketchWith("framed-svg", {
+          radius: numberSpec({ default: 10 }),
+        }) as unknown as Record<string, unknown>),
+        time: { duration: 4, mode: "loop" },
+        generate,
+      } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+      const el = mount(<SketchControls sketch={sketch} />);
+      const composition = lastCompositionFrame!;
+      const source: Scene = {
+        space: composition,
+        background: { color: "lavender" },
+        primitives: [
+          {
+            points: [
+              [-composition.width * 0.1, composition.height * 0.4],
+              [composition.width * 1.1, composition.height * 0.4],
+              [composition.width * 1.1, composition.height * 0.6],
+              [-composition.width * 0.1, composition.height * 0.6],
+            ],
+            closed: true,
+            fill: { color: "navy" },
+          },
+        ],
+      };
+      fakeDisplayedFillScene = {
+        scene: source,
+        sourceScene: source,
+        displayedScene: source,
+        t: 1.75,
+        renderMode: "fill",
+        tolerance: 0,
+        includeFrame: true,
+        inputRevision: 0,
+        sourceInputRevision: 0,
+      };
+      const outline: Scene = { space: composition, primitives: [] };
+      fakeDisplayedScene = {
+        scene: outline,
+        sourceScene: outline,
+        displayedScene: outline,
+        t: 1.75,
+        renderMode: "outline",
+        tolerance: 0,
+        includeFrame: true,
+        inputRevision: 0,
+        sourceInputRevision: 0,
+      };
+
+      clickButton(el, "Crop");
+      for (const [name, value] of Object.entries(percentages)) {
+        setInput(
+          el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+          String(value),
+        );
+      }
+      clickButton(el, "Apply");
+      expect(generate).not.toHaveBeenCalled();
+
+      const frame: PageFrame = {
+        x: (composition.width * percentages.x) / 100,
+        y: (composition.height * percentages.y) / 100,
+        width: (composition.width * percentages.width) / 100,
+        height: (composition.height * percentages.height) / 100,
+      };
+      clickButton(el, "Export SVG");
+
+      expect(generate).not.toHaveBeenCalled();
+      expect(exportSceneCapture.current).toEqual(frameScene(source, frame));
+      expect(exportSceneCapture.current).not.toBe(source);
+      expect(downloadBlob.mock.calls[0]![1]).toMatch(/-t1\.75\.svg$/);
+      const exported = exportSceneCapture.current as Scene;
+      expect(exported.space).toEqual({
+        width: frame.width,
+        height: frame.height,
+      });
+      expect(exported.background).toEqual({ color: "lavender" });
+      expect(outOfBoundsPoints(exported, frame.width, frame.height)).toEqual([]);
+    },
+  );
+
   // #237: a Scene whose single Primitive overflows the 100×100 canvas on BOTH
   // sides — a horizontal line from x=-50 to x=150 at y=50. The plain SVG export
   // must clip it to the canvas rectangle before serializing, so the exported
@@ -3128,6 +3226,54 @@ describe("SketchControls — SVG export wiring", () => {
     const svg = await blobText(blob);
     expect(svg).not.toContain("-50");
     expect(svg).not.toContain("150");
+  });
+
+  it("preserves the exact unframed cold-generation and clipping path", () => {
+    const retained: Scene = {
+      space: { width: 100, height: 100 },
+      primitives: [{ points: [[90, 90]], fill: { color: "retained" } }],
+    };
+    fakeDisplayedScene = {
+      scene: retained,
+      sourceScene: retained,
+      displayedScene: retained,
+      t: 3,
+      renderMode: "fill",
+      tolerance: 0,
+      includeFrame: true,
+      inputRevision: 0,
+      sourceInputRevision: 0,
+    };
+    fakeCurrentT = 2.5;
+    const generate = vi.fn(() => overflowScene as Scene);
+    const sketch = {
+      ...(sketchWith("unframed-regression", {
+        radius: numberSpec({ default: 10 }),
+      }) as unknown as Record<string, unknown>),
+      time: { duration: 4, mode: "loop" },
+      generate,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+    const el = mount(<SketchControls sketch={sketch} />);
+    const seed = Number(
+      el.querySelector<HTMLInputElement>("#sketch-seed")!.value,
+    );
+
+    clickButton(el, "Export SVG");
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(generate).toHaveBeenCalledWith(
+      { radius: 10 },
+      seed,
+      2.5,
+      lastCompositionFrame,
+    );
+    expect(exportSceneCapture.current).toEqual(
+      clipSceneToBounds(overflowScene as Scene),
+    );
+    expect(exportSceneCapture.current).not.toEqual(retained);
+    expect(downloadBlob.mock.calls[0]![1]).toBe(
+      `unframed-regression-seed${seed}-t2.5.svg`,
+    );
   });
 });
 

@@ -14,6 +14,7 @@ import {
   clipSceneToBounds,
   defaultParams,
   exportFilename,
+  frameScene,
   insertPngMetadata,
   newSeed,
   plotDrawableAspectsEquivalent,
@@ -1098,47 +1099,76 @@ export function SketchControls({
   // Export the CURRENTLY DISPLAYED frame as a vector SVG — the sibling export
   // path to {@link exportPng}, also a one-shot click OUTSIDE the per-frame loop.
   // Unlike PNG (which snapshots the live canvas's pixels), SVG serializes Scene
-  // geometry with core's `renderToSVG`. Ordinary Sketches retain their cold
-  // `generate` path. Scribble-capable Sketches serialize the exact acknowledged
+  // geometry with core's `renderToSVG`. Unframed ordinary Sketches retain their
+  // cold `generate` path exactly. A committed Page Frame instead transforms the
+  // exact retained full-Composition Fill, without preparation, sampling, or
+  // generation. Scribble-capable Sketches keep serializing their acknowledged
   // worker Scene and never regenerate expensive artwork on the main thread.
   //
-  // `t` is read from the handle and TIME-GATED on `sketch.time` exactly as the
-  // PNG path does, so the regenerated Scene and the `-t{t}` filename segment both
-  // reflect the same displayed moment (static Sketches pass `undefined`, not 0).
+  // `t` is TIME-GATED on `sketch.time` exactly as the PNG path does. Framed
+  // ordinary export takes it atomically from the retained Fill record; all
+  // existing paths keep reading the handle's current time. Static Sketches pass
+  // `undefined`, not 0.
   const exportSvg = () => {
     if (toneReferenceActiveRef.current || !environmentReadyNow()) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
     const scribbleExport = captureCurrentScribbleExport();
     if (hasScribblePreparation && scribbleExport === null) return;
-    const t = sketch.time === undefined ? undefined : handle.getCurrentT();
+    const edit = historyRef.current.present;
+    const pageFrame =
+      !hasScribblePreparation && edit.framing.kind === "framed"
+        ? edit.framing.pageFrame
+        : null;
+    const framedOrdinary = pageFrame !== null;
+    const retainedFill = framedOrdinary
+      ? handle.captureDisplayedFillFrame()
+      : null;
+    if (framedOrdinary && retainedFill === null) return;
+    const sampledT = retainedFill?.t ?? handle.getCurrentT();
+    const t = sketch.time === undefined ? undefined : sampledT;
     // `generate` takes a concrete `t` (static Sketches conventionally get 0 and
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
     const scene =
       scribbleExport?.result.scene ??
-      sketch.generate(params, seed, t ?? 0, compositionFrame);
+      (pageFrame !== null && retainedFill !== null
+        ? frameScene(retainedFill.sourceScene, pageFrame)
+        : sketch.generate(params, seed, t ?? 0, compositionFrame));
     // Clip the generated geometry to the canvas rectangle so the exported plot
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
-    const exportScene = scribbleExport === null ? clipSceneToBounds(scene) : scene;
+    const exportScene =
+      scribbleExport === null && !framedOrdinary
+        ? clipSceneToBounds(scene)
+        : scene;
     // Embed the same reproduction envelope as a <metadata> element (issue #76),
     // built from the displayed `(params, seed, locks, t)` spine plus the active
     // Plot Profile (#247) — core's `renderToSVG` does the injection (ADR-0004:
     // serialization lives in core).
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
-      seed,
-      params,
-      locks,
+      seed: framedOrdinary ? edit.seed : seed,
+      params: framedOrdinary ? edit.params : params,
+      locks: framedOrdinary ? edit.locks : locks,
       t,
-      profile,
+      profile: framedOrdinary ? edit.profile : profile,
     });
     if (!sameScribbleExportRevision(scribbleExport)) return;
     const svg = renderToSVG(exportScene, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     if (!sameScribbleExportRevision(scribbleExport)) return;
-    downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "svg"));
+    downloadBlob(
+      blob,
+      exportFilename(
+        {
+          sketchId: sketch.id,
+          seed: framedOrdinary ? edit.seed : seed,
+          t,
+        },
+        "svg",
+      ),
+    );
   };
 
   // Capture exactly one retained displayed-frame record, then freeze the entire
