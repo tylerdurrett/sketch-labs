@@ -3,6 +3,7 @@ import { resolveCompositionFrame } from '../compositionFrame'
 import { fullCompositionPageFrame, type PageFrame } from '../pageFrame'
 import {
   derivePageFramePlotProfile,
+  fitPageFramePlotProfileToAspect,
   resizePageFrameFromPhysicalDimension,
   resizePageFramePlotProfileProportionally,
 } from '../pageFramePlotProfile'
@@ -237,6 +238,95 @@ describe('derivePageFramePlotProfile', () => {
         height: 800,
       }),
     ).toThrow(/validatePlotProfile/)
+  })
+})
+
+describe('fitPageFramePlotProfileToAspect', () => {
+  it.each([
+    ['portrait', 3 / 4, { width: 150, height: 190 }],
+    ['landscape', 2, { width: 230, height: 130 }],
+  ] as const)(
+    'fits a %s target inside the current non-square drawable without enlarging it',
+    (_name, targetAspect, expectedPaper) => {
+      const fitted = fitPageFramePlotProfileToAspect(profile, targetAspect)
+      const before = plotDrawableRectangle(profile)
+      const after = plotDrawableRectangle(fitted)
+
+      expect({ width: fitted.width, height: fitted.height }).toEqual(
+        expectedPaper,
+      )
+      expect(after.width / after.height).toBe(targetAspect)
+      expect(after.width).toBeLessThanOrEqual(before.width)
+      expect(after.height).toBeLessThanOrEqual(before.height)
+      expect(after.width === before.width || after.height === before.height).toBe(
+        true,
+      )
+    },
+  )
+
+  it('preserves asymmetric margins and every unrelated profile field', () => {
+    const fitted = fitPageFramePlotProfileToAspect(profile, 1)
+
+    expect(fitted).toEqual({
+      width: 190,
+      height: 190,
+      insets: { top: 7, right: 11, bottom: 23, left: 19 },
+      includeFrame: false,
+      toolWidthMillimeters: 0.7,
+    })
+    expect(fitted.insets).not.toBe(profile.insets)
+    expect(plotDrawableRectangle(fitted)).toEqual({
+      width: 160,
+      height: 160,
+    })
+  })
+
+  it('retains the exact profile for an equal or machine-equivalent aspect', () => {
+    const currentAspect = 200 / 160
+
+    expect(
+      fitPageFramePlotProfileToAspect(profile, currentAspect),
+    ).toBe(profile)
+    expect(
+      fitPageFramePlotProfileToAspect(
+        profile,
+        currentAspect + Number.EPSILON,
+      ),
+    ).toBe(profile)
+  })
+
+  it('fits an exact target from a different non-square containing profile', () => {
+    const wideProfile: PlotProfile = {
+      width: 337,
+      height: 149,
+      insets: { top: 13, right: 17, bottom: 16, left: 20 },
+      includeFrame: true,
+      toolWidthMillimeters: 1.2,
+    }
+
+    const fitted = fitPageFramePlotProfileToAspect(wideProfile, 3 / 2)
+
+    expect(fitted.width).toBe(217)
+    expect(fitted.height).toBe(wideProfile.height)
+    expect(plotDrawableRectangle(fitted)).toEqual({
+      width: 180,
+      height: 120,
+    })
+    expect(plotDrawableRectangle(fitted).width).toBeLessThan(
+      plotDrawableRectangle(wideProfile).width,
+    )
+  })
+
+  it.each([
+    0,
+    -1,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+  ])('rejects invalid target aspect %s', (targetAspect) => {
+    expect(() =>
+      fitPageFramePlotProfileToAspect(profile, targetAspect),
+    ).toThrow(/finite positive/)
   })
 })
 

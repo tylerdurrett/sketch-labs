@@ -14,6 +14,7 @@
 import type { PageFrame } from './pageFrame'
 import { validatePageFrame } from './pageFrame'
 import {
+  plotDrawableAspectsEquivalent,
   plotDrawableRectangle,
   type PlotProfile,
   validatePlotProfile,
@@ -79,6 +80,62 @@ export function derivePageFramePlotProfile(
   }
   validatePlotProfile(derived)
   return derived
+}
+
+/**
+ * Contain a target drawable aspect within the current physical Page.
+ *
+ * The current drawable rectangle is the containing box. One drawable axis is
+ * retained exactly and only the other is shortened to reach the target
+ * width/height ratio, so this operation never enlarges the Page. The four
+ * physical insets remain fixed and are added around the fitted drawable.
+ *
+ * An already-equivalent aspect is an identity operation, preserving the exact
+ * profile record and avoiding arithmetic drift.
+ *
+ * @throws if the profile is invalid, the target aspect is not finite and
+ *   strictly positive, or the fitted dimensions cannot form a valid profile.
+ */
+export function fitPageFramePlotProfileToAspect(
+  profile: PlotProfile,
+  targetDrawableAspect: number,
+): PlotProfile {
+  const operation = 'fitPageFramePlotProfileToAspect'
+  const drawable = plotDrawableRectangle(profile)
+  if (!Number.isFinite(targetDrawableAspect) || targetDrawableAspect <= 0) {
+    throw new Error(
+      `${operation}: target drawable aspect must be a finite positive width/height ratio, got ${targetDrawableAspect}`,
+    )
+  }
+
+  const currentDrawableAspect = drawable.width / drawable.height
+  if (
+    plotDrawableAspectsEquivalent(
+      currentDrawableAspect,
+      targetDrawableAspect,
+    )
+  ) {
+    return profile
+  }
+
+  const targetDrawableWidth =
+    currentDrawableAspect > targetDrawableAspect
+      ? drawable.height * targetDrawableAspect
+      : drawable.width
+  const targetDrawableHeight =
+    currentDrawableAspect < targetDrawableAspect
+      ? drawable.width / targetDrawableAspect
+      : drawable.height
+  const { insets } = profile
+  const fitted: PlotProfile = {
+    ...profile,
+    width: targetDrawableWidth + insets.left + insets.right,
+    height: targetDrawableHeight + insets.top + insets.bottom,
+    insets: { ...insets },
+  }
+
+  validatePlotProfile(fitted)
+  return fitted
 }
 
 /**
