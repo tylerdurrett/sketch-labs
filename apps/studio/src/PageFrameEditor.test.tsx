@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { PageFrame } from "@harness/core";
+import type { PageFrame, PlotProfile } from "@harness/core";
 
 import { PageFrameEditor } from "./PageFrameEditor";
 
@@ -13,6 +13,13 @@ import { PageFrameEditor } from "./PageFrameEditor";
 
 const COMPOSITION = { width: 200, height: 100 };
 const FULL_FRAME: PageFrame = { x: 0, y: 0, width: 200, height: 100 };
+const PROFILE: PlotProfile = {
+  width: 220,
+  height: 120,
+  insets: { top: 10, right: 10, bottom: 10, left: 10 },
+  includeFrame: false,
+  toolWidthMillimeters: 0.3,
+};
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -32,6 +39,9 @@ function mountEditor(initialFrame: PageFrame = FULL_FRAME) {
       <PageFrameEditor
         compositionFrame={COMPOSITION}
         initialFrame={initialFrame}
+        profile={PROFILE}
+        representedFrame={FULL_FRAME}
+        displayUnit="mm"
         {...callbacks}
       />,
     );
@@ -149,5 +159,20 @@ describe("PageFrameEditor", () => {
     expect(callbacks.onApply).not.toHaveBeenCalled();
     expect(callbacks.onCancel).toHaveBeenCalledOnce();
     expect(callbacks.onReset).toHaveBeenCalledOnce();
+  });
+
+  it("routes a physical paper edit only through the transient draft callback", () => {
+    const { el, callbacks } = mountEditor();
+
+    setInput(input(el, "physical-width"), "120");
+
+    expect(callbacks.onDraftChange).toHaveBeenLastCalledWith({
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+    });
+    expect(callbacks.onApply).not.toHaveBeenCalled();
+    expect(callbacks.onReset).not.toHaveBeenCalled();
   });
 });

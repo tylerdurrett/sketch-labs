@@ -4,16 +4,22 @@ import {
   type CoordinateSpace,
   type PageFrame,
   type PageFramePercentages,
+  type PlotProfile,
 } from "@harness/core";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { Button } from "./components/ui/button";
+import { PageFramePhysicalFields } from "./PageFramePhysicalFields";
+import type { PaperDisplayUnit } from "./paperDisplayUnit";
 
 type PageFrameField = keyof PageFramePercentages;
 
 export interface PageFrameEditorProps {
   compositionFrame: CoordinateSpace;
   initialFrame: PageFrame;
+  profile: PlotProfile;
+  representedFrame: PageFrame;
+  displayUnit: PaperDisplayUnit;
   onDraftChange: (frame: PageFrame) => void;
   onApply: (frame: PageFrame) => void;
   onCancel: () => void;
@@ -98,6 +104,9 @@ function parseDraft(
 export function PageFrameEditor({
   compositionFrame,
   initialFrame,
+  profile,
+  representedFrame,
+  displayUnit,
   onDraftChange,
   onApply,
   onCancel,
@@ -108,6 +117,18 @@ export function PageFrameEditor({
   );
   const [error, setError] = useState<PageFrameError | null>(null);
   const errorId = useId();
+
+  useEffect(() => {
+    setDraft(initialDraft(initialFrame, compositionFrame));
+    setError(null);
+  }, [
+    compositionFrame.height,
+    compositionFrame.width,
+    initialFrame.height,
+    initialFrame.width,
+    initialFrame.x,
+    initialFrame.y,
+  ]);
 
   const updateField = (field: PageFrameField, value: string): void => {
     const next = { ...draft, [field]: value };
@@ -160,6 +181,13 @@ export function PageFrameEditor({
           </label>
         ))}
       </div>
+      <PageFramePhysicalFields
+        profile={profile}
+        representedFrame={representedFrame}
+        frame={initialFrame}
+        displayUnit={displayUnit}
+        onFrameChange={onDraftChange}
+      />
       {error !== null && (
         <p id={errorId} role="alert" className="text-sm text-destructive">
           {error.message}

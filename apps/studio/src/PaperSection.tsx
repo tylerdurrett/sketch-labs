@@ -5,7 +5,6 @@ import {
   derivePaperOrientation,
   inchToMm,
   matchStandardPaper,
-  mmToInch,
   STANDARD_PAPER_NAMES,
   swapPlotOrientation,
   validatePlotProfile,
@@ -14,11 +13,14 @@ import {
 } from "@harness/core";
 
 import type { EditTransactionLifecycle } from "./editHistory";
+import {
+  formatPaperDimension as formatDimension,
+  readPaperDisplayUnit,
+  writePaperDisplayUnit,
+  type PaperDisplayUnit,
+} from "./paperDisplayUnit";
 
-/** The Studio-local preference key. Display units are never Plot Profile state. */
-export const PAPER_DISPLAY_UNIT_STORAGE_KEY = "sketch-labs.paper-display-unit";
-
-export type PaperDisplayUnit = "mm" | "in";
+export { PAPER_DISPLAY_UNIT_STORAGE_KEY } from "./paperDisplayUnit";
 
 export type PaperProfileCandidateSource =
   | "width"
@@ -72,34 +74,6 @@ interface LegacyPaperSectionProps {
 
 export type PaperSectionProps = PaperSectionBaseProps &
   (TransactionalPaperSectionProps | LegacyPaperSectionProps);
-
-/** Read the presentation-only unit preference without assuming storage is usable. */
-function readDisplayUnit(): PaperDisplayUnit {
-  if (typeof window === "undefined") return "mm";
-
-  try {
-    const stored = window.localStorage.getItem(PAPER_DISPLAY_UNIT_STORAGE_KEY);
-    return stored === "mm" || stored === "in" ? stored : "mm";
-  } catch {
-    return "mm";
-  }
-}
-
-/** Persist the presentation-only unit preference when browser storage permits it. */
-function writeDisplayUnit(unit: PaperDisplayUnit): void {
-  try {
-    window.localStorage.setItem(PAPER_DISPLAY_UNIT_STORAGE_KEY, unit);
-  } catch {
-    // Storage can be unavailable (privacy mode, denied access, quota). The
-    // in-memory preference still works for this Studio session.
-  }
-}
-
-/** Keep dimension summaries compact while preserving useful custom-size precision. */
-function formatDimension(value: number, unit: PaperDisplayUnit): string {
-  const displayed = unit === "in" ? mmToInch(value) : value;
-  return String(Number(displayed.toFixed(unit === "in" ? 3 : 2)));
-}
 
 type PaperDimension = "width" | "height";
 type PaperErrorTarget =
@@ -162,7 +136,7 @@ export function PaperSection({
   ...editProps
 }: PaperSectionProps) {
   const [displayUnit, setDisplayUnit] =
-    useState<PaperDisplayUnit>(readDisplayUnit);
+    useState<PaperDisplayUnit>(readPaperDisplayUnit);
   const [dimensionDrafts, setDimensionDrafts] = useState(() => ({
     width: formatDimension(profile.width, displayUnit),
     height: formatDimension(profile.height, displayUnit),
@@ -183,7 +157,7 @@ export function PaperSection({
   const id = useId();
 
   useEffect(() => {
-    writeDisplayUnit(displayUnit);
+    writePaperDisplayUnit(displayUnit);
   }, [displayUnit]);
 
   // A controlled profile update (including a Preset reload) or a presentation-

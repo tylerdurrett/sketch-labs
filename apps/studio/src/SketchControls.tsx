@@ -84,6 +84,7 @@ import {
   type OutlineSessionAction,
 } from "./outlineSession";
 import { PaperSection } from "./PaperSection";
+import { readPaperDisplayUnit } from "./paperDisplayUnit";
 import { PageFrameEditor } from "./PageFrameEditor";
 import {
   readPlotterSvgIncludePaperMargins,
@@ -1451,6 +1452,9 @@ export function SketchControls({
           <PageFrameEditor
             compositionFrame={compositionFrame}
             initialFrame={pageFrameDraft}
+            profile={profile}
+            representedFrame={initialPageFrameForEdit(history.present)}
+            displayUnit={readPaperDisplayUnit()}
             onDraftChange={setPageFrameDraft}
             onApply={applyPageFrame}
             onCancel={closePageFrameEditor}
