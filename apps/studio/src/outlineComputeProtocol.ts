@@ -746,8 +746,10 @@ function copyCompletedOutline(
 
 /**
  * Capture an export job without retaining references to live state. A supplied
- * completed Outline is copied only when every geometry identity field matches;
- * callers cannot accidentally reuse a merely similar Scene.
+ * completed Outline is copied only when every geometry identity field matches.
+ * Opted-in sources may differ only in their physical target because cheap
+ * finalization reapplies the current target; strict compute identity still
+ * distinguishes those requests and their terminal completions.
  */
 export function createHiddenLineExportSnapshot(
   input: CreateHiddenLineExportSnapshotInput,
@@ -759,7 +761,7 @@ export function createHiddenLineExportSnapshot(
   const matchingCandidate =
     input.reusableOutline !== undefined &&
     isOutlineComputeIdentity(input.reusableOutline.identity) &&
-    outlineComputeIdentitiesEqual(identity, input.reusableOutline.identity)
+    outlineGeometryIdentitiesEqual(identity, input.reusableOutline.identity)
       ? copyCompletedOutline(input.reusableOutline)
       : undefined;
   const snapshot: HiddenLineExportSnapshot = Object.freeze({
@@ -851,7 +853,7 @@ export function isHiddenLineExportSnapshot(
   if (!hasOwn(value, "reusableOutline")) return true;
   return (
     isCompletedOutline(value.reusableOutline) &&
-    outlineComputeIdentitiesEqual(
+    outlineGeometryIdentitiesEqual(
       value.identity,
       value.reusableOutline.identity,
     )

@@ -20,6 +20,7 @@ import {
 import {
   createHiddenLineExportSnapshot,
   createOutlineComputeIdentity,
+  outlineComputeIdentitiesEqual,
   type OutlineComputeIdentity,
 } from "./outlineComputeProtocol";
 import { finalizeOutlineScene, outlineScene } from "./outlineScene";
@@ -596,6 +597,30 @@ function exportIdentity(
   });
 }
 
+function physicalExportIdentity(
+  sourceKind: "specialized-sketch" | "completed-scene-sketch",
+  target = {
+    toolWidthMillimeters: 0.5,
+    millimetersPerSceneUnit: 5,
+  },
+): OutlineComputeIdentity {
+  const sketch =
+    sourceKind === "specialized-sketch" ? grassHills : toneCalibration;
+  return createOutlineComputeIdentity({
+    sketchId: sketch.id,
+    schema: sketch.schema,
+    params: defaultParams(sketch.schema),
+    seed: "physical-target",
+    sampledT: 0.75,
+    compositionFrame: source.space,
+    tolerance: 0.2,
+    ...(sourceKind === "completed-scene-sketch"
+      ? { sourceScene: source }
+      : {}),
+    outlineTarget: target,
+  });
+}
+
 function exportRequest({
   identity = exportIdentity(),
   profile = plotProfile,
@@ -625,6 +650,28 @@ function exportRequest({
     }),
   };
 }
+
+const reusableIdentityMismatches: ReadonlyArray<
+  readonly [string, (copy: Record<string, any>) => void]
+> = [
+  ["sketch id", (copy) => (copy.sketchId = "other")],
+  ["params", (copy) => (copy.params[0].value = 0.123)],
+  ["seed", (copy) => (copy.seed = "other")],
+  ["sampled time", (copy) => (copy.sampledT = 0.8)],
+  ["Composition Frame", (copy) => (copy.compositionFrame.width = 41)],
+  ["tolerance", (copy) => (copy.tolerance = 0.25)],
+  [
+    "source kind",
+    (copy) => {
+      copy.sourceKind = "specialized-sketch";
+      delete copy.sourceScene;
+    },
+  ],
+  [
+    "completed source Scene",
+    (copy) => (copy.sourceScene.primitives[0].points[0][0] = 2),
+  ],
+];
 
 describe("hidden-line export worker runtime", () => {
   it("derives a cache miss through the frame-free shared seam exactly once", () => {
@@ -693,6 +740,190 @@ describe("hidden-line export worker runtime", () => {
     expect(derive).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    "specialized-sketch",
+    "completed-scene-sketch",
+  ] as const)(
+    "reuses %s geometry across a target-only change and applies the current target before Page finalization",
+    (sourceKind) => {
+      const current = physicalExportIdentity(sourceKind, {
+        toolWidthMillimeters: 0.5,
+        millimetersPerSceneUnit: 10,
+      });
+      const prior = structuredClone(current) as OutlineComputeIdentity;
+      if (prior.sourceKind === "legacy-scene") {
+        throw new Error("expected physical-tool identity");
+      }
+      (
+        prior.outlineTarget as { toolWidthMillimeters: number }
+      ).toolWidthMillimeters = 0.3;
+      (
+        prior.outlineTarget as { millimetersPerSceneUnit: number }
+      ).millimetersPerSceneUnit = 5;
+      const completed: Scene = {
+        space: source.space,
+        primitives: [
+          {
+            points: [[5, 10], [35, 10]],
+            stroke: { color: "navy", width: 0.06 },
+          },
+        ],
+      };
+      const profile: PlotProfile = {
+        ...plotProfile,
+        includeFrame: true,
+        toolWidthMillimeters: 0.5,
+      };
+      const pageFrame: PageFrame = {
+        x: 10,
+        y: 5,
+        width: 20,
+        height: 15,
+      };
+      const derive = vi.fn(() => {
+        throw new Error("target-only reuse must skip hidden-line derivation");
+      });
+      const clip = vi.fn((scene: Scene) => scene);
+      const captured = exportRequest({
+        identity: current,
+        profile,
+        pageFrame,
+        reusableOutline: { identity: prior, scene: completed },
+      });
+
+      expect(captured.snapshot.identity).toEqual(current);
+      expect(captured.snapshot.reusableOutline?.identity).toEqual(prior);
+      expect(outlineComputeIdentitiesEqual(current, prior)).toBe(false);
+
+      const response = handleHiddenLineWorkerMessage(
+        captured,
+        { derive, clip },
+      );
+
+      expect(derive).not.toHaveBeenCalled();
+      expect(clip).toHaveBeenCalledOnce();
+      const finalized = clip.mock.calls[0]![0];
+      expect(finalized.space).toEqual({ width: 20, height: 15 });
+      expect(finalized.primitives.map(({ stroke }) => stroke?.width)).toEqual([
+        0.05,
+        0.05,
+      ]);
+      expect(finalized.primitives.at(-1)).toEqual({
+        points: [[0, 0], [20, 0], [20, 15], [0, 15], [0, 0]],
+        stroke: { color: "black", width: 0.05 },
+      });
+      expect(response).toMatchObject({
+        type: "complete",
+        jobKind: "export",
+        identity: current,
+        completedOutline: { identity: current, scene: completed },
+      });
+      if (response?.type !== "complete" || response.jobKind !== "export") {
+        throw new Error("expected export completion");
+      }
+      expect(response.svg.match(/stroke-width="0.5"/g)).toHaveLength(2);
+      expect(outlineComputeIdentitiesEqual(response.identity, current)).toBe(
+        true,
+      );
+      expect(
+        outlineComputeIdentitiesEqual(
+          response.completedOutline.identity,
+          current,
+        ),
+      ).toBe(true);
+      expect(
+        outlineComputeIdentitiesEqual(
+          response.completedOutline.identity,
+          prior,
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it.each(reusableIdentityMismatches)(
+    "derives after a reusable %s mismatch",
+    (_name, mutate) => {
+      const current = physicalExportIdentity("completed-scene-sketch");
+      const candidate = structuredClone(current) as Record<string, any>;
+      mutate(candidate);
+      const completed = outlineScene(source, current.tolerance);
+      const request = exportRequest({
+        identity: current,
+        profile: { ...plotProfile, toolWidthMillimeters: 0.5 },
+        reusableOutline: {
+          identity: candidate as OutlineComputeIdentity,
+          scene: completed,
+        },
+      });
+      const derive = vi.fn(() => completed);
+
+      expect(request.snapshot.reusableOutline).toBeUndefined();
+      handleHiddenLineWorkerMessage(request, { derive });
+
+      expect(derive).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("preserves legacy authored strokes while giving only the Page outline the current physical width", () => {
+    const identity = exportIdentity();
+    const completed: Scene = {
+      space: source.space,
+      primitives: [
+        {
+          points: [[5, 10], [35, 10]],
+          stroke: { color: "navy", width: 3 },
+        },
+      ],
+    };
+    const profile: PlotProfile = {
+      ...plotProfile,
+      toolWidthMillimeters: 0.5,
+    };
+    const pageFrame: PageFrame = {
+      x: 10,
+      y: 5,
+      width: 20,
+      height: 15,
+    };
+    const clip = vi.fn((scene: Scene) => scene);
+
+    const response = handleHiddenLineWorkerMessage(
+      exportRequest({
+        identity,
+        profile,
+        pageFrame,
+        reusableOutline: { identity, scene: completed },
+      }),
+      { clip },
+    );
+
+    expect(
+      clip.mock.calls[0]![0].primitives.map(({ stroke }) => stroke?.width),
+    ).toEqual([3, 0.05]);
+    expect(response).toMatchObject({ type: "complete", jobKind: "export" });
+    if (response?.type !== "complete" || response.jobKind !== "export") {
+      throw new Error("expected export completion");
+    }
+    expect(response.svg).toContain('stroke-width="30"');
+    expect(response.svg).toContain('stroke-width="0.5"');
+
+    const differentSourceKind = {
+      ...structuredClone(identity),
+      sourceKind: "completed-scene-sketch",
+      outlineTarget: {
+        toolWidthMillimeters: 0.5,
+        millimetersPerSceneUnit: 10,
+      },
+    } as OutlineComputeIdentity;
+    const miss = exportRequest({
+      identity,
+      profile,
+      pageFrame,
+      reusableOutline: { identity: differentSourceKind, scene: completed },
+    });
+    expect(miss.snapshot.reusableOutline).toBeUndefined();
+  });
+
   it("is deterministic with the prior derive → clip → plotter expression", () => {
     const identity = exportIdentity({ tolerance: 0.5 });
     const expectedScene = outlineScene(source, 0.5);
@@ -700,6 +931,13 @@ describe("hidden-line export worker runtime", () => {
       expectedScene,
       null,
       plotProfile.includeFrame,
+      {
+        kind: "legacy-scene",
+        target: {
+          toolWidthMillimeters: plotProfile.toolWidthMillimeters,
+          millimetersPerSceneUnit: 5,
+        },
+      },
     );
     const expectedSvg = renderPlotterSVG(
       clipSceneToBounds(finalizedScene),
@@ -808,7 +1046,13 @@ describe("hidden-line export worker runtime", () => {
     );
 
     expect(clip).toHaveBeenCalledOnce();
-    const finalized = finalizeOutlineScene(overflow, null, true);
+    const finalized = finalizeOutlineScene(overflow, null, true, {
+      kind: "legacy-scene",
+      target: {
+        toolWidthMillimeters: plotProfile.toolWidthMillimeters,
+        millimetersPerSceneUnit: 5,
+      },
+    });
     expect(clip).toHaveBeenCalledWith(finalized);
     expect(render).toHaveBeenCalledWith(
       clipSceneToBounds(finalized),
@@ -881,7 +1125,7 @@ describe("hidden-line export worker runtime", () => {
     );
     expect(renderedScene.primitives.at(-1)).toEqual({
       points: [[0, 0], [20, 0], [20, 15], [0, 15], [0, 0]],
-      stroke: { color: "black", width: 1 },
+      stroke: { color: "black", width: 0.03 },
     });
     expect(render.mock.calls[0]![1]).toEqual(plotProfile);
   });
