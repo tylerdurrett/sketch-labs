@@ -194,6 +194,7 @@ describe('Photo Scribble black-box contract', () => {
     const params = fastParams({
       imageAsset: AUTHORED_FIXTURE_LOOKUP_KEY,
       toneContrast: 0.25,
+      tonePivot: 0.3,
       toneGamma: 0.75,
     })
     const seed = 'persisted-photo'

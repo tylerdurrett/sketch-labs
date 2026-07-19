@@ -58,6 +58,13 @@ export function createPhotoScribbleSchema(defaultImageAssetId: string) {
       default: PHOTO_TONE_CONTROL_DEFAULT,
       step: PHOTO_TONE_CONTROL_STEP,
     },
+    tonePivot: {
+      kind: 'number',
+      min: PHOTO_TONE_CONTROL_MIN,
+      max: PHOTO_TONE_CONTROL_MAX,
+      default: PHOTO_TONE_CONTROL_DEFAULT,
+      step: PHOTO_TONE_CONTROL_STEP,
+    },
     toneGamma: {
       kind: 'number',
       min: PHOTO_TONE_CONTROL_MIN,
@@ -78,6 +85,7 @@ function toneControls(
   return {
     toneGamma: numberParam(params, schema, 'toneGamma'),
     toneContrast: numberParam(params, schema, 'toneContrast'),
+    tonePivot: numberParam(params, schema, 'tonePivot'),
   }
 }
 
