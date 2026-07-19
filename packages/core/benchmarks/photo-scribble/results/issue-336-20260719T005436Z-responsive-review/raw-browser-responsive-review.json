@@ -1,0 +1,4964 @@
+{
+  "schemaVersion": 1,
+  "review": "issue-336-product-studio-responsive-review",
+  "evidenceId": "issue-336-20260719T005436Z-responsive-review",
+  "studioUrl": "http://127.0.0.1:4317/",
+  "browser": {
+    "product": "Chrome/144.0.7559.96",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+    "platform": "Darwin 24.6.0 arm64",
+    "viewport": {
+      "width": 1440,
+      "height": 1000,
+      "devicePixelRatio": 1
+    }
+  },
+  "policy": {
+    "acceptedSegments": 1000000,
+    "polylines": 16000,
+    "stagnations": 32000,
+    "restarts": 16000
+  },
+  "actions": [
+    {
+      "at": "2026-07-19T01:14:35.728Z",
+      "action": "load committed preset",
+      "preset": "neat"
+    },
+    {
+      "at": "2026-07-19T01:14:38.285Z",
+      "action": "select-complete-value, type, press Enter",
+      "selector": "#sketch-seed",
+      "value": 5036310400360332,
+      "previousCount": 2,
+      "workerIndex": 2,
+      "beforeEnter": {
+        "workerCount": 2,
+        "newWorkers": [],
+        "inputs": [
+          {
+            "at": 4428.900000095367,
+            "id": "sketch-seed",
+            "value": "5"
+          },
+          {
+            "at": 4452.5,
+            "id": "sketch-seed",
+            "value": "50"
+          },
+          {
+            "at": 4475.099999904633,
+            "id": "sketch-seed",
+            "value": "503"
+          },
+          {
+            "at": 4497.200000286102,
+            "id": "sketch-seed",
+            "value": "5036"
+          },
+          {
+            "at": 4519,
+            "id": "sketch-seed",
+            "value": "50363"
+          },
+          {
+            "at": 4544.5,
+            "id": "sketch-seed",
+            "value": "503631"
+          },
+          {
+            "at": 4566.099999904633,
+            "id": "sketch-seed",
+            "value": "5036310"
+          },
+          {
+            "at": 4587.599999904633,
+            "id": "sketch-seed",
+            "value": "50363104"
+          },
+          {
+            "at": 4608.800000190735,
+            "id": "sketch-seed",
+            "value": "503631040"
+          },
+          {
+            "at": 4629.300000190735,
+            "id": "sketch-seed",
+            "value": "5036310400"
+          },
+          {
+            "at": 4650,
+            "id": "sketch-seed",
+            "value": "50363104003"
+          },
+          {
+            "at": 4670.599999904633,
+            "id": "sketch-seed",
+            "value": "503631040036"
+          },
+          {
+            "at": 4690.900000095367,
+            "id": "sketch-seed",
+            "value": "5036310400360"
+          },
+          {
+            "at": 4706.300000190735,
+            "id": "sketch-seed",
+            "value": "50363104003603"
+          },
+          {
+            "at": 4717,
+            "id": "sketch-seed",
+            "value": "503631040036033"
+          },
+          {
+            "at": 4727.700000286102,
+            "id": "sketch-seed",
+            "value": "5036310400360332"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-07-19T01:14:39.682Z",
+      "action": "select-complete-value, type, press Enter",
+      "selector": "#control-chaos",
+      "value": 0.71,
+      "previousCount": 3,
+      "workerIndex": 3,
+      "beforeEnter": {
+        "workerCount": 3,
+        "newWorkers": [],
+        "inputs": [
+          {
+            "at": 6061,
+            "id": "control-chaos",
+            "value": "0"
+          },
+          {
+            "at": 6086.300000190735,
+            "id": "control-chaos",
+            "value": "00"
+          },
+          {
+            "at": 6089.700000286102,
+            "id": "control-chaos",
+            "value": "00"
+          },
+          {
+            "at": 6091.300000190735,
+            "id": "control-chaos",
+            "value": "00.7"
+          },
+          {
+            "at": 6112.5,
+            "id": "control-chaos",
+            "value": "00.71"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-07-19T01:14:43.912Z",
+      "action": "select-complete-value, type, press Enter",
+      "selector": "#control-chaos",
+      "value": 0.72,
+      "previousCount": 4,
+      "workerIndex": 4,
+      "beforeEnter": {
+        "workerCount": 4,
+        "newWorkers": [],
+        "inputs": [
+          {
+            "at": 10305.800000190735,
+            "id": "control-chaos",
+            "value": "0"
+          },
+          {
+            "at": 10324,
+            "id": "control-chaos",
+            "value": "0"
+          },
+          {
+            "at": 10325.800000190735,
+            "id": "control-chaos",
+            "value": "0.7"
+          },
+          {
+            "at": 10341.900000095367,
+            "id": "control-chaos",
+            "value": "0.72"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-07-19T01:14:46.201Z",
+      "action": "select-complete-value, type, press Enter",
+      "selector": "#sketch-seed",
+      "value": 5036310400360331,
+      "previousCount": 5,
+      "workerIndex": 5,
+      "beforeEnter": {
+        "workerCount": 5,
+        "newWorkers": [],
+        "inputs": [
+          {
+            "at": 12447.099999904633,
+            "id": "sketch-seed",
+            "value": "5"
+          },
+          {
+            "at": 12463.099999904633,
+            "id": "sketch-seed",
+            "value": "50"
+          },
+          {
+            "at": 12479.300000190735,
+            "id": "sketch-seed",
+            "value": "503"
+          },
+          {
+            "at": 12495,
+            "id": "sketch-seed",
+            "value": "5036"
+          },
+          {
+            "at": 12510.599999904633,
+            "id": "sketch-seed",
+            "value": "50363"
+          },
+          {
+            "at": 12526.200000286102,
+            "id": "sketch-seed",
+            "value": "503631"
+          },
+          {
+            "at": 12541.700000286102,
+            "id": "sketch-seed",
+            "value": "5036310"
+          },
+          {
+            "at": 12557.700000286102,
+            "id": "sketch-seed",
+            "value": "50363104"
+          },
+          {
+            "at": 12580.200000286102,
+            "id": "sketch-seed",
+            "value": "503631040"
+          },
+          {
+            "at": 12595.800000190735,
+            "id": "sketch-seed",
+            "value": "5036310400"
+          },
+          {
+            "at": 12611.599999904633,
+            "id": "sketch-seed",
+            "value": "50363104003"
+          },
+          {
+            "at": 12627.300000190735,
+            "id": "sketch-seed",
+            "value": "503631040036"
+          },
+          {
+            "at": 12643.300000190735,
+            "id": "sketch-seed",
+            "value": "5036310400360"
+          },
+          {
+            "at": 12653.599999904633,
+            "id": "sketch-seed",
+            "value": "50363104003603"
+          },
+          {
+            "at": 12659.099999904633,
+            "id": "sketch-seed",
+            "value": "503631040036033"
+          },
+          {
+            "at": 12664.800000190735,
+            "id": "sketch-seed",
+            "value": "5036310400360331"
+          }
+        ]
+      }
+    },
+    {
+      "at": "2026-07-19T01:14:46.467Z",
+      "action": "select-complete-value, type, press Enter",
+      "selector": "#control-scribbleScale",
+      "value": 0.1,
+      "previousCount": 6,
+      "workerIndex": 6,
+      "beforeEnter": {
+        "workerCount": 6,
+        "newWorkers": [],
+        "inputs": [
+          {
+            "at": 12927.300000190735,
+            "id": "control-scribbleScale",
+            "value": "0"
+          },
+          {
+            "at": 12934.400000095367,
+            "id": "control-scribbleScale",
+            "value": "0"
+          },
+          {
+            "at": 12935.900000095367,
+            "id": "control-scribbleScale",
+            "value": "0.1"
+          }
+        ]
+      }
+    }
+  ],
+  "transitions": {
+    "initialConverged": {
+      "workerIndex": 0,
+      "worker": {
+        "workerId": 1,
+        "createdAt": 561.3000001907349,
+        "requestAt": 561.4000000953674,
+        "request": {
+          "type": "compute",
+          "jobId": 1,
+          "identity": {
+            "sketchId": "photo-scribble",
+            "params": [
+              {
+                "key": "imageAsset",
+                "value": "pinecone-4330aa0314f7"
+              },
+              {
+                "key": "toneContrast",
+                "value": 0.5
+              },
+              {
+                "key": "toneGamma",
+                "value": 0.5
+              },
+              {
+                "key": "pathDensity",
+                "value": 1
+              },
+              {
+                "key": "scribbleScale",
+                "value": 1
+              },
+              {
+                "key": "momentum",
+                "value": 0.75
+              },
+              {
+                "key": "chaos",
+                "value": 0.25
+              },
+              {
+                "key": "toneFidelity",
+                "value": 0.9
+              }
+            ],
+            "seed": 6822306050304031,
+            "compositionFrame": {
+              "width": 1000,
+              "height": 1000
+            }
+          }
+        },
+        "progress": [
+          {
+            "at": 675.7000002861023,
+            "completedWorkUnits": 1,
+            "totalWorkUnits": 27380,
+            "terminal": false
+          },
+          {
+            "at": 704.5,
+            "completedWorkUnits": 1171,
+            "totalWorkUnits": 27380,
+            "terminal": true
+          }
+        ],
+        "successAt": 716.4000000953674,
+        "success": {
+          "identity": {
+            "sketchId": "photo-scribble",
+            "params": [
+              {
+                "key": "imageAsset",
+                "value": "pinecone-4330aa0314f7"
+              },
+              {
+                "key": "toneContrast",
+                "value": 0.5
+              },
+              {
+                "key": "toneGamma",
+                "value": 0.5
+              },
+              {
+                "key": "pathDensity",
+                "value": 1
+              },
+              {
+                "key": "scribbleScale",
+                "value": 1
+              },
+              {
+                "key": "momentum",
+                "value": 0.75
+              },
+              {
+                "key": "chaos",
+                "value": 0.25
+              },
+              {
+                "key": "toneFidelity",
+                "value": 0.9
+              }
+            ],
+            "seed": 6822306050304031,
+            "compositionFrame": {
+              "width": 1000,
+              "height": 1000
+            }
+          },
+          "diagnostics": {
+            "termination": "completed",
+            "residualError": 0.016467643258161416,
+            "pathLength": 13527.441558888706,
+            "polylineCount": 13,
+            "penLiftCount": 12
+          },
+          "computeTimeMs": 37.09999990463257,
+          "primitiveCount": 13
+        },
+        "failureAt": null,
+        "failure": null,
+        "terminatedAt": 716.8000001907349
+      },
+      "canvas": {
+        "width": 886,
+        "height": 886,
+        "rgbaSha256": "b2991c3149faa55a0a2a20b1e50e8af43efe35c7a6402d1fc20049f05ffcb2d9"
+      },
+      "shading": {
+        "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nneat\nReload\nseed\nShading\nConverged\nDISPLAYED RESULT\nTermination\nConverged\nResidual error\n1.65%\nCompute time\n37 ms\nPath length\n13,527.44 units\nPolylines\n13\nPen lifts\n12\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "open": true,
+        "summary": "Shading\nConverged",
+        "detail": "Shading\nConverged\nDISPLAYED RESULT\nTermination\nConverged\nResidual error\n1.65%\nCompute time\n37 ms\nPath length\n13,527.44 units\nPolylines\n13\nPen lifts\n12",
+        "exportsDisabled": [
+          {
+            "label": "Export PNG",
+            "disabled": false
+          },
+          {
+            "label": "Export SVG",
+            "disabled": false
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": false
+          }
+        ]
+      },
+      "result": {
+        "sceneHash": "5c1225a7907f023ab4855f03987486b0dd881b448265a281296aa4bfddb184c0",
+        "diagnosticsHash": "886ddeb4e6c0480d412c0fc51053f54909cd07f7870c6d65bce63f32eff562e2",
+        "identityHash": "e43e57352beb7ec333b0535748df32a9e00c335f7f3907b729b68e264331191e",
+        "targetHash": "b0b2250918018cfac35ff6bb6e11474ab05d9736c16da40d9bf7675fb7aae2ed",
+        "primitiveCount": 13,
+        "pointCount": 3876,
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.016467643258161416,
+          "pathLength": 13527.441558888706,
+          "polylineCount": 13,
+          "penLiftCount": 12
+        },
+        "computeTimeMs": 37.09999990463257,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 0.5
+            },
+            {
+              "key": "toneGamma",
+              "value": 0.5
+            },
+            {
+              "key": "pathDensity",
+              "value": 1
+            },
+            {
+              "key": "scribbleScale",
+              "value": 1
+            },
+            {
+              "key": "momentum",
+              "value": 0.75
+            },
+            {
+              "key": "chaos",
+              "value": 0.25
+            },
+            {
+              "key": "toneFidelity",
+              "value": 0.9
+            }
+          ],
+          "seed": 6822306050304031,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      }
+    },
+    "neatPrimary": {
+      "workerIndex": 1,
+      "worker": {
+        "workerId": 2,
+        "createdAt": 2330,
+        "requestAt": 2330,
+        "request": {
+          "type": "compute",
+          "jobId": 2,
+          "identity": {
+            "sketchId": "photo-scribble",
+            "params": [
+              {
+                "key": "imageAsset",
+                "value": "pinecone-4330aa0314f7"
+              },
+              {
+                "key": "toneContrast",
+                "value": 1
+              },
+              {
+                "key": "toneGamma",
+                "value": 1
+              },
+              {
+                "key": "pathDensity",
+                "value": 20
+              },
+              {
+                "key": "scribbleScale",
+                "value": 0.5
+              },
+              {
+                "key": "momentum",
+                "value": 1
+              },
+              {
+                "key": "chaos",
+                "value": 0.72
+              },
+              {
+                "key": "toneFidelity",
+                "value": 1
+              }
+            ],
+            "seed": 5036310400360331,
+            "compositionFrame": {
+              "width": 1000,
+              "height": 1000
+            }
+          }
+        },
+        "progress": [
+          {
+            "at": 2445.0999999046326,
+            "completedWorkUnits": 1,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 2545.0999999046326,
+            "completedWorkUnits": 5439,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 2645.0999999046326,
+            "completedWorkUnits": 11174,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 2745.0999999046326,
+            "completedWorkUnits": 17095,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 2845.0999999046326,
+            "completedWorkUnits": 23060,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 2945.5999999046326,
+            "completedWorkUnits": 28779,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 3045.5999999046326,
+            "completedWorkUnits": 34622,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 3145.5999999046326,
+            "completedWorkUnits": 40352,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 3245.7000002861023,
+            "completedWorkUnits": 46215,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 3345.7000002861023,
+            "completedWorkUnits": 52081,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 3445.7000002861023,
+            "completedWorkUnits": 57928,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 3545.5999999046326,
+            "completedWorkUnits": 63804,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 3645.5999999046326,
+            "completedWorkUnits": 69708,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 3745.5999999046326,
+            "completedWorkUnits": 75656,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 3757.0999999046326,
+            "completedWorkUnits": 75818,
+            "totalWorkUnits": 908160,
+            "terminal": true
+          }
+        ],
+        "successAt": 3824.2000002861023,
+        "success": {
+          "identity": {
+            "sketchId": "photo-scribble",
+            "params": [
+              {
+                "key": "imageAsset",
+                "value": "pinecone-4330aa0314f7"
+              },
+              {
+                "key": "toneContrast",
+                "value": 1
+              },
+              {
+                "key": "toneGamma",
+                "value": 1
+              },
+              {
+                "key": "pathDensity",
+                "value": 20
+              },
+              {
+                "key": "scribbleScale",
+                "value": 0.5
+              },
+              {
+                "key": "momentum",
+                "value": 1
+              },
+              {
+                "key": "chaos",
+                "value": 0.72
+              },
+              {
+                "key": "toneFidelity",
+                "value": 1
+              }
+            ],
+            "seed": 5036310400360331,
+            "compositionFrame": {
+              "width": 1000,
+              "height": 1000
+            }
+          },
+          "diagnostics": {
+            "termination": "completed",
+            "residualError": 0.004998970876759262,
+            "pathLength": 445314.8790813252,
+            "polylineCount": 17,
+            "penLiftCount": 16
+          },
+          "computeTimeMs": 1367.7000002861023,
+          "primitiveCount": 17
+        },
+        "failureAt": null,
+        "failure": null,
+        "terminatedAt": 3826.4000000953674
+      },
+      "canvas": {
+        "width": 886,
+        "height": 886,
+        "rgbaSha256": "d695851eb12b40145e2cbf6b46538f202f6400088c60092c272e548a878726d2"
+      },
+      "shading": {
+        "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nneat\nReload\nseed\nShading\nConverged\nDISPLAYED RESULT\nTermination\nConverged\nResidual error\n0.50%\nCompute time\n1.4 s\nPath length\n445,314.88 units\nPolylines\n17\nPen lifts\n16\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "open": true,
+        "summary": "Shading\nConverged",
+        "detail": "Shading\nConverged\nDISPLAYED RESULT\nTermination\nConverged\nResidual error\n0.50%\nCompute time\n1.4 s\nPath length\n445,314.88 units\nPolylines\n17\nPen lifts\n16",
+        "exportsDisabled": [
+          {
+            "label": "Export PNG",
+            "disabled": false
+          },
+          {
+            "label": "Export SVG",
+            "disabled": false
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": false
+          }
+        ]
+      },
+      "result": {
+        "sceneHash": "ff214bb0ed506be55e621521af93f5011aa035a421ee5f91edfdcc7fd00d2645",
+        "diagnosticsHash": "43e7aedb84afda3fe5338e11bb34ebf939bbc26872b720812865fd9a10d40d76",
+        "identityHash": "68eaf51a2141567645edc9a1f0d1b2c63e941546b5fd81bfa930e04512d241dd",
+        "targetHash": "3a4237f5fe2b4d9bbcfc9160feb24c27a7d1c89ad2e108e8e3dd1e79a4bad2c7",
+        "primitiveCount": 17,
+        "pointCount": 158948,
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.004998970876759262,
+          "pathLength": 445314.8790813252,
+          "polylineCount": 17,
+          "penLiftCount": 16
+        },
+        "computeTimeMs": 1367.7000002861023,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360331,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      }
+    },
+    "supersedingEdit": {
+      "reseedWorkerIndex": 2,
+      "latestWorkerIndex": 3,
+      "seedEdit": {
+        "workerIndex": 2,
+        "action": {
+          "at": "2026-07-19T01:14:38.285Z",
+          "action": "select-complete-value, type, press Enter",
+          "selector": "#sketch-seed",
+          "value": 5036310400360332,
+          "previousCount": 2,
+          "workerIndex": 2,
+          "beforeEnter": {
+            "workerCount": 2,
+            "newWorkers": [],
+            "inputs": [
+              {
+                "at": 4428.900000095367,
+                "id": "sketch-seed",
+                "value": "5"
+              },
+              {
+                "at": 4452.5,
+                "id": "sketch-seed",
+                "value": "50"
+              },
+              {
+                "at": 4475.099999904633,
+                "id": "sketch-seed",
+                "value": "503"
+              },
+              {
+                "at": 4497.200000286102,
+                "id": "sketch-seed",
+                "value": "5036"
+              },
+              {
+                "at": 4519,
+                "id": "sketch-seed",
+                "value": "50363"
+              },
+              {
+                "at": 4544.5,
+                "id": "sketch-seed",
+                "value": "503631"
+              },
+              {
+                "at": 4566.099999904633,
+                "id": "sketch-seed",
+                "value": "5036310"
+              },
+              {
+                "at": 4587.599999904633,
+                "id": "sketch-seed",
+                "value": "50363104"
+              },
+              {
+                "at": 4608.800000190735,
+                "id": "sketch-seed",
+                "value": "503631040"
+              },
+              {
+                "at": 4629.300000190735,
+                "id": "sketch-seed",
+                "value": "5036310400"
+              },
+              {
+                "at": 4650,
+                "id": "sketch-seed",
+                "value": "50363104003"
+              },
+              {
+                "at": 4670.599999904633,
+                "id": "sketch-seed",
+                "value": "503631040036"
+              },
+              {
+                "at": 4690.900000095367,
+                "id": "sketch-seed",
+                "value": "5036310400360"
+              },
+              {
+                "at": 4706.300000190735,
+                "id": "sketch-seed",
+                "value": "50363104003603"
+              },
+              {
+                "at": 4717,
+                "id": "sketch-seed",
+                "value": "503631040036033"
+              },
+              {
+                "at": 4727.700000286102,
+                "id": "sketch-seed",
+                "value": "5036310400360332"
+              }
+            ]
+          }
+        },
+        "previousInputs": 0
+      },
+      "chaosEdit": {
+        "workerIndex": 3,
+        "action": {
+          "at": "2026-07-19T01:14:39.682Z",
+          "action": "select-complete-value, type, press Enter",
+          "selector": "#control-chaos",
+          "value": 0.71,
+          "previousCount": 3,
+          "workerIndex": 3,
+          "beforeEnter": {
+            "workerCount": 3,
+            "newWorkers": [],
+            "inputs": [
+              {
+                "at": 6061,
+                "id": "control-chaos",
+                "value": "0"
+              },
+              {
+                "at": 6086.300000190735,
+                "id": "control-chaos",
+                "value": "00"
+              },
+              {
+                "at": 6089.700000286102,
+                "id": "control-chaos",
+                "value": "00"
+              },
+              {
+                "at": 6091.300000190735,
+                "id": "control-chaos",
+                "value": "00.7"
+              },
+              {
+                "at": 6112.5,
+                "id": "control-chaos",
+                "value": "00.71"
+              }
+            ]
+          }
+        },
+        "previousInputs": 16
+      },
+      "staleBeforeProbes": {
+        "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nneat\nReload\nseed\nShading\nDisplayed result: stale\nPreparing 0%\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "open": false,
+        "summary": "Shading\nDisplayed result: stale\nPreparing 0%",
+        "detail": "Shading\nDisplayed result: stale\nPreparing 0%",
+        "exportsDisabled": [
+          {
+            "label": "Export PNG",
+            "disabled": true
+          },
+          {
+            "label": "Export SVG",
+            "disabled": true
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": true
+          }
+        ]
+      },
+      "staleCanvasBeforeProbes": {
+        "width": 886,
+        "height": 886,
+        "rgbaSha256": "234f6b9d0cb3f85b7d6b63882578ad904c3768ffbaea4a21f38f6614273f4e2a"
+      },
+      "activeAfterProbes": {
+        "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nneat\nReload\nseed\nShading\nDisplayed result: stale\nPreparing 6%\nDISPLAYED RESULT (STALE)\nTermination\nConverged\nResidual error\n0.50%\nCompute time\n1.4 s\nPath length\n445,314.88 units\nPolylines\n17\nPen lifts\n16\nPREPARING REPLACEMENT\nProgress\n6% (58,281 of 908,160 work units)\nEstimated time remaining\n14.7 s\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "open": true,
+        "summary": "Shading\nDisplayed result: stale\nPreparing 6%",
+        "detail": "Shading\nDisplayed result: stale\nPreparing 6%\nDISPLAYED RESULT (STALE)\nTermination\nConverged\nResidual error\n0.50%\nCompute time\n1.4 s\nPath length\n445,314.88 units\nPolylines\n17\nPen lifts\n16\nPREPARING REPLACEMENT\nProgress\n6% (58,281 of 908,160 work units)\nEstimated time remaining\n14.7 s",
+        "exportsDisabled": [
+          {
+            "label": "Export PNG",
+            "disabled": true
+          },
+          {
+            "label": "Export SVG",
+            "disabled": true
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": true
+          }
+        ]
+      },
+      "cancellationState": {
+        "firstInputAt": 6061,
+        "workerTerminatedAt": 6061.200000286102,
+        "cancellationLatencyMs": 0.20000028610229492
+      },
+      "staleAfterCancellation": {
+        "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nneat\nReload\nseed\nShading\nDisplayed result: stale\nPreparing\nDISPLAYED RESULT (STALE)\nTermination\nConverged\nResidual error\n0.50%\nCompute time\n1.4 s\nPath length\n445,314.88 units\nPolylines\n17\nPen lifts\n16\nPREPARING REPLACEMENT\n\nWaiting for worker progress.\n\nEstimated time remaining\nEstimating…\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "open": true,
+        "summary": "Shading\nDisplayed result: stale\nPreparing",
+        "detail": "Shading\nDisplayed result: stale\nPreparing\nDISPLAYED RESULT (STALE)\nTermination\nConverged\nResidual error\n0.50%\nCompute time\n1.4 s\nPath length\n445,314.88 units\nPolylines\n17\nPen lifts\n16\nPREPARING REPLACEMENT\n\nWaiting for worker progress.\n\nEstimated time remaining\nEstimating…",
+        "exportsDisabled": [
+          {
+            "label": "Export PNG",
+            "disabled": true
+          },
+          {
+            "label": "Export SVG",
+            "disabled": true
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": true
+          }
+        ]
+      },
+      "staleCanvasAfterCancellation": {
+        "width": 886,
+        "height": 886,
+        "rgbaSha256": "234f6b9d0cb3f85b7d6b63882578ad904c3768ffbaea4a21f38f6614273f4e2a"
+      },
+      "latestCanvas": {
+        "width": 886,
+        "height": 886,
+        "rgbaSha256": "c5d026d03f95ff49e166e76c845a7658c967a590d513be1ed37d4d14d66afaa7"
+      },
+      "latestShading": {
+        "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nneat\nReload\nseed\nShading\nConverged\nDISPLAYED RESULT\nTermination\nConverged\nResidual error\n0.50%\nCompute time\n1.3 s\nPath length\n444,477.5 units\nPolylines\n7\nPen lifts\n6\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "open": true,
+        "summary": "Shading\nConverged",
+        "detail": "Shading\nConverged\nDISPLAYED RESULT\nTermination\nConverged\nResidual error\n0.50%\nCompute time\n1.3 s\nPath length\n444,477.5 units\nPolylines\n7\nPen lifts\n6",
+        "exportsDisabled": [
+          {
+            "label": "Export PNG",
+            "disabled": false
+          },
+          {
+            "label": "Export SVG",
+            "disabled": false
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": false
+          }
+        ]
+      },
+      "latestResult": {
+        "sceneHash": "14333a41b5dddfb6583db41b06b3eee11e316ba58ae6d0e77413d352311c2be5",
+        "diagnosticsHash": "b446751f9900a973c81bfcefab74fd28c4137c1dce1220d15224f813e2aa28d5",
+        "identityHash": "46a7af67d9516182453515dd04852f0cc82694346f1b29fe7f06c1039b8423d0",
+        "targetHash": "3a4237f5fe2b4d9bbcfc9160feb24c27a7d1c89ad2e108e8e3dd1e79a4bad2c7",
+        "primitiveCount": 7,
+        "pointCount": 125109,
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.004998879424811855,
+          "pathLength": 444477.50242804067,
+          "polylineCount": 7,
+          "penLiftCount": 6
+        },
+        "computeTimeMs": 1348.8000001907349,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.71
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360332,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      },
+      "cancelledWorker": {
+        "workerId": 3,
+        "createdAt": 4848.800000190735,
+        "requestAt": 4848.900000095367,
+        "request": {
+          "type": "compute",
+          "jobId": 3,
+          "identity": {
+            "sketchId": "photo-scribble",
+            "params": [
+              {
+                "key": "imageAsset",
+                "value": "pinecone-4330aa0314f7"
+              },
+              {
+                "key": "toneContrast",
+                "value": 1
+              },
+              {
+                "key": "toneGamma",
+                "value": 1
+              },
+              {
+                "key": "pathDensity",
+                "value": 20
+              },
+              {
+                "key": "scribbleScale",
+                "value": 0.5
+              },
+              {
+                "key": "momentum",
+                "value": 1
+              },
+              {
+                "key": "chaos",
+                "value": 0.72
+              },
+              {
+                "key": "toneFidelity",
+                "value": 1
+              }
+            ],
+            "seed": 5036310400360332,
+            "compositionFrame": {
+              "width": 1000,
+              "height": 1000
+            }
+          }
+        },
+        "progress": [
+          {
+            "at": 4980.400000095367,
+            "completedWorkUnits": 1,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 5080.400000095367,
+            "completedWorkUnits": 5176,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 5180.5,
+            "completedWorkUnits": 10949,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 5280.5,
+            "completedWorkUnits": 16800,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 5380.5,
+            "completedWorkUnits": 22809,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 5480.400000095367,
+            "completedWorkUnits": 28612,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 5580.5,
+            "completedWorkUnits": 34532,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 5680.5,
+            "completedWorkUnits": 40531,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 5780.400000095367,
+            "completedWorkUnits": 46447,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 5880.400000095367,
+            "completedWorkUnits": 52409,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          },
+          {
+            "at": 5989.200000286102,
+            "completedWorkUnits": 58281,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          }
+        ],
+        "successAt": null,
+        "success": null,
+        "failureAt": null,
+        "failure": null,
+        "terminatedAt": 6061.200000286102
+      },
+      "noLateReplacement": true,
+      "cancelledHeartbeat": {
+        "samples": [
+          4848.900000095367,
+          4980.400000095367,
+          5080.400000095367,
+          5180.5,
+          5280.5,
+          5380.5,
+          5480.400000095367,
+          5580.5,
+          5680.5,
+          5780.400000095367,
+          5880.400000095367,
+          5989.200000286102
+        ],
+        "gapsMs": [
+          131.5,
+          100,
+          100.09999990463257,
+          100,
+          100,
+          99.90000009536743,
+          100.09999990463257,
+          100,
+          99.90000009536743,
+          100,
+          108.80000019073486
+        ],
+        "maximumGapMs": 131.5
+      }
+    },
+    "reseedFixedScenario": {
+      "workerIndex": 4,
+      "action": {
+        "at": "2026-07-19T01:14:43.912Z",
+        "action": "select-complete-value, type, press Enter",
+        "selector": "#control-chaos",
+        "value": 0.72,
+        "previousCount": 4,
+        "workerIndex": 4,
+        "beforeEnter": {
+          "workerCount": 4,
+          "newWorkers": [],
+          "inputs": [
+            {
+              "at": 10305.800000190735,
+              "id": "control-chaos",
+              "value": "0"
+            },
+            {
+              "at": 10324,
+              "id": "control-chaos",
+              "value": "0"
+            },
+            {
+              "at": 10325.800000190735,
+              "id": "control-chaos",
+              "value": "0.7"
+            },
+            {
+              "at": 10341.900000095367,
+              "id": "control-chaos",
+              "value": "0.72"
+            }
+          ]
+        }
+      },
+      "result": {
+        "sceneHash": "a5b351815397316df5896a34febe647ff3f3f8fa71b1168fb4e5d8adb76fdcfb",
+        "diagnosticsHash": "ff34ca194eefe8f96f60a90f193dac3db926c1fcaec520518cd961bc2c2d7cf2",
+        "identityHash": "aac86bfd47153fad9fcecb141ab41539dbc5dcb8c82bf012d90aa5bd24903671",
+        "targetHash": "3a4237f5fe2b4d9bbcfc9160feb24c27a7d1c89ad2e108e8e3dd1e79a4bad2c7",
+        "primitiveCount": 17,
+        "pointCount": 155650,
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.004999353385387752,
+          "pathLength": 440505.3168286352,
+          "polylineCount": 17,
+          "penLiftCount": 16
+        },
+        "computeTimeMs": 1334.3000001907349,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360332,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      },
+      "shading": {
+        "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nneat\nReload\nseed\nShading\nConverged\nDISPLAYED RESULT\nTermination\nConverged\nResidual error\n0.50%\nCompute time\n1.3 s\nPath length\n440,505.32 units\nPolylines\n17\nPen lifts\n16\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "open": true,
+        "summary": "Shading\nConverged",
+        "detail": "Shading\nConverged\nDISPLAYED RESULT\nTermination\nConverged\nResidual error\n0.50%\nCompute time\n1.3 s\nPath length\n440,505.32 units\nPolylines\n17\nPen lifts\n16",
+        "exportsDisabled": [
+          {
+            "label": "Export PNG",
+            "disabled": false
+          },
+          {
+            "label": "Export SVG",
+            "disabled": false
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": false
+          }
+        ]
+      }
+    },
+    "fineBudgetExhausted": {
+      "cancelledPrimaryRestoreWorker": {
+        "workerId": 6,
+        "createdAt": 12778,
+        "requestAt": 12778,
+        "request": {
+          "type": "compute",
+          "jobId": 6,
+          "identity": {
+            "sketchId": "photo-scribble",
+            "params": [
+              {
+                "key": "imageAsset",
+                "value": "pinecone-4330aa0314f7"
+              },
+              {
+                "key": "toneContrast",
+                "value": 1
+              },
+              {
+                "key": "toneGamma",
+                "value": 1
+              },
+              {
+                "key": "pathDensity",
+                "value": 20
+              },
+              {
+                "key": "scribbleScale",
+                "value": 0.5
+              },
+              {
+                "key": "momentum",
+                "value": 1
+              },
+              {
+                "key": "chaos",
+                "value": 0.72
+              },
+              {
+                "key": "toneFidelity",
+                "value": 1
+              }
+            ],
+            "seed": 5036310400360331,
+            "compositionFrame": {
+              "width": 1000,
+              "height": 1000
+            }
+          }
+        },
+        "progress": [
+          {
+            "at": 12894,
+            "completedWorkUnits": 1,
+            "totalWorkUnits": 908160,
+            "terminal": false
+          }
+        ],
+        "successAt": null,
+        "success": null,
+        "failureAt": null,
+        "failure": null,
+        "terminatedAt": 12927.400000095367
+      },
+      "workerIndex": 6,
+      "worker": {
+        "workerId": 7,
+        "createdAt": 13044.599999904633,
+        "requestAt": 13044.599999904633,
+        "request": {
+          "type": "compute",
+          "jobId": 7,
+          "identity": {
+            "sketchId": "photo-scribble",
+            "params": [
+              {
+                "key": "imageAsset",
+                "value": "pinecone-4330aa0314f7"
+              },
+              {
+                "key": "toneContrast",
+                "value": 1
+              },
+              {
+                "key": "toneGamma",
+                "value": 1
+              },
+              {
+                "key": "pathDensity",
+                "value": 20
+              },
+              {
+                "key": "scribbleScale",
+                "value": 0.1
+              },
+              {
+                "key": "momentum",
+                "value": 1
+              },
+              {
+                "key": "chaos",
+                "value": 0.72
+              },
+              {
+                "key": "toneFidelity",
+                "value": 1
+              }
+            ],
+            "seed": 5036310400360331,
+            "compositionFrame": {
+              "width": 1000,
+              "height": 1000
+            }
+          }
+        },
+        "progress": [
+          {
+            "at": 13236.099999904633,
+            "completedWorkUnits": 1,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 13336.099999904633,
+            "completedWorkUnits": 5277,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 13436.099999904633,
+            "completedWorkUnits": 10742,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 13536,
+            "completedWorkUnits": 16338,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 13636,
+            "completedWorkUnits": 21911,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 13736,
+            "completedWorkUnits": 27488,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 13836.099999904633,
+            "completedWorkUnits": 33066,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 13936,
+            "completedWorkUnits": 38684,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 14036,
+            "completedWorkUnits": 44455,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 14136.099999904633,
+            "completedWorkUnits": 50232,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 14236,
+            "completedWorkUnits": 56097,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 14336,
+            "completedWorkUnits": 61724,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 14436.099999904633,
+            "completedWorkUnits": 67574,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 14536.099999904633,
+            "completedWorkUnits": 73383,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 14636,
+            "completedWorkUnits": 79380,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 14736,
+            "completedWorkUnits": 85301,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 14836.099999904633,
+            "completedWorkUnits": 91306,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 14936.099999904633,
+            "completedWorkUnits": 97124,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 15036.099999904633,
+            "completedWorkUnits": 103012,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 15136.200000286102,
+            "completedWorkUnits": 108747,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 15236.099999904633,
+            "completedWorkUnits": 114678,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 15336.099999904633,
+            "completedWorkUnits": 120475,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 15436.099999904633,
+            "completedWorkUnits": 126407,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 15536.200000286102,
+            "completedWorkUnits": 132441,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 15636.099999904633,
+            "completedWorkUnits": 138334,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 15736.099999904633,
+            "completedWorkUnits": 144353,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 15836.099999904633,
+            "completedWorkUnits": 150049,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 15936.099999904633,
+            "completedWorkUnits": 155829,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 16036.099999904633,
+            "completedWorkUnits": 161422,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 16136.099999904633,
+            "completedWorkUnits": 167049,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 16236.099999904633,
+            "completedWorkUnits": 173044,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 16336.099999904633,
+            "completedWorkUnits": 179021,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 16436.099999904633,
+            "completedWorkUnits": 184998,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 16536.099999904633,
+            "completedWorkUnits": 190920,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 16636.099999904633,
+            "completedWorkUnits": 196804,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 16736.099999904633,
+            "completedWorkUnits": 202758,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 16836.099999904633,
+            "completedWorkUnits": 208429,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 16936.099999904633,
+            "completedWorkUnits": 214296,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 17036.099999904633,
+            "completedWorkUnits": 220055,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 17136.099999904633,
+            "completedWorkUnits": 225919,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 17236.099999904633,
+            "completedWorkUnits": 231701,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 17336.099999904633,
+            "completedWorkUnits": 237290,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 17436.099999904633,
+            "completedWorkUnits": 242970,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 17536.099999904633,
+            "completedWorkUnits": 248841,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 17636.099999904633,
+            "completedWorkUnits": 254775,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 17736.200000286102,
+            "completedWorkUnits": 260476,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 17836.099999904633,
+            "completedWorkUnits": 266329,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 17936.099999904633,
+            "completedWorkUnits": 272207,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 18036.099999904633,
+            "completedWorkUnits": 278136,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 18136.099999904633,
+            "completedWorkUnits": 284032,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 18236.099999904633,
+            "completedWorkUnits": 289705,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 18336.099999904633,
+            "completedWorkUnits": 295343,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 18436.099999904633,
+            "completedWorkUnits": 300960,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 18536.099999904633,
+            "completedWorkUnits": 306937,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 18636.099999904633,
+            "completedWorkUnits": 312733,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 18736.200000286102,
+            "completedWorkUnits": 318564,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 18836.200000286102,
+            "completedWorkUnits": 324326,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 18936.200000286102,
+            "completedWorkUnits": 330063,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 19036.200000286102,
+            "completedWorkUnits": 336022,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 19136.099999904633,
+            "completedWorkUnits": 341839,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 19236.099999904633,
+            "completedWorkUnits": 347747,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 19336.200000286102,
+            "completedWorkUnits": 353597,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 19436.200000286102,
+            "completedWorkUnits": 359448,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 19536.099999904633,
+            "completedWorkUnits": 365317,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 19636.099999904633,
+            "completedWorkUnits": 371346,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 19736.099999904633,
+            "completedWorkUnits": 377204,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 19836.099999904633,
+            "completedWorkUnits": 383069,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 19936.099999904633,
+            "completedWorkUnits": 389035,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 20036.099999904633,
+            "completedWorkUnits": 394852,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 20136.099999904633,
+            "completedWorkUnits": 400590,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 20236.099999904633,
+            "completedWorkUnits": 406607,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 20336.200000286102,
+            "completedWorkUnits": 412280,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 20436.099999904633,
+            "completedWorkUnits": 418260,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 20536.099999904633,
+            "completedWorkUnits": 424421,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 20636.200000286102,
+            "completedWorkUnits": 430395,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 20736.099999904633,
+            "completedWorkUnits": 436536,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 20836.099999904633,
+            "completedWorkUnits": 442569,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 20936.099999904633,
+            "completedWorkUnits": 448529,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 21036.099999904633,
+            "completedWorkUnits": 454419,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 21136.099999904633,
+            "completedWorkUnits": 460102,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 21236.099999904633,
+            "completedWorkUnits": 465684,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 21336.099999904633,
+            "completedWorkUnits": 471517,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 21436.099999904633,
+            "completedWorkUnits": 477451,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 21536.099999904633,
+            "completedWorkUnits": 483341,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 21636.200000286102,
+            "completedWorkUnits": 489196,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 21736.099999904633,
+            "completedWorkUnits": 495046,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 21836.099999904633,
+            "completedWorkUnits": 500911,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 21936.099999904633,
+            "completedWorkUnits": 506729,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 22036.099999904633,
+            "completedWorkUnits": 512453,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 22136.200000286102,
+            "completedWorkUnits": 518084,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 22236.200000286102,
+            "completedWorkUnits": 523436,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 22336.200000286102,
+            "completedWorkUnits": 529155,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 22436.200000286102,
+            "completedWorkUnits": 534901,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 22536.200000286102,
+            "completedWorkUnits": 540550,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 22636.200000286102,
+            "completedWorkUnits": 546344,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 22736.099999904633,
+            "completedWorkUnits": 552151,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 22836.099999904633,
+            "completedWorkUnits": 557873,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 22936.200000286102,
+            "completedWorkUnits": 563773,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 23036.099999904633,
+            "completedWorkUnits": 569434,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 23136.099999904633,
+            "completedWorkUnits": 575143,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 23236.099999904633,
+            "completedWorkUnits": 580720,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 23336.099999904633,
+            "completedWorkUnits": 585799,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 23436.099999904633,
+            "completedWorkUnits": 591499,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 23536.099999904633,
+            "completedWorkUnits": 597085,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 23636.099999904633,
+            "completedWorkUnits": 602272,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 23736.099999904633,
+            "completedWorkUnits": 607866,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 23836.200000286102,
+            "completedWorkUnits": 613263,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 23936.099999904633,
+            "completedWorkUnits": 619037,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 24036.099999904633,
+            "completedWorkUnits": 624671,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 24136.099999904633,
+            "completedWorkUnits": 630062,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 24236.200000286102,
+            "completedWorkUnits": 635639,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 24336.099999904633,
+            "completedWorkUnits": 641504,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 24436.200000286102,
+            "completedWorkUnits": 647280,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 24536.200000286102,
+            "completedWorkUnits": 652410,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 24636.200000286102,
+            "completedWorkUnits": 658276,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 24736.200000286102,
+            "completedWorkUnits": 663905,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 24836.099999904633,
+            "completedWorkUnits": 669613,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 24936.099999904633,
+            "completedWorkUnits": 675260,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 25036.099999904633,
+            "completedWorkUnits": 680866,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 25136.200000286102,
+            "completedWorkUnits": 686562,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 25236.099999904633,
+            "completedWorkUnits": 692337,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 25336.099999904633,
+            "completedWorkUnits": 697965,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 25436.099999904633,
+            "completedWorkUnits": 703597,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 25536.200000286102,
+            "completedWorkUnits": 709134,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 25636.099999904633,
+            "completedWorkUnits": 714668,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 25736.099999904633,
+            "completedWorkUnits": 720269,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 25836.099999904633,
+            "completedWorkUnits": 725905,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 25936.099999904633,
+            "completedWorkUnits": 731640,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 26036.200000286102,
+            "completedWorkUnits": 736859,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 26136.099999904633,
+            "completedWorkUnits": 742830,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 26236.099999904633,
+            "completedWorkUnits": 748922,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 26336.099999904633,
+            "completedWorkUnits": 754813,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 26436.099999904633,
+            "completedWorkUnits": 760616,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 26536.099999904633,
+            "completedWorkUnits": 766291,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 26636.099999904633,
+            "completedWorkUnits": 772201,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 26736.099999904633,
+            "completedWorkUnits": 777957,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 26836.099999904633,
+            "completedWorkUnits": 783673,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 26936.099999904633,
+            "completedWorkUnits": 789254,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 27036.099999904633,
+            "completedWorkUnits": 794899,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 27136.099999904633,
+            "completedWorkUnits": 800741,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 27236.200000286102,
+            "completedWorkUnits": 806611,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 27336.099999904633,
+            "completedWorkUnits": 812541,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 27436.099999904633,
+            "completedWorkUnits": 818457,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 27536.099999904633,
+            "completedWorkUnits": 824256,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 27636.099999904633,
+            "completedWorkUnits": 830052,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 27736.099999904633,
+            "completedWorkUnits": 835760,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 27836.099999904633,
+            "completedWorkUnits": 841308,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 27936.099999904633,
+            "completedWorkUnits": 846907,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 28036.099999904633,
+            "completedWorkUnits": 852778,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 28136.099999904633,
+            "completedWorkUnits": 858186,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 28236.099999904633,
+            "completedWorkUnits": 863872,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 28336.099999904633,
+            "completedWorkUnits": 869782,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 28436.099999904633,
+            "completedWorkUnits": 875857,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 28536.099999904633,
+            "completedWorkUnits": 881506,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 28636.099999904633,
+            "completedWorkUnits": 887131,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 28736.099999904633,
+            "completedWorkUnits": 892993,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 28836.099999904633,
+            "completedWorkUnits": 898737,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 28936.200000286102,
+            "completedWorkUnits": 904779,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 29036.099999904633,
+            "completedWorkUnits": 910513,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 29136.200000286102,
+            "completedWorkUnits": 916391,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 29236.200000286102,
+            "completedWorkUnits": 921985,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 29336.099999904633,
+            "completedWorkUnits": 927781,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 29436.099999904633,
+            "completedWorkUnits": 933604,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 29536.200000286102,
+            "completedWorkUnits": 939361,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 29636.099999904633,
+            "completedWorkUnits": 945146,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 29736.099999904633,
+            "completedWorkUnits": 950869,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 29836.099999904633,
+            "completedWorkUnits": 956556,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 29936.200000286102,
+            "completedWorkUnits": 962530,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 30036.099999904633,
+            "completedWorkUnits": 968354,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 30136.099999904633,
+            "completedWorkUnits": 974182,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 30236.099999904633,
+            "completedWorkUnits": 980093,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 30336.099999904633,
+            "completedWorkUnits": 985885,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 30436.099999904633,
+            "completedWorkUnits": 991694,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 30536.099999904633,
+            "completedWorkUnits": 997443,
+            "totalWorkUnits": 1032000,
+            "terminal": false
+          },
+          {
+            "at": 30580.700000286102,
+            "completedWorkUnits": 1000005,
+            "totalWorkUnits": 1032000,
+            "terminal": true
+          }
+        ],
+        "successAt": 31721.400000095367,
+        "success": {
+          "identity": {
+            "sketchId": "photo-scribble",
+            "params": [
+              {
+                "key": "imageAsset",
+                "value": "pinecone-4330aa0314f7"
+              },
+              {
+                "key": "toneContrast",
+                "value": 1
+              },
+              {
+                "key": "toneGamma",
+                "value": 1
+              },
+              {
+                "key": "pathDensity",
+                "value": 20
+              },
+              {
+                "key": "scribbleScale",
+                "value": 0.1
+              },
+              {
+                "key": "momentum",
+                "value": 1
+              },
+              {
+                "key": "chaos",
+                "value": 0.72
+              },
+              {
+                "key": "toneFidelity",
+                "value": 1
+              }
+            ],
+            "seed": 5036310400360331,
+            "compositionFrame": {
+              "width": 1000,
+              "height": 1000
+            }
+          },
+          "diagnostics": {
+            "termination": "budget-exhausted",
+            "residualError": 0.062259759099295466,
+            "pathLength": 1175618.3878658891,
+            "polylineCount": 6,
+            "penLiftCount": 5
+          },
+          "computeTimeMs": 18039.400000095367,
+          "primitiveCount": 6
+        },
+        "failureAt": null,
+        "failure": null,
+        "terminatedAt": 31739.200000286102
+      },
+      "action": {
+        "at": "2026-07-19T01:14:46.467Z",
+        "action": "select-complete-value, type, press Enter",
+        "selector": "#control-scribbleScale",
+        "value": 0.1,
+        "previousCount": 6,
+        "workerIndex": 6,
+        "beforeEnter": {
+          "workerCount": 6,
+          "newWorkers": [],
+          "inputs": [
+            {
+              "at": 12927.300000190735,
+              "id": "control-scribbleScale",
+              "value": "0"
+            },
+            {
+              "at": 12934.400000095367,
+              "id": "control-scribbleScale",
+              "value": "0"
+            },
+            {
+              "at": 12935.900000095367,
+              "id": "control-scribbleScale",
+              "value": "0.1"
+            }
+          ]
+        }
+      },
+      "canvas": {
+        "width": 886,
+        "height": 886,
+        "rgbaSha256": "c9a48174a7917e7db7c9bd61a8f91d3d382db1e92dea7112d41fc1d5fa16fa25"
+      },
+      "shading": {
+        "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nneat\nReload\nseed\nShading\nBudget exhausted\nDISPLAYED RESULT\n\nThe safety budget was exhausted. This is a bounded partial result, not a computation error.\n\nTermination\nBudget exhausted\nResidual error\n6.23%\nCompute time\n18.0 s\nPath length\n1,175,618.39 units\nPolylines\n6\nPen lifts\n5\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "open": true,
+        "summary": "Shading\nBudget exhausted",
+        "detail": "Shading\nBudget exhausted\nDISPLAYED RESULT\n\nThe safety budget was exhausted. This is a bounded partial result, not a computation error.\n\nTermination\nBudget exhausted\nResidual error\n6.23%\nCompute time\n18.0 s\nPath length\n1,175,618.39 units\nPolylines\n6\nPen lifts\n5",
+        "exportsDisabled": [
+          {
+            "label": "Export PNG",
+            "disabled": false
+          },
+          {
+            "label": "Export SVG",
+            "disabled": false
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": false
+          }
+        ]
+      },
+      "result": {
+        "sceneHash": "6a2dbad0f2e899b0dff72d726b513495034adf01205c42e5472f191719fce57b",
+        "diagnosticsHash": "15a2d85947c8a622d285202f08a1d89092b0beec1b8810a18b2d8d67449fb90b",
+        "identityHash": "2a62930556a24b446b7d0e2a09b78faf1d169fb7a28d95a05891cf7f00edf87c",
+        "targetHash": "96738e63053982deb8f7b0afd042311f827b88280434024ad17e086826b72008",
+        "primitiveCount": 6,
+        "pointCount": 2257213,
+        "diagnostics": {
+          "termination": "budget-exhausted",
+          "residualError": 0.062259759099295466,
+          "pathLength": 1175618.3878658891,
+          "polylineCount": 6,
+          "penLiftCount": 5
+        },
+        "computeTimeMs": 18039.400000095367,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.1
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360331,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      },
+      "expectedFine": {
+        "targetHash": "96738e63053982deb8f7b0afd042311f827b88280434024ad17e086826b72008",
+        "sceneHash": "6a2dbad0f2e899b0dff72d726b513495034adf01205c42e5472f191719fce57b",
+        "termination": "budget-exhausted",
+        "residualError": 0.062259759099295466
+      }
+    }
+  },
+  "probes": [
+    {
+      "probeId": "hide-inspector",
+      "target": "button[aria-label=\"Hide inspector\"]",
+      "coordinate": {
+        "x": 1094,
+        "y": 26,
+        "xFraction": 0.5,
+        "yFraction": 0.5
+      },
+      "action": "single primary-pointer click",
+      "startedAt": 5902.099999904633,
+      "endedAt": 5940,
+      "durationMs": 37.90000009536743
+    },
+    {
+      "probeId": "show-inspector",
+      "target": "button[aria-label=\"Show inspector\"]",
+      "coordinate": {
+        "x": 1414,
+        "y": 26,
+        "xFraction": 0.5,
+        "yFraction": 0.5
+      },
+      "action": "single primary-pointer click",
+      "startedAt": 5942.400000095367,
+      "endedAt": 5971.5,
+      "durationMs": 29.09999990463257
+    },
+    {
+      "probeId": "toggle-shading-disclosure",
+      "target": "summary[data-issue-336-shading=\"true\"]",
+      "coordinate": {
+        "x": 1273,
+        "y": 936,
+        "xFraction": 0.5,
+        "yFraction": 0.5
+      },
+      "action": "single primary-pointer click",
+      "startedAt": 5974.099999904633,
+      "endedAt": 5988.400000095367,
+      "durationMs": 14.300000190734863
+    }
+  ],
+  "console": [
+    {
+      "at": "2026-07-19T01:14:33.435Z",
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "at": "2026-07-19T01:14:33.460Z",
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "at": "2026-07-19T01:14:33.503Z",
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    },
+    {
+      "at": "2026-07-19T01:14:33.581Z",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "at": "2026-07-19T01:14:37.528Z",
+      "type": "warn",
+      "text": "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently"
+    }
+  ],
+  "pageErrors": [],
+  "screenshots": [
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T005436Z-responsive-review/2026-07-18_201435_initial-converged.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T005436Z-responsive-review/2026-07-18_201437_neat-primary-settled.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T005436Z-responsive-review/2026-07-18_201438_reseed-active-stale-retained.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T005436Z-responsive-review/2026-07-18_201439_active-progress-and-rolling-eta.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T005436Z-responsive-review/2026-07-18_201439_chaos-supersedes-reseed-latest-input-wins.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T005436Z-responsive-review/2026-07-18_201443_latest-chaos-result-settled.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T005436Z-responsive-review/2026-07-18_201505_adopted-1m-budget-exhausted.jpg"
+  ],
+  "video": {
+    "status": "not-recorded",
+    "reason": "The first host attempt's CDP-to-MediaRecorder bridge stalled before the first critical edit; the product review continued with timestamped screenshots and raw Worker/DOM timing logs."
+  },
+  "assertions": {
+    "initialTruthfullyConverged": true,
+    "settledSeedEditLaunchedOnlyAfterEnter": true,
+    "settledChaosEditLaunchedOnlyAfterEnter": true,
+    "staleCanvasRetainedDuringReseed": true,
+    "staleCanvasRetainedAfterCancellation": true,
+    "staleStateLabelled": true,
+    "progressVisible": true,
+    "rollingEtaVisible": true,
+    "cancellationWithin500Ms": true,
+    "noLateStaleReplacement": true,
+    "latestCanvasReplacedStale": true,
+    "reseedTargetExactlyStable": true,
+    "reseedIdentityChanged": true,
+    "reseedSceneChanged": true,
+    "fineTruthfullyBudgetExhausted": true,
+    "fineMatchesAdoptedTarget": true,
+    "fineMatchesAdoptedScene": true,
+    "fineMatchesAdoptedResidual": true,
+    "probesWithin250Ms": true,
+    "noPageErrors": true
+  },
+  "cleanup": {
+    "beforeAssets": [
+      {
+        "path": "img-0672-79d639daec62.png",
+        "byteLength": 6323366,
+        "sha256": "79d639daec62a2af4a59954b9d102e51ff30d11cd14246fffc52a53250858a7d"
+      },
+      {
+        "path": "pinecone-4330aa0314f7.png",
+        "byteLength": 333669,
+        "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
+      }
+    ],
+    "afterAssets": [
+      {
+        "path": "img-0672-79d639daec62.png",
+        "byteLength": 6323366,
+        "sha256": "79d639daec62a2af4a59954b9d102e51ff30d11cd14246fffc52a53250858a7d"
+      },
+      {
+        "path": "pinecone-4330aa0314f7.png",
+        "byteLength": 333669,
+        "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
+      }
+    ],
+    "assetsExact": true,
+    "beforePresets": [
+      {
+        "path": "flowers-dense-chaotic.json",
+        "byteLength": 558,
+        "sha256": "d96c7917fa170f53cd67e66237653285098b9132823cfe95c40fd4e89d57112c"
+      },
+      {
+        "path": "flowers-dense.json",
+        "byteLength": 554,
+        "sha256": "e74b5b72a2a44f66c86aca0d7e2117920820aff1ab8393f92b1126016ceb4e67"
+      },
+      {
+        "path": "neat.json",
+        "byteLength": 535,
+        "sha256": "25b34ea7b25a273cf62940c5338c1328e5bb70fd4c0634abe24a4a4cebd36cd0"
+      }
+    ],
+    "afterPresets": [
+      {
+        "path": "flowers-dense-chaotic.json",
+        "byteLength": 558,
+        "sha256": "d96c7917fa170f53cd67e66237653285098b9132823cfe95c40fd4e89d57112c"
+      },
+      {
+        "path": "flowers-dense.json",
+        "byteLength": 554,
+        "sha256": "e74b5b72a2a44f66c86aca0d7e2117920820aff1ab8393f92b1126016ceb4e67"
+      },
+      {
+        "path": "neat.json",
+        "byteLength": 535,
+        "sha256": "25b34ea7b25a273cf62940c5338c1328e5bb70fd4c0634abe24a4a4cebd36cd0"
+      }
+    ],
+    "presetsExact": true,
+    "trialAssetsOrPresetsCreated": false,
+    "browserClosed": true
+  },
+  "workers": [
+    {
+      "workerId": 1,
+      "createdAt": 561.3000001907349,
+      "requestAt": 561.4000000953674,
+      "request": {
+        "type": "compute",
+        "jobId": 1,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 0.5
+            },
+            {
+              "key": "toneGamma",
+              "value": 0.5
+            },
+            {
+              "key": "pathDensity",
+              "value": 1
+            },
+            {
+              "key": "scribbleScale",
+              "value": 1
+            },
+            {
+              "key": "momentum",
+              "value": 0.75
+            },
+            {
+              "key": "chaos",
+              "value": 0.25
+            },
+            {
+              "key": "toneFidelity",
+              "value": 0.9
+            }
+          ],
+          "seed": 6822306050304031,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      },
+      "progress": [
+        {
+          "at": 675.7000002861023,
+          "completedWorkUnits": 1,
+          "totalWorkUnits": 27380,
+          "terminal": false
+        },
+        {
+          "at": 704.5,
+          "completedWorkUnits": 1171,
+          "totalWorkUnits": 27380,
+          "terminal": true
+        }
+      ],
+      "successAt": 716.4000000953674,
+      "success": {
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 0.5
+            },
+            {
+              "key": "toneGamma",
+              "value": 0.5
+            },
+            {
+              "key": "pathDensity",
+              "value": 1
+            },
+            {
+              "key": "scribbleScale",
+              "value": 1
+            },
+            {
+              "key": "momentum",
+              "value": 0.75
+            },
+            {
+              "key": "chaos",
+              "value": 0.25
+            },
+            {
+              "key": "toneFidelity",
+              "value": 0.9
+            }
+          ],
+          "seed": 6822306050304031,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.016467643258161416,
+          "pathLength": 13527.441558888706,
+          "polylineCount": 13,
+          "penLiftCount": 12
+        },
+        "computeTimeMs": 37.09999990463257,
+        "primitiveCount": 13
+      },
+      "failureAt": null,
+      "failure": null,
+      "terminatedAt": 716.8000001907349
+    },
+    {
+      "workerId": 2,
+      "createdAt": 2330,
+      "requestAt": 2330,
+      "request": {
+        "type": "compute",
+        "jobId": 2,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360331,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      },
+      "progress": [
+        {
+          "at": 2445.0999999046326,
+          "completedWorkUnits": 1,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 2545.0999999046326,
+          "completedWorkUnits": 5439,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 2645.0999999046326,
+          "completedWorkUnits": 11174,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 2745.0999999046326,
+          "completedWorkUnits": 17095,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 2845.0999999046326,
+          "completedWorkUnits": 23060,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 2945.5999999046326,
+          "completedWorkUnits": 28779,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 3045.5999999046326,
+          "completedWorkUnits": 34622,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 3145.5999999046326,
+          "completedWorkUnits": 40352,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 3245.7000002861023,
+          "completedWorkUnits": 46215,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 3345.7000002861023,
+          "completedWorkUnits": 52081,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 3445.7000002861023,
+          "completedWorkUnits": 57928,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 3545.5999999046326,
+          "completedWorkUnits": 63804,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 3645.5999999046326,
+          "completedWorkUnits": 69708,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 3745.5999999046326,
+          "completedWorkUnits": 75656,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 3757.0999999046326,
+          "completedWorkUnits": 75818,
+          "totalWorkUnits": 908160,
+          "terminal": true
+        }
+      ],
+      "successAt": 3824.2000002861023,
+      "success": {
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360331,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.004998970876759262,
+          "pathLength": 445314.8790813252,
+          "polylineCount": 17,
+          "penLiftCount": 16
+        },
+        "computeTimeMs": 1367.7000002861023,
+        "primitiveCount": 17
+      },
+      "failureAt": null,
+      "failure": null,
+      "terminatedAt": 3826.4000000953674
+    },
+    {
+      "workerId": 3,
+      "createdAt": 4848.800000190735,
+      "requestAt": 4848.900000095367,
+      "request": {
+        "type": "compute",
+        "jobId": 3,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360332,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      },
+      "progress": [
+        {
+          "at": 4980.400000095367,
+          "completedWorkUnits": 1,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 5080.400000095367,
+          "completedWorkUnits": 5176,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 5180.5,
+          "completedWorkUnits": 10949,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 5280.5,
+          "completedWorkUnits": 16800,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 5380.5,
+          "completedWorkUnits": 22809,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 5480.400000095367,
+          "completedWorkUnits": 28612,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 5580.5,
+          "completedWorkUnits": 34532,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 5680.5,
+          "completedWorkUnits": 40531,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 5780.400000095367,
+          "completedWorkUnits": 46447,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 5880.400000095367,
+          "completedWorkUnits": 52409,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 5989.200000286102,
+          "completedWorkUnits": 58281,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        }
+      ],
+      "successAt": null,
+      "success": null,
+      "failureAt": null,
+      "failure": null,
+      "terminatedAt": 6061.200000286102
+    },
+    {
+      "workerId": 4,
+      "createdAt": 6248.5,
+      "requestAt": 6248.599999904633,
+      "request": {
+        "type": "compute",
+        "jobId": 4,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.71
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360332,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      },
+      "progress": [
+        {
+          "at": 6380.700000286102,
+          "completedWorkUnits": 1,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 6480.599999904633,
+          "completedWorkUnits": 5308,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 6580.700000286102,
+          "completedWorkUnits": 11099,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 6680.700000286102,
+          "completedWorkUnits": 16997,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 6780.700000286102,
+          "completedWorkUnits": 22891,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 6880.700000286102,
+          "completedWorkUnits": 28753,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 6980.599999904633,
+          "completedWorkUnits": 34674,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 7080.599999904633,
+          "completedWorkUnits": 40511,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 7180.700000286102,
+          "completedWorkUnits": 46425,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 7280.599999904633,
+          "completedWorkUnits": 52125,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 7380.599999904633,
+          "completedWorkUnits": 57880,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 7480.599999904633,
+          "completedWorkUnits": 63786,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 7580.700000286102,
+          "completedWorkUnits": 69782,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 7668.599999904633,
+          "completedWorkUnits": 75078,
+          "totalWorkUnits": 908160,
+          "terminal": true
+        }
+      ],
+      "successAt": 7735.599999904633,
+      "success": {
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.71
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360332,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.004998879424811855,
+          "pathLength": 444477.50242804067,
+          "polylineCount": 7,
+          "penLiftCount": 6
+        },
+        "computeTimeMs": 1348.8000001907349,
+        "primitiveCount": 7
+      },
+      "failureAt": null,
+      "failure": null,
+      "terminatedAt": 7737.300000190735
+    },
+    {
+      "workerId": 5,
+      "createdAt": 10479.700000286102,
+      "requestAt": 10479.700000286102,
+      "request": {
+        "type": "compute",
+        "jobId": 5,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360332,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      },
+      "progress": [
+        {
+          "at": 10603.400000095367,
+          "completedWorkUnits": 1,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 10703.5,
+          "completedWorkUnits": 5218,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 10803.400000095367,
+          "completedWorkUnits": 11111,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 10903.400000095367,
+          "completedWorkUnits": 17086,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 11003.400000095367,
+          "completedWorkUnits": 23064,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 11103.400000095367,
+          "completedWorkUnits": 28868,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 11203.400000095367,
+          "completedWorkUnits": 34826,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 11303.400000095367,
+          "completedWorkUnits": 40796,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 11403.400000095367,
+          "completedWorkUnits": 46716,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 11503.400000095367,
+          "completedWorkUnits": 52549,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 11603.400000095367,
+          "completedWorkUnits": 58605,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 11703.400000095367,
+          "completedWorkUnits": 64638,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 11803.400000095367,
+          "completedWorkUnits": 70716,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        },
+        {
+          "at": 11876.800000190735,
+          "completedWorkUnits": 75182,
+          "totalWorkUnits": 908160,
+          "terminal": true
+        }
+      ],
+      "successAt": 11948,
+      "success": {
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360332,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.004999353385387752,
+          "pathLength": 440505.3168286352,
+          "polylineCount": 17,
+          "penLiftCount": 16
+        },
+        "computeTimeMs": 1334.3000001907349,
+        "primitiveCount": 17
+      },
+      "failureAt": null,
+      "failure": null,
+      "terminatedAt": 11949.700000286102
+    },
+    {
+      "workerId": 6,
+      "createdAt": 12778,
+      "requestAt": 12778,
+      "request": {
+        "type": "compute",
+        "jobId": 6,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360331,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      },
+      "progress": [
+        {
+          "at": 12894,
+          "completedWorkUnits": 1,
+          "totalWorkUnits": 908160,
+          "terminal": false
+        }
+      ],
+      "successAt": null,
+      "success": null,
+      "failureAt": null,
+      "failure": null,
+      "terminatedAt": 12927.400000095367
+    },
+    {
+      "workerId": 7,
+      "createdAt": 13044.599999904633,
+      "requestAt": 13044.599999904633,
+      "request": {
+        "type": "compute",
+        "jobId": 7,
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.1
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360331,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        }
+      },
+      "progress": [
+        {
+          "at": 13236.099999904633,
+          "completedWorkUnits": 1,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 13336.099999904633,
+          "completedWorkUnits": 5277,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 13436.099999904633,
+          "completedWorkUnits": 10742,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 13536,
+          "completedWorkUnits": 16338,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 13636,
+          "completedWorkUnits": 21911,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 13736,
+          "completedWorkUnits": 27488,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 13836.099999904633,
+          "completedWorkUnits": 33066,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 13936,
+          "completedWorkUnits": 38684,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 14036,
+          "completedWorkUnits": 44455,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 14136.099999904633,
+          "completedWorkUnits": 50232,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 14236,
+          "completedWorkUnits": 56097,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 14336,
+          "completedWorkUnits": 61724,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 14436.099999904633,
+          "completedWorkUnits": 67574,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 14536.099999904633,
+          "completedWorkUnits": 73383,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 14636,
+          "completedWorkUnits": 79380,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 14736,
+          "completedWorkUnits": 85301,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 14836.099999904633,
+          "completedWorkUnits": 91306,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 14936.099999904633,
+          "completedWorkUnits": 97124,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 15036.099999904633,
+          "completedWorkUnits": 103012,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 15136.200000286102,
+          "completedWorkUnits": 108747,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 15236.099999904633,
+          "completedWorkUnits": 114678,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 15336.099999904633,
+          "completedWorkUnits": 120475,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 15436.099999904633,
+          "completedWorkUnits": 126407,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 15536.200000286102,
+          "completedWorkUnits": 132441,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 15636.099999904633,
+          "completedWorkUnits": 138334,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 15736.099999904633,
+          "completedWorkUnits": 144353,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 15836.099999904633,
+          "completedWorkUnits": 150049,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 15936.099999904633,
+          "completedWorkUnits": 155829,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 16036.099999904633,
+          "completedWorkUnits": 161422,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 16136.099999904633,
+          "completedWorkUnits": 167049,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 16236.099999904633,
+          "completedWorkUnits": 173044,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 16336.099999904633,
+          "completedWorkUnits": 179021,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 16436.099999904633,
+          "completedWorkUnits": 184998,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 16536.099999904633,
+          "completedWorkUnits": 190920,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 16636.099999904633,
+          "completedWorkUnits": 196804,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 16736.099999904633,
+          "completedWorkUnits": 202758,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 16836.099999904633,
+          "completedWorkUnits": 208429,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 16936.099999904633,
+          "completedWorkUnits": 214296,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 17036.099999904633,
+          "completedWorkUnits": 220055,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 17136.099999904633,
+          "completedWorkUnits": 225919,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 17236.099999904633,
+          "completedWorkUnits": 231701,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 17336.099999904633,
+          "completedWorkUnits": 237290,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 17436.099999904633,
+          "completedWorkUnits": 242970,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 17536.099999904633,
+          "completedWorkUnits": 248841,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 17636.099999904633,
+          "completedWorkUnits": 254775,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 17736.200000286102,
+          "completedWorkUnits": 260476,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 17836.099999904633,
+          "completedWorkUnits": 266329,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 17936.099999904633,
+          "completedWorkUnits": 272207,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 18036.099999904633,
+          "completedWorkUnits": 278136,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 18136.099999904633,
+          "completedWorkUnits": 284032,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 18236.099999904633,
+          "completedWorkUnits": 289705,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 18336.099999904633,
+          "completedWorkUnits": 295343,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 18436.099999904633,
+          "completedWorkUnits": 300960,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 18536.099999904633,
+          "completedWorkUnits": 306937,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 18636.099999904633,
+          "completedWorkUnits": 312733,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 18736.200000286102,
+          "completedWorkUnits": 318564,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 18836.200000286102,
+          "completedWorkUnits": 324326,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 18936.200000286102,
+          "completedWorkUnits": 330063,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 19036.200000286102,
+          "completedWorkUnits": 336022,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 19136.099999904633,
+          "completedWorkUnits": 341839,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 19236.099999904633,
+          "completedWorkUnits": 347747,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 19336.200000286102,
+          "completedWorkUnits": 353597,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 19436.200000286102,
+          "completedWorkUnits": 359448,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 19536.099999904633,
+          "completedWorkUnits": 365317,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 19636.099999904633,
+          "completedWorkUnits": 371346,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 19736.099999904633,
+          "completedWorkUnits": 377204,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 19836.099999904633,
+          "completedWorkUnits": 383069,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 19936.099999904633,
+          "completedWorkUnits": 389035,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 20036.099999904633,
+          "completedWorkUnits": 394852,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 20136.099999904633,
+          "completedWorkUnits": 400590,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 20236.099999904633,
+          "completedWorkUnits": 406607,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 20336.200000286102,
+          "completedWorkUnits": 412280,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 20436.099999904633,
+          "completedWorkUnits": 418260,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 20536.099999904633,
+          "completedWorkUnits": 424421,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 20636.200000286102,
+          "completedWorkUnits": 430395,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 20736.099999904633,
+          "completedWorkUnits": 436536,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 20836.099999904633,
+          "completedWorkUnits": 442569,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 20936.099999904633,
+          "completedWorkUnits": 448529,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 21036.099999904633,
+          "completedWorkUnits": 454419,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 21136.099999904633,
+          "completedWorkUnits": 460102,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 21236.099999904633,
+          "completedWorkUnits": 465684,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 21336.099999904633,
+          "completedWorkUnits": 471517,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 21436.099999904633,
+          "completedWorkUnits": 477451,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 21536.099999904633,
+          "completedWorkUnits": 483341,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 21636.200000286102,
+          "completedWorkUnits": 489196,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 21736.099999904633,
+          "completedWorkUnits": 495046,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 21836.099999904633,
+          "completedWorkUnits": 500911,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 21936.099999904633,
+          "completedWorkUnits": 506729,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 22036.099999904633,
+          "completedWorkUnits": 512453,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 22136.200000286102,
+          "completedWorkUnits": 518084,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 22236.200000286102,
+          "completedWorkUnits": 523436,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 22336.200000286102,
+          "completedWorkUnits": 529155,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 22436.200000286102,
+          "completedWorkUnits": 534901,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 22536.200000286102,
+          "completedWorkUnits": 540550,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 22636.200000286102,
+          "completedWorkUnits": 546344,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 22736.099999904633,
+          "completedWorkUnits": 552151,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 22836.099999904633,
+          "completedWorkUnits": 557873,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 22936.200000286102,
+          "completedWorkUnits": 563773,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 23036.099999904633,
+          "completedWorkUnits": 569434,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 23136.099999904633,
+          "completedWorkUnits": 575143,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 23236.099999904633,
+          "completedWorkUnits": 580720,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 23336.099999904633,
+          "completedWorkUnits": 585799,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 23436.099999904633,
+          "completedWorkUnits": 591499,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 23536.099999904633,
+          "completedWorkUnits": 597085,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 23636.099999904633,
+          "completedWorkUnits": 602272,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 23736.099999904633,
+          "completedWorkUnits": 607866,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 23836.200000286102,
+          "completedWorkUnits": 613263,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 23936.099999904633,
+          "completedWorkUnits": 619037,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 24036.099999904633,
+          "completedWorkUnits": 624671,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 24136.099999904633,
+          "completedWorkUnits": 630062,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 24236.200000286102,
+          "completedWorkUnits": 635639,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 24336.099999904633,
+          "completedWorkUnits": 641504,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 24436.200000286102,
+          "completedWorkUnits": 647280,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 24536.200000286102,
+          "completedWorkUnits": 652410,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 24636.200000286102,
+          "completedWorkUnits": 658276,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 24736.200000286102,
+          "completedWorkUnits": 663905,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 24836.099999904633,
+          "completedWorkUnits": 669613,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 24936.099999904633,
+          "completedWorkUnits": 675260,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 25036.099999904633,
+          "completedWorkUnits": 680866,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 25136.200000286102,
+          "completedWorkUnits": 686562,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 25236.099999904633,
+          "completedWorkUnits": 692337,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 25336.099999904633,
+          "completedWorkUnits": 697965,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 25436.099999904633,
+          "completedWorkUnits": 703597,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 25536.200000286102,
+          "completedWorkUnits": 709134,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 25636.099999904633,
+          "completedWorkUnits": 714668,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 25736.099999904633,
+          "completedWorkUnits": 720269,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 25836.099999904633,
+          "completedWorkUnits": 725905,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 25936.099999904633,
+          "completedWorkUnits": 731640,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 26036.200000286102,
+          "completedWorkUnits": 736859,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 26136.099999904633,
+          "completedWorkUnits": 742830,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 26236.099999904633,
+          "completedWorkUnits": 748922,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 26336.099999904633,
+          "completedWorkUnits": 754813,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 26436.099999904633,
+          "completedWorkUnits": 760616,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 26536.099999904633,
+          "completedWorkUnits": 766291,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 26636.099999904633,
+          "completedWorkUnits": 772201,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 26736.099999904633,
+          "completedWorkUnits": 777957,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 26836.099999904633,
+          "completedWorkUnits": 783673,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 26936.099999904633,
+          "completedWorkUnits": 789254,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 27036.099999904633,
+          "completedWorkUnits": 794899,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 27136.099999904633,
+          "completedWorkUnits": 800741,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 27236.200000286102,
+          "completedWorkUnits": 806611,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 27336.099999904633,
+          "completedWorkUnits": 812541,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 27436.099999904633,
+          "completedWorkUnits": 818457,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 27536.099999904633,
+          "completedWorkUnits": 824256,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 27636.099999904633,
+          "completedWorkUnits": 830052,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 27736.099999904633,
+          "completedWorkUnits": 835760,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 27836.099999904633,
+          "completedWorkUnits": 841308,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 27936.099999904633,
+          "completedWorkUnits": 846907,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 28036.099999904633,
+          "completedWorkUnits": 852778,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 28136.099999904633,
+          "completedWorkUnits": 858186,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 28236.099999904633,
+          "completedWorkUnits": 863872,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 28336.099999904633,
+          "completedWorkUnits": 869782,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 28436.099999904633,
+          "completedWorkUnits": 875857,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 28536.099999904633,
+          "completedWorkUnits": 881506,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 28636.099999904633,
+          "completedWorkUnits": 887131,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 28736.099999904633,
+          "completedWorkUnits": 892993,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 28836.099999904633,
+          "completedWorkUnits": 898737,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 28936.200000286102,
+          "completedWorkUnits": 904779,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 29036.099999904633,
+          "completedWorkUnits": 910513,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 29136.200000286102,
+          "completedWorkUnits": 916391,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 29236.200000286102,
+          "completedWorkUnits": 921985,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 29336.099999904633,
+          "completedWorkUnits": 927781,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 29436.099999904633,
+          "completedWorkUnits": 933604,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 29536.200000286102,
+          "completedWorkUnits": 939361,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 29636.099999904633,
+          "completedWorkUnits": 945146,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 29736.099999904633,
+          "completedWorkUnits": 950869,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 29836.099999904633,
+          "completedWorkUnits": 956556,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 29936.200000286102,
+          "completedWorkUnits": 962530,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 30036.099999904633,
+          "completedWorkUnits": 968354,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 30136.099999904633,
+          "completedWorkUnits": 974182,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 30236.099999904633,
+          "completedWorkUnits": 980093,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 30336.099999904633,
+          "completedWorkUnits": 985885,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 30436.099999904633,
+          "completedWorkUnits": 991694,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 30536.099999904633,
+          "completedWorkUnits": 997443,
+          "totalWorkUnits": 1032000,
+          "terminal": false
+        },
+        {
+          "at": 30580.700000286102,
+          "completedWorkUnits": 1000005,
+          "totalWorkUnits": 1032000,
+          "terminal": true
+        }
+      ],
+      "successAt": 31721.400000095367,
+      "success": {
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.1
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360331,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        },
+        "diagnostics": {
+          "termination": "budget-exhausted",
+          "residualError": 0.062259759099295466,
+          "pathLength": 1175618.3878658891,
+          "polylineCount": 6,
+          "penLiftCount": 5
+        },
+        "computeTimeMs": 18039.400000095367,
+        "primitiveCount": 6
+      },
+      "failureAt": null,
+      "failure": null,
+      "terminatedAt": 31739.200000286102
+    }
+  ]
+}
