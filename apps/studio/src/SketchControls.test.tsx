@@ -27,6 +27,7 @@ import {
   toneCalibration,
   type ParamSchema,
   type CoordinateSpace,
+  type PageFrame,
   type PlotProfile,
   type Preset,
   type Scene,
@@ -406,6 +407,7 @@ let lastOnOutlineComputed: (() => void) | null = null;
 let autoFireOutlineComputed = true;
 let lastCompositionFrame: CoordinateSpace | null = null;
 let lastProfile: PlotProfile | null = null;
+let lastPageFrameDraft: PageFrame | null = null;
 let lastToneSource: ToneSource | null = null;
 let autoAcknowledgeDisplayedScene = true;
 let acknowledgeDisplayedScene: (() => void) | null = null;
@@ -424,6 +426,7 @@ vi.mock("./LiveCanvas", () => ({
     tolerance,
     compositionFrame,
     profile,
+    pageFrameDraft,
     handleRef,
     inputRevision = 0,
     fillCaptureRequest,
@@ -446,6 +449,7 @@ vi.mock("./LiveCanvas", () => ({
     tolerance?: number;
     compositionFrame: CoordinateSpace;
     profile: PlotProfile;
+    pageFrameDraft?: PageFrame | null;
     handleRef?: Ref<LiveCanvasHandle>;
     inputRevision?: number;
     fillCaptureRequest?: {
@@ -515,6 +519,7 @@ vi.mock("./LiveCanvas", () => ({
     };
     lastCompositionFrame = compositionFrame;
     lastProfile = profile;
+    lastPageFrameDraft = pageFrameDraft ?? null;
     lastToneSource = renderState?.source ?? null;
     // Model the outline pass finishing: fire the "computed" signal after each
     // outline render so the owner's busy label clears (unless a test opts out to
@@ -755,6 +760,7 @@ beforeEach(() => {
   lastOnOutlineComputed = null;
   lastCompositionFrame = null;
   lastProfile = null;
+  lastPageFrameDraft = null;
   lastToneSource = null;
   autoAcknowledgeDisplayedScene = true;
   acknowledgeDisplayedScene = null;
@@ -1650,6 +1656,113 @@ describe("SketchControls — central edit-history integration", () => {
         "data-render-state",
       ),
     ).toBe("outline");
+  });
+});
+
+describe("SketchControls — Page Frame edit mode", () => {
+  function frameInput(el: HTMLElement, name: string): HTMLInputElement {
+    const found = el.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+    if (found === null) throw new Error(`no Page Frame ${name} input`);
+    return found;
+  }
+
+  it("applies, cancels, resets, and traverses framing as atomic history", () => {
+    const el = mount(<SketchControls sketch={sketchWith("frame", {})} />);
+    const originalProfile = structuredClone(lastProfile);
+    const originalComposition = structuredClone(lastCompositionFrame);
+
+    clickButton(el, "Crop");
+    expect(el.querySelector("h2")?.textContent).toBe("Edit Page Frame");
+    expect(frameInput(el, "x").value).toBe("0");
+    expect(frameInput(el, "y").value).toBe("0");
+    expect(frameInput(el, "width").value).toBe("100");
+    expect(frameInput(el, "height").value).toBe("100");
+    expect(lastPageFrameDraft).toEqual({
+      x: 0,
+      y: 0,
+      width: originalComposition!.width,
+      height: originalComposition!.height,
+    });
+    expect(
+      [...el.querySelectorAll("button")].map((button) => button.textContent),
+    ).not.toContain("New seed");
+
+    setInput(frameInput(el, "width"), "0");
+    clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+      "greater than 0%",
+    );
+
+    setInput(frameInput(el, "width"), "100");
+    clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.after.present.framing).toEqual({
+      kind: "framed",
+      pageFrame: {
+        x: 0,
+        y: 0,
+        width: originalComposition!.width,
+        height: originalComposition!.height,
+      },
+      generationAspect:
+        originalComposition!.width / originalComposition!.height,
+    });
+    expect(lastProfile).toEqual(originalProfile);
+    expect(lastCompositionFrame).toEqual(originalComposition);
+    expect(lastPageFrameDraft).toBeNull();
+
+    clickButton(el, "Crop");
+    setInput(frameInput(el, "x"), "10");
+    setInput(frameInput(el, "y"), "20");
+    setInput(frameInput(el, "width"), "60");
+    setInput(frameInput(el, "height"), "50");
+    clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(2);
+    const committed = historyCapture.atomic[1]!.after.present;
+    expect(committed.framing).toEqual({
+      kind: "framed",
+      pageFrame: {
+        x: originalComposition!.width * 0.1,
+        y: originalComposition!.height * 0.2,
+        width: originalComposition!.width * 0.6,
+        height: originalComposition!.height * 0.5,
+      },
+      generationAspect:
+        originalComposition!.width / originalComposition!.height,
+    });
+
+    clickButton(el, "Crop");
+    expect(frameInput(el, "x").value).toBe("10");
+    expect(frameInput(el, "width").value).toBe("60");
+    setInput(frameInput(el, "x"), "-25");
+    clickButton(el, "Cancel");
+    expect(historyCapture.atomic).toHaveLength(2);
+    expect(lastPageFrameDraft).toBeNull();
+    clickButton(el, "Crop");
+    expect(frameInput(el, "x").value).toBe("10");
+
+    clickButton(el, "Reset Frame");
+    expect(historyCapture.atomic).toHaveLength(3);
+    expect(historyCapture.atomic[2]!.after.present.framing).toEqual({
+      kind: "unframed",
+    });
+    expect(lastPageFrameDraft).toBeNull();
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    clickButton(el, "Crop");
+    expect(frameInput(el, "x").value).toBe("10");
+    clickButton(el, "Cancel");
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    clickButton(el, "Crop");
+    expect(frameInput(el, "x").value).toBe("0");
+    expect(frameInput(el, "width").value).toBe("100");
   });
 });
 

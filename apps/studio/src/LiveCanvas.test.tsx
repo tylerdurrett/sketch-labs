@@ -708,6 +708,92 @@ describe("LiveCanvas full-sheet preview chrome (#248)", () => {
   });
 });
 
+describe("LiveCanvas Page Frame edit view", () => {
+  const compositionFrame = { width: 200, height: 100 };
+
+  it("contains the whole Composition and an outward draft in one padded extent", () => {
+    const el = mount(
+      <LiveCanvas
+        sketch={spacedSketch(200, 100)}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrameDraft={{ x: -50, y: -10, width: 300, height: 130 }}
+      />,
+    );
+    const view = el.querySelector<HTMLElement>(".page-frame-edit-view")!;
+    const composition = el.querySelector<HTMLElement>(
+      ".page-frame-edit-composition",
+    )!;
+    const boundary = el.querySelector("[data-testid='page-frame-boundary']")!;
+
+    expect(el.querySelector(".plot-sheet")).toBeNull();
+    expect(view.getAttribute("aria-label")).toBe("Page Frame edit preview");
+    expect(view.style.getPropertyValue("--page-frame-edit-aspect")).toBe(
+      String(300 / 130),
+    );
+    expect(view.style.getPropertyValue("--page-frame-composition-left")).toBe(
+      `${(50 / 300) * 100}%`,
+    );
+    expect(view.style.getPropertyValue("--page-frame-composition-top")).toBe(
+      `${(10 / 130) * 100}%`,
+    );
+    expect(composition.querySelector("canvas")).toBe(canvasEl(el));
+    expect(boundary.getAttribute("x")).toBe("-50");
+    expect(boundary.getAttribute("y")).toBe("-10");
+    expect(boundary.getAttribute("width")).toBe("300");
+    expect(boundary.getAttribute("height")).toBe("130");
+  });
+
+  it("dims only discarded Composition content for crop and mixed drafts", () => {
+    const sketch = spacedSketch(200, 100);
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrameDraft={{ x: 20, y: 10, width: 100, height: 50 }}
+      />,
+    );
+    const cropPath = el
+      .querySelector("[data-testid='page-frame-discarded']")!
+      .getAttribute("d");
+    expect(cropPath).toContain("M 0 0 H 200 V 100 H 0 Z");
+    expect(cropPath).toContain("M 20 10 H 120 V 60 H 20 Z");
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          compositionFrame={compositionFrame}
+          pageFrameDraft={{ x: 40, y: -20, width: 220, height: 80 }}
+        />,
+      );
+    });
+    const mixedPath = el
+      .querySelector("[data-testid='page-frame-discarded']")!
+      .getAttribute("d");
+    expect(mixedPath).toContain("M 40 0 H 200 V 60 H 40 Z");
+  });
+
+  it("preserves the ordinary full-sheet path when no edit draft is present", () => {
+    const el = mount(
+      <LiveCanvas
+        sketch={spacedSketch(200, 100)}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+      />,
+    );
+
+    expect(el.querySelector(".plot-sheet")).not.toBeNull();
+    expect(el.querySelector(".page-frame-edit-view")).toBeNull();
+  });
+});
+
 describe("LiveCanvas transport — one-shot range/clamp via synthetic fixture (AC4)", () => {
   it("a one-shot Sketch's scrubber clamps its range at duration", () => {
     // No real one-shot Sketch exists yet — construct the fixture to exercise the
