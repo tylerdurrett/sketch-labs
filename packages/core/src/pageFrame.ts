@@ -43,10 +43,24 @@ const PAGE_FRAME_FIELDS = ['x', 'y', 'width', 'height'] as const
  * Validate a Page Frame without imposing containment in its Composition Frame.
  *
  * Origins must be finite but may be negative. Width and height must be finite
- * and strictly positive; they may extend beyond the Composition Frame.
+ * and strictly positive; they may extend beyond the Composition Frame. Each
+ * computed far edge must also remain finite and strictly exceed its origin, so
+ * overflow and floating-point precision collapse cannot produce invalid bounds.
  */
 export function validatePageFrame(frame: PageFrame): void {
   validateRectangle(frame, 'validatePageFrame')
+
+  for (const [originField, extentField] of [
+    ['x', 'width'],
+    ['y', 'height'],
+  ] as const) {
+    const farEdge = frame[originField] + frame[extentField]
+    if (!Number.isFinite(farEdge) || farEdge <= frame[originField]) {
+      throw new Error(
+        `validatePageFrame: ${originField} + ${extentField} must produce a finite far edge strictly greater than ${originField}, got ${farEdge}`,
+      )
+    }
+  }
 }
 
 function validateRectangle(
@@ -94,12 +108,22 @@ export function pageFrameToPercentages(
 ): PageFramePercentages {
   validatePageFrame(frame)
   validateCompositionSpace(composition, 'pageFrameToPercentages')
+  const unitsPerPercentX = composition.width / 100
+  const unitsPerPercentY = composition.height / 100
 
   const percentages = {
-    x: (frame.x / composition.width) * 100,
-    y: (frame.y / composition.height) * 100,
-    width: (frame.width / composition.width) * 100,
-    height: (frame.height / composition.height) * 100,
+    x: coordinateToPercentage(frame.x, composition.width, unitsPerPercentX),
+    y: coordinateToPercentage(frame.y, composition.height, unitsPerPercentY),
+    width: coordinateToPercentage(
+      frame.width,
+      composition.width,
+      unitsPerPercentX,
+    ),
+    height: coordinateToPercentage(
+      frame.height,
+      composition.height,
+      unitsPerPercentY,
+    ),
   }
   validateRectangle(percentages, 'pageFrameToPercentages')
   return Object.freeze(percentages)
@@ -115,12 +139,30 @@ export function pageFrameFromPercentages(
 ): PageFrame {
   validateRectangle(percentages, 'pageFrameFromPercentages')
   validateCompositionSpace(composition, 'pageFrameFromPercentages')
+  const unitsPerPercentX = composition.width / 100
+  const unitsPerPercentY = composition.height / 100
 
   const frame = {
-    x: (percentages.x / 100) * composition.width,
-    y: (percentages.y / 100) * composition.height,
-    width: (percentages.width / 100) * composition.width,
-    height: (percentages.height / 100) * composition.height,
+    x: percentageToCoordinate(
+      percentages.x,
+      composition.width,
+      unitsPerPercentX,
+    ),
+    y: percentageToCoordinate(
+      percentages.y,
+      composition.height,
+      unitsPerPercentY,
+    ),
+    width: percentageToCoordinate(
+      percentages.width,
+      composition.width,
+      unitsPerPercentX,
+    ),
+    height: percentageToCoordinate(
+      percentages.height,
+      composition.height,
+      unitsPerPercentY,
+    ),
   }
   validatePageFrame(frame)
   return Object.freeze(frame)
@@ -146,7 +188,37 @@ export function rebasePointToPageFrame(
       `rebasePointToPageFrame: point coordinates must be finite, got ${point[0]},${point[1]}`,
     )
   }
-  return [point[0] - frame.x, point[1] - frame.y]
+  const x = point[0] - frame.x
+  const y = point[1] - frame.y
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    throw new Error(
+      `rebasePointToPageFrame: rebased point coordinates must be finite, got ${x},${y}`,
+    )
+  }
+  return [x, y]
+}
+
+function coordinateToPercentage(
+  coordinate: number,
+  extent: number,
+  unitsPerPercent: number,
+): number {
+  // Reuse the same extent/100 factor in both directions for exact representative
+  // decimal round trips. A subnormal extent can underflow that factor to zero;
+  // only then, fall back to the algebraically equivalent unfactored expression.
+  return unitsPerPercent === 0
+    ? (coordinate / extent) * 100
+    : coordinate / unitsPerPercent
+}
+
+function percentageToCoordinate(
+  percentage: number,
+  extent: number,
+  unitsPerPercent: number,
+): number {
+  return unitsPerPercent === 0
+    ? (percentage * extent) / 100
+    : percentage * unitsPerPercent
 }
 
 function validateCompositionSpace(

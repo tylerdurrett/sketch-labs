@@ -63,6 +63,48 @@ describe('Page Frame', () => {
         /Composition Frame (width|height) must be a finite positive number/,
       )
     })
+
+    it.each([
+      [
+        'overflowing horizontal far edge',
+        { x: Number.MAX_VALUE, y: 0, width: Number.MAX_VALUE, height: 1 },
+      ],
+      [
+        'collapsed horizontal far edge',
+        { x: Number.MAX_VALUE, y: 0, width: 1, height: 1 },
+      ],
+      [
+        'overflowing vertical far edge',
+        { x: 0, y: Number.MAX_VALUE, width: 1, height: Number.MAX_VALUE },
+      ],
+      [
+        'collapsed vertical far edge',
+        { x: 0, y: Number.MAX_VALUE, width: 1, height: 1 },
+      ],
+    ] satisfies Array<[string, PageFrame]>)(
+      'rejects a frame with an %s',
+      (_name, frame) => {
+        expect(() => validatePageFrame(frame)).toThrow(
+          /must produce a finite far edge strictly greater/,
+        )
+        expect(() => pageFrameClipBounds(frame)).toThrow(
+          /must produce a finite far edge strictly greater/,
+        )
+      },
+    )
+
+    it('rejects a rebase whose finite operands produce a nonfinite point', () => {
+      const frame = {
+        x: -Number.MAX_VALUE,
+        y: 0,
+        width: Number.MAX_VALUE,
+        height: 1,
+      }
+
+      expect(() =>
+        rebasePointToPageFrame([Number.MAX_VALUE, 0], frame),
+      ).toThrow(/rebased point coordinates must be finite/)
+    })
   })
 
   describe('percentage conversion', () => {
@@ -95,6 +137,42 @@ describe('Page Frame', () => {
         expect(pageFrameToPercentages(frame, composition)).toEqual(percentages)
       },
     )
+
+    it('uses one per-axis factor for exact representative decimal conversions', () => {
+      const decimalComposition = { width: 3, height: 3 }
+      const percentages = { x: 10, y: 10, width: 100, height: 100 }
+
+      const frame = pageFrameFromPercentages(
+        percentages,
+        decimalComposition,
+      )
+      expect(frame).toEqual({ x: 0.3, y: 0.3, width: 3, height: 3 })
+      expect(pageFrameToPercentages(frame, decimalComposition)).toEqual(
+        percentages,
+      )
+    })
+
+    it('falls back safely when units-per-percent underflows', () => {
+      const subnormalComposition = {
+        width: Number.MIN_VALUE,
+        height: Number.MIN_VALUE,
+      }
+      const percentages = { x: 0, y: 0, width: 100, height: 100 }
+
+      const frame = pageFrameFromPercentages(
+        percentages,
+        subnormalComposition,
+      )
+      expect(frame).toEqual({
+        x: 0,
+        y: 0,
+        width: Number.MIN_VALUE,
+        height: Number.MIN_VALUE,
+      })
+      expect(pageFrameToPercentages(frame, subnormalComposition)).toEqual(
+        percentages,
+      )
+    })
   })
 
   it('returns immutable records and never mutates its inputs', () => {
