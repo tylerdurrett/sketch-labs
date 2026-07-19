@@ -831,7 +831,7 @@ export function SketchControls({
       ...outlineIdentitySourceFor(
         sketch,
         edit,
-        capture.scene,
+        capture.sourceScene,
       ),
     });
     const next = dispatchOutline({
@@ -839,7 +839,7 @@ export function SketchControls({
       token: capture.token,
       inputRevision: capture.inputRevision,
       identity,
-      scene: capture.scene,
+      scene: capture.sourceScene,
       t: capture.t,
       sourceInputRevision: capture.sourceInputRevision,
       ...(capture.contentRevision === undefined
@@ -1173,11 +1173,11 @@ export function SketchControls({
     const sourceScene =
       scribbleExport?.result.scene ??
       (displayed.renderMode !== "outline"
-        ? displayed.scene
+        ? displayed.sourceScene
         : cachedSourceScene ??
           (sketch.deriveOutlineSource === undefined &&
           sketch.generateOutlineSource !== undefined
-            ? displayed.scene
+            ? displayed.sourceScene
             : undefined));
     if (sourceScene === undefined) return;
     const identity = createOutlineComputeIdentity({
@@ -1379,6 +1379,11 @@ export function SketchControls({
             renderState={renderState}
             tolerance={tolerance}
             pageFrameDraft={pageFrameDraft}
+            pageFrame={
+              history.present.framing.kind === "framed"
+                ? history.present.framing.pageFrame
+                : null
+            }
           />
         </div>
       </section>

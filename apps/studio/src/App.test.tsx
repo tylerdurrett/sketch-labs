@@ -87,14 +87,19 @@ vi.mock("./LiveCanvas", () => ({
       getCanvas: () => null,
       getCurrentT: () => 0,
       getDisplayedScene: () => null,
-      captureDisplayedFrame: () => ({
-        scene: { space: { width: 100, height: 100 }, primitives: [] },
-        t: 0,
-        renderMode: "fill" as const,
-        tolerance: 0,
-        includeFrame: true,
-        inputRevision: 0,
-      }),
+      captureDisplayedFrame: () => {
+        const scene = { space: { width: 100, height: 100 }, primitives: [] };
+        return {
+          scene,
+          sourceScene: scene,
+          displayedScene: scene,
+          t: 0,
+          renderMode: "fill" as const,
+          tolerance: 0,
+          includeFrame: true,
+          inputRevision: 0,
+        };
+      },
     }));
     return (
       <div
