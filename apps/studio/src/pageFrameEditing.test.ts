@@ -654,6 +654,75 @@ describe("draft-aware Page Frame history commands", () => {
     expect(reset.present.framing).toEqual({ kind: "unframed" });
   });
 
+  it("treats realistic A4 round-trip noise as full Composition without adding history", () => {
+    const a4Profile: PlotProfile = {
+      ...PROFILE,
+      width: 210,
+      height: 297,
+    };
+    const initial = state(a4Profile);
+    const history = createEditHistory(initial);
+    const fixed = fixedDraft(initial);
+    const draft = setFixedPageCompositionScale(fixed, 2.5);
+    const fullComposition = fullCompositionPageFrame(draft.compositionFrame);
+
+    // Re-resolving the drawable aspect introduces only machine-scale padding.
+    expect(fixed.fitFrame).not.toEqual(fullComposition);
+    expect(Math.abs(fixed.fitFrame.x - fullComposition.x)).toBeLessThan(1e-10);
+
+    const reset = resetPageFrameEditDraft(history, draft);
+
+    expect(reset).toBe(history);
+    expect(reset.past).toEqual([]);
+    expect(reset.present).toBe(initial);
+  });
+
+  it("collapses padding only inside the Page Frame EPSILON tolerance", () => {
+    const framedSquare = (relativeWidthDelta: number): StudioEditState => {
+      const profile: PlotProfile = {
+        ...PROFILE,
+        width: 1_000 * (1 + relativeWidthDelta),
+        height: 1_000,
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+      };
+      return {
+        ...state(profile),
+        framing: {
+          kind: "framed",
+          pageFrame: {
+            x: 0,
+            y: 0,
+            width: profile.width,
+            height: profile.height,
+          },
+          generationAspect: 1,
+          aspectLocked: true,
+        },
+      };
+    };
+    const inside = framedSquare(Number.EPSILON * 4);
+    const outside = framedSquare(Number.EPSILON * 32);
+    const insideDraft = fixedDraft(inside);
+    const outsideDraft = fixedDraft(outside);
+
+    const insideReset = resetPageFrameEditDraft(
+      createEditHistory(inside),
+      insideDraft,
+    );
+    const outsideReset = resetPageFrameEditDraft(
+      createEditHistory(outside),
+      outsideDraft,
+    );
+
+    expect(insideReset.present.framing).toEqual({ kind: "unframed" });
+    expect(outsideReset.present.framing).toEqual({
+      kind: "framed",
+      pageFrame: outsideDraft.fitFrame,
+      generationAspect: 1,
+      aspectLocked: true,
+    });
+  });
+
   it("rejects forged ordinary and fixed drafts before touching history", () => {
     const initial = state();
     const history = createEditHistory(initial);

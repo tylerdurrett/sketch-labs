@@ -26,7 +26,7 @@ import {
 } from "./pageFrameEditDraft";
 
 const UNFRAMED: StudioFramingState = Object.freeze({ kind: "unframed" });
-const PHYSICAL_SCALE_RELATIVE_TOLERANCE = Number.EPSILON * 8;
+const RELATIVE_TOLERANCE = Number.EPSILON * 8;
 
 /** Resolve the aspect that generation must continue to use for this state. */
 export function studioGenerationAspect(state: StudioEditState): number {
@@ -84,7 +84,7 @@ export function sameStudioPhysicalScale(
   if (leftScale === rightScale) return true;
   return (
     Math.abs(leftScale - rightScale) <=
-    PHYSICAL_SCALE_RELATIVE_TOLERANCE *
+    RELATIVE_TOLERANCE *
       Math.max(Math.abs(leftScale), Math.abs(rightScale))
   );
 }
@@ -196,7 +196,7 @@ export function resetPageFrameEditDraft(
     });
   }
 
-  const framing = samePageFrame(draft.fitFrame, fullComposition)
+  const framing = equivalentPageFrame(draft.fitFrame, fullComposition)
     ? UNFRAMED
     : framedPageFrame(draft.fitFrame, draft.generationAspect);
   return commitEditState(history, {
@@ -254,11 +254,26 @@ function framedPageFrame(
   });
 }
 
-function samePageFrame(left: PageFrame, right: PageFrame): boolean {
+/** Compare valid frames while absorbing only scale-relative machine noise. */
+function equivalentPageFrame(left: PageFrame, right: PageFrame): boolean {
   return (
-    left.x === right.x &&
-    left.y === right.y &&
-    left.width === right.width &&
-    left.height === right.height
+    equivalentFrameValue(left.x, right.x, left.width, right.width) &&
+    equivalentFrameValue(left.y, right.y, left.height, right.height) &&
+    equivalentFrameValue(left.width, right.width, left.width, right.width) &&
+    equivalentFrameValue(left.height, right.height, left.height, right.height)
+  );
+}
+
+function equivalentFrameValue(
+  left: number,
+  right: number,
+  leftExtent: number,
+  rightExtent: number,
+): boolean {
+  if (left === right) return true;
+  return (
+    Math.abs(left - right) <=
+    RELATIVE_TOLERANCE *
+      Math.max(Math.abs(left), Math.abs(right), leftExtent, rightExtent)
   );
 }
