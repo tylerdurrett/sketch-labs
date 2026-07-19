@@ -26,6 +26,7 @@ import {
   canonicalBrowserDiagnosticsHash,
   canonicalBrowserSceneHash,
   canonicalBrowserScribbleTargetHash,
+  canonicalScribbleIdentityHash,
 } from "./photoScribbleEvidenceHash";
 import {
   parsePhotoScribbleEvidenceWorkerConfig,
@@ -597,13 +598,26 @@ describe("Photo Scribble evidence page seams", () => {
       "./photoScribbleEvidence"
     );
 
-    await runPhotoScribbleEvidence(
+    const run = await runPhotoScribbleEvidence(
       "flowers-opaque-control",
       { kind: "production" },
       { includePresentationEvidence: false },
     );
 
     const request = FakeEvidenceWorker.instances[0]!.requests[0]!;
+    expect(
+      request.identity.params.map(({ key }: { key: string }) => key),
+    ).toEqual([
+      "imageAsset",
+      "toneContrast",
+      "toneGamma",
+      "pathDensity",
+      "scribbleScale",
+      "momentum",
+      "chaos",
+      "toneFidelity",
+      "stopPoint",
+    ]);
     const workerParams = Object.fromEntries(
       request.identity.params.map(
         ({ key, value }: { key: string; value: string | number }) => [
@@ -613,6 +627,23 @@ describe("Photo Scribble evidence page seams", () => {
       ),
     );
     expect(workerParams.stopPoint).toBe(100);
+    expect(run.identityHash).toBe(
+      await canonicalScribbleIdentityHash(request.identity),
+    );
+
+    const schema = createPhotoScribbleSchema(String(workerParams.imageAsset));
+    const { stopPoint: _stopPointSpec, ...legacySchema } = schema;
+    const { stopPoint: _stopPoint, ...legacyParams } = workerParams;
+    const legacyIdentity = createScribbleComputeIdentity({
+      sketchId: "photo-scribble",
+      schema: legacySchema,
+      params: legacyParams,
+      seed: request.identity.seed,
+      compositionFrame: request.identity.compositionFrame,
+    });
+    expect(await canonicalScribbleIdentityHash(legacyIdentity)).not.toBe(
+      run.identityHash,
+    );
   });
 
   it("keeps the two equivalence solves in a distinct unmeasured result", async () => {

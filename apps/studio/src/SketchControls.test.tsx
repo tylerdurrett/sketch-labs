@@ -1999,6 +1999,61 @@ describe("SketchControls — preset save/reload wiring", () => {
     expect(lastProfile).toEqual(loadedProfile);
   });
 
+  it("defaults and re-saves a pre-stop-point Scribble Preset through the live schema", async () => {
+    const { stopPoint: _stopPoint, ...legacyParams } = defaultParams(
+      toneCalibration.schema,
+    );
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: toneCalibration.id,
+      name: "legacy-neat",
+      seed: 999,
+      params: legacyParams,
+      locks: ["stopPoint"],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    listPresets.mockResolvedValue(["legacy-neat"]);
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "legacy-neat");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(paramInput(el, "stopPoint").value).toBe("100");
+    expect(
+      el
+        .querySelector('button[aria-label="stopPoint lock"]')
+        ?.getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(scribbleJob.starts.at(-1)?.identity).toMatchObject({
+      seed: 999,
+      params: expect.arrayContaining([{ key: "stopPoint", value: 100 }]),
+    });
+
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      "current-neat",
+    );
+    clickButton(el, "Save");
+    await flush();
+    expect(savePreset.mock.calls[0]![0]).toMatchObject({
+      seed: 999,
+      params: { ...legacyParams, stopPoint: 100 },
+      locks: ["stopPoint"],
+    });
+  });
+
   it("reloads and re-saves the exact non-default Image Asset ID", async () => {
     const defaultAsset = "portrait-default-000000000001";
     const persistedAsset = "portrait-persisted-bbbbbbbbbbbb";
@@ -4359,7 +4414,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     return match;
   }
 
-  it("shows exactly the five Scribble controls while keeping the source fixed", () => {
+  it("shows exactly the six Scribble controls while keeping the source fixed", () => {
     const el = mount(<SketchControls sketch={toneCalibration} />);
 
     expect(
@@ -4372,6 +4427,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       "control-momentum",
       "control-chaos",
       "control-toneFidelity",
+      "control-stopPoint",
     ]);
     expect(paramInput(el, "pathDensity").value).toBe("1");
     expect(paramInput(el, "pathDensity").max).toBe("20");
@@ -4380,6 +4436,17 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(paramInput(el, "momentum").value).toBe("0.75");
     expect(paramInput(el, "chaos").value).toBe("0.25");
     expect(paramInput(el, "toneFidelity").value).toBe("0.9");
+    const stopPoint = paramInput(el, "stopPoint");
+    expect(stopPoint.value).toBe("100");
+    expect(stopPoint.min).toBe("0");
+    expect(stopPoint.max).toBe("100");
+    const stopPointSlider = el.querySelector<HTMLInputElement>(
+      'input[type="range"][aria-label="stopPoint slider"]',
+    )!;
+    expect(stopPointSlider.min).toBe("0");
+    expect(stopPointSlider.max).toBe("100");
+    expect(stopPointSlider.step).toBe("1");
+    expect(stopPointSlider.value).toBe("100");
     expect(
       [...el.querySelectorAll('[role="group"][aria-label="Render mode"] button')].map(
         (candidate) => candidate.textContent,
@@ -4401,6 +4468,53 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(points.map((point) => lastToneSource!.toneField.sample(point))).toEqual(
       points.map((point) => expected.toneField.sample(point)),
     );
+  });
+
+  it("threads stop point through edit settlement, Undo/Redo, Randomize, and locks", () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    const stopPoint = paramInput(el, "stopPoint");
+
+    expect(scribbleJob.starts[0]!.identity.params.at(-1)).toEqual({
+      key: "stopPoint",
+      value: 100,
+    });
+    act(() => stopPoint.focus());
+    setInput(stopPoint, "25");
+    expect(scribbleJob.cancelCount).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    act(() => stopPoint.blur());
+    expect(scribbleJob.starts[1]!.identity.params.at(-1)).toEqual({
+      key: "stopPoint",
+      value: 25,
+    });
+    expect(historyCapture.transactionCommits).toHaveLength(1);
+
+    expect(pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented).toBe(
+      true,
+    );
+    expect(paramInput(el, "stopPoint").value).toBe("100");
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(paramInput(el, "stopPoint").value).toBe("25");
+
+    act(() =>
+      el
+        .querySelector<HTMLButtonElement>('button[aria-label="stopPoint lock"]')!
+        .click(),
+    );
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    clickButton(el, "Randomize");
+    expect(paramInput(el, "stopPoint").value).toBe("25");
+
+    act(() =>
+      el
+        .querySelector<HTMLButtonElement>('button[aria-label="stopPoint lock"]')!
+        .click(),
+    );
+    clickButton(el, "Randomize");
+    expect(paramInput(el, "stopPoint").value).toBe("0");
   });
 
   it("keeps Tone pixels inert and exports only nonempty vector Fill artwork", async () => {
@@ -6071,19 +6185,19 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(canvas.dataset.sourceInputRevision).toBe("0");
     expect(canvas.dataset.contentRevision).toBe("1");
 
-    const density = paramInput(el, "pathDensity");
-    act(() => density.focus());
-    setInput(density, "2");
-    setInput(density, "3");
+    const stopPoint = paramInput(el, "stopPoint");
+    act(() => stopPoint.focus());
+    setInput(stopPoint, "50");
+    setInput(stopPoint, "25");
     expect(canvas.dataset.sourceInputRevision).toBe("0");
     expect(canvas.dataset.contentRevision).toBe("1");
     expect(scribbleJob.starts).toHaveLength(1);
 
-    act(() => density.blur());
+    act(() => stopPoint.blur());
     expect(scribbleJob.starts).toHaveLength(2);
     expect(scribbleJob.starts[1]!.identity.params).toContainEqual({
-      key: "pathDensity",
-      value: 3,
+      key: "stopPoint",
+      value: 25,
     });
     expect(generate).not.toHaveBeenCalled();
 
@@ -6160,6 +6274,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       "control-momentum",
       "control-chaos",
       "control-toneFidelity",
+      "control-stopPoint",
     ]);
     expect(historyCapture.atomic).toHaveLength(0);
     expect(historyCapture.transactionCommits).toHaveLength(0);

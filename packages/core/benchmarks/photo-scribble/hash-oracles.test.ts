@@ -14,7 +14,10 @@ import {
   generatePhotoScribbleArtwork,
 } from '../../src/sketches/photo-scribble'
 import type { ScribbleControls } from '../../src/scribbleStrategy'
-import { reconcileLegacyPhotoScribbleParams } from './benchmark-artwork'
+import {
+  reconcileLegacyPhotoScribbleParams,
+  resolvePhotoScribbleBenchmark,
+} from './benchmark-artwork'
 import {
   CANONICAL_HASHED_KEYS,
   canonicalArtworkHashes,
@@ -279,6 +282,56 @@ function mutateCompleteScene(mutate: (scene: Scene) => void): Scene {
 }
 
 describe('Photo Scribble canonical hash oracles', () => {
+  it('reconciles a legacy stop point before target and artwork hashing', () => {
+    const { stopPoint: _stopPoint, ...legacyParams } = SYNTHETIC_PARAMS
+    const environment: SketchEnvironment = {
+      imageAssets: (id) =>
+        id === SYNTHETIC_ASSET_ID ? SYNTHETIC_PIXELS : undefined,
+    }
+    const legacy = resolvePhotoScribbleBenchmark(
+      legacyParams,
+      SYNTHETIC_FRAME,
+      environment,
+    )
+    const current = resolvePhotoScribbleBenchmark(
+      SYNTHETIC_PARAMS,
+      SYNTHETIC_FRAME,
+      environment,
+    )
+
+    expect(legacy.controls).toEqual(current.controls)
+    expect(legacy.productionLimits).toEqual(current.productionLimits)
+    expect(legacy.model.samples()).toEqual(current.model.samples())
+    expect(
+      canonicalScribbleTargetHash(
+        legacy.source,
+        SYNTHETIC_FRAME,
+        legacy.controls,
+      ),
+    ).toBe(
+      canonicalScribbleTargetHash(
+        current.source,
+        SYNTHETIC_FRAME,
+        current.controls,
+      ),
+    )
+
+    const schema = createPhotoScribbleSchema(SYNTHETIC_ASSET_ID)
+    const legacyArtwork = generatePhotoScribbleArtwork(
+      legacyParams,
+      SYNTHETIC_PRIMARY_SEED,
+      SYNTHETIC_FRAME,
+      schema,
+      undefined,
+      environment,
+    )
+    const currentArtwork = syntheticArtwork(SYNTHETIC_PRIMARY_SEED)
+    expect(canonicalArtworkHashes(legacyArtwork)).toEqual(
+      canonicalArtworkHashes(currentArtwork),
+    )
+    expect(legacyArtwork).toEqual(currentArtwork)
+  })
+
   it('pins the pre-change centered-control target for both fixed control scenarios', () => {
     expect(
       protocol.scenarios.every(

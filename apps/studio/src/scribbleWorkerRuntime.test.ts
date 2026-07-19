@@ -361,6 +361,36 @@ describe("Scribble worker runtime", () => {
     },
   );
 
+  it("executes an authored zero stop point as current stopped-early artwork", async () => {
+    const params = {
+      ...defaultParams(toneCalibration.schema),
+      stopPoint: 0,
+    };
+    const input = request({ params });
+    const response = await handleScribbleWorkerMessage(
+      input,
+      undefined,
+      undefined,
+      () => 10,
+    );
+
+    expect(input.identity.params.at(-1)).toEqual({
+      key: "stopPoint",
+      value: 0,
+    });
+    expect(response).toMatchObject({
+      type: "success",
+      identity: input.identity,
+      scene: { primitives: [] },
+      diagnostics: {
+        termination: "stopped-early",
+        pathLength: 0,
+        polylineCount: 0,
+        penLiftCount: 0,
+      },
+    });
+  });
+
   it(
     "validates first, resolves opaque IDs per job, and enters compute with only worker-owned pixels",
     async () => {

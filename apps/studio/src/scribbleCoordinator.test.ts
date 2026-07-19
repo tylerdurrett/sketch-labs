@@ -14,6 +14,7 @@ import {
 
 const schema: ParamSchema = {
   amount: { kind: "number", min: 0, max: 10, default: 1 },
+  stopPoint: { kind: "number", min: 0, max: 100, default: 100 },
 };
 
 const imageAssetSchema: ParamSchema = {
@@ -44,11 +45,11 @@ const diagnostics: ScribbleDiagnostics = {
   penLiftCount: 0,
 };
 
-function identity(amount = 1): ScribbleComputeIdentity {
+function identity(amount = 1, stopPoint = 100): ScribbleComputeIdentity {
   return createScribbleComputeIdentity({
     sketchId: "test-scribble",
     schema,
-    params: { amount },
+    params: { amount, stopPoint },
     seed: 123,
     compositionFrame: scene.space,
   });
@@ -159,6 +160,30 @@ describe("ScribbleCoordinator", () => {
     });
     expect(worker.terminate).toHaveBeenCalledOnce();
     expect(coordinator.busy).toBe(false);
+  });
+
+  it("returns an intentional stopped-early success for the authored identity", async () => {
+    const worker = new FakeWorker();
+    const coordinator = new ScribbleCoordinator(() => worker);
+    const result = coordinator.start(identity(1, 25));
+    const response = successResponse(worker);
+
+    worker.emit("message", {
+      ...response,
+      diagnostics: {
+        ...response.diagnostics,
+        termination: "stopped-early",
+        residualError: 0.2,
+      },
+    });
+
+    await expect(result).resolves.toMatchObject({
+      status: "success",
+      identity: {
+        params: expect.arrayContaining([{ key: "stopPoint", value: 25 }]),
+      },
+      diagnostics: { termination: "stopped-early" },
+    });
   });
 
   it("applies Scribble's monotonic filter and accepts only a newly terminal equal count", async () => {

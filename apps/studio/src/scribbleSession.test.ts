@@ -16,6 +16,7 @@ import {
 
 const schema: ParamSchema = {
   amount: { kind: "number", min: 0, max: 10, default: 1 },
+  stopPoint: { kind: "number", min: 0, max: 100, default: 100 },
 };
 const sceneA: Scene = {
   space: { width: 20, height: 20 },
@@ -32,11 +33,11 @@ const completedDiagnostics: ScribbleDiagnostics = {
   polylineCount: 3,
   penLiftCount: 2,
 };
-function identity(amount: number): ScribbleComputeIdentity {
+function identity(amount: number, stopPoint = 100): ScribbleComputeIdentity {
   return createScribbleComputeIdentity({
     sketchId: "test",
     schema,
-    params: { amount },
+    params: { amount, stopPoint },
     seed: 1,
     compositionFrame: sceneA.space,
   });
@@ -172,6 +173,40 @@ describe("scribbleSessionReducer", () => {
         sourceInputRevision: 12,
       }),
     ).toBe(settled);
+  });
+
+  it("treats an authored stop-point edit as a cache identity change", () => {
+    const completed = completedA();
+    const pending = scribbleSessionReducer(completed, {
+      type: "transaction-settled",
+      identity: identity(1, 25),
+      sourceInputRevision: 11,
+    });
+
+    expect(pending.pending?.identity.params.at(-1)).toEqual({
+      key: "stopPoint",
+      value: 25,
+    });
+    expect(pending.displayed).toBe(completed.displayed);
+    expect(selectCurrentScribbleResult(pending)).toBeNull();
+
+    const current = succeed(launch(pending), sceneB, {
+      ...completedDiagnostics,
+      termination: "stopped-early",
+      residualError: 0.2,
+    });
+    expect(current.displayed).toMatchObject({
+      identity: {
+        params: [
+          { key: "amount", value: 1 },
+          { key: "stopPoint", value: 25 },
+        ],
+      },
+      scene: sceneB,
+      diagnostics: { termination: "stopped-early" },
+      sourceInputRevision: 11,
+    });
+    expect(selectExportableScribbleResult(current)).toBe(current.displayed);
   });
 
   it("ignores delayed authored actions older than the pending or active generation", () => {
