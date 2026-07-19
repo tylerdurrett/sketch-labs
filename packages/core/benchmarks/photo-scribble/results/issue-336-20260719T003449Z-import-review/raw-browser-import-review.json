@@ -1,0 +1,881 @@
+{
+  "schemaVersion": 1,
+  "review": "issue-336-product-studio-import",
+  "browser": {
+    "product": "Chrome/144.0.7559.96",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+    "platform": "Darwin 24.6.0 arm64",
+    "viewport": {
+      "width": 1440,
+      "height": 1000,
+      "devicePixelRatio": 1
+    }
+  },
+  "initial": {
+    "selectedId": "pinecone-4330aa0314f7",
+    "expectedInitialAssets": [
+      "img-0672-79d639daec62",
+      "pinecone-4330aa0314f7"
+    ],
+    "bodyContainsLocalPath": false,
+    "picker": [
+      {
+        "label": "img 0672",
+        "current": false,
+        "thumbnail": "/image-assets/img-0672-79d639daec62.png"
+      },
+      {
+        "label": "pinecone",
+        "current": true,
+        "thumbnail": "/image-assets/pinecone-4330aa0314f7.png"
+      }
+    ]
+  },
+  "import": {
+    "selectedId": "issue-336-trial-import-review-e78487d08d1a",
+    "picker": [
+      {
+        "label": "img 0672",
+        "current": false,
+        "thumbnail": "/image-assets/img-0672-79d639daec62.png"
+      },
+      {
+        "label": "issue 336 trial import review",
+        "current": true,
+        "thumbnail": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png"
+      },
+      {
+        "label": "pinecone",
+        "current": false,
+        "thumbnail": "/image-assets/pinecone-4330aa0314f7.png"
+      }
+    ],
+    "persisted": {
+      "status": 200,
+      "contentType": "image/png",
+      "byteLength": 358178,
+      "sha256": "e78487d08d1a0a446292cc28f5e1952bdd2ed800200a554cd1a9b43011a69292",
+      "width": 512,
+      "height": 768
+    },
+    "idHashMatchesPersistedBytes": true,
+    "secondRead": {
+      "status": 200,
+      "contentType": "image/png",
+      "byteLength": 358178,
+      "sha256": "e78487d08d1a0a446292cc28f5e1952bdd2ed800200a554cd1a9b43011a69292",
+      "width": 512,
+      "height": 768
+    },
+    "persistedBytesImmutable": true,
+    "postResponses": [
+      {
+        "phase": "response",
+        "method": "POST",
+        "path": "/__api/image-assets/issue-336-trial-import-review",
+        "status": 200,
+        "contentType": "application/json",
+        "jsonBody": {
+          "id": "issue-336-trial-import-review-e78487d08d1a",
+          "created": true
+        }
+      },
+      {
+        "phase": "response",
+        "method": "POST",
+        "path": "/__api/image-assets/issue-336-trial-import-review",
+        "status": 200,
+        "contentType": "application/json",
+        "jsonBody": {
+          "id": "issue-336-trial-import-review-e78487d08d1a",
+          "created": false
+        }
+      }
+    ]
+  },
+  "reuse": {
+    "flowersSelectedId": "img-0672-79d639daec62",
+    "pineconeSelectedId": "pinecone-4330aa0314f7",
+    "importedReselectedId": "issue-336-trial-import-review-e78487d08d1a",
+    "picker": [
+      {
+        "label": "img 0672",
+        "current": false,
+        "thumbnail": "/image-assets/img-0672-79d639daec62.png"
+      },
+      {
+        "label": "issue 336 trial import review",
+        "current": true,
+        "thumbnail": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png"
+      },
+      {
+        "label": "pinecone",
+        "current": false,
+        "thumbnail": "/image-assets/pinecone-4330aa0314f7.png"
+      }
+    ]
+  },
+  "reload": {
+    "postReloadDefaultId": "pinecone-4330aa0314f7",
+    "selectedPreset": "issue-336-trial-import-review",
+    "restoredId": "issue-336-trial-import-review-e78487d08d1a",
+    "picker": [
+      {
+        "label": "img 0672",
+        "current": false,
+        "thumbnail": "/image-assets/img-0672-79d639daec62.png"
+      },
+      {
+        "label": "issue 336 trial import review",
+        "current": true,
+        "thumbnail": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png"
+      },
+      {
+        "label": "pinecone",
+        "current": false,
+        "thumbnail": "/image-assets/pinecone-4330aa0314f7.png"
+      }
+    ],
+    "preset": {
+      "status": 200,
+      "body": {
+        "version": 2,
+        "sketch": "photo-scribble",
+        "name": "issue-336-trial-import-review",
+        "seed": 3113733967113507,
+        "params": {
+          "imageAsset": "issue-336-trial-import-review-e78487d08d1a",
+          "toneContrast": 0.5,
+          "toneGamma": 0.5,
+          "pathDensity": 1,
+          "scribbleScale": 1,
+          "momentum": 0.75,
+          "chaos": 0.25,
+          "toneFidelity": 0.9
+        },
+        "locks": [],
+        "profile": {
+          "width": 200,
+          "height": 200,
+          "insets": {
+            "top": 10,
+            "right": 10,
+            "bottom": 10,
+            "left": 10
+          },
+          "includeFrame": true,
+          "toolWidthMillimeters": 0.3
+        }
+      }
+    }
+  },
+  "privacy": {
+    "checkedSurfaces": [
+      "visible body text",
+      "local/session/IndexedDB/cookie state",
+      "captured managed-asset and Preset requests/responses",
+      "saved Preset JSON"
+    ],
+    "checkedMarkers": [
+      "/Users/",
+      "/tmp/",
+      "issue-336-trial-pinecone-import.png"
+    ],
+    "markerMatches": [],
+    "fileInputValueAfterImport": ""
+  },
+  "storage": {
+    "localStorage": {
+      "sketch-labs.paper-display-unit": "mm"
+    },
+    "sessionStorage": {},
+    "indexedDatabases": [],
+    "cookie": ""
+  },
+  "network": [
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": [
+        "flowers-dense",
+        "flowers-dense-chaotic",
+        "neat"
+      ]
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": [
+        "flowers-dense",
+        "flowers-dense-chaotic",
+        "neat"
+      ]
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/__api/image-assets",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/img-0672-79d639daec62.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/__api/image-assets",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": [
+        "img-0672-79d639daec62",
+        "pinecone-4330aa0314f7"
+      ]
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/img-0672-79d639daec62.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "POST",
+      "path": "/__api/image-assets/issue-336-trial-import-review",
+      "contentType": "image/png",
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/__api/image-assets",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "POST",
+      "path": "/__api/image-assets/issue-336-trial-import-review",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": {
+        "id": "issue-336-trial-import-review-e78487d08d1a",
+        "created": true
+      }
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/__api/image-assets",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": [
+        "img-0672-79d639daec62",
+        "issue-336-trial-import-review-e78487d08d1a",
+        "pinecone-4330aa0314f7"
+      ]
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "POST",
+      "path": "/__api/image-assets/issue-336-trial-import-review",
+      "contentType": "image/png",
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/__api/image-assets",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "POST",
+      "path": "/__api/image-assets/issue-336-trial-import-review",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": {
+        "id": "issue-336-trial-import-review-e78487d08d1a",
+        "created": false
+      }
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/__api/image-assets",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": [
+        "img-0672-79d639daec62",
+        "issue-336-trial-import-review-e78487d08d1a",
+        "pinecone-4330aa0314f7"
+      ]
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/img-0672-79d639daec62.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/img-0672-79d639daec62.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "POST",
+      "path": "/__api/presets/photo-scribble",
+      "contentType": "application/json",
+      "contentLength": null,
+      "jsonBody": {
+        "version": 2,
+        "sketch": "photo-scribble",
+        "name": "issue-336-trial-import-review",
+        "seed": 3113733967113507,
+        "params": {
+          "imageAsset": "issue-336-trial-import-review-e78487d08d1a",
+          "toneContrast": 0.5,
+          "toneGamma": 0.5,
+          "pathDensity": 1,
+          "scribbleScale": 1,
+          "momentum": 0.75,
+          "chaos": 0.25,
+          "toneFidelity": 0.9
+        },
+        "locks": [],
+        "profile": {
+          "width": 200,
+          "height": 200,
+          "insets": {
+            "top": 10,
+            "right": 10,
+            "bottom": 10,
+            "left": 10
+          },
+          "includeFrame": true,
+          "toolWidthMillimeters": 0.3
+        }
+      }
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": [
+        "flowers-dense",
+        "flowers-dense-chaotic",
+        "issue-336-trial-import-review",
+        "neat"
+      ]
+    },
+    {
+      "phase": "response",
+      "method": "POST",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "contentType": "application/json",
+      "bodyReadError": "ProtocolError"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": [
+        "flowers-dense",
+        "flowers-dense-chaotic",
+        "issue-336-trial-import-review",
+        "neat"
+      ]
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": [
+        "flowers-dense",
+        "flowers-dense-chaotic",
+        "issue-336-trial-import-review",
+        "neat"
+      ]
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/sketches/photo-scribble/presets/issue-336-trial-import-review.json",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/sketches/photo-scribble/presets/issue-336-trial-import-review.json",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": {
+        "version": 2,
+        "sketch": "photo-scribble",
+        "name": "issue-336-trial-import-review",
+        "seed": 3113733967113507,
+        "params": {
+          "imageAsset": "issue-336-trial-import-review-e78487d08d1a",
+          "toneContrast": 0.5,
+          "toneGamma": 0.5,
+          "pathDensity": 1,
+          "scribbleScale": 1,
+          "momentum": 0.75,
+          "chaos": 0.25,
+          "toneFidelity": 0.9
+        },
+        "locks": [],
+        "profile": {
+          "width": 200,
+          "height": 200,
+          "insets": {
+            "top": 10,
+            "right": 10,
+            "bottom": 10,
+            "left": 10
+          },
+          "includeFrame": true,
+          "toolWidthMillimeters": 0.3
+        }
+      }
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/__api/image-assets",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/__api/image-assets",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": [
+        "img-0672-79d639daec62",
+        "issue-336-trial-import-review-e78487d08d1a",
+        "pinecone-4330aa0314f7"
+      ]
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/img-0672-79d639daec62.png",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/image-assets/img-0672-79d639daec62.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/sketches/photo-scribble/presets/issue-336-trial-import-review.json",
+      "contentType": null,
+      "contentLength": null
+    },
+    {
+      "phase": "response",
+      "method": "GET",
+      "path": "/sketches/photo-scribble/presets/issue-336-trial-import-review.json",
+      "status": 200,
+      "contentType": "application/json",
+      "jsonBody": {
+        "version": 2,
+        "sketch": "photo-scribble",
+        "name": "issue-336-trial-import-review",
+        "seed": 3113733967113507,
+        "params": {
+          "imageAsset": "issue-336-trial-import-review-e78487d08d1a",
+          "toneContrast": 0.5,
+          "toneGamma": 0.5,
+          "pathDensity": 1,
+          "scribbleScale": 1,
+          "momentum": 0.75,
+          "chaos": 0.25,
+          "toneFidelity": 0.9
+        },
+        "locks": [],
+        "profile": {
+          "width": 200,
+          "height": 200,
+          "insets": {
+            "top": 10,
+            "right": 10,
+            "bottom": 10,
+            "left": 10
+          },
+          "includeFrame": true,
+          "toolWidthMillimeters": 0.3
+        }
+      }
+    },
+    {
+      "phase": "request",
+      "method": "GET",
+      "path": "/image-assets/issue-336-trial-import-review-e78487d08d1a.png",
+      "contentType": null,
+      "contentLength": null
+    }
+  ],
+  "console": [
+    {
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    }
+  ],
+  "pageErrors": [],
+  "screenshots": [
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T003449Z-import-review/2026-07-18_193700_initial-picker.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T003449Z-import-review/2026-07-18_193710_imported-selected.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T003449Z-import-review/2026-07-18_193720_reload-picker-reuse.jpg"
+  ],
+  "pass": true
+}
