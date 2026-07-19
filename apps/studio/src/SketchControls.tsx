@@ -90,8 +90,9 @@ import {
   createHiddenLineExportSnapshot,
   createOutlineComputeIdentity,
   mutableScene,
-  outlineComputeIdentitiesEqual,
+  outlineGeometryIdentitiesEqual,
 } from "./outlineComputeProtocol";
+import { finalizeOutlineScene } from "./outlineScene";
 import {
   createOutlineSessionState,
   outlineSessionReducer,
@@ -178,10 +179,7 @@ function outlineIdentitySourceFor(
   | { sourceScene: Scene }
   | { outlineTarget: OutlineTarget }
   | { sourceScene: Scene; outlineTarget: OutlineTarget } {
-  const outlineTarget = {
-    toolWidthMillimeters: edit.profile.toolWidthMillimeters,
-    millimetersPerSceneUnit: studioMillimetersPerCompositionUnit(edit),
-  };
+  const outlineTarget = outlineTargetFor(edit);
   if (sketch.deriveOutlineSource !== undefined) {
     return { sourceScene, outlineTarget };
   }
@@ -189,31 +187,74 @@ function outlineIdentitySourceFor(
   return { sourceScene };
 }
 
-/** Whether moving between two authored states invalidates prepared Outline geometry. */
-function outlineInputsChanged(
+function outlineTargetFor(edit: StudioEditState): OutlineTarget {
+  return {
+    toolWidthMillimeters: edit.profile.toolWidthMillimeters,
+    millimetersPerSceneUnit: studioMillimetersPerCompositionUnit(edit),
+  };
+}
+
+/** Resolve the transient Page editor's physical target without committing it. */
+function outlineEditForPageDraft(
+  edit: StudioEditState,
+  draft: PageFrameEditDraft | null,
+): StudioEditState {
+  if (draft === null) return edit;
+  return {
+    ...edit,
+    profile: pageFrameEditDraftProfile(draft),
+    framing: {
+      kind: "framed",
+      pageFrame: draft.frame,
+      generationAspect: draft.generationAspect,
+      aspectLocked:
+        edit.framing.kind === "framed" && edit.framing.aspectLocked,
+    },
+  };
+}
+
+type OutlineEditChange =
+  | "geometry"
+  | "physical-style"
+  | "placement"
+  | "none";
+
+/** Classify authored edits by the cheapest work needed for current Outline. */
+function classifyOutlineEdit(
   previous: StudioEditState,
   next: StudioEditState,
   usesPhysicalTool: boolean,
-): boolean {
+): OutlineEditChange {
   if (
     !sameParams(previous.params, next.params) ||
     previous.seed !== next.seed ||
     previous.tolerance !== next.tolerance ||
-    !Object.is(
-      previous.profile.toolWidthMillimeters,
-      next.profile.toolWidthMillimeters,
+    !plotDrawableAspectsEquivalent(
+      studioGenerationAspect(previous),
+      studioGenerationAspect(next),
     )
   ) {
-    return true;
+    return "geometry";
   }
 
-  if (usesPhysicalTool && !sameStudioPhysicalScale(previous, next)) {
-    return true;
+  if (
+    usesPhysicalTool &&
+    (!Object.is(
+      previous.profile.toolWidthMillimeters,
+      next.profile.toolWidthMillimeters,
+    ) ||
+      !sameStudioPhysicalScale(previous, next))
+  ) {
+    return "physical-style";
   }
-  return !plotDrawableAspectsEquivalent(
-    studioGenerationAspect(previous),
-    studioGenerationAspect(next),
-  );
+
+  if (
+    previous.profile !== next.profile ||
+    previous.framing !== next.framing
+  ) {
+    return "placement";
+  }
+  return "none";
 }
 
 /** Whether an edit changes the time-invariant Scribble worker identity. */
@@ -641,7 +682,14 @@ export function SketchControls({
     if (hasScribblePreparation && scribbleChanged) {
       scribbleInputRevisionRef.current += 1;
     }
-    if (hasScribblePreparation && scribbleAction === "preview") {
+    if (
+      hasScribblePreparation &&
+      scribbleAction === "preview" &&
+      scribbleChanged
+    ) {
+      if (!scribblePreparation.getSessionSnapshot().transactionOpen) {
+        scribblePreparation.beginTransaction();
+      }
       scribblePreparation.previewAuthoredState(
         authoredScribbleState(next.present),
       );
@@ -652,14 +700,22 @@ export function SketchControls({
     ) {
       scribblePreparation.requestAtomic(authoredScribbleState(next.present));
     }
-    const invalidated = outlineInputsChanged(
+    const outlineChange = classifyOutlineEdit(
       current.present,
       next.present,
       sketch.generateOutlineSource !== undefined ||
         sketch.deriveOutlineSource !== undefined,
     );
-    if (invalidated) {
+    if (outlineChange === "geometry") {
       cancelOutlineCoordinator();
+      // Paper transactions defer this boundary until their first geometry edit.
+      // Target/style-only previews can therefore keep painting retained Outline.
+      if (
+        hasActiveTransaction(next) &&
+        !outlineSessionRef.current.transactionOpen
+      ) {
+        dispatchOutline({ type: "transaction-began" });
+      }
       const retainsPaintedScribble =
         hasScribblePreparation && !scribbleChanged && scribblePaintIsCurrent;
       dispatchOutline({
@@ -864,20 +920,32 @@ export function SketchControls({
     updateHistory(beginEditTransaction, false);
     if (hasScribblePreparation) scribblePreparation.beginTransaction();
   };
+  const beginProfileTransaction = (): void => {
+    // A profile gesture may prove to be physical style or Page placement only.
+    // Keep the current Outline until a preview actually crosses a geometry
+    // boundary; classification in updateHistory opens the session lazily then.
+    updateHistory(beginEditTransaction, false);
+  };
   const settleTransaction = (
     transition: (current: EditHistory) => EditHistory,
   ): void => {
+    const outlineTransactionOpen = outlineSessionRef.current.transactionOpen;
+    const scribbleTransactionOpen =
+      hasScribblePreparation &&
+      scribblePreparation.getSessionSnapshot().transactionOpen;
     updateHistory(transition, false);
-    if (hasScribblePreparation) {
+    if (scribbleTransactionOpen) {
       scribblePreparation.settleTransaction(authoredScribbleState());
     }
     // Settlement belongs to the session reducer: outside export it resamples the
     // final Fill exactly once; during export it retains only a deferred request,
     // which the export terminal action releases after relinquishing the slot.
-    dispatchOutline({
-      type: "transaction-settled",
-      launch: environmentReadyNow() && !hasScribblePreparation,
-    });
+    if (outlineTransactionOpen) {
+      dispatchOutline({
+        type: "transaction-settled",
+        launch: environmentReadyNow() && !hasScribblePreparation,
+      });
+    }
   };
   const commitTransaction = (): void => settleTransaction(commitEditTransaction);
   const cancelTransaction = (): void => settleTransaction(cancelEditTransaction);
@@ -1126,6 +1194,36 @@ export function SketchControls({
     dispatchOutline({ type: "source-ready", provenance });
   };
 
+  const outlineSceneForDisplay = useMemo<Scene | null>(() => {
+    if (
+      outlineSession.phase.kind !== "outline" ||
+      (sketch.generateOutlineSource === undefined &&
+        sketch.deriveOutlineSource === undefined)
+    ) {
+      return null;
+    }
+    // Opt-in Outline geometry is target-invariant. Repaint its physical stroke
+    // style from the current authored or transient Page target while retaining
+    // the session's immutable base geometry for reuse.
+    return finalizeOutlineScene(
+      outlineSession.phase.scene,
+      null,
+      false,
+      {
+        kind: "physical-tool",
+        target: outlineTargetFor(
+          outlineEditForPageDraft(history.present, pageFrameEditDraft),
+        ),
+      },
+    );
+  }, [
+    outlineSession.phase,
+    sketch.generateOutlineSource,
+    sketch.deriveOutlineSource,
+    history.present,
+    pageFrameEditDraft,
+  ]);
+
   const renderState: LiveCanvasRenderState =
     unavailableEnvironmentStatus !== null
       ? {
@@ -1164,7 +1262,12 @@ export function SketchControls({
                 ? {}
                 : { contentRevision: outlineSession.phase.contentRevision }),
             }
-          : outlineSession.phase;
+          : outlineSceneForDisplay !== null
+            ? {
+                ...outlineSession.phase,
+                scene: outlineSceneForDisplay,
+              }
+            : outlineSession.phase;
 
   // New seed: roll a fresh arrangement, leaving every param value untouched —
   // the seed axis is independent of the param (Randomize) axis.
@@ -1463,7 +1566,7 @@ export function SketchControls({
       includePaperMargins,
       filename,
       ...(cachedOutline !== null &&
-      outlineComputeIdentitiesEqual(identity, cachedOutline.identity)
+      outlineGeometryIdentitiesEqual(identity, cachedOutline.identity)
         ? {
             reusableOutline: {
               identity: cachedOutline.identity,
@@ -1674,7 +1777,7 @@ export function SketchControls({
         <PaperSection
           profile={profile}
           transaction={{
-            onBegin: beginTransaction,
+            onBegin: beginProfileTransaction,
             onPreview: (next) => previewLeaf("profile", next),
             onCommit: commitTransaction,
             onCancel: cancelTransaction,

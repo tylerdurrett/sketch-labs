@@ -459,6 +459,7 @@ let lastCommittedPageFrame: PageFrame | null = null;
 let lastPageFrameAspectConstraint: PageFrameAspectConstraint | null = null;
 let lastOnPageFrameDraftChange: ((frame: PageFrame) => void) | null = null;
 let lastToneSource: ToneSource | null = null;
+let lastRenderScene: Scene | null = null;
 let autoAcknowledgeDisplayedScene = true;
 let acknowledgeDisplayedScene: (() => void) | null = null;
 let generateDuringLiveCanvasRender = false;
@@ -612,6 +613,7 @@ vi.mock("./LiveCanvas", () => ({
     lastPageFrameAspectConstraint = pageFrameAspectConstraint ?? null;
     lastOnPageFrameDraftChange = onPageFrameDraftChange ?? null;
     lastToneSource = renderState?.source ?? null;
+    lastRenderScene = (renderState?.scene as Scene | undefined) ?? null;
     // Model the outline pass finishing: fire the "computed" signal after each
     // outline render so the owner's busy label clears (unless a test opts out to
     // observe the intermediate "Computing…" state itself).
@@ -863,6 +865,7 @@ beforeEach(() => {
   lastPageFrameAspectConstraint = null;
   lastOnPageFrameDraftChange = null;
   lastToneSource = null;
+  lastRenderScene = null;
   autoAcknowledgeDisplayedScene = true;
   acknowledgeDisplayedScene = null;
   generateDuringLiveCanvasRender = false;
@@ -1630,7 +1633,7 @@ describe("SketchControls — central edit-history integration", () => {
     });
   });
 
-  it("shows live Fill for a changed transaction and reuses exact cache on cancel", () => {
+  it("defers a Paper transaction boundary until a geometry value changes", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -1644,8 +1647,9 @@ describe("SketchControls — central edit-history integration", () => {
     )!;
 
     act(() => width.focus());
-    expect(canvasRenderMode(el)).toBe("fill");
+    expect(canvasRenderMode(el)).toBe("outline");
     setInput(width, "300");
+    expect(canvasRenderMode(el)).toBe("fill");
     expect(toggle.textContent).toBe("Outline");
     expect(lastCompositionFrame).not.toBe(initialFrame);
     expect(outlineJob.starts).toBe(1);
@@ -1666,7 +1670,7 @@ describe("SketchControls — central edit-history integration", () => {
     expect(historyCapture.cancels[0]!.after.past).toHaveLength(0);
   });
 
-  it("shows live Fill during a same-identity edit and restores exact cache on cancel", () => {
+  it("keeps Outline through a placement-only edit and cancel", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -1686,7 +1690,7 @@ describe("SketchControls — central edit-history integration", () => {
     )!;
 
     act(() => margin.focus());
-    expect(canvasRenderMode(el)).toBe("fill");
+    expect(canvasRenderMode(el)).toBe("outline");
     setInput(margin, "20");
     expect(lastProfile?.insets).toEqual({
       top: 20,
@@ -1701,7 +1705,7 @@ describe("SketchControls — central edit-history integration", () => {
       el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
         "data-render-state",
       ),
-    ).toBe("fill-live");
+    ).toBe("outline");
 
     act(() =>
       margin.dispatchEvent(
@@ -1726,7 +1730,7 @@ describe("SketchControls — central edit-history integration", () => {
     expect(historyCapture.cancels).toHaveLength(1);
   });
 
-  it("shows live Fill for an invalid draft and restores exact cache on settle", () => {
+  it("keeps Outline through an invalid Paper draft", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -1745,7 +1749,7 @@ describe("SketchControls — central edit-history integration", () => {
       el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
         "data-render-state",
       ),
-    ).toBe("fill-live");
+    ).toBe("outline");
 
     act(() =>
       width.dispatchEvent(
@@ -4101,6 +4105,114 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(generateOutlineSource).not.toHaveBeenCalled();
   });
 
+  it("keeps legacy Outline identity and authored stroke widths exact across tool changes", () => {
+    autoFireOutlineComputed = false;
+    const source: Scene = {
+      space: { width: 1_000, height: 1_000 },
+      primitives: [
+        {
+          points: [[10, 10], [900, 900]],
+          stroke: { color: "purple", width: 4 },
+          hiddenLineRole: "source",
+        },
+      ],
+    };
+    const generate = vi.fn(() => source);
+    const el = mount(
+      <SketchControls
+        sketch={{ ...sketchWith("legacy-exact", schema), generate }}
+      />,
+    );
+    fakeFillCaptureScene = source;
+    clickButton(el, "Fill");
+    act(() => lastOnOutlineComputed?.());
+    const initialIdentity = outlineJob.lastIdentity;
+    expect(initialIdentity?.sourceKind).toBe("legacy-scene");
+    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(4);
+
+    generate.mockClear();
+    generateDuringLiveCanvasRender = true;
+    const toolWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Tool width (mm)"]',
+    )!;
+    act(() => toolWidth.focus());
+    setInput(toolWidth, "0.8");
+    act(() => toolWidth.blur());
+
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.lastIdentity).toBe(initialIdentity);
+    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(4);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.lastExportSnapshot?.identity).toEqual(initialIdentity);
+  });
+
+  it("recomputes opt-in Outline for every authored geometry axis", () => {
+    autoFireOutlineComputed = false;
+    const sketch = {
+      ...(sketchWith("geometry-axes", schema) as unknown as Record<
+        string,
+        unknown
+      >),
+      time: { duration: 10, mode: "loop" },
+      generateOutlineSource: vi.fn(() => ({
+        space: { width: 1_000, height: 1_000 },
+        primitives: [],
+      })),
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+    const el = mount(<SketchControls sketch={sketch} />);
+
+    clickButton(el, "Fill");
+    act(() => lastOnOutlineComputed?.());
+    expect(outlineJob.starts).toBe(1);
+
+    const radius = paramInput(el, "radius");
+    act(() => radius.focus());
+    setInput(radius, "11");
+    act(() => radius.blur());
+    expect(outlineJob.starts).toBe(2);
+    expect(outlineJob.lastIdentity?.params).toContainEqual({
+      key: "radius",
+      value: 11,
+    });
+    act(() => lastOnOutlineComputed?.());
+
+    const priorSeed = outlineJob.lastIdentity?.seed;
+    clickButton(el, "New seed");
+    expect(outlineJob.starts).toBe(3);
+    expect(outlineJob.lastIdentity?.seed).not.toBe(priorSeed);
+    act(() => lastOnOutlineComputed?.());
+
+    const tolerance = el.querySelector<HTMLInputElement>(
+      "#sketch-tolerance",
+    )!;
+    act(() => tolerance.focus());
+    setInput(tolerance, "1");
+    act(() => tolerance.blur());
+    expect(outlineJob.starts).toBe(4);
+    expect(outlineJob.lastIdentity?.tolerance).toBe(1);
+    act(() => lastOnOutlineComputed?.());
+
+    const priorFrame = outlineJob.lastIdentity?.compositionFrame;
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    act(() => width.focus());
+    setInput(width, "300");
+    act(() => width.blur());
+    expect(outlineJob.starts).toBe(5);
+    expect(outlineJob.lastIdentity?.compositionFrame).not.toEqual(priorFrame);
+    act(() => lastOnOutlineComputed?.());
+
+    clickButton(el, "Outline");
+    fakeCurrentT = 2.5;
+    clickButton(el, "Fill");
+    expect(outlineJob.starts).toBe(6);
+    expect(outlineJob.lastIdentity?.sampledT).toBe(2.5);
+  });
+
   it("does not rederive Outline when the final Page rectangle option changes", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
@@ -6335,6 +6447,104 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(canvas.dataset.contentRevision).toBe(contentRevision);
   });
 
+  it("restyles retained Outline through fixed-page scale and pan without generation or preparation", async () => {
+    autoFireOutlineComputed = false;
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    const source = preparedScene(78);
+    source.primitives[0]!.stroke = { color: "navy", width: 7 };
+    await completeScribble(0, source);
+    clickButton(el, "Outline");
+    act(() => lastOnOutlineComputed?.());
+    expect(outlineJob.starts).toBe(1);
+    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBeCloseTo(
+      0.3 / 0.18,
+      12,
+    );
+
+    generate.mockClear();
+    generateDuringLiveCanvasRender = true;
+    clickButton(el, "Crop");
+    act(() =>
+      el
+        .querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!
+        .click(),
+    );
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "150",
+    );
+    const scaled = lastPageFrameEditDraft;
+    if (scaled?.mode !== "fixed-page" || lastProfile === null) {
+      throw new Error("fixed Page draft was not active");
+    }
+    const drawableWidth =
+      lastProfile.width - lastProfile.insets.left - lastProfile.insets.right;
+    const targetScale = drawableWidth / scaled.frame.width;
+    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBeCloseTo(
+      0.3 / targetScale,
+      12,
+    );
+    expect(outlineJob.starts).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    const styledWidth = lastRenderScene?.primitives[0]?.stroke?.width;
+    act(() =>
+      lastOnPageFrameDraftChange?.({
+        ...scaled.frame,
+        x: scaled.frame.x + 40,
+        y: scaled.frame.y - 25,
+      }),
+    );
+    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(styledWidth);
+    expect(outlineJob.starts).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Apply");
+    expect(outlineJob.starts).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Crop");
+    act(() =>
+      el
+        .querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!
+        .click(),
+    );
+    const panOnly = lastPageFrameEditDraft;
+    if (panOnly?.mode !== "fixed-page") {
+      throw new Error("fixed Page pan draft was not active");
+    }
+    act(() =>
+      lastOnPageFrameDraftChange?.({
+        ...panOnly.frame,
+        x: panOnly.frame.x - 15,
+      }),
+    );
+    clickButton(el, "Apply");
+    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(styledWidth);
+    expect(outlineJob.starts).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(outlineJob.lastExportSnapshot?.identity).toMatchObject({
+      sourceKind: "completed-scene-sketch",
+      outlineTarget: {
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: targetScale,
+      },
+    });
+  });
+
   it.each([
     ["crop", { x: 25, y: 20, width: 50, height: 60 }],
     ["padding", { x: -25, y: -10, width: 150, height: 120 }],
@@ -7870,7 +8080,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     ["Tone Calibration", toneCalibration],
     ["Scribble Moon", scribbleMoon],
   ] as const)(
-    "keeps %s preparation stable across physical-only edits and replaces it at the frame-aspect boundary",
+    "repaints cached %s geometry for physical style and replaces it at the frame-aspect boundary",
     async (_name, sketch) => {
       autoFireOutlineComputed = false;
       const generate = vi.fn(sketch.generate);
@@ -7880,6 +8090,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         ...preparedScene(31),
         space: { ...firstFrame },
       };
+      firstScene.primitives[0]!.stroke = { color: "black", width: 9 };
       await completeScribble(0, firstScene);
 
       clickButton(el, "Outline");
@@ -7895,6 +8106,11 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         },
       });
       act(() => lastOnOutlineComputed?.());
+      await flush();
+      expect(lastRenderScene?.primitives[0]?.stroke?.width).toBeCloseTo(
+        0.3 / 0.18,
+        12,
+      );
 
       const margin = el.querySelector<HTMLInputElement>(
         'input[aria-label="Linked paper margin (mm)"]',
@@ -7905,15 +8121,12 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
 
       expect(scribbleJob.starts).toHaveLength(1);
       expect(lastCompositionFrame).toBe(firstFrame);
-      expect(outlineJob.starts).toBe(2);
-      expect(outlineJob.lastIdentity).toEqual({
-        ...initialOutline,
-        outlineTarget: {
-          toolWidthMillimeters: 0.3,
-          millimetersPerSceneUnit: 0.16,
-        },
-      });
-      act(() => lastOnOutlineComputed?.());
+      expect(outlineJob.starts).toBe(1);
+      expect(outlineJob.lastIdentity).toBe(initialOutline);
+      expect(lastRenderScene?.primitives[0]?.stroke?.width).toBeCloseTo(
+        0.3 / 0.16,
+        12,
+      );
 
       const toolWidth = el.querySelector<HTMLInputElement>(
         'input[aria-label="Tool width (mm)"]',
@@ -7924,15 +8137,25 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
 
       expect(scribbleJob.starts).toHaveLength(1);
       expect(lastCompositionFrame).toBe(firstFrame);
-      expect(outlineJob.starts).toBe(3);
-      expect(outlineJob.lastIdentity).toEqual({
-        ...initialOutline,
+      expect(outlineJob.starts).toBe(1);
+      expect(outlineJob.lastIdentity).toBe(initialOutline);
+      expect(lastRenderScene?.primitives[0]?.stroke?.width).toBeCloseTo(
+        0.5 / 0.16,
+        12,
+      );
+
+      expect(exportButton(el, "Export Hidden-line SVG").disabled).toBe(false);
+      clickButton(el, "Export Hidden-line SVG");
+      expect(outlineJob.exportStarts).toBe(1);
+      expect(outlineJob.exportDerivations).toBe(0);
+      expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+      expect(outlineJob.lastExportSnapshot?.identity).toMatchObject({
+        sourceKind: "completed-scene-sketch",
         outlineTarget: {
           toolWidthMillimeters: 0.5,
           millimetersPerSceneUnit: 0.16,
         },
       });
-      act(() => lastOnOutlineComputed?.());
 
       const width = el.querySelector<HTMLInputElement>(
         'input[aria-label="Paper width (mm)"]',
@@ -7946,7 +8169,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       expect(scribbleJob.starts[1]?.identity.compositionFrame).toEqual(
         lastCompositionFrame,
       );
-      expect(outlineJob.starts).toBe(3);
+      expect(outlineJob.starts).toBe(1);
 
       const replacementScene: Scene = {
         ...preparedScene(32),
@@ -7954,7 +8177,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       };
       await completeScribble(1, replacementScene);
       await flush();
-      expect(outlineJob.starts).toBe(4);
+      expect(outlineJob.starts).toBe(2);
       expect(outlineJob.lastIdentity).toMatchObject({
         sourceKind: "completed-scene-sketch",
         compositionFrame: lastCompositionFrame!,
