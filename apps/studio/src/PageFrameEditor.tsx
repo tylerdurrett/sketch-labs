@@ -116,6 +116,7 @@ export function PageFrameEditor({
     initialDraft(initialFrame, compositionFrame),
   );
   const [error, setError] = useState<PageFrameError | null>(null);
+  const [physicalFieldsValid, setPhysicalFieldsValid] = useState(true);
   const errorId = useId();
 
   useEffect(() => {
@@ -139,6 +140,7 @@ export function PageFrameEditor({
   };
 
   const apply = (): void => {
+    if (!physicalFieldsValid) return;
     const parsed = parseDraft(draft, compositionFrame);
     if (parsed.frame === null) {
       setError(parsed.error);
@@ -187,6 +189,7 @@ export function PageFrameEditor({
         frame={initialFrame}
         displayUnit={displayUnit}
         onFrameChange={onDraftChange}
+        onValidityChange={setPhysicalFieldsValid}
       />
       {error !== null && (
         <p id={errorId} role="alert" className="text-sm text-destructive">

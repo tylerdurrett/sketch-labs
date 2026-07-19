@@ -22,6 +22,8 @@ export interface PageFramePhysicalFieldsProps {
   frame: PageFrame;
   displayUnit: PaperDisplayUnit;
   onFrameChange: (frame: PageFrame) => void;
+  /** Lets a containing commit boundary block while a local text draft is invalid. */
+  onValidityChange?: (valid: boolean) => void;
 }
 
 interface PhysicalFieldError {
@@ -59,6 +61,7 @@ export function PageFramePhysicalFields({
   frame,
   displayUnit,
   onFrameChange,
+  onValidityChange,
 }: PageFramePhysicalFieldsProps) {
   const [drafts, setDrafts] = useState(() =>
     physicalDrafts(profile, representedFrame, frame, displayUnit),
@@ -71,6 +74,7 @@ export function PageFramePhysicalFields({
       physicalDrafts(profile, representedFrame, frame, displayUnit),
     );
     setError(null);
+    onValidityChange?.(true);
   }, [
     displayUnit,
     frame.height,
@@ -93,6 +97,7 @@ export function PageFramePhysicalFields({
 
     const displayValue = raw.trim() === "" ? Number.NaN : Number(raw);
     if (!Number.isFinite(displayValue) || displayValue <= 0) {
+      onValidityChange?.(false);
       setError({
         field: dimension,
         message: `${dimensionLabel(dimension)} must be a finite positive number.`,
@@ -103,6 +108,7 @@ export function PageFramePhysicalFields({
     const millimeters =
       displayUnit === "in" ? inchToMm(displayValue) : displayValue;
     if (!Number.isFinite(millimeters)) {
+      onValidityChange?.(false);
       setError({
         field: dimension,
         message: `${dimensionLabel(dimension)} must be a finite positive number.`,
@@ -115,6 +121,7 @@ export function PageFramePhysicalFields({
         ? profile.insets.left + profile.insets.right
         : profile.insets.top + profile.insets.bottom;
     if (millimeters <= insetExtent) {
+      onValidityChange?.(false);
       const axis = dimension === "width" ? "horizontal" : "vertical";
       setError({
         field: dimension,
@@ -132,8 +139,10 @@ export function PageFramePhysicalFields({
         millimeters,
       );
       setError(null);
+      onValidityChange?.(true);
       onFrameChange(next);
     } catch {
+      onValidityChange?.(false);
       setError({
         field: dimension,
         message: `${dimensionLabel(dimension)} must produce a finite positive Page extent.`,

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -34,17 +34,29 @@ function mountEditor(initialFrame: PageFrame = FULL_FRAME) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => {
-    root!.render(
+
+  function ControlledEditor() {
+    const [frame, setFrame] = useState(initialFrame);
+    return (
       <PageFrameEditor
         compositionFrame={COMPOSITION}
-        initialFrame={initialFrame}
+        initialFrame={frame}
         profile={PROFILE}
         representedFrame={FULL_FRAME}
         displayUnit="mm"
-        {...callbacks}
-      />,
+        onDraftChange={(next) => {
+          callbacks.onDraftChange(next);
+          setFrame(next);
+        }}
+        onApply={callbacks.onApply}
+        onCancel={callbacks.onCancel}
+        onReset={callbacks.onReset}
+      />
     );
+  }
+
+  act(() => {
+    root!.render(<ControlledEditor />);
   });
   return { el: container, callbacks };
 }
@@ -174,5 +186,30 @@ describe("PageFrameEditor", () => {
     });
     expect(callbacks.onApply).not.toHaveBeenCalled();
     expect(callbacks.onReset).not.toHaveBeenCalled();
+  });
+
+  it("blocks Apply while a physical draft is invalid, then applies its correction", () => {
+    const { el, callbacks } = mountEditor();
+    const physicalWidth = input(el, "physical-width");
+
+    setInput(physicalWidth, "");
+    click(el, "Apply");
+
+    expect(callbacks.onApply).not.toHaveBeenCalled();
+    expect(el.querySelector("h2")?.textContent).toBe("Edit Page Frame");
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+      "finite positive",
+    );
+
+    setInput(physicalWidth, "120");
+    click(el, "Apply");
+
+    expect(callbacks.onApply).toHaveBeenCalledOnce();
+    expect(callbacks.onApply).toHaveBeenCalledWith({
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+    });
   });
 });
