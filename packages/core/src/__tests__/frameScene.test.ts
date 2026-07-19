@@ -13,11 +13,18 @@ function sceneOf(...primitives: Primitive[]): Scene {
 
 function expectInsidePage(scene: Scene): void {
   for (const primitive of scene.primitives) {
+    const strokeRadius = (primitive.stroke?.width ?? 0) / 2
     for (const [x, y] of primitive.points) {
-      expect(x).toBeGreaterThanOrEqual(0)
-      expect(x).toBeLessThanOrEqual(scene.space.width)
-      expect(y).toBeGreaterThanOrEqual(0)
-      expect(y).toBeLessThanOrEqual(scene.space.height)
+      expect(x).toBeGreaterThanOrEqual(-strokeRadius)
+      expect(x).toBeLessThanOrEqual(scene.space.width + strokeRadius)
+      expect(y).toBeGreaterThanOrEqual(-strokeRadius)
+      expect(y).toBeLessThanOrEqual(scene.space.height + strokeRadius)
+      if (primitive.fill !== undefined) {
+        expect(x).toBeGreaterThanOrEqual(0)
+        expect(x).toBeLessThanOrEqual(scene.space.width)
+        expect(y).toBeGreaterThanOrEqual(0)
+        expect(y).toBeLessThanOrEqual(scene.space.height)
+      }
     }
   }
 }
@@ -31,7 +38,7 @@ describe('frameScene', () => {
         [40, 30],
       ],
       [
-        [0, 20],
+        [-1.5, 20],
         [20, 20],
       ],
     ],
@@ -43,7 +50,7 @@ describe('frameScene', () => {
       ],
       [
         [40, 20],
-        [60, 20],
+        [61.5, 20],
       ],
     ],
     [
@@ -53,7 +60,7 @@ describe('frameScene', () => {
         [40, 30],
       ],
       [
-        [20, 0],
+        [20, -1.5],
         [20, 20],
       ],
     ],
@@ -65,7 +72,7 @@ describe('frameScene', () => {
       ],
       [
         [20, 30],
-        [20, 50],
+        [20, 51.5],
       ],
     ],
   ] as const)(
@@ -102,12 +109,12 @@ describe('frameScene', () => {
 
     expect(result.primitives).toHaveLength(2)
     expect(result.primitives[0]!.points).toEqual([
-      [0, 20],
+      [-1, 20],
       [20, 20],
-      [56, 50],
+      [57.2, 51],
     ])
     expect(result.primitives[1]!.points).toEqual([
-      [50, 50],
+      [51.5, 51],
       [20, 30],
     ])
     expect(result.primitives.every(({ closed }) => closed === false)).toBe(true)
@@ -258,8 +265,8 @@ describe('frameScene', () => {
     })
     expect(stroke).toEqual({
       points: [
-        [60, 30],
-        [0, 30],
+        [62, 30],
+        [-2, 30],
       ],
       closed: false,
       stroke: { color: 'purple', width: 4 },
@@ -284,6 +291,187 @@ describe('frameScene', () => {
 
     expect(result.primitives).toEqual([])
   })
+
+  it.each([
+    [
+      'left',
+      [
+        [19, 20],
+        [19, 50],
+      ],
+      [-1, 10],
+    ],
+    [
+      'right',
+      [
+        [81, 20],
+        [81, 50],
+      ],
+      [61, 10],
+    ],
+    [
+      'top',
+      [
+        [30, 9],
+        [70, 9],
+      ],
+      [10, -1],
+    ],
+    [
+      'bottom',
+      [
+        [30, 61],
+        [70, 61],
+      ],
+      [10, 51],
+    ],
+  ] as const)(
+    'retains a thick stroke parallel just outside the %s edge when its footprint enters the Page',
+    (_edge, points, expectedFirst) => {
+      const result = frameScene(
+        sceneOf({
+          points: [...points],
+          stroke: { color: 'black', width: 4 },
+        }),
+        crop,
+      )
+
+      expect(result.primitives).toHaveLength(1)
+      expect(result.primitives[0]!.points[0]).toEqual(expectedFirst)
+      expect(result.primitives[0]!.stroke?.width).toBe(4)
+    },
+  )
+
+  it('preserves thick stroke footprints at every edge of the full-Composition identity frame', () => {
+    const result = frameScene(
+      sceneOf(
+        {
+          points: [
+            [-1, 10],
+            [-1, 70],
+          ],
+          stroke: { color: 'left', width: 4 },
+        },
+        {
+          points: [
+            [101, 10],
+            [101, 70],
+          ],
+          stroke: { color: 'right', width: 4 },
+        },
+        {
+          points: [
+            [10, -1],
+            [90, -1],
+          ],
+          stroke: { color: 'top', width: 4 },
+        },
+        {
+          points: [
+            [10, 81],
+            [90, 81],
+          ],
+          stroke: { color: 'bottom', width: 4 },
+        },
+      ),
+      { x: 0, y: 0, width: 100, height: 80 },
+    )
+
+    expect(result.primitives.map(({ stroke }) => stroke?.color)).toEqual([
+      'left',
+      'right',
+      'top',
+      'bottom',
+    ])
+    expect(result.primitives.map(({ points }) => points[0])).toEqual([
+      [-1, 10],
+      [101, 10],
+      [10, -1],
+      [10, 81],
+    ])
+  })
+
+  it.each([
+    [
+      'left edge',
+      [
+        [0, 20],
+        [40, 40],
+      ],
+      [-2, 19],
+    ],
+    [
+      'right edge',
+      [
+        [60, 40],
+        [100, 20],
+      ],
+      [62, 19],
+    ],
+    [
+      'top edge',
+      [
+        [30, 0],
+        [50, 20],
+      ],
+      [18, -2],
+    ],
+    [
+      'bottom edge',
+      [
+        [30, 50],
+        [50, 70],
+      ],
+      [22, 52],
+    ],
+    [
+      'top-left corner',
+      [
+        [0, -10],
+        [40, 30],
+      ],
+      [-2, -2],
+    ],
+    [
+      'top-right corner',
+      [
+        [60, 30],
+        [100, -10],
+      ],
+      [62, -2],
+    ],
+    [
+      'bottom-left corner',
+      [
+        [0, 80],
+        [40, 40],
+      ],
+      [-2, 52],
+    ],
+    [
+      'bottom-right corner',
+      [
+        [60, 40],
+        [100, 80],
+      ],
+      [62, 52],
+    ],
+  ] as const)(
+    'keeps an oblique %s crossing beyond the Page so its synthetic cap remains outside',
+    (_boundary, points, expectedOutside) => {
+      const result = frameScene(
+        sceneOf({
+          points: [...points],
+          stroke: { color: 'black', width: 4 },
+        }),
+        crop,
+      )
+
+      expect(result.primitives).toHaveLength(1)
+      expect(result.primitives[0]!.points).toContainEqual(expectedOutside)
+      expect(result.primitives[0]!.closed).toBeUndefined()
+    },
+  )
 
   it('keeps each split Primitive together in painter order, fill before its stroke survivors', () => {
     const result = frameScene(
@@ -374,6 +562,36 @@ describe('frameScene', () => {
       primitives: [{ points: [[30, 20]], fill: { color: 'ink' } }],
       background: { color: 'paper' },
     })
+  })
+
+  it('canonicalizes fractional right and bottom fill boundaries to the exact output extent', () => {
+    const result = frameScene(
+      sceneOf({
+        points: [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+          [0, 1],
+        ],
+        closed: true,
+        fill: { color: 'blue' },
+      }),
+      { x: 0.1, y: 0.1, width: 0.2, height: 0.2 },
+    )
+    const points = result.primitives[0]!.points
+
+    expect(result.space).toEqual({ width: 0.2, height: 0.2 })
+    expect(Math.max(...points.map(([x]) => x))).toBe(result.space.width)
+    expect(Math.max(...points.map(([, y]) => y))).toBe(result.space.height)
+    expect(
+      points.every(
+        ([x, y]) =>
+          x >= 0 &&
+          x <= result.space.width &&
+          y >= 0 &&
+          y <= result.space.height,
+      ),
+    ).toBe(true)
   })
 
   it('preserves absent optional fields and the absence of a Scene background', () => {

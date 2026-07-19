@@ -2,10 +2,12 @@
  * Commit a Page Frame to completed Scene geometry (ADR-0015).
  *
  * This is a pure, renderer-agnostic post-process. The Page Frame is expressed
- * in the source Scene's Composition coordinates; the result is clipped to that
- * rectangle, translated so its top-left is `(0, 0)`, and given the Page
+ * in the source Scene's Composition coordinates; the result is clipped through
+ * that viewport, translated so its top-left is `(0, 0)`, and given the Page
  * Frame's extent as its output coordinate space. Nothing is scaled and the
- * source Scene is never mutated.
+ * source Scene is never mutated. Stroke centerlines may remain just outside the
+ * output space so the renderer viewport, rather than a new endpoint, clips the
+ * authored stroke footprint exactly.
  *
  * Fill and stroke need separate treatment at a crop boundary. A clipped fill
  * must acquire Page-boundary edges so that it still covers the viewport-visible
@@ -18,7 +20,7 @@
 
 import { clipPolylinesToBox } from './clip'
 import type { BBox } from './clip'
-import { pageFrameClipBounds, rebasePointToPageFrame } from './pageFrame'
+import { pageFrameClipBounds } from './pageFrame'
 import type { PageFrame } from './pageFrame'
 import type { Primitive, Scene } from './scene'
 import type { Point, Polyline } from './types'
@@ -116,8 +118,24 @@ function pointInsideBounds([x, y]: Point, bounds: BBox): boolean {
   return x >= bounds[0] && x <= bounds[2] && y >= bounds[1] && y <= bounds[3]
 }
 
-function rebased(points: Polyline, frame: PageFrame): Polyline {
-  return points.map((point) => rebasePointToPageFrame(point, frame))
+function rebased(
+  points: Polyline,
+  frame: PageFrame,
+  bounds: BBox,
+  clampToPage = false,
+): Polyline {
+  return points.map(([x, y]) => {
+    const localX =
+      x === bounds[0] ? 0 : x === bounds[2] ? frame.width : x - frame.x
+    const localY =
+      y === bounds[1] ? 0 : y === bounds[3] ? frame.height : y - frame.y
+    return clampToPage
+      ? [
+          Math.max(0, Math.min(frame.width, localX)),
+          Math.max(0, Math.min(frame.height, localY)),
+        ]
+      : [localX, localY]
+  })
 }
 
 function carryClosed(
@@ -134,13 +152,27 @@ function carryRole(source: Primitive, target: Primitive): void {
   }
 }
 
-function copyRebasedPrimitive(source: Primitive, frame: PageFrame): Primitive {
-  const target: Primitive = { points: rebased(source.points, frame) }
+function copyRebasedPrimitive(
+  source: Primitive,
+  frame: PageFrame,
+  bounds: BBox,
+): Primitive {
+  const target: Primitive = { points: rebased(source.points, frame, bounds) }
   carryClosed(source, target)
   if (source.fill !== undefined) target.fill = source.fill
   if (source.stroke !== undefined) target.stroke = source.stroke
   carryRole(source, target)
   return target
+}
+
+function expandedStrokeBounds(bounds: BBox, width: number): BBox {
+  const radius = Math.max(0, width / 2)
+  return [
+    bounds[0] - radius,
+    bounds[1] - radius,
+    bounds[2] + radius,
+    bounds[3] + radius,
+  ]
 }
 
 function strokePath(source: Primitive, bounds: BBox): Polyline {
@@ -174,7 +206,7 @@ export function frameScene(scene: Scene, frame: PageFrame): Scene {
 
   for (const source of scene.primitives) {
     if (source.points.every((point) => pointInsideBounds(point, bounds))) {
-      primitives.push(copyRebasedPrimitive(source, frame))
+      primitives.push(copyRebasedPrimitive(source, frame, bounds))
       continue
     }
 
@@ -182,7 +214,7 @@ export function frameScene(scene: Scene, frame: PageFrame): Scene {
       const polygon = clipFillToBox(source.points, bounds)
       if (polygon.length > 0) {
         const fill: Primitive = {
-          points: rebased(polygon, frame),
+          points: rebased(polygon, frame, bounds, true),
           fill: source.fill,
         }
         carryClosed(source, fill)
@@ -192,10 +224,22 @@ export function frameScene(scene: Scene, frame: PageFrame): Scene {
     }
 
     if (source.stroke !== undefined || source.fill === undefined) {
-      const segments = clipPolylinesToBox([strokePath(source, bounds)], bounds)
+      // Clip the centerline outside the Page by half the authored width. The
+      // final renderer's viewport performs the exact visual clip. Ending the
+      // retained path on this expanded boundary keeps any new butt cap outside
+      // the Page, while preserving authored stroke footprint that reaches in
+      // from a parallel or oblique centerline just beyond the Page boundary.
+      const strokeBounds = expandedStrokeBounds(
+        bounds,
+        source.stroke?.width ?? 0,
+      )
+      const segments = clipPolylinesToBox(
+        [strokePath(source, strokeBounds)],
+        strokeBounds,
+      )
       for (const segment of segments) {
         if (segment.length < 2) continue
-        const stroke: Primitive = { points: rebased(segment, frame) }
+        const stroke: Primitive = { points: rebased(segment, frame, bounds) }
         // A clipped survivor is always open. Preserve explicit optional-field
         // presence while preventing a source closure from drawing a crop chord.
         carryClosed(source, stroke, false)
