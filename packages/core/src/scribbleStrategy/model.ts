@@ -49,7 +49,7 @@ function boundedControl(name: ScribbleControlName, value: number): number {
  * Bound untrusted run controls using their authored declarations.
  *
  * A partial object is accepted so integrations can adopt the model before all
- * five controls have dedicated UI wiring; missing/non-finite values use the
+ * six controls have dedicated UI wiring; missing/non-finite values use the
  * declared defaults rather than leaking NaNs into geometry.
  */
 export function normalizeScribbleControls(
@@ -72,6 +72,10 @@ export function normalizeScribbleControls(
     toneFidelity: boundedControl(
       'toneFidelity',
       controls.toneFidelity ?? defaultScribbleControls.toneFidelity,
+    ),
+    stopPoint: boundedControl(
+      'stopPoint',
+      controls.stopPoint ?? defaultScribbleControls.stopPoint,
     ),
   })
 }

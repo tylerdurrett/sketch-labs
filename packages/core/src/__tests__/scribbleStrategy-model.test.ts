@@ -33,13 +33,14 @@ function source(
 }
 
 describe('Scribble authored controls', () => {
-  it('declares exactly the five bounded controls and derives their defaults', () => {
+  it('declares exactly the six bounded controls and derives their defaults', () => {
     expect(Object.keys(scribbleControlSchema)).toEqual([
       'pathDensity',
       'scribbleScale',
       'momentum',
       'chaos',
       'toneFidelity',
+      'stopPoint',
     ])
 
     for (const [name, spec] of Object.entries(scribbleControlSchema)) {
@@ -54,9 +55,17 @@ describe('Scribble authored controls', () => {
 
     expect(scribbleControlSchema.pathDensity.max).toBe(20)
     expect(scribbleControlSchema.scribbleScale.min).toBe(0.1)
+    expect(scribbleControlSchema.stopPoint).toEqual({
+      kind: 'number',
+      min: 0,
+      max: 100,
+      default: 100,
+      step: 1,
+      integer: true,
+    })
   })
 
-  it('uses defaults for missing/non-finite values and authored bounds otherwise', () => {
+  it('uses defaults for legacy-missing/non-finite values and authored bounds otherwise', () => {
     expect(
       normalizeScribbleControls({
         pathDensity: Number.NaN,
@@ -68,10 +77,38 @@ describe('Scribble authored controls', () => {
       scribbleScale: scribbleControlSchema.scribbleScale.min,
       momentum: scribbleControlSchema.momentum.max,
     })
+    expect(
+      normalizeScribbleControls({ stopPoint: Number.POSITIVE_INFINITY }),
+    ).toEqual(defaultScribbleControls)
+    expect(normalizeScribbleControls({ stopPoint: -1 }).stopPoint).toBe(0)
+    expect(normalizeScribbleControls({ stopPoint: 101 }).stopPoint).toBe(100)
+
+    const legacyControls = {
+      pathDensity: 2,
+      scribbleScale: 0.5,
+      momentum: 0.25,
+      chaos: 0.75,
+      toneFidelity: 0.4,
+    }
+    expect(normalizeScribbleControls(legacyControls)).toEqual({
+      ...legacyControls,
+      stopPoint: 100,
+    })
   })
 })
 
 describe('Scribble coherent scale model', () => {
+  it('keeps stop point independent of source sampling, scales, and completion target', () => {
+    const fixture = source(horizontalGradientTone(SQUARE))
+    const unfinished = createScribbleModel(fixture, SQUARE, { stopPoint: 0 })
+    const ordinary = createScribbleModel(fixture, SQUARE, { stopPoint: 100 })
+
+    expect(unfinished.scales).toEqual(ordinary.scales)
+    expect(unfinished.lattice).toEqual(ordinary.lattice)
+    expect(unfinished.samples()).toEqual(ordinary.samples())
+    expect(unfinished.residualError()).toBe(ordinary.residualError())
+  })
+
   it('derives segment, coverage, residual, and mask-check lengths at fixed ratios', () => {
     const scales = resolveScribbleScales(SQUARE)
 

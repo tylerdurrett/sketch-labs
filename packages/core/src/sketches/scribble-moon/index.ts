@@ -53,7 +53,7 @@ const SATELLITE_INDICES = [3, 4] as const
 const SPHERE_INDEX = 5
 const STRUCTURAL_PRIMITIVE_COUNT = 13
 
-/** Scribble Moon's source controls followed by the five shared Scribble controls. */
+/** Scribble Moon's source controls followed by the six shared Scribble controls. */
 export const scribbleMoonSchema = {
   /** Direction of the sphere's projected light, in degrees. */
   lightAngle: {
@@ -110,6 +110,7 @@ function scribbleControls(params: Params): ScribbleControls {
     momentum: numberParam(params, scribbleMoonSchema, 'momentum'),
     chaos: numberParam(params, scribbleMoonSchema, 'chaos'),
     toneFidelity: numberParam(params, scribbleMoonSchema, 'toneFidelity'),
+    stopPoint: numberParam(params, scribbleMoonSchema, 'stopPoint'),
   }
 }
 
@@ -218,7 +219,7 @@ export function createScribbleMoonStructuralScene(
  *
  * Keeping this seam independent of Scene styling lets downstream integrations
  * inspect truthful termination and residual error without duplicating how Moon
- * resolves its source and the five shared controls.
+ * resolves its source and the six shared controls.
  */
 export function generateScribbleMoonScribble(
   params: Params,

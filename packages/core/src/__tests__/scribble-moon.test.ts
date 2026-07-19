@@ -32,6 +32,7 @@ const SCRIBBLE_CONTROL_KEYS = [
   'momentum',
   'chaos',
   'toneFidelity',
+  'stopPoint',
 ] as const
 const CONTROL_KEYS = [...SOURCE_CONTROL_KEYS, ...SCRIBBLE_CONTROL_KEYS]
 const FORBIDDEN_CONTROL_KEYS = [
@@ -132,7 +133,7 @@ function independentlySampleMask(
 }
 
 describe('Scribble Moon Sketch contract', () => {
-  it('declares exactly four source controls plus five shared Scribble controls', () => {
+  it('declares exactly four source controls plus six shared Scribble controls', () => {
     expect(Object.keys(scribbleMoon.schema)).toEqual(CONTROL_KEYS)
     expect(scribbleMoon.schema).toBe(scribbleMoonSchema)
 

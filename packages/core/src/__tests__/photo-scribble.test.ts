@@ -74,7 +74,7 @@ beforeEach(() => {
 })
 
 describe('Photo Scribble headless composition', () => {
-  it('declares Image Asset, exact tone controls, then the five Scribble controls', () => {
+  it('declares Image Asset, exact tone controls, then the six Scribble controls', () => {
     const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
 
     expect(Object.keys(schema)).toEqual([
@@ -86,6 +86,7 @@ describe('Photo Scribble headless composition', () => {
       'momentum',
       'chaos',
       'toneFidelity',
+      'stopPoint',
     ])
     expect(schema.imageAsset).toEqual({
       kind: 'image-asset',
@@ -108,6 +109,7 @@ describe('Photo Scribble headless composition', () => {
       momentum: 0.75,
       chaos: 0.25,
       toneFidelity: 0.9,
+      stopPoint: 100,
     })
   })
 
@@ -216,7 +218,7 @@ describe('Photo Scribble headless composition', () => {
     )
   })
 
-  it('passes the existing five Scribble controls and Seed to the Strategy', () => {
+  it('passes the six Scribble controls and Seed to the Strategy', () => {
     const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
     generatePhotoScribble(
       params({
@@ -225,6 +227,7 @@ describe('Photo Scribble headless composition', () => {
         momentum: 0.25,
         chaos: 0.75,
         toneFidelity: 0.4,
+        stopPoint: 35,
       }),
       'routing-seed',
       FRAME,
@@ -243,6 +246,7 @@ describe('Photo Scribble headless composition', () => {
           momentum: 0.25,
           chaos: 0.75,
           toneFidelity: 0.4,
+          stopPoint: 35,
         },
       }),
     )

@@ -100,6 +100,30 @@ function isFinitePoint(point: Readonly<Point>): boolean {
   return Number.isFinite(point[0]) && Number.isFinite(point[1])
 }
 
+interface AuthoredExecutionLimits {
+  readonly limits: Readonly<ScribbleExecutionLimits>
+  readonly acceptedSegmentLimitIsAuthored: boolean
+}
+
+/** Apply artistic early stopping without weakening any independent safety guard. */
+function applyStopPoint(
+  limits: Readonly<ScribbleExecutionLimits>,
+  stopPoint: number,
+): AuthoredExecutionLimits {
+  if (stopPoint === 100) {
+    return { limits, acceptedSegmentLimitIsAuthored: false }
+  }
+
+  const maxAcceptedSegments = Math.floor(
+    (limits.maxAcceptedSegments * stopPoint) / 100,
+  )
+  return {
+    limits: Object.freeze({ ...limits, maxAcceptedSegments }),
+    acceptedSegmentLimitIsAuthored:
+      maxAcceptedSegments < limits.maxAcceptedSegments,
+  }
+}
+
 function assertValidOutcomeGeometry(
   input: ScribbleStrategyInput,
   polylines: readonly Polyline[],
@@ -173,12 +197,17 @@ function executeScribbleStrategy(
     return { polylines: [], termination: 'completed', residualError: 0 }
   }
 
+  const ordinaryLimits =
+    injectedLimits ?? resolveProductionScribbleExecutionLimits(model)
+  const authoredExecution = applyStopPoint(
+    ordinaryLimits,
+    model.controls.stopPoint,
+  )
   const outcome = orchestrate({
     model,
     rng: createRandom(input.seed),
     residualThreshold: model.scales.completionThreshold,
-    limits:
-      injectedLimits ?? resolveProductionScribbleExecutionLimits(model),
+    limits: authoredExecution.limits,
     ...(input.observer === undefined ? {} : { observer: input.observer }),
   })
 
@@ -218,7 +247,10 @@ function executeScribbleStrategy(
     termination:
       outcome.stopCause === 'threshold-reached'
         ? 'completed'
-        : 'budget-exhausted',
+        : authoredExecution.acceptedSegmentLimitIsAuthored &&
+            outcome.bindingGuard === 'accepted-segment-limit'
+          ? 'stopped-early'
+          : 'budget-exhausted',
     residualError: outcome.residualError,
   }
 }

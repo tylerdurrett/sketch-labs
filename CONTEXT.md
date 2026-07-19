@@ -66,7 +66,7 @@ A reusable deterministic generator that samples a **Tone Field** under a **Shadi
 _Avoid_: shader, fill renderer, shading mode
 
 **Shading Result**:
-The minimal outcome of a **Shading Strategy**: generated polylines plus a truthful termination reason distinguishing normal completion from safety-budget exhaustion.
+The minimal outcome of a **Shading Strategy**: generated polylines plus a truthful termination reason distinguishing normal completion, intentional early stopping, and safety-budget exhaustion.
 _Avoid_: bare polyline array, generic metrics bag
 
 **Scribble Strategy**:
@@ -90,6 +90,10 @@ An authored **Scribble Strategy** control that sets how broadly Seeded steering 
 **Tone fidelity**:
 An authored **Scribble Strategy** control that sets how little permission-weighted residual error may remain before generation is considered converged, independently of path abundance and spatial detail.
 _Avoid_: Path density, resolution
+
+**Stop point**:
+An authored **Scribble Strategy** control for the artistic look of an unfinished piece. It stops after an approximate percentage of the ordinary accepted-segment allowance without changing path density, tone fidelity, the Tone Field, or its completion target; `100%` preserves the ordinary complete run.
+_Avoid_: performance budget, Path density, Tone fidelity, reveal progress
 
 **Output Profile**:
 The one target-specific artifact description active in a Sketch session and captured by its **Preset**—plot dimensions and margins for paper, or resolution and frame settings for video. Before reframing, its aspect determines the **Composition Frame** and its magnitude controls output mapping; committing a **Page Frame** instead derives the final output page at that same physical scale while the original Composition Frame remains independently reproducible. A Sketch may declare its default, otherwise the Harness initially supplies a square `200 × 200 mm` plot profile with linked `10 mm` insets.
@@ -199,12 +203,14 @@ _Avoid_: config, params, options, export options
 - A **Sketch** draws shading polylines as Hidden-line sources in painter's order; the existing **Hidden-line pass**, not the **Shading Strategy**, clips them behind nearer filled occluders alongside the Sketch's other visible contours.
 - A **Scribble Strategy** minimizes pen lifts but may return multiple polylines so disconnected or exhausted regions can be shaded without crossing a zero-permission **Shading Mask**.
 - A **Scribble Strategy** tracks the virtual coverage deposited by its paths and stops when remaining weighted tone error falls below an explicit tolerance; a maximum path budget is a deterministic safety cap, not the definition of completion.
+- **Stop point** is shared by Photo Scribble, Scribble Moon, Tone Calibration, and every other **Scribble Strategy** consumer. It scales only the ordinary accepted-segment allowance, approximately rather than promising a percentage of final path length or darkness, so its purpose remains authored unfinishedness rather than performance tuning.
+- A sub-`100%` **Stop point** that binds returns a valid `stopped-early` **Shading Result**; reaching an independent solver safety guard remains `budget-exhausted`, while reaching the tone target first remains normal completion. At `100%`, execution limits, geometry, residual, and termination are unchanged.
 - A **Scribble Strategy** weights remaining tone error linearly by **Shading Mask** permission for both steering and completion, so low-permission areas exert proportionally less demand while zero-permission areas exert none and remain impassable.
 - A **Scribble Strategy** deposits additive virtual coverage with a compact smooth falloff around each segment; explicit Scene-space influence radius and per-pass strength control spacing and repetition without representing physical **Tool width**.
 - Increasing **Path density** reduces the virtual coverage satisfied by each pass, producing more path length for the same **Tone Field** while preserving its relative light-dark relationships.
 - Decreasing **Scribble scale** produces finer paths and tighter field sampling, while increasing it produces broader, looser paths; low-level sampling and coverage ratios remain internal until hands-on iteration proves a need to expose them separately.
 - A **Scribble Strategy** selects starts and restarts through Seeded weighting among high-residual areas, so dark regions tend to appear early without forcing every Seed to begin at the same global maximum.
-- A safety-budget-exhausted **Shading Result** remains valid, exportable creative geometry but Studio must identify it truthfully rather than calling it converged; generic path length and pen-lift counts are derived from its polylines, while strategy-specific diagnostics do not widen the shared result.
+- Intentionally stopped-early and safety-budget-exhausted **Shading Results** remain valid, exportable creative geometry, but Studio must identify each truthfully rather than calling either converged or confusing authored unfinishedness with a safety warning; generic path length and pen-lift counts are derived from their polylines, while strategy-specific diagnostics do not widen the shared result.
 - Plot dimensions and insets are canonical millimeters; the Paper UI accepts and displays both millimeters and inches by converting at its boundary, while the display-unit choice is a Studio local-storage preference rather than Preset or Sketch state.
 - The first Output Profile implementation is plot-focused in Studio; Remotion derives the same fixed-area Composition Frame from its existing pixel width and height while retaining its current resolution/fps inputs, and a Studio Video profile/target switch waits until video authoring moves there.
 

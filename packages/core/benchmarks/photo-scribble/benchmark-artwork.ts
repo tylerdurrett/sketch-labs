@@ -50,6 +50,9 @@ export function photoScribbleBenchmarkControls(
     momentum: finiteNumber(params, 'momentum'),
     chaos: finiteNumber(params, 'chaos'),
     toneFidelity: finiteNumber(params, 'toneFidelity'),
+    // Frozen issue-336 scenarios predate the authored stop-point control.
+    stopPoint:
+      params.stopPoint === undefined ? 100 : finiteNumber(params, 'stopPoint'),
   }
 }
 

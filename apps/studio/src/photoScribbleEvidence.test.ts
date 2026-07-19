@@ -659,6 +659,7 @@ describe("Photo Scribble evidence page seams", () => {
       momentum: Number(params.momentum),
       chaos: Number(params.chaos),
       toneFidelity: Number(params.toneFidelity),
+      stopPoint: Number(params.stopPoint ?? 100),
     };
     expect(
       await canonicalBrowserScribbleTargetHash(source, frame, controls),

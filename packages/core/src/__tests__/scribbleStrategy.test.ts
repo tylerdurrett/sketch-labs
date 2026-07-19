@@ -25,6 +25,7 @@ import type {
   ScribbleOrchestratorOutcome,
   ScribbleOrchestratorStopCause,
 } from '../scribbleStrategy/orchestrator'
+import { runScribbleOrchestrator } from '../scribbleStrategy/orchestrator'
 import type { ScribbleControls } from '../scribbleStrategy/types'
 import type { Point, Polyline } from '../types'
 import {
@@ -144,7 +145,9 @@ function maximumTurn(polyline: readonly Point[]): number {
 }
 
 function expectValidResult(result: ScribbleResult): void {
-  expect(['completed', 'budget-exhausted']).toContain(result.termination)
+  expect(['completed', 'stopped-early', 'budget-exhausted']).toContain(
+    result.termination,
+  )
   expect(Number.isFinite(result.residualError)).toBe(true)
   expect(result.residualError).toBeGreaterThanOrEqual(0)
   expect(result.residualError).toBeLessThanOrEqual(1)
@@ -202,6 +205,7 @@ describe('public Scribble strategy boundary', () => {
       'momentum',
       'chaos',
       'toneFidelity',
+      'stopPoint',
     ])
     expect(Object.keys(defaultScribbleControls)).toEqual(
       Object.keys(scribbleControlSchema),
@@ -244,7 +248,7 @@ describe('public Scribble strategy boundary', () => {
   it('completes zero demand without calling E1 or creating geometry', () => {
     let calls = 0
     const result = runScribbleStrategyForTesting(
-      input(source(constantTone(0))),
+      input(source(constantTone(0)), 'zero-demand-stop', { stopPoint: 0 }),
       TINY_LIMITS,
       {
         orchestrate: () => {
@@ -259,6 +263,193 @@ describe('public Scribble strategy boundary', () => {
       polylines: [],
       termination: 'completed',
       residualError: 0,
+    })
+  })
+
+  it('lets an already-satisfied nonzero target beat a zero stop point', () => {
+    const observations: ScribbleExecutionObservation[] = []
+    const result = runScribbleStrategyForTesting(
+      input(source(constantTone(0.1)), 'satisfied-stop-zero', {
+        toneFidelity: 0,
+        stopPoint: 0,
+      }),
+      { ...TINY_LIMITS, maxAcceptedSegments: 20 },
+      {
+        executionObserver: (observation) => observations.push(observation),
+      },
+    )
+
+    expect(result).toEqual({
+      polylines: [],
+      termination: 'completed',
+      residualError: expect.closeTo(0.1, 12),
+    })
+    expect(observations).toEqual([
+      {
+        stopCause: 'threshold-reached',
+        bindingGuard: null,
+        counters: {
+          acceptedSegments: 0,
+          emittedPolylines: 0,
+          stagnations: 0,
+          restarts: 0,
+        },
+      },
+    ])
+  })
+
+  it('returns intentional empty artwork when zero stop point binds nonzero demand', () => {
+    const observations: ScribbleExecutionObservation[] = []
+    const result = runScribbleStrategyForTesting(
+      input(source(constantTone(1)), 'unfinished-at-zero', { stopPoint: 0 }),
+      { ...TINY_LIMITS, maxAcceptedSegments: 20 },
+      {
+        executionObserver: (observation) => observations.push(observation),
+      },
+    )
+
+    expect(result.polylines).toEqual([])
+    expect(result.termination).toBe('stopped-early')
+    expect(result.residualError).toBe(1)
+    expect(observations[0]).toMatchObject({
+      stopCause: 'budget-reached',
+      bindingGuard: 'accepted-segment-limit',
+      counters: { acceptedSegments: 0 },
+    })
+  })
+
+  it.each([
+    [25, 1],
+    [50, 3],
+    [75, 5],
+  ] as const)(
+    'floors stop point %s%% against the ordinary accepted cap only',
+    (stopPoint, expectedAcceptedSegments) => {
+      const limits: ScribbleExecutionLimits = {
+        maxAcceptedSegments: 7,
+        maxPolylines: 9,
+        maxStagnations: 11,
+        maxRestarts: 13,
+      }
+      let receivedLimits: Readonly<ScribbleExecutionLimits> | undefined
+      const observations: ScribbleExecutionObservation[] = []
+      const result = runScribbleStrategyForTesting(
+        input(source(constantTone(1)), `stop-floor-${stopPoint}`, {
+          toneFidelity: 1,
+          stopPoint,
+        }),
+        limits,
+        {
+          orchestrate: (orchestratorInput) => {
+            receivedLimits = orchestratorInput.limits
+            return runScribbleOrchestrator(orchestratorInput)
+          },
+          executionObserver: (observation) => observations.push(observation),
+        },
+      )
+
+      expect(receivedLimits).toEqual({
+        ...limits,
+        maxAcceptedSegments: expectedAcceptedSegments,
+      })
+      expect(receivedLimits).toMatchObject({
+        maxPolylines: limits.maxPolylines,
+        maxStagnations: limits.maxStagnations,
+        maxRestarts: limits.maxRestarts,
+      })
+      expect(observations[0]!.counters.acceptedSegments).toBe(
+        expectedAcceptedSegments,
+      )
+      expect(observations[0]!.bindingGuard).toBe('accepted-segment-limit')
+      expect(result.termination).toBe('stopped-early')
+    },
+  )
+
+  it('lets threshold completion win when the same segment reaches the authored cap', () => {
+    const limits = { ...TINY_LIMITS, maxAcceptedSegments: 2 }
+    const result = runScribbleStrategyForTesting(
+      input(source(), 'threshold-authored-cap-collision', { stopPoint: 50 }),
+      limits,
+      {
+        orchestrate: ({ model, limits: receivedLimits }) => {
+          expect(receivedLimits.maxAcceptedSegments).toBe(1)
+          return outcome(
+            [
+              [
+                [10, 10],
+                [11, 10],
+              ],
+            ],
+            model.scales.completionThreshold,
+            'threshold-reached',
+          )
+        },
+      },
+    )
+
+    expect(result.termination).toBe('completed')
+  })
+
+  it('keeps independent safety guards budget-exhausted below 100 percent', () => {
+    const result = runScribbleStrategyForTesting(
+      input(source(constantTone(1)), 'stop-with-safety-guard', {
+        stopPoint: 50,
+      }),
+      {
+        maxAcceptedSegments: 20,
+        maxPolylines: 0,
+        maxStagnations: 20,
+        maxRestarts: 20,
+      },
+    )
+
+    expect(result.polylines).toEqual([])
+    expect(result.termination).toBe('budget-exhausted')
+  })
+
+  it('passes the exact ordinary tuple and preserves legacy output at 100 percent', () => {
+    const limits: ScribbleExecutionLimits = {
+      maxAcceptedSegments: 9,
+      maxPolylines: 5,
+      maxStagnations: 7,
+      maxRestarts: 3,
+    }
+    const controlsWithoutStopPoint = {
+      pathDensity: 1,
+      scribbleScale: 1,
+      momentum: 0.75,
+      chaos: 0.25,
+      toneFidelity: 1,
+    }
+    const legacyInput: ScribbleStrategyInput = {
+      source: source(constantTone(1)),
+      frame: FRAME,
+      controls: controlsWithoutStopPoint as ScribbleControls,
+      seed: 'stop-point-100-compatibility',
+    }
+    const explicitInput: ScribbleStrategyInput = {
+      ...legacyInput,
+      controls: { ...controlsWithoutStopPoint, stopPoint: 100 },
+    }
+    const receivedLimits: Readonly<ScribbleExecutionLimits>[] = []
+    const execute = (strategyInput: ScribbleStrategyInput) =>
+      runScribbleStrategyForTesting(strategyInput, limits, {
+        orchestrate: (orchestratorInput) => {
+          receivedLimits.push(orchestratorInput.limits)
+          return runScribbleOrchestrator(orchestratorInput)
+        },
+      })
+
+    const legacy = execute(legacyInput)
+    const explicit = execute(explicitInput)
+
+    expect(receivedLimits).toEqual([limits, limits])
+    expect(receivedLimits.every((received) => received === limits)).toBe(true)
+    expect(explicit).toEqual(legacy)
+    expect(explicit).toMatchObject({
+      polylines: legacy.polylines,
+      residualError: legacy.residualError,
+      termination: legacy.termination,
     })
   })
 
