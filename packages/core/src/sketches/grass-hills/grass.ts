@@ -45,12 +45,13 @@ export interface CanonicalGrassCoordinates {
   readonly v: number
 }
 
-/** Four unconditional random draws consumed for every selected root. */
+/** Five unconditional random draws consumed for every selected root. */
 export interface GrassBladeRolls {
   readonly length: number
   readonly width: number
   readonly stiffness: number
   readonly lean: number
+  readonly survival: number
 }
 
 /**
@@ -78,9 +79,11 @@ export function resolveMaximumUnscaledBladeLength(
 /**
  * Project selected roots and resolve their stable, root-local blade variation.
  *
- * Each root owns an independent RNG stream. The four draws are deliberately
- * unconditional and ordered length, width, stiffness, lean so collapsing a
- * control's variance never shifts any other property or blade.
+ * Each root owns an independent RNG stream. The five draws are deliberately
+ * unconditional and ordered length, width, stiffness, lean, survival so
+ * collapsing a control's variance never shifts any other property or blade.
+ * The survival roll participates only in exclusion, never geometry: it is
+ * drawn even when exclusion is off so enabling it cannot reroll any blade.
  */
 export function buildGrassBlades({
   seed,
@@ -103,6 +106,7 @@ export function buildGrassBlades({
         width: random.value(),
         stiffness: random.value(),
         lean: random.value(),
+        survival: random.value(),
       })
       const [x, y] = projectGrassRoot(root, mask)
       const unscaledLength = clamp(

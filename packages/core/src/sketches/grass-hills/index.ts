@@ -39,11 +39,18 @@
  *
  * GRASS / CANONICAL STABILITY: every hill owns a canonical 100 x 100 stable-cell
  * root bank keyed by its reduced depth identity. Priority-prefix selection and
- * the four per-blade rolls stay in that hill-local space, so a shared hill
+ * the five per-blade rolls stay in that hill-local space, so a shared hill
  * retains its arrangement and variation when `hillCount` changes. Only the
  * final projection follows the count-dependent terrain mask. Each hill is
  * emitted before its blades, whose ascending root-y order lets lower blades
  * cover higher ones before the next, nearer hill covers the whole group.
+ *
+ * GRASS EXCLUSION: `treelineStrength` and `slopeBareness` compare each root's
+ * unconditional fifth roll against a per-band survival probability built from
+ * band-relative elevation and the depth-invariant terrain slope. The filter
+ * runs before painter sorting and foreground zoom, so survivors never move or
+ * reroll; with both knobs at zero the filter is skipped structurally and no
+ * survival probability is ever evaluated.
  *
  * DENSE / FAITHFUL OUTLINE ARCHITECTURE: the full-composition target is 10,000
  * descriptors from a seeded 100×100 stratified bank per stable hill identity.
@@ -95,6 +102,7 @@ import {
   resolveMaximumUnscaledBladeLength,
   type GrassBladeDescriptor,
 } from './grass'
+import { createGrassSurvival } from './grass-exclusion'
 import { createGrassHillMask } from './grass-placement'
 import {
   grassHillsOutlineSource,
@@ -287,6 +295,10 @@ function prepareGrassHills(
   const terrainSharpness = numberParam(params, schema, 'terrainSharpness')
   const ridgeSamples = Math.round(numberParam(params, schema, 'ridgeSamples'))
   const bladeDensity = numberParam(params, schema, 'bladeDensity')
+  const treelineHeight = numberParam(params, schema, 'treelineHeight')
+  const treelineFalloff = numberParam(params, schema, 'treelineFalloff')
+  const treelineStrength = numberParam(params, schema, 'treelineStrength')
+  const slopeBareness = numberParam(params, schema, 'slopeBareness')
   const bladeLength = numberParam(params, schema, 'bladeLength')
   const bladeLengthVariance = numberParam(
     params,
@@ -358,7 +370,24 @@ function prepareGrassHills(
           : {}),
         maxUnscaledBladeLength,
       })
-      const descriptors = [
+      // Exclusion runs pre-sort and pre-zoom against the survival roll, so
+      // survivors keep their exact descriptors. Both knobs at zero skip the
+      // filter (and every survival evaluation) entirely — today's code path.
+      const survivalAt =
+        treelineStrength === 0 && slopeBareness === 0
+          ? undefined
+          : createGrassSurvival({
+              band,
+              terrainAt,
+              ridgeAmplitude,
+              knobs: {
+                treelineHeight,
+                treelineFalloff,
+                treelineStrength,
+                slopeBareness,
+              },
+            })
+      const built = [
         ...buildGrassBlades({
           seed,
           hillKey: band.hillKey,
@@ -370,7 +399,16 @@ function prepareGrassHills(
           stiffnessVariance,
           windLean,
         }),
-      ].sort(
+      ]
+      const descriptors = (
+        survivalAt === undefined
+          ? built
+          : built.filter(
+              (descriptor) =>
+                descriptor.rolls.survival <
+                survivalAt(descriptor.canonical.u, descriptor.projected[1]),
+            )
+      ).sort(
         (a, b) =>
           a.projected[1] - b.projected[1] ||
           a.projected[0] - b.projected[0] ||
