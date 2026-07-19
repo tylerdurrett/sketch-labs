@@ -42,8 +42,16 @@ The single declaration a **Sketch** makes of its tweakable knobs. It is the *spi
 _Avoid_: config, settings
 
 **Composition Frame**:
-The scale-independent, aspect-ratio-bearing drawable rectangle a **Sketch** composes into, expressed as a unitless coordinate space normalized to the area of the Harness's `1000 × 1000` square; for a plot it takes the aspect of the paper inside its margins, while physical paper size and pixel resolution belong to the later output mapping.
+The scale-independent, aspect-ratio-bearing drawable rectangle a **Sketch** composes into, expressed as a unitless coordinate space normalized to the area of the Harness's `1000 × 1000` square; an unframed plot initially takes the aspect of the paper inside its margins, while later Page framing leaves this original generation boundary intact as the output page diverges from it.
 _Avoid_: paper size (physical output), resolution (pixel output), canvas size (ambiguous between layout and pixels)
+
+**Page Frame**:
+The axis-aligned final drawable page boundary positioned in an already-generated **Scene**'s **Composition Frame** coordinates; making it smaller crops generated content, extending it beyond the Composition Frame introduces geometry-free page padding, and neither operation regenerates or rescales the Scene beneath it (ADR-0015).
+_Avoid_: Crop Window (names only the subtractive case), Composition Frame (generation boundary), canvas bounds
+
+**Page Frame edit mode**:
+A non-persistent Studio editing view that shows the whole original composition, the crop or padded area around it, and direct controls over its **Page Frame**, while ordinary preview shows the committed framed result edge-to-edge exactly as output will.
+_Avoid_: crop preview (names only the subtractive case), crop parameter
 
 **Tone Field**:
 A deterministic, resolution-independent sampler over a **Composition Frame** that gives the desired relative ink darkness at any point as a finite value from `0` for paper to `1` for maximum darkness.
@@ -84,7 +92,7 @@ An authored **Scribble Strategy** control that sets how little permission-weight
 _Avoid_: Path density, resolution
 
 **Output Profile**:
-The one target-specific artifact description active in a Sketch session and captured by its **Preset**—plot dimensions and margins for paper, or resolution and frame settings for video—whose aspect determines the **Composition Frame** while whose magnitude only controls output mapping; a Sketch may declare its default, otherwise the Harness initially supplies a square `200 × 200 mm` plot profile with linked `10 mm` insets.
+The one target-specific artifact description active in a Sketch session and captured by its **Preset**—plot dimensions and margins for paper, or resolution and frame settings for video. Before reframing, its aspect determines the **Composition Frame** and its magnitude controls output mapping; committing a **Page Frame** instead derives the final output page at that same physical scale while the original Composition Frame remains independently reproducible. A Sketch may declare its default, otherwise the Harness initially supplies a square `200 × 200 mm` plot profile with linked `10 mm` insets.
 _Avoid_: render target (the target is only one field), export options, last-used settings
 
 **Tool width**:
@@ -116,9 +124,9 @@ An action distinct from re-seeding: it rolls new *values* for every unlocked num
 A per-param flag that pins its value and excludes it from **Randomize**.
 
 **Preset**:
-A committed, per-Sketch snapshot that fully reproduces an image and resumes an exploration session — it captures params, seed, locks, one active **Output Profile**, and — once the deferred timed-reveal feature (#327) lands — the selected `t` for a time-driven Sketch. Stored as a JSON file per Sketch under `{sketchesRoot}/{id}/presets/`, colocated with the Sketch's code (a Sketch is a folder, `{sketchesRoot}/{id}/index.ts`). `sketchesRoot` is a single configured knob — today `packages/core/src/sketches` — so sketches and their presets can later move out of the harness by repointing it (ADR-0006). Presets are written in dev via a Vite dev-server middleware plugin (no standalone server) and read by every consumer (studio, Remotion) as a static file at the stable logical URL `/sketches/{id}/presets/{name}.json`.
+A committed, per-Sketch snapshot that fully reproduces an image and resumes an exploration session — it captures params, seed, locks, one active **Output Profile**, any active **Page Frame** plus the original **Composition Frame** aspect when the two have diverged, and — once the deferred timed-reveal feature (#327) lands — the selected `t` for a time-driven Sketch. Stored as a JSON file per Sketch under `{sketchesRoot}/{id}/presets/`, colocated with the Sketch's code (a Sketch is a folder, `{sketchesRoot}/{id}/index.ts`). `sketchesRoot` is a single configured knob — today `packages/core/src/sketches` — so sketches and their presets can later move out of the harness by repointing it (ADR-0006). Presets are written in dev via a Vite dev-server middleware plugin (no standalone server) and read by every consumer (studio, Remotion) as a static file at the stable logical URL `/sketches/{id}/presets/{name}.json`.
 
-The serialized record is a self-describing envelope over the studio's live state. In addition to seed, params, and locks, it captures one active **Output Profile**: its aspect supplies the **Composition Frame** needed to reproduce the Scene, while its complete dimensions resume the intended artifact; a timed Preset also captures the selected `t` and reloads paused at that frame (deferred to #327); locks resume the session and do _not_ affect the rendered frame. The **Parameter Schema** is authoritative _on read_, not just on write: a Preset is a derived view, so reloading reconciles its `params` against the live schema — keys absent from the schema are dropped, keys missing from the Preset are filled from their spec `default`, and out-of-bounds values load **as-is, unclamped** (exact-image fidelity beats staying in-bounds; a clamp would silently reproduce a different frame). `version` is the migration escape hatch: v1 stores `{ version, sketch, name, seed, params, locks }`; v2 adds the active plot `profile`; a deferred next version (#327) adds an optional finite `t`, present when the saved Sketch is time-driven, without changing how v1 or v2 records load.
+The serialized record is a self-describing envelope over the studio's live state. In addition to seed, params, and locks, it captures one active **Output Profile**: when unframed, its aspect supplies the **Composition Frame** needed to reproduce the Scene; when reframed, the Preset preserves that generation aspect independently and records the exact Page Frame while the profile describes the final artifact. A timed Preset also captures the selected `t` and reloads paused at that frame (deferred to #327); locks resume the session and do _not_ affect the rendered frame. The **Parameter Schema** is authoritative _on read_, not just on write: a Preset is a derived view, so reloading reconciles its `params` against the live schema — keys absent from the schema are dropped, keys missing from the Preset are filled from their spec `default`, and out-of-bounds values load **as-is, unclamped** (exact-image fidelity beats staying in-bounds; a clamp would silently reproduce a different frame). `version` is the migration escape hatch: v1 stores `{ version, sketch, name, seed, params, locks }`; v2 adds the active plot `profile`; future additive versions carry timed-frame and Page Frame state without changing how v1 or v2 records load.
 
 **Palette swatch**:
 A Harness-wide Studio editing shortcut that sets a color param to a fixed hex value without becoming part of the Sketch's **Parameter Schema** or **Preset**.
@@ -142,11 +150,14 @@ _Avoid_: config, params, options, export options
 - A vector **Sketch**'s generator produces private domain structures (e.g. its own leaf instances), then **draws** them into a **Scene** of **Primitives**. Domain types never leave the generator.
 - A **Sketch** binds to one or more **Renderers**. Vector Sketches use **Scene Renderers** (and get SVG/plotter/raster export for free); non-vector Sketches use **Direct Renderers**.
 - "Can this Sketch bake itself into a **Scene**?" is the dividing line between the two renderer families.
-- One active **Output Profile** supplies the **Composition Frame** aspect to generation and the target-specific dimensions to the later output mapping.
+- Before reframing, one active **Output Profile** supplies both the **Composition Frame** aspect to generation and the target-specific dimensions to later output mapping; a committed Page Frame decouples those responsibilities without changing the generated Scene.
 - A **Preset**'s Output Profile wins on reload; otherwise a Sketch's declared default wins, with the Harness's square default as the terminal fallback.
+- A reframed **Preset** preserves both sides of the post-generation boundary: its stored generation aspect regenerates the same Scene, while its **Output Profile** and exact **Page Frame** reproduce the final page and framing; Page Frame edits participate in Studio Undo/Redo like other authored session edits.
 - _(Deferred to #327.)_ A timed **Preset** restores its selected `t` in a paused state, so the saved frame, **Outline mode**, and plotter export identify the same reveal progress without turning progress into a Sketch parameter.
 - _(Deferred to #327.)_ When an older **Preset** has no stored `t`, reload pauses a one-shot Sketch at its complete `duration` and a looping Sketch at `t = 0`; these mode-specific defaults keep migration deterministic.
 - An **Image Asset parameter** lets the **Parameter Schema** derive managed image selection and lets a **Preset** capture the chosen stable ID; **Randomize** leaves the selection unchanged, and its spec declares a default asset ID so a consuming Sketch renders from a committed sample out of the box.
+- Each resolved **Image Asset parameter** control exposes a Harness-owned "Recompose to this image's aspect" action scoped to that exact row; the selected asset's decoded dimensions provide the aspect, so multiple image fields remain unambiguous and no Sketch-contract hint chooses one for the user.
+- Recompose to an image aspect resets Page framing and fits the new drawable aspect inside the current drawable Page without enlarging it—preserving the dimension that already fits, shrinking the other, and retaining physical margins—after which ordinary locked Page resizing may scale the result.
 - A missing **Image Asset** fails closed: the parameter keeps the unresolvable ID exactly as captured, Studio shows an explicit missing-asset state rather than substituting other bytes, no background shading work launches, and exports stay disabled until the asset resolves — reproducing a different image would break the **Preset** contract's exact-image fidelity.
 - The default raster adapter maps inverted linear relative luminance to a **Tone Field** (sRGB decodes to linear light before weighting, so plotted ink coverage tracks the photograph's physical reflectance rather than on-screen lightness) and straight alpha to a **Shading Mask**, so opaque photographs use their full fitted extent while transparent and partially transparent pixels provide hard and soft permission respectively.
 - The default raster adapter fits the whole photograph centered inside the **Composition Frame** (contain, never crop); outside the fitted extent both tone and permission are exactly zero, so a mismatched aspect letterboxes with unplottable bands rather than silently discarding photo content.
@@ -155,6 +166,26 @@ _Avoid_: config, params, options, export options
 - A plot profile's margins inset the paper to form its drawable rectangle; that rectangle's aspect supplies the Composition Frame, so a margin change regenerates only when it changes the drawable aspect.
 - Plot margins are four physical insets; the initial Harness UI edits them as one linked value, leaving asymmetric plotter-safe regions representable without changing the Preset model later.
 - Composition Frames use fixed-area normalization: for aspect `r`, the Harness resolves `width = 1000√r` and `height = 1000/√r`, preserving one million square coordinate units across aspect changes; an Output Profile later supplies the uniform conversion from those unitless coordinates to millimeters or pixels.
+- A **Page Frame** is downstream of generation: moving or resizing it never changes the **Composition Frame**, reruns the **Sketch**, or alters the generated **Scene**.
+- Studio enters Page Frame edit mode through the familiar user-facing **Crop** action; the mode is titled **Edit Page Frame** because the same controls can crop inward or enlarge the Page with padding.
+- Entering Page Frame edit mode begins as the current page boundary; on first use that is an exact, visually inert full-**Composition Frame** frame, after which the user can resize and reposition it.
+- A Page Frame may sit inside its Composition Frame to crop, cross it to combine cropping with padding, or contain it to add padding on any side.
+- Committing a Page Frame preserves the existing physical scale: reducing its width or height removes the corresponding physical page extent, while enlarging it adds geometry-free page extent instead of rescaling the generated artwork.
+- Committing a Page Frame automatically locks the resulting page aspect, so editing either physical paper dimension updates the other and uniformly rescales output without changing the stored **Composition Frame** or regenerating its Scene; the user may explicitly unlock it later.
+- Inside Page Frame edit mode, changing Page width, height, or aspect reframes around the frozen Composition without regeneration; outside that mode, an unlocked Paper-aspect edit retains its existing recompose meaning, warns that the Scene will change, and resets the Page Frame, while locked proportional Paper resizing changes magnitude only.
+- Page framing applies only to the drawable composition; a plot **Output Profile**'s physical margins remain unchanged around the framed result, and removing that plotter clearance is a separate Paper edit.
+- Studio exposes Page Frame position and extent as percentages of the original **Composition Frame**, synchronized with direct manipulation; pixels do not define vector framing geometry, and physical millimeters or inches remain **Output Profile** concerns.
+- Page Frame edit mode's compact toolbar exposes percentage `X`, `Y`, `W`, and `H` (including negative origins and extents above `100%` for padding), editable physical Page width/height in the current unit, freeform/common/custom aspect controls with a persistent lock, and Apply/Cancel/Reset Frame; pixels, resolution, rotation, grids, and automatic content detection remain outside this capability.
+- Page Frame resizing is freeform by default; holding Shift while dragging temporarily preserves its current aspect, while choosing a named or custom aspect provides an explicit persistent constraint until the user returns to freeform.
+- Dragging inside a Page Frame pans the composition behind its stationary boundary by updating the same Page Frame position inversely; it is an alternate direct manipulation, not a persisted composition transform.
+- **Page Frame edit mode** is temporary Studio chrome: it reveals the whole source composition, dims discarded content, shows padded extent with the normal background precedence, and overlays move/resize controls; leaving it restores the ordinary edge-to-edge framed preview shared by output.
+- Final preview and output rebase the committed Page Frame's top-left to the drawable Page origin while leaving the underlying Scene coordinates untouched; Preset framing data reproduces that output-only translation exactly.
+- Page framing is the cheap final operation after full-Composition generation and, when requested, Hidden-line derivation: interactive reframing reuses completed Scribble and Outline results, clips paths exactly at the final Page boundary, and adds any requested plot frame around that final Page rather than the original Composition.
+- One committed Page Frame governs Fill preview, Tone reference mode, Outline preview, ordinary PNG/SVG, and plotter SVG; only Page Frame edit mode reveals discarded composition outside it.
+- The first Page Frame implementation covers the current Scene-backed Studio workflow and its exports; later video or Direct Renderer consumers may adopt the same persisted model when real consumers establish their output-surface requirements.
+- A Page Frame survives params, Seed, Image Asset selection, time, and other content changes made against the same Composition Frame, plus locked proportional Paper resizing; an explicit recompose that changes the Composition Frame aspect resets it because its coordinate basis has changed.
+- Canceling Page Frame edit mode restores the last committed Page Frame, while Reset Frame removes it entirely and restores the full Composition Frame at the current physical scale and margins without regeneration; both committed framing and reset operations are undoable.
+- A Scene-authored background retains ADR-0009 precedence under Page Framing: it fills the whole output surface, including padded Page Frame extent; when absent, the caller's Page ground shows through, while a background intended to stop at the Composition Frame edge is bounded Primitive geometry instead.
 - Scene geometry and Scene stroke widths scale through the output mapping; a plotter's physical **Tool width** remains fixed in millimeters and can drive a plot preview independently.
 - The Studio exposes the active plot Output Profile in a Paper section near the top of the inspector; it is collapsible and collapsed by default, with its active dimensions retained in the summary.
 - A plotter-ready SVG maps artwork into the profile's physical paper and margins but emits only plot paths; paper edges, margin guides, and backgrounds are preview chrome rather than drawable geometry, while the Output Profile remains available as metadata.
@@ -179,7 +210,7 @@ _Avoid_: config, params, options, export options
 
 ## Core invariant: a Sketch is a pure function of (params, seed, time, composition frame)
 
-A Sketch's output is deterministic in its params, seed, time, and **Composition Frame** — same inputs, same Scene, always. Changing the Composition Frame's aspect fully regenerates the Scene; changing only physical paper size or pixel resolution does not. This single function has three callers:
+A Sketch's output is deterministic in its params, seed, time, and **Composition Frame** — same inputs, same Scene, always. Changing the Composition Frame's aspect fully regenerates the Scene; changing only physical paper size, pixel resolution, or a downstream **Page Frame** does not. This single function has three callers:
 - **Exploration** samples it at `t = wall-clock`, as fast as it can, to *feel* realtime while tuning.
 - **Remotion** samples it at `t = frame / fps` for deterministic video.
 - **Static / plotter export** freezes `t` and exports that frame's vector IR exactly.
@@ -211,7 +242,6 @@ These are intentionally **not** pinned here — they are implementation specific
 - A mask-only Studio diagnostic alongside **Tone reference mode**. The initial reference shows the effective target because that is what the solver matches. Imported masks did not automatically pull this in either: with the default adapter the mask is straight alpha plus the letterbox zero, so the same photographic-source browser review decides whether 'paper because forbidden' vs 'paper because white' is confusing enough to warrant a separate permission view.
 - The Node/Remotion **Image Asset** loader. Core's decoded-pixels record (ADR-0014) is the seam; a pure-JS decoder joins when video first consumes a photo-backed Sketch, honoring the glossary's cross-consumer resolution promise as direction rather than as the first photographic feature's obligation.
 - Alternate raster-to-field interpretations beyond the default luminance-plus-alpha adapter: channel selection, independent mask assets, color-aware tone models, thresholding, inversion, edge-aware preprocessing, and fit/crop policy remain source-side concerns to refine with real photograph experiments; none may leak into **Shading Strategy** consumers. Tone contrast and Tone gamma graduated out of this deferral into the first photo Sketch's source controls — applied on the tone domain, exact-zero-preserving, composed inside the source adapter.
-- A Studio convenience that sets the active plot **Output Profile**'s aspect (or dimensions) from a chosen **Image Asset** so the fitted photograph fills the paper without letterbox bands; the contain-fit default makes this attractive but it stays a one-click affordance idea until the photo Sketch proves the need.
 
 ## Example dialogue
 
@@ -229,6 +259,9 @@ These are intentionally **not** pinned here — they are implementation specific
 >
 > **Sketch author:** “Does viewing the source tone replace the scribble in my exported plot?”
 > **Domain expert:** “No. **Tone reference mode** is diagnostic only; **Outline mode** still shows the complete plot geometry, including the finished shading.”
+>
+> **Sketch author:** “I like this exact square drawing, but can I tighten the Page around it without generating a different portrait composition?”
+> **Domain expert:** “Yes. Move or resize its **Page Frame** to crop or pad the frozen **Composition Frame**; use Recompose only when you want the Sketch to respond to the Page's new aspect.”
 
 ## Flagged ambiguities
 
@@ -237,6 +270,7 @@ These are intentionally **not** pinned here — they are implementation specific
 - "preset color swatch" collided with the existing full-session **Preset**. Resolved: **Palette swatch** is the canonical term for a color-choice shortcut.
 - "shades-of-darkness-to-path" mixed the source, strategy, and Scene output. Resolved: a **Tone Field** is the shared source abstraction; shading strategies produce polyline geometry that a **Sketch** draws as **Primitives**.
 - "shading region" implied ink was either allowed or forbidden. Resolved: a **Shading Mask** carries soft permission above zero and reserves exact zero for a hard prohibition.
+- "crop" named only shrinking the output boundary even though the same mechanism can enlarge it with padding. Resolved: **Page Frame** is the persisted domain concept and **Crop** remains the familiar Studio action that enters Page Frame edit mode.
 
 ## Build strategy (decided)
 
