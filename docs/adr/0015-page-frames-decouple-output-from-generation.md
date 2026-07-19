@@ -1,0 +1,7 @@
+# Page Frames decouple output from generation
+
+Historically one **Output Profile** did two jobs: its drawable aspect supplied the **Composition Frame** that generated a Scene, and its physical dimensions mapped that Scene onto the output page. We decided a committed **Page Frame** may decouple those jobs. The Page Frame is an axis-aligned final output boundary positioned in the original Composition Frame coordinates; moving or resizing it crops or pads the page without regenerating or rescaling the Scene beneath it, while an explicit recompose operation remains the way to make the Sketch respond to a new page aspect.
+
+This preserves exact generated artwork while making page framing reproducible. Once Page and Composition diverge, a **Preset** retains the original generation aspect, the Page Frame, and the final Output Profile; final preview and export clip and rebase completed geometry through that frame after expensive generation and Hidden-line work. Physical plot margins remain separate, and ADR-0009 background precedence remains unchanged across padded extent.
+
+We rejected changing the Composition Frame whenever the user crops because aspect-sensitive Sketches would regenerate the artwork being preserved. We also rejected separate crop and padding models: both are the same Page Frame positioned respectively inside or beyond the Composition Frame, and separate representations would create avoidable state, UI, and export branches.
