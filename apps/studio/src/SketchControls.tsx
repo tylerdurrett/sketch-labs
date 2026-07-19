@@ -20,6 +20,7 @@ import {
   randomize,
   renderToSVG,
   resolveOutputProfile,
+  type PageFrame,
   type Preset,
   type OutlineTarget,
   type Scene,
@@ -45,6 +46,9 @@ import {
   type StudioEditState,
 } from "./editHistory";
 import {
+  applyPageFrameEdit,
+  initialPageFrameForEdit,
+  resetPageFrame,
   resolveStudioCompositionFrame,
   sameStudioPhysicalScale,
   studioGenerationAspect,
@@ -79,6 +83,7 @@ import {
   type OutlineSessionAction,
 } from "./outlineSession";
 import { PaperSection } from "./PaperSection";
+import { PageFrameEditor } from "./PageFrameEditor";
 import {
   readPlotterSvgIncludePaperMargins,
   writePlotterSvgIncludePaperMargins,
@@ -286,6 +291,12 @@ export function SketchControls({
   const historyRef = useRef(history);
   historyRef.current = history;
   const { params, seed, locks, profile, tolerance } = history.present;
+  const [pageFrameDraft, setPageFrameDraft] = useState<PageFrame | null>(null);
+  // Page Frame percentages are relative to the Composition basis captured on
+  // mode entry. Keep history fixed until Apply, Cancel, or Reset closes the mode
+  // so a draft can never outlive the basis its strings describe.
+  const pageFrameDraftRef = useRef(pageFrameDraft);
+  pageFrameDraftRef.current = pageFrameDraft;
   // Tone reference is diagnostic Studio chrome, not authored state. Keeping it
   // beside (rather than inside) the edit-history model excludes it from Undo,
   // Presets, locks, profiles, and every reproduction envelope by construction.
@@ -637,6 +648,11 @@ export function SketchControls({
       const command = historyShortcutFor(event, shortcutPlatform);
       if (command === null) return;
 
+      // Page Frame edit mode owns a transient draft outside Studio history.
+      // Ignoring the shortcut (without preventing it) keeps global history and
+      // the Composition basis stable while preserving native input Undo/Redo.
+      if (pageFrameDraftRef.current !== null) return;
+
       const current = historyRef.current;
       if (
         fieldOwnsHistoryShortcut(
@@ -710,6 +726,24 @@ export function SketchControls({
   };
   const commitTransaction = (): void => settleTransaction(commitEditTransaction);
   const cancelTransaction = (): void => settleTransaction(cancelEditTransaction);
+
+  const openPageFrameEditor = (): void => {
+    setPageFrameDraft(initialPageFrameForEdit(historyRef.current.present));
+  };
+
+  const applyPageFrame = (frame: PageFrame): void => {
+    updateHistory(
+      (current) => applyPageFrameEdit(current, frame),
+      true,
+      "atomic",
+    );
+    setPageFrameDraft(null);
+  };
+
+  const resetFrame = (): void => {
+    updateHistory(resetPageFrame, true, "atomic");
+    setPageFrameDraft(null);
+  };
 
   // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
   // export snapshots. It is a ref, not state — export reads it imperatively on a
@@ -1344,6 +1378,7 @@ export function SketchControls({
             onDisplayedSceneCommitted={onDisplayedSceneCommitted}
             renderState={renderState}
             tolerance={tolerance}
+            pageFrameDraft={pageFrameDraft}
           />
         </div>
       </section>
@@ -1364,6 +1399,17 @@ export function SketchControls({
         hidden={collapsed}
       >
         {switcher}
+        {pageFrameDraft !== null ? (
+          <PageFrameEditor
+            compositionFrame={compositionFrame}
+            initialFrame={pageFrameDraft}
+            onDraftChange={setPageFrameDraft}
+            onApply={applyPageFrame}
+            onCancel={() => setPageFrameDraft(null)}
+            onReset={resetFrame}
+          />
+        ) : (
+          <>
         <PaperSection
           profile={profile}
           transaction={{
@@ -1395,6 +1441,14 @@ export function SketchControls({
             retry: sketchEnvironment.retry,
           }}
         />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={openPageFrameEditor}
+        >
+          Crop
+        </Button>
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
@@ -1732,6 +1786,8 @@ export function SketchControls({
             ) : null}
           </div>
         </div>
+          </>
+        )}
       </aside>
     </div>
   );

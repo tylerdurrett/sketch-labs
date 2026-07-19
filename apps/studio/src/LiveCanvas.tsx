@@ -16,6 +16,7 @@ import {
   type Canvas2DContext,
   type CoordinateSpace,
   type Params,
+  type PageFrame,
   type PlotProfile,
   type Scene,
   type Seed,
@@ -179,6 +180,8 @@ export interface LiveCanvasProps {
   renderState?: LiveCanvasRenderState;
   /** Export identity metadata retained in the displayed-scene handle. */
   tolerance?: number;
+  /** Transient Page Frame draft; present only while Studio is editing framing. */
+  pageFrameDraft?: PageFrame | null;
   /**
    * Optional ref the owner passes to obtain the read-only {@link LiveCanvasHandle}
    * — the live canvas node + current `t` — so the studio chrome can snapshot the
@@ -329,6 +332,7 @@ export function LiveCanvas({
   onDisplayedSceneCommitted,
   renderState = LIVE_FILL_RENDER_STATE,
   tolerance = 0,
+  pageFrameDraft = null,
   handleRef,
 }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -400,6 +404,52 @@ export function LiveCanvas({
     "--plot-inset-bottom": `${(profile.insets.bottom / profile.height) * 100}%`,
     "--plot-inset-left": `${(profile.insets.left / profile.width) * 100}%`,
   } as CSSProperties;
+
+  const pageFrameEditGeometry = useMemo(() => {
+    if (pageFrameDraft === null) return null;
+    const minX = Math.min(0, pageFrameDraft.x);
+    const minY = Math.min(0, pageFrameDraft.y);
+    const maxX = Math.max(
+      compositionFrame.width,
+      pageFrameDraft.x + pageFrameDraft.width,
+    );
+    const maxY = Math.max(
+      compositionFrame.height,
+      pageFrameDraft.y + pageFrameDraft.height,
+    );
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const intersectionX = Math.max(0, pageFrameDraft.x);
+    const intersectionY = Math.max(0, pageFrameDraft.y);
+    const intersectionWidth = Math.max(
+      0,
+      Math.min(compositionFrame.width, pageFrameDraft.x + pageFrameDraft.width) -
+        intersectionX,
+    );
+    const intersectionHeight = Math.max(
+      0,
+      Math.min(
+        compositionFrame.height,
+        pageFrameDraft.y + pageFrameDraft.height,
+      ) - intersectionY,
+    );
+    const compositionPath = `M 0 0 H ${compositionFrame.width} V ${compositionFrame.height} H 0 Z`;
+    const retainedPath =
+      intersectionWidth > 0 && intersectionHeight > 0
+        ? ` M ${intersectionX} ${intersectionY} H ${intersectionX + intersectionWidth} V ${intersectionY + intersectionHeight} H ${intersectionX} Z`
+        : "";
+    return {
+      style: {
+        "--page-frame-edit-aspect": width / height,
+        "--page-frame-composition-left": `${((0 - minX) / width) * 100}%`,
+        "--page-frame-composition-top": `${((0 - minY) / height) * 100}%`,
+        "--page-frame-composition-width": `${(compositionFrame.width / width) * 100}%`,
+        "--page-frame-composition-height": `${(compositionFrame.height / height) * 100}%`,
+      } as CSSProperties,
+      viewBox: `${minX} ${minY} ${width} ${height}`,
+      dimPath: `${compositionPath}${retainedPath}`,
+    };
+  }, [compositionFrame, pageFrameDraft]);
 
   // The latest caller-owned sampler follows the same post-commit ref discipline
   // as the other live inputs. The rAF effect does not depend on it, so
@@ -869,6 +919,40 @@ export function LiveCanvas({
       : unavailableState?.status === "missing"
         ? `${unavailableSubject} unavailable`
         : `${unavailableSubject} could not be loaded`;
+  const canvasSurface = (
+    <>
+      <canvas
+        ref={canvasRef}
+        className="live-canvas"
+        style={paperStyle}
+        aria-hidden={unavailableState === null ? undefined : true}
+      />
+      {unavailableState !== null && (
+        <div
+          className="live-canvas-unavailable"
+          role={unavailableState.status === "loading" ? "status" : "alert"}
+          aria-live={
+            unavailableState.status === "loading" ? "polite" : "assertive"
+          }
+          aria-atomic="true"
+        >
+          <strong className="live-canvas-unavailable__message">
+            {unavailableMessage}
+          </strong>
+          <span className="live-canvas-unavailable__label">
+            {unavailableState.unresolvedAssetIds.length === 1
+              ? "Unresolved ID"
+              : "Unresolved IDs"}
+          </span>
+          <span className="live-canvas-unavailable__ids">
+            {unavailableState.unresolvedAssetIds.map((id, index) => (
+              <code key={`${index}:${id}`}>{id}</code>
+            ))}
+          </span>
+        </div>
+      )}
+    </>
+  );
   return (
     <div className="live-canvas-layout">
       <div className="live-canvas-stage">
@@ -879,45 +963,47 @@ export function LiveCanvas({
          * the sole rendered/exported pixel surface — neither margin chrome nor the
          * guide enters getCanvas()/PNG.
          */}
-        <div
-          className="plot-sheet"
-          style={sheetStyle}
-          role="group"
-          aria-label="Plot sheet preview"
-        >
-          <div className="plot-drawable">
-            <canvas
-              ref={canvasRef}
-              className="live-canvas"
-              style={paperStyle}
-              aria-hidden={unavailableState === null ? undefined : true}
-            />
-            {unavailableState !== null && (
-              <div
-                className="live-canvas-unavailable"
-                role={unavailableState.status === "loading" ? "status" : "alert"}
-                aria-live={
-                  unavailableState.status === "loading" ? "polite" : "assertive"
-                }
-                aria-atomic="true"
-              >
-                <strong className="live-canvas-unavailable__message">
-                  {unavailableMessage}
-                </strong>
-                <span className="live-canvas-unavailable__label">
-                  {unavailableState.unresolvedAssetIds.length === 1
-                    ? "Unresolved ID"
-                    : "Unresolved IDs"}
-                </span>
-                <span className="live-canvas-unavailable__ids">
-                  {unavailableState.unresolvedAssetIds.map((id, index) => (
-                    <code key={`${index}:${id}`}>{id}</code>
-                  ))}
-                </span>
-              </div>
-            )}
+        {pageFrameEditGeometry === null || pageFrameDraft === null ? (
+          <div
+            className="plot-sheet"
+            style={sheetStyle}
+            role="group"
+            aria-label="Plot sheet preview"
+          >
+            <div className="plot-drawable">{canvasSurface}</div>
           </div>
-        </div>
+        ) : (
+          <div
+            className="page-frame-edit-view"
+            style={pageFrameEditGeometry.style}
+            role="group"
+            aria-label="Page Frame edit preview"
+          >
+            <div className="page-frame-edit-composition">{canvasSurface}</div>
+            <svg
+              className="page-frame-edit-overlay"
+              viewBox={pageFrameEditGeometry.viewBox}
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <path
+                className="page-frame-edit-discarded"
+                data-testid="page-frame-discarded"
+                d={pageFrameEditGeometry.dimPath}
+                fillRule="evenodd"
+              />
+              <rect
+                className="page-frame-edit-boundary"
+                data-testid="page-frame-boundary"
+                x={pageFrameDraft.x}
+                y={pageFrameDraft.y}
+                width={pageFrameDraft.width}
+                height={pageFrameDraft.height}
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+          </div>
+        )}
       </div>
       {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
       {time !== undefined && unavailableState === null && (
