@@ -2291,6 +2291,149 @@ describe("LiveCanvas Tone reference pixels (#316)", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  it("rasterizes the committed Page extent at its aspect with white padding outside Composition", () => {
+    const { ctx, counts, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 5, height: 1 } as DOMRect,
+    );
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const sample = vi.fn(() => 1);
+    const source: ToneSource = {
+      toneField: createToneField(sample),
+      shadingMask: createShadingMask(() => 1),
+    };
+    const frame = { x: -5, y: 2, width: 20, height: 4 };
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={{ width: 10, height: 10 }}
+        pageFrame={frame}
+        renderState={{ kind: "tone-reference", source }}
+      />,
+    );
+
+    expect(canvasEl(el)).toMatchObject({ width: 5, height: 1 });
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBe(5);
+    expect(
+      Array.from({ length: 5 }, (_, index) => images[0]![index * 4]),
+    ).toEqual([255, 0, 0, 0, 255]);
+    expect(sample).toHaveBeenCalledTimes(3);
+    expect(counts.putImageData).toBe(1);
+    expect(counts.setTransform ?? 0).toBe(0);
+    expect(counts.fillRect ?? 0).toBe(0);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("re-rasterizes only on committed framing settlement while draft motion stays overlay-only", () => {
+    const { ctx, counts, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 2, height: 2 } as DOMRect,
+    );
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const sampled: Array<readonly [number, number]> = [];
+    const source: ToneSource = {
+      toneField: createToneField((point) => {
+        sampled.push(point);
+        return 0.5;
+      }),
+      shadingMask: createShadingMask(() => 1),
+    };
+    const params = {};
+    const crop = { x: 10, y: 20, width: 40, height: 20 };
+    const movedDraft = { x: -30, y: -40, width: 160, height: 180 };
+    const applied = { x: 50, y: 5, width: 20, height: 60 };
+    const render = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+    ) => (
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={{ width: 100, height: 100 }}
+        pageFrame={pageFrame}
+        pageFrameDraft={pageFrameDraft}
+        renderState={{ kind: "tone-reference", source }}
+      />
+    );
+    const el = mount(render(null, null));
+    expect(sampled).toEqual([
+      [25, 25],
+      [75, 25],
+      [25, 75],
+      [75, 75],
+    ]);
+
+    act(() => root!.render(render(crop, null)));
+    expect(sampled.slice(-4)).toEqual([
+      [20, 25],
+      [40, 25],
+      [20, 35],
+      [40, 35],
+    ]);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBe(2);
+
+    act(() => root!.render(render(crop, crop)));
+    expect(sampled.slice(-4)).toEqual([
+      [25, 25],
+      [75, 25],
+      [25, 75],
+      [75, 75],
+    ]);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBe(1);
+
+    const paintsBeforeDraftMotion = counts.putImageData;
+    const samplesBeforeDraftMotion = sampled.length;
+    act(() => root!.render(render(crop, movedDraft)));
+    expect(counts.putImageData).toBe(paintsBeforeDraftMotion);
+    expect(sampled).toHaveLength(samplesBeforeDraftMotion);
+    expect(
+      el.querySelector("[data-testid='page-frame-boundary']")?.getAttribute("x"),
+    ).toBe(String(movedDraft.x));
+
+    act(() => root!.render(render(applied, null)));
+    expect(sampled.slice(-4)).toEqual([
+      [55, 20],
+      [65, 20],
+      [55, 50],
+      [65, 50],
+    ]);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(1 / 3);
+
+    act(() => root!.render(render(null, null)));
+    expect(sampled.slice(-4)).toEqual([
+      [25, 25],
+      [75, 25],
+      [25, 75],
+      [75, 75],
+    ]);
+    expect(counts.putImageData).toBe(5);
+    expect(images).toHaveLength(5);
+    expect(counts.setTransform ?? 0).toBe(0);
+    expect(counts.fillRect ?? 0).toBe(0);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it("suspends and resumes artwork without mutating the selected time", () => {
     const { ctx } = pixelRecordingContext();
     useRecordingContext(ctx);

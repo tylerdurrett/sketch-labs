@@ -256,6 +256,7 @@ function paintToneReference(
   canvas: HTMLCanvasElement,
   source: ToneSource,
   compositionFrame: CoordinateSpace,
+  pageFrame: PageFrame | null,
 ): boolean {
   const ctx = canvas.getContext("2d");
   if (ctx === null || canvas.width === 0 || canvas.height === 0) return false;
@@ -265,6 +266,7 @@ function paintToneReference(
     compositionFrame,
     canvas.width,
     canvas.height,
+    pageFrame,
   );
   const imageData = ctx.createImageData(raster.width, raster.height);
   imageData.data.set(raster.data);
@@ -745,7 +747,12 @@ export function LiveCanvas({
     const state = renderStateRef.current;
     if (state.kind === "tone-reference") {
       displayedSceneRef.current = null;
-      paintToneReference(canvas, state.source, compositionFrameRef.current);
+      paintToneReference(
+        canvas,
+        state.source,
+        compositionFrameRef.current,
+        editingPageFrameRef.current ? null : pageFrameRef.current,
+      );
       return;
     }
     if (state.kind === "unavailable") return;
@@ -866,21 +873,34 @@ export function LiveCanvas({
     syncPageGround,
   ]);
 
-  // Tone depends only on its analytic source and Composition Frame. Keeping it
-  // outside the artwork effect prevents Seed, Outline bookkeeping, and unrelated
-  // Studio state from re-sampling every backing pixel.
+  // Tone depends only on its analytic source, frozen Composition, committed Page
+  // Frame, edit-mode settlement, and backing resolution. Keeping it outside the
+  // artwork effect prevents Seed, Outline bookkeeping, and unrelated Studio
+  // state from re-sampling every backing pixel. Draft coordinates are excluded:
+  // entering edit mode returns to the full Composition once, then draft motion
+  // remains overlay-only until Apply or Reset settles a committed frame.
   useEffect(() => {
     if (toneReferenceSource === null) return;
     const canvas = canvasRef.current;
     if (canvas === null) return;
     sizeToBox(canvas, window.devicePixelRatio || 1);
     displayedSceneRef.current = null;
-    paintToneReference(canvas, toneReferenceSource, compositionFrame);
+    paintToneReference(
+      canvas,
+      toneReferenceSource,
+      compositionFrame,
+      editingPageFrame ? null : pageFrame,
+    );
   }, [
     toneReferenceSource,
     compositionAspect,
     compositionWidth,
     compositionHeight,
+    pageFrame?.x,
+    pageFrame?.y,
+    pageFrame?.width,
+    pageFrame?.height,
+    editingPageFrame,
   ]);
 
   // Static live Fill derives synchronously. Supplied held geometry paints as-is;
