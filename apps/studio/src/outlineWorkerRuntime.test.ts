@@ -132,15 +132,15 @@ describe("outline worker runtime", () => {
     const response = handleOutlineWorkerMessage(request(false, 0.5));
     expect(response).toMatchObject({ type: "success", jobId: 7 });
     if (response?.type !== "success") throw new Error("expected success");
-    expect(response.scene).toEqual(outlineScene(source, 0.5, false));
+    expect(response.scene).toEqual(outlineScene(source, 0.5));
     expect(response.scene).toEqual(hiddenLinePass(source, { tolerance: 0.5 }));
     expect(response.scene.background).toBeUndefined();
   });
 
-  it("includes the authored frame through the shared seam", () => {
+  it("keeps expensive derivation frame-free when identity includes a frame", () => {
     const response = handleOutlineWorkerMessage(request(true));
     if (response?.type !== "success") throw new Error("expected success");
-    expect(response.scene).toEqual(outlineScene(source, 0, true));
+    expect(response.scene).toEqual(outlineScene(source, 0));
   });
 
   it("preserves source and occluder roles through worker identity restoration", () => {
@@ -256,7 +256,7 @@ describe("outline worker runtime", () => {
         ({ stroke }) => stroke?.width === 5 / 3,
       ),
     ).toBe(true);
-    expect(derive).toHaveBeenCalledWith(specialized, 0.4, false, undefined);
+    expect(derive).toHaveBeenCalledWith(specialized, 0.4, undefined);
   });
 
   it("dispatches completed artwork to Scene-based specialization without regeneration", () => {
@@ -327,7 +327,7 @@ describe("outline worker runtime", () => {
     expect(response).toMatchObject({ type: "success", jobId: 12 });
     expect(identity.sourceKind).toBe("completed-scene-sketch");
     expect(generate).not.toHaveBeenCalled();
-    expect(derive).toHaveBeenCalledWith(specialized, 0.2, false, undefined);
+    expect(derive).toHaveBeenCalledWith(specialized, 0.2, undefined);
     expect(derive.mock.calls[0]?.[0]).toEqual(specialized);
     expect(derive.mock.calls[0]?.[0]).not.toBe(completed);
     expect(derive.mock.calls[0]?.[0].primitives).toHaveLength(2);
@@ -482,7 +482,7 @@ describe("outline worker runtime", () => {
   it("emits an initial update, at most one per elapsed interval, and terminal", () => {
     const emitted: unknown[] = [];
     const clock = [0, 25, 99, 100, 150];
-    const derive: typeof outlineScene = (scene, _tolerance, _frame, observer) => {
+    const derive: typeof outlineScene = (scene, _tolerance, observer) => {
       for (const completedWorkUnits of [10, 20, 30, 40, 50]) {
         observer?.({
           completedWorkUnits,
@@ -635,13 +635,9 @@ function exportRequest({
 }
 
 describe("hidden-line export worker runtime", () => {
-  it("derives a cache miss through the shared seam exactly once, including one frame", () => {
+  it("derives a cache miss through the frame-free shared seam exactly once", () => {
     const identity = exportIdentity({ tolerance: 0.25, includeFrame: true });
-    const derived = outlineScene(
-      source,
-      identity.tolerance,
-      identity.includeFrame,
-    );
+    const derived = outlineScene(source, identity.tolerance);
     const derive = vi.fn((...args: Parameters<typeof outlineScene>) =>
       outlineScene(...args),
     );
@@ -652,12 +648,7 @@ describe("hidden-line export worker runtime", () => {
     );
 
     expect(derive).toHaveBeenCalledOnce();
-    expect(derive).toHaveBeenCalledWith(
-      source,
-      0.25,
-      true,
-      undefined,
-    );
+    expect(derive).toHaveBeenCalledWith(source, 0.25, undefined);
     expect(response).toMatchObject({
       type: "complete",
       jobKind: "export",
@@ -668,24 +659,21 @@ describe("hidden-line export worker runtime", () => {
     if (response?.type !== "complete" || response.jobKind !== "export") {
       throw new Error("expected export completion");
     }
-    const frame = response.completedOutline.scene.primitives.at(-1);
-    expect(frame?.points).toEqual([
-      [0, 0],
-      [40, 0],
-      [40, 30],
-      [0, 30],
-      [0, 0],
-    ]);
-    expect(
-      response.completedOutline.scene.primitives.filter(
-        (primitive) => primitive.points.length === 5,
-      ),
-    ).toHaveLength(1);
+    expect(response.completedOutline.scene.primitives).not.toContainEqual({
+      points: [
+        [0, 0],
+        [40, 0],
+        [40, 30],
+        [0, 30],
+        [0, 0],
+      ],
+      stroke: { color: "black", width: 1 },
+    });
   });
 
   it("reuses an exact candidate without deriving, but derives after any identity mismatch", () => {
     const identity = exportIdentity();
-    const completed = outlineScene(source, 0, true);
+    const completed = outlineScene(source, 0);
     const derive = vi.fn((...args: Parameters<typeof outlineScene>) =>
       outlineScene(...args),
     );
@@ -715,7 +703,7 @@ describe("hidden-line export worker runtime", () => {
 
   it("is deterministic with the prior derive → clip → plotter expression", () => {
     const identity = exportIdentity({ tolerance: 0.5 });
-    const expectedScene = outlineScene(source, 0.5, true);
+    const expectedScene = outlineScene(source, 0.5);
     const expectedSvg = renderPlotterSVG(
       clipSceneToBounds(expectedScene),
       plotProfile,
@@ -733,7 +721,7 @@ describe("hidden-line export worker runtime", () => {
 
   it("reuses geometry across profile-only changes while changing physical output", () => {
     const identity = exportIdentity();
-    const completed = outlineScene(source, 0, true);
+    const completed = outlineScene(source, 0);
     const derive = vi.fn(() => completed);
     const larger: PlotProfile = {
       width: 420,
@@ -901,8 +889,7 @@ describe("hidden-line export worker runtime", () => {
         (
           _scene: Scene,
           _tolerance: number,
-          _includeFrame: boolean,
-          report?: Parameters<typeof outlineScene>[3],
+          report?: Parameters<typeof outlineScene>[2],
         ) => {
           report?.({
             completedWorkUnits: 1,
@@ -1012,13 +999,12 @@ describe("hidden-line export worker runtime", () => {
           structuredClone(completed),
           target,
         );
-        const expected = outlineScene(specialized, 0.1, false);
+        const expected = outlineScene(specialized, 0.1);
         expect(preview.scene).toEqual(expected);
         expect(derive).toHaveBeenCalledOnce();
         expect(derive).toHaveBeenCalledWith(
           specialized,
           0.1,
-          false,
           undefined,
         );
 
@@ -1115,7 +1101,7 @@ describe("hidden-line export worker runtime", () => {
       owner: "outline-preview",
       jobId: 12,
       identity,
-      scene: outlineScene(source, 0.5, false),
+      scene: outlineScene(source, 0.5),
     });
   });
 

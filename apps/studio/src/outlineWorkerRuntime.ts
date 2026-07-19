@@ -162,7 +162,6 @@ export function handleHiddenLineWorkerMessage(
         scene: derive(
           sourceSceneForIdentity(identity),
           identity.tolerance,
-          identity.includeFrame,
           report,
         ),
       };
@@ -177,7 +176,6 @@ export function handleHiddenLineWorkerMessage(
         ? derive(
             sourceSceneForIdentity(identity),
             identity.tolerance,
-            identity.includeFrame,
             report,
           )
         : mutableScene(value.snapshot.reusableOutline.scene);
@@ -246,7 +244,6 @@ export function handleOutlineWorkerMessage(
       scene: derive(
         sourceSceneForIdentity(value.identity),
         value.identity.tolerance,
-        value.identity.includeFrame,
         emitProgress === undefined
           ? undefined
           : createProgressReporter(value.jobId, emitProgress, now),

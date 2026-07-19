@@ -243,7 +243,6 @@ vi.mock("./hiddenLineCoordinator", () => ({
                     primitives: [],
                   },
               snapshot.identity.tolerance,
-              snapshot.identity.includeFrame,
             )
           : mutableScene(snapshot.reusableOutline.scene);
       const clipped = clipSceneToBounds(processed);
@@ -539,7 +538,6 @@ vi.mock("./LiveCanvas", () => ({
               primitives: [],
             },
         active.identity.tolerance,
-        active.identity.includeFrame,
       );
       outlineJob.lastCompletedScene = scene;
       active.resolve({
@@ -3543,7 +3541,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
   it("atomically scales the physical sheet via Preset reload while reusing the cached Outline Scene", async () => {
     listPresets.mockResolvedValue(["double"]);
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
-    const processed = outlineScene(source, 0, true);
+    const processed = outlineScene(source, 0);
     const processedBefore = structuredClone(processed);
     const generate = vi.fn(() => source);
     const el = mount(
@@ -3636,7 +3634,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
   it("reuses the exact displayed outline Scene without generating or reprocessing", () => {
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
-    const processed = outlineScene(source, 0, true);
+    const processed = outlineScene(source, 0);
     const base = hlStaticSketch("circles");
     const generate = vi.fn(() => source);
     const sketch = { ...base, generate };
@@ -3678,7 +3676,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).not.toHaveBeenCalled();
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(source, 0, true)),
+      clipSceneToBounds(outlineScene(source, 0)),
     );
   });
 
@@ -3748,7 +3746,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).toHaveBeenCalledTimes(1);
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(source, 0, true)),
+      clipSceneToBounds(outlineScene(source, 0)),
     );
   });
 
@@ -3770,7 +3768,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).not.toHaveBeenCalled();
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(fakeDisplayedScene.scene, 0, true)),
+      clipSceneToBounds(outlineScene(fakeDisplayedScene.scene, 0)),
     );
   });
 
@@ -3809,7 +3807,6 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
         0,
-        true,
       ),
     );
   });
@@ -3891,7 +3888,6 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
         0,
-        true,
       ),
     );
     const vertsAtZero = totalVerts(atZero);
@@ -3912,7 +3908,6 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
         1,
-        true,
       ),
     );
     // ...and simplification actually reduced the exported vertex count.
@@ -3980,7 +3975,6 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
         resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
       ),
       0,
-      true,
     );
     expect(outOfBoundsPoints(seam, 100, 100)).not.toEqual([]);
 
@@ -4096,7 +4090,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     clickButton(el, "Fill");
     const startsBeforeExport = outlineJob.starts;
     fakeDisplayedScene = {
-      scene: outlineScene(source, 0, true),
+      scene: outlineScene(source, 0),
       t: 0,
       renderMode: "outline",
       tolerance: 0,

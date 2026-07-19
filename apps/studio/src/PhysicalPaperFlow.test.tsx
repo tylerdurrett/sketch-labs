@@ -82,7 +82,7 @@ vi.mock("./presetsClient", () => ({
 }));
 
 vi.mock("./hiddenLineCoordinator", async () => {
-  const { outlineScene } = await import("./outlineScene");
+  const { finalizeOutlineScene, outlineScene } = await import("./outlineScene");
   const { clipSceneToBounds, renderPlotterSVG } = await import("@harness/core");
   return {
     HiddenLineCoordinator: class {
@@ -96,9 +96,12 @@ vi.mock("./hiddenLineCoordinator", async () => {
               status: "success",
               jobId: 1,
               identity,
-              scene: outlineScene(
-                identity.sourceScene as Scene,
-                identity.tolerance,
+              scene: finalizeOutlineScene(
+                outlineScene(
+                  identity.sourceScene as Scene,
+                  identity.tolerance,
+                ),
+                null,
                 identity.includeFrame,
               ),
             });
@@ -112,9 +115,12 @@ vi.mock("./hiddenLineCoordinator", async () => {
         if (snapshot.identity.sourceKind !== "legacy-scene") {
           throw new Error("PhysicalPaperFlow uses only legacy Scene identities");
         }
-        const scene = outlineScene(
-          snapshot.identity.sourceScene as Scene,
-          snapshot.identity.tolerance,
+        const scene = finalizeOutlineScene(
+          outlineScene(
+            snapshot.identity.sourceScene as Scene,
+            snapshot.identity.tolerance,
+          ),
+          null,
           snapshot.identity.includeFrame,
         );
         const payload = {
