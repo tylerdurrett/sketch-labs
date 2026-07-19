@@ -65,7 +65,8 @@ temp/
 coverage/
 .nyc_output/
 
-# Agent harness — transient worktrees created by /batch's worktree-isolated agents
+# Agent harness — transient worktrees created by agent workflows
+.worktrees/
 .claude/worktrees/
 
 # Machine-local Claude settings (holds the batch/autopilot autoMode.allow rule) — never checked in
