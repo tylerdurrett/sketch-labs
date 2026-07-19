@@ -2,6 +2,7 @@ import type { Params, ScribbleArtwork } from "@harness/core";
 
 import {
   generatePhotoScribbleBenchmarkArtworkFromResolution,
+  reconcileLegacyPhotoScribbleParams,
   resolvePhotoScribbleBenchmark,
   type PhotoScribbleBenchmarkResolution,
 } from "../../../packages/core/benchmarks/photo-scribble/benchmark-artwork";
@@ -72,7 +73,9 @@ export function executePhotoScribbleEvidenceArtwork(
   if (identity.sketchId !== "photo-scribble") {
     throw new TypeError("Photo Scribble evidence Worker received another Sketch");
   }
-  const params = paramsFromEntries(identity.params);
+  const params = reconcileLegacyPhotoScribbleParams(
+    paramsFromEntries(identity.params),
+  );
   const imageAssetId = params.imageAsset;
   if (typeof imageAssetId !== "string") {
     throw new TypeError("Photo Scribble evidence identity lacks an Image Asset");

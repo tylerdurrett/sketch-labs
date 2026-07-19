@@ -24,7 +24,10 @@ import type {
   ScribbleExecutionLimits,
   ScribbleExecutionObservation,
 } from '../../src/scribbleStrategy/orchestrator'
-import type { ScribbleControls } from '../../src/scribbleStrategy/types'
+import {
+  defaultScribbleControls,
+  type ScribbleControls,
+} from '../../src/scribbleStrategy/types'
 import {
   createPhotoScribbleSchema,
   createPhotoScribbleSource,
@@ -41,18 +44,31 @@ function finiteNumber(params: Params, key: keyof ScribbleControls): number {
   return value
 }
 
+/** Reconcile frozen pre-stop-point evidence with the current authored schema. */
+export function reconcileLegacyPhotoScribbleParams<T extends Params>(
+  params: T,
+): T & Pick<ScribbleControls, 'stopPoint'> {
+  const stopPoint = params.stopPoint
+  if (stopPoint === undefined) {
+    return { ...params, stopPoint: defaultScribbleControls.stopPoint }
+  }
+  if (typeof stopPoint !== 'number' || !Number.isFinite(stopPoint)) {
+    throw new TypeError('Photo Scribble stopPoint is invalid')
+  }
+  return params as T & Pick<ScribbleControls, 'stopPoint'>
+}
+
 export function photoScribbleBenchmarkControls(
   params: Params,
 ): ScribbleControls {
+  const reconciled = reconcileLegacyPhotoScribbleParams(params)
   return {
-    pathDensity: finiteNumber(params, 'pathDensity'),
-    scribbleScale: finiteNumber(params, 'scribbleScale'),
-    momentum: finiteNumber(params, 'momentum'),
-    chaos: finiteNumber(params, 'chaos'),
-    toneFidelity: finiteNumber(params, 'toneFidelity'),
-    // Frozen issue-336 scenarios predate the authored stop-point control.
-    stopPoint:
-      params.stopPoint === undefined ? 100 : finiteNumber(params, 'stopPoint'),
+    pathDensity: finiteNumber(reconciled, 'pathDensity'),
+    scribbleScale: finiteNumber(reconciled, 'scribbleScale'),
+    momentum: finiteNumber(reconciled, 'momentum'),
+    chaos: finiteNumber(reconciled, 'chaos'),
+    toneFidelity: finiteNumber(reconciled, 'toneFidelity'),
+    stopPoint: finiteNumber(reconciled, 'stopPoint'),
   }
 }
 
@@ -69,15 +85,21 @@ export function resolvePhotoScribbleBenchmark(
   frame: CoordinateSpace,
   environment: SketchEnvironment,
 ): PhotoScribbleBenchmarkResolution {
-  const imageAsset = params.imageAsset
+  const reconciled = reconcileLegacyPhotoScribbleParams(params)
+  const imageAsset = reconciled.imageAsset
   if (typeof imageAsset !== 'string' || imageAsset.length === 0) {
     throw new TypeError('Photo Scribble benchmark imageAsset is invalid')
   }
   const schema = createPhotoScribbleSchema(
     PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
   )
-  const controls = photoScribbleBenchmarkControls(params)
-  const source = createPhotoScribbleSource(params, frame, schema, environment)
+  const controls = photoScribbleBenchmarkControls(reconciled)
+  const source = createPhotoScribbleSource(
+    reconciled,
+    frame,
+    schema,
+    environment,
+  )
   const model = createScribbleModel(source, frame, controls)
   return {
     source,

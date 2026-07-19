@@ -10,6 +10,7 @@ import {
 } from "@harness/core";
 
 import protocolJson from "../../../packages/core/benchmarks/photo-scribble/protocol.json";
+import { reconcileLegacyPhotoScribbleParams } from "../../../packages/core/benchmarks/photo-scribble/benchmark-artwork";
 import type { ScribbleExecutionLimits } from "../../../packages/core/src/scribbleStrategy/orchestrator";
 import {
   canonicalBrowserDiagnosticsHash,
@@ -239,7 +240,10 @@ function scenarioById(scenarioId: string): Scenario {
     (candidate) => candidate.scenarioId === scenarioId,
   );
   if (scenario === undefined) throw new Error(`Unknown scenario ${scenarioId}`);
-  return scenario;
+  return {
+    ...scenario,
+    params: reconcileLegacyPhotoScribbleParams(scenario.params),
+  };
 }
 
 function profileForCandidate(candidateId: string): PhotoScribbleEvidenceProfile {

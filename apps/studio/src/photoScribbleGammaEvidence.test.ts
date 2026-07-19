@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  photoScribbleGammaControls,
   photoScribbleGammaCaptureId,
   type MappingId,
 } from "./photoScribbleGammaEvidence";
@@ -21,6 +22,25 @@ afterEach(() => {
 });
 
 describe("Photo Scribble gamma capture IDs", () => {
+  it("defaults frozen protocol controls to the current stop point", () => {
+    expect(
+      photoScribbleGammaControls({
+        pathDensity: 20,
+        scribbleScale: 0.35,
+        momentum: 0.75,
+        chaos: 0.25,
+        toneFidelity: 0.99,
+      }),
+    ).toEqual({
+      pathDensity: 20,
+      scribbleScale: 0.35,
+      momentum: 0.75,
+      chaos: 0.25,
+      toneFidelity: 0.99,
+      stopPoint: 100,
+    });
+  });
+
   it("resolves all four returned IDs through browser and Puppeteer-compatible APIs", () => {
     const captures = fixtures.flatMap((fixtureId) =>
       mappings.map((mapping) => {

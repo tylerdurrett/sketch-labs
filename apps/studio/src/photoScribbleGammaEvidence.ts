@@ -20,6 +20,7 @@ import {
 
 import fixturesJson from "../../../packages/core/benchmarks/photo-scribble/fixtures.json";
 import protocolJson from "../../../packages/core/benchmarks/photo-scribble/protocol.json";
+import { reconcileLegacyPhotoScribbleParams } from "../../../packages/core/benchmarks/photo-scribble/benchmark-artwork";
 import { resolveSketchEnvironment } from "./imageAssetResolver";
 import { canonicalBrowserScribbleTargetHash } from "./photoScribbleEvidenceHash";
 import { rasterizeToneReference } from "./toneReference";
@@ -34,7 +35,7 @@ const CAPTURE_MAPPING_SLUGS: Readonly<Record<MappingId, string>> = {
 interface Scenario {
   readonly scenarioId: string;
   readonly fixtureId: string;
-  readonly params: Params & ScribbleControls;
+  readonly params: Params & Omit<ScribbleControls, "stopPoint">;
 }
 
 interface Fixture {
@@ -151,7 +152,7 @@ function candidateSource(
 }
 
 function currentSource(
-  scenario: Scenario,
+  params: Scenario["params"] & Pick<ScribbleControls, "stopPoint">,
   fixture: Fixture,
   environment: SketchEnvironment,
   gamma: number,
@@ -159,7 +160,7 @@ function currentSource(
 ): ToneSource {
   const schema = createPhotoScribbleSchema(fixture.assetId);
   return createPhotoScribbleSource(
-    { ...scenario.params, toneGamma: gamma, toneContrast: contrast },
+    { ...params, toneGamma: gamma, toneContrast: contrast },
     protocol.frame,
     schema,
     environment,
@@ -306,19 +307,24 @@ function profileId(mapping: MappingId, gamma: number, contrast: number, authored
     : `${mapping}--gamma-${gamma}--contrast-${contrast}`;
 }
 
-function scribbleControls(params: Scenario["params"]): ScribbleControls {
+export function photoScribbleGammaControls(
+  params: Scenario["params"],
+): ScribbleControls {
+  const reconciled = reconcileLegacyPhotoScribbleParams(params);
   return {
-    pathDensity: params.pathDensity,
-    scribbleScale: params.scribbleScale,
-    momentum: params.momentum,
-    chaos: params.chaos,
-    toneFidelity: params.toneFidelity,
+    pathDensity: reconciled.pathDensity,
+    scribbleScale: reconciled.scribbleScale,
+    momentum: reconciled.momentum,
+    chaos: reconciled.chaos,
+    toneFidelity: reconciled.toneFidelity,
+    stopPoint: reconciled.stopPoint,
   };
 }
 
 async function fixtureEvidence(scenario: Scenario, fixture: Fixture) {
+  const params = reconcileLegacyPhotoScribbleParams(scenario.params);
   const schema = createPhotoScribbleSchema(fixture.assetId);
-  const environment = await resolveSketchEnvironment(schema, scenario.params);
+  const environment = await resolveSketchEnvironment(schema, params);
   const pixels = environment.imageAssets(fixture.assetId);
   if (pixels === undefined) throw new Error(`Resolved fixture ${fixture.fixtureId} disappeared`);
   const rawToneByPixel = new Float64Array(pixels.width * pixels.height);
@@ -357,15 +363,15 @@ async function fixtureEvidence(scenario: Scenario, fixture: Fixture) {
         })),
       ),
       {
-        gamma: Number(scenario.params.toneGamma),
-        contrast: Number(scenario.params.toneContrast),
+        gamma: Number(params.toneGamma),
+        contrast: Number(params.toneContrast),
         authored: true,
       },
     ];
     for (const controls of profileControls) {
       const source = mapping === "current-0.5-to-2"
         ? currentSource(
-            scenario,
+            params,
             fixture,
             environment,
             controls.gamma,
@@ -384,7 +390,7 @@ async function fixtureEvidence(scenario: Scenario, fixture: Fixture) {
       const targetHash = await canonicalBrowserScribbleTargetHash(
         source,
         protocol.frame,
-        scribbleControls(scenario.params),
+        photoScribbleGammaControls(params),
       );
       let toneReference = null;
       if (controls.authored) {

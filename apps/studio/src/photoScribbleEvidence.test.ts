@@ -57,6 +57,7 @@ const params: Params = {
   momentum: 0.5,
   chaos: 0.75,
   toneFidelity: 0,
+  stopPoint: 100,
 };
 const environment: SketchEnvironment = {
   imageAssets: (id) => (id === assetId ? pixels : undefined),
@@ -98,6 +99,7 @@ class FakeEvidenceWorker {
   static readonly instances: FakeEvidenceWorker[] = [];
   readonly listeners = new Map<string, Array<(event: any) => void>>();
   readonly config: PhotoScribbleEvidenceWorkerConfig;
+  readonly requests: any[] = [];
   terminated = false;
 
   constructor(_url: URL, options: WorkerOptions) {
@@ -116,6 +118,7 @@ class FakeEvidenceWorker {
   }
 
   postMessage(request: any): void {
+    this.requests.push(request);
     if (FakeEvidenceWorker.mode === "pending") return;
     if (FakeEvidenceWorker.mode === "failure") {
       this.emit({
@@ -316,6 +319,44 @@ describe("Photo Scribble evidence page seams", () => {
     expect(parsePhotoScribbleEvidenceWorkerConfig(JSON.stringify(config))).toEqual(
       config,
     );
+  });
+
+  it("defaults a legacy identity before invoking the production generator", () => {
+    const schema = createPhotoScribbleSchema(assetId);
+    const { stopPoint: _stopPointSpec, ...legacySchema } = schema;
+    const { stopPoint: _stopPoint, ...legacyParams } = params;
+    const identity = createScribbleComputeIdentity({
+      sketchId: "photo-scribble",
+      schema: legacySchema,
+      params: legacyParams,
+      seed: 336,
+      compositionFrame: frame,
+    });
+    const artwork = generatePhotoScribbleArtwork(
+      params,
+      336,
+      frame,
+      schema,
+      undefined,
+      environment,
+    );
+    const generate = vi.fn((_params: Params) => artwork);
+
+    executePhotoScribbleEvidenceArtwork(
+      {
+        schemaVersion: 1,
+        runId: "legacy-stop-point",
+        telemetryChannel: "legacy-stop-point-telemetry",
+        purpose: "measurement",
+        profile: { kind: "production" },
+      },
+      generate,
+      identity,
+      environment,
+      undefined,
+    );
+
+    expect(generate.mock.calls[0]![0]).toMatchObject({ stopPoint: 100 });
   });
 
   it("prepares source/model and executes exactly once per measured job", () => {
@@ -548,6 +589,30 @@ describe("Photo Scribble evidence page seams", () => {
     expect(heartbeat.maximumGapMs).toBeGreaterThanOrEqual(0);
     expect(FakeEvidenceWorker.instances[0]!.terminated).toBe(true);
     expect(FakeEvidenceBroadcastChannel.instances[0]!.closed).toBe(true);
+  });
+
+  it("reconciles frozen protocol params before current identity and execution", async () => {
+    installEvidenceBrowserFakes();
+    const { runPhotoScribbleEvidence } = await import(
+      "./photoScribbleEvidence"
+    );
+
+    await runPhotoScribbleEvidence(
+      "flowers-opaque-control",
+      { kind: "production" },
+      { includePresentationEvidence: false },
+    );
+
+    const request = FakeEvidenceWorker.instances[0]!.requests[0]!;
+    const workerParams = Object.fromEntries(
+      request.identity.params.map(
+        ({ key, value }: { key: string; value: string | number }) => [
+          key,
+          value,
+        ],
+      ),
+    );
+    expect(workerParams.stopPoint).toBe(100);
   });
 
   it("keeps the two equivalence solves in a distinct unmeasured result", async () => {

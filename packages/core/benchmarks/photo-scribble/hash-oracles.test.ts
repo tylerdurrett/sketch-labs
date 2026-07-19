@@ -14,6 +14,7 @@ import {
   generatePhotoScribbleArtwork,
 } from '../../src/sketches/photo-scribble'
 import type { ScribbleControls } from '../../src/scribbleStrategy'
+import { reconcileLegacyPhotoScribbleParams } from './benchmark-artwork'
 import {
   CANONICAL_HASHED_KEYS,
   canonicalArtworkHashes,
@@ -35,7 +36,7 @@ interface ScenarioRecord {
   readonly fixtureId: string
   readonly seed: number
   readonly reseed: number
-  readonly params: Params & ScribbleControls
+  readonly params: Params & Omit<ScribbleControls, 'stopPoint'>
 }
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -128,12 +129,14 @@ function decodeFixture(fixture: FixtureRecord): DecodedPixels {
 function controlsFrom(
   params: Readonly<ScenarioRecord['params']>,
 ): ScribbleControls {
+  const reconciled = reconcileLegacyPhotoScribbleParams(params)
   return {
-    pathDensity: params.pathDensity,
-    scribbleScale: params.scribbleScale,
-    momentum: params.momentum,
-    chaos: params.chaos,
-    toneFidelity: params.toneFidelity,
+    pathDensity: reconciled.pathDensity,
+    scribbleScale: reconciled.scribbleScale,
+    momentum: reconciled.momentum,
+    chaos: reconciled.chaos,
+    toneFidelity: reconciled.toneFidelity,
+    stopPoint: reconciled.stopPoint,
   }
 }
 
@@ -187,6 +190,7 @@ const SYNTHETIC_PARAMS = Object.freeze({
   momentum: 0.5,
   chaos: 0.75,
   toneFidelity: 0,
+  stopPoint: 100,
 }) satisfies Params & ScribbleControls
 const SYNTHETIC_PRIMARY_SEED = 336_001
 const SYNTHETIC_RESEED = 336_002
@@ -276,6 +280,17 @@ function mutateCompleteScene(mutate: (scene: Scene) => void): Scene {
 
 describe('Photo Scribble canonical hash oracles', () => {
   it('pins the pre-change centered-control target for both fixed control scenarios', () => {
+    expect(
+      protocol.scenarios.every(
+        (scenario) => scenario.params.stopPoint === undefined,
+      ),
+    ).toBe(true)
+    expect(
+      protocol.scenarios.every(
+        (scenario) =>
+          reconcileLegacyPhotoScribbleParams(scenario.params).stopPoint === 100,
+      ),
+    ).toBe(true)
     const scenarioById = new Map(
       protocol.scenarios.map((scenario) => [scenario.scenarioId, scenario]),
     )
