@@ -4,6 +4,8 @@ import { ColorControl } from "./ColorControl";
 import type { EditTransactionLifecycle } from "./editHistory";
 import {
   ImageAssetControl,
+  type ImageAssetControlDimensions,
+  type ImageAssetControlRecomposeRequest,
   type ImageAssetControlResolution,
 } from "./ImageAssetControl";
 import { NumberControl } from "./NumberControl";
@@ -45,6 +47,14 @@ export interface ControlPanelProps {
   imageAssetLongEdgeCap?: number;
   /** Exact-resolution lifecycle shared by schema-declared Image Assets. */
   imageAssetResolution?: ImageAssetControlResolution;
+  /** Look up decoded dimensions for one exact selected Image Asset ID. */
+  getImageAssetDimensions?: (
+    imageAssetId: string,
+  ) => ImageAssetControlDimensions | undefined;
+  /** Route a row-scoped request to recompose to its selected image aspect. */
+  onRecomposeToImageAspect?: (
+    request: ImageAssetControlRecomposeRequest,
+  ) => void;
 }
 
 /**
@@ -68,6 +78,12 @@ function renderControl(
   onToggleLock: (key: string) => void,
   imageAssetLongEdgeCap: number,
   imageAssetResolution?: ImageAssetControlResolution,
+  getImageAssetDimensions?: (
+    imageAssetId: string,
+  ) => ImageAssetControlDimensions | undefined,
+  onRecomposeToImageAspect?: (
+    request: ImageAssetControlRecomposeRequest,
+  ) => void,
   editHistory?: EditTransactionLifecycle<Params>,
 ) {
   const rowHistory = editHistory
@@ -105,17 +121,22 @@ function renderControl(
           editHistory={rowHistory}
         />
       );
-    case "image-asset":
+    case "image-asset": {
+      const imageAssetId =
+        typeof value === "string" ? value : spec.default;
       return (
         <ImageAssetControl
           key={key}
           paramKey={key}
-          value={typeof value === "string" ? value : spec.default}
+          value={imageAssetId}
           onChange={(next) => onChange(key, next)}
           imageAssetLongEdgeCap={imageAssetLongEdgeCap}
           resolution={imageAssetResolution}
+          imageDimensions={getImageAssetDimensions?.(imageAssetId)}
+          onRecomposeToImageAspect={onRecomposeToImageAspect}
         />
       );
+    }
     default:
       return (
         <div
@@ -148,6 +169,8 @@ export function ControlPanel({
   onToggleLock,
   imageAssetLongEdgeCap = STUDIO_IMAGE_ASSET_LONG_EDGE_CAP,
   imageAssetResolution,
+  getImageAssetDimensions,
+  onRecomposeToImageAspect,
 }: ControlPanelProps) {
   return (
     <div className="flex flex-col gap-4">
@@ -162,6 +185,8 @@ export function ControlPanel({
           onToggleLock,
           imageAssetLongEdgeCap,
           imageAssetResolution,
+          getImageAssetDimensions,
+          onRecomposeToImageAspect,
           editHistory,
         ),
       )}
