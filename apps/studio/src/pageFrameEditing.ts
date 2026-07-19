@@ -20,6 +20,10 @@ import {
   type StudioEditState,
   type StudioFramingState,
 } from "./editHistory";
+import {
+  validatePageFrameEditDraft,
+  type PageFrameEditDraft,
+} from "./pageFrameEditDraft";
 
 const UNFRAMED: StudioFramingState = Object.freeze({ kind: "unframed" });
 const PHYSICAL_SCALE_RELATIVE_TOLERANCE = Number.EPSILON * 8;
@@ -114,14 +118,34 @@ export function applyPageFrameEdit(
     currentPageFrame,
     pageFrame,
   );
-  const framing: StudioFramingState = Object.freeze({
-    kind: "framed",
-    pageFrame: Object.freeze({ ...pageFrame }),
-    generationAspect,
-    aspectLocked: true,
-  });
+  const framing = framedPageFrame(pageFrame, generationAspect);
 
   return commitEditState(history, { ...current, profile, framing });
+}
+
+/**
+ * Commit either transient Page Frame edit mode as one authored history state.
+ *
+ * Ordinary edits materialize their scale-preserving basis derivation. Fixed-page
+ * edits retain the exact locked physical profile while committing only their
+ * adjusted Composition-coordinate Page Frame.
+ */
+export function applyPageFrameEditDraft(
+  history: EditHistory,
+  draft: PageFrameEditDraft,
+): EditHistory {
+  validatePageFrameEditDraft(draft);
+  const profile =
+    draft.mode === "fixed-page"
+      ? draft.profile
+      : derivePageFramePlotProfile(
+          draft.profile,
+          draft.representedFrame,
+          draft.frame,
+        );
+  const framing = framedPageFrame(draft.frame, draft.generationAspect);
+
+  return commitEditState(history, { ...history.present, profile, framing });
 }
 
 /**
@@ -142,6 +166,44 @@ export function resetPageFrame(history: EditHistory): EditHistory {
   );
 
   return commitEditState(history, { ...current, profile, framing: UNFRAMED });
+}
+
+/**
+ * Commit Reset from a transient editor draft as one authored history state.
+ *
+ * Ordinary Reset restores full Composition at the draft basis's physical
+ * scale. Fixed-page Reset keeps the exact locked profile and commits its
+ * centered scale-one fit; framing remains only when that fit represents
+ * geometry-free padding beyond the frozen Composition.
+ */
+export function resetPageFrameEditDraft(
+  history: EditHistory,
+  draft: PageFrameEditDraft,
+): EditHistory {
+  validatePageFrameEditDraft(draft);
+  const fullComposition = fullCompositionPageFrame(draft.compositionFrame);
+
+  if (draft.mode === "scale-preserving") {
+    const profile = derivePageFramePlotProfile(
+      draft.profile,
+      draft.representedFrame,
+      fullComposition,
+    );
+    return commitEditState(history, {
+      ...history.present,
+      profile,
+      framing: UNFRAMED,
+    });
+  }
+
+  const framing = samePageFrame(draft.fitFrame, fullComposition)
+    ? UNFRAMED
+    : framedPageFrame(draft.fitFrame, draft.generationAspect);
+  return commitEditState(history, {
+    ...history.present,
+    profile: draft.profile,
+    framing,
+  });
 }
 
 /** Explicitly change the Page aspect lock on committed framing. */
@@ -178,4 +240,25 @@ export function recomposePageToProfile(
     profile,
     framing: UNFRAMED,
   });
+}
+
+function framedPageFrame(
+  pageFrame: PageFrame,
+  generationAspect: number,
+): StudioFramingState {
+  return Object.freeze({
+    kind: "framed",
+    pageFrame: Object.freeze({ ...pageFrame }),
+    generationAspect,
+    aspectLocked: true,
+  });
+}
+
+function samePageFrame(left: PageFrame, right: PageFrame): boolean {
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height
+  );
 }
