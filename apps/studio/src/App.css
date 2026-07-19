@@ -195,6 +195,70 @@
 }
 
 /*
+ * Page Frame edit mode exposes the union of the frozen Composition and draft
+ * Page extent. The generated canvas stays positioned in exact Composition
+ * coordinates; a ground layer beneath it identifies geometry-free Page padding
+ * with normal ADR-0009 precedence. SVG chrome above it dims only Composition
+ * content discarded by the draft and outlines the final Page boundary.
+ */
+.page-frame-edit-view {
+  position: relative;
+  --page-frame-edit-aspect: 1;
+  aspect-ratio: var(--page-frame-edit-aspect);
+  width: min(100cqw, 100cqh * var(--page-frame-edit-aspect));
+  overflow: hidden;
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, rgb(0 0 0 / 5%) 25%, transparent 25%),
+    linear-gradient(-45deg, rgb(0 0 0 / 5%) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgb(0 0 0 / 5%) 75%),
+    linear-gradient(-45deg, transparent 75%, rgb(0 0 0 / 5%) 75%);
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  background-size: 12px 12px;
+  outline: 1px solid var(--border);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 60%);
+}
+
+.page-frame-edit-composition {
+  position: absolute;
+  z-index: 1;
+  top: var(--page-frame-composition-top);
+  left: var(--page-frame-composition-left);
+  width: var(--page-frame-composition-width);
+  height: var(--page-frame-composition-height);
+  background: #fff;
+}
+
+.page-frame-edit-page-ground {
+  position: absolute;
+  top: var(--page-frame-page-top);
+  left: var(--page-frame-page-left);
+  width: var(--page-frame-page-width);
+  height: var(--page-frame-page-height);
+  background: #fff;
+}
+
+.page-frame-edit-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.page-frame-edit-discarded {
+  fill: rgb(0 0 0 / 55%);
+}
+
+.page-frame-edit-boundary {
+  fill: none;
+  stroke: #f97316;
+  stroke-width: 2px;
+}
+
+/*
  * Fail-closed Image Asset feedback occupies the drawable rectangle itself, so
  * unavailable input cannot look like current artwork. The exact authored IDs
  * wrap rather than clip and remain selectable for diagnosis/correction.

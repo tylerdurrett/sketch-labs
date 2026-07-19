@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clipSceneToBounds,
+  derivePageFramePlotProfile,
+  frameScene,
   leafField,
   resolvePlotCompositionFrame,
   type CoordinateSpace,
@@ -21,6 +23,10 @@ import { SketchControls } from "./SketchControls";
 
 const previewCapture = vi.hoisted(() => ({
   paints: [] as Array<{ scene: unknown; width: number; height: number }>,
+  ordinaryExport: null as null | {
+    scene: Scene;
+    metadata: string | undefined;
+  },
   plotterExport: null as null | {
     scene: Scene;
     profile: PlotProfile;
@@ -39,6 +45,15 @@ vi.mock("@harness/core", async (importActual) => {
       width: number,
       height: number,
     ) => previewCapture.paints.push({ scene, width, height }),
+    renderToSVG: (
+      ...args: Parameters<typeof actual.renderToSVG>
+    ): ReturnType<typeof actual.renderToSVG> => {
+      previewCapture.ordinaryExport = {
+        scene: args[0],
+        metadata: args[1],
+      };
+      return actual.renderToSVG(...args);
+    },
     renderPlotterSVG: (
       ...args: Parameters<typeof actual.renderPlotterSVG>
     ): ReturnType<typeof actual.renderPlotterSVG> => {
@@ -258,6 +273,7 @@ function clickButton(el: HTMLElement, text: string): void {
 beforeEach(() => {
   window.localStorage.clear();
   previewCapture.paints = [];
+  previewCapture.ordinaryExport = null;
   previewCapture.plotterExport = null;
   presetClient.list.mockReset().mockResolvedValue([]);
   presetClient.load.mockReset();
@@ -409,6 +425,70 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
       el.querySelector<HTMLCanvasElement>(".plot-drawable > canvas"),
     );
     expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("keeps framed Fill, PNG, ordinary SVG, and physical paper on one mixed crop/pad output", async () => {
+    const { sketch, generate } = testSketch(A4_PROFILE);
+    const el = mount(sketch);
+    await flushPromises();
+    const composition = resolvePlotCompositionFrame(A4_PROFILE);
+    const source = generate.mock.results.at(-1)!.value as Scene;
+    const callsBeforeFrame = generate.mock.calls.length;
+
+    clickButton(el, "Crop");
+    const percentages = { x: 10, y: -20, width: 110, height: 80 };
+    for (const [name, value] of Object.entries(percentages)) {
+      setInput(
+        el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+        String(value),
+      );
+    }
+    clickButton(el, "Apply");
+
+    const pageFrame = {
+      x: composition.width * 0.1,
+      y: composition.height * -0.2,
+      width: composition.width * 1.1,
+      height: composition.height * 0.8,
+    };
+    const expectedScene = frameScene(source, pageFrame);
+    const expectedProfile = derivePageFramePlotProfile(
+      A4_PROFILE,
+      { x: 0, y: 0, ...composition },
+      pageFrame,
+    );
+
+    expect(generate).toHaveBeenCalledTimes(callsBeforeFrame);
+    expect(previewCapture.paints.at(-1)!.scene).toEqual(expectedScene);
+    expect(previewCapture.paints.at(-1)!.scene).not.toBe(source);
+    expect(
+      el
+        .querySelector<HTMLCanvasElement>("canvas")!
+        .style.getPropertyValue("--paper-aspect"),
+    ).toBe(String(pageFrame.width / pageFrame.height));
+    expect(
+      el
+        .querySelector<HTMLElement>(".plot-sheet")!
+        .style.getPropertyValue("--sheet-aspect"),
+    ).toBe(String(expectedProfile.width / expectedProfile.height));
+    expect(expectedProfile.insets).toEqual(A4_PROFILE.insets);
+
+    clickButton(el, "Export PNG");
+    expect(pngSnapshotCount).toBe(1);
+    expect(pngCanvas).toBe(el.querySelector(".plot-drawable > canvas"));
+    expect(generate).toHaveBeenCalledTimes(callsBeforeFrame);
+
+    clickButton(el, "Export SVG");
+    expect(generate).toHaveBeenCalledTimes(callsBeforeFrame);
+    expect(previewCapture.ordinaryExport?.scene).toEqual(expectedScene);
+    expect(previewCapture.ordinaryExport?.scene.space).toEqual({
+      width: pageFrame.width,
+      height: pageFrame.height,
+    });
+    expect(
+      JSON.parse(previewCapture.ordinaryExport!.metadata!).profile,
+    ).toEqual(expectedProfile);
+    await flushPromises();
   });
 
   it("reloads controls, geometry, and preview together, then preserves exact Outline Scene geometry across a proportional non-square resize", async () => {

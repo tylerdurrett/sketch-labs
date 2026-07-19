@@ -40,6 +40,31 @@ describe("full-sheet preview geometry CSS", () => {
   });
 });
 
+describe("Page Frame edit geometry CSS", () => {
+  it("contain-fits the combined edit extent and positions Composition independently", () => {
+    const view = declarations(".page-frame-edit-view");
+    const composition = declarations(".page-frame-edit-composition");
+
+    expect(view).toMatch(/position:\s*relative/);
+    expect(view).toMatch(/aspect-ratio:\s*var\(--page-frame-edit-aspect\)/);
+    expect(view).toMatch(/width:\s*min\(100cqw,\s*100cqh/);
+    expect(composition).toMatch(/position:\s*absolute/);
+    expect(composition).toMatch(/left:\s*var\(--page-frame-composition-left\)/);
+    expect(composition).toMatch(/top:\s*var\(--page-frame-composition-top\)/);
+  });
+
+  it("keeps the dim and boundary overlay visual-only", () => {
+    const overlay = declarations(".page-frame-edit-overlay");
+    const discarded = declarations(".page-frame-edit-discarded");
+    const boundary = declarations(".page-frame-edit-boundary");
+
+    expect(overlay).toMatch(/pointer-events:\s*none/);
+    expect(discarded).toMatch(/fill:\s*rgb\(0 0 0 \/ 55%\)/);
+    expect(boundary).toMatch(/fill:\s*none/);
+    expect(boundary).toMatch(/stroke:/);
+  });
+});
+
 describe("viewport scroll ownership", () => {
   it("contains absolutely positioned inspector content inside its scrollport", () => {
     const inspector = declarations(".inspector");

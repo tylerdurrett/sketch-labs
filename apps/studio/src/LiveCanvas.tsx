@@ -12,10 +12,12 @@ import {
 
 import {
   drawSceneFitted,
+  frameScene,
   prepareSketch,
   type Canvas2DContext,
   type CoordinateSpace,
   type Params,
+  type PageFrame,
   type PlotProfile,
   type Scene,
   type Seed,
@@ -41,7 +43,12 @@ export type RenderMode = "fill" | "outline";
 
 /** An atomic record of the Scene that most recently reached the live canvas. */
 export interface DisplayedSceneSnapshot {
+  /** Backward-compatible alias for `displayedScene`. */
   readonly scene: Scene;
+  /** Exact full-Composition Scene sampled at `t`, before Page framing. */
+  readonly sourceScene: Scene;
+  /** Exact Scene painted to the canvas, framed only for committed Fill. */
+  readonly displayedScene: Scene;
   readonly t: number;
   readonly renderMode: RenderMode;
   readonly tolerance: number;
@@ -64,7 +71,10 @@ export interface FillCaptureRequest {
 }
 
 export interface FillCapture extends FillCaptureRequest {
+  /** Backward-compatible alias for `sourceScene`. */
   readonly scene: Scene;
+  /** Exact full-Composition derivation source retained by LiveCanvas. */
+  readonly sourceScene: Scene;
   readonly t: number;
   readonly sourceInputRevision: number;
   readonly contentRevision?: number;
@@ -127,6 +137,12 @@ export interface LiveCanvasHandle {
   /** Atomically read the retained record for the last committed canvas frame. */
   captureDisplayedFrame(): DisplayedSceneSnapshot | null;
   /**
+   * Atomically read the most recent committed Fill, even while Outline is the
+   * currently displayed mode. Page-framed ordinary export consumes this exact
+   * full-Composition source instead of asking the Sketch to sample it again.
+   */
+  captureDisplayedFillFrame(): DisplayedSceneSnapshot | null;
+  /**
    * The live `<canvas>` element, or `null` before it mounts. Its backing store is
    * already DPR-sized by `sizeToBox`, so a `toBlob` snapshot is crisp by
    * construction (the displayed frame at device resolution).
@@ -179,6 +195,10 @@ export interface LiveCanvasProps {
   renderState?: LiveCanvasRenderState;
   /** Export identity metadata retained in the displayed-scene handle. */
   tolerance?: number;
+  /** Transient Page Frame draft; present only while Studio is editing framing. */
+  pageFrameDraft?: PageFrame | null;
+  /** Committed Page Frame applied as a paint-only Fill derivation. */
+  pageFrame?: PageFrame | null;
   /**
    * Optional ref the owner passes to obtain the read-only {@link LiveCanvasHandle}
    * — the live canvas node + current `t` — so the studio chrome can snapshot the
@@ -329,9 +349,12 @@ export function LiveCanvas({
   onDisplayedSceneCommitted,
   renderState = LIVE_FILL_RENDER_STATE,
   tolerance = 0,
+  pageFrameDraft = null,
+  pageFrame = null,
   handleRef,
 }: LiveCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pageGroundRef = useRef<HTMLDivElement>(null);
   // The exact Scene most recently painted, exposed read-only to one-shot export.
   const displayedSceneRef = useRef<DisplayedSceneSnapshot | null>(null);
   // Capture reads Fill only: a completed Outline may be displayed while the
@@ -359,6 +382,22 @@ export function LiveCanvas({
   const compositionHeight = compositionFrame.height;
   const toneReferenceSource =
     renderState.kind === "tone-reference" ? renderState.source : null;
+  const suppliedScene =
+    renderState.kind === "fill-held" || renderState.kind === "outline"
+      ? renderState.scene
+      : null;
+  const suppliedT =
+    renderState.kind === "fill-held" || renderState.kind === "outline"
+      ? renderState.t
+      : null;
+  const suppliedSourceInputRevision =
+    renderState.kind === "fill-held" || renderState.kind === "outline"
+      ? renderState.sourceInputRevision
+      : null;
+  const suppliedContentRevision =
+    renderState.kind === "fill-held" || renderState.kind === "outline"
+      ? renderState.contentRevision
+      : null;
   const preparedFrame = useMemo(
     () =>
       renderState.kind === "fill-live"
@@ -367,10 +406,9 @@ export function LiveCanvas({
     [sketch, params, seed, compositionAspect, renderState.kind],
   );
 
-  // The paper's CSS-box aspect (#155): the `<canvas>` box is sized to the
-  // COMPOSITION FRAME's aspect, not a fixed square and not the Sketch's own
-  // generated space. The ratio is the caller-resolved frame's own
-  // `width / height`. No throwaway Scene is sampled anymore
+  // The paper's CSS-box aspect (#155): ordinary committed Fill follows the Page
+  // Frame, while unframed and edit-mode Fill follows the full Composition. It is
+  // never driven by the Sketch's generated space. No throwaway Scene is sampled
   // (the metadata that once short-circuited that probe was removed with the
   // widened contract in #251; the frame supersedes both). The ratio is threaded
   // onto `.live-canvas` as the `--paper-aspect` custom property; the CSS there
@@ -379,10 +417,14 @@ export function LiveCanvas({
   // contain-fit (`drawSceneFitted`) are untouched, so PNG/SVG export still
   // snapshots the displayed frame. A degenerate frame (zero/non-finite extent)
   // falls back to a square.
+  const editingPageFrame = pageFrameDraft !== null;
   const paperAspect = useMemo(() => {
-    const ratio = compositionFrame.width / compositionFrame.height;
+    const ratio =
+      pageFrame !== null && !editingPageFrame
+        ? pageFrame.width / pageFrame.height
+        : compositionFrame.width / compositionFrame.height;
     return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
-  }, [compositionFrame]);
+  }, [compositionFrame, pageFrame, editingPageFrame]);
 
   // Inline the derived ratio as the `--paper-aspect` custom property the
   // `.live-canvas` rule reads for its `aspect-ratio` + contain-fit width. Cast
@@ -401,6 +443,56 @@ export function LiveCanvas({
     "--plot-inset-left": `${(profile.insets.left / profile.width) * 100}%`,
   } as CSSProperties;
 
+  const pageFrameEditGeometry = useMemo(() => {
+    if (pageFrameDraft === null) return null;
+    const minX = Math.min(0, pageFrameDraft.x);
+    const minY = Math.min(0, pageFrameDraft.y);
+    const maxX = Math.max(
+      compositionFrame.width,
+      pageFrameDraft.x + pageFrameDraft.width,
+    );
+    const maxY = Math.max(
+      compositionFrame.height,
+      pageFrameDraft.y + pageFrameDraft.height,
+    );
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const intersectionX = Math.max(0, pageFrameDraft.x);
+    const intersectionY = Math.max(0, pageFrameDraft.y);
+    const intersectionWidth = Math.max(
+      0,
+      Math.min(compositionFrame.width, pageFrameDraft.x + pageFrameDraft.width) -
+        intersectionX,
+    );
+    const intersectionHeight = Math.max(
+      0,
+      Math.min(
+        compositionFrame.height,
+        pageFrameDraft.y + pageFrameDraft.height,
+      ) - intersectionY,
+    );
+    const compositionPath = `M 0 0 H ${compositionFrame.width} V ${compositionFrame.height} H 0 Z`;
+    const retainedPath =
+      intersectionWidth > 0 && intersectionHeight > 0
+        ? ` M ${intersectionX} ${intersectionY} H ${intersectionX + intersectionWidth} V ${intersectionY + intersectionHeight} H ${intersectionX} Z`
+        : "";
+    return {
+      style: {
+        "--page-frame-edit-aspect": width / height,
+        "--page-frame-composition-left": `${((0 - minX) / width) * 100}%`,
+        "--page-frame-composition-top": `${((0 - minY) / height) * 100}%`,
+        "--page-frame-composition-width": `${(compositionFrame.width / width) * 100}%`,
+        "--page-frame-composition-height": `${(compositionFrame.height / height) * 100}%`,
+        "--page-frame-page-left": `${((pageFrameDraft.x - minX) / width) * 100}%`,
+        "--page-frame-page-top": `${((pageFrameDraft.y - minY) / height) * 100}%`,
+        "--page-frame-page-width": `${(pageFrameDraft.width / width) * 100}%`,
+        "--page-frame-page-height": `${(pageFrameDraft.height / height) * 100}%`,
+      } as CSSProperties,
+      viewBox: `${minX} ${minY} ${width} ${height}`,
+      dimPath: `${compositionPath}${retainedPath}`,
+    };
+  }, [compositionFrame, pageFrameDraft]);
+
   // The latest caller-owned sampler follows the same post-commit ref discipline
   // as the other live inputs. The rAF effect does not depend on it, so
   // invalidating preparation never resets the animation clock; the next tick
@@ -408,6 +500,8 @@ export function LiveCanvas({
   const preparedFrameRef = useRef(preparedFrame);
   const renderStateRef = useRef(renderState);
   const compositionFrameRef = useRef(compositionFrame);
+  const pageFrameRef = useRef(pageFrame);
+  const editingPageFrameRef = useRef(editingPageFrame);
   // `toleranceRef` lets the stable on-demand draw callbacks (rebuild/repaint,
   // scrubTo) read the current tolerance without a `tolerance` dependency, so the
   // clock effect and rAF baseline stay untouched by a knob change (issue #232).
@@ -423,6 +517,8 @@ export function LiveCanvas({
     preparedFrameRef.current = preparedFrame;
     renderStateRef.current = renderState;
     compositionFrameRef.current = compositionFrame;
+    pageFrameRef.current = pageFrame;
+    editingPageFrameRef.current = editingPageFrame;
     toleranceRef.current = tolerance;
     includeFrameRef.current = includeFrame;
     inputRevisionRef.current = inputRevision;
@@ -433,6 +529,8 @@ export function LiveCanvas({
     preparedFrame,
     renderState,
     compositionFrame,
+    pageFrame,
+    editingPageFrame,
     tolerance,
     includeFrame,
     inputRevision,
@@ -461,6 +559,7 @@ export function LiveCanvas({
       getCurrentT: () => tRef.current,
       getDisplayedScene: () => displayedSceneRef.current,
       captureDisplayedFrame: () => displayedSceneRef.current,
+      captureDisplayedFillFrame: () => displayedFillRef.current,
     }),
     [],
   );
@@ -523,7 +622,8 @@ export function LiveCanvas({
     onCaptured({
       token: request.token,
       inputRevision: request.inputRevision,
-      scene: snapshot.scene,
+      scene: snapshot.sourceScene,
+      sourceScene: snapshot.sourceScene,
       t: snapshot.t,
       sourceInputRevision: snapshot.sourceInputRevision,
       ...(snapshot.contentRevision === undefined
@@ -543,9 +643,11 @@ export function LiveCanvas({
   );
 
   const commitFillFrame = useCallback(
-    (scene: Scene, t: number) => {
+    (sourceScene: Scene, displayedScene: Scene, t: number) => {
       const snapshot: DisplayedSceneSnapshot = {
-        scene,
+        scene: displayedScene,
+        sourceScene,
+        displayedScene,
         t,
         renderMode: "fill",
         tolerance: toleranceRef.current,
@@ -558,6 +660,19 @@ export function LiveCanvas({
     [commitDisplayedScene],
   );
 
+  const displayedFillScene = useCallback((sourceScene: Scene): Scene => {
+    const committedFrame = pageFrameRef.current;
+    return committedFrame !== null && !editingPageFrameRef.current
+      ? frameScene(sourceScene, committedFrame)
+      : sourceScene;
+  }, []);
+
+  const syncPageGround = useCallback((sourceScene: Scene) => {
+    const ground = pageGroundRef.current;
+    if (ground === null) return;
+    ground.style.backgroundColor = sourceScene.background?.color ?? "white";
+  }, []);
+
   // Only live Fill derives geometry. Held Fill and completed Outline are
   // caller-owned immutable frames and travel through `paintSuppliedFrame`.
   const rebuildAndDrawFillAt = useCallback((t: number) => {
@@ -565,18 +680,27 @@ export function LiveCanvas({
     if (canvas === null) return;
     const sampleFrame = preparedFrameRef.current;
     if (sampleFrame === null) return;
-    const rendered = sampleFrame(t);
-    if (paintFrame(canvas, rendered)) {
-      commitFillFrame(rendered, t);
+    const sourceScene = sampleFrame(t);
+    const displayedScene = displayedFillScene(sourceScene);
+    if (paintFrame(canvas, displayedScene)) {
+      syncPageGround(sourceScene);
+      commitFillFrame(sourceScene, displayedScene, t);
     }
-  }, [commitFillFrame]);
+  }, [commitFillFrame, displayedFillScene, syncPageGround]);
 
   const paintSuppliedFrame = useCallback(
     (state: Extract<LiveCanvasRenderState, { kind: "fill-held" | "outline" }>) => {
       const canvas = canvasRef.current;
-      if (canvas === null || !paintFrame(canvas, state.scene)) return;
+      const displayedScene =
+        state.kind === "fill-held"
+          ? displayedFillScene(state.scene)
+          : state.scene;
+      if (canvas === null || !paintFrame(canvas, displayedScene)) return;
+      syncPageGround(state.scene);
       const snapshot: DisplayedSceneSnapshot = {
-        scene: state.scene,
+        scene: displayedScene,
+        sourceScene: state.scene,
+        displayedScene,
         t: state.t,
         renderMode: state.kind === "outline" ? "outline" : "fill",
         tolerance: toleranceRef.current,
@@ -593,7 +717,7 @@ export function LiveCanvas({
       };
       commitDisplayedScene(snapshot, state.kind === "fill-held");
     },
-    [commitDisplayedScene],
+    [commitDisplayedScene, displayedFillScene, syncPageGround],
   );
 
   // Geometry-only changes repaint the exact displayed Scene. They never sample
@@ -609,7 +733,7 @@ export function LiveCanvas({
     }
     if (state.kind === "unavailable") return;
     const displayed = displayedSceneRef.current;
-    if (displayed !== null) paintFrame(canvas, displayed.scene);
+    if (displayed !== null) paintFrame(canvas, displayed.displayedScene);
   }, []);
 
   // Re-fit then intentionally rebuild: this path is owned by true geometry
@@ -702,8 +826,12 @@ export function LiveCanvas({
       // provably simplify-free (issue #232's on-demand-only invariant).
       const sampleFrame = preparedFrameRef.current;
       if (sampleFrame === null) return;
-      const rendered = sampleFrame(t);
-      if (paintFrame(canvas, rendered)) commitFillFrame(rendered, t);
+      const sourceScene = sampleFrame(t);
+      const displayedScene = displayedFillScene(sourceScene);
+      if (paintFrame(canvas, displayedScene)) {
+        syncPageGround(sourceScene);
+        commitFillFrame(sourceScene, displayedScene, t);
+      }
       frameId = requestAnimationFrame(tick);
     };
 
@@ -712,7 +840,14 @@ export function LiveCanvas({
     return () => {
       cancelAnimationFrame(frameId);
     };
-  }, [sketch, playing, renderState.kind, commitFillFrame]);
+  }, [
+    sketch,
+    playing,
+    renderState.kind,
+    commitFillFrame,
+    displayedFillScene,
+    syncPageGround,
+  ]);
 
   // Tone depends only on its analytic source and Composition Frame. Keeping it
   // outside the artwork effect prevents Seed, Outline bookkeeping, and unrelated
@@ -756,10 +891,44 @@ export function LiveCanvas({
     compositionAspect,
     compositionWidth,
     compositionHeight,
-    renderState,
+    renderState.kind,
+    suppliedScene,
+    suppliedT,
+    suppliedSourceInputRevision,
+    suppliedContentRevision,
     inputRevision,
     refitAndDrawFill,
     paintSuppliedFrame,
+  ]);
+
+  // A frame commit/reset and entering/leaving edit mode are display-only. The
+  // retained full-Composition source is re-framed at the same exact `t`; neither
+  // Sketch preparation nor sampling participates in this path. Draft movement
+  // only changes overlay geometry and therefore is intentionally excluded.
+  const framingPaintIdentity = `${pageFrame?.x ?? "none"}:${pageFrame?.y ?? "none"}:${pageFrame?.width ?? "none"}:${pageFrame?.height ?? "none"}:${editingPageFrame}`;
+  const previousFramingPaintIdentityRef = useRef(framingPaintIdentity);
+  useEffect(() => {
+    if (previousFramingPaintIdentityRef.current === framingPaintIdentity) return;
+    previousFramingPaintIdentityRef.current = framingPaintIdentity;
+    const canvas = canvasRef.current;
+    const retained = displayedSceneRef.current;
+    if (canvas === null || retained === null) return;
+    sizeToBox(canvas, window.devicePixelRatio || 1);
+    const displayedScene =
+      retained.renderMode === "fill"
+        ? displayedFillScene(retained.sourceScene)
+        : retained.sourceScene;
+    if (!paintFrame(canvas, displayedScene)) return;
+    syncPageGround(retained.sourceScene);
+    commitDisplayedScene(
+      { ...retained, scene: displayedScene, displayedScene },
+      retained.renderMode === "fill",
+    );
+  }, [
+    framingPaintIdentity,
+    displayedFillScene,
+    syncPageGround,
+    commitDisplayedScene,
   ]);
 
   // Re-fit on box-size AND devicePixelRatio change (the #41 contract). DECOUPLED
@@ -869,6 +1038,40 @@ export function LiveCanvas({
       : unavailableState?.status === "missing"
         ? `${unavailableSubject} unavailable`
         : `${unavailableSubject} could not be loaded`;
+  const canvasSurface = (
+    <>
+      <canvas
+        ref={canvasRef}
+        className="live-canvas"
+        style={paperStyle}
+        aria-hidden={unavailableState === null ? undefined : true}
+      />
+      {unavailableState !== null && (
+        <div
+          className="live-canvas-unavailable"
+          role={unavailableState.status === "loading" ? "status" : "alert"}
+          aria-live={
+            unavailableState.status === "loading" ? "polite" : "assertive"
+          }
+          aria-atomic="true"
+        >
+          <strong className="live-canvas-unavailable__message">
+            {unavailableMessage}
+          </strong>
+          <span className="live-canvas-unavailable__label">
+            {unavailableState.unresolvedAssetIds.length === 1
+              ? "Unresolved ID"
+              : "Unresolved IDs"}
+          </span>
+          <span className="live-canvas-unavailable__ids">
+            {unavailableState.unresolvedAssetIds.map((id, index) => (
+              <code key={`${index}:${id}`}>{id}</code>
+            ))}
+          </span>
+        </div>
+      )}
+    </>
+  );
   return (
     <div className="live-canvas-layout">
       <div className="live-canvas-stage">
@@ -880,43 +1083,72 @@ export function LiveCanvas({
          * guide enters getCanvas()/PNG.
          */}
         <div
-          className="plot-sheet"
-          style={sheetStyle}
+          className={
+            pageFrameEditGeometry === null
+              ? "plot-sheet"
+              : "page-frame-edit-view"
+          }
+          style={
+            pageFrameEditGeometry === null
+              ? sheetStyle
+              : pageFrameEditGeometry.style
+          }
           role="group"
-          aria-label="Plot sheet preview"
+          aria-label={
+            pageFrameEditGeometry === null
+              ? "Plot sheet preview"
+              : "Page Frame edit preview"
+          }
         >
-          <div className="plot-drawable">
-            <canvas
-              ref={canvasRef}
-              className="live-canvas"
-              style={paperStyle}
-              aria-hidden={unavailableState === null ? undefined : true}
+          {pageFrameEditGeometry !== null && pageFrameDraft !== null && (
+            <div
+              key="page-ground"
+              ref={pageGroundRef}
+              className="page-frame-edit-page-ground"
+              aria-hidden="true"
             />
-            {unavailableState !== null && (
-              <div
-                className="live-canvas-unavailable"
-                role={unavailableState.status === "loading" ? "status" : "alert"}
-                aria-live={
-                  unavailableState.status === "loading" ? "polite" : "assertive"
-                }
-                aria-atomic="true"
-              >
-                <strong className="live-canvas-unavailable__message">
-                  {unavailableMessage}
-                </strong>
-                <span className="live-canvas-unavailable__label">
-                  {unavailableState.unresolvedAssetIds.length === 1
-                    ? "Unresolved ID"
-                    : "Unresolved IDs"}
-                </span>
-                <span className="live-canvas-unavailable__ids">
-                  {unavailableState.unresolvedAssetIds.map((id, index) => (
-                    <code key={`${index}:${id}`}>{id}</code>
-                  ))}
-                </span>
-              </div>
-            )}
+          )}
+          {/*
+           * Keep this keyed wrapper (and therefore its canvas child) at the same
+           * reconciliation position while its layout role changes. The rAF loop,
+           * ResizeObserver, DPR listener, and imperative export handle all retain
+           * the one live DOM node across Page Frame entry and settlement.
+           */}
+          <div
+            key="canvas-surface"
+            className={
+              pageFrameEditGeometry === null
+                ? "plot-drawable"
+                : "page-frame-edit-composition"
+            }
+          >
+            {canvasSurface}
           </div>
+          {pageFrameEditGeometry !== null && pageFrameDraft !== null && (
+            <svg
+              key="edit-overlay"
+              className="page-frame-edit-overlay"
+              viewBox={pageFrameEditGeometry.viewBox}
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <path
+                className="page-frame-edit-discarded"
+                data-testid="page-frame-discarded"
+                d={pageFrameEditGeometry.dimPath}
+                fillRule="evenodd"
+              />
+              <rect
+                className="page-frame-edit-boundary"
+                data-testid="page-frame-boundary"
+                x={pageFrameDraft.x}
+                y={pageFrameDraft.y}
+                width={pageFrameDraft.width}
+                height={pageFrameDraft.height}
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+          )}
         </div>
       </div>
       {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
