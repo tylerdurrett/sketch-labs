@@ -1764,6 +1764,104 @@ describe("SketchControls — Page Frame edit mode", () => {
     expect(frameInput(el, "x").value).toBe("0");
     expect(frameInput(el, "width").value).toBe("100");
   });
+
+  it("blocks Studio Undo and Redo until the Composition-relative draft settles", () => {
+    const sketch = {
+      ...sketchWith("frame-history", {}),
+      defaultOutputProfile: {
+        width: 210,
+        height: 297,
+        insets: { top: 10, right: 10, bottom: 10, left: 10 },
+        includeFrame: true,
+        toolWidthMillimeters: 0.3,
+      },
+    } as Parameters<typeof SketchControls>[0]["sketch"];
+    const el = mount(<SketchControls sketch={sketch} />);
+    const portraitComposition = structuredClone(lastCompositionFrame)!;
+
+    clickButton(el, "Swap to landscape");
+    const landscapeComposition = structuredClone(lastCompositionFrame)!;
+    expect(landscapeComposition.width / landscapeComposition.height).not.toBe(
+      portraitComposition.width / portraitComposition.height,
+    );
+
+    clickButton(el, "Crop");
+    const landscapeX = frameInput(el, "x");
+    setInput(landscapeX, "12.5");
+    act(() => landscapeX.focus());
+    expect(
+      pressHistoryShortcut(landscapeX, { ctrlKey: true }).defaultPrevented,
+    ).toBe(false);
+    expect(lastCompositionFrame).toEqual(landscapeComposition);
+    expect(landscapeX.value).toBe("12.5");
+
+    clickButton(el, "Apply");
+    const landscapeApply = historyCapture.atomic.at(-1)!.after.present;
+    if (landscapeApply.framing.kind !== "framed") {
+      throw new Error("landscape Apply did not commit framing");
+    }
+    expect(landscapeApply.framing.pageFrame.x).toBeCloseTo(
+      landscapeComposition.width * 0.125,
+      12,
+    );
+    expect(landscapeApply.framing.pageFrame.y).toBe(0);
+    expect(landscapeApply.framing.pageFrame.width).toBeCloseTo(
+      landscapeComposition.width,
+      12,
+    );
+    expect(landscapeApply.framing.pageFrame.height).toBeCloseTo(
+      landscapeComposition.height,
+      12,
+    );
+    expect(landscapeApply.framing.generationAspect).toBeCloseTo(
+      landscapeComposition.width / landscapeComposition.height,
+      14,
+    );
+
+    // Outside the mode, Undo traverses the frame commit and then the earlier
+    // aspect-changing Paper command, leaving a meaningful Redo available.
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(lastCompositionFrame).toEqual(portraitComposition);
+
+    clickButton(el, "Crop");
+    const portraitX = frameInput(el, "x");
+    setInput(portraitX, "-10");
+    act(() => portraitX.focus());
+    expect(
+      pressHistoryShortcut(portraitX, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(false);
+    expect(lastCompositionFrame).toEqual(portraitComposition);
+    expect(portraitX.value).toBe("-10");
+
+    clickButton(el, "Apply");
+    const portraitApply = historyCapture.atomic.at(-1)!.after.present;
+    if (portraitApply.framing.kind !== "framed") {
+      throw new Error("portrait Apply did not commit framing");
+    }
+    expect(portraitApply.framing.pageFrame.x).toBeCloseTo(
+      portraitComposition.width * -0.1,
+      12,
+    );
+    expect(portraitApply.framing.pageFrame.y).toBe(0);
+    expect(portraitApply.framing.pageFrame.width).toBeCloseTo(
+      portraitComposition.width,
+      12,
+    );
+    expect(portraitApply.framing.pageFrame.height).toBeCloseTo(
+      portraitComposition.height,
+      12,
+    );
+    expect(portraitApply.framing.generationAspect).toBeCloseTo(
+      portraitComposition.width / portraitComposition.height,
+      14,
+    );
+  });
 });
 
 describe("SketchControls — collapsed-state a11y (#165)", () => {

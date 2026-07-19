@@ -292,6 +292,11 @@ export function SketchControls({
   historyRef.current = history;
   const { params, seed, locks, profile, tolerance } = history.present;
   const [pageFrameDraft, setPageFrameDraft] = useState<PageFrame | null>(null);
+  // Page Frame percentages are relative to the Composition basis captured on
+  // mode entry. Keep history fixed until Apply, Cancel, or Reset closes the mode
+  // so a draft can never outlive the basis its strings describe.
+  const pageFrameDraftRef = useRef(pageFrameDraft);
+  pageFrameDraftRef.current = pageFrameDraft;
   // Tone reference is diagnostic Studio chrome, not authored state. Keeping it
   // beside (rather than inside) the edit-history model excludes it from Undo,
   // Presets, locks, profiles, and every reproduction envelope by construction.
@@ -642,6 +647,11 @@ export function SketchControls({
       if (event.defaultPrevented) return;
       const command = historyShortcutFor(event, shortcutPlatform);
       if (command === null) return;
+
+      // Page Frame edit mode owns a transient draft outside Studio history.
+      // Ignoring the shortcut (without preventing it) keeps global history and
+      // the Composition basis stable while preserving native input Undo/Redo.
+      if (pageFrameDraftRef.current !== null) return;
 
       const current = historyRef.current;
       if (
