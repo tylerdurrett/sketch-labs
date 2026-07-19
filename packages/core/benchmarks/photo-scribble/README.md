@@ -281,5 +281,8 @@ runs the registered production generator twice through fresh DedicatedWorkers,
 plus a separate production-versus-injected exact-equivalence proof. The host
 requires the resolver's full tuple, frozen centered target hash, identity hash,
 Scene hash, and diagnostics hash to agree before it accepts either measured
-production run. Every run records exactly one preparation and solver pass; the
-primary run additionally persists the exact 1000 × 1000 Canvas captures.
+production run. Each measured production run records one preparation and one
+solver pass. The equivalence production run records two preparations—one owned
+by the registered generator and one benchmark-only tuple/target resolution—and
+one solver pass; its injected counterpart records one of each. The primary run
+additionally persists the exact 1000 × 1000 Canvas captures.

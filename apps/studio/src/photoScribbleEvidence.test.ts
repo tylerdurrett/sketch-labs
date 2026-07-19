@@ -157,7 +157,11 @@ class FakeEvidenceWorker {
       serializedArtworkBytes: 100,
       targetHash: null,
       workerDurationMs: this.config.purpose === "measurement" ? 1 : null,
-      preparationCount: 1,
+      preparationCount:
+        this.config.purpose === "equivalence-proof" &&
+        this.config.profile.kind === "production"
+          ? 2
+          : 1,
       solverPassCount: 1,
       responseReadyEpochMs: Date.now(),
     };
@@ -376,7 +380,7 @@ describe("Photo Scribble evidence page seams", () => {
       purpose: "measurement",
     } as const;
 
-    executePhotoScribbleEvidenceArtwork(
+    const measuredProduction = executePhotoScribbleEvidenceArtwork(
       { ...baseConfig, profile: { kind: "production" } },
       productionGenerate,
       identity,
@@ -389,8 +393,12 @@ describe("Photo Scribble evidence page seams", () => {
     expect(resolve).not.toHaveBeenCalled();
     expect(injectedPreparation).toEqual({ source: 0, model: 0 });
     expect(injectedGenerate).not.toHaveBeenCalled();
+    expect(measuredProduction).toMatchObject({
+      preparationCount: 1,
+      solverPassCount: 1,
+    });
 
-    executePhotoScribbleEvidenceArtwork(
+    const measuredInjected = executePhotoScribbleEvidenceArtwork(
       {
         ...baseConfig,
         profile: {
@@ -414,6 +422,84 @@ describe("Photo Scribble evidence page seams", () => {
     expect(injectedGenerate).toHaveBeenCalledOnce();
     expect(resolve).toHaveBeenCalledOnce();
     expect(injectedPreparation).toEqual({ source: 1, model: 1 });
+    expect(measuredInjected).toMatchObject({
+      preparationCount: 1,
+      solverPassCount: 1,
+    });
+  });
+
+  it("counts the equivalence production tuple resolution as a second preparation", () => {
+    const schema = createPhotoScribbleSchema(assetId);
+    const identity = createScribbleComputeIdentity({
+      sketchId: "photo-scribble",
+      schema,
+      params,
+      seed: 336,
+      compositionFrame: frame,
+    });
+    const artwork = generatePhotoScribbleArtwork(
+      params,
+      336,
+      frame,
+      schema,
+      undefined,
+      environment,
+    );
+    const productionGenerate = vi.fn(() => artwork);
+    const resolve = vi.fn(resolvePhotoScribbleBenchmark);
+    const injectedGenerate = vi.fn((...args) => {
+      const hooks = args[5];
+      hooks.executionObserver?.({
+        stopCause: "budget-reached",
+        bindingGuard: "accepted-segment-limit",
+        counters: {
+          acceptedSegments: 1,
+          emittedPolylines: 1,
+          stagnations: 0,
+          restarts: 0,
+        },
+      });
+      return artwork;
+    });
+    const baseConfig = {
+      schemaVersion: 1,
+      runId: "equivalence-counts",
+      telemetryChannel: "equivalence-counts-telemetry",
+      purpose: "equivalence-proof",
+    } as const;
+
+    const production = executePhotoScribbleEvidenceArtwork(
+      { ...baseConfig, profile: { kind: "production" } },
+      productionGenerate,
+      identity,
+      environment,
+      undefined,
+      { resolve, generateInjected: injectedGenerate },
+    );
+    expect(production).toMatchObject({ preparationCount: 2, solverPassCount: 1 });
+    expect(productionGenerate).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(injectedGenerate).not.toHaveBeenCalled();
+
+    const injected = executePhotoScribbleEvidenceArtwork(
+      {
+        ...baseConfig,
+        profile: {
+          kind: "injected",
+          candidateId: "resolved-production-tuple-equivalence",
+          limits: production.resolvedProductionLimits!,
+        },
+      },
+      productionGenerate,
+      identity,
+      environment,
+      undefined,
+      { resolve, generateInjected: injectedGenerate },
+    );
+    expect(injected).toMatchObject({ preparationCount: 1, solverPassCount: 1 });
+    expect(productionGenerate).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledTimes(2);
+    expect(injectedGenerate).toHaveBeenCalledOnce();
   });
 
   it("surfaces Worker failure immediately and cleans up without telemetry", async () => {

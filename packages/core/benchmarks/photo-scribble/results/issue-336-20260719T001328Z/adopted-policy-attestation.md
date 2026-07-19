@@ -23,3 +23,13 @@ measurements took 18.52 s and 18.48 s. Heartbeat gaps remain observations under
 the maintainer machine-ceiling override: flowers reached 1.53 s and 1.56 s
 during large result transfer, while pinecone remained below 0.84 s. All
 terminal-to-display and cancellation limits passed.
+
+## Evidence-integrity correction
+
+The first committed harness serialized `preparationCount: 1` for every path
+instead of reporting the executor's actual calls. The two measured production
+runs per fixture remain one preparation and one solver pass. The equivalence
+production path is corrected to two preparations and one solver pass because it
+runs the registered generator, then separately resolves the tuple and target;
+the injected equivalence path remains one preparation and one solver pass. No
+geometry, hash, timing, capture, or adoption result changed.

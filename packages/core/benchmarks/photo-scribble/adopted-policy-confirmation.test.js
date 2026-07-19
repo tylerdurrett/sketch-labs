@@ -145,9 +145,9 @@ describe('issue #336 adopted production policy confirmation', () => {
         sceneHashMatches: true,
         diagnosticsHashMatches: true,
       })
-      for (const run of [
-        record.equivalence.production,
-        record.equivalence.injectedResolvedTuple,
+      for (const [run, preparationCount] of [
+        [record.equivalence.production, 2],
+        [record.equivalence.injectedResolvedTuple, 1],
       ]) {
         expect(run.fullTuple).toEqual(adoptedTuple)
         expect(run.telemetry).toMatchObject({
@@ -155,7 +155,7 @@ describe('issue #336 adopted production policy confirmation', () => {
           effectiveLimits: adoptedTuple,
           productionResolverSelectedEffectiveTuple: true,
           targetHash: expectedTarget,
-          preparationCount: 1,
+          preparationCount,
           solverPassCount: 1,
         })
       }

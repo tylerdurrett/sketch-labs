@@ -63,8 +63,8 @@ const executeEvidenceArtwork: ScribbleArtworkExecutor = (
       smoothedEmittedPolylines: artwork.scene.primitives.length,
       workerDurationMs:
         config.purpose === "measurement" ? performance.now() - startedAt : null,
-      preparationCount: 1,
-      solverPassCount: 1,
+      preparationCount: evidence.preparationCount,
+      solverPassCount: evidence.solverPassCount,
     },
     artwork,
     targetHash: evidence.targetHash,

@@ -94,7 +94,7 @@
         "smoothedEmittedPoints": 2257213,
         "smoothedEmittedPolylines": 6,
         "workerDurationMs": null,
-        "preparationCount": 1,
+        "preparationCount": 2,
         "solverPassCount": 1,
         "serializedArtworkBytes": 86470358,
         "targetHash": "96738e63053982deb8f7b0afd042311f827b88280434024ad17e086826b72008",

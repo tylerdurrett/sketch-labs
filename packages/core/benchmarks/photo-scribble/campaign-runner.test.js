@@ -152,7 +152,8 @@ function evidenceRun({
       serializedArtworkBytes: 100,
       targetHash: 'd'.repeat(64),
       workerDurationMs: purpose === 'measurement' ? 1 : null,
-      preparationCount: 1,
+      preparationCount:
+        purpose === 'equivalence-proof' && profile.kind === 'production' ? 2 : 1,
       solverPassCount: 1,
       responseReadyEpochMs: 1,
     },

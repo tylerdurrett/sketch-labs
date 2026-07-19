@@ -39,10 +39,10 @@ export interface PhotoScribbleEvidenceTelemetry {
   readonly targetHash: string | null;
   /** Worker duration is retained only for measured, single-solve runs. */
   readonly workerDurationMs: number | null;
-  /** The evidence executor admits exactly one source/model preparation per run. */
-  readonly preparationCount: 1;
-  /** The evidence executor admits exactly one solver pass per run. */
-  readonly solverPassCount: 1;
+  /** Instrumented calls that prepare a source/model for this evidence run. */
+  readonly preparationCount: number;
+  /** Instrumented solver passes executed for this evidence run. */
+  readonly solverPassCount: number;
   /** Epoch proxy sampled immediately before the product response is posted. */
   readonly responseReadyEpochMs: number;
 }

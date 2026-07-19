@@ -103,6 +103,10 @@ function sha256(bytes) {
 }
 
 function validateRun(run, expected) {
+  const expectedPreparationCount =
+    expected.profile.kind === 'production' && expected.purpose === 'equivalence-proof'
+      ? 2
+      : 1
   evidenceAssertion(isRecord(run), `${expected.label} is not an object`)
   evidenceAssertion(run.schemaVersion === 1, `${expected.label} schemaVersion is not 1`)
   evidenceAssertion(run.campaignId === expected.campaignId,
@@ -140,7 +144,7 @@ function validateRun(run, expected) {
     Number.isSafeInteger(run.telemetry.serializedArtworkBytes) &&
     run.telemetry.serializedArtworkBytes > 0 &&
     Number.isFinite(run.telemetry.responseReadyEpochMs) &&
-    run.telemetry.preparationCount === 1 &&
+    run.telemetry.preparationCount === expectedPreparationCount &&
     run.telemetry.solverPassCount === 1,
   `${expected.label} telemetry identity does not match`)
   evidenceAssertion(isRecord(run.protocolBoundary) &&

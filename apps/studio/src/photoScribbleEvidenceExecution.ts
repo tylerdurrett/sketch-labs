@@ -40,6 +40,8 @@ export interface PhotoScribbleEvidenceExecution {
   readonly effectiveLimits: Readonly<ScribbleExecutionLimits> | null;
   readonly productionResolverSelectedEffectiveTuple: boolean | null;
   readonly execution: Readonly<ScribbleExecutionObservation> | null;
+  readonly preparationCount: number;
+  readonly solverPassCount: number;
   /** Deferred until after the product success response is posted. */
   readonly targetHash: (() => Promise<string>) | null;
 }
@@ -75,20 +77,36 @@ export function executePhotoScribbleEvidenceArtwork(
   if (typeof imageAssetId !== "string") {
     throw new TypeError("Photo Scribble evidence identity lacks an Image Asset");
   }
-  if (config.profile.kind === "production") {
-    // A measured production job performs only the registered generator's one
-    // source/model/solver preparation. Tuple discovery is deliberately moved
-    // to the separate unmeasured proof operation below.
-    const artwork = generate(
+  let preparationCount = 0;
+  let solverPassCount = 0;
+  const resolve = (): PhotoScribbleBenchmarkResolution => {
+    preparationCount++;
+    return dependencies.resolve(
+      params,
+      identity.compositionFrame,
+      environment,
+    );
+  };
+  const generateProduction = (): ScribbleArtwork => {
+    // The registered generator owns both preparation and its solver pass.
+    preparationCount++;
+    solverPassCount++;
+    return generate(
       params,
       identity.seed,
       identity.compositionFrame,
       observer,
       environment,
     );
+  };
+  if (config.profile.kind === "production") {
+    // A measured production job performs only the registered generator's one
+    // source/model/solver preparation. Tuple discovery is deliberately moved
+    // to the separate unmeasured proof operation below.
+    const artwork = generateProduction();
     const resolution =
       config.purpose === "equivalence-proof"
-        ? dependencies.resolve(params, identity.compositionFrame, environment)
+        ? resolve()
         : null;
     return {
       artwork,
@@ -99,6 +117,8 @@ export function executePhotoScribbleEvidenceArtwork(
       productionResolverSelectedEffectiveTuple:
         resolution === null ? null : true,
       execution: null,
+      preparationCount,
+      solverPassCount,
       targetHash:
         resolution === null
           ? null
@@ -106,12 +126,9 @@ export function executePhotoScribbleEvidenceArtwork(
     };
   }
 
-  const resolution = dependencies.resolve(
-    params,
-    identity.compositionFrame,
-    environment,
-  );
+  const resolution = resolve();
   let execution: ScribbleExecutionObservation | undefined;
+  solverPassCount++;
   const artwork = dependencies.generateInjected(
     resolution,
     identity.seed,
@@ -134,6 +151,8 @@ export function executePhotoScribbleEvidenceArtwork(
       config.profile.limits,
     ),
     execution,
+    preparationCount,
+    solverPassCount,
     targetHash: () => canonicalBrowserScribbleTargetHash(resolution.model),
   };
 }
