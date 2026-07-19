@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { resolveCompositionFrame } from '../compositionFrame'
 import { fullCompositionPageFrame, type PageFrame } from '../pageFrame'
-import { derivePageFramePlotProfile } from '../pageFramePlotProfile'
+import {
+  derivePageFramePlotProfile,
+  resizePageFrameFromPhysicalDimension,
+  resizePageFramePlotProfileProportionally,
+} from '../pageFramePlotProfile'
+import { inchToMm } from '../paperCatalog'
 import { plotDrawableRectangle, type PlotProfile } from '../plotProfile'
 
 const profile: PlotProfile = {
@@ -232,5 +237,229 @@ describe('derivePageFramePlotProfile', () => {
         height: 800,
       }),
     ).toThrow(/validatePlotProfile/)
+  })
+})
+
+describe('resizePageFramePlotProfileProportionally', () => {
+  it.each([
+    ['width', 130, { width: 130, height: 110 }],
+    ['width', 430, { width: 430, height: 350 }],
+    ['height', 70, { width: 80, height: 70 }],
+    ['height', 350, { width: 430, height: 350 }],
+  ] as const)(
+    'drives a crop or pad from total paper %s while retaining fixed asymmetric insets',
+    (dimension, millimeters, expected) => {
+      const resized = resizePageFramePlotProfileProportionally(
+        profile,
+        fullFrame,
+        dimension,
+        millimeters,
+      )
+
+      expect({ width: resized.width, height: resized.height }).toEqual(
+        expected,
+      )
+      expect(resized.insets).toEqual(profile.insets)
+      expect(resized.insets).not.toBe(profile.insets)
+      expect(resized.includeFrame).toBe(profile.includeFrame)
+      expect(resized.toolWidthMillimeters).toBe(
+        profile.toolWidthMillimeters,
+      )
+      expect(
+        plotDrawableRectangle(resized).width /
+          plotDrawableRectangle(resized).height,
+      ).toBe(fullFrame.width / fullFrame.height)
+    },
+  )
+
+  it('supports repeated edits and inch-converted total paper values without compounding scale', () => {
+    const tenInches = inchToMm(10)
+    const twelveInches = inchToMm(12)
+    const widthDriven = resizePageFramePlotProfileProportionally(
+      profile,
+      fullFrame,
+      'width',
+      tenInches,
+    )
+    const heightDriven = resizePageFramePlotProfileProportionally(
+      widthDriven,
+      fullFrame,
+      'height',
+      twelveInches,
+    )
+    const widthDrivenAgain = resizePageFramePlotProfileProportionally(
+      heightDriven,
+      fullFrame,
+      'width',
+      tenInches,
+    )
+
+    expect(widthDriven.width).toBe(254)
+    expect(widthDriven.height).toBeCloseTo(209.2, 12)
+    expect(heightDriven.width).toBeCloseTo(373.5, 12)
+    expect(heightDriven.height).toBeCloseTo(304.8, 12)
+    expect(widthDrivenAgain.width).toBe(widthDriven.width)
+    expect(widthDrivenAgain.height).toBeCloseTo(widthDriven.height, 12)
+    expect(profile).toEqual({
+      width: 230,
+      height: 190,
+      insets: { top: 7, right: 11, bottom: 23, left: 19 },
+      includeFrame: false,
+      toolWidthMillimeters: 0.7,
+    })
+  })
+
+  it('rejects invalid dimensions, inset exhaustion, and a nonuniform represented scale', () => {
+    expect(() =>
+      resizePageFramePlotProfileProportionally(
+        profile,
+        fullFrame,
+        'width',
+        Number.NaN,
+      ),
+    ).toThrow(/finite positive/)
+    expect(() =>
+      resizePageFramePlotProfileProportionally(
+        profile,
+        fullFrame,
+        'height',
+        0,
+      ),
+    ).toThrow(/finite positive/)
+    expect(() =>
+      resizePageFramePlotProfileProportionally(
+        profile,
+        fullFrame,
+        'width',
+        profile.insets.left + profile.insets.right,
+      ),
+    ).toThrow(/exhausted/)
+    expect(() =>
+      resizePageFramePlotProfileProportionally(
+        profile,
+        { ...fullFrame, height: 1_000 },
+        'width',
+        130,
+      ),
+    ).toThrow(/equivalent physical scales/)
+  })
+})
+
+describe('resizePageFrameFromPhysicalDimension', () => {
+  const draftFrame: PageFrame = {
+    x: 50,
+    y: -20,
+    width: 900,
+    height: 700,
+  }
+
+  it.each([
+    ['width', 130, { ...draftFrame, width: 500 }],
+    ['width', 430, { ...draftFrame, width: 2_000 }],
+    ['height', 110, { ...draftFrame, height: 400 }],
+    ['height', 350, { ...draftFrame, height: 1_600 }],
+  ] as const)(
+    'maps cropped and padded total paper %s to only that draft extent',
+    (dimension, millimeters, expected) => {
+      expect(
+        resizePageFrameFromPhysicalDimension(
+          profile,
+          fullFrame,
+          draftFrame,
+          dimension,
+          millimeters,
+        ),
+      ).toEqual(expected)
+    },
+  )
+
+  it('supports repeated per-axis edits, including an inch-converted value', () => {
+    const widthEdited = resizePageFrameFromPhysicalDimension(
+      profile,
+      fullFrame,
+      draftFrame,
+      'width',
+      inchToMm(10),
+    )
+    const heightEdited = resizePageFrameFromPhysicalDimension(
+      profile,
+      fullFrame,
+      widthEdited,
+      'height',
+      110,
+    )
+    const widthEditedAgain = resizePageFrameFromPhysicalDimension(
+      profile,
+      fullFrame,
+      heightEdited,
+      'width',
+      130,
+    )
+
+    expect(widthEdited).toEqual({ ...draftFrame, width: 1_120 })
+    expect(heightEdited).toEqual({
+      ...draftFrame,
+      width: 1_120,
+      height: 400,
+    })
+    expect(widthEditedAgain).toEqual({
+      ...draftFrame,
+      width: 500,
+      height: 400,
+    })
+  })
+
+  it('preserves the represented physical scale when the derived draft is committed', () => {
+    const resizedDraft = resizePageFrameFromPhysicalDimension(
+      profile,
+      fullFrame,
+      draftFrame,
+      'width',
+      130,
+    )
+    const committed = derivePageFramePlotProfile(
+      profile,
+      fullFrame,
+      resizedDraft,
+    )
+
+    expect(committed.width).toBe(130)
+    expect(committed.height).toBe(170)
+    expect(plotDrawableRectangle(committed).width / resizedDraft.width).toBe(
+      0.2,
+    )
+    expect(
+      plotDrawableRectangle(committed).height / resizedDraft.height,
+    ).toBe(0.2)
+  })
+
+  it('rejects invalid dimensions, inset exhaustion, and a nonuniform represented scale', () => {
+    expect(() =>
+      resizePageFrameFromPhysicalDimension(
+        profile,
+        fullFrame,
+        draftFrame,
+        'height',
+        Number.POSITIVE_INFINITY,
+      ),
+    ).toThrow(/finite positive/)
+    expect(() =>
+      resizePageFrameFromPhysicalDimension(
+        profile,
+        fullFrame,
+        draftFrame,
+        'height',
+        profile.insets.top + profile.insets.bottom,
+      ),
+    ).toThrow(/exhausted/)
+    expect(() =>
+      resizePageFrameFromPhysicalDimension(
+        profile,
+        { ...fullFrame, width: 800 },
+        draftFrame,
+        'width',
+        130,
+      ),
+    ).toThrow(/equivalent physical scales/)
   })
 })
