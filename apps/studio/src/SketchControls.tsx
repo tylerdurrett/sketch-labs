@@ -12,19 +12,15 @@ import {
   applyPreset,
   buildReproMetadata,
   clipSceneToBounds,
-  computePlotMapping,
   defaultParams,
   exportFilename,
   insertPngMetadata,
   newSeed,
   plotDrawableAspectsEquivalent,
-  plotDrawableRectangle,
   randomize,
   renderToSVG,
   resolveOutputProfile,
   type Preset,
-  type PlotProfile,
-  type CoordinateSpace,
   type OutlineTarget,
   type Scene,
   type Sketch,
@@ -50,7 +46,9 @@ import {
 } from "./editHistory";
 import {
   resolveStudioCompositionFrame,
+  sameStudioPhysicalScale,
   studioGenerationAspect,
+  studioMillimetersPerCompositionUnit,
 } from "./pageFrameEditing";
 import {
   detectHistoryShortcutPlatform,
@@ -135,16 +133,15 @@ function sameParams(
 
 function outlineIdentitySourceFor(
   sketch: Sketch,
-  profile: PlotProfile,
-  frame: CoordinateSpace,
+  edit: StudioEditState,
   sourceScene: Scene,
 ):
   | { sourceScene: Scene }
   | { outlineTarget: OutlineTarget }
   | { sourceScene: Scene; outlineTarget: OutlineTarget } {
   const outlineTarget = {
-    toolWidthMillimeters: profile.toolWidthMillimeters,
-    millimetersPerSceneUnit: computePlotMapping(frame, profile).scale,
+    toolWidthMillimeters: edit.profile.toolWidthMillimeters,
+    millimetersPerSceneUnit: studioMillimetersPerCompositionUnit(edit),
   };
   if (sketch.deriveOutlineSource !== undefined) {
     return { sourceScene, outlineTarget };
@@ -172,13 +169,7 @@ function outlineInputsChanged(
     return true;
   }
 
-  const previousDrawable = plotDrawableRectangle(previous.profile);
-  const nextDrawable = plotDrawableRectangle(next.profile);
-  if (
-    usesPhysicalTool &&
-    (!Object.is(previousDrawable.width, nextDrawable.width) ||
-      !Object.is(previousDrawable.height, nextDrawable.height))
-  ) {
+  if (usesPhysicalTool && !sameStudioPhysicalScale(previous, next)) {
     return true;
   }
   return !plotDrawableAspectsEquivalent(
@@ -805,8 +796,7 @@ export function SketchControls({
       includeFrame: edit.profile.includeFrame,
       ...outlineIdentitySourceFor(
         sketch,
-        edit.profile,
-        compositionFrame,
+        edit,
         capture.scene,
       ),
     });
@@ -1167,8 +1157,7 @@ export function SketchControls({
       includeFrame: displayed.includeFrame,
       ...outlineIdentitySourceFor(
         sketch,
-        edit.profile,
-        compositionFrame,
+        edit,
         sourceScene,
       ),
     });

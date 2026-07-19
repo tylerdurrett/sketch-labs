@@ -1,4 +1,5 @@
 import {
+  computePlotMapping,
   derivePageFramePlotProfile,
   fullCompositionPageFrame,
   plotDrawableRectangle,
@@ -19,7 +20,9 @@ import {
   initialPageFrameForEdit,
   resetPageFrame,
   resolveStudioCompositionFrame,
+  sameStudioPhysicalScale,
   studioGenerationAspect,
+  studioMillimetersPerCompositionUnit,
 } from "./pageFrameEditing";
 
 const PROFILE: PlotProfile = {
@@ -147,6 +150,49 @@ describe("Page Frame editing commands", () => {
       generationAspect: 200 / 160,
     });
     expect(resolveStudioCompositionFrame(second.present)).toEqual(composition);
+  });
+
+  it("derives framed physical scale from the represented Page extent and retains it across frame-only edits", () => {
+    const initial = state();
+    const composition = resolveStudioCompositionFrame(initial);
+    const originalScale = studioMillimetersPerCompositionUnit(initial);
+    const tallCrop = scaleFrame(composition, {
+      x: 0.2,
+      y: 0.1,
+      width: 0.4,
+      height: 0.8,
+    });
+    const first = applyPageFrameEdit(
+      createEditHistory(initial),
+      tallCrop,
+    ).present;
+    const widePadding = scaleFrame(composition, {
+      x: -0.1,
+      y: 0.2,
+      width: 1.2,
+      height: 0.5,
+    });
+    const second = applyPageFrameEdit(
+      createEditHistory(first),
+      widePadding,
+    ).present;
+
+    // These profiles materially mismatch the frozen Composition aspect, so the
+    // ordinary whole-Composition plot mapper would reject them.
+    expect(resolvePlotCompositionFrame(first.profile)).not.toEqual(composition);
+    expect(() => computePlotMapping(composition, first.profile)).toThrow(
+      /does not match drawable aspect/,
+    );
+    expect(studioMillimetersPerCompositionUnit(first)).toBeCloseTo(
+      originalScale,
+      14,
+    );
+    expect(studioMillimetersPerCompositionUnit(second)).toBeCloseTo(
+      originalScale,
+      14,
+    );
+    expect(sameStudioPhysicalScale(initial, first)).toBe(true);
+    expect(sameStudioPhysicalScale(first, second)).toBe(true);
   });
 
   it("Reset derives the full-Composition profile at current scale before atomically clearing framing", () => {

@@ -1,11 +1,13 @@
 /** Pure Studio history commands for committed Page Frame state (ADR-0015). */
 
 import {
+  computePlotMapping,
   derivePageFramePlotProfile,
   fullCompositionPageFrame,
   plotDrawableRectangle,
   resolveCompositionFrame,
   resolvePlotCompositionFrame,
+  validatePageFrame,
   type CoordinateSpace,
   type PageFrame,
 } from "@harness/core";
@@ -18,6 +20,7 @@ import {
 } from "./editHistory";
 
 const UNFRAMED: StudioFramingState = Object.freeze({ kind: "unframed" });
+const PHYSICAL_SCALE_RELATIVE_TOLERANCE = Number.EPSILON * 8;
 
 /** Resolve the aspect that generation must continue to use for this state. */
 export function studioGenerationAspect(state: StudioEditState): number {
@@ -35,6 +38,49 @@ export function resolveStudioCompositionFrame(
   return state.framing.kind === "framed"
     ? resolveCompositionFrame(state.framing.generationAspect)
     : resolvePlotCompositionFrame(state.profile);
+}
+
+/** Resolve the uniform physical scale represented by the authored Page extent. */
+export function studioMillimetersPerCompositionUnit(
+  state: StudioEditState,
+): number {
+  if (state.framing.kind === "unframed") {
+    return computePlotMapping(
+      resolveStudioCompositionFrame(state),
+      state.profile,
+    ).scale;
+  }
+
+  const drawable = plotDrawableRectangle(state.profile);
+  const { pageFrame } = state.framing;
+  validatePageFrame(pageFrame);
+  return Math.min(
+    drawable.width / pageFrame.width,
+    drawable.height / pageFrame.height,
+  );
+}
+
+/** Whether two states retain the same physical scale up to machine noise. */
+export function sameStudioPhysicalScale(
+  left: StudioEditState,
+  right: StudioEditState,
+): boolean {
+  const leftScale = studioMillimetersPerCompositionUnit(left);
+  const rightScale = studioMillimetersPerCompositionUnit(right);
+  if (
+    !Number.isFinite(leftScale) ||
+    leftScale <= 0 ||
+    !Number.isFinite(rightScale) ||
+    rightScale <= 0
+  ) {
+    return false;
+  }
+  if (leftScale === rightScale) return true;
+  return (
+    Math.abs(leftScale - rightScale) <=
+    PHYSICAL_SCALE_RELATIVE_TOLERANCE *
+      Math.max(1, Math.abs(leftScale), Math.abs(rightScale))
+  );
 }
 
 /** Initial numeric-editor value; creating or changing it does not touch history. */
