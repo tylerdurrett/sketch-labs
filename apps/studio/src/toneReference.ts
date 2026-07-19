@@ -1,6 +1,7 @@
 import {
   sampleEffectiveTone,
   type CoordinateSpace,
+  type PageFrame,
   type ToneSource,
 } from "@harness/core";
 
@@ -14,28 +15,49 @@ export interface ToneReferenceRaster {
 /**
  * Sample a headless Tone source into opaque grayscale canvas pixels.
  *
- * Pixel centers, rather than pixel edges, are mapped over the Composition Frame:
- * backing pixel `(x, y)` samples `((x + 0.5) / width * frame.width,
- * (y + 0.5) / height * frame.height)`. Effective tone is ink darkness, so zero
- * maps to paper white and one maps to black. The returned bytes are Studio-only;
- * neither the backing resolution nor DOM raster types enter the core contracts.
+ * Pixel centers, rather than pixel edges, are mapped over the represented Page
+ * Frame. An unframed reference represents the full Composition at origin zero;
+ * a committed frame maps over its exact `x..x + width` / `y..y + height`
+ * extent. Samples beyond the frozen Composition are paper white and never reach
+ * the Tone source, so padding cannot invent analytic content outside the source
+ * domain. Effective tone is ink darkness, so zero maps to paper white and one
+ * maps to black. The returned bytes are Studio-only; neither the backing
+ * resolution nor DOM raster types enter the core contracts.
  */
 export function rasterizeToneReference(
   source: ToneSource,
   compositionFrame: CoordinateSpace,
   width: number,
   height: number,
+  pageFrame: PageFrame | null = null,
 ): ToneReferenceRaster {
   const pixelWidth = Number.isFinite(width) && width > 0 ? Math.trunc(width) : 0;
   const pixelHeight =
     Number.isFinite(height) && height > 0 ? Math.trunc(height) : 0;
   const data = new Uint8ClampedArray(pixelWidth * pixelHeight * 4);
+  const representedFrame = pageFrame ?? {
+    x: 0,
+    y: 0,
+    width: compositionFrame.width,
+    height: compositionFrame.height,
+  };
 
   for (let y = 0; y < pixelHeight; y += 1) {
-    const frameY = ((y + 0.5) / pixelHeight) * compositionFrame.height;
+    const frameY =
+      representedFrame.y +
+      ((y + 0.5) / pixelHeight) * representedFrame.height;
     for (let x = 0; x < pixelWidth; x += 1) {
-      const frameX = ((x + 0.5) / pixelWidth) * compositionFrame.width;
-      const tone = sampleEffectiveTone(source, [frameX, frameY]);
+      const frameX =
+        representedFrame.x +
+        ((x + 0.5) / pixelWidth) * representedFrame.width;
+      const outsideComposition =
+        frameX < 0 ||
+        frameX > compositionFrame.width ||
+        frameY < 0 ||
+        frameY > compositionFrame.height;
+      const tone = outsideComposition
+        ? 0
+        : sampleEffectiveTone(source, [frameX, frameY]);
       const gray = Math.round((1 - tone) * 255);
       const offset = (y * pixelWidth + x) * 4;
       data[offset] = gray;
