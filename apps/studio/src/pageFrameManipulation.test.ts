@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PageFrame } from "@harness/core";
 
 import {
-  MIN_PAGE_FRAME_EXTENT,
+  PAGE_FRAME_MIN_EXTENT_FRACTION,
   beginPageFrameManipulation,
   cancelPageFrameManipulation,
   finishPageFrameManipulation,
@@ -15,12 +15,17 @@ import {
 const FREE: PageFrameAspectConstraint = { kind: "free" };
 const START = Object.freeze({ x: 10, y: 20, width: 100, height: 80 });
 const POINTER = Object.freeze({ x: 200, y: 300 });
+const COMPOSITION = Object.freeze({ width: 1_000, height: 800 });
 
 function begin(
   handle: PageFrameResizeHandle,
   options: {
     readonly frame?: PageFrame;
     readonly constraint?: PageFrameAspectConstraint;
+    readonly compositionFrame?: {
+      readonly width: number;
+      readonly height: number;
+    };
     readonly shiftKey?: boolean;
   } = {},
 ): PageFrameManipulationState {
@@ -29,6 +34,7 @@ function begin(
     target: { kind: "resize", handle },
     pointer: POINTER,
     constraint: options.constraint ?? FREE,
+    compositionFrame: options.compositionFrame ?? COMPOSITION,
     shiftKey: options.shiftKey ?? false,
   });
 }
@@ -89,11 +95,20 @@ describe("free Page Frame resize", () => {
     ).frame;
 
     expect(left.x + left.width).toBe(110);
-    expect(left.width).toBeCloseTo(MIN_PAGE_FRAME_EXTENT, 12);
+    expect(left.width).toBeCloseTo(
+      COMPOSITION.width * PAGE_FRAME_MIN_EXTENT_FRACTION,
+      12,
+    );
     expect(bottomRight.x).toBe(10);
     expect(bottomRight.y).toBe(20);
-    expect(bottomRight.width).toBeCloseTo(MIN_PAGE_FRAME_EXTENT, 12);
-    expect(bottomRight.height).toBeCloseTo(MIN_PAGE_FRAME_EXTENT, 12);
+    expect(bottomRight.width).toBeCloseTo(
+      COMPOSITION.width * PAGE_FRAME_MIN_EXTENT_FRACTION,
+      12,
+    );
+    expect(bottomRight.height).toBeCloseTo(
+      COMPOSITION.height * PAGE_FRAME_MIN_EXTENT_FRACTION,
+      12,
+    );
   });
 
   it("lets a pre-existing sub-floor frame grow outward without snapping", () => {
@@ -120,6 +135,41 @@ describe("free Page Frame resize", () => {
     expect(crossed.width).toBeCloseTo(tiny.width, 14);
     expect(crossed.height).toBeCloseTo(tiny.height, 14);
   });
+
+  it.each([
+    ["huge", 1e12, -1e12, 4, { width: 1_000, height: 800 }],
+    ["tiny", 1e-12, -1e-12, 4e-12, { width: 1e-9, height: 8e-10 }],
+  ] as const)(
+    "keeps free and constrained edge/corner clamps representable at %s scale",
+    (_name, x, y, extent, compositionFrame) => {
+      const frame = { x, y, width: extent, height: extent };
+      const right = frame.x + frame.width;
+      const bottom = frame.y + frame.height;
+
+      for (const [handle, constraint] of [
+        ["left", FREE],
+        ["top-left", FREE],
+        ["left", { kind: "ratio", ratio: 1 }],
+        ["top-left", { kind: "ratio", ratio: 1 }],
+      ] as const) {
+        const clamped = updatePageFrameManipulation(
+          begin(handle, { frame, compositionFrame, constraint }),
+          { x: POINTER.x + 1_000, y: POINTER.y + 1_000 },
+          false,
+        ).frame;
+
+        expect(clamped).not.toEqual(frame);
+        expect(clamped.x).toBeLessThan(right);
+        expect(clamped.x + clamped.width).toBe(right);
+        expect(clamped.width).toBeGreaterThan(0);
+        expect(clamped.y + clamped.height).toBeGreaterThan(clamped.y);
+        if (handle === "top-left") {
+          expect(clamped.y).toBeLessThan(bottom);
+          expect(clamped.y + clamped.height).toBe(bottom);
+        }
+      }
+    },
+  );
 });
 
 describe("aspect-constrained Page Frame resize", () => {
@@ -246,6 +296,7 @@ describe("Page Frame pan and gesture safety", () => {
       target: { kind: "pan" },
       pointer: POINTER,
       constraint: { kind: "ratio", ratio: 16 / 9 },
+      compositionFrame: COMPOSITION,
       shiftKey: true,
     });
     const moved = updatePageFrameManipulation(
@@ -283,6 +334,7 @@ describe("Page Frame pan and gesture safety", () => {
         target: { kind: "pan" },
         pointer: POINTER,
         constraint: FREE,
+        compositionFrame: COMPOSITION,
         shiftKey: false,
       }),
     ).toThrow(/width must be a finite positive number/);
@@ -292,6 +344,7 @@ describe("Page Frame pan and gesture safety", () => {
         target: { kind: "pan" },
         pointer: { x: Number.POSITIVE_INFINITY, y: 0 },
         constraint: FREE,
+        compositionFrame: COMPOSITION,
         shiftKey: false,
       }),
     ).toThrow(/pointer coordinates must be finite/);
@@ -301,6 +354,7 @@ describe("Page Frame pan and gesture safety", () => {
         target: { kind: "resize", handle: "right" },
         pointer: POINTER,
         constraint: { kind: "ratio", ratio: 0 },
+        compositionFrame: COMPOSITION,
         shiftKey: false,
       }),
     ).toThrow(/aspect ratio must be a finite positive number/);

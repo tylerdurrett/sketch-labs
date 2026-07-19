@@ -1,16 +1,20 @@
 /** Pure direct-manipulation geometry for the transient Page Frame draft. */
 
-import { validatePageFrame, type PageFrame } from "@harness/core";
+import {
+  validatePageFrame,
+  type CoordinateSpace,
+  type PageFrame,
+} from "@harness/core";
 
 /**
- * Composition-unit floor used when a drag would cross its opposite edge.
+ * Fraction of the Composition axis used as the baseline crossing floor.
  *
- * Existing frames smaller than this remain usable: a gesture uses the smaller
- * of this floor and its current extent, so beginning a drag never enlarges an
- * already-valid tiny frame. The next rebase adopts the same rule from the
- * latest valid frame.
+ * The effective floor also includes eight ULPs at the fixed edge's coordinate,
+ * keeping the two edges representably distinct at very large origins. Existing
+ * valid frames smaller than that combined floor remain usable: a gesture uses
+ * their current extent, so beginning a drag never enlarges a tiny frame.
  */
-export const MIN_PAGE_FRAME_EXTENT = 1e-6;
+export const PAGE_FRAME_MIN_EXTENT_FRACTION = 1e-6;
 
 export const PAGE_FRAME_RESIZE_HANDLES = [
   "top-left",
@@ -52,6 +56,7 @@ export interface PageFramePointer {
 export interface PageFrameManipulationState {
   readonly target: PageFrameManipulationTarget;
   readonly constraint: PageFrameAspectConstraint;
+  readonly compositionFrame: CoordinateSpace;
   readonly startFrame: PageFrame;
   readonly frame: PageFrame;
   readonly anchorFrame: PageFrame;
@@ -64,6 +69,7 @@ export interface BeginPageFrameManipulation {
   readonly target: PageFrameManipulationTarget;
   readonly pointer: PageFramePointer;
   readonly constraint: PageFrameAspectConstraint;
+  readonly compositionFrame: CoordinateSpace;
   readonly shiftKey: boolean;
 }
 
@@ -73,17 +79,20 @@ export function beginPageFrameManipulation({
   target,
   pointer,
   constraint,
+  compositionFrame,
   shiftKey,
 }: BeginPageFrameManipulation): PageFrameManipulationState {
   validatePageFrame(frame);
   validatePointer(pointer, "beginPageFrameManipulation");
   validateTarget(target);
   validateConstraint(constraint);
+  validateCompositionFrame(compositionFrame);
 
   const startFrame = freezeFrame(frame);
   return Object.freeze({
     target: freezeTarget(target),
     constraint: freezeConstraint(constraint),
+    compositionFrame: Object.freeze({ ...compositionFrame }),
     startFrame,
     frame: startFrame,
     anchorFrame: startFrame,
@@ -147,7 +156,14 @@ function manipulateFrame(
   const candidate =
     state.target.kind === "pan"
       ? panFrame(state.anchorFrame, dx, dy)
-      : resizeFrame(state.anchorFrame, state.target.handle, dx, dy, ratio);
+      : resizeFrame(
+          state.anchorFrame,
+          state.compositionFrame,
+          state.target.handle,
+          dx,
+          dy,
+          ratio,
+        );
   if (candidate === null) return null;
 
   try {
@@ -167,6 +183,7 @@ function panFrame(frame: PageFrame, dx: number, dy: number): PageFrame | null {
 
 function resizeFrame(
   frame: PageFrame,
+  compositionFrame: CoordinateSpace,
   handle: PageFrameResizeHandle,
   dx: number,
   dy: number,
@@ -175,15 +192,24 @@ function resizeFrame(
   const horizontal = horizontalDirection(handle);
   const vertical = verticalDirection(handle);
   if (ratio === null) {
-    return freeResize(frame, horizontal, vertical, dx, dy);
+    return freeResize(frame, compositionFrame, horizontal, vertical, dx, dy);
   }
-  return constrainedResize(frame, horizontal, vertical, dx, dy, ratio);
+  return constrainedResize(
+    frame,
+    compositionFrame,
+    horizontal,
+    vertical,
+    dx,
+    dy,
+    ratio,
+  );
 }
 
 type AxisDirection = -1 | 0 | 1;
 
 function freeResize(
   frame: PageFrame,
+  compositionFrame: CoordinateSpace,
   horizontal: AxisDirection,
   vertical: AxisDirection,
   dx: number,
@@ -191,8 +217,14 @@ function freeResize(
 ): PageFrame | null {
   const right = frame.x + frame.width;
   const bottom = frame.y + frame.height;
-  const minWidth = Math.min(MIN_PAGE_FRAME_EXTENT, frame.width);
-  const minHeight = Math.min(MIN_PAGE_FRAME_EXTENT, frame.height);
+  const fixedX = horizontal < 0 ? right : frame.x;
+  const fixedY = vertical < 0 ? bottom : frame.y;
+  const minWidth = minimumExtent(frame.width, compositionFrame.width, fixedX);
+  const minHeight = minimumExtent(
+    frame.height,
+    compositionFrame.height,
+    fixedY,
+  );
 
   let left = frame.x;
   let nextRight = right;
@@ -215,6 +247,7 @@ function freeResize(
 
 function constrainedResize(
   frame: PageFrame,
+  compositionFrame: CoordinateSpace,
   horizontal: AxisDirection,
   vertical: AxisDirection,
   dx: number,
@@ -227,8 +260,14 @@ function constrainedResize(
   const centerY = frame.y + frame.height / 2;
   if (![right, bottom, centerX, centerY].every(Number.isFinite)) return null;
 
-  const minWidth = Math.min(MIN_PAGE_FRAME_EXTENT, frame.width);
-  const minHeight = Math.min(MIN_PAGE_FRAME_EXTENT, frame.height);
+  const fixedX = horizontal < 0 ? right : horizontal > 0 ? frame.x : centerX;
+  const fixedY = vertical < 0 ? bottom : vertical > 0 ? frame.y : centerY;
+  const minWidth = minimumExtent(frame.width, compositionFrame.width, fixedX);
+  const minHeight = minimumExtent(
+    frame.height,
+    compositionFrame.height,
+    fixedY,
+  );
   const ratioMinWidth = Math.max(minWidth, minHeight * ratio);
   const ratioMinHeight = ratioMinWidth / ratio;
   if (!Number.isFinite(ratioMinWidth) || !Number.isFinite(ratioMinHeight)) {
@@ -289,6 +328,19 @@ function activeAspectRatio(
     : null;
 }
 
+function minimumExtent(
+  startingExtent: number,
+  compositionExtent: number,
+  fixedEdge: number,
+): number {
+  const scaleAwareFloor = Math.max(
+    compositionExtent * PAGE_FRAME_MIN_EXTENT_FRACTION,
+    Math.abs(fixedEdge) * Number.EPSILON * 8,
+    Number.MIN_VALUE,
+  );
+  return Math.min(startingExtent, scaleAwareFloor);
+}
+
 function rebaseGesture(
   state: PageFrameManipulationState,
   pointer: PageFramePointer,
@@ -333,6 +385,19 @@ function validateConstraint(constraint: PageFrameAspectConstraint): void {
   ) {
     throw new Error(
       "beginPageFrameManipulation: aspect ratio must be a finite positive number",
+    );
+  }
+}
+
+function validateCompositionFrame(compositionFrame: CoordinateSpace): void {
+  if (
+    !Number.isFinite(compositionFrame.width) ||
+    compositionFrame.width <= 0 ||
+    !Number.isFinite(compositionFrame.height) ||
+    compositionFrame.height <= 0
+  ) {
+    throw new Error(
+      "beginPageFrameManipulation: Composition Frame extents must be finite positive numbers",
     );
   }
 }
