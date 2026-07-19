@@ -213,6 +213,43 @@ describe("finalizeOutlineScene cheap Page finalization seam", () => {
     expect(base).toEqual(before);
   });
 
+  it("uses the current opt-in width when deciding Page-boundary survival", () => {
+    const nearPage: Scene = {
+      space: { width: 20, height: 10 },
+      primitives: [
+        {
+          points: [
+            [-1.5, 2],
+            [-1.5, 8],
+          ],
+          stroke: { color: "black", width: 1 },
+        },
+      ],
+    };
+    const finalized = finalizeOutlineScene(
+      nearPage,
+      { x: 0, y: 0, width: 10, height: 10 },
+      false,
+      {
+        kind: "physical-tool",
+        target: {
+          toolWidthMillimeters: 1,
+          millimetersPerSceneUnit: 0.25,
+        },
+      },
+    );
+
+    expect(finalized.primitives).toEqual([
+      {
+        points: [
+          [-1.5, 2],
+          [-1.5, 8],
+        ],
+        stroke: { color: "black", width: 4 },
+      },
+    ]);
+  });
+
   it("preserves authored legacy widths while carrying a current physical target", () => {
     const finalized = finalizeOutlineScene(source, null, false, legacyPolicy);
 

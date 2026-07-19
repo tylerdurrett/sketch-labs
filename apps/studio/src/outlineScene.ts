@@ -113,10 +113,11 @@ export function outlineScene(
  * the source Composition coordinate space remains the final Page space.
  *
  * Supplying a stroke policy makes the current physical target explicit. An
- * opt-in physical-tool source has each surviving stroke retargeted after Page
- * framing; a legacy Scene keeps every authored stroke. In either case the
- * Harness-owned Page outline uses the current physical width. Omitting the
- * policy preserves the historical behavior for callers that have not migrated.
+ * opt-in physical-tool source has each stroke retargeted before Page framing so
+ * clipping uses its current physical footprint; a legacy Scene keeps every
+ * authored stroke. In either case the Harness-owned Page outline uses the
+ * current physical width. Omitting the policy preserves historical behavior
+ * for callers that have not migrated.
  */
 export function finalizeOutlineScene(
   base: Scene,
@@ -124,8 +125,8 @@ export function finalizeOutlineScene(
   includeFrame: boolean,
   strokePolicy?: OutlineFinalizationStrokePolicy,
 ): Scene {
-  const framed = pageFrame === null ? base : frameScene(base, pageFrame);
-  const finalized = applyArtworkStrokePolicy(framed, strokePolicy);
+  const styled = applyArtworkStrokePolicy(base, strokePolicy);
+  const finalized = pageFrame === null ? styled : frameScene(styled, pageFrame);
   if (!includeFrame) return finalized;
 
   const { width, height } = finalized.space;
