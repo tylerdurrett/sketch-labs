@@ -2,6 +2,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+import { imageAssetsPlugin } from "./src/imageAssetsPlugin";
 import { presetsPlugin, sketchesStaticPlugin } from "./src/presetsPlugin";
 
 /**
@@ -37,6 +38,14 @@ export const sketchesRoot = resolveFromHere(
 );
 
 /**
+ * Absolute path to the committed project-managed PNG assets. Like
+ * `sketchesRoot`, this is resolved from the config rather than the launch CWD,
+ * so repointing the repo-relative knob relocates the backing store without
+ * changing its logical browser URL.
+ */
+export const imageAssetsRoot = resolveFromHere("../../assets/image-assets");
+
+/**
  * The pnpm workspace root (this config lives at `<root>/apps/studio/`). Added to
  * `server.fs.allow` so Vite is permitted to serve files under `sketchesRoot`,
  * which sits outside the studio's own root in `packages/core` (ADR-0006).
@@ -55,6 +64,8 @@ export default defineConfig({
     // against the single sketchesRoot knob above.
     presetsPlugin(sketchesRoot),
     sketchesStaticPlugin(sketchesRoot),
+    // Bounded list/write middleware plus exact-ID static Image Asset serving.
+    imageAssetsPlugin(imageAssetsRoot),
   ],
   server: {
     fs: {

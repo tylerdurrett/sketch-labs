@@ -20,6 +20,7 @@ import { grassHills } from './sketches/grass-hills'
 import { leafField } from './sketches/leaf-field'
 import { scribbleMoon } from './sketches/scribble-moon'
 import { toneCalibration } from './sketches/tone-calibration'
+import { photoScribble } from './sketches/photo-scribble'
 
 /** A read-only index of Sketches keyed by their stable {@link Sketch.id}. */
 export interface SketchRegistry {
@@ -70,9 +71,10 @@ export function createRegistry(sketches: readonly Sketch[]): SketchRegistry {
 /**
  * The default registry of built-in Sketches — what the Studio navigates over.
  * Holds {@link circles}, {@link scatter}, {@link flowField}, {@link leafField},
- * {@link grassHills}, {@link scribbleMoon}, and {@link toneCalibration}; new
- * Sketches join this list as they land. Tone Calibration is intentionally last:
- * the Studio treats the newest registered Sketch as its default selection.
+ * {@link grassHills}, {@link scribbleMoon}, {@link toneCalibration}, and
+ * {@link photoScribble}; new Sketches join this list as they land. Photo
+ * Scribble is intentionally last: the Studio treats the newest registered
+ * Sketch as its default selection.
  */
 export const registry: SketchRegistry = createRegistry([
   circles,
@@ -82,4 +84,5 @@ export const registry: SketchRegistry = createRegistry([
   grassHills,
   scribbleMoon,
   toneCalibration,
+  photoScribble,
 ])

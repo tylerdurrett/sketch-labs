@@ -34,6 +34,8 @@ afterEach(() => {
   container = null;
   root = null;
   vi.clearAllMocks();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const numberSpec = (over: Record<string, unknown> = {}): ParamSpec =>
@@ -133,6 +135,269 @@ describe("ControlPanel", () => {
       />,
     );
     expect(html).toContain('aria-label="ink current color #aabbcc"');
+  });
+
+  it("renders image-asset as a lock-free schema-derived control", () => {
+    const value = "pine-cone-0123456789ab";
+    const schema: ParamSchema = {
+      source: { kind: "image-asset", default: "default-aaaaaaaaaaaa" },
+    };
+    const html = renderToStaticMarkup(
+      <ControlPanel
+        schema={schema}
+        params={{ source: value }}
+        locks={new Set(["source"])}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+      />,
+    );
+
+    expect(html).toContain(value);
+    expect(html).toContain(`src="/image-assets/${value}.png"`);
+    expect(html).not.toContain("unsupported control kind");
+    expect(html).not.toContain('aria-label="source lock"');
+  });
+
+  it("wires exact Image Asset resolution state and retry without edit history", () => {
+    const value = "missing-image-0123456789ab";
+    const retry = vi.fn();
+    const onChange = vi.fn();
+    const onBegin = vi.fn();
+    const el = mount(
+      <ControlPanel
+        schema={{
+          source: { kind: "image-asset", default: "default-aaaaaaaaaaaa" },
+        }}
+        params={{ source: value }}
+        locks={new Set()}
+        onChange={onChange}
+        editHistory={{
+          onBegin,
+          onPreview: vi.fn(),
+          onCommit: vi.fn(),
+          onCancel: vi.fn(),
+        }}
+        onToggleLock={() => {}}
+        imageAssetResolution={{
+          status: "missing",
+          failedId: value,
+          retry,
+        }}
+      />,
+    );
+
+    expect(el.querySelector("img")).toBeNull();
+    expect(el.querySelector("code")?.textContent).toBe(value);
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+      "Image Asset is missing",
+    );
+    act(() => {
+      [...el.querySelectorAll<HTMLButtonElement>("button")]
+        .find((candidate) => candidate.textContent === "Retry exact asset")!
+        .click();
+    });
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onBegin).not.toHaveBeenCalled();
+  });
+
+  it("marks only the exact failed Image Asset in a multi-asset schema", () => {
+    const missing = "missing-image-0123456789ab";
+    const healthy = "healthy-image-abcdef012345";
+    const html = renderToStaticMarkup(
+      <ControlPanel
+        schema={{
+          first: { kind: "image-asset", default: "default-aaaaaaaaaaaa" },
+          second: { kind: "image-asset", default: "default-bbbbbbbbbbbb" },
+        }}
+        params={{ first: missing, second: healthy }}
+        locks={new Set()}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+        imageAssetResolution={{
+          status: "error",
+          failedId: missing,
+          retry: () => {},
+        }}
+      />,
+    );
+
+    expect((html.match(/Image Asset is unavailable/g) ?? []).length).toBe(1);
+    expect((html.match(/Retry exact asset/g) ?? []).length).toBe(1);
+    expect(html).not.toContain(`/image-assets/${missing}.png`);
+    expect(html).toContain(`/image-assets/${healthy}.png`);
+  });
+
+  it("routes an Image Asset choice through the ordinary lock-free setter", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({
+        ok: true,
+        text: () =>
+          Promise.resolve(JSON.stringify(["apple-tree-bbbbbbbbbbbb"])),
+      } as Response),
+    );
+    const onChange = vi.fn();
+    const onBegin = vi.fn();
+    const onPreview = vi.fn();
+    const onCommit = vi.fn();
+    const el = mount(
+      <ControlPanel
+        schema={{
+          source: {
+            kind: "image-asset",
+            default: "default-aaaaaaaaaaaa",
+          },
+        }}
+        params={{ source: "current-cccccccccccc" }}
+        locks={new Set(["source"])}
+        onChange={onChange}
+        editHistory={{
+          onBegin,
+          onPreview,
+          onCommit,
+          onCancel: vi.fn(),
+        }}
+        onToggleLock={vi.fn()}
+      />,
+    );
+
+    act(() => {
+      [...el.querySelectorAll<HTMLButtonElement>("button")]
+        .find((candidate) => candidate.textContent === "Choose image")!
+        .click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      el.querySelector<HTMLButtonElement>(
+        '[aria-label="Image Assets"] button',
+      )!.click();
+    });
+
+    expect(onChange).toHaveBeenCalledWith(
+      "source",
+      "apple-tree-bbbbbbbbbbbb",
+    );
+    expect(onBegin).not.toHaveBeenCalled();
+    expect(onPreview).not.toHaveBeenCalled();
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(el.querySelector('[aria-label="source lock"]')).toBeNull();
+  });
+
+  it("forwards a non-default Image Asset cap into browser normalization", async () => {
+    const bitmap = {
+      width: 1_000,
+      height: 500,
+      close: vi.fn(),
+    };
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(bitmap));
+    const drawImage = vi.fn();
+    vi.spyOn(window.HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      drawImage,
+    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(window.HTMLCanvasElement.prototype, "toBlob").mockImplementation(
+      (callback: BlobCallback) => {
+        callback(new Blob(["normalized"], { type: "image/png" }));
+      },
+    );
+    vi.stubGlobal("fetch", (_url: string, init?: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify(
+              init?.method === "POST"
+                ? { id: "control-import-bbbbbbbbbbbb", created: true }
+                : [],
+            ),
+          ),
+      } as Response),
+    );
+    const onChange = vi.fn();
+    const el = mount(
+      <ControlPanel
+        schema={{
+          source: {
+            kind: "image-asset",
+            default: "default-aaaaaaaaaaaa",
+          },
+        }}
+        params={{ source: "current-cccccccccccc" }}
+        locks={new Set()}
+        onChange={onChange}
+        onToggleLock={() => {}}
+        imageAssetLongEdgeCap={777}
+      />,
+    );
+    act(() => {
+      [...el.querySelectorAll<HTMLButtonElement>("button")]
+        .find((candidate) => candidate.textContent === "Choose image")!
+        .click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const fileInput = el.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(fileInput, "files", {
+      configurable: true,
+      value: [new File(["source"], "Large.webp")],
+    });
+    act(() =>
+      fileInput.dispatchEvent(new Event("change", { bubbles: true })),
+    );
+    act(() => {
+      [...el.querySelectorAll<HTMLButtonElement>("button")]
+        .find((candidate) => candidate.textContent === "Import Image Asset")!
+        .click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 777, 389);
+    expect(onChange).toHaveBeenCalledWith(
+      "source",
+      "control-import-bbbbbbbbbbbb",
+    );
+    expect(bitmap.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls image-asset back only for a missing or nonstring runtime value", () => {
+    const fallback = "fallback-image-0123456789ab";
+    const malformed = "Present Malformed Identity";
+    const schema: ParamSchema = {
+      source: { kind: "image-asset", default: fallback },
+    };
+    const render = (params: Params) =>
+      renderToStaticMarkup(
+        <ControlPanel
+          schema={schema}
+          params={params}
+          locks={new Set()}
+          onChange={() => {}}
+          onToggleLock={() => {}}
+        />,
+      );
+
+    expect(render({})).toContain(fallback);
+    expect(render({ source: 42 })).toContain(fallback);
+
+    const malformedHtml = render({ source: malformed });
+    expect(malformedHtml).toContain(malformed);
+    expect(malformedHtml).not.toContain(fallback);
+    expect(malformedHtml).not.toContain("<img");
+    expect(malformedHtml).not.toContain("/image-assets/");
+
+    const emptyHtml = render({ source: "" });
+    expect(emptyHtml).not.toContain(fallback);
+    const host = document.createElement("div");
+    host.innerHTML = emptyHtml;
+    expect(host.querySelector("code")?.textContent).toBe("");
   });
 
   it("renders a LOUD visible fallback for an unsupported kind (never silent)", () => {

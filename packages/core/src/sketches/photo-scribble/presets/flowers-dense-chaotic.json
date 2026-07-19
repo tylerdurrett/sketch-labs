@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "sketch": "photo-scribble",
+  "name": "flowers-dense-chaotic",
+  "seed": 2381065623916958,
+  "params": {
+    "imageAsset": "img-0672-79d639daec62",
+    "toneContrast": 1,
+    "toneGamma": 1,
+    "pathDensity": 20,
+    "scribbleScale": 0.3,
+    "momentum": 0.98,
+    "chaos": 0.41,
+    "toneFidelity": 0.99,
+    "stopPoint": 100
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true,
+    "toolWidthMillimeters": 0.3
+  }
+}

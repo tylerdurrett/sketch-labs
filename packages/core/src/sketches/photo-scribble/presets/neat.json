@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "sketch": "photo-scribble",
+  "name": "neat",
+  "seed": 5036310400360331,
+  "params": {
+    "imageAsset": "pinecone-4330aa0314f7",
+    "toneContrast": 1,
+    "toneGamma": 1,
+    "pathDensity": 20,
+    "scribbleScale": 0.5,
+    "momentum": 1,
+    "chaos": 0.72,
+    "toneFidelity": 1,
+    "stopPoint": 100
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true,
+    "toolWidthMillimeters": 0.3
+  }
+}

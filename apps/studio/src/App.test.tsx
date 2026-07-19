@@ -3,6 +3,8 @@ import { act, useImperativeHandle, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID } from "@harness/core";
+
 import { App } from "./App";
 import type { LiveCanvasHandle } from "./LiveCanvas";
 
@@ -25,6 +27,51 @@ import type { LiveCanvasHandle } from "./LiveCanvas";
 // React 19's `act` requires this flag; vitest's jsdom env does not set it.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
+
+const appImageResolution = vi.hoisted(() => ({ ids: [] as string[] }));
+const appNormalization = vi.hoisted(() => ({ caps: [] as number[] }));
+
+vi.mock("./imageAssetNormalization", async (importActual) => {
+  const actual =
+    await importActual<typeof import("./imageAssetNormalization")>();
+  return {
+    ...actual,
+    normalizeImageAsset: async (
+      _file: Blob,
+      options: { readonly maxLongEdge: number },
+    ) => {
+      appNormalization.caps.push(options.maxLongEdge);
+      return {
+        png: new Blob(["normalized"], { type: "image/png" }),
+        width: 12,
+        height: 8,
+      };
+    },
+  };
+});
+
+vi.mock("./imageAssetResolver", async (importActual) => {
+  const actual = await importActual<typeof import("./imageAssetResolver")>();
+  return {
+    ...actual,
+    resolveSketchEnvironment: async (
+      _schema: unknown,
+      params: Readonly<Record<string, unknown>>,
+    ) => {
+      const id = String(params.imageAsset);
+      appImageResolution.ids.push(id);
+      const pixels = {
+        width: 1,
+        height: 1,
+        data: Uint8ClampedArray.from([32, 32, 32, 255]),
+      };
+      return {
+        imageAssets: (requested: string) =>
+          requested === id ? pixels : undefined,
+      };
+    },
+  };
+});
 
 vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
@@ -104,6 +151,9 @@ afterEach(() => {
   container = null;
   root = null;
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
+  appImageResolution.ids = [];
+  appNormalization.caps = [];
   exportJob.resolve = null;
 });
 
@@ -249,21 +299,33 @@ describe("App — keyed edit-history sessions", () => {
   });
 });
 
-describe("App — Tone Calibration integration (#324)", () => {
-  it("opens on Scribble controls and resets its diagnostic view after switching", () => {
+describe("App — Photo Scribble integration (#333)", () => {
+  it("opens on the bundled source and resets all authored controls after switching", async () => {
     mountApp();
+    await act(async () => Promise.resolve());
 
-    expect(trigger().textContent).toBe("Tone Calibration");
+    expect(trigger().textContent).toBe("Photo Scribble");
+    expect(appImageResolution.ids).toEqual([
+      PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+    ]);
+    expect(
+      document.querySelector(
+        '[aria-label="imageAsset image asset identity"]',
+      )?.textContent,
+    ).toBe(PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID);
     expect(
       [...document.querySelectorAll('#inspector input[id^="control-"]')].map(
         (input) => input.id,
       ),
     ).toEqual([
+      "control-toneContrast",
+      "control-toneGamma",
       "control-pathDensity",
       "control-scribbleScale",
       "control-momentum",
       "control-chaos",
       "control-toneFidelity",
+      "control-stopPoint",
     ]);
     expect(
       document
@@ -271,11 +333,15 @@ describe("App — Tone Calibration integration (#324)", () => {
         ?.getAttribute("data-params"),
     ).toBe(
       JSON.stringify({
+        imageAsset: PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+        toneContrast: 0.5,
+        toneGamma: 0.5,
         pathDensity: 1,
         scribbleScale: 1,
         momentum: 0.75,
         chaos: 0.25,
         toneFidelity: 0.9,
+        stopPoint: 100,
       }),
     );
     expect(
@@ -309,7 +375,8 @@ describe("App — Tone Calibration integration (#324)", () => {
     ).toBe("tone-reference");
 
     selectOption("Circles");
-    selectOption("Tone Calibration");
+    selectOption("Photo Scribble");
+    await act(async () => Promise.resolve());
 
     expect(
       [...document.querySelectorAll<HTMLButtonElement>("button")].find(
@@ -323,7 +390,65 @@ describe("App — Tone Calibration integration (#324)", () => {
     ).toBe("fill-held");
     expect(
       document.querySelectorAll('#inspector input[id^="control-"]'),
-    ).toHaveLength(5);
+    ).toHaveLength(8);
+    expect(
+      document.querySelector(
+        '[aria-label="imageAsset image asset identity"]',
+      )?.textContent,
+    ).toBe(PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID);
+    expect(appImageResolution.ids).toEqual([
+      PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+      PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+    ]);
+  });
+
+  it("wires the default 2048px normalization cap into image import", async () => {
+    vi.stubGlobal("fetch", (_url: string, init?: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify(
+              init?.method === "POST"
+                ? { id: "app-import-bbbbbbbbbbbb", created: true }
+                : [],
+            ),
+          ),
+      } as Response),
+    );
+    mountApp();
+    const choose = [
+      ...document.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((candidate) => candidate.textContent === "Choose image")!;
+    act(() => choose.click());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const input = document.querySelector<HTMLInputElement>(
+      '#inspector input[type="file"]',
+    )!;
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [new File(["source"], "App Import.webp")],
+    });
+    act(() => input.dispatchEvent(new Event("change", { bubbles: true })));
+    const confirm = [
+      ...document.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((candidate) => candidate.textContent === "Import Image Asset")!;
+    act(() => confirm.click());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(appNormalization.caps).toEqual([2048]);
+    expect(
+      document.querySelector(
+        '[aria-label="imageAsset image asset identity"]',
+      )?.textContent,
+    ).toBe("app-import-bbbbbbbbbbbb");
   });
 });
 

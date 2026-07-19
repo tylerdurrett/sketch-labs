@@ -1,8 +1,10 @@
 import {
   registry,
+  type ParamSchema,
   type Params,
   type ScribbleArtwork,
   type ScribbleObserver,
+  type SketchEnvironment,
   type StatelessSketch,
 } from "@harness/core";
 
@@ -20,6 +22,7 @@ import {
   createWorkerProgressEmitter,
   type MonotonicClock,
 } from "./workerProgress";
+import { resolveSketchEnvironment } from "./imageAssetResolver";
 
 type ProgressSink = (progress: ScribbleComputeProgress) => void;
 type ScribbleArtworkGenerator = NonNullable<
@@ -29,8 +32,14 @@ type ScribbleArtworkGenerator = NonNullable<
 export type ScribbleArtworkExecutor = (
   generate: ScribbleArtworkGenerator,
   identity: ScribbleComputeIdentity,
+  environment: SketchEnvironment,
   observer?: ScribbleObserver,
 ) => ScribbleArtwork;
+
+export type ScribbleEnvironmentResolver = (
+  schema: ParamSchema,
+  params: Params,
+) => Promise<SketchEnvironment>;
 
 function systemMonotonicClock(): number {
   return performance.now();
@@ -48,9 +57,15 @@ function schemaMismatch(sketchId: string): TypeError {
   );
 }
 
-function resolveScribbleGenerator(
+interface ResolvedScribbleRequest {
+  readonly generate: ScribbleArtworkGenerator;
+  readonly schema: ParamSchema;
+  readonly params: Params;
+}
+
+function resolveScribbleRequest(
   identity: ScribbleComputeIdentity,
-): ScribbleArtworkGenerator {
+): ResolvedScribbleRequest {
   const sketch = registry.get(identity.sketchId);
   if (sketch.generateScribbleArtwork === undefined) {
     throw new Error(
@@ -58,12 +73,13 @@ function resolveScribbleGenerator(
     );
   }
 
+  const params = paramsFromIdentity(identity);
   let canonicalIdentity: ScribbleComputeIdentity;
   try {
     canonicalIdentity = createScribbleComputeIdentity({
       sketchId: sketch.id,
       schema: sketch.schema,
-      params: paramsFromIdentity(identity),
+      params,
       seed: identity.seed,
       compositionFrame: identity.compositionFrame,
     });
@@ -73,13 +89,18 @@ function resolveScribbleGenerator(
   if (!scribbleComputeIdentitiesEqual(identity, canonicalIdentity)) {
     throw schemaMismatch(sketch.id);
   }
-  return sketch.generateScribbleArtwork;
+  return {
+    generate: sketch.generateScribbleArtwork,
+    schema: sketch.schema,
+    params,
+  };
 }
 
 /** Execute the already-resolved Sketch-owned Scribble preparation hook. */
 export const executeScribbleArtwork: ScribbleArtworkExecutor = (
   generate,
   identity,
+  environment,
   observer,
 ) =>
   generate(
@@ -90,6 +111,7 @@ export const executeScribbleArtwork: ScribbleArtworkExecutor = (
       height: identity.compositionFrame.height,
     },
     observer,
+    environment,
   );
 
 function safeError(error: unknown): string {
@@ -128,20 +150,27 @@ function progressReporter(
 }
 
 /** Execute one validated Scribble request without sharing Outline messages. */
-export function handleScribbleWorkerMessage(
+export async function handleScribbleWorkerMessage(
   value: unknown,
   execute: ScribbleArtworkExecutor = executeScribbleArtwork,
   emitProgress?: ProgressSink,
   now: MonotonicClock = systemMonotonicClock,
-): ScribbleComputeResponse | null {
+  resolveEnvironment: ScribbleEnvironmentResolver = (schema, params) =>
+    resolveSketchEnvironment(schema, params),
+): Promise<ScribbleComputeResponse | null> {
   if (!isScribbleComputeRequest(value)) return null;
 
   try {
-    const generate = resolveScribbleGenerator(value.identity);
+    // Canonicalize against the registry before an opaque Image Asset ID can
+    // trigger any fetch or decode. The resolver creates fresh worker-owned
+    // records for this job; decoded pixels never join protocol identity.
+    const { generate, schema, params } = resolveScribbleRequest(value.identity);
+    const environment = await resolveEnvironment(schema, params);
     const startedAt = now();
     const artwork = execute(
       generate,
       value.identity,
+      environment,
       emitProgress === undefined
         ? undefined
         : progressReporter(value.jobId, emitProgress, now),

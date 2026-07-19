@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createRegistry,
   grassHills,
+  photoScribble,
   registry,
   scribbleMoon,
   toneCalibration,
@@ -63,7 +64,7 @@ describe('the default registry', () => {
   })
 
   it(
-    'exports and registers Tone Calibration exactly once as the newest Sketch',
+    'exports and registers Tone Calibration exactly once',
     () => {
       expect(toneCalibration.id).toBe('tone-calibration')
       expect(toneCalibration.name).toBe('Tone Calibration')
@@ -71,9 +72,18 @@ describe('the default registry', () => {
       expect(
         registry.list().filter((sketch) => sketch === toneCalibration),
       ).toEqual([toneCalibration])
-      expect(registry.list().at(-1)).toBe(toneCalibration)
     },
   )
+
+  it('exports and registers Photo Scribble exactly once as the newest Sketch', () => {
+    expect(photoScribble.id).toBe('photo-scribble')
+    expect(photoScribble.name).toBe('Photo Scribble')
+    expect(registry.get('photo-scribble')).toBe(photoScribble)
+    expect(
+      registry.list().filter((sketch) => sketch === photoScribble),
+    ).toEqual([photoScribble])
+    expect(registry.list().at(-1)).toBe(photoScribble)
+  })
 
   it('registers every built-in under a unique id and display name', () => {
     const sketches = registry.list()

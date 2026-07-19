@@ -195,6 +195,51 @@
 }
 
 /*
+ * Fail-closed Image Asset feedback occupies the drawable rectangle itself, so
+ * unavailable input cannot look like current artwork. The exact authored IDs
+ * wrap rather than clip and remain selectable for diagnosis/correction.
+ */
+.live-canvas-unavailable {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-sizing: border-box;
+  padding: 1rem;
+  overflow: auto;
+  background: #fff;
+  color: #222;
+  text-align: center;
+}
+
+.live-canvas-unavailable__message {
+  font-size: 1rem;
+}
+
+.live-canvas-unavailable__label {
+  font-size: 0.75rem;
+  color: #555;
+}
+
+.live-canvas-unavailable__ids {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 100%;
+}
+
+.live-canvas-unavailable__ids code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/*
  * NOTE: the numeric control rows, their lock affordance, and the schema-driven
  * control surface are now Tailwind/shadcn components (#157) — NumberControl,
  * the Slider primitive, and ControlPanel style themselves against the design

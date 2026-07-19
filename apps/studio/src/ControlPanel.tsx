@@ -2,7 +2,12 @@ import type { ParamSchema, Params, ParamSpec } from "@harness/core";
 
 import { ColorControl } from "./ColorControl";
 import type { EditTransactionLifecycle } from "./editHistory";
+import {
+  ImageAssetControl,
+  type ImageAssetControlResolution,
+} from "./ImageAssetControl";
 import { NumberControl } from "./NumberControl";
+import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
 
 /**
  * Props for {@link ControlPanel}.
@@ -27,7 +32,8 @@ export interface ControlPanelProps {
    * Update a single param by key when no transaction lifecycle is supplied.
    * The value type widens with the `ParamSpec`
    * union: `number` from a NumberControl, a hex color `string` from a
-   * ColorControl. The owner's params state is already `Record<string, unknown>`,
+   * ColorControl or an Image Asset ID from ImageAssetControl. The owner's
+   * params state is already `Record<string, unknown>`,
    * so this widening is purely at the handler seam.
    */
   onChange: (key: string, value: number | string) => void;
@@ -35,17 +41,22 @@ export interface ControlPanelProps {
   editHistory?: EditTransactionLifecycle<Params> | undefined;
   /** Toggle a numeric param's lock membership. */
   onToggleLock: (key: string) => void;
+  /** Longest normalized source edge for Image Asset imports. */
+  imageAssetLongEdgeCap?: number;
+  /** Exact-resolution lifecycle shared by schema-declared Image Assets. */
+  imageAssetResolution?: ImageAssetControlResolution;
 }
 
 /**
  * Render one control for a single schema entry, switching on `spec.kind`.
  *
  * `kind: 'number'` → a lock-aware {@link NumberControl}; `kind: 'color'` → a
- * lock-free {@link ColorControl}. An UNKNOWN kind renders a LOUD, visible
- * fallback (never a silent skip) so an unsupported control surfaces in the UI
- * as a defect to fix rather than vanishing. As the open `ParamSpec` union
- * widens further (boolean, enum, …) this switch grows a case per kind; the
- * `default` branch is the safety net for any kind not yet handled.
+ * lock-free {@link ColorControl}; `kind: 'image-asset'` → a lock-free,
+ * reusable picker/import {@link ImageAssetControl}. An UNKNOWN kind renders a
+ * LOUD, visible fallback (never a silent skip) so an unsupported control
+ * surfaces in the UI as a defect to fix rather than vanishing. As the open
+ * `ParamSpec` union widens further (boolean, enum, …) this switch grows a case
+ * per kind; the `default` branch is the safety net for any kind not yet handled.
  */
 function renderControl(
   key: string,
@@ -55,6 +66,8 @@ function renderControl(
   params: Params,
   onChange: (key: string, value: number | string) => void,
   onToggleLock: (key: string) => void,
+  imageAssetLongEdgeCap: number,
+  imageAssetResolution?: ImageAssetControlResolution,
   editHistory?: EditTransactionLifecycle<Params>,
 ) {
   const rowHistory = editHistory
@@ -92,6 +105,17 @@ function renderControl(
           editHistory={rowHistory}
         />
       );
+    case "image-asset":
+      return (
+        <ImageAssetControl
+          key={key}
+          paramKey={key}
+          value={typeof value === "string" ? value : spec.default}
+          onChange={(next) => onChange(key, next)}
+          imageAssetLongEdgeCap={imageAssetLongEdgeCap}
+          resolution={imageAssetResolution}
+        />
+      );
     default:
       return (
         <div
@@ -122,6 +146,8 @@ export function ControlPanel({
   onChange,
   editHistory,
   onToggleLock,
+  imageAssetLongEdgeCap = STUDIO_IMAGE_ASSET_LONG_EDGE_CAP,
+  imageAssetResolution,
 }: ControlPanelProps) {
   return (
     <div className="flex flex-col gap-4">
@@ -134,6 +160,8 @@ export function ControlPanel({
           params,
           onChange,
           onToggleLock,
+          imageAssetLongEdgeCap,
+          imageAssetResolution,
           editHistory,
         ),
       )}

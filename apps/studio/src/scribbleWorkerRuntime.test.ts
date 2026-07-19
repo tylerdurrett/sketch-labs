@@ -2,12 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   defaultParams,
+  photoScribble,
+  PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
   scribbleMoon,
   toneCalibration,
+  type DecodedPixels,
   type ParamSchema,
   type Scene,
   type ScribbleArtwork,
   type ScribbleProgress,
+  type SketchEnvironment,
 } from "@harness/core";
 
 import {
@@ -50,6 +54,7 @@ function request(
     schema: ParamSchema;
     params: Record<string, string | number>;
     frame: { width: number; height: number };
+    seed: string | number;
   }> = {},
 ): ScribbleComputeRequest {
   const sketchId = overrides.sketchId ?? toneCalibration.id;
@@ -60,21 +65,21 @@ function request(
       sketchId,
       schema: overrides.schema ?? toneCalibration.schema,
       params: overrides.params ?? defaultParams(toneCalibration.schema),
-      seed: "seed",
+      seed: overrides.seed ?? "seed",
       compositionFrame: overrides.frame ?? scene.space,
     }),
   };
 }
 
 describe("Scribble worker runtime", () => {
-  it("returns the executor's complete Scene, diagnostics, and finite elapsed time", () => {
+  it("returns the executor's complete Scene, diagnostics, and finite elapsed time", async () => {
     const input = request();
     const execute = vi.fn((..._args: Parameters<ScribbleArtworkExecutor>) =>
       artwork,
     );
     const clock = [10.25, 52.75];
 
-    const response = handleScribbleWorkerMessage(
+    const response = await handleScribbleWorkerMessage(
       input,
       execute,
       undefined,
@@ -84,6 +89,7 @@ describe("Scribble worker runtime", () => {
     expect(execute).toHaveBeenCalledWith(
       toneCalibration.generateScribbleArtwork,
       input.identity,
+      expect.objectContaining({ imageAssets: expect.any(Function) }),
       undefined,
     );
     expect(response).toEqual({
@@ -99,9 +105,9 @@ describe("Scribble worker runtime", () => {
   it.each([
     [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
     [50, 40],
-  ])("normalizes an unusable clock interval to zero", (startedAt, endedAt) => {
+  ])("normalizes an unusable clock interval to zero", async (startedAt, endedAt) => {
     const clock = [startedAt, endedAt];
-    const response = handleScribbleWorkerMessage(
+    const response = await handleScribbleWorkerMessage(
       request(),
       () => artwork,
       undefined,
@@ -111,12 +117,13 @@ describe("Scribble worker runtime", () => {
     expect(response).toMatchObject({ type: "success", computeTimeMs: 0 });
   });
 
-  it("emits first, interval, and terminal progress before success", () => {
+  it("emits first, interval, and terminal progress before success", async () => {
     const events: ScribbleWorkerMessage[] = [];
     const clock = [1_000, 1_000, 1_025, 1_099, 1_100, 1_150, 1_200];
     const execute: ScribbleArtworkExecutor = (
       _generate,
       _identity,
+      _environment,
       observer,
     ) => {
       for (const completedWorkUnits of [10, 20, 30, 40, 50]) {
@@ -134,7 +141,7 @@ describe("Scribble worker runtime", () => {
       return artwork;
     };
 
-    const response = handleScribbleWorkerMessage(
+    const response = await handleScribbleWorkerMessage(
       request(),
       execute,
       (progress) => events.push(progress),
@@ -167,11 +174,12 @@ describe("Scribble worker runtime", () => {
     expect(Object.keys(events[0]!)).toEqual(["type", "jobId", "snapshot"]);
   });
 
-  it("always emits terminal progress when its count equals an ordinary snapshot", () => {
+  it("always emits terminal progress when its count equals an ordinary snapshot", async () => {
     const progress: ScribbleProgress[] = [];
     const execute: ScribbleArtworkExecutor = (
       _generate,
       _identity,
+      _environment,
       observer,
     ) => {
       observer?.({
@@ -187,7 +195,7 @@ describe("Scribble worker runtime", () => {
       return artwork;
     };
 
-    handleScribbleWorkerMessage(
+    await handleScribbleWorkerMessage(
       request(),
       execute,
       (message) => progress.push(message.snapshot),
@@ -202,11 +210,11 @@ describe("Scribble worker runtime", () => {
 
   it.each([null, {}, { type: "compute" }, { type: "preview" }])(
     "rejects malformed or non-Scribble input before execution: %o",
-    (candidate) => {
+    async (candidate) => {
       const execute = vi.fn(
         (..._args: Parameters<ScribbleArtworkExecutor>) => artwork,
       );
-      expect(handleScribbleWorkerMessage(candidate, execute)).toBeNull();
+      expect(await handleScribbleWorkerMessage(candidate, execute)).toBeNull();
       expect(execute).not.toHaveBeenCalled();
     },
   );
@@ -218,27 +226,40 @@ describe("Scribble worker runtime", () => {
     ["wrong-kind", (params: any[]) => (params[0].value = "not-a-number")],
   ])(
     "rejects %s params that are structurally valid but not schema-canonical",
-    (_case, mutate) => {
+    async (_case, mutate) => {
       const input = structuredClone(request()) as Record<string, any>;
       mutate(input.identity.params);
       const execute = vi.fn(
         (..._args: Parameters<ScribbleArtworkExecutor>) => artwork,
       );
+      const resolveEnvironment = vi.fn(async (): Promise<SketchEnvironment> => ({
+        imageAssets: () => undefined,
+      }));
 
-      expect(handleScribbleWorkerMessage(input, execute)).toMatchObject({
+      expect(
+        await handleScribbleWorkerMessage(
+          input,
+          execute,
+          undefined,
+          () => 0,
+          resolveEnvironment,
+        ),
+      ).toMatchObject({
         type: "failure",
         error:
           "Scribble request parameters do not match tone-calibration schema",
       });
+      expect(resolveEnvironment).not.toHaveBeenCalled();
       expect(execute).not.toHaveBeenCalled();
     },
   );
 
-  it("blocks malformed progress before posting a bounded safe failure", () => {
+  it("blocks malformed progress before posting a bounded safe failure", async () => {
     const emitted = vi.fn();
     const execute: ScribbleArtworkExecutor = (
       _generate,
       _identity,
+      _environment,
       observer,
     ) => {
       observer?.({
@@ -249,7 +270,7 @@ describe("Scribble worker runtime", () => {
       return artwork;
     };
 
-    const response = handleScribbleWorkerMessage(
+    const response = await handleScribbleWorkerMessage(
       request(),
       execute,
       emitted,
@@ -263,12 +284,12 @@ describe("Scribble worker runtime", () => {
     });
   });
 
-  it("turns thrown and malformed results into safe bounded domain failures", () => {
+  it("turns thrown and malformed results into safe bounded domain failures", async () => {
     const longMessage = `geometry ${"x".repeat(700)}`;
-    const thrown = handleScribbleWorkerMessage(request(), () => {
+    const thrown = await handleScribbleWorkerMessage(request(), () => {
       throw new Error(longMessage);
     });
-    const malformed = handleScribbleWorkerMessage(
+    const malformed = await handleScribbleWorkerMessage(
       request(),
       () => ({
         ...artwork,
@@ -288,8 +309,8 @@ describe("Scribble worker runtime", () => {
     });
   });
 
-  it("requires the selected registry Sketch to own the Scribble hook", () => {
-    const response = handleScribbleWorkerMessage(
+  it("requires the selected registry Sketch to own the Scribble hook", async () => {
+    const response = await handleScribbleWorkerMessage(
       request({
         sketchId: "circles",
         schema: {},
@@ -305,14 +326,14 @@ describe("Scribble worker runtime", () => {
 
   it.each([toneCalibration, scribbleMoon])(
     "executes the real $id registry hook with complete diagnostics",
-    (sketch) => {
+    async (sketch) => {
       const params = {
         ...defaultParams(sketch.schema),
         pathDensity: 0.5,
         scribbleScale: 2,
         toneFidelity: 0,
       };
-      const response = handleScribbleWorkerMessage(
+      const response = await handleScribbleWorkerMessage(
         request({
           sketchId: sketch.id,
           schema: sketch.schema,
@@ -339,4 +360,168 @@ describe("Scribble worker runtime", () => {
       });
     },
   );
+
+  it(
+    "validates first, resolves opaque IDs per job, and enters compute with only worker-owned pixels",
+    async () => {
+      const input = request({
+        sketchId: photoScribble.id,
+        schema: photoScribble.schema,
+        params: {
+          ...defaultParams(photoScribble.schema),
+          pathDensity: 0.5,
+          scribbleScale: 2,
+          toneFidelity: 1,
+        },
+        frame: { width: 24, height: 16 },
+      });
+      const pixels: DecodedPixels = {
+        width: 2,
+        height: 2,
+        data: Uint8ClampedArray.from([
+          0, 0, 0, 255, 32, 32, 32, 255,
+          64, 64, 64, 255, 96, 96, 96, 255,
+        ]),
+      };
+      const environment: SketchEnvironment = {
+        imageAssets: (id) =>
+          id === PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID ? pixels : undefined,
+      };
+      let finishResolution: ((value: SketchEnvironment) => void) | undefined;
+      const resolveEnvironment = vi.fn(
+        () =>
+          new Promise<SketchEnvironment>((resolve) => {
+            finishResolution = resolve;
+          }),
+      );
+      const execute = vi.fn(
+        (...args: Parameters<ScribbleArtworkExecutor>) =>
+          args[0](
+            Object.fromEntries(
+              args[1].params.map(({ key, value }) => [key, value]),
+            ),
+            args[1].seed,
+            args[1].compositionFrame,
+            args[3],
+            args[2],
+          ),
+      );
+
+      const pending = handleScribbleWorkerMessage(
+        input,
+        execute,
+        undefined,
+        () => 5,
+        resolveEnvironment,
+      );
+      await Promise.resolve();
+
+      expect(resolveEnvironment).toHaveBeenCalledWith(
+        photoScribble.schema,
+        expect.objectContaining({
+          imageAsset: PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+        }),
+      );
+      expect(execute).not.toHaveBeenCalled();
+      expect(JSON.stringify(input)).not.toMatch(/data|pixels|bitmap|blob/i);
+
+      finishResolution?.(environment);
+      const response = await pending;
+
+      expect(execute).toHaveBeenCalledWith(
+        photoScribble.generateScribbleArtwork,
+        input.identity,
+        environment,
+        undefined,
+      );
+      expect(response).toMatchObject({
+        type: "success",
+        identity: { sketchId: "photo-scribble" },
+        diagnostics: { polylineCount: expect.any(Number) },
+      });
+      if (response?.type !== "success") throw new Error("expected success");
+      expect(response.scene.primitives.length).toBeGreaterThan(0);
+      expect(response.diagnostics.polylineCount).toBeGreaterThan(0);
+      expect(JSON.stringify(response)).not.toMatch(/data|pixels|bitmap|blob/i);
+    },
+  );
+
+  it("turns resolution failure into a bounded safe failure before generation", async () => {
+    const execute = vi.fn(
+      (..._args: Parameters<ScribbleArtworkExecutor>) => artwork,
+    );
+    const emitProgress = vi.fn();
+    const response = await handleScribbleWorkerMessage(
+      request(),
+      execute,
+      emitProgress,
+      () => 0,
+      async () => {
+        throw new Error(`decode ${"x".repeat(700)}`);
+      },
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(emitProgress).not.toHaveBeenCalled();
+    expect(response).toMatchObject({ type: "failure" });
+    if (response?.type !== "failure") throw new Error("expected failure");
+    expect(response.error).toHaveLength(500);
+  });
+
+  it("resolves a fresh worker-owned environment for a seed-only replacement", async () => {
+    const params = defaultParams(photoScribble.schema) as Record<
+      string,
+      string | number
+    >;
+    const environments: SketchEnvironment[] = [
+      { imageAssets: () => undefined },
+      { imageAssets: () => undefined },
+    ];
+    const resolveEnvironment = vi.fn(async () => environments.shift()!);
+    const received: SketchEnvironment[] = [];
+    const execute: ScribbleArtworkExecutor = (
+      _generate,
+      _identity,
+      environment,
+    ) => {
+      received.push(environment);
+      return artwork;
+    };
+
+    const first = request({
+      sketchId: photoScribble.id,
+      schema: photoScribble.schema,
+      params,
+      seed: "first",
+    });
+    const second = request({
+      sketchId: photoScribble.id,
+      schema: photoScribble.schema,
+      params,
+      seed: "second",
+    });
+    await handleScribbleWorkerMessage(
+      first,
+      execute,
+      undefined,
+      () => 0,
+      resolveEnvironment,
+    );
+    await handleScribbleWorkerMessage(
+      second,
+      execute,
+      undefined,
+      () => 0,
+      resolveEnvironment,
+    );
+
+    expect(resolveEnvironment).toHaveBeenCalledTimes(2);
+    expect(resolveEnvironment.mock.calls[0]).toEqual(
+      resolveEnvironment.mock.calls[1],
+    );
+    expect(received).toHaveLength(2);
+    expect(received[0]).not.toBe(received[1]);
+    expect(first.identity.params).toEqual(second.identity.params);
+    expect(first.identity.seed).not.toBe(second.identity.seed);
+  });
 });

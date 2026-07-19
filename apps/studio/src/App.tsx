@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "./components/ui/select";
 import "./App.css";
+import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
 
 /** The Sketches the navigation lists, in registration order. */
 const sketches = registry.list();
@@ -188,6 +189,7 @@ export function App() {
         collapsed={collapsed}
         onToggleCollapse={toggleCollapsed}
         onHiddenLineBusyChange={setHiddenLineBusy}
+        imageAssetLongEdgeCap={STUDIO_IMAGE_ASSET_LONG_EDGE_CAP}
       />
     </main>
   );

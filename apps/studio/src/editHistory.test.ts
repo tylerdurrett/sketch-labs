@@ -167,6 +167,27 @@ describe("edit history", () => {
     expect(committed.present).toBe(preset);
     expect(unchanged).toBe(committed);
   });
+
+  it("undoes and redoes an Image Asset ID as exact authored state", () => {
+    const initialAsset = "portrait-alpha-000000000001";
+    const unresolvedAsset = "missing/opaque ID?variant=🌲";
+    const initial = editState(1, {
+      params: { imageAsset: initialAsset, toneGamma: 0.5 },
+    });
+    const selected = editState(1, {
+      params: { imageAsset: unresolvedAsset, toneGamma: 0.5 },
+    });
+
+    const committed = commitEditState(createEditHistory(initial), selected);
+
+    expect(committed.past).toEqual([initial]);
+    expect(committed.present.params.imageAsset).toBe(unresolvedAsset);
+    expect(undoEdit(committed).present.params.imageAsset).toBe(initialAsset);
+    expect(redoEdit(undoEdit(committed)).present.params.imageAsset).toBe(
+      unresolvedAsset,
+    );
+    expect(sameStudioEditState(initial, selected)).toBe(false);
+  });
 });
 
 describe("Studio edit-state equality", () => {

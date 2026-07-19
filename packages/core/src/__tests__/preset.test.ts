@@ -271,6 +271,27 @@ describe('applyPreset', () => {
     expect(state.params).toEqual({ count: 30, radius: 12 })
   })
 
+  it('preserves a stored Image Asset ID and defaults only an absent one', () => {
+    const assetSchema: ParamSchema = {
+      image: { kind: 'image-asset', default: 'portrait-default' },
+    }
+    const stored = makePreset(
+      'photo-scribble',
+      'stored',
+      { image: 'missing-but-authored-id' },
+      1,
+      new Set(),
+    )
+    const absent = makePreset('photo-scribble', 'absent', {}, 1, new Set())
+
+    expect(applyPreset(assetSchema, stored).params).toEqual({
+      image: 'missing-but-authored-id',
+    })
+    expect(applyPreset(assetSchema, absent).params).toEqual({
+      image: 'portrait-default',
+    })
+  })
+
   it('loads an out-of-bounds value AS-IS, unclamped', () => {
     const preset = makePreset(
       'circles',
@@ -355,5 +376,72 @@ describe('round-trip fidelity (no-drift case)', () => {
     expect(state.params).toEqual(params)
     expect(state.seed).toBe(seed)
     expect(state.locks).toEqual(['count'])
+  })
+
+  it('round-trips an authored Image Asset ID through the existing v2 envelope without interpreting it', () => {
+    const imageAssetDefault = 'bundled-default-000000000000'
+    const authoredImageAsset = 'missing/opaque ID?variant=🌲'
+    const schema: ParamSchema = {
+      imageAsset: { kind: 'image-asset', default: imageAssetDefault },
+      toneGamma: { kind: 'number', min: 0, max: 1, default: 0.5 },
+    }
+    const liveParams: Params = {
+      imageAsset: authoredImageAsset,
+      toneGamma: 0.75,
+    }
+
+    const saved = makePreset(
+      'photo-scribble',
+      'opaque-asset',
+      liveParams,
+      'asset-roundtrip-seed',
+      new Set(['imageAsset']),
+      profile,
+    )
+    const wireValue = JSON.parse(JSON.stringify(serialize(saved)))
+    const loaded = deserialize(wireValue)
+    const state = applyPreset(schema, loaded)
+
+    expect(saved.version).toBe(PRESET_VERSION)
+    expect(saved.params.imageAsset).toBe(authoredImageAsset)
+    expect(wireValue.params.imageAsset).toBe(authoredImageAsset)
+    expect(loaded.params.imageAsset).toBe(authoredImageAsset)
+    expect(state).toEqual({
+      params: liveParams,
+      seed: 'asset-roundtrip-seed',
+      locks: ['imageAsset'],
+      profile,
+    })
+  })
+
+  it('defaults only an absent Image Asset key after a v2 transport round-trip', () => {
+    const schema: ParamSchema = {
+      imageAsset: {
+        kind: 'image-asset',
+        default: 'bundled-default-000000000000',
+      },
+    }
+    const loaded = deserialize(
+      JSON.parse(
+        JSON.stringify(
+          serialize(
+            makePreset(
+              'photo-scribble',
+              'legacy-without-image',
+              {},
+              7,
+              new Set(),
+              profile,
+            ),
+          ),
+        ),
+      ),
+    )
+
+    expect(loaded.version).toBe(PRESET_VERSION)
+    expect('imageAsset' in loaded.params).toBe(false)
+    expect(applyPreset(schema, loaded).params.imageAsset).toBe(
+      'bundled-default-000000000000',
+    )
   })
 })

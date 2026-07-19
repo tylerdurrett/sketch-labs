@@ -114,6 +114,7 @@ function copyParamValue(
 ): ScribbleParamValue {
   if (spec.kind === "number" && isFiniteNumber(value)) return value;
   if (spec.kind === "color" && typeof value === "string") return value;
+  if (spec.kind === "image-asset" && typeof value === "string") return value;
   throw new TypeError(
     `Scribble parameter ${key} does not match its ${spec.kind} schema`,
   );
@@ -356,6 +357,7 @@ function isScribbleDiagnostics(value: unknown): value is ScribbleDiagnostics {
       "penLiftCount",
     ]) &&
     (value.termination === "completed" ||
+      value.termination === "stopped-early" ||
       value.termination === "budget-exhausted") &&
     isFiniteNumber(value.residualError) &&
     value.residualError >= 0 &&

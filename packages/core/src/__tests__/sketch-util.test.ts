@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { bbox } from '../sketches/sketch-util'
+import { bbox, imageAssetParam } from '../sketches/sketch-util'
+import type { ParamSpec } from '../sketch'
 import type { Point } from '../types'
 
 describe('bbox', () => {
@@ -27,5 +28,25 @@ describe('bbox', () => {
       [-3, -5],
     ]
     expect(bbox(points)).toEqual({ minX: -10, minY: -20, maxX: -3, maxY: -5 })
+  })
+})
+
+describe('imageAssetParam', () => {
+  const schema = {
+    image: { kind: 'image-asset', default: 'portrait-default' },
+    count: { kind: 'number', min: 1, max: 10, default: 5 },
+  } satisfies Record<string, ParamSpec>
+
+  it('returns the authored stable ID unchanged', () => {
+    expect(imageAssetParam({ image: 'portrait-selected' }, schema, 'image')).toBe(
+      'portrait-selected',
+    )
+  })
+
+  it('falls back to the declared default for a missing or non-string value', () => {
+    expect(imageAssetParam({}, schema, 'image')).toBe('portrait-default')
+    expect(imageAssetParam({ image: 42 }, schema, 'image')).toBe(
+      'portrait-default',
+    )
   })
 })

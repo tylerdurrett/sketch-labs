@@ -3,7 +3,7 @@ import type { ToneSource } from '../shadingFields'
 import type { NumberParamSpec } from '../sketch'
 import type { Point } from '../types'
 
-/** The five artist-facing controls shared by every Scribble Strategy consumer. */
+/** The six artist-facing controls shared by every Scribble Strategy consumer. */
 export interface ScribbleControls {
   /** Relative mark abundance. More density means less darkness per pass. */
   readonly pathDensity: number
@@ -15,6 +15,8 @@ export interface ScribbleControls {
   readonly chaos: number
   /** Requested tonal accuracy before the strategy may report completion. */
   readonly toneFidelity: number
+  /** Percentage of ordinary accepted-segment work to retain. */
+  readonly stopPoint: number
 }
 export type ScribbleControlName = keyof ScribbleControls
 
@@ -48,6 +50,14 @@ export const scribbleControlSchema = Object.freeze({
     default: 0.9,
     step: 0.01,
   },
+  stopPoint: {
+    kind: 'number',
+    min: 0,
+    max: 100,
+    default: 100,
+    step: 1,
+    integer: true,
+  },
 } satisfies Record<ScribbleControlName, NumberParamSpec>)
 
 /** Frozen defaults derived from the same declarations the Harness presents. */
@@ -57,6 +67,7 @@ export const defaultScribbleControls: Readonly<ScribbleControls> = Object.freeze
   momentum: scribbleControlSchema.momentum.default,
   chaos: scribbleControlSchema.chaos.default,
   toneFidelity: scribbleControlSchema.toneFidelity.default,
+  stopPoint: scribbleControlSchema.stopPoint.default,
 })
 
 /** Internal lengths and thresholds coherently derived for one run. */
