@@ -61,27 +61,22 @@ export interface ScribbleStrategyTestHooks {
 
 // The ordinary work budget follows the normalized model: finer lattices and
 // lower per-pass coverage both require proportionally more deposited segments.
-// Separate hard ceilings remain as emergency guards against extreme frames.
-const HARD_MAX_ACCEPTED_SEGMENTS = 250_000
-const HARD_MAX_POLYLINES = 4_000
-const HARD_MAX_STAGNATIONS = 8_000
-const HARD_MAX_RESTARTS = 4_000
+// The hard tuple is the largest one that completed both managed-photo cases in
+// a real Studio Worker on the maintainer machine; the next accepted-segment
+// ceiling crossed the campaign's hard stability boundary. Keep the decision
+// evidence durable at packages/core/benchmarks/photo-scribble/results/
+// issue-336-20260718T233038Z/machine-ceiling-decision.json.
+const HARD_MAX_ACCEPTED_SEGMENTS = 1_000_000
+const HARD_MAX_POLYLINES = 16_000
+const HARD_MAX_STAGNATIONS = 32_000
+const HARD_MAX_RESTARTS = 16_000
 const SEGMENTS_PER_DENSITY_WEIGHTED_SAMPLE = 2
-const FULL_WORK_BUDGET_SCALE = 0.5
 
 export function resolveProductionScribbleExecutionLimits(
   model: Readonly<Pick<ScribbleModel, 'controls' | 'lattice'>>,
 ): Readonly<ScribbleExecutionLimits> {
-  // Very fine scales multiply lattice and output-point counts quadratically.
-  // Until generation moves off the synchronous Studio path, taper the
-  // deterministic safety cap below the former 0.5 floor so 0.1 remains useful
-  // for exploration and returns honest partial geometry instead of freezing.
-  const scaleAdjustedHardLimit = Math.floor(
-    HARD_MAX_ACCEPTED_SEGMENTS *
-      Math.min(1, model.controls.scribbleScale / FULL_WORK_BUDGET_SCALE),
-  )
   const maxAcceptedSegments = Math.min(
-    scaleAdjustedHardLimit,
+    HARD_MAX_ACCEPTED_SEGMENTS,
     Math.ceil(
       model.lattice.sampleCount *
         model.controls.pathDensity *

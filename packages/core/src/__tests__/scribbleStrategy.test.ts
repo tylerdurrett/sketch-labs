@@ -90,12 +90,13 @@ function source(
   return { toneField, shadingMask }
 }
 
-function highDensityProductionLimitsAtScale(
+function productionLimitsAt(
   scribbleScale: number,
+  pathDensity = scribbleControlSchema.pathDensity.max,
 ): Readonly<ScribbleExecutionLimits> {
   const controls = {
     ...defaultScribbleControls,
-    pathDensity: scribbleControlSchema.pathDensity.max,
+    pathDensity,
     scribbleScale,
   }
   const scales = resolveScribbleScales(FRAME, controls)
@@ -475,31 +476,53 @@ describe('public Scribble strategy boundary', () => {
 
 describe('internal Scribble execution-limit seam', () => {
   it.each([
-    [0.1, 50_000, 4_000, 8_000, 4_000],
-    [0.2, 100_000, 4_000, 8_000, 4_000],
-    [0.25, 125_000, 4_000, 8_000, 4_000],
-    [0.5, 250_000, 4_000, 8_000, 4_000],
-    [1, 219_040, 4_000, 8_000, 4_000],
-    [2, 54_760, 4_000, 8_000, 4_000],
+    [0.1, 10, 1_000_000],
+    [0.1, 20, 1_000_000],
+    [0.2, 10, 1_000_000],
+    [0.2, 20, 1_000_000],
+    [0.5, 10, 438_080],
+    [0.5, 20, 876_160],
+    [1, 10, 109_520],
+    [1, 20, 219_040],
   ] as const)(
-    'pins the production tuple at Scribble scale %s',
-    (
-      scribbleScale,
-      maxAcceptedSegments,
-      maxPolylines,
-      maxStagnations,
-      maxRestarts,
-    ) => {
-      expect(highDensityProductionLimitsAtScale(scribbleScale)).toEqual({
+    'pins the high-density production tuple at scale %s and density %s',
+    (scribbleScale, pathDensity, maxAcceptedSegments) => {
+      expect(productionLimitsAt(scribbleScale, pathDensity)).toEqual({
         maxAcceptedSegments,
-        maxPolylines,
-        maxStagnations,
-        maxRestarts,
+        maxPolylines: 16_000,
+        maxStagnations: 32_000,
+        maxRestarts: 16_000,
       })
     },
   )
 
-  it('reproduces production geometry when supplied the production tuple', () => {
+  it('uses the evidence-selected hard tuple without the obsolete fine-scale taper', () => {
+    const limits = productionLimitsAt(0.1)
+
+    expect(limits).toEqual({
+      maxAcceptedSegments: 1_000_000,
+      maxPolylines: 16_000,
+      maxStagnations: 32_000,
+      maxRestarts: 16_000,
+    })
+    expect(limits.maxAcceptedSegments + limits.maxStagnations).toBe(1_032_000)
+  })
+
+  it.each([
+    [0.5, 1, 43_808],
+    [1, 1, 10_952],
+    [2, 1, 2_738],
+  ] as const)(
+    'keeps ordinary accepted-segment work input-derived at scale %s and density %s',
+    (scribbleScale, pathDensity, expectedWork) => {
+      const limits = productionLimitsAt(scribbleScale, pathDensity)
+
+      expect(limits.maxAcceptedSegments).toBe(expectedWork)
+      expect(limits.maxAcceptedSegments).toBeLessThan(250_000)
+    },
+  )
+
+  it('preserves deterministic termination, geometry, guard attribution, and progress totals', () => {
     const strategyInput = input(
       source(horizontalGradientTone(FRAME)),
       'production-limit-injection',
@@ -511,10 +534,30 @@ describe('internal Scribble execution-limit seam', () => {
       strategyInput.controls,
     )
     const limits = resolveProductionScribbleExecutionLimits(strategyModel)
+    const progress: ScribbleProgress[] = []
+    const observations: ScribbleExecutionObservation[] = []
 
-    expect(
-      runScribbleStrategyForTesting(strategyInput, limits),
-    ).toEqual(scribbleStrategy(strategyInput))
+    const injected = runScribbleStrategyForTesting(
+      { ...strategyInput, observer: (snapshot) => progress.push(snapshot) },
+      limits,
+      {
+        executionObserver: (observation) => observations.push(observation),
+      },
+    )
+    const production = scribbleStrategy(strategyInput)
+
+    expect(injected).toEqual(production)
+    expect(runScribbleStrategyForTesting(strategyInput, limits)).toEqual(
+      injected,
+    )
+    expect(injected.termination).toBe('completed')
+    expect(observations).toHaveLength(1)
+    expect(observations[0]!.bindingGuard).toBeNull()
+    expect(progress.length).toBeGreaterThan(1)
+    expect(progress.at(-1)?.terminal).toBe(true)
+    expect(new Set(progress.map(({ totalWorkUnits }) => totalWorkUnits))).toEqual(
+      new Set([limits.maxAcceptedSegments + limits.maxStagnations]),
+    )
   })
 })
 

@@ -17,8 +17,8 @@ import {
 } from './types'
 
 // Ratios belong to the strategy, not the authored parameter surface. The values
-// keep the default 1000 x 1000 Composition Frame useful synchronously while
-// retaining enough samples to distinguish hard and feathered boundaries.
+// keep the default 1000 x 1000 Composition Frame practical in the Studio Worker
+// while retaining enough samples to distinguish hard and feathered boundaries.
 const SEGMENT_TO_FRAME = 0.012
 const COVERAGE_TO_SEGMENT = 1.5
 const RESIDUAL_TO_SEGMENT = 1.125
