@@ -489,6 +489,106 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
       JSON.parse(previewCapture.ordinaryExport!.metadata!).profile,
     ).toEqual(expectedProfile);
     await flushPromises();
+
+    // Re-Apply restores the lock without changing Composition or regenerating.
+    const lock = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Lock Page aspect"]',
+    )!;
+    expect(lock.checked).toBe(true);
+    act(() => lock.click());
+    expect(lock.checked).toBe(false);
+    clickButton(el, "Crop");
+    clickButton(el, "Apply");
+    expect(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Lock Page aspect"]',
+      )?.checked,
+    ).toBe(true);
+    expect(generate).toHaveBeenCalledTimes(callsBeforeFrame);
+
+    // A locked physical resize changes only scale: the frozen Page and generation
+    // basis survive, and the Sketch itself is not asked to generate again.
+    const generationFrame = generate.mock.calls.at(-1)![3];
+    const paperAspect = el
+      .querySelector<HTMLCanvasElement>("canvas")!
+      .style.getPropertyValue("--paper-aspect");
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    act(() => width.focus());
+    setInput(width, String(expectedProfile.width * 1.2));
+    act(() => width.blur());
+    flushRaf();
+    expect(generate).toHaveBeenCalledTimes(callsBeforeFrame);
+    expect(
+      el
+        .querySelector<HTMLCanvasElement>("canvas")!
+        .style.getPropertyValue("--paper-aspect"),
+    ).toBe(paperAspect);
+
+    // Content changes may regenerate, but every generation stays on the exact
+    // frozen Composition object and leaves the committed Page visible.
+    const radius = el.querySelector<HTMLInputElement>("#control-radius")!;
+    act(() => radius.focus());
+    setInput(radius, "25");
+    act(() => radius.blur());
+    clickButton(el, "New seed");
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    clickButton(el, "Randomize");
+    flushRaf();
+    expect(generate.mock.calls.length).toBeGreaterThan(callsBeforeFrame);
+    for (const call of generate.mock.calls.slice(callsBeforeFrame)) {
+      expect(call[3]).toBe(generationFrame);
+    }
+    expect(
+      el
+        .querySelector<HTMLCanvasElement>("canvas")!
+        .style.getPropertyValue("--paper-aspect"),
+    ).toBe(paperAspect);
+  });
+
+  it("retains a committed Page and frozen Composition across animated ticks", async () => {
+    const base = testSketch(A4_PROFILE);
+    const sketch = {
+      ...base.sketch,
+      time: { duration: 4, mode: "loop" as const },
+    } as Sketch;
+    const el = mount(sketch);
+    await flushPromises();
+    flushRaf();
+    const generationFrame = base.generate.mock.calls.at(-1)![3];
+
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    setInput(el.querySelector<HTMLInputElement>('input[name="width"]')!, "80");
+    clickButton(el, "Apply");
+    const paperAspect = el
+      .querySelector<HTMLCanvasElement>("canvas")!
+      .style.getPropertyValue("--paper-aspect");
+    const callsAfterApply = base.generate.mock.calls.length;
+
+    act(() => {
+      for (const time of [250, 500, 1_000]) {
+        const due = [...rafCallbacks.values()];
+        rafCallbacks.clear();
+        for (const callback of due) callback(time);
+      }
+    });
+
+    expect(base.generate.mock.calls.length).toBeGreaterThan(callsAfterApply);
+    for (const call of base.generate.mock.calls.slice(callsAfterApply)) {
+      expect(call[3]).toBe(generationFrame);
+    }
+    expect(
+      el
+        .querySelector<HTMLCanvasElement>("canvas")!
+        .style.getPropertyValue("--paper-aspect"),
+    ).toBe(paperAspect);
+    expect(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Lock Page aspect"]',
+      )?.checked,
+    ).toBe(true);
   });
 
   it("reloads controls, geometry, and preview together, then preserves exact Outline Scene geometry across a proportional non-square resize", async () => {

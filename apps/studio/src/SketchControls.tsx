@@ -18,10 +18,13 @@ import {
   insertPngMetadata,
   newSeed,
   plotDrawableAspectsEquivalent,
+  plotDrawableRectangle,
   randomize,
   renderToSVG,
+  resizePageFramePlotProfileProportionally,
   resolveOutputProfile,
   type PageFrame,
+  type PlotProfile,
   type Preset,
   type OutlineTarget,
   type Scene,
@@ -49,11 +52,13 @@ import {
 import {
   applyPageFrameEdit,
   initialPageFrameForEdit,
+  recomposePageToProfile,
   resetPageFrame,
   resolveStudioCompositionFrame,
   sameStudioPhysicalScale,
   studioGenerationAspect,
   studioMillimetersPerCompositionUnit,
+  setPageAspectLocked,
 } from "./pageFrameEditing";
 import {
   detectHistoryShortcutPlatform,
@@ -83,7 +88,11 @@ import {
   outlineSessionReducer,
   type OutlineSessionAction,
 } from "./outlineSession";
-import { PaperSection } from "./PaperSection";
+import {
+  PaperSection,
+  type PaperProfileCandidateDecision,
+  type PaperProfileCandidateSource,
+} from "./PaperSection";
 import { readPaperDisplayUnit } from "./paperDisplayUnit";
 import { PageFrameEditor } from "./PageFrameEditor";
 import {
@@ -699,6 +708,68 @@ export function SketchControls({
     updateHistory(
       (current) =>
         commitEditState(current, { ...current.present, [key]: value }),
+      true,
+      "atomic",
+    );
+  };
+
+  const routePaperProfileCandidate = (
+    candidate: PlotProfile,
+    source: PaperProfileCandidateSource,
+  ): PaperProfileCandidateDecision => {
+    const current = historyRef.current.present;
+    if (current.framing.kind === "unframed") {
+      return { kind: "accept", profile: candidate };
+    }
+
+    const currentDrawable = plotDrawableRectangle(current.profile);
+    const candidateDrawable = plotDrawableRectangle(candidate);
+    const sameAspect = plotDrawableAspectsEquivalent(
+      currentDrawable.width / currentDrawable.height,
+      candidateDrawable.width / candidateDrawable.height,
+    );
+
+    if (current.framing.aspectLocked) {
+      if (source === "width" || source === "height") {
+        return {
+          kind: "accept",
+          profile: resizePageFramePlotProfileProportionally(
+            current.profile,
+            current.framing.pageFrame,
+            source,
+            candidate[source],
+          ),
+        };
+      }
+      return sameAspect
+        ? { kind: "accept", profile: candidate }
+        : {
+            kind: "reject",
+            message:
+              "Unlock Page aspect before changing the Page proportions.",
+          };
+    }
+
+    if (sameAspect) return { kind: "accept", profile: candidate };
+    if (
+      !window.confirm(
+        "Changing the Page aspect will recompose the Scene and reset the Page Frame. Continue?",
+      )
+    ) {
+      return { kind: "reject", message: "Page aspect change canceled." };
+    }
+
+    updateHistory(
+      (historyState) => recomposePageToProfile(historyState, candidate),
+      true,
+      "atomic",
+    );
+    return { kind: "handled", profile: candidate };
+  };
+
+  const commitPageAspectLocked = (locked: boolean): void => {
+    updateHistory(
+      (current) => setPageAspectLocked(current, locked),
       true,
       "atomic",
     );
@@ -1471,6 +1542,13 @@ export function SketchControls({
             onCancel: cancelTransaction,
           }}
           onAtomicChange={(next) => commitLeaf("profile", next)}
+          routeProfileCandidate={routePaperProfileCandidate}
+          {...(history.present.framing.kind === "framed"
+            ? {
+                aspectLocked: history.present.framing.aspectLocked,
+                onAspectLockedChange: commitPageAspectLocked,
+              }
+            : {})}
           includePaperMargins={includePaperMargins}
           onIncludePaperMarginsChange={commitIncludePaperMargins}
         />

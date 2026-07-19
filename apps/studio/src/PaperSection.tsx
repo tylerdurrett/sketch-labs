@@ -31,6 +31,7 @@ export type PaperProfileCandidateSource =
 
 export type PaperProfileCandidateDecision =
   | { readonly kind: "accept"; readonly profile: PlotProfile }
+  | { readonly kind: "handled"; readonly profile: PlotProfile }
   | { readonly kind: "reject"; readonly message: string };
 
 /** Decide an aspect-affecting Paper candidate before Studio previews it. */
@@ -212,8 +213,13 @@ export function PaperSection({
     candidate: PlotProfile,
     source: PaperProfileCandidateSource,
     target: PaperErrorTarget,
-  ): PlotProfile | null => {
-    if (routeProfileCandidate === undefined) return candidate;
+  ):
+    | { readonly kind: "accept"; readonly profile: PlotProfile }
+    | { readonly kind: "handled"; readonly profile: PlotProfile }
+    | null => {
+    if (routeProfileCandidate === undefined) {
+      return { kind: "accept", profile: candidate };
+    }
 
     const decision = routeProfileCandidate(candidate, source);
     if (decision.kind === "reject") {
@@ -235,7 +241,7 @@ export function PaperSection({
         );
       }
     }
-    return decision.profile;
+    return decision;
   };
 
   const beginField = (field: PaperField): void => {
@@ -301,14 +307,15 @@ export function PaperSection({
   ): void => {
     try {
       validatePlotProfile(candidate);
-      const accepted =
+      const routed =
         source === undefined
-          ? candidate
+          ? { kind: "accept" as const, profile: candidate }
           : routeCandidate(candidate, source, target);
-      if (accepted === null) return;
-      validatePlotProfile(accepted);
+      if (routed === null) return;
+      validatePlotProfile(routed.profile);
       setError(null);
-      preview(accepted);
+      if (routed.kind === "handled") return;
+      preview(routed.profile);
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : "Invalid paper dimensions";
@@ -356,13 +363,15 @@ export function PaperSection({
   ): void => {
     try {
       validatePlotProfile(candidate);
-      const accepted =
+      const routed =
         source === undefined
-          ? candidate
+          ? { kind: "accept" as const, profile: candidate }
           : routeCandidate(candidate, source, target);
-      if (accepted === null) return;
-      validatePlotProfile(accepted);
+      if (routed === null) return;
+      validatePlotProfile(routed.profile);
       setError(null);
+      if (routed.kind === "handled") return;
+      const accepted = routed.profile;
       if (sameProfile(profile, accepted)) return;
       if (
         "onAtomicChange" in editProps &&

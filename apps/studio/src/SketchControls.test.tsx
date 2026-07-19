@@ -1771,6 +1771,7 @@ describe("SketchControls — Page Frame edit mode", () => {
       },
       generationAspect:
         originalComposition!.width / originalComposition!.height,
+      aspectLocked: true,
     });
     expect(lastProfile).toEqual(originalProfile);
     expect(lastCompositionFrame).toEqual(originalComposition);
@@ -1806,6 +1807,7 @@ describe("SketchControls — Page Frame edit mode", () => {
       },
       generationAspect:
         originalComposition!.width / originalComposition!.height,
+      aspectLocked: true,
     });
     expect(lastCommittedPageFrame).toEqual(
       committed.framing.kind === "framed"
@@ -1847,6 +1849,92 @@ describe("SketchControls — Page Frame edit mode", () => {
     clickButton(el, "Crop");
     expect(frameInput(el, "x").value).toBe("0");
     expect(frameInput(el, "width").value).toBe("100");
+  });
+
+  it("routes locked resize and confirm-gated recompose through exact framing history", () => {
+    const confirm = vi.spyOn(window, "confirm");
+    const el = mount(<SketchControls sketch={sketchWith("page-semantics", {})} />);
+
+    clickButton(el, "Crop");
+    setInput(frameInput(el, "x"), "10");
+    setInput(frameInput(el, "width"), "60");
+    setInput(frameInput(el, "height"), "50");
+    clickButton(el, "Apply");
+
+    const applied = historyCapture.atomic.at(-1)!.after.present;
+    if (applied.framing.kind !== "framed") {
+      throw new Error("Apply did not commit framing");
+    }
+    const frozenFraming = structuredClone(applied.framing);
+    const frozenComposition = structuredClone(lastCompositionFrame);
+    const lock = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Lock Page aspect"]',
+    )!;
+    expect(lock.checked).toBe(true);
+
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    act(() => width.focus());
+    setInput(width, String(applied.profile.width * 1.25));
+    act(() => width.blur());
+
+    const resized = historyCapture.transactionCommits.at(-1)!.after.present;
+    expect(resized.framing).toEqual(frozenFraming);
+    expect(lastCompositionFrame).toEqual(frozenComposition);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(
+      (resized.profile.width -
+        resized.profile.insets.left -
+        resized.profile.insets.right) /
+        (resized.profile.height -
+          resized.profile.insets.top -
+          resized.profile.insets.bottom),
+    ).toBeCloseTo(
+      frozenFraming.pageFrame.width / frozenFraming.pageFrame.height,
+      14,
+    );
+
+    act(() => lock.click());
+    const unlocked = historyCapture.atomic.at(-1)!.after.present;
+    expect(unlocked.framing).toEqual({ ...frozenFraming, aspectLocked: false });
+
+    confirm.mockReturnValueOnce(false);
+    const rejectedWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    const rejectedDraft = rejectedWidth.value;
+    const beforeDecline = historyCapture.atomic.at(-1)!.after;
+    act(() => rejectedWidth.focus());
+    setInput(rejectedWidth, String(unlocked.profile.width + 17));
+    act(() => rejectedWidth.blur());
+    expect(rejectedWidth.value).toBe(rejectedDraft);
+    expect(historyCapture.atomic.at(-1)!.after).toBe(beforeDecline);
+    expect(lastCompositionFrame).toEqual(frozenComposition);
+
+    confirm.mockReturnValueOnce(true);
+    act(() => rejectedWidth.focus());
+    setInput(rejectedWidth, String(unlocked.profile.width + 17));
+    act(() => rejectedWidth.blur());
+
+    const recomposed = historyCapture.atomic.at(-1)!.after;
+    expect(recomposed.present.framing).toEqual({ kind: "unframed" });
+    expect(recomposed.present.profile.width).toBe(unlocked.profile.width + 17);
+    expect(recomposed.past).toHaveLength(beforeDecline.past.length + 1);
+    expect(lastCompositionFrame).not.toEqual(frozenComposition);
+    expect(
+      el.querySelector('input[aria-label="Lock Page aspect"]'),
+    ).toBeNull();
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+    expect(lastCommittedPageFrame).toEqual(frozenFraming.pageFrame);
+    expect(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Lock Page aspect"]',
+      )?.checked,
+    ).toBe(false);
+    pressHistoryShortcut(window, { key: "y", ctrlKey: true });
+    expect(lastCommittedPageFrame).toBeNull();
   });
 
   it("blocks Studio Undo and Redo until the Composition-relative draft settles", () => {
@@ -5264,6 +5352,15 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     });
     clickButton(el, "Tone");
 
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    setInput(el.querySelector<HTMLInputElement>('input[name="width"]')!, "80");
+    clickButton(el, "Apply");
+    const frozenFraming = structuredClone(
+      historyCapture.atomic[0]!.after.present.framing,
+    );
+    const frozenComposition = lastCompositionFrame;
+
     clickButton(el, "Choose image");
     await flush();
     clickButton(el, "Refresh");
@@ -5276,10 +5373,14 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     if (persistedB === undefined) throw new Error("no persisted B choice");
     act(() => persistedB.click());
 
-    expect(historyCapture.atomic).toHaveLength(1);
-    expect(historyCapture.atomic[0]!.after.present.params.imageAsset).toBe(
+    expect(historyCapture.atomic).toHaveLength(2);
+    expect(historyCapture.atomic[1]!.after.present.params.imageAsset).toBe(
       assetB,
     );
+    expect(historyCapture.atomic[1]!.after.present.framing).toEqual(
+      frozenFraming,
+    );
+    expect(lastCompositionFrame).toBe(frozenComposition);
     expect(sketchEnvironmentJob.starts).toHaveLength(2);
     expect(sketchEnvironmentJob.starts[0]!.signal.aborted).toBe(true);
     expect(lastToneSource).toBeNull();
@@ -5291,6 +5392,10 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       await Promise.resolve();
     });
     expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentB);
+    expect(historyCapture.atomic[1]!.after.present.framing).toEqual(
+      frozenFraming,
+    );
+    expect(lastCompositionFrame).toBe(frozenComposition);
     expect(scribbleJob.starts).toHaveLength(2);
     expect(scribbleJob.starts[1]!.identity.params).toContainEqual({
       key: "imageAsset",

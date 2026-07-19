@@ -288,6 +288,37 @@ describe("PaperSection", () => {
     expect(controlled().height).toBe(310);
   });
 
+  it("reconciles an owner-handled dimension without previewing or reporting an error", () => {
+    const handled: PlotProfile = { ...profile, width: 225, height: 315 };
+    const routeProfileCandidate = vi.fn<
+      Parameters<PaperProfileCandidateRouter>,
+      ReturnType<PaperProfileCandidateRouter>
+    >(() => ({ kind: "handled", profile: handled }));
+    const { el, events, onAtomicChange, profile: controlled } =
+      mountTransactional(profile, { routeProfileCandidate });
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    focusInput(width);
+    setInput(width, "220");
+
+    expect(routeProfileCandidate).toHaveBeenCalledWith(
+      { ...profile, width: 220 },
+      "width",
+    );
+    expect(events).toEqual(["begin"]);
+    expect(onAtomicChange).not.toHaveBeenCalled();
+    expect(controlled()).toEqual(profile);
+    expect(width.value).toBe("225");
+    expect(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Paper height (mm)"]',
+      )!.value,
+    ).toBe("315");
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+  });
+
   it("restores a rejected locked margin draft without previewing history", () => {
     const routeProfileCandidate = vi.fn<
       Parameters<PaperProfileCandidateRouter>,
