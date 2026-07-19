@@ -5199,7 +5199,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
-  it("copies the committed frame into hidden-line finalization and reuses base Outline across framing options", async () => {
+  it("reuses one Scribble and Outline base through repeated Page history, frame visibility, and exports", async () => {
     autoFireOutlineComputed = false;
     const generate = vi.fn(toneCalibration.generate);
     const el = mount(
@@ -5258,6 +5258,66 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(outlineJob.starts).toBe(1);
     expect(scribbleJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
+
+    const exportAndExpectFrame = async (pageFrame: PageFrame | null) => {
+      clickButton(el, "Export Hidden-line SVG");
+      await flush();
+      expect(outlineJob.lastExportSnapshot?.pageFrame).toEqual(pageFrame);
+      expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+      expect(outlineJob.exportDerivations).toBe(0);
+      expect(outlineJob.starts).toBe(1);
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(generate).not.toHaveBeenCalled();
+    };
+
+    // Reset, Undo, and Redo traverse only cheap finalization state. Export each
+    // settled state so reuse is proven at the actual worker boundary, not merely
+    // inferred from the preview job count.
+    clickButton(el, "Crop");
+    clickButton(el, "Reset Frame");
+    await exportAndExpectFrame(null);
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    await exportAndExpectFrame(expectedFrame);
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    await exportAndExpectFrame(null);
+
+    // Re-apply an asymmetric mixed crop/pad frame, export it repeatedly, then
+    // restore the Page boundary. None is a generation or derivation identity.
+    clickButton(el, "Crop");
+    for (const [name, value] of Object.entries({
+      x: -20,
+      y: 10,
+      width: 130,
+      height: 75,
+    })) {
+      setInput(
+        el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+        String(value),
+      );
+    }
+    clickButton(el, "Apply");
+    const asymmetricFrame: PageFrame = {
+      x: composition.width * -0.2,
+      y: composition.height * 0.1,
+      width: composition.width * 1.3,
+      height: composition.height * 0.75,
+    };
+    await exportAndExpectFrame(asymmetricFrame);
+    await exportAndExpectFrame(asymmetricFrame);
+
+    act(() => compositionFrameCheckbox(el).click());
+    expect(outlineJob.lastExportSnapshot?.profile.includeFrame).toBe(false);
+    await exportAndExpectFrame(asymmetricFrame);
+    expect(outlineJob.lastExportSnapshot?.profile.includeFrame).toBe(true);
+    expect(outlineJob.exportStarts).toBe(8);
+    expect(outlineJob.exportFinalizations).toBe(8);
   });
 
   const assetA = "portrait-alpha-000000000001";

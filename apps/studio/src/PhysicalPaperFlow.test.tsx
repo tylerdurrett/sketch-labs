@@ -20,7 +20,6 @@ import {
 import leafFieldNice1 from "../../../packages/core/src/sketches/leaf-field/presets/nice1.json";
 
 import { SketchControls } from "./SketchControls";
-import { finalizeOutlineScene } from "./outlineScene";
 
 const previewCapture = vi.hoisted(() => ({
   paints: [] as Array<{ scene: unknown; width: number; height: number }>,
@@ -695,11 +694,9 @@ describe("physical plot artifact acceptance flow (#276)", () => {
 
     clickButton(el, "Export Hidden-line SVG");
     const enabledExportScene = previewCapture.plotterExport!.scene;
-    // Canvas clipping is implicit in preview pixels and explicit for exported
-    // vectors; after that boundary step the geometry and styling are identical.
-    expect(enabledExportScene).toEqual(
-      clipSceneToBounds(finalizeOutlineScene(enabledPreview, null, true)),
-    );
+    // The preview is already the one cheap finalization of the cached base;
+    // export adds only explicit vector clipping, never a second Page boundary.
+    expect(enabledExportScene).toEqual(clipSceneToBounds(enabledPreview));
     expect(previewCapture.plotterExport?.profile).toEqual(profile);
     const enabledSvg = await downloadBlob.mock.calls.at(-1)![0].text();
     const enabledDocument = new DOMParser().parseFromString(
@@ -787,8 +784,12 @@ describe("physical plot artifact acceptance flow (#276)", () => {
     act(() => frameCheckbox.click());
     flushRaf();
     const disabledPreview = previewCapture.paints.at(-1)!.scene as Scene;
-    // Frame visibility is export finalization state, not cached Outline input.
-    expect(disabledPreview).toEqual(enabledPreview);
+    // Frame visibility is cheap preview/export finalization state, not cached
+    // Outline input: hiding it removes exactly the final Page rectangle.
+    expect(disabledPreview).toEqual({
+      ...enabledPreview,
+      primitives: enabledPreview.primitives.slice(0, -1),
+    });
 
     clickButton(el, "Export Hidden-line SVG");
     const disabledExportScene = previewCapture.plotterExport!.scene;
