@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  centeredFixedPageFrame,
   clipSceneToBounds,
   derivePageFramePlotProfile,
   frameScene,
@@ -686,32 +687,111 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
     expect(generate.mock.calls.at(-1)![3]).toBe(originalFrame);
   });
 
-  it("restores a saved framed page before exporting matching ordinary and plotter v3 metadata", async () => {
-    presetClient.list.mockReset().mockResolvedValue(["framed"]);
+  it("restores a saved fixed-page result before exporting matching ordinary and plotter v3 metadata", async () => {
+    presetClient.list.mockReset().mockResolvedValue(["fixed-page"]);
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    const { sketch, generate } = testSketch(A4_PROFILE);
+    const initialProfile: PlotProfile = {
+      width: 260,
+      height: 190,
+      insets: { top: 11, right: 19, bottom: 23, left: 7 },
+      includeFrame: false,
+      toolWidthMillimeters: 0.45,
+    };
+    const lockedProfile: PlotProfile = {
+      ...initialProfile,
+      width: 333.125,
+      height: 250,
+      insets: { ...initialProfile.insets },
+    };
+    const { sketch, generate } = testSketch(initialProfile);
     const el = mount(sketch);
     await flushPromises();
+    const generationFrame = generate.mock.calls.at(-1)![3];
 
     clickButton(el, "Crop");
-    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
-    setInput(el.querySelector<HTMLInputElement>('input[name="y"]')!, "-5");
-    setInput(el.querySelector<HTMLInputElement>('input[name="width"]')!, "80");
-    setInput(el.querySelector<HTMLInputElement>('input[name="height"]')!, "110");
+    setInput(
+      el.querySelector<HTMLInputElement>('input[name="physical-width"]')!,
+      String(lockedProfile.width),
+    );
+    setInput(
+      el.querySelector<HTMLInputElement>('input[name="physical-height"]')!,
+      String(lockedProfile.height),
+    );
+    act(() =>
+      el
+        .querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!
+        .click(),
+    );
+    for (const side of ["top", "right", "bottom", "left"] as const) {
+      expect(
+        el.querySelector<HTMLInputElement>(
+          `input[name="physical-inset-${side}"]`,
+        )?.value,
+      ).toBe(String(lockedProfile.insets[side]));
+    }
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "175",
+    );
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "12.5");
+    setInput(el.querySelector<HTMLInputElement>('input[name="y"]')!, "-8");
     clickButton(el, "Apply");
     setInput(
       el.querySelector<HTMLInputElement>('input[aria-label="preset name"]')!,
-      "framed",
+      "fixed-page",
     );
     clickButton(el, "Save");
     await flushPromises();
     await flushPromises();
 
     const saved = presetClient.save.mock.calls[0]![0];
-    expect(saved.version).toBe(3);
+    const fitFrame = centeredFixedPageFrame(lockedProfile, generationFrame);
+    const expectedPageFrame = {
+      x: generationFrame.width * 0.125,
+      y: generationFrame.height * -0.08,
+      width: fitFrame.width / 1.75,
+      height: fitFrame.height / 1.75,
+    };
+    expect(saved).toEqual({
+      version: 3,
+      sketch: sketch.id,
+      name: "fixed-page",
+      seed: expect.any(Number),
+      params: { radius: 10 },
+      locks: [],
+      profile: lockedProfile,
+      framing: {
+        pageFrame: expectedPageFrame,
+        generationAspect: 3 / 2,
+        aspectLocked: true,
+      },
+    });
     const framing = saved.framing;
     if (saved.version !== 3 || framing === undefined) {
       throw new Error("expected framed v3 preset");
+    }
+    expect(Object.keys(framing).sort()).toEqual([
+      "aspectLocked",
+      "generationAspect",
+      "pageFrame",
+    ]);
+    expect(Object.keys(framing.pageFrame).sort()).toEqual([
+      "height",
+      "width",
+      "x",
+      "y",
+    ]);
+    for (const field of [
+      "scale",
+      "center",
+      "fitReference",
+      "editMode",
+      "compositionTransform",
+    ]) {
+      expect(field in saved).toBe(false);
+      expect(field in framing).toBe(false);
     }
 
     // Move every relevant live axis away from the saved snapshot, including
@@ -737,27 +817,29 @@ describe("physical-paper Studio acceptance flow (#248)", () => {
     const picker = el.querySelector<HTMLSelectElement>(
       'select[aria-label="saved presets"]',
     )!;
-    expect([...picker.options].map((option) => option.value)).toContain("framed");
-    selectValue(picker, "framed");
-    expect(picker.value).toBe("framed");
+    expect([...picker.options].map((option) => option.value)).toContain("fixed-page");
+    selectValue(picker, "fixed-page");
+    expect(picker.value).toBe("fixed-page");
     clickButton(el, "Reload");
     await flushPromises();
     flushRaf();
 
-    expect(presetClient.load).toHaveBeenCalledWith(sketch.id, "framed");
+    expect(presetClient.load).toHaveBeenCalledWith(sketch.id, "fixed-page");
     expect(el.querySelector<HTMLInputElement>("#control-radius")!.value).toBe(
       String(saved.params.radius),
     );
 
-    const generationFrame = resolveCompositionFrame(
+    const reloadedGenerationFrame = resolveCompositionFrame(
       framing.generationAspect,
     );
     expect(generate).toHaveBeenLastCalledWith(
       saved.params,
       saved.seed,
       0,
-      generationFrame,
+      reloadedGenerationFrame,
     );
+    expect(saved.profile).toEqual(lockedProfile);
+    expect(framing.pageFrame).toEqual(expectedPageFrame);
     const source = generate.mock.results.at(-1)!.value as Scene;
     expect(previewCapture.paints.at(-1)!.scene).toEqual(
       frameScene(source, framing.pageFrame),

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   HARNESS_FALLBACK_PLOT_PROFILE,
+  type PlotProfile,
   type Preset,
   type PresetFraming,
 } from "@harness/core";
@@ -33,6 +34,8 @@ let root: Root;
 async function mount(
   names: string[] = [],
   framing?: PresetFraming,
+  profile: PlotProfile = HARNESS_FALLBACK_PLOT_PROFILE,
+  onReload: (preset: Preset) => void = vi.fn(),
 ): Promise<HTMLDivElement> {
   presetClient.list.mockResolvedValue(names);
   container = document.createElement("div");
@@ -45,9 +48,9 @@ async function mount(
         params={{ count: 12 }}
         seed="abc123"
         locks={new Set(["count"])}
-        profile={HARNESS_FALLBACK_PLOT_PROFILE}
+        profile={profile}
         {...(framing === undefined ? {} : { framing })}
-        onReload={vi.fn()}
+        onReload={onReload}
       />,
     ),
   );
@@ -166,27 +169,74 @@ describe("PresetControls name entry", () => {
     });
   });
 
-  it("forwards exact committed framing into a v3 save", async () => {
-    const framing: PresetFraming = {
-      pageFrame: { x: -12.5, y: 8.25, width: 144.75, height: 92.5 },
-      generationAspect: 16 / 9,
-      aspectLocked: false,
+  it("saves and reloads an exact fixed-page v3 result without transient edit fields", async () => {
+    const profile: PlotProfile = {
+      width: 333.125,
+      height: 241.75,
+      insets: { top: 11, right: 19, bottom: 23, left: 7 },
+      includeFrame: false,
+      toolWidthMillimeters: 0.45,
     };
-    await mount([], framing);
-    enterBrowserValue("framed");
+    const framing: PresetFraming = {
+      pageFrame: { x: 18.75, y: -8, width: 600 / 7, height: 415.5 / 7 },
+      generationAspect: 3 / 2,
+      aspectLocked: true,
+    };
+    const onReload = vi.fn<[Preset], void>();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await mount(["fixed-page"], framing, profile, onReload);
+    enterBrowserValue("fixed page");
 
     await clickSave();
 
-    expect(presetClient.save).toHaveBeenCalledWith({
+    const saved: Preset = {
       version: 3,
       sketch: "circles",
-      name: "framed",
+      name: "fixed-page",
       seed: "abc123",
       params: { count: 12 },
       locks: ["count"],
-      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+      profile,
       framing,
+    };
+    expect(presetClient.save).toHaveBeenCalledWith(saved);
+    expect(Object.keys(saved.framing!).sort()).toEqual([
+      "aspectLocked",
+      "generationAspect",
+      "pageFrame",
+    ]);
+    for (const field of [
+      "scale",
+      "center",
+      "fitReference",
+      "editMode",
+      "compositionTransform",
+    ]) {
+      expect(field in saved).toBe(false);
+      expect(field in saved.framing!).toBe(false);
+    }
+
+    presetClient.load.mockResolvedValue(saved);
+    const picker = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "fixed-page");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
     });
+    await act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>("button")]
+        .find((button) => button.textContent === "Reload")!
+        .click();
+      await Promise.resolve();
+    });
+
+    expect(presetClient.load).toHaveBeenCalledWith("circles", "fixed-page");
+    expect(onReload).toHaveBeenCalledWith(saved);
   });
 
   it("keeps an unframed save on the v2 transport shape", async () => {

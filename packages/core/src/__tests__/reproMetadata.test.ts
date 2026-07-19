@@ -33,6 +33,25 @@ const framing: PresetFraming = {
   aspectLocked: true,
 }
 
+const fixedPageProfile: PlotProfile = {
+  width: 333.125,
+  height: 241.75,
+  insets: { top: 11, right: 19, bottom: 23, left: 7 },
+  includeFrame: false,
+  toolWidthMillimeters: 0.45,
+}
+
+const fixedPageFraming: PresetFraming = {
+  pageFrame: {
+    x: 18.75,
+    y: -8,
+    width: 600 / 7,
+    height: 415.5 / 7,
+  },
+  generationAspect: 3 / 2,
+  aspectLocked: true,
+}
+
 describe('reproFilenameStem', () => {
   it('omits the -t segment (and the extension) for a static Sketch', () => {
     expect(reproFilenameStem({ sketchId: 'circles', seed: 42 })).toBe(
@@ -249,6 +268,57 @@ describe('buildReproMetadata', () => {
       locks: ['count', 'radius'],
       profile,
       framing,
+    })
+  })
+
+  it('reuses the exact v3 framing envelope for fixed-page reproduction metadata', () => {
+    const schema: ParamSchema = {
+      count: { kind: 'number', min: 1, max: 80, default: 24 },
+    }
+    const payload = JSON.parse(
+      buildReproMetadata({
+        sketchId: 'circles',
+        seed: 'fixed-page-seed',
+        params: { count: 30 },
+        locks: new Set(['count']),
+        profile: fixedPageProfile,
+        framing: fixedPageFraming,
+      }),
+    )
+
+    expect(PRESET_VERSION).toBe(3)
+    expect(payload.version).toBe(3)
+    expect(Object.keys(payload).sort()).toEqual([
+      'framing',
+      'locks',
+      'name',
+      'params',
+      'profile',
+      'seed',
+      'sketch',
+      'version',
+    ])
+    expect(Object.keys(payload.framing).sort()).toEqual([
+      'aspectLocked',
+      'generationAspect',
+      'pageFrame',
+    ])
+    for (const field of [
+      'scale',
+      'center',
+      'fitReference',
+      'editMode',
+      'compositionTransform',
+    ]) {
+      expect(field in payload).toBe(false)
+      expect(field in payload.framing).toBe(false)
+    }
+    expect(applyPreset(schema, deserialize(payload))).toEqual({
+      params: { count: 30 },
+      seed: 'fixed-page-seed',
+      locks: ['count'],
+      profile: fixedPageProfile,
+      framing: fixedPageFraming,
     })
   })
 

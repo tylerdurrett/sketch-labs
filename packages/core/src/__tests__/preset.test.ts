@@ -28,6 +28,25 @@ const framing: PresetFraming = {
   aspectLocked: true,
 }
 
+const fixedPageProfile: PlotProfile = {
+  width: 333.125,
+  height: 241.75,
+  insets: { top: 11, right: 19, bottom: 23, left: 7 },
+  includeFrame: false,
+  toolWidthMillimeters: 0.45,
+}
+
+const fixedPageFraming: PresetFraming = {
+  pageFrame: {
+    x: 18.75,
+    y: -8,
+    width: 600 / 7,
+    height: 415.5 / 7,
+  },
+  generationAspect: 3 / 2,
+  aspectLocked: true,
+}
+
 describe('makePreset', () => {
   it('serializes locks as a sorted string array regardless of Set insertion order', () => {
     const preset = makePreset(
@@ -628,6 +647,64 @@ describe('applyPreset', () => {
 })
 
 describe('round-trip fidelity (no-drift case)', () => {
+  it('round-trips a fixed-page result exactly in v3 without persisting transient edit state', () => {
+    const schema: ParamSchema = {
+      count: { kind: 'number', min: 1, max: 80, default: 24 },
+    }
+    const saved = makePreset(
+      'circles',
+      'fixed-page',
+      { count: 30 },
+      'fixed-page-seed',
+      new Set(['count']),
+      fixedPageProfile,
+      fixedPageFraming,
+    )
+    const wireValue = JSON.parse(JSON.stringify(serialize(saved)))
+    const state = applyPreset(schema, deserialize(wireValue))
+
+    expect(PRESET_VERSION).toBe(3)
+    expect(wireValue.version).toBe(3)
+    expect(Object.keys(wireValue).sort()).toEqual([
+      'framing',
+      'locks',
+      'name',
+      'params',
+      'profile',
+      'seed',
+      'sketch',
+      'version',
+    ])
+    expect(Object.keys(wireValue.framing).sort()).toEqual([
+      'aspectLocked',
+      'generationAspect',
+      'pageFrame',
+    ])
+    expect(Object.keys(wireValue.framing.pageFrame).sort()).toEqual([
+      'height',
+      'width',
+      'x',
+      'y',
+    ])
+    for (const field of [
+      'scale',
+      'center',
+      'fitReference',
+      'editMode',
+      'compositionTransform',
+    ]) {
+      expect(field in wireValue).toBe(false)
+      expect(field in wireValue.framing).toBe(false)
+    }
+    expect(state).toEqual({
+      params: { count: 30 },
+      seed: 'fixed-page-seed',
+      locks: ['count'],
+      profile: fixedPageProfile,
+      framing: fixedPageFraming,
+    })
+  })
+
   it('applyPreset(schema, deserialize(serialize(makePreset(...)))) equals the input params/seed/locks', () => {
     const schema: ParamSchema = {
       count: { kind: 'number', min: 1, max: 80, default: 24 },
