@@ -314,12 +314,6 @@
   transform: translate(-50%, -50%);
 }
 
-.page-frame-pan-target:focus-visible,
-.page-frame-resize-handle:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: 2px;
-}
-
 .page-frame-resize-handle[data-page-frame-handle="top-left"],
 .page-frame-resize-handle[data-page-frame-handle="left"],
 .page-frame-resize-handle[data-page-frame-handle="bottom-left"] {
