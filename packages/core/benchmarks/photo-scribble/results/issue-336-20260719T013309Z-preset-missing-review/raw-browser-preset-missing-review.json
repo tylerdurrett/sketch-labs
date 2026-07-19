@@ -1,0 +1,1943 @@
+{
+  "schemaVersion": 1,
+  "review": "issue-336-product-studio-preset-missing-asset-review",
+  "evidenceId": "issue-336-20260719T013309Z-preset-missing-review",
+  "presetName": "issue-336-trial-preset-missing-review",
+  "selectedAssetId": "pinecone-4330aa0314f7",
+  "studioUrl": "http://127.0.0.1:4319/",
+  "policy": {
+    "source": "packages/core/src/scribbleStrategy/index.ts",
+    "maxAcceptedSegments": 1000000,
+    "maxPolylines": 16000,
+    "maxStagnations": 32000,
+    "maxRestarts": 16000
+  },
+  "browser": {
+    "product": "Chrome/144.0.7559.96",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+    "platform": "Darwin 24.6.0 arm64",
+    "viewport": {
+      "width": 1440,
+      "height": 1000,
+      "devicePixelRatio": 1
+    }
+  },
+  "lifecycle": [
+    {
+      "at": "2026-07-19T01:44:48.932Z",
+      "action": "start-studio",
+      "reason": "settled-save-and-reload-proof",
+      "stdout": [
+        "\n  VITE v8.0.16  ready in 128 ms\n\n",
+        "  ➜  Local:   http://127.0.0.1:4319/\n"
+      ],
+      "stderr": [],
+      "readyAt": "2026-07-19T01:44:49.153Z",
+      "exit": {
+        "at": "2026-07-19T01:44:57.296Z",
+        "code": 143,
+        "signal": null
+      }
+    },
+    {
+      "at": "2026-07-19T01:44:57.284Z",
+      "action": "stop-studio",
+      "reason": "required-before-selected-asset-quarantine"
+    },
+    {
+      "at": "2026-07-19T01:44:57.297Z",
+      "action": "start-studio",
+      "reason": "missing-asset-fail-closed-proof",
+      "stdout": [
+        "\n  VITE v8.0.16  ready in 157 ms\n\n",
+        "  ➜  Local:   http://127.0.0.1:4319/\n"
+      ],
+      "stderr": [],
+      "readyAt": "2026-07-19T01:44:57.515Z",
+      "exit": {
+        "at": "2026-07-19T01:45:02.322Z",
+        "code": 143,
+        "signal": null
+      }
+    },
+    {
+      "at": "2026-07-19T01:45:02.311Z",
+      "action": "stop-studio",
+      "reason": "review-complete-or-failed"
+    }
+  ],
+  "actions": [
+    {
+      "at": "2026-07-19T01:44:54.300Z",
+      "action": "save-prefixed-preset",
+      "presetName": "issue-336-trial-preset-missing-review"
+    },
+    {
+      "at": "2026-07-19T01:44:57.177Z",
+      "action": "full-reload-and-load-prefixed-preset",
+      "presetName": "issue-336-trial-preset-missing-review"
+    },
+    {
+      "at": "2026-07-19T01:44:57.296Z",
+      "action": "quarantine-only-selected-worktree-asset",
+      "assetId": "pinecone-4330aa0314f7",
+      "externalByteLength": 333669,
+      "externalSha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
+    },
+    {
+      "at": "2026-07-19T01:45:00.029Z",
+      "action": "load-preset-with-selected-asset-quarantined-and-attempt-all-disabled-exports",
+      "presetName": "issue-336-trial-preset-missing-review"
+    },
+    {
+      "at": "2026-07-19T01:45:00.029Z",
+      "action": "restore-exact-selected-asset-by-rename",
+      "assetId": "pinecone-4330aa0314f7",
+      "byteLength": 333669,
+      "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
+    }
+  ],
+  "network": [
+    {
+      "at": "2026-07-19T01:44:49.879Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/",
+      "resourceType": "document"
+    },
+    {
+      "at": "2026-07-19T01:44:49.883Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/",
+      "status": 200,
+      "resourceType": "document"
+    },
+    {
+      "at": "2026-07-19T01:44:50.058Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:50.059Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:50.059Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:50.060Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:50.347Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:50.347Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:50.347Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:50.370Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "image"
+    },
+    {
+      "at": "2026-07-19T01:44:50.373Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "resourceType": "image"
+    },
+    {
+      "at": "2026-07-19T01:44:50.419Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:50.480Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:52.065Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/sketches/photo-scribble/presets/neat.json",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:52.066Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/sketches/photo-scribble/presets/neat.json",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:52.125Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:52.195Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.270Z",
+      "event": "request",
+      "method": "POST",
+      "path": "/__api/presets/photo-scribble",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.283Z",
+      "event": "response",
+      "method": "POST",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.283Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.284Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.339Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/",
+      "resourceType": "document"
+    },
+    {
+      "at": "2026-07-19T01:44:54.341Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/",
+      "status": 304,
+      "resourceType": "document"
+    },
+    {
+      "at": "2026-07-19T01:44:54.440Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.441Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.441Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.441Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.497Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.497Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.497Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.518Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "image"
+    },
+    {
+      "at": "2026-07-19T01:44:54.520Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "resourceType": "image"
+    },
+    {
+      "at": "2026-07-19T01:44:54.559Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:54.624Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:55.141Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:55.143Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:55.205Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:55.279Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:57.554Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/",
+      "resourceType": "document"
+    },
+    {
+      "at": "2026-07-19T01:44:57.595Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/",
+      "status": 304,
+      "resourceType": "document"
+    },
+    {
+      "at": "2026-07-19T01:44:57.796Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:57.796Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:57.797Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:57.797Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:57.832Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:57.832Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/__api/presets/photo-scribble",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:57.832Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 404,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:58.418Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:44:58.420Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:45:00.052Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:45:00.054Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:45:00.073Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "image"
+    },
+    {
+      "at": "2026-07-19T01:45:00.075Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "resourceType": "image"
+    },
+    {
+      "at": "2026-07-19T01:45:00.114Z",
+      "event": "request",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "resourceType": "fetch"
+    },
+    {
+      "at": "2026-07-19T01:45:00.190Z",
+      "event": "response",
+      "method": "GET",
+      "path": "/image-assets/pinecone-4330aa0314f7.png",
+      "status": 200,
+      "resourceType": "fetch"
+    }
+  ],
+  "console": [
+    {
+      "at": "2026-07-19T01:44:49.973Z",
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "at": "2026-07-19T01:44:49.977Z",
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    },
+    {
+      "at": "2026-07-19T01:44:50.063Z",
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "at": "2026-07-19T01:44:50.063Z",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "at": "2026-07-19T01:44:54.354Z",
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "at": "2026-07-19T01:44:54.373Z",
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "at": "2026-07-19T01:44:54.387Z",
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    },
+    {
+      "at": "2026-07-19T01:44:57.287Z",
+      "type": "log",
+      "text": "[vite] server connection lost. Polling for restart..."
+    },
+    {
+      "at": "2026-07-19T01:44:57.732Z",
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "at": "2026-07-19T01:44:57.735Z",
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "at": "2026-07-19T01:44:57.740Z",
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    },
+    {
+      "at": "2026-07-19T01:44:57.832Z",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "pageErrors": [],
+  "screenshots": [
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_204454_preset-before-save-settled.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_204457_preset-post-full-reload-exact.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_204459_missing-asset-explicit-fail-closed.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_204502_restored-asset-retry-recovers-exact.jpg"
+  ],
+  "phases": {
+    "preflight": {
+      "beforeAssets": [
+        {
+          "path": "img-0672-79d639daec62.png",
+          "byteLength": 6323366,
+          "sha256": "79d639daec62a2af4a59954b9d102e51ff30d11cd14246fffc52a53250858a7d"
+        },
+        {
+          "path": "pinecone-4330aa0314f7.png",
+          "byteLength": 333669,
+          "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
+        }
+      ],
+      "beforePresets": [
+        {
+          "path": "flowers-dense-chaotic.json",
+          "byteLength": 558,
+          "sha256": "d96c7917fa170f53cd67e66237653285098b9132823cfe95c40fd4e89d57112c"
+        },
+        {
+          "path": "flowers-dense.json",
+          "byteLength": 554,
+          "sha256": "e74b5b72a2a44f66c86aca0d7e2117920820aff1ab8393f92b1126016ceb4e67"
+        },
+        {
+          "path": "neat.json",
+          "byteLength": 535,
+          "sha256": "25b34ea7b25a273cf62940c5338c1328e5bb70fd4c0634abe24a4a4cebd36cd0"
+        }
+      ],
+      "backupAssets": [
+        {
+          "path": "img-0672-79d639daec62.png",
+          "byteLength": 6323366,
+          "sha256": "79d639daec62a2af4a59954b9d102e51ff30d11cd14246fffc52a53250858a7d"
+        },
+        {
+          "path": "pinecone-4330aa0314f7.png",
+          "byteLength": 333669,
+          "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
+        }
+      ],
+      "backupPresets": [
+        {
+          "path": "flowers-dense-chaotic.json",
+          "byteLength": 558,
+          "sha256": "d96c7917fa170f53cd67e66237653285098b9132823cfe95c40fd4e89d57112c"
+        },
+        {
+          "path": "flowers-dense.json",
+          "byteLength": 554,
+          "sha256": "e74b5b72a2a44f66c86aca0d7e2117920820aff1ab8393f92b1126016ceb4e67"
+        },
+        {
+          "path": "neat.json",
+          "byteLength": 535,
+          "sha256": "25b34ea7b25a273cf62940c5338c1328e5bb70fd4c0634abe24a4a4cebd36cd0"
+        }
+      ],
+      "backupInventoriesExact": true,
+      "externalBackupCreated": true,
+      "selectedAsset": {
+        "path": "assets/image-assets/pinecone-4330aa0314f7.png",
+        "byteLength": 333669,
+        "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
+      }
+    },
+    "initial": {
+      "result": {
+        "sceneHash": "913e7346312dda04c87a0373620c7f63c166b8afd7ba3e95ecf1694b1fffc48f",
+        "diagnosticsHash": "acd77e69480250f3004a17def16bfc918384fc99058c84703b5e672c45595f37",
+        "identityHash": "2fc1d4db35bc009772eeba700fe7cfe7b023efc7aa7c1c8f44afc539e5439037",
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 0.5
+            },
+            {
+              "key": "toneGamma",
+              "value": 0.5
+            },
+            {
+              "key": "pathDensity",
+              "value": 1
+            },
+            {
+              "key": "scribbleScale",
+              "value": 1
+            },
+            {
+              "key": "momentum",
+              "value": 0.75
+            },
+            {
+              "key": "chaos",
+              "value": 0.25
+            },
+            {
+              "key": "toneFidelity",
+              "value": 0.9
+            }
+          ],
+          "seed": 3886752028253382,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        },
+        "params": {
+          "imageAsset": "pinecone-4330aa0314f7",
+          "toneContrast": 0.5,
+          "toneGamma": 0.5,
+          "pathDensity": 1,
+          "scribbleScale": 1,
+          "momentum": 0.75,
+          "chaos": 0.25,
+          "toneFidelity": 0.9
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.01641013255501016,
+          "pathLength": 13736.747216975687,
+          "polylineCount": 15,
+          "penLiftCount": 14
+        },
+        "primitiveCount": 15,
+        "pointCount": 4724,
+        "computeTimeMs": 40
+      },
+      "workers": [
+        {
+          "workerId": 1,
+          "createdAt": 496.09999990463257,
+          "url": "http://127.0.0.1:4319/src/scribbleWorker.ts?worker_file&type=module",
+          "requestAt": 496.2000002861023,
+          "request": {
+            "type": "compute",
+            "jobId": 1,
+            "identity": {
+              "sketchId": "photo-scribble",
+              "params": [
+                {
+                  "key": "imageAsset",
+                  "value": "pinecone-4330aa0314f7"
+                },
+                {
+                  "key": "toneContrast",
+                  "value": 0.5
+                },
+                {
+                  "key": "toneGamma",
+                  "value": 0.5
+                },
+                {
+                  "key": "pathDensity",
+                  "value": 1
+                },
+                {
+                  "key": "scribbleScale",
+                  "value": 1
+                },
+                {
+                  "key": "momentum",
+                  "value": 0.75
+                },
+                {
+                  "key": "chaos",
+                  "value": 0.25
+                },
+                {
+                  "key": "toneFidelity",
+                  "value": 0.9
+                }
+              ],
+              "seed": 3886752028253382,
+              "compositionFrame": {
+                "width": 1000,
+                "height": 1000
+              }
+            }
+          },
+          "progress": [
+            {
+              "at": 613.4000000953674,
+              "completedWorkUnits": 1,
+              "totalWorkUnits": 18952,
+              "terminal": false
+            },
+            {
+              "at": 644.3000001907349,
+              "completedWorkUnits": 1193,
+              "totalWorkUnits": 18952,
+              "terminal": true
+            }
+          ],
+          "successAt": 655.4000000953674,
+          "success": {
+            "identity": {
+              "sketchId": "photo-scribble",
+              "params": [
+                {
+                  "key": "imageAsset",
+                  "value": "pinecone-4330aa0314f7"
+                },
+                {
+                  "key": "toneContrast",
+                  "value": 0.5
+                },
+                {
+                  "key": "toneGamma",
+                  "value": 0.5
+                },
+                {
+                  "key": "pathDensity",
+                  "value": 1
+                },
+                {
+                  "key": "scribbleScale",
+                  "value": 1
+                },
+                {
+                  "key": "momentum",
+                  "value": 0.75
+                },
+                {
+                  "key": "chaos",
+                  "value": 0.25
+                },
+                {
+                  "key": "toneFidelity",
+                  "value": 0.9
+                }
+              ],
+              "seed": 3886752028253382,
+              "compositionFrame": {
+                "width": 1000,
+                "height": 1000
+              }
+            },
+            "diagnostics": {
+              "termination": "completed",
+              "residualError": 0.01641013255501016,
+              "pathLength": 13736.747216975687,
+              "polylineCount": 15,
+              "penLiftCount": 14
+            },
+            "computeTimeMs": 40,
+            "primitiveCount": 15
+          },
+          "failureAt": null,
+          "failure": null,
+          "terminatedAt": 655.9000000953674
+        }
+      ]
+    },
+    "beforeSave": {
+      "result": {
+        "sceneHash": "ff214bb0ed506be55e621521af93f5011aa035a421ee5f91edfdcc7fd00d2645",
+        "diagnosticsHash": "43e7aedb84afda3fe5338e11bb34ebf939bbc26872b720812865fd9a10d40d76",
+        "identityHash": "68eaf51a2141567645edc9a1f0d1b2c63e941546b5fd81bfa930e04512d241dd",
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360331,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        },
+        "params": {
+          "imageAsset": "pinecone-4330aa0314f7",
+          "toneContrast": 1,
+          "toneGamma": 1,
+          "pathDensity": 20,
+          "scribbleScale": 0.5,
+          "momentum": 1,
+          "chaos": 0.72,
+          "toneFidelity": 1
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.004998970876759262,
+          "pathLength": 445314.8790813252,
+          "polylineCount": 17,
+          "penLiftCount": 16
+        },
+        "primitiveCount": 17,
+        "pointCount": 158948,
+        "computeTimeMs": 1404
+      },
+      "ui": {
+        "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nissue-336-trial-preset-missing-review\nneat\nReload\nseed\nShading\nConverged\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "assetIdentity": "pinecone-4330aa0314f7",
+        "alerts": [],
+        "overlay": null,
+        "canvas": {
+          "width": 886,
+          "height": 886,
+          "ariaHidden": null
+        },
+        "exports": [
+          {
+            "label": "Export PNG",
+            "disabled": false
+          },
+          {
+            "label": "Export SVG",
+            "disabled": false
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": false
+          }
+        ],
+        "retryVisible": false,
+        "thumbnailForSelected": false
+      },
+      "preset": {
+        "path": "packages/core/src/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
+        "byteLength": 568,
+        "sha256": "c6ca2c549b98fc99984f69bf48a967048648ecabfd2361260ea2130aa1a1b752",
+        "record": {
+          "version": 2,
+          "sketch": "photo-scribble",
+          "name": "issue-336-trial-preset-missing-review",
+          "seed": 5036310400360331,
+          "params": {
+            "imageAsset": "pinecone-4330aa0314f7",
+            "toneContrast": 1,
+            "toneGamma": 1,
+            "pathDensity": 20,
+            "scribbleScale": 0.5,
+            "momentum": 1,
+            "chaos": 0.72,
+            "toneFidelity": 1
+          },
+          "locks": [],
+          "profile": {
+            "width": 200,
+            "height": 200,
+            "insets": {
+              "top": 10,
+              "right": 10,
+              "bottom": 10,
+              "left": 10
+            },
+            "includeFrame": true,
+            "toolWidthMillimeters": 0.3
+          }
+        }
+      }
+    },
+    "postReload": {
+      "result": {
+        "sceneHash": "ff214bb0ed506be55e621521af93f5011aa035a421ee5f91edfdcc7fd00d2645",
+        "diagnosticsHash": "43e7aedb84afda3fe5338e11bb34ebf939bbc26872b720812865fd9a10d40d76",
+        "identityHash": "68eaf51a2141567645edc9a1f0d1b2c63e941546b5fd81bfa930e04512d241dd",
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360331,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        },
+        "params": {
+          "imageAsset": "pinecone-4330aa0314f7",
+          "toneContrast": 1,
+          "toneGamma": 1,
+          "pathDensity": 20,
+          "scribbleScale": 0.5,
+          "momentum": 1,
+          "chaos": 0.72,
+          "toneFidelity": 1
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.004998970876759262,
+          "pathLength": 445314.8790813252,
+          "polylineCount": 17,
+          "penLiftCount": 16
+        },
+        "primitiveCount": 17,
+        "pointCount": 158948,
+        "computeTimeMs": 1383
+      },
+      "ui": {
+        "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nissue-336-trial-preset-missing-review\nneat\nReload\nseed\nShading\nConverged\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "assetIdentity": "pinecone-4330aa0314f7",
+        "alerts": [],
+        "overlay": null,
+        "canvas": {
+          "width": 886,
+          "height": 886,
+          "ariaHidden": null
+        },
+        "exports": [
+          {
+            "label": "Export PNG",
+            "disabled": false
+          },
+          {
+            "label": "Export SVG",
+            "disabled": false
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": false
+          }
+        ],
+        "retryVisible": false,
+        "thumbnailForSelected": false
+      },
+      "workers": [
+        {
+          "workerId": 1,
+          "createdAt": 180.90000009536743,
+          "url": "http://127.0.0.1:4319/src/scribbleWorker.ts?worker_file&type=module",
+          "requestAt": 180.90000009536743,
+          "request": {
+            "type": "compute",
+            "jobId": 1,
+            "identity": {
+              "sketchId": "photo-scribble",
+              "params": [
+                {
+                  "key": "imageAsset",
+                  "value": "pinecone-4330aa0314f7"
+                },
+                {
+                  "key": "toneContrast",
+                  "value": 0.5
+                },
+                {
+                  "key": "toneGamma",
+                  "value": 0.5
+                },
+                {
+                  "key": "pathDensity",
+                  "value": 1
+                },
+                {
+                  "key": "scribbleScale",
+                  "value": 1
+                },
+                {
+                  "key": "momentum",
+                  "value": 0.75
+                },
+                {
+                  "key": "chaos",
+                  "value": 0.25
+                },
+                {
+                  "key": "toneFidelity",
+                  "value": 0.9
+                }
+              ],
+              "seed": 2760069582778738,
+              "compositionFrame": {
+                "width": 1000,
+                "height": 1000
+              }
+            }
+          },
+          "progress": [
+            {
+              "at": 297,
+              "completedWorkUnits": 1,
+              "totalWorkUnits": 18952,
+              "terminal": false
+            },
+            {
+              "at": 327.7000002861023,
+              "completedWorkUnits": 1177,
+              "totalWorkUnits": 18952,
+              "terminal": true
+            }
+          ],
+          "successAt": 339.6000003814697,
+          "success": {
+            "identity": {
+              "sketchId": "photo-scribble",
+              "params": [
+                {
+                  "key": "imageAsset",
+                  "value": "pinecone-4330aa0314f7"
+                },
+                {
+                  "key": "toneContrast",
+                  "value": 0.5
+                },
+                {
+                  "key": "toneGamma",
+                  "value": 0.5
+                },
+                {
+                  "key": "pathDensity",
+                  "value": 1
+                },
+                {
+                  "key": "scribbleScale",
+                  "value": 1
+                },
+                {
+                  "key": "momentum",
+                  "value": 0.75
+                },
+                {
+                  "key": "chaos",
+                  "value": 0.25
+                },
+                {
+                  "key": "toneFidelity",
+                  "value": 0.9
+                }
+              ],
+              "seed": 2760069582778738,
+              "compositionFrame": {
+                "width": 1000,
+                "height": 1000
+              }
+            },
+            "diagnostics": {
+              "termination": "completed",
+              "residualError": 0.01641067119236603,
+              "pathLength": 13655.999031138732,
+              "polylineCount": 7,
+              "penLiftCount": 6
+            },
+            "computeTimeMs": 40.09999990463257,
+            "primitiveCount": 7
+          },
+          "failureAt": null,
+          "failure": null,
+          "terminatedAt": 339.80000019073486
+        },
+        {
+          "workerId": 2,
+          "createdAt": 823.4000000953674,
+          "url": "http://127.0.0.1:4319/src/scribbleWorker.ts?worker_file&type=module",
+          "requestAt": 823.5,
+          "request": {
+            "type": "compute",
+            "jobId": 2,
+            "identity": {
+              "sketchId": "photo-scribble",
+              "params": [
+                {
+                  "key": "imageAsset",
+                  "value": "pinecone-4330aa0314f7"
+                },
+                {
+                  "key": "toneContrast",
+                  "value": 1
+                },
+                {
+                  "key": "toneGamma",
+                  "value": 1
+                },
+                {
+                  "key": "pathDensity",
+                  "value": 20
+                },
+                {
+                  "key": "scribbleScale",
+                  "value": 0.5
+                },
+                {
+                  "key": "momentum",
+                  "value": 1
+                },
+                {
+                  "key": "chaos",
+                  "value": 0.72
+                },
+                {
+                  "key": "toneFidelity",
+                  "value": 1
+                }
+              ],
+              "seed": 5036310400360331,
+              "compositionFrame": {
+                "width": 1000,
+                "height": 1000
+              }
+            }
+          },
+          "progress": [
+            {
+              "at": 957,
+              "completedWorkUnits": 1,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 1056.9000000953674,
+              "completedWorkUnits": 5357,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 1157,
+              "completedWorkUnits": 10949,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 1256.9000000953674,
+              "completedWorkUnits": 16764,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 1356.9000000953674,
+              "completedWorkUnits": 22568,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 1456.9000000953674,
+              "completedWorkUnits": 28308,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 1556.9000000953674,
+              "completedWorkUnits": 34044,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 1656.9000000953674,
+              "completedWorkUnits": 39830,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 1756.9000000953674,
+              "completedWorkUnits": 45707,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 1856.9000000953674,
+              "completedWorkUnits": 51535,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 1956.9000000953674,
+              "completedWorkUnits": 57342,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 2056.9000000953674,
+              "completedWorkUnits": 63079,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 2156.9000000953674,
+              "completedWorkUnits": 68863,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 2256.9000000953674,
+              "completedWorkUnits": 74819,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 2274,
+              "completedWorkUnits": 75818,
+              "totalWorkUnits": 258000,
+              "terminal": true
+            }
+          ],
+          "successAt": 2354.1000003814697,
+          "success": {
+            "identity": {
+              "sketchId": "photo-scribble",
+              "params": [
+                {
+                  "key": "imageAsset",
+                  "value": "pinecone-4330aa0314f7"
+                },
+                {
+                  "key": "toneContrast",
+                  "value": 1
+                },
+                {
+                  "key": "toneGamma",
+                  "value": 1
+                },
+                {
+                  "key": "pathDensity",
+                  "value": 20
+                },
+                {
+                  "key": "scribbleScale",
+                  "value": 0.5
+                },
+                {
+                  "key": "momentum",
+                  "value": 1
+                },
+                {
+                  "key": "chaos",
+                  "value": 0.72
+                },
+                {
+                  "key": "toneFidelity",
+                  "value": 1
+                }
+              ],
+              "seed": 5036310400360331,
+              "compositionFrame": {
+                "width": 1000,
+                "height": 1000
+              }
+            },
+            "diagnostics": {
+              "termination": "completed",
+              "residualError": 0.004998970876759262,
+              "pathLength": 445314.8790813252,
+              "polylineCount": 17,
+              "penLiftCount": 16
+            },
+            "computeTimeMs": 1383,
+            "primitiveCount": 17
+          },
+          "failureAt": null,
+          "failure": null,
+          "terminatedAt": 2355.7000002861023
+        }
+      ]
+    },
+    "missing": {
+      "workersBeforeMissingLoad": 0,
+      "workersAfterMissingLoad": [],
+      "workerRequestsAfterMissingLoad": 0,
+      "ui": {
+        "bodyText": "Image Asset unavailable\nUnresolved ID\npinecone-4330aa0314f7\nPhoto Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nImage Asset is missing. The exact selected ID remains active.\nRetry exact asset\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nissue-336-trial-preset-missing-review\nneat\nReload\nseed\nShading\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "assetIdentity": "pinecone-4330aa0314f7",
+        "alerts": [
+          "Image Asset unavailableUnresolved IDpinecone-4330aa0314f7",
+          "Image Asset is missing. The exact selected ID remains active."
+        ],
+        "overlay": "Image Asset unavailableUnresolved IDpinecone-4330aa0314f7",
+        "canvas": {
+          "width": 886,
+          "height": 886,
+          "ariaHidden": "true"
+        },
+        "exports": [
+          {
+            "label": "Export PNG",
+            "disabled": true
+          },
+          {
+            "label": "Export SVG",
+            "disabled": true
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": true
+          }
+        ],
+        "retryVisible": true,
+        "thumbnailForSelected": false
+      },
+      "canvas": {
+        "width": 886,
+        "height": 886,
+        "firstRgba": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "uniform": true,
+        "rgbaSha256": "24449b975a86d6e4d8bdb6596863ee30bd4ef63547501a034a7018242d88a259"
+      },
+      "exportAttempt": {
+        "before": [
+          {
+            "label": "Export PNG",
+            "disabled": true
+          },
+          {
+            "label": "Export SVG",
+            "disabled": true
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": true
+          }
+        ],
+        "clickedThroughDomApi": 3
+      },
+      "downloadsAfterDisabledClicks": [],
+      "network": [
+        {
+          "at": "2026-07-19T01:44:57.554Z",
+          "event": "request",
+          "method": "GET",
+          "path": "/",
+          "resourceType": "document"
+        },
+        {
+          "at": "2026-07-19T01:44:57.595Z",
+          "event": "response",
+          "method": "GET",
+          "path": "/",
+          "status": 304,
+          "resourceType": "document"
+        },
+        {
+          "at": "2026-07-19T01:44:57.796Z",
+          "event": "request",
+          "method": "GET",
+          "path": "/__api/presets/photo-scribble",
+          "resourceType": "fetch"
+        },
+        {
+          "at": "2026-07-19T01:44:57.796Z",
+          "event": "request",
+          "method": "GET",
+          "path": "/image-assets/pinecone-4330aa0314f7.png",
+          "resourceType": "fetch"
+        },
+        {
+          "at": "2026-07-19T01:44:57.797Z",
+          "event": "request",
+          "method": "GET",
+          "path": "/__api/presets/photo-scribble",
+          "resourceType": "fetch"
+        },
+        {
+          "at": "2026-07-19T01:44:57.797Z",
+          "event": "request",
+          "method": "GET",
+          "path": "/image-assets/pinecone-4330aa0314f7.png",
+          "resourceType": "fetch"
+        },
+        {
+          "at": "2026-07-19T01:44:57.832Z",
+          "event": "response",
+          "method": "GET",
+          "path": "/__api/presets/photo-scribble",
+          "status": 200,
+          "resourceType": "fetch"
+        },
+        {
+          "at": "2026-07-19T01:44:57.832Z",
+          "event": "response",
+          "method": "GET",
+          "path": "/__api/presets/photo-scribble",
+          "status": 200,
+          "resourceType": "fetch"
+        },
+        {
+          "at": "2026-07-19T01:44:57.832Z",
+          "event": "response",
+          "method": "GET",
+          "path": "/image-assets/pinecone-4330aa0314f7.png",
+          "status": 404,
+          "resourceType": "fetch"
+        },
+        {
+          "at": "2026-07-19T01:44:58.418Z",
+          "event": "request",
+          "method": "GET",
+          "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
+          "resourceType": "fetch"
+        },
+        {
+          "at": "2026-07-19T01:44:58.420Z",
+          "event": "response",
+          "method": "GET",
+          "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
+          "status": 200,
+          "resourceType": "fetch"
+        }
+      ]
+    },
+    "recovered": {
+      "recoveryAction": "Retry exact asset",
+      "result": {
+        "sceneHash": "ff214bb0ed506be55e621521af93f5011aa035a421ee5f91edfdcc7fd00d2645",
+        "diagnosticsHash": "43e7aedb84afda3fe5338e11bb34ebf939bbc26872b720812865fd9a10d40d76",
+        "identityHash": "68eaf51a2141567645edc9a1f0d1b2c63e941546b5fd81bfa930e04512d241dd",
+        "identity": {
+          "sketchId": "photo-scribble",
+          "params": [
+            {
+              "key": "imageAsset",
+              "value": "pinecone-4330aa0314f7"
+            },
+            {
+              "key": "toneContrast",
+              "value": 1
+            },
+            {
+              "key": "toneGamma",
+              "value": 1
+            },
+            {
+              "key": "pathDensity",
+              "value": 20
+            },
+            {
+              "key": "scribbleScale",
+              "value": 0.5
+            },
+            {
+              "key": "momentum",
+              "value": 1
+            },
+            {
+              "key": "chaos",
+              "value": 0.72
+            },
+            {
+              "key": "toneFidelity",
+              "value": 1
+            }
+          ],
+          "seed": 5036310400360331,
+          "compositionFrame": {
+            "width": 1000,
+            "height": 1000
+          }
+        },
+        "params": {
+          "imageAsset": "pinecone-4330aa0314f7",
+          "toneContrast": 1,
+          "toneGamma": 1,
+          "pathDensity": 20,
+          "scribbleScale": 0.5,
+          "momentum": 1,
+          "chaos": 0.72,
+          "toneFidelity": 1
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "residualError": 0.004998970876759262,
+          "pathLength": 445314.8790813252,
+          "polylineCount": 17,
+          "penLiftCount": 16
+        },
+        "primitiveCount": 17,
+        "pointCount": 158948,
+        "computeTimeMs": 1395.8999996185303
+      },
+      "ui": {
+        "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nissue-336-trial-preset-missing-review\nneat\nReload\nseed\nShading\nConverged\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
+        "assetIdentity": "pinecone-4330aa0314f7",
+        "alerts": [],
+        "overlay": null,
+        "canvas": {
+          "width": 886,
+          "height": 886,
+          "ariaHidden": null
+        },
+        "exports": [
+          {
+            "label": "Export PNG",
+            "disabled": false
+          },
+          {
+            "label": "Export SVG",
+            "disabled": false
+          },
+          {
+            "label": "Export Hidden-line SVG",
+            "disabled": false
+          }
+        ],
+        "retryVisible": false,
+        "thumbnailForSelected": false
+      },
+      "workers": [
+        {
+          "workerId": 1,
+          "createdAt": 2522.5999999046326,
+          "url": "http://127.0.0.1:4319/src/scribbleWorker.ts?worker_file&type=module",
+          "requestAt": 2522.5999999046326,
+          "request": {
+            "type": "compute",
+            "jobId": 1,
+            "identity": {
+              "sketchId": "photo-scribble",
+              "params": [
+                {
+                  "key": "imageAsset",
+                  "value": "pinecone-4330aa0314f7"
+                },
+                {
+                  "key": "toneContrast",
+                  "value": 1
+                },
+                {
+                  "key": "toneGamma",
+                  "value": 1
+                },
+                {
+                  "key": "pathDensity",
+                  "value": 20
+                },
+                {
+                  "key": "scribbleScale",
+                  "value": 0.5
+                },
+                {
+                  "key": "momentum",
+                  "value": 1
+                },
+                {
+                  "key": "chaos",
+                  "value": 0.72
+                },
+                {
+                  "key": "toneFidelity",
+                  "value": 1
+                }
+              ],
+              "seed": 5036310400360331,
+              "compositionFrame": {
+                "width": 1000,
+                "height": 1000
+              }
+            }
+          },
+          "progress": [
+            {
+              "at": 2652,
+              "completedWorkUnits": 1,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 2751.9000000953674,
+              "completedWorkUnits": 5261,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 2851.9000000953674,
+              "completedWorkUnits": 10924,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 2951.9000000953674,
+              "completedWorkUnits": 16721,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 3052,
+              "completedWorkUnits": 22595,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 3152,
+              "completedWorkUnits": 28387,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 3252,
+              "completedWorkUnits": 34028,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 3351.9000000953674,
+              "completedWorkUnits": 39788,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 3452,
+              "completedWorkUnits": 45608,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 3551.9000000953674,
+              "completedWorkUnits": 51031,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 3651.9000000953674,
+              "completedWorkUnits": 56772,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 3751.9000000953674,
+              "completedWorkUnits": 62434,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 3851.9000000953674,
+              "completedWorkUnits": 68152,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 3951.9000000953674,
+              "completedWorkUnits": 73936,
+              "totalWorkUnits": 258000,
+              "terminal": false
+            },
+            {
+              "at": 3985.5,
+              "completedWorkUnits": 75818,
+              "totalWorkUnits": 258000,
+              "terminal": true
+            }
+          ],
+          "successAt": 4058.7000002861023,
+          "success": {
+            "identity": {
+              "sketchId": "photo-scribble",
+              "params": [
+                {
+                  "key": "imageAsset",
+                  "value": "pinecone-4330aa0314f7"
+                },
+                {
+                  "key": "toneContrast",
+                  "value": 1
+                },
+                {
+                  "key": "toneGamma",
+                  "value": 1
+                },
+                {
+                  "key": "pathDensity",
+                  "value": 20
+                },
+                {
+                  "key": "scribbleScale",
+                  "value": 0.5
+                },
+                {
+                  "key": "momentum",
+                  "value": 1
+                },
+                {
+                  "key": "chaos",
+                  "value": 0.72
+                },
+                {
+                  "key": "toneFidelity",
+                  "value": 1
+                }
+              ],
+              "seed": 5036310400360331,
+              "compositionFrame": {
+                "width": 1000,
+                "height": 1000
+              }
+            },
+            "diagnostics": {
+              "termination": "completed",
+              "residualError": 0.004998970876759262,
+              "pathLength": 445314.8790813252,
+              "polylineCount": 17,
+              "penLiftCount": 16
+            },
+            "computeTimeMs": 1395.8999996185303,
+            "primitiveCount": 17
+          },
+          "failureAt": null,
+          "failure": null,
+          "terminatedAt": 4060.5
+        }
+      ],
+      "selectedAsset": {
+        "byteLength": 333669,
+        "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
+      }
+    }
+  },
+  "assertions": {
+    "preflightBackupExact": true,
+    "adoptedProductionPolicyRecorded": true,
+    "savedAssetIdExact": true,
+    "savedParamsExact": true,
+    "savedSeedExact": true,
+    "fullReloadSceneExact": true,
+    "fullReloadDiagnosticsExact": true,
+    "fullReloadIdentityExact": true,
+    "fullReloadAssetIdExact": true,
+    "missingAssetIdPreserved": true,
+    "missingStateExplicit": true,
+    "missingCanvasHiddenAndNeutral": true,
+    "noBackgroundScribbleJobForMissingAsset": true,
+    "allExportsDisabled": true,
+    "disabledExportsFailClosed": true,
+    "selectedAssetFetch404": true,
+    "noFallbackOrSubstitution": true,
+    "restoredAssetBytesExact": true,
+    "recoverySceneExact": true,
+    "recoveryDiagnosticsExact": true,
+    "recoveryIdentityExact": true,
+    "recoveryAssetIdExact": true,
+    "recoveryUiResolved": true,
+    "noPageErrors": true
+  },
+  "cleanup": {
+    "beforeAssets": [
+      {
+        "path": "img-0672-79d639daec62.png",
+        "byteLength": 6323366,
+        "sha256": "79d639daec62a2af4a59954b9d102e51ff30d11cd14246fffc52a53250858a7d"
+      },
+      {
+        "path": "pinecone-4330aa0314f7.png",
+        "byteLength": 333669,
+        "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
+      }
+    ],
+    "afterAssets": [
+      {
+        "path": "img-0672-79d639daec62.png",
+        "byteLength": 6323366,
+        "sha256": "79d639daec62a2af4a59954b9d102e51ff30d11cd14246fffc52a53250858a7d"
+      },
+      {
+        "path": "pinecone-4330aa0314f7.png",
+        "byteLength": 333669,
+        "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
+      }
+    ],
+    "assetsExact": true,
+    "beforePresets": [
+      {
+        "path": "flowers-dense-chaotic.json",
+        "byteLength": 558,
+        "sha256": "d96c7917fa170f53cd67e66237653285098b9132823cfe95c40fd4e89d57112c"
+      },
+      {
+        "path": "flowers-dense.json",
+        "byteLength": 554,
+        "sha256": "e74b5b72a2a44f66c86aca0d7e2117920820aff1ab8393f92b1126016ceb4e67"
+      },
+      {
+        "path": "neat.json",
+        "byteLength": 535,
+        "sha256": "25b34ea7b25a273cf62940c5338c1328e5bb70fd4c0634abe24a4a4cebd36cd0"
+      }
+    ],
+    "afterPresets": [
+      {
+        "path": "flowers-dense-chaotic.json",
+        "byteLength": 558,
+        "sha256": "d96c7917fa170f53cd67e66237653285098b9132823cfe95c40fd4e89d57112c"
+      },
+      {
+        "path": "flowers-dense.json",
+        "byteLength": 554,
+        "sha256": "e74b5b72a2a44f66c86aca0d7e2117920820aff1ab8393f92b1126016ceb4e67"
+      },
+      {
+        "path": "neat.json",
+        "byteLength": 535,
+        "sha256": "25b34ea7b25a273cf62940c5338c1328e5bb70fd4c0634abe24a4a4cebd36cd0"
+      }
+    ],
+    "presetsExact": true,
+    "selectedAssetRestored": true,
+    "trialPresetRemoved": true,
+    "browserClosed": true,
+    "studioStopped": true,
+    "externalBackupRemoved": true
+  }
+}
