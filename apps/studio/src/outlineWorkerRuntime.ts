@@ -20,7 +20,7 @@ import {
   type OutlineComputeResponse,
   type OutlineComputeIdentity,
 } from "./outlineComputeProtocol";
-import { outlineScene } from "./outlineScene";
+import { finalizeOutlineScene, outlineScene } from "./outlineScene";
 import {
   createWorkerProgressEmitter,
   type MonotonicClock,
@@ -188,8 +188,13 @@ export function handleHiddenLineWorkerMessage(
     });
     const clip = dependencies.clip ?? clipSceneToBounds;
     const render = dependencies.render ?? renderPlotterSVG;
+    const finalizedScene = finalizeOutlineScene(
+      completedScene,
+      value.snapshot.pageFrame,
+      value.snapshot.profile.includeFrame,
+    );
     const svg = render(
-      clip(completedScene),
+      clip(finalizedScene),
       mutableProfile(value.snapshot.profile),
       value.snapshot.metadata,
       { includePaperMargins: value.snapshot.includePaperMargins },

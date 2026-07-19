@@ -45,7 +45,6 @@ function identity(frame = { width: 100, height: 80 }): LegacyOutlineComputeIdent
     sampledT: 1.25,
     compositionFrame: frame,
     tolerance: 0.5,
-    includeFrame: true,
     sourceScene: sourceScene(),
   });
 }
@@ -59,7 +58,6 @@ function completedSceneIdentity(): CompletedSceneOutlineComputeIdentity {
     sampledT: 1.25,
     compositionFrame: { width: 100, height: 80 },
     tolerance: 0.5,
-    includeFrame: true,
     sourceScene: sourceScene(),
     outlineTarget: {
       toolWidthMillimeters: 0.3,
@@ -124,9 +122,6 @@ const identityMismatches: ReadonlyArray<
   ["tolerance", (copy) => {
     copy.tolerance = 0.75;
   }],
-  ["includeFrame", (copy) => {
-    copy.includeFrame = false;
-  }],
   [
     "source Scene",
     (copy) => {
@@ -145,20 +140,24 @@ describe("hidden-line export snapshot", () => {
   it("deeply copies and freezes every mutable capture and candidate", () => {
     const liveIdentity = identity();
     const liveProfile = profile();
+    const livePageFrame = { x: -5, y: 3, width: 110, height: 75 };
     const liveCandidate = completed(liveIdentity);
     const captured = snapshot({
       identity: liveIdentity,
       profile: liveProfile,
+      pageFrame: livePageFrame,
       reusableOutline: liveCandidate,
     });
 
     liveProfile.width = 999;
     liveProfile.insets.left = 99;
+    livePageFrame.x = 999;
     liveCandidate.scene.space.width = 999;
     liveCandidate.scene.primitives[0]!.points[0]![0] = 999;
 
     expect(captured.profile.width).toBe(210);
     expect(captured.profile.insets.left).toBe(10);
+    expect(captured.pageFrame).toEqual({ x: -5, y: 3, width: 110, height: 75 });
     expect(captured.reusableOutline?.scene.space.width).toBe(100);
     expect(captured.reusableOutline?.scene.primitives[0]?.points[0]?.[0]).toBe(1);
     expect(captured.identity.sourceKind).toBe("legacy-scene");
@@ -175,6 +174,7 @@ describe("hidden-line export snapshot", () => {
     expect(captured.reusableOutline?.identity).not.toBe(liveIdentity);
     expect(Object.isFrozen(captured)).toBe(true);
     expect(Object.isFrozen(captured.profile.insets)).toBe(true);
+    expect(Object.isFrozen(captured.pageFrame)).toBe(true);
     expect(Object.isFrozen(captured.identity.sourceScene.primitives[0]?.points[0])).toBe(
       true,
     );
@@ -183,11 +183,12 @@ describe("hidden-line export snapshot", () => {
     ).toBe(true);
   });
 
-  it("reuses across profile-only changes but rejects an aspect identity miss", () => {
+  it("reuses across Page/profile changes but rejects an aspect identity miss", () => {
     const geometryIdentity = identity();
     const profileOnlyChange = snapshot({
       identity: geometryIdentity,
-      profile: profile(2),
+      profile: { ...profile(2), includeFrame: false },
+      pageFrame: { x: 10, y: 5, width: 50, height: 40 },
       reusableOutline: completed(identity()),
     });
     expect(profileOnlyChange.reusableOutline).toBeDefined();
@@ -209,6 +210,23 @@ describe("hidden-line export snapshot", () => {
     expect(next.reusableOutline).not.toBe(prior);
     expect(next.reusableOutline?.scene).not.toBe(prior.scene);
     expect(isHiddenLineExportSnapshot(next)).toBe(true);
+  });
+
+  it("normalizes an omitted Page Frame to null and rejects invalid frames", () => {
+    expect(snapshot().pageFrame).toBeNull();
+    expect(() =>
+      snapshot({ pageFrame: { x: 0, y: 0, width: 0, height: 80 } }),
+    ).toThrow("Hidden-line export Page Frame is invalid");
+    expect(() =>
+      snapshot({
+        pageFrame: {
+          x: Number.MAX_VALUE,
+          y: 0,
+          width: Number.MAX_VALUE,
+          height: 80,
+        },
+      }),
+    ).toThrow("Hidden-line export Page Frame is invalid");
   });
 
   it("copies and reuses completed-Scene specialization only on exact Scene and target identity", () => {
@@ -281,6 +299,15 @@ describe("hidden-line export snapshot", () => {
     {},
     { ...structuredClone(snapshot()), filename: "" },
     { ...structuredClone(snapshot()), includePaperMargins: "yes" },
+    { ...structuredClone(snapshot()), pageFrame: undefined },
+    {
+      ...structuredClone(snapshot()),
+      pageFrame: { x: 0, y: 0, width: 0, height: 80 },
+    },
+    {
+      ...structuredClone(snapshot()),
+      pageFrame: { x: Number.MAX_VALUE, y: 0, width: Number.MAX_VALUE, height: 80 },
+    },
     {
       ...structuredClone(snapshot()),
       profile: { ...profile(), width: 0 },

@@ -3,6 +3,7 @@ import type {
   HiddenLineRole,
   HiddenLineProgress,
   OutlineTarget,
+  PageFrame,
   ParamSchema,
   Params,
   PlotProfile,
@@ -41,7 +42,6 @@ interface OutlineComputeIdentityBase {
   readonly sampledT: number;
   readonly compositionFrame: Readonly<CoordinateSpace>;
   readonly tolerance: number;
-  readonly includeFrame: boolean;
 }
 
 export interface LegacyOutlineComputeIdentity
@@ -112,7 +112,6 @@ interface CreateIdentityInputBase {
   sampledT: number;
   compositionFrame: CoordinateSpace;
   tolerance: number;
-  includeFrame: boolean;
 }
 
 type CreateLegacyIdentityInput = CreateIdentityInputBase & {
@@ -214,7 +213,6 @@ function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity 
       height: identity.compositionFrame.height,
     }),
     tolerance: identity.tolerance,
-    includeFrame: identity.includeFrame,
   };
   switch (identity.sourceKind) {
     case "legacy-scene":
@@ -269,7 +267,6 @@ export function createOutlineComputeIdentity(
       height: input.compositionFrame.height,
     }),
     tolerance: input.tolerance,
-    includeFrame: input.includeFrame,
   };
   let identity: OutlineComputeIdentity;
   if (input.outlineTarget === undefined) {
@@ -372,8 +369,7 @@ export function isOutlineComputeIdentity(
     !isRecord(value.compositionFrame) ||
     !isFiniteNumber(value.compositionFrame.width) ||
     !isFiniteNumber(value.compositionFrame.height) ||
-    !isFiniteNumber(value.tolerance) ||
-    typeof value.includeFrame !== "boolean"
+    !isFiniteNumber(value.tolerance)
   ) {
     return false;
   }
@@ -558,7 +554,6 @@ export function outlineComputeIdentitiesEqual(
     Object.is(left.compositionFrame.width, right.compositionFrame.width) &&
     Object.is(left.compositionFrame.height, right.compositionFrame.height) &&
     Object.is(left.tolerance, right.tolerance) &&
-    Object.is(left.includeFrame, right.includeFrame) &&
     left.params.length === right.params.length &&
     left.params.every((entry, index) => {
       const other = right.params[index];
@@ -642,6 +637,7 @@ export interface CompletedOutline {
 export interface HiddenLineExportSnapshot {
   readonly identity: OutlineComputeIdentity;
   readonly profile: ImmutablePlotProfile;
+  readonly pageFrame: Readonly<PageFrame> | null;
   readonly metadata: string;
   readonly includePaperMargins: boolean;
   readonly filename: string;
@@ -651,6 +647,7 @@ export interface HiddenLineExportSnapshot {
 export interface CreateHiddenLineExportSnapshotInput {
   identity: OutlineComputeIdentity;
   profile: PlotProfile;
+  pageFrame?: PageFrame | null;
   metadata: string;
   includePaperMargins: boolean;
   filename: string;
@@ -673,6 +670,22 @@ function copyProfile(profile: PlotProfile): ImmutablePlotProfile {
     includeFrame: profile.includeFrame,
     toolWidthMillimeters: profile.toolWidthMillimeters,
   });
+}
+
+function copyPageFrame(
+  pageFrame: PageFrame | null | undefined,
+): Readonly<PageFrame> | null {
+  if (pageFrame == null) return null;
+  const copy = {
+    x: pageFrame.x,
+    y: pageFrame.y,
+    width: pageFrame.width,
+    height: pageFrame.height,
+  };
+  if (!isPageFrame(copy)) {
+    throw new TypeError("Hidden-line export Page Frame is invalid");
+  }
+  return Object.freeze(copy);
 }
 
 function copyCompletedOutline(
@@ -706,6 +719,7 @@ export function createHiddenLineExportSnapshot(
   const snapshot: HiddenLineExportSnapshot = Object.freeze({
     identity,
     profile: copyProfile(input.profile),
+    pageFrame: copyPageFrame(input.pageFrame),
     metadata: input.metadata,
     includePaperMargins: input.includePaperMargins,
     filename: input.filename,
@@ -717,6 +731,23 @@ export function createHiddenLineExportSnapshot(
     throw new TypeError("Hidden-line export snapshot contains an invalid value");
   }
   return snapshot;
+}
+
+function isPageFrame(value: unknown): value is Readonly<PageFrame> {
+  if (!isRecord(value)) return false;
+  const { x, y, width, height } = value;
+  return (
+    isFiniteNumber(x) &&
+    isFiniteNumber(y) &&
+    isFiniteNumber(width) &&
+    width > 0 &&
+    isFiniteNumber(height) &&
+    height > 0 &&
+    Number.isFinite(x + width) &&
+    x + width > x &&
+    Number.isFinite(y + height) &&
+    y + height > y
+  );
 }
 
 function isPlotProfile(value: unknown): value is ImmutablePlotProfile {
@@ -763,6 +794,7 @@ export function isHiddenLineExportSnapshot(
     !isRecord(value) ||
     !isOutlineComputeIdentity(value.identity) ||
     !isPlotProfile(value.profile) ||
+    !(value.pageFrame === null || isPageFrame(value.pageFrame)) ||
     typeof value.metadata !== "string" ||
     typeof value.includePaperMargins !== "boolean" ||
     typeof value.filename !== "string" ||

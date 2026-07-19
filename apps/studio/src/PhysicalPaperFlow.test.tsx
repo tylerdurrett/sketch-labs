@@ -20,6 +20,7 @@ import {
 import leafFieldNice1 from "../../../packages/core/src/sketches/leaf-field/presets/nice1.json";
 
 import { SketchControls } from "./SketchControls";
+import { finalizeOutlineScene } from "./outlineScene";
 
 const previewCapture = vi.hoisted(() => ({
   paints: [] as Array<{ scene: unknown; width: number; height: number }>,
@@ -116,8 +117,8 @@ vi.mock("./hiddenLineCoordinator", async () => {
             snapshot.identity.sourceScene as Scene,
             snapshot.identity.tolerance,
           ),
-          null,
-          snapshot.identity.includeFrame,
+          snapshot.pageFrame,
+          snapshot.profile.includeFrame,
         );
         const payload = {
           status: "success" as const,
@@ -130,7 +131,13 @@ vi.mock("./hiddenLineCoordinator", async () => {
             { includePaperMargins: snapshot.includePaperMargins },
           ),
           filename: snapshot.filename,
-          completedOutline: { identity: snapshot.identity, scene },
+          completedOutline: {
+            identity: snapshot.identity,
+            scene: outlineScene(
+              snapshot.identity.sourceScene as Scene,
+              snapshot.identity.tolerance,
+            ),
+          },
         };
         return {
           then(resolve: (result: typeof payload) => void) {
@@ -690,7 +697,9 @@ describe("physical plot artifact acceptance flow (#276)", () => {
     const enabledExportScene = previewCapture.plotterExport!.scene;
     // Canvas clipping is implicit in preview pixels and explicit for exported
     // vectors; after that boundary step the geometry and styling are identical.
-    expect(enabledExportScene).toEqual(clipSceneToBounds(enabledPreview));
+    expect(enabledExportScene).toEqual(
+      clipSceneToBounds(finalizeOutlineScene(enabledPreview, null, true)),
+    );
     expect(previewCapture.plotterExport?.profile).toEqual(profile);
     const enabledSvg = await downloadBlob.mock.calls.at(-1)![0].text();
     const enabledDocument = new DOMParser().parseFromString(
@@ -778,9 +787,8 @@ describe("physical plot artifact acceptance flow (#276)", () => {
     act(() => frameCheckbox.click());
     flushRaf();
     const disabledPreview = previewCapture.paints.at(-1)!.scene as Scene;
-    expect(disabledPreview.primitives).toEqual(
-      enabledPreview.primitives.slice(0, -1),
-    );
+    // Frame visibility is export finalization state, not cached Outline input.
+    expect(disabledPreview).toEqual(enabledPreview);
 
     clickButton(el, "Export Hidden-line SVG");
     const disabledExportScene = previewCapture.plotterExport!.scene;

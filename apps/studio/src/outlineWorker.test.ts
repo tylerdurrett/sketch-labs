@@ -33,7 +33,6 @@ describe("outline worker entry", () => {
       sampledT: 0,
       compositionFrame: scene.space,
       tolerance: 0,
-      includeFrame: false,
       sourceScene: scene,
     });
     messageListener?.({

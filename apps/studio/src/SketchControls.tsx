@@ -166,7 +166,6 @@ function outlineInputsChanged(
     !sameParams(previous.params, next.params) ||
     previous.seed !== next.seed ||
     previous.tolerance !== next.tolerance ||
-    previous.profile.includeFrame !== next.profile.includeFrame ||
     !Object.is(
       previous.profile.toolWidthMillimeters,
       next.profile.toolWidthMillimeters,
@@ -841,7 +840,6 @@ export function SketchControls({
       sampledT: capture.t,
       compositionFrame,
       tolerance: edit.tolerance,
-      includeFrame: edit.profile.includeFrame,
       ...outlineIdentitySourceFor(
         sketch,
         edit,
@@ -1231,7 +1229,6 @@ export function SketchControls({
       sampledT: displayed.t,
       compositionFrame,
       tolerance: displayed.tolerance,
-      includeFrame: displayed.includeFrame,
       ...outlineIdentitySourceFor(
         sketch,
         edit,
@@ -1254,6 +1251,8 @@ export function SketchControls({
     const snapshot = createHiddenLineExportSnapshot({
       identity,
       profile: edit.profile,
+      pageFrame:
+        edit.framing.kind === "framed" ? edit.framing.pageFrame : null,
       metadata,
       includePaperMargins,
       filename,
