@@ -42,6 +42,35 @@ const observations = {
   schemaVersion: 1,
   review: "issue-336-product-studio-preset-missing-asset-review",
   evidenceId,
+  provenance: {
+    authoritativeAttempt: "post-layout-fix",
+    attempts: [
+      {
+        id: "host-preflight",
+        included: false,
+        outcome:
+          "Vite spawn failed before Studio or Chrome because the worktree dependency link was absent; no repository asset or Preset was mutated and the external backup was removed.",
+      },
+      {
+        id: "excluded-harness-timeout",
+        included: false,
+        outcome:
+          "The first browser attempt timed out after 180000 ms in a harness-only wait that incorrectly required a successful default Worker while the default selected asset was deliberately quarantined. Finally cleanup restored exact asset and Preset inventories, stopped Studio and Chrome, removed the external backup, and the partial observations were deleted.",
+      },
+      {
+        id: "superseded-pre-layout-fix",
+        included: false,
+        outcome:
+          "The workflow passed, but visual review of its missing-state screenshot reproduced a collapsed one-character Image Asset text column. That evidence was superseded by this post-fix rerun.",
+      },
+      {
+        id: "post-layout-fix",
+        included: true,
+        outcome:
+          "Authoritative complete product workflow after the responsive Image Asset row fix.",
+      },
+    ],
+  },
   presetName,
   selectedAssetId,
   studioUrl,
@@ -273,15 +302,41 @@ async function pageState(page) {
   return page.evaluate(() => {
     const buttons = [...document.querySelectorAll("button")];
     const canvas = document.querySelector("canvas");
-    const identity = document.querySelector(
+    const identityElement = document.querySelector(
       '[aria-label="imageAsset image asset identity"]',
-    )?.textContent?.trim() ?? null;
+    );
+    const identity = identityElement?.textContent?.trim() ?? null;
+    const identityColumn = identityElement?.parentElement ?? null;
+    const assetHeader = identityColumn?.parentElement ?? null;
+    const retryButton = buttons.find(
+      (button) => button.textContent?.trim() === "Retry exact asset",
+    ) ?? null;
+    const actionGroup = retryButton?.parentElement ?? null;
+    const bounds = (element) => {
+      if (!(element instanceof HTMLElement)) return null;
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
     const alerts = [...document.querySelectorAll('[role="alert"]')]
       .map((element) => element.textContent?.trim() ?? "");
     const overlay = document.querySelector(".live-canvas-unavailable");
     return {
       bodyText: document.body?.innerText ?? "",
       assetIdentity: identity,
+      assetLayout: {
+        header: bounds(assetHeader),
+        identityColumn: bounds(identityColumn),
+        identity: bounds(identityElement),
+        alert: bounds(identityColumn?.querySelector('[role="alert"]') ?? null),
+        actions: bounds(actionGroup),
+      },
       alerts,
       overlay: overlay?.textContent?.replace(/\s+/g, " ").trim() ?? null,
       canvas: canvas instanceof HTMLCanvasElement
@@ -690,6 +745,14 @@ try {
       missingState.overlay?.includes("Image Asset unavailable") === true &&
       missingState.overlay?.includes(selectedAssetId) === true &&
       missingState.alerts.some((text) => text.includes("exact selected ID remains active")),
+    missingLayoutReadableAndWrapped:
+      missingState.assetLayout.identityColumn?.width >= 192 &&
+      missingState.assetLayout.identity?.width >= 192 &&
+      missingState.assetLayout.alert?.width >= 192 &&
+      missingState.assetLayout.actions?.top >=
+        missingState.assetLayout.identityColumn?.bottom - 1 &&
+      missingState.assetLayout.actions?.right <=
+        missingState.assetLayout.header?.right + 1,
     missingCanvasHiddenAndNeutral:
       missingState.canvas?.ariaHidden === "true" &&
       missingCanvas.width > 0 &&

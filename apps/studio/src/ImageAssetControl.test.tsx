@@ -175,6 +175,39 @@ describe("ImageAssetControl", () => {
     },
   );
 
+  it("keeps missing-state identity and error readable beside wrapping actions", () => {
+    const value = "missing-image-abcdef012345";
+    const el = mount(
+      <ImageAssetControl
+        paramKey="source"
+        value={value}
+        onChange={() => {}}
+        resolution={{ status: "missing", failedId: value, retry: () => {} }}
+      />,
+    );
+    el.style.width = "18rem";
+
+    const identity = el.querySelector("code")!;
+    const identityColumn = identity.parentElement!;
+    const header = identityColumn.parentElement!;
+    const retry = button(el, "Retry exact asset");
+    const choose = button(el, "Choose image");
+    const actions = retry.parentElement!;
+
+    expect(header.className).toContain("flex-wrap");
+    expect(header.className).toContain("items-start");
+    expect(identityColumn.className).toContain("min-w-[12rem]");
+    expect(identityColumn.className).toContain("flex-[1_1_12rem]");
+    expect(identity.className).toContain("break-all");
+    expect(identity.textContent).toBe(value);
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+      "Image Asset is missing. The exact selected ID remains active.",
+    );
+    expect(actions).toBe(choose.parentElement);
+    expect(actions.className).toContain("flex-wrap");
+    expect(actions.className).toContain("ml-auto");
+  });
+
   it("shows loading for the exact selection, then its resolved thumbnail", () => {
     const value = "pending-image-abcdef012345";
     const retry = vi.fn();

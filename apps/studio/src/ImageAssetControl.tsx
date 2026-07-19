@@ -258,7 +258,7 @@ export function ImageAssetControl({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-start gap-3">
         {showThumbnail ? (
           <img
             src={url}
@@ -266,7 +266,7 @@ export function ImageAssetControl({
             className="size-12 shrink-0 rounded-md border bg-muted object-cover"
           />
         ) : null}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[12rem] flex-[1_1_12rem]">
           <div className="text-sm text-foreground">{paramKey}</div>
           {displayName !== null ? (
             <div className="truncate text-sm text-muted-foreground">
@@ -293,26 +293,28 @@ export function ImageAssetControl({
             </div>
           ) : null}
         </div>
-        {presentationStatus === "missing" ||
-        presentationStatus === "error" ? (
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {presentationStatus === "missing" ||
+          presentationStatus === "error" ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={resolution?.retry}
+            >
+              Retry exact asset
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={resolution?.retry}
+            aria-expanded={open}
+            onClick={toggleOpen}
           >
-            Retry exact asset
+            {open ? "Close library" : "Choose image"}
           </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          aria-expanded={open}
-          onClick={toggleOpen}
-        >
-          {open ? "Close library" : "Choose image"}
-        </Button>
+        </div>
       </div>
 
       {open ? (

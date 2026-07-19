@@ -7,11 +7,15 @@
 
 ## Result
 
-Pass. The actual Studio preserved the complete Photo Scribble reproduction
-identity through save and full reload, failed closed when the selected managed
-Image Asset was absent, and recovered the exact original result after the exact
-asset bytes returned. No product defect was reproduced, so this block changes
-no product code.
+Pass after fixing one reproduced presentation defect. The actual Studio
+preserved the complete Photo Scribble reproduction identity through save and
+full reload, failed closed when the selected managed Image Asset was absent,
+and recovered the exact original result after the exact asset bytes returned.
+At the fixed `1440 × 1000` viewport, the original missing-state row collapsed
+the ID and error into a one-character column beside Retry and Choose. The row
+now preserves a readable text basis and lets its accessible action group wrap
+beneath the text at constrained inspector widths. A focused component
+regression freezes that responsive structure.
 
 The uniquely prefixed trial Preset captured:
 
@@ -50,6 +54,8 @@ quarantine. After Studio restarted, the saved Preset loaded with:
 - an HTTP 404 for exactly `/image-assets/pinecone-4330aa0314f7.png`
 - the authored ID still present in the Image Asset control and Preset params
 - explicit `Image Asset unavailable` canvas and `Image Asset is missing` control states
+- a 272 px Image Asset identity/error column with the action group wrapped onto
+  the next row and contained within the same 272 px header
 - a hidden, uniform transparent canvas (`886 × 886`, RGBA `[0,0,0,0]`)
 - zero Scribble Worker requests for the unresolved input
 - PNG, SVG, and Hidden-line SVG export controls all disabled
@@ -62,20 +68,41 @@ remained 333,669 bytes and its SHA-256 remained
 The product's `Retry exact asset` action resolved it without parameter mutation
 and produced the exact original Scene, diagnostics, and identity hashes above.
 
+## Attempts and provenance
+
+Only the post-layout-fix run in the raw record is authoritative. Three earlier
+host/review attempts are disclosed there and excluded:
+
+1. A Vite spawn failed before Studio or Chrome because the worktree dependency
+   link was absent. No repository asset or Preset was mutated, and its external
+   backup was removed.
+2. The first browser attempt timed out after 180 seconds in a harness-only wait
+   that incorrectly required a successful default Worker while the default
+   selected asset was deliberately quarantined. Its `finally` cleanup restored
+   exact asset and Preset inventories, stopped Studio and Chrome, and removed
+   the external backup. Partial observations were deleted.
+3. A complete pre-fix workflow passed its functional assertions, but visual
+   review of the missing-state screenshot exposed the collapsed text column.
+   Its evidence was superseded and deleted before the authoritative rerun.
+
+The authoritative run followed the complete workflow after the responsive
+layout fix. Its raw provenance identifies `post-layout-fix` as the sole included
+attempt.
+
 ## Cleanup
 
 The complete before/after path, byte-size, and SHA-256 inventories for
 `assets/image-assets/` and
 `packages/core/src/sketches/photo-scribble/presets/` are identical. The
 selected asset is restored, the trial Preset is absent, Studio and Chrome are
-stopped, and the external backup is removed. All 24 executable review
+stopped, and the external backup is removed. All 25 executable review
 assertions passed and no page error occurred.
 
-Repository verification also passed: 210 focused Studio tests across Presets,
-environment resolution, canvas fail-closed behavior, and Sketch controls; Studio
-TypeScript checking; the production Vite build; script syntax checking; and
-`git diff --check`. The focused test run emitted the suite's existing React
-`act(...)` warnings but had no failure.
+Repository verification also passed: 233 focused Studio tests across the Image
+Asset control, Presets, environment resolution, canvas fail-closed behavior,
+and Sketch controls; plus Studio TypeScript checking, the production Vite
+build, script syntax checking, and `git diff --check`. The focused test run
+emitted the suite's existing React `act(...)` warnings but had no failure.
 
 Raw actions, network and Worker logs, hashes, inventories, UI snapshots, and
 assertions are in `raw-browser-preset-missing-review.json`. The four timestamped

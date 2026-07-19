@@ -2,6 +2,31 @@
   "schemaVersion": 1,
   "review": "issue-336-product-studio-preset-missing-asset-review",
   "evidenceId": "issue-336-20260719T013309Z-preset-missing-review",
+  "provenance": {
+    "authoritativeAttempt": "post-layout-fix",
+    "attempts": [
+      {
+        "id": "host-preflight",
+        "included": false,
+        "outcome": "Vite spawn failed before Studio or Chrome because the worktree dependency link was absent; no repository asset or Preset was mutated and the external backup was removed."
+      },
+      {
+        "id": "excluded-harness-timeout",
+        "included": false,
+        "outcome": "The first browser attempt timed out after 180000 ms in a harness-only wait that incorrectly required a successful default Worker while the default selected asset was deliberately quarantined. Finally cleanup restored exact asset and Preset inventories, stopped Studio and Chrome, removed the external backup, and the partial observations were deleted."
+      },
+      {
+        "id": "superseded-pre-layout-fix",
+        "included": false,
+        "outcome": "The workflow passed, but visual review of its missing-state screenshot reproduced a collapsed one-character Image Asset text column. That evidence was superseded by this post-fix rerun."
+      },
+      {
+        "id": "post-layout-fix",
+        "included": true,
+        "outcome": "Authoritative complete product workflow after the responsive Image Asset row fix."
+      }
+    ]
+  },
   "presetName": "issue-336-trial-preset-missing-review",
   "selectedAssetId": "pinecone-4330aa0314f7",
   "studioUrl": "http://127.0.0.1:4319/",
@@ -24,73 +49,73 @@
   },
   "lifecycle": [
     {
-      "at": "2026-07-19T01:44:48.932Z",
+      "at": "2026-07-19T01:55:07.258Z",
       "action": "start-studio",
       "reason": "settled-save-and-reload-proof",
       "stdout": [
-        "\n  VITE v8.0.16  ready in 128 ms\n\n",
+        "\n  VITE v8.0.16  ready in 123 ms\n\n",
         "  ➜  Local:   http://127.0.0.1:4319/\n"
       ],
       "stderr": [],
-      "readyAt": "2026-07-19T01:44:49.153Z",
+      "readyAt": "2026-07-19T01:55:07.478Z",
       "exit": {
-        "at": "2026-07-19T01:44:57.296Z",
+        "at": "2026-07-19T01:55:14.886Z",
         "code": 143,
         "signal": null
       }
     },
     {
-      "at": "2026-07-19T01:44:57.284Z",
+      "at": "2026-07-19T01:55:14.876Z",
       "action": "stop-studio",
       "reason": "required-before-selected-asset-quarantine"
     },
     {
-      "at": "2026-07-19T01:44:57.297Z",
+      "at": "2026-07-19T01:55:14.887Z",
       "action": "start-studio",
       "reason": "missing-asset-fail-closed-proof",
       "stdout": [
-        "\n  VITE v8.0.16  ready in 157 ms\n\n",
+        "\n  VITE v8.0.16  ready in 125 ms\n\n",
         "  ➜  Local:   http://127.0.0.1:4319/\n"
       ],
       "stderr": [],
-      "readyAt": "2026-07-19T01:44:57.515Z",
+      "readyAt": "2026-07-19T01:55:15.103Z",
       "exit": {
-        "at": "2026-07-19T01:45:02.322Z",
+        "at": "2026-07-19T01:55:19.892Z",
         "code": 143,
         "signal": null
       }
     },
     {
-      "at": "2026-07-19T01:45:02.311Z",
+      "at": "2026-07-19T01:55:19.885Z",
       "action": "stop-studio",
       "reason": "review-complete-or-failed"
     }
   ],
   "actions": [
     {
-      "at": "2026-07-19T01:44:54.300Z",
+      "at": "2026-07-19T01:55:11.837Z",
       "action": "save-prefixed-preset",
       "presetName": "issue-336-trial-preset-missing-review"
     },
     {
-      "at": "2026-07-19T01:44:57.177Z",
+      "at": "2026-07-19T01:55:14.763Z",
       "action": "full-reload-and-load-prefixed-preset",
       "presetName": "issue-336-trial-preset-missing-review"
     },
     {
-      "at": "2026-07-19T01:44:57.296Z",
+      "at": "2026-07-19T01:55:14.887Z",
       "action": "quarantine-only-selected-worktree-asset",
       "assetId": "pinecone-4330aa0314f7",
       "externalByteLength": 333669,
       "externalSha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79"
     },
     {
-      "at": "2026-07-19T01:45:00.029Z",
+      "at": "2026-07-19T01:55:17.559Z",
       "action": "load-preset-with-selected-asset-quarantined-and-attempt-all-disabled-exports",
       "presetName": "issue-336-trial-preset-missing-review"
     },
     {
-      "at": "2026-07-19T01:45:00.029Z",
+      "at": "2026-07-19T01:55:17.559Z",
       "action": "restore-exact-selected-asset-by-rename",
       "assetId": "pinecone-4330aa0314f7",
       "byteLength": 333669,
@@ -99,14 +124,14 @@
   ],
   "network": [
     {
-      "at": "2026-07-19T01:44:49.879Z",
+      "at": "2026-07-19T01:55:08.205Z",
       "event": "request",
       "method": "GET",
       "path": "/",
       "resourceType": "document"
     },
     {
-      "at": "2026-07-19T01:44:49.883Z",
+      "at": "2026-07-19T01:55:08.208Z",
       "event": "response",
       "method": "GET",
       "path": "/",
@@ -114,35 +139,35 @@
       "resourceType": "document"
     },
     {
-      "at": "2026-07-19T01:44:50.058Z",
+      "at": "2026-07-19T01:55:08.384Z",
       "event": "request",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:50.059Z",
+      "at": "2026-07-19T01:55:08.385Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:50.059Z",
+      "at": "2026-07-19T01:55:08.386Z",
       "event": "request",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:50.060Z",
+      "at": "2026-07-19T01:55:08.386Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:50.347Z",
+      "at": "2026-07-19T01:55:08.749Z",
       "event": "response",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
@@ -150,7 +175,7 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:50.347Z",
+      "at": "2026-07-19T01:55:08.749Z",
       "event": "response",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
@@ -158,7 +183,7 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:50.347Z",
+      "at": "2026-07-19T01:55:08.749Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -166,14 +191,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:50.370Z",
+      "at": "2026-07-19T01:55:08.775Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "image"
     },
     {
-      "at": "2026-07-19T01:44:50.373Z",
+      "at": "2026-07-19T01:55:08.778Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -181,14 +206,14 @@
       "resourceType": "image"
     },
     {
-      "at": "2026-07-19T01:44:50.419Z",
+      "at": "2026-07-19T01:55:08.822Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:50.480Z",
+      "at": "2026-07-19T01:55:08.882Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -196,14 +221,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:52.065Z",
+      "at": "2026-07-19T01:55:09.699Z",
       "event": "request",
       "method": "GET",
       "path": "/sketches/photo-scribble/presets/neat.json",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:52.066Z",
+      "at": "2026-07-19T01:55:09.700Z",
       "event": "response",
       "method": "GET",
       "path": "/sketches/photo-scribble/presets/neat.json",
@@ -211,14 +236,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:52.125Z",
+      "at": "2026-07-19T01:55:09.761Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:52.195Z",
+      "at": "2026-07-19T01:55:09.828Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -226,14 +251,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.270Z",
+      "at": "2026-07-19T01:55:11.833Z",
       "event": "request",
       "method": "POST",
       "path": "/__api/presets/photo-scribble",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.283Z",
+      "at": "2026-07-19T01:55:11.835Z",
       "event": "response",
       "method": "POST",
       "path": "/__api/presets/photo-scribble",
@@ -241,14 +266,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.283Z",
+      "at": "2026-07-19T01:55:11.835Z",
       "event": "request",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.284Z",
+      "at": "2026-07-19T01:55:11.836Z",
       "event": "response",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
@@ -256,14 +281,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.339Z",
+      "at": "2026-07-19T01:55:11.876Z",
       "event": "request",
       "method": "GET",
       "path": "/",
       "resourceType": "document"
     },
     {
-      "at": "2026-07-19T01:44:54.341Z",
+      "at": "2026-07-19T01:55:11.879Z",
       "event": "response",
       "method": "GET",
       "path": "/",
@@ -271,35 +296,35 @@
       "resourceType": "document"
     },
     {
-      "at": "2026-07-19T01:44:54.440Z",
+      "at": "2026-07-19T01:55:11.984Z",
       "event": "request",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.441Z",
+      "at": "2026-07-19T01:55:11.985Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.441Z",
+      "at": "2026-07-19T01:55:11.985Z",
       "event": "request",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.441Z",
+      "at": "2026-07-19T01:55:11.985Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.497Z",
+      "at": "2026-07-19T01:55:12.042Z",
       "event": "response",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
@@ -307,7 +332,7 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.497Z",
+      "at": "2026-07-19T01:55:12.042Z",
       "event": "response",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
@@ -315,7 +340,7 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.497Z",
+      "at": "2026-07-19T01:55:12.042Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -323,14 +348,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.518Z",
+      "at": "2026-07-19T01:55:12.063Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "image"
     },
     {
-      "at": "2026-07-19T01:44:54.520Z",
+      "at": "2026-07-19T01:55:12.065Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -338,14 +363,14 @@
       "resourceType": "image"
     },
     {
-      "at": "2026-07-19T01:44:54.559Z",
+      "at": "2026-07-19T01:55:12.109Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:54.624Z",
+      "at": "2026-07-19T01:55:12.175Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -353,14 +378,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:55.141Z",
+      "at": "2026-07-19T01:55:12.692Z",
       "event": "request",
       "method": "GET",
       "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:55.143Z",
+      "at": "2026-07-19T01:55:12.693Z",
       "event": "response",
       "method": "GET",
       "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
@@ -368,14 +393,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:55.205Z",
+      "at": "2026-07-19T01:55:12.757Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:55.279Z",
+      "at": "2026-07-19T01:55:12.834Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -383,14 +408,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:57.554Z",
+      "at": "2026-07-19T01:55:15.140Z",
       "event": "request",
       "method": "GET",
       "path": "/",
       "resourceType": "document"
     },
     {
-      "at": "2026-07-19T01:44:57.595Z",
+      "at": "2026-07-19T01:55:15.174Z",
       "event": "response",
       "method": "GET",
       "path": "/",
@@ -398,35 +423,35 @@
       "resourceType": "document"
     },
     {
-      "at": "2026-07-19T01:44:57.796Z",
+      "at": "2026-07-19T01:55:15.377Z",
       "event": "request",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:57.796Z",
+      "at": "2026-07-19T01:55:15.378Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:57.797Z",
+      "at": "2026-07-19T01:55:15.378Z",
       "event": "request",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:57.797Z",
+      "at": "2026-07-19T01:55:15.378Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:57.832Z",
+      "at": "2026-07-19T01:55:15.415Z",
       "event": "response",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
@@ -434,7 +459,7 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:57.832Z",
+      "at": "2026-07-19T01:55:15.415Z",
       "event": "response",
       "method": "GET",
       "path": "/__api/presets/photo-scribble",
@@ -442,7 +467,7 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:57.832Z",
+      "at": "2026-07-19T01:55:15.415Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -450,14 +475,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:58.418Z",
+      "at": "2026-07-19T01:55:15.970Z",
       "event": "request",
       "method": "GET",
       "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:44:58.420Z",
+      "at": "2026-07-19T01:55:15.971Z",
       "event": "response",
       "method": "GET",
       "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
@@ -465,14 +490,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:45:00.052Z",
+      "at": "2026-07-19T01:55:17.580Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:45:00.054Z",
+      "at": "2026-07-19T01:55:17.581Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -480,14 +505,14 @@
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:45:00.073Z",
+      "at": "2026-07-19T01:55:17.601Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "image"
     },
     {
-      "at": "2026-07-19T01:45:00.075Z",
+      "at": "2026-07-19T01:55:17.603Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -495,14 +520,14 @@
       "resourceType": "image"
     },
     {
-      "at": "2026-07-19T01:45:00.114Z",
+      "at": "2026-07-19T01:55:17.642Z",
       "event": "request",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
       "resourceType": "fetch"
     },
     {
-      "at": "2026-07-19T01:45:00.190Z",
+      "at": "2026-07-19T01:55:17.767Z",
       "event": "response",
       "method": "GET",
       "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -512,72 +537,72 @@
   ],
   "console": [
     {
-      "at": "2026-07-19T01:44:49.973Z",
+      "at": "2026-07-19T01:55:08.296Z",
       "type": "debug",
       "text": "[vite] connecting..."
     },
     {
-      "at": "2026-07-19T01:44:49.977Z",
+      "at": "2026-07-19T01:55:08.301Z",
       "type": "info",
       "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
     },
     {
-      "at": "2026-07-19T01:44:50.063Z",
+      "at": "2026-07-19T01:55:08.389Z",
       "type": "debug",
       "text": "[vite] connected."
     },
     {
-      "at": "2026-07-19T01:44:50.063Z",
+      "at": "2026-07-19T01:55:08.390Z",
       "type": "error",
       "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
     },
     {
-      "at": "2026-07-19T01:44:54.354Z",
+      "at": "2026-07-19T01:55:11.896Z",
       "type": "debug",
       "text": "[vite] connecting..."
     },
     {
-      "at": "2026-07-19T01:44:54.373Z",
+      "at": "2026-07-19T01:55:11.915Z",
       "type": "debug",
       "text": "[vite] connected."
     },
     {
-      "at": "2026-07-19T01:44:54.387Z",
+      "at": "2026-07-19T01:55:11.931Z",
       "type": "info",
       "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
     },
     {
-      "at": "2026-07-19T01:44:57.287Z",
+      "at": "2026-07-19T01:55:14.877Z",
       "type": "log",
       "text": "[vite] server connection lost. Polling for restart..."
     },
     {
-      "at": "2026-07-19T01:44:57.732Z",
+      "at": "2026-07-19T01:55:15.300Z",
       "type": "debug",
       "text": "[vite] connecting..."
     },
     {
-      "at": "2026-07-19T01:44:57.735Z",
+      "at": "2026-07-19T01:55:15.305Z",
       "type": "debug",
       "text": "[vite] connected."
     },
     {
-      "at": "2026-07-19T01:44:57.740Z",
+      "at": "2026-07-19T01:55:15.310Z",
       "type": "info",
       "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
     },
     {
-      "at": "2026-07-19T01:44:57.832Z",
+      "at": "2026-07-19T01:55:15.415Z",
       "type": "error",
       "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
     }
   ],
   "pageErrors": [],
   "screenshots": [
-    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_204454_preset-before-save-settled.jpg",
-    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_204457_preset-post-full-reload-exact.jpg",
-    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_204459_missing-asset-explicit-fail-closed.jpg",
-    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_204502_restored-asset-retry-recovers-exact.jpg"
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_205511_preset-before-save-settled.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_205514_preset-post-full-reload-exact.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_205517_missing-asset-explicit-fail-closed.jpg",
+    "packages/core/benchmarks/photo-scribble/results/issue-336-20260719T013309Z-preset-missing-review/2026-07-18_205519_restored-asset-retry-recovers-exact.jpg"
   ],
   "phases": {
     "preflight": {
@@ -649,9 +674,9 @@
     },
     "initial": {
       "result": {
-        "sceneHash": "913e7346312dda04c87a0373620c7f63c166b8afd7ba3e95ecf1694b1fffc48f",
-        "diagnosticsHash": "acd77e69480250f3004a17def16bfc918384fc99058c84703b5e672c45595f37",
-        "identityHash": "2fc1d4db35bc009772eeba700fe7cfe7b023efc7aa7c1c8f44afc539e5439037",
+        "sceneHash": "6c808f360895091cc7d9051b285562033ead948a7fb2ad7a8941580c9303940b",
+        "diagnosticsHash": "d0bef5ca7128d142eb0cd21593d8e6dad3256c4032d54a8c1efec719895023a8",
+        "identityHash": "77263a66170c7fa11c25240a660a3c5161edd95e9c76bba1ef2f2d277ecf20ca",
         "identity": {
           "sketchId": "photo-scribble",
           "params": [
@@ -688,7 +713,7 @@
               "value": 0.9
             }
           ],
-          "seed": 3886752028253382,
+          "seed": 636646174962535,
           "compositionFrame": {
             "width": 1000,
             "height": 1000
@@ -706,21 +731,21 @@
         },
         "diagnostics": {
           "termination": "completed",
-          "residualError": 0.01641013255501016,
-          "pathLength": 13736.747216975687,
-          "polylineCount": 15,
-          "penLiftCount": 14
+          "residualError": 0.016319778400787566,
+          "pathLength": 13255.171794364618,
+          "polylineCount": 9,
+          "penLiftCount": 8
         },
-        "primitiveCount": 15,
-        "pointCount": 4724,
-        "computeTimeMs": 40
+        "primitiveCount": 9,
+        "pointCount": 3500,
+        "computeTimeMs": 39.09999990463257
       },
       "workers": [
         {
           "workerId": 1,
-          "createdAt": 496.09999990463257,
+          "createdAt": 575.8000001907349,
           "url": "http://127.0.0.1:4319/src/scribbleWorker.ts?worker_file&type=module",
-          "requestAt": 496.2000002861023,
+          "requestAt": 575.9000000953674,
           "request": {
             "type": "compute",
             "jobId": 1,
@@ -760,7 +785,7 @@
                   "value": 0.9
                 }
               ],
-              "seed": 3886752028253382,
+              "seed": 636646174962535,
               "compositionFrame": {
                 "width": 1000,
                 "height": 1000
@@ -769,19 +794,19 @@
           },
           "progress": [
             {
-              "at": 613.4000000953674,
+              "at": 689.2000002861023,
               "completedWorkUnits": 1,
               "totalWorkUnits": 18952,
               "terminal": false
             },
             {
-              "at": 644.3000001907349,
-              "completedWorkUnits": 1193,
+              "at": 719.5,
+              "completedWorkUnits": 1144,
               "totalWorkUnits": 18952,
               "terminal": true
             }
           ],
-          "successAt": 655.4000000953674,
+          "successAt": 730.5,
           "success": {
             "identity": {
               "sketchId": "photo-scribble",
@@ -819,7 +844,7 @@
                   "value": 0.9
                 }
               ],
-              "seed": 3886752028253382,
+              "seed": 636646174962535,
               "compositionFrame": {
                 "width": 1000,
                 "height": 1000
@@ -827,17 +852,17 @@
             },
             "diagnostics": {
               "termination": "completed",
-              "residualError": 0.01641013255501016,
-              "pathLength": 13736.747216975687,
-              "polylineCount": 15,
-              "penLiftCount": 14
+              "residualError": 0.016319778400787566,
+              "pathLength": 13255.171794364618,
+              "polylineCount": 9,
+              "penLiftCount": 8
             },
-            "computeTimeMs": 40,
-            "primitiveCount": 15
+            "computeTimeMs": 39.09999990463257,
+            "primitiveCount": 9
           },
           "failureAt": null,
           "failure": null,
-          "terminatedAt": 655.9000000953674
+          "terminatedAt": 730.9000000953674
         }
       ]
     },
@@ -907,11 +932,39 @@
         },
         "primitiveCount": 17,
         "pointCount": 158948,
-        "computeTimeMs": 1404
+        "computeTimeMs": 1389.5
       },
       "ui": {
         "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nissue-336-trial-preset-missing-review\nneat\nReload\nseed\nShading\nConverged\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
         "assetIdentity": "pinecone-4330aa0314f7",
+        "assetLayout": {
+          "header": {
+            "left": 1137,
+            "top": 122,
+            "right": 1409,
+            "bottom": 222,
+            "width": 272,
+            "height": 100
+          },
+          "identityColumn": {
+            "left": 1197,
+            "top": 122,
+            "right": 1409,
+            "bottom": 178,
+            "width": 212,
+            "height": 56
+          },
+          "identity": {
+            "left": 1197,
+            "top": 162,
+            "right": 1409,
+            "bottom": 178,
+            "width": 212,
+            "height": 16
+          },
+          "alert": null,
+          "actions": null
+        },
         "alerts": [],
         "overlay": null,
         "canvas": {
@@ -1037,11 +1090,39 @@
         },
         "primitiveCount": 17,
         "pointCount": 158948,
-        "computeTimeMs": 1383
+        "computeTimeMs": 1413.0999999046326
       },
       "ui": {
         "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nissue-336-trial-preset-missing-review\nneat\nReload\nseed\nShading\nConverged\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
         "assetIdentity": "pinecone-4330aa0314f7",
+        "assetLayout": {
+          "header": {
+            "left": 1137,
+            "top": 122,
+            "right": 1424,
+            "bottom": 222,
+            "width": 287,
+            "height": 100
+          },
+          "identityColumn": {
+            "left": 1197,
+            "top": 122,
+            "right": 1424,
+            "bottom": 178,
+            "width": 227,
+            "height": 56
+          },
+          "identity": {
+            "left": 1197,
+            "top": 162,
+            "right": 1424,
+            "bottom": 178,
+            "width": 227,
+            "height": 16
+          },
+          "alert": null,
+          "actions": null
+        },
         "alerts": [],
         "overlay": null,
         "canvas": {
@@ -1069,9 +1150,9 @@
       "workers": [
         {
           "workerId": 1,
-          "createdAt": 180.90000009536743,
+          "createdAt": 189.69999980926514,
           "url": "http://127.0.0.1:4319/src/scribbleWorker.ts?worker_file&type=module",
-          "requestAt": 180.90000009536743,
+          "requestAt": 189.7999997138977,
           "request": {
             "type": "compute",
             "jobId": 1,
@@ -1111,7 +1192,7 @@
                   "value": 0.9
                 }
               ],
-              "seed": 2760069582778738,
+              "seed": 1839071785788179,
               "compositionFrame": {
                 "width": 1000,
                 "height": 1000
@@ -1120,19 +1201,19 @@
           },
           "progress": [
             {
-              "at": 297,
+              "at": 312.19999980926514,
               "completedWorkUnits": 1,
               "totalWorkUnits": 18952,
               "terminal": false
             },
             {
-              "at": 327.7000002861023,
-              "completedWorkUnits": 1177,
+              "at": 341.19999980926514,
+              "completedWorkUnits": 1153,
               "totalWorkUnits": 18952,
               "terminal": true
             }
           ],
-          "successAt": 339.6000003814697,
+          "successAt": 353.09999990463257,
           "success": {
             "identity": {
               "sketchId": "photo-scribble",
@@ -1170,7 +1251,7 @@
                   "value": 0.9
                 }
               ],
-              "seed": 2760069582778738,
+              "seed": 1839071785788179,
               "compositionFrame": {
                 "width": 1000,
                 "height": 1000
@@ -1178,23 +1259,23 @@
             },
             "diagnostics": {
               "termination": "completed",
-              "residualError": 0.01641067119236603,
-              "pathLength": 13655.999031138732,
-              "polylineCount": 7,
-              "penLiftCount": 6
+              "residualError": 0.016360090282634316,
+              "pathLength": 13336.511462276843,
+              "polylineCount": 10,
+              "penLiftCount": 9
             },
-            "computeTimeMs": 40.09999990463257,
-            "primitiveCount": 7
+            "computeTimeMs": 37.40000009536743,
+            "primitiveCount": 10
           },
           "failureAt": null,
           "failure": null,
-          "terminatedAt": 339.80000019073486
+          "terminatedAt": 353.2999997138977
         },
         {
           "workerId": 2,
-          "createdAt": 823.4000000953674,
+          "createdAt": 838.7999997138977,
           "url": "http://127.0.0.1:4319/src/scribbleWorker.ts?worker_file&type=module",
-          "requestAt": 823.5,
+          "requestAt": 838.8999996185303,
           "request": {
             "type": "compute",
             "jobId": 2,
@@ -1243,97 +1324,97 @@
           },
           "progress": [
             {
-              "at": 957,
+              "at": 975,
               "completedWorkUnits": 1,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 1056.9000000953674,
-              "completedWorkUnits": 5357,
+              "at": 1075,
+              "completedWorkUnits": 5238,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 1157,
-              "completedWorkUnits": 10949,
+              "at": 1174.8999996185303,
+              "completedWorkUnits": 10799,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 1256.9000000953674,
-              "completedWorkUnits": 16764,
+              "at": 1275,
+              "completedWorkUnits": 16620,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 1356.9000000953674,
-              "completedWorkUnits": 22568,
+              "at": 1374.8999996185303,
+              "completedWorkUnits": 22410,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 1456.9000000953674,
-              "completedWorkUnits": 28308,
+              "at": 1474.8999996185303,
+              "completedWorkUnits": 28116,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 1556.9000000953674,
-              "completedWorkUnits": 34044,
+              "at": 1574.8999996185303,
+              "completedWorkUnits": 33796,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 1656.9000000953674,
-              "completedWorkUnits": 39830,
+              "at": 1674.8999996185303,
+              "completedWorkUnits": 39414,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 1756.9000000953674,
-              "completedWorkUnits": 45707,
+              "at": 1775,
+              "completedWorkUnits": 45067,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 1856.9000000953674,
-              "completedWorkUnits": 51535,
+              "at": 1874.8999996185303,
+              "completedWorkUnits": 50585,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 1956.9000000953674,
-              "completedWorkUnits": 57342,
+              "at": 1975,
+              "completedWorkUnits": 56232,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 2056.9000000953674,
-              "completedWorkUnits": 63079,
+              "at": 2075,
+              "completedWorkUnits": 61737,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 2156.9000000953674,
-              "completedWorkUnits": 68863,
+              "at": 2174.8999996185303,
+              "completedWorkUnits": 67303,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 2256.9000000953674,
-              "completedWorkUnits": 74819,
+              "at": 2275,
+              "completedWorkUnits": 72972,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 2274,
+              "at": 2325,
               "completedWorkUnits": 75818,
               "totalWorkUnits": 258000,
               "terminal": true
             }
           ],
-          "successAt": 2354.1000003814697,
+          "successAt": 2399.699999809265,
           "success": {
             "identity": {
               "sketchId": "photo-scribble",
@@ -1384,12 +1465,12 @@
               "polylineCount": 17,
               "penLiftCount": 16
             },
-            "computeTimeMs": 1383,
+            "computeTimeMs": 1413.0999999046326,
             "primitiveCount": 17
           },
           "failureAt": null,
           "failure": null,
-          "terminatedAt": 2355.7000002861023
+          "terminatedAt": 2401.5
         }
       ]
     },
@@ -1400,6 +1481,48 @@
       "ui": {
         "bodyText": "Image Asset unavailable\nUnresolved ID\npinecone-4330aa0314f7\nPhoto Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nImage Asset is missing. The exact selected ID remains active.\nRetry exact asset\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nissue-336-trial-preset-missing-review\nneat\nReload\nseed\nShading\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
         "assetIdentity": "pinecone-4330aa0314f7",
+        "assetLayout": {
+          "header": {
+            "left": 1137,
+            "top": 122,
+            "right": 1409,
+            "bottom": 262,
+            "width": 272,
+            "height": 140
+          },
+          "identityColumn": {
+            "left": 1137,
+            "top": 122,
+            "right": 1409,
+            "bottom": 218,
+            "width": 272,
+            "height": 96
+          },
+          "identity": {
+            "left": 1137,
+            "top": 162,
+            "right": 1409,
+            "bottom": 178,
+            "width": 272,
+            "height": 16
+          },
+          "alert": {
+            "left": 1137,
+            "top": 178,
+            "right": 1409,
+            "bottom": 218,
+            "width": 272,
+            "height": 40
+          },
+          "actions": {
+            "left": 1140.8671875,
+            "top": 230,
+            "right": 1409,
+            "bottom": 262,
+            "width": 268.1328125,
+            "height": 32
+          }
+        },
         "alerts": [
           "Image Asset unavailableUnresolved IDpinecone-4330aa0314f7",
           "Image Asset is missing. The exact selected ID remains active."
@@ -1459,14 +1582,14 @@
       "downloadsAfterDisabledClicks": [],
       "network": [
         {
-          "at": "2026-07-19T01:44:57.554Z",
+          "at": "2026-07-19T01:55:15.140Z",
           "event": "request",
           "method": "GET",
           "path": "/",
           "resourceType": "document"
         },
         {
-          "at": "2026-07-19T01:44:57.595Z",
+          "at": "2026-07-19T01:55:15.174Z",
           "event": "response",
           "method": "GET",
           "path": "/",
@@ -1474,35 +1597,35 @@
           "resourceType": "document"
         },
         {
-          "at": "2026-07-19T01:44:57.796Z",
+          "at": "2026-07-19T01:55:15.377Z",
           "event": "request",
           "method": "GET",
           "path": "/__api/presets/photo-scribble",
           "resourceType": "fetch"
         },
         {
-          "at": "2026-07-19T01:44:57.796Z",
+          "at": "2026-07-19T01:55:15.378Z",
           "event": "request",
           "method": "GET",
           "path": "/image-assets/pinecone-4330aa0314f7.png",
           "resourceType": "fetch"
         },
         {
-          "at": "2026-07-19T01:44:57.797Z",
+          "at": "2026-07-19T01:55:15.378Z",
           "event": "request",
           "method": "GET",
           "path": "/__api/presets/photo-scribble",
           "resourceType": "fetch"
         },
         {
-          "at": "2026-07-19T01:44:57.797Z",
+          "at": "2026-07-19T01:55:15.378Z",
           "event": "request",
           "method": "GET",
           "path": "/image-assets/pinecone-4330aa0314f7.png",
           "resourceType": "fetch"
         },
         {
-          "at": "2026-07-19T01:44:57.832Z",
+          "at": "2026-07-19T01:55:15.415Z",
           "event": "response",
           "method": "GET",
           "path": "/__api/presets/photo-scribble",
@@ -1510,7 +1633,7 @@
           "resourceType": "fetch"
         },
         {
-          "at": "2026-07-19T01:44:57.832Z",
+          "at": "2026-07-19T01:55:15.415Z",
           "event": "response",
           "method": "GET",
           "path": "/__api/presets/photo-scribble",
@@ -1518,7 +1641,7 @@
           "resourceType": "fetch"
         },
         {
-          "at": "2026-07-19T01:44:57.832Z",
+          "at": "2026-07-19T01:55:15.415Z",
           "event": "response",
           "method": "GET",
           "path": "/image-assets/pinecone-4330aa0314f7.png",
@@ -1526,14 +1649,14 @@
           "resourceType": "fetch"
         },
         {
-          "at": "2026-07-19T01:44:58.418Z",
+          "at": "2026-07-19T01:55:15.970Z",
           "event": "request",
           "method": "GET",
           "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
           "resourceType": "fetch"
         },
         {
-          "at": "2026-07-19T01:44:58.420Z",
+          "at": "2026-07-19T01:55:15.971Z",
           "event": "response",
           "method": "GET",
           "path": "/sketches/photo-scribble/presets/issue-336-trial-preset-missing-review.json",
@@ -1609,11 +1732,39 @@
         },
         "primitiveCount": 17,
         "pointCount": 158948,
-        "computeTimeMs": 1395.8999996185303
+        "computeTimeMs": 1398.6000003814697
       },
       "ui": {
         "bodyText": "Photo Scribble\nPaper\n200 × 200 mm\nimageAsset\npinecone\npinecone-4330aa0314f7\nChoose image\ntoneContrast\ntoneGamma\npathDensity\nscribbleScale\nmomentum\nchaos\ntoneFidelity\nNew seed\nRandomize\nSave\nSelect a preset…\nflowers-dense\nflowers-dense-chaotic\nissue-336-trial-preset-missing-review\nneat\nReload\nseed\nShading\nConverged\nrender\nFill\nOutline\nTone\nsimplify\nExport PNG\nExport SVG\nExport Hidden-line SVG",
         "assetIdentity": "pinecone-4330aa0314f7",
+        "assetLayout": {
+          "header": {
+            "left": 1137,
+            "top": 122,
+            "right": 1424,
+            "bottom": 222,
+            "width": 287,
+            "height": 100
+          },
+          "identityColumn": {
+            "left": 1197,
+            "top": 122,
+            "right": 1424,
+            "bottom": 178,
+            "width": 227,
+            "height": 56
+          },
+          "identity": {
+            "left": 1197,
+            "top": 162,
+            "right": 1424,
+            "bottom": 178,
+            "width": 227,
+            "height": 16
+          },
+          "alert": null,
+          "actions": null
+        },
         "alerts": [],
         "overlay": null,
         "canvas": {
@@ -1641,9 +1792,9 @@
       "workers": [
         {
           "workerId": 1,
-          "createdAt": 2522.5999999046326,
+          "createdAt": 2464.5999999046326,
           "url": "http://127.0.0.1:4319/src/scribbleWorker.ts?worker_file&type=module",
-          "requestAt": 2522.5999999046326,
+          "requestAt": 2464.699999809265,
           "request": {
             "type": "compute",
             "jobId": 1,
@@ -1692,97 +1843,97 @@
           },
           "progress": [
             {
-              "at": 2652,
+              "at": 2644.0999999046326,
               "completedWorkUnits": 1,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 2751.9000000953674,
-              "completedWorkUnits": 5261,
+              "at": 2744.0999999046326,
+              "completedWorkUnits": 5282,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 2851.9000000953674,
-              "completedWorkUnits": 10924,
+              "at": 2844.0999999046326,
+              "completedWorkUnits": 10820,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 2951.9000000953674,
-              "completedWorkUnits": 16721,
+              "at": 2944.0999999046326,
+              "completedWorkUnits": 16360,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 3052,
-              "completedWorkUnits": 22595,
+              "at": 3044.199999809265,
+              "completedWorkUnits": 22009,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 3152,
-              "completedWorkUnits": 28387,
+              "at": 3144.0999999046326,
+              "completedWorkUnits": 27686,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 3252,
-              "completedWorkUnits": 34028,
+              "at": 3244.0999999046326,
+              "completedWorkUnits": 33298,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 3351.9000000953674,
-              "completedWorkUnits": 39788,
+              "at": 3344.199999809265,
+              "completedWorkUnits": 39008,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 3452,
-              "completedWorkUnits": 45608,
+              "at": 3444.0999999046326,
+              "completedWorkUnits": 44834,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 3551.9000000953674,
-              "completedWorkUnits": 51031,
+              "at": 3544.0999999046326,
+              "completedWorkUnits": 50579,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 3651.9000000953674,
-              "completedWorkUnits": 56772,
+              "at": 3644.2999997138977,
+              "completedWorkUnits": 56415,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 3751.9000000953674,
-              "completedWorkUnits": 62434,
+              "at": 3744.2999997138977,
+              "completedWorkUnits": 62077,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 3851.9000000953674,
-              "completedWorkUnits": 68152,
+              "at": 3844.2999997138977,
+              "completedWorkUnits": 67838,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 3951.9000000953674,
-              "completedWorkUnits": 73936,
+              "at": 3944.2999997138977,
+              "completedWorkUnits": 73642,
               "totalWorkUnits": 258000,
               "terminal": false
             },
             {
-              "at": 3985.5,
+              "at": 3982.3999996185303,
               "completedWorkUnits": 75818,
               "totalWorkUnits": 258000,
               "terminal": true
             }
           ],
-          "successAt": 4058.7000002861023,
+          "successAt": 4053.199999809265,
           "success": {
             "identity": {
               "sketchId": "photo-scribble",
@@ -1833,12 +1984,12 @@
               "polylineCount": 17,
               "penLiftCount": 16
             },
-            "computeTimeMs": 1395.8999996185303,
+            "computeTimeMs": 1398.6000003814697,
             "primitiveCount": 17
           },
           "failureAt": null,
           "failure": null,
-          "terminatedAt": 4060.5
+          "terminatedAt": 4055.199999809265
         }
       ],
       "selectedAsset": {
@@ -1859,6 +2010,7 @@
     "fullReloadAssetIdExact": true,
     "missingAssetIdPreserved": true,
     "missingStateExplicit": true,
+    "missingLayoutReadableAndWrapped": true,
     "missingCanvasHiddenAndNeutral": true,
     "noBackgroundScribbleJobForMissingAsset": true,
     "allExportsDisabled": true,
