@@ -21,6 +21,7 @@ export * from './imageAssets'
 export * from './rasterToneSource'
 export * from './shadingFields'
 export * from './shadingStrategy'
+export * from './scribbleScaleField'
 export {
   scribbleStrategy,
   type ScribbleObserver,
