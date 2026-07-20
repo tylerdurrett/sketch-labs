@@ -80,6 +80,8 @@ interface CustomAspectError {
 }
 
 const FIELDS = ["x", "y", "width", "height"] as const;
+const UNREPRESENTABLE_SCALE_MESSAGE =
+  "Composition scale cannot be represented by finite Page geometry.";
 const LABELS: Record<PageFrameField, string> = {
   x: "X",
   y: "Y",
@@ -352,12 +354,18 @@ export function PageFrameEditor(props: PageFrameEditorProps) {
     onAspectConstraintChange,
   } = props;
   const fixedPage = controlledEditDraft?.mode === "fixed-page";
+  const controlledCompositionScale =
+    controlledEditDraft?.mode === "fixed-page"
+      ? controlledEditDraft.compositionScale
+      : null;
   const [draft, setDraft] = useState(() =>
     initialDraft(controlledFrame, compositionFrame),
   );
   const [error, setError] = useState<PageFrameError | null>(null);
   const [physicalFieldsValid, setPhysicalFieldsValid] = useState(true);
   const [scaleControlValid, setScaleControlValid] = useState(true);
+  const [scaleRepresentabilityError, setScaleRepresentabilityError] =
+    useState<string | null>(null);
   const [uncontrolledAspectConstraint, setUncontrolledAspectConstraint] =
     useState<PageFrameAspectConstraint>({ kind: "free" });
   const aspectConstraint =
@@ -439,8 +447,15 @@ export function PageFrameEditor(props: PageFrameEditorProps) {
   }, [controlledAspectConstraint]);
 
   useEffect(() => {
-    if (!fixedPage) setScaleControlValid(true);
+    if (!fixedPage) {
+      setScaleControlValid(true);
+      setScaleRepresentabilityError(null);
+    }
   }, [fixedPage]);
+
+  useEffect(() => {
+    setScaleRepresentabilityError(null);
+  }, [controlledCompositionScale]);
 
   const emitAspectConstraint = (
     next: PageFrameAspectConstraint,
@@ -523,7 +538,13 @@ export function PageFrameEditor(props: PageFrameEditorProps) {
   };
 
   const apply = (): void => {
-    if (!physicalFieldsValid || !scaleControlValid) return;
+    if (
+      !physicalFieldsValid ||
+      !scaleControlValid ||
+      scaleRepresentabilityError !== null
+    ) {
+      return;
+    }
     const parsed =
       controlledEditDraft?.mode === "fixed-page"
         ? parseFixedPagePosition(draft, compositionFrame, controlledFrame)
@@ -554,6 +575,7 @@ export function PageFrameEditor(props: PageFrameEditorProps) {
     setError(null);
     setCustomAspectError(null);
     setScaleControlValid(true);
+    setScaleRepresentabilityError(null);
     editDraftProps!.onEditDraftChange(next);
   };
 
@@ -618,14 +640,19 @@ export function PageFrameEditor(props: PageFrameEditorProps) {
       {fixedPage && controlledEditDraft?.mode === "fixed-page" && (
         <CompositionScaleControl
           scalePercent={controlledEditDraft.compositionScale * 100}
-          onScalePercentChange={(scalePercent) =>
-            editDraftProps!.onEditDraftChange(
-              setFixedPageCompositionScale(
+          onScalePercentChange={(scalePercent) => {
+            try {
+              const next = setFixedPageCompositionScale(
                 controlledEditDraft,
                 scalePercent / 100,
-              ),
-            )
-          }
+              );
+              setScaleRepresentabilityError(null);
+              editDraftProps!.onEditDraftChange(next);
+            } catch {
+              setScaleRepresentabilityError(UNREPRESENTABLE_SCALE_MESSAGE);
+            }
+          }}
+          validationError={scaleRepresentabilityError}
           onValidityChange={setScaleControlValid}
         />
       )}

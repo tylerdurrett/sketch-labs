@@ -675,4 +675,41 @@ describe("PageFrameEditor", () => {
       );
     },
   );
+
+  it.each([
+    ["overflow", "1e308"],
+    ["underflow", "5e-324"],
+  ])(
+    "keeps unrepresentable scale %s local and recovers",
+    (_case, invalidScale) => {
+      const fixed = aspectMismatchedFixedDraft();
+      const { el, callbacks } = mountDraftEditor(fixed);
+      const scale = el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      );
+      if (scale === null) {
+        throw new Error("No Composition scale percentage input");
+      }
+
+      setInput(scale, invalidScale);
+
+      expect(scale.value).toBe(invalidScale);
+      expect(scale.getAttribute("aria-invalid")).toBe("true");
+      expect(el.querySelector('[role="alert"]')?.textContent).toMatch(
+        /cannot be represented by finite Page geometry/i,
+      );
+      expect(callbacks.onEditDraftChange).not.toHaveBeenCalled();
+
+      click(el, "Apply");
+      expect(callbacks.onApply).not.toHaveBeenCalled();
+
+      setInput(scale, "150");
+      expect(scale.getAttribute("aria-invalid")).toBeNull();
+      expect(el.querySelector('[role="alert"]')).toBeNull();
+      expect(callbacks.onEditDraftChange).toHaveBeenCalledOnce();
+
+      click(el, "Apply");
+      expect(callbacks.onApply).toHaveBeenCalledOnce();
+    },
+  );
 });

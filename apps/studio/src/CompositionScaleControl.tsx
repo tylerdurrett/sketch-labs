@@ -15,6 +15,8 @@ export interface CompositionScaleControlProps {
   scalePercent: number;
   /** Lift a finite positive percentage to the Page Frame draft owner. */
   onScalePercentChange: (scalePercent: number) => void;
+  /** A containing geometry owner may reject an otherwise valid percentage. */
+  validationError?: string | null;
   /** Lets the containing commit boundary block while a text draft is invalid. */
   onValidityChange?: (valid: boolean) => void;
 }
@@ -50,6 +52,7 @@ function rangePresentationValue(scalePercent: number): number {
 export function CompositionScaleControl({
   scalePercent,
   onScalePercentChange,
+  validationError = null,
   onValidityChange,
 }: CompositionScaleControlProps) {
   const [draft, setDraft] = useState(() => String(scalePercent));
@@ -64,9 +67,11 @@ export function CompositionScaleControl({
     setError(null);
   }, [scalePercent]);
 
+  const visibleError = error ?? validationError;
+
   useEffect(() => {
-    onValidityChange?.(error === null);
-  }, [error, onValidityChange]);
+    onValidityChange?.(visibleError === null);
+  }, [onValidityChange, visibleError]);
 
   const updateFromRange = (nextScalePercent: number): void => {
     setDraft(String(nextScalePercent));
@@ -87,7 +92,7 @@ export function CompositionScaleControl({
   };
 
   const describedBy =
-    error === null ? descriptionId : `${descriptionId} ${errorId}`;
+    visibleError === null ? descriptionId : `${descriptionId} ${errorId}`;
 
   return (
     <fieldset className="flex flex-col gap-2">
@@ -113,7 +118,7 @@ export function CompositionScaleControl({
             type="number"
             aria-label="Composition scale percentage"
             aria-describedby={describedBy}
-            aria-invalid={error === null ? undefined : true}
+            aria-invalid={visibleError === null ? undefined : true}
             className="min-w-0 w-full rounded-md border bg-background px-2 py-1.5 text-right text-sm text-foreground tabular-nums outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             min={Number.MIN_VALUE}
             step="any"
@@ -135,9 +140,9 @@ export function CompositionScaleControl({
           </span>
         </label>
       </div>
-      {error !== null && (
+      {visibleError !== null && (
         <p id={errorId} role="alert" className="text-sm text-destructive">
-          {error}
+          {visibleError}
         </p>
       )}
     </fieldset>
