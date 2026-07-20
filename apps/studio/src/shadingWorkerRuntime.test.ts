@@ -9,20 +9,20 @@ import {
   type DecodedPixels,
   type ParamSchema,
   type Scene,
-  type ScribbleArtwork,
-  type ScribbleProgress,
+  type ShadingArtwork,
+  type ShadingProgress,
   type SketchEnvironment,
 } from "@harness/core";
 
 import {
-  createScribbleComputeIdentity,
-  type ScribbleComputeRequest,
-  type ScribbleWorkerMessage,
-} from "./scribbleComputeProtocol";
+  createShadingComputeIdentity,
+  type ShadingComputeRequest,
+  type ShadingWorkerMessage,
+} from "./shadingComputeProtocol";
 import {
-  handleScribbleWorkerMessage,
-  type ScribbleArtworkExecutor,
-} from "./scribbleWorkerRuntime";
+  handleShadingWorkerMessage,
+  type ShadingArtworkExecutor,
+} from "./shadingWorkerRuntime";
 
 const scene: Scene = {
   space: { width: 120, height: 90 },
@@ -37,14 +37,14 @@ const scene: Scene = {
   ],
 };
 
-const artwork: ScribbleArtwork = {
+const artwork: ShadingArtwork = {
   scene,
   diagnostics: {
     termination: "completed",
-    residualError: 0.02,
     pathLength: Math.sqrt(8),
     polylineCount: 1,
     penLiftCount: 0,
+    fidelity: { kind: "scribble", residualError: 0.02 },
   },
 };
 
@@ -56,12 +56,12 @@ function request(
     frame: { width: number; height: number };
     seed: string | number;
   }> = {},
-): ScribbleComputeRequest {
+): ShadingComputeRequest {
   const sketchId = overrides.sketchId ?? toneCalibration.id;
   return {
     type: "compute",
     jobId: 7,
-    identity: createScribbleComputeIdentity({
+    identity: createShadingComputeIdentity({
       sketchId,
       schema: overrides.schema ?? toneCalibration.schema,
       params: overrides.params ?? defaultParams(toneCalibration.schema),
@@ -71,15 +71,15 @@ function request(
   };
 }
 
-describe("Scribble worker runtime", () => {
+describe("Shading worker runtime", () => {
   it("returns the executor's complete Scene, diagnostics, and finite elapsed time", async () => {
     const input = request();
-    const execute = vi.fn((..._args: Parameters<ScribbleArtworkExecutor>) =>
+    const execute = vi.fn((..._args: Parameters<ShadingArtworkExecutor>) =>
       artwork,
     );
     const clock = [10.25, 52.75];
 
-    const response = await handleScribbleWorkerMessage(
+    const response = await handleShadingWorkerMessage(
       input,
       execute,
       undefined,
@@ -87,7 +87,7 @@ describe("Scribble worker runtime", () => {
     );
 
     expect(execute).toHaveBeenCalledWith(
-      toneCalibration.generateScribbleArtwork,
+      toneCalibration.generateShadingArtwork,
       input.identity,
       expect.objectContaining({ imageAssets: expect.any(Function) }),
       undefined,
@@ -107,7 +107,7 @@ describe("Scribble worker runtime", () => {
     [50, 40],
   ])("normalizes an unusable clock interval to zero", async (startedAt, endedAt) => {
     const clock = [startedAt, endedAt];
-    const response = await handleScribbleWorkerMessage(
+    const response = await handleShadingWorkerMessage(
       request(),
       () => artwork,
       undefined,
@@ -118,9 +118,9 @@ describe("Scribble worker runtime", () => {
   });
 
   it("emits first, interval, and terminal progress before success", async () => {
-    const events: ScribbleWorkerMessage[] = [];
+    const events: ShadingWorkerMessage[] = [];
     const clock = [1_000, 1_000, 1_025, 1_099, 1_100, 1_150, 1_200];
-    const execute: ScribbleArtworkExecutor = (
+    const execute: ShadingArtworkExecutor = (
       _generate,
       _identity,
       _environment,
@@ -141,7 +141,7 @@ describe("Scribble worker runtime", () => {
       return artwork;
     };
 
-    const response = await handleScribbleWorkerMessage(
+    const response = await handleShadingWorkerMessage(
       request(),
       execute,
       (progress) => events.push(progress),
@@ -175,8 +175,8 @@ describe("Scribble worker runtime", () => {
   });
 
   it("always emits terminal progress when its count equals an ordinary snapshot", async () => {
-    const progress: ScribbleProgress[] = [];
-    const execute: ScribbleArtworkExecutor = (
+    const progress: ShadingProgress[] = [];
+    const execute: ShadingArtworkExecutor = (
       _generate,
       _identity,
       _environment,
@@ -195,7 +195,7 @@ describe("Scribble worker runtime", () => {
       return artwork;
     };
 
-    await handleScribbleWorkerMessage(
+    await handleShadingWorkerMessage(
       request(),
       execute,
       (message) => progress.push(message.snapshot),
@@ -209,12 +209,12 @@ describe("Scribble worker runtime", () => {
   });
 
   it.each([null, {}, { type: "compute" }, { type: "preview" }])(
-    "rejects malformed or non-Scribble input before execution: %o",
+    "rejects malformed or non-Shading input before execution: %o",
     async (candidate) => {
       const execute = vi.fn(
-        (..._args: Parameters<ScribbleArtworkExecutor>) => artwork,
+        (..._args: Parameters<ShadingArtworkExecutor>) => artwork,
       );
-      expect(await handleScribbleWorkerMessage(candidate, execute)).toBeNull();
+      expect(await handleShadingWorkerMessage(candidate, execute)).toBeNull();
       expect(execute).not.toHaveBeenCalled();
     },
   );
@@ -230,14 +230,14 @@ describe("Scribble worker runtime", () => {
       const input = structuredClone(request()) as Record<string, any>;
       mutate(input.identity.params);
       const execute = vi.fn(
-        (..._args: Parameters<ScribbleArtworkExecutor>) => artwork,
+        (..._args: Parameters<ShadingArtworkExecutor>) => artwork,
       );
       const resolveEnvironment = vi.fn(async (): Promise<SketchEnvironment> => ({
         imageAssets: () => undefined,
       }));
 
       expect(
-        await handleScribbleWorkerMessage(
+        await handleShadingWorkerMessage(
           input,
           execute,
           undefined,
@@ -247,7 +247,7 @@ describe("Scribble worker runtime", () => {
       ).toMatchObject({
         type: "failure",
         error:
-          "Scribble request parameters do not match tone-calibration schema",
+          "Shading request parameters do not match tone-calibration schema",
       });
       expect(resolveEnvironment).not.toHaveBeenCalled();
       expect(execute).not.toHaveBeenCalled();
@@ -256,7 +256,7 @@ describe("Scribble worker runtime", () => {
 
   it("blocks malformed progress before posting a bounded safe failure", async () => {
     const emitted = vi.fn();
-    const execute: ScribbleArtworkExecutor = (
+    const execute: ShadingArtworkExecutor = (
       _generate,
       _identity,
       _environment,
@@ -270,7 +270,7 @@ describe("Scribble worker runtime", () => {
       return artwork;
     };
 
-    const response = await handleScribbleWorkerMessage(
+    const response = await handleShadingWorkerMessage(
       request(),
       execute,
       emitted,
@@ -280,20 +280,26 @@ describe("Scribble worker runtime", () => {
     expect(emitted).not.toHaveBeenCalled();
     expect(response).toMatchObject({
       type: "failure",
-      error: "Scribble worker produced invalid progress",
+      error: "Shading worker produced invalid progress",
     });
   });
 
   it("turns thrown and malformed results into safe bounded domain failures", async () => {
     const longMessage = `geometry ${"x".repeat(700)}`;
-    const thrown = await handleScribbleWorkerMessage(request(), () => {
+    const thrown = await handleShadingWorkerMessage(request(), () => {
       throw new Error(longMessage);
     });
-    const malformed = await handleScribbleWorkerMessage(
+    const malformed = await handleShadingWorkerMessage(
       request(),
       () => ({
         ...artwork,
-        diagnostics: { ...artwork.diagnostics, residualError: Number.NaN },
+        diagnostics: {
+          ...artwork.diagnostics,
+          fidelity: {
+            ...artwork.diagnostics.fidelity,
+            residualError: Number.NaN,
+          },
+        },
       }),
       undefined,
       () => Number.POSITIVE_INFINITY,
@@ -305,12 +311,12 @@ describe("Scribble worker runtime", () => {
     expect(longMessage.startsWith(thrown.error)).toBe(true);
     expect(malformed).toMatchObject({
       type: "failure",
-      error: "Scribble worker produced an invalid result",
+      error: "Shading worker produced an invalid result",
     });
   });
 
-  it("requires the selected registry Sketch to own the Scribble hook", async () => {
-    const response = await handleScribbleWorkerMessage(
+  it("requires the selected registry Sketch to own the Shading hook", async () => {
+    const response = await handleShadingWorkerMessage(
       request({
         sketchId: "circles",
         schema: {},
@@ -320,7 +326,7 @@ describe("Scribble worker runtime", () => {
 
     expect(response).toMatchObject({
       type: "failure",
-      error: "Sketch circles has no Scribble artwork generator",
+      error: "Sketch circles has no Shading artwork generator",
     });
   });
 
@@ -333,7 +339,7 @@ describe("Scribble worker runtime", () => {
         scribbleScale: 2,
         toneFidelity: 0,
       };
-      const response = await handleScribbleWorkerMessage(
+      const response = await handleShadingWorkerMessage(
         request({
           sketchId: sketch.id,
           schema: sketch.schema,
@@ -351,10 +357,13 @@ describe("Scribble worker runtime", () => {
         scene: { space: { width: 80, height: 60 } },
         diagnostics: {
           termination: expect.stringMatching(/^(completed|budget-exhausted)$/),
-          residualError: expect.any(Number),
           pathLength: expect.any(Number),
           polylineCount: expect.any(Number),
           penLiftCount: expect.any(Number),
+          fidelity: {
+            kind: "scribble",
+            residualError: expect.any(Number),
+          },
         },
         computeTimeMs: 0,
       });
@@ -396,7 +405,7 @@ describe("Scribble worker runtime", () => {
           }),
       );
       const execute = vi.fn(
-        (...args: Parameters<ScribbleArtworkExecutor>) =>
+        (...args: Parameters<ShadingArtworkExecutor>) =>
           args[0](
             Object.fromEntries(
               args[1].params.map(({ key, value }) => [key, value]),
@@ -408,7 +417,7 @@ describe("Scribble worker runtime", () => {
           ),
       );
 
-      const pending = handleScribbleWorkerMessage(
+      const pending = handleShadingWorkerMessage(
         input,
         execute,
         undefined,
@@ -430,7 +439,7 @@ describe("Scribble worker runtime", () => {
       const response = await pending;
 
       expect(execute).toHaveBeenCalledWith(
-        photoScribble.generateScribbleArtwork,
+        photoScribble.generateShadingArtwork,
         input.identity,
         expect.objectContaining({
           imageAssets: environment.imageAssets,
@@ -467,10 +476,10 @@ describe("Scribble worker runtime", () => {
       }),
     };
     const execute = vi.fn(
-      (..._args: Parameters<ScribbleArtworkExecutor>) => artwork,
+      (..._args: Parameters<ShadingArtworkExecutor>) => artwork,
     );
 
-    const response = await handleScribbleWorkerMessage(
+    const response = await handleShadingWorkerMessage(
       input,
       execute,
       undefined,
@@ -480,7 +489,7 @@ describe("Scribble worker runtime", () => {
 
     expect(response).toMatchObject({ type: "success" });
     expect(execute).toHaveBeenCalledWith(
-      photoScribble.generateScribbleArtwork,
+      photoScribble.generateShadingArtwork,
       input.identity,
       environment,
       undefined,
@@ -490,10 +499,10 @@ describe("Scribble worker runtime", () => {
 
   it("turns resolution failure into a bounded safe failure before generation", async () => {
     const execute = vi.fn(
-      (..._args: Parameters<ScribbleArtworkExecutor>) => artwork,
+      (..._args: Parameters<ShadingArtworkExecutor>) => artwork,
     );
     const emitProgress = vi.fn();
-    const response = await handleScribbleWorkerMessage(
+    const response = await handleShadingWorkerMessage(
       request(),
       execute,
       emitProgress,
@@ -521,7 +530,7 @@ describe("Scribble worker runtime", () => {
     ];
     const resolveEnvironment = vi.fn(async () => environments.shift()!);
     const received: SketchEnvironment[] = [];
-    const execute: ScribbleArtworkExecutor = (
+    const execute: ShadingArtworkExecutor = (
       _generate,
       _identity,
       environment,
@@ -542,14 +551,14 @@ describe("Scribble worker runtime", () => {
       params,
       seed: "second",
     });
-    await handleScribbleWorkerMessage(
+    await handleShadingWorkerMessage(
       first,
       execute,
       undefined,
       () => 0,
       resolveEnvironment,
     );
-    await handleScribbleWorkerMessage(
+    await handleShadingWorkerMessage(
       second,
       execute,
       undefined,

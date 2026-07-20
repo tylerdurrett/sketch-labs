@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 
-import { bbox, imageAssetParam } from '../sketches/sketch-util'
+import { bbox, choiceParam, imageAssetParam } from '../sketches/sketch-util'
 import type { ParamSpec } from '../sketch'
 import type { Point } from '../types'
 
@@ -47,6 +47,52 @@ describe('imageAssetParam', () => {
     expect(imageAssetParam({}, schema, 'image')).toBe('portrait-default')
     expect(imageAssetParam({ image: 42 }, schema, 'image')).toBe(
       'portrait-default',
+    )
+  })
+})
+
+describe('choiceParam', () => {
+  const schema = {
+    strategy: {
+      kind: 'choice',
+      options: [
+        { value: 'scribble', label: 'Scribble' },
+        { value: 'stippling', label: 'Stippling' },
+      ],
+      default: 'scribble',
+    },
+    count: { kind: 'number', min: 1, max: 10, default: 5 },
+  } as const satisfies Record<string, ParamSpec>
+
+  it('returns a declared present value with its exact value-union type', () => {
+    const value = choiceParam({ strategy: 'stippling' }, schema, 'strategy')
+    expect(value).toBe('stippling')
+    expectTypeOf(value).toEqualTypeOf<'scribble' | 'stippling'>()
+  })
+
+  it('falls back to the declared default only when the key is absent', () => {
+    expect(choiceParam({}, schema, 'strategy')).toBe('scribble')
+  })
+
+  it.each([undefined, 42, 'hatching'])(
+    'rejects an invalid explicitly present value (%s)',
+    (value) => {
+      expect(() => choiceParam({ strategy: value }, schema, 'strategy')).toThrow(
+        /value must be one of its declared option values/,
+      )
+    },
+  )
+
+  it('validates the Choice declaration before resolving a value', () => {
+    const malformed = {
+      strategy: {
+        kind: 'choice',
+        options: [{ value: 'scribble', label: '' }],
+        default: 'scribble',
+      },
+    } as const satisfies Record<string, ParamSpec>
+    expect(() => choiceParam({}, malformed, 'strategy')).toThrow(
+      /nonempty string label/,
     )
   })
 })

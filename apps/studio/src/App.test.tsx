@@ -467,7 +467,7 @@ describe("App — Photo Scribble integration (#333)", () => {
 describe("App — hidden-line navigation guard (#289)", () => {
   it("disables Sketch navigation for the full active interval with the exact reason", () => {
     mountApp();
-    // Use an immediate live-Fill Sketch here. Scribble-capable Sketches now
+    // Use an immediate live-Fill Sketch here. Shading-capable Sketches now
     // intentionally defer Outline until current worker geometry is painted.
     selectOption("Circles");
     const outlineChoice = document.querySelector<HTMLButtonElement>(

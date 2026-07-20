@@ -165,7 +165,7 @@ describe('Photo Scribble black-box contract', () => {
     delete legacyParams.detailInfluence
     const environment = environmentFor(FIXTURE_PIXELS)
 
-    const before = sketch.generateScribbleArtwork!(
+    const before = sketch.generateShadingArtwork!(
       legacyParams,
       'legacy-detail-influence',
       FRAME,
@@ -182,7 +182,7 @@ describe('Photo Scribble black-box contract', () => {
       params: legacyParams,
       locks: [],
     })
-    const after = sketch.generateScribbleArtwork!(
+    const after = sketch.generateShadingArtwork!(
       restored.params,
       restored.seed,
       FRAME,
@@ -205,7 +205,7 @@ describe('Photo Scribble black-box contract', () => {
     delete legacyParams.detailSensitivity
     const environment = environmentFor(FIXTURE_PIXELS)
 
-    const before = sketch.generateScribbleArtwork!(
+    const before = sketch.generateShadingArtwork!(
       legacyParams,
       'legacy-detail-sensitivity',
       FRAME,
@@ -221,7 +221,7 @@ describe('Photo Scribble black-box contract', () => {
       params: legacyParams,
       locks: [],
     })
-    const after = sketch.generateScribbleArtwork!(
+    const after = sketch.generateShadingArtwork!(
       restored.params,
       restored.seed,
       FRAME,
@@ -241,14 +241,14 @@ describe('Photo Scribble black-box contract', () => {
     const params = fastParams()
     const environment = environmentFor(FIXTURE_PIXELS)
 
-    const first = sketch.generateScribbleArtwork!(
+    const first = sketch.generateShadingArtwork!(
       params,
       'repeatable-photo',
       FRAME,
       undefined,
       environment,
     )
-    const second = sketch.generateScribbleArtwork!(
+    const second = sketch.generateShadingArtwork!(
       params,
       'repeatable-photo',
       FRAME,
@@ -287,7 +287,7 @@ describe('Photo Scribble black-box contract', () => {
           : undefined,
     }
 
-    const first = sketch.generateScribbleArtwork!(
+    const first = sketch.generateShadingArtwork!(
       params,
       'repeatable-detail-photo',
       FRAME,
@@ -296,7 +296,7 @@ describe('Photo Scribble black-box contract', () => {
     )
     const firstInput = capturedInput(0)
     const firstResult = capturedResult(0)
-    const second = sketch.generateScribbleArtwork!(
+    const second = sketch.generateShadingArtwork!(
       params,
       'repeatable-detail-photo',
       FRAME,
@@ -339,7 +339,7 @@ describe('Photo Scribble black-box contract', () => {
       CHANGED_PIXELS,
     )
 
-    const before = sketch.generateScribbleArtwork!(
+    const before = sketch.generateShadingArtwork!(
       params,
       seed,
       FRAME,
@@ -366,7 +366,7 @@ describe('Photo Scribble black-box contract', () => {
       ),
     )
     const restored = applyPreset(sketch.schema, loaded)
-    const after = sketch.generateScribbleArtwork!(
+    const after = sketch.generateShadingArtwork!(
       restored.params,
       restored.seed,
       FRAME,
@@ -543,7 +543,7 @@ describe('Photo Scribble black-box contract', () => {
 
   it('does not expose decoded data through Strategy input or Scene output', () => {
     const sketch = createPhotoScribble(HEADLESS_FIXTURE_LOOKUP_KEY)
-    const artwork = sketch.generateScribbleArtwork!(
+    const artwork = sketch.generateShadingArtwork!(
       fastParams(),
       'no-raster-leak',
       FRAME,

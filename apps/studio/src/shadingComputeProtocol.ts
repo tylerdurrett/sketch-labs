@@ -4,65 +4,65 @@ import type {
   ParamSchema,
   Params,
   Scene,
-  ScribbleDiagnostics,
-  ScribbleProgress,
+  ShadingDiagnostics,
+  ShadingProgress,
   Seed,
 } from "@harness/core";
 
 /** A schema-backed authored value that can cross the Worker boundary. */
-export type ScribbleParamValue = string | number;
+export type ShadingParamValue = string | number;
 
-export interface ScribbleParamEntry {
+export interface ShadingParamEntry {
   readonly key: string;
-  readonly value: ScribbleParamValue;
+  readonly value: ShadingParamValue;
 }
 
-/** Every input that can change one complete Scribble artwork preparation. */
-export interface ScribbleComputeIdentity {
+/** Every input that can change one complete Shading artwork preparation. */
+export interface ShadingComputeIdentity {
   readonly sketchId: string;
-  readonly params: readonly ScribbleParamEntry[];
+  readonly params: readonly ShadingParamEntry[];
   readonly seed: Seed;
   readonly compositionFrame: Readonly<CoordinateSpace>;
 }
 
-export interface ScribbleComputeRequest {
+export interface ShadingComputeRequest {
   readonly type: "compute";
   readonly jobId: number;
-  readonly identity: ScribbleComputeIdentity;
+  readonly identity: ShadingComputeIdentity;
 }
 
-/** Compact, identity-free progress emitted while a Scribble job is running. */
-export interface ScribbleComputeProgress {
+/** Compact, identity-free progress emitted while a Shading job is running. */
+export interface ShadingComputeProgress {
   readonly type: "progress";
   readonly jobId: number;
-  readonly snapshot: ScribbleProgress;
+  readonly snapshot: ShadingProgress;
 }
 
-export interface ScribbleComputeSuccess {
+export interface ShadingComputeSuccess {
   readonly type: "success";
   readonly jobId: number;
-  readonly identity: ScribbleComputeIdentity;
+  readonly identity: ShadingComputeIdentity;
   readonly scene: Scene;
-  readonly diagnostics: ScribbleDiagnostics;
+  readonly diagnostics: ShadingDiagnostics;
   readonly computeTimeMs: number;
 }
 
-export interface ScribbleComputeFailure {
+export interface ShadingComputeFailure {
   readonly type: "failure";
   readonly jobId: number;
-  readonly identity: ScribbleComputeIdentity;
+  readonly identity: ShadingComputeIdentity;
   readonly error: string;
 }
 
-export type ScribbleComputeResponse =
-  | ScribbleComputeSuccess
-  | ScribbleComputeFailure;
+export type ShadingComputeResponse =
+  | ShadingComputeSuccess
+  | ShadingComputeFailure;
 
-export type ScribbleWorkerMessage =
-  | ScribbleComputeProgress
-  | ScribbleComputeResponse;
+export type ShadingWorkerMessage =
+  | ShadingComputeProgress
+  | ShadingComputeResponse;
 
-export interface CreateScribbleComputeIdentityInput {
+export interface CreateShadingComputeIdentityInput {
   readonly sketchId: string;
   readonly schema: ParamSchema;
   readonly params: Params;
@@ -111,12 +111,15 @@ function copyParamValue(
   value: unknown,
   key: string,
   spec: ParamSchema[string],
-): ScribbleParamValue {
+): ShadingParamValue {
   if (spec.kind === "number" && isFiniteNumber(value)) return value;
-  if (spec.kind === "color" && typeof value === "string") return value;
-  if (spec.kind === "image-asset" && typeof value === "string") return value;
+  // Every non-numeric schema value crosses this protocol as an already-
+  // validated string. This keeps Color and Image Asset behavior exact while
+  // allowing future schema-backed Choice strings without teaching the worker
+  // protocol about Choice semantics or applicability.
+  if (spec.kind !== "number" && typeof value === "string") return value;
   throw new TypeError(
-    `Scribble parameter ${key} does not match its ${spec.kind} schema`,
+    `Shading parameter ${key} does not match its ${spec.kind} schema`,
   );
 }
 
@@ -125,9 +128,9 @@ function copyParamValue(
  * Incidental insertion order and extra keys in the inhabited params object do not
  * participate in cache identity.
  */
-export function createScribbleComputeIdentity(
-  input: CreateScribbleComputeIdentityInput,
-): ScribbleComputeIdentity {
+export function createShadingComputeIdentity(
+  input: CreateShadingComputeIdentityInput,
+): ShadingComputeIdentity {
   const params = Object.keys(input.schema).map((key) =>
     Object.freeze({
       key,
@@ -143,18 +146,18 @@ export function createScribbleComputeIdentity(
       height: input.compositionFrame.height,
     }),
   });
-  if (!isScribbleComputeIdentity(identity)) {
-    throw new TypeError("Scribble compute identity contains an invalid value");
+  if (!isShadingComputeIdentity(identity)) {
+    throw new TypeError("Shading compute identity contains an invalid value");
   }
   return identity;
 }
 
 /** Make an isolated, deeply immutable copy suitable for cache ownership. */
-export function copyScribbleComputeIdentity(
-  identity: ScribbleComputeIdentity,
-): ScribbleComputeIdentity {
-  if (!isScribbleComputeIdentity(identity)) {
-    throw new TypeError("Cannot copy an invalid Scribble compute identity");
+export function copyShadingComputeIdentity(
+  identity: ShadingComputeIdentity,
+): ShadingComputeIdentity {
+  if (!isShadingComputeIdentity(identity)) {
+    throw new TypeError("Cannot copy an invalid Shading compute identity");
   }
   return Object.freeze({
     sketchId: identity.sketchId,
@@ -171,10 +174,10 @@ export function copyScribbleComputeIdentity(
   });
 }
 
-/** Compare every Scribble-affecting input exactly and in canonical schema order. */
-export function scribbleComputeIdentitiesEqual(
-  left: ScribbleComputeIdentity,
-  right: ScribbleComputeIdentity,
+/** Compare every Shading-affecting input exactly and in canonical schema order. */
+export function shadingComputeIdentitiesEqual(
+  left: ShadingComputeIdentity,
+  right: ShadingComputeIdentity,
 ): boolean {
   if (
     left.sketchId !== right.sketchId ||
@@ -192,9 +195,9 @@ export function scribbleComputeIdentitiesEqual(
   );
 }
 
-export function isScribbleComputeIdentity(
+export function isShadingComputeIdentity(
   value: unknown,
-): value is ScribbleComputeIdentity {
+): value is ShadingComputeIdentity {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ["sketchId", "params", "seed", "compositionFrame"]) ||
@@ -229,19 +232,19 @@ export function isScribbleComputeIdentity(
   return true;
 }
 
-export function isScribbleComputeRequest(
+export function isShadingComputeRequest(
   value: unknown,
-): value is ScribbleComputeRequest {
+): value is ShadingComputeRequest {
   return (
     isRecord(value) &&
     hasExactKeys(value, ["type", "jobId", "identity"]) &&
     value.type === "compute" &&
     isPositiveJobId(value.jobId) &&
-    isScribbleComputeIdentity(value.identity)
+    isShadingComputeIdentity(value.identity)
   );
 }
 
-function isScribbleProgressSnapshot(value: unknown): value is ScribbleProgress {
+function isShadingProgressSnapshot(value: unknown): value is ShadingProgress {
   if (
     !isRecord(value) ||
     !hasExactKeys(
@@ -265,15 +268,15 @@ function isScribbleProgressSnapshot(value: unknown): value is ScribbleProgress {
   return true;
 }
 
-export function isScribbleComputeProgress(
+export function isShadingComputeProgress(
   value: unknown,
-): value is ScribbleComputeProgress {
+): value is ShadingComputeProgress {
   return (
     isRecord(value) &&
     hasExactKeys(value, ["type", "jobId", "snapshot"]) &&
     value.type === "progress" &&
     isPositiveJobId(value.jobId) &&
-    isScribbleProgressSnapshot(value.snapshot)
+    isShadingProgressSnapshot(value.snapshot)
   );
 }
 
@@ -350,33 +353,44 @@ function isScene(value: unknown): value is Scene {
   });
 }
 
-function isScribbleDiagnostics(value: unknown): value is ScribbleDiagnostics {
+function isShadingFidelity(
+  value: unknown,
+): value is ShadingDiagnostics["fidelity"] {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["kind", "residualError"]) &&
+    value.kind === "scribble" &&
+    isFiniteNumber(value.residualError) &&
+    value.residualError >= 0 &&
+    value.residualError <= 1
+  );
+}
+
+function isShadingDiagnostics(value: unknown): value is ShadingDiagnostics {
   return (
     isRecord(value) &&
     hasExactKeys(value, [
       "termination",
-      "residualError",
       "pathLength",
       "polylineCount",
       "penLiftCount",
+      "fidelity",
     ]) &&
     (value.termination === "completed" ||
       value.termination === "stopped-early" ||
       value.termination === "budget-exhausted") &&
-    isFiniteNumber(value.residualError) &&
-    value.residualError >= 0 &&
-    value.residualError <= 1 &&
     isNonNegativeFiniteNumber(value.pathLength) &&
     Number.isSafeInteger(value.polylineCount) &&
     (value.polylineCount as number) >= 0 &&
     Number.isSafeInteger(value.penLiftCount) &&
-    value.penLiftCount === Math.max(0, (value.polylineCount as number) - 1)
+    value.penLiftCount === Math.max(0, (value.polylineCount as number) - 1) &&
+    isShadingFidelity(value.fidelity)
   );
 }
 
-export function isScribbleComputeSuccess(
+export function isShadingComputeSuccess(
   value: unknown,
-): value is ScribbleComputeSuccess {
+): value is ShadingComputeSuccess {
   return (
     isRecord(value) &&
     hasExactKeys(value, [
@@ -389,34 +403,34 @@ export function isScribbleComputeSuccess(
     ]) &&
     value.type === "success" &&
     isPositiveJobId(value.jobId) &&
-    isScribbleComputeIdentity(value.identity) &&
+    isShadingComputeIdentity(value.identity) &&
     isScene(value.scene) &&
-    isScribbleDiagnostics(value.diagnostics) &&
+    isShadingDiagnostics(value.diagnostics) &&
     isNonNegativeFiniteNumber(value.computeTimeMs)
   );
 }
 
-export function isScribbleComputeFailure(
+export function isShadingComputeFailure(
   value: unknown,
-): value is ScribbleComputeFailure {
+): value is ShadingComputeFailure {
   return (
     isRecord(value) &&
     hasExactKeys(value, ["type", "jobId", "identity", "error"]) &&
     value.type === "failure" &&
     isPositiveJobId(value.jobId) &&
-    isScribbleComputeIdentity(value.identity) &&
+    isShadingComputeIdentity(value.identity) &&
     typeof value.error === "string"
   );
 }
 
-export function isScribbleComputeResponse(
+export function isShadingComputeResponse(
   value: unknown,
-): value is ScribbleComputeResponse {
-  return isScribbleComputeSuccess(value) || isScribbleComputeFailure(value);
+): value is ShadingComputeResponse {
+  return isShadingComputeSuccess(value) || isShadingComputeFailure(value);
 }
 
-export function isScribbleWorkerMessage(
+export function isShadingWorkerMessage(
   value: unknown,
-): value is ScribbleWorkerMessage {
-  return isScribbleComputeProgress(value) || isScribbleComputeResponse(value);
+): value is ShadingWorkerMessage {
+  return isShadingComputeProgress(value) || isShadingComputeResponse(value);
 }
