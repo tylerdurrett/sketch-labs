@@ -164,4 +164,15 @@ describe('Stippling mask validation', () => {
     ).toThrow(RangeError)
     expect(sample).not.toHaveBeenCalled()
   })
+
+  it('rejects a large but safe interval count before sampling', () => {
+    const sample = vi.fn(() => 1)
+    const mask = createShadingMask(sample)
+
+    // A trillion intervals is a safe integer, but is not operationally bounded.
+    expect(() =>
+      isMaskPermittedStipple(mask, FRAME, [1, 1], [2, 1], 1e-12),
+    ).toThrow('maxSpacing exceeds the Stipple mask interval limit')
+    expect(sample).not.toHaveBeenCalled()
+  })
 })

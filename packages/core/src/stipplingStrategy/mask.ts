@@ -2,6 +2,8 @@ import type { CoordinateSpace } from '../scene'
 import { sampleShadingMask, type ShadingMask } from '../shadingFields'
 import type { Point } from '../types'
 
+const MAX_STIPPLE_MASK_INTERVALS = 1_000_000
+
 function assertValidMaxSpacing(maxSpacing: number): void {
   if (!Number.isFinite(maxSpacing) || maxSpacing <= 0) {
     throw new RangeError('maxSpacing must be finite and positive')
@@ -59,6 +61,9 @@ export function isMaskPermittedStipple(
   const intervalCount = Math.ceil(length / maxSpacing)
   if (!Number.isSafeInteger(intervalCount)) {
     throw new RangeError('maxSpacing produces an unsafe interval count')
+  }
+  if (intervalCount > MAX_STIPPLE_MASK_INTERVALS) {
+    throw new RangeError('maxSpacing exceeds the Stipple mask interval limit')
   }
 
   if (intervalCount === 0) return isPermittedSample(mask, frame, start)
