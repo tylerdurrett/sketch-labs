@@ -496,6 +496,50 @@ describe("PaperSection", () => {
     expect(events).toEqual(["begin", "preview", "commit"]);
   });
 
+  it("keeps transient dimension validation silent and rejects coherently on blur", () => {
+    const square: PlotProfile = { ...profile, width: 200, height: 200 };
+    const { el, events, profile: controlled } = mountTransactional(square);
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    const height = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper height (mm)"]',
+    )!;
+
+    focusInput(width);
+    setInput(width, "1");
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    setInput(width, "15");
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    expect(controlled()).toEqual(square);
+
+    focusInput(height);
+    expect(width.value).toBe("200");
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe(
+      "Paper width must be greater than 20 mm to leave room for the margins.",
+    );
+
+    setInput(height, "22");
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    expect(controlled()).toEqual({ ...square, height: 22 });
+    expect(width.value).toBe("200");
+    expect(height.value).toBe("22");
+
+    blurInput(height);
+    clickButton(el, "Swap to portrait");
+    expect(controlled()).toEqual({ ...square, width: 22, height: 200 });
+    expect(width.value).toBe("22");
+    expect(height.value).toBe("200");
+    expect(events).toEqual([
+      "begin",
+      "cancel",
+      "begin",
+      "preview",
+      "commit",
+      "atomic",
+    ]);
+  });
+
   it("previews and commits a positive physical tool width transactionally", () => {
     const { el, events, profile: controlled } = mountTransactional();
     const toolWidth = el.querySelector<HTMLInputElement>(
@@ -631,7 +675,7 @@ describe("PaperSection", () => {
     focusInput(width);
     setInput(width, "");
     blurInput(width);
-    expect(width.value).toBe("");
+    expect(width.value).toBe("210");
     expect(el.querySelector('[role="alert"]')).not.toBeNull();
 
     restore({ ...profile, width: 230 });
@@ -1040,7 +1084,9 @@ describe("PaperSection", () => {
     expect(onChange).not.toHaveBeenCalled();
     const error = el.querySelector('[role="alert"]');
     const select = el.querySelector("select")!;
-    expect(error?.textContent).toContain("no drawable rectangle");
+    expect(error?.textContent).toBe(
+      "The selected paper size is too small for the current margins. Choose a larger size or reduce the margins.",
+    );
     expect(select.getAttribute("aria-invalid")).toBe("true");
     expect(select.getAttribute("aria-describedby")).toBe(error?.id);
     for (const input of el.querySelectorAll('input[type="number"]')) {

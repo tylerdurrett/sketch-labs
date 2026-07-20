@@ -90,6 +90,12 @@ interface PaperError {
   message: string;
 }
 
+interface ActivePaperField {
+  field: PaperField;
+  snapshot: PlotProfile;
+  pendingError: PaperError | null;
+}
+
 function paperName(name: StandardPaperName): string {
   return name.startsWith("a")
     ? name.toUpperCase()
@@ -116,6 +122,79 @@ function sameProfile(left: PlotProfile, right: PlotProfile): boolean {
     left.includeFrame === right.includeFrame &&
     Object.is(left.toolWidthMillimeters, right.toolWidthMillimeters)
   );
+}
+
+function paperValidationError(
+  candidate: PlotProfile,
+  target: PaperErrorTarget,
+  displayUnit: PaperDisplayUnit,
+): PaperError {
+  const measurement = (millimeters: number): string =>
+    `${formatDimension(millimeters, displayUnit)} ${displayUnit}`;
+  const horizontalMargins = candidate.insets.left + candidate.insets.right;
+  const verticalMargins = candidate.insets.top + candidate.insets.bottom;
+
+  if (
+    !Number.isFinite(candidate.toolWidthMillimeters) ||
+    candidate.toolWidthMillimeters <= 0
+  ) {
+    return {
+      target: "toolWidth",
+      message: "Tool width must be greater than 0.",
+    };
+  }
+  if (!Number.isFinite(candidate.width) || candidate.width <= 0) {
+    return { target: "width", message: "Paper width must be greater than 0." };
+  }
+  if (!Number.isFinite(candidate.height) || candidate.height <= 0) {
+    return {
+      target: "height",
+      message: "Paper height must be greater than 0.",
+    };
+  }
+  if (
+    Object.values(candidate.insets).some(
+      (inset) => !Number.isFinite(inset) || inset < 0,
+    )
+  ) {
+    return { target: "margin", message: "Margin must be 0 or greater." };
+  }
+  if (
+    horizontalMargins >= candidate.width ||
+    verticalMargins >= candidate.height
+  ) {
+    if (target === "margin") {
+      return {
+        target,
+        message: `Margin must be less than ${measurement(Math.min(candidate.width, candidate.height) / 2)} to leave drawable space.`,
+      };
+    }
+    if (target === "format") {
+      return {
+        target,
+        message:
+          "The selected paper size is too small for the current margins. Choose a larger size or reduce the margins.",
+      };
+    }
+    if (target === "orientation") {
+      return {
+        target,
+        message:
+          "This orientation is too small for the current margins. Reduce the margins before swapping.",
+      };
+    }
+    if (horizontalMargins >= candidate.width) {
+      return {
+        target: "width",
+        message: `Paper width must be greater than ${measurement(horizontalMargins)} to leave room for the margins.`,
+      };
+    }
+    return {
+      target: "height",
+      message: `Paper height must be greater than ${measurement(verticalMargins)} to leave room for the margins.`,
+    };
+  }
+  return { target, message: "Enter valid paper settings." };
 }
 
 /**
@@ -150,10 +229,8 @@ export function PaperSection({
     formatDimension(profile.toolWidthMillimeters, displayUnit),
   );
   const [error, setError] = useState<PaperError | null>(null);
-  const activeField = useRef<{
-    field: PaperField;
-    snapshot: PlotProfile;
-  } | null>(null);
+  const activeField = useRef<ActivePaperField | null>(null);
+  const rejectedFieldError = useRef<PaperError | null>(null);
   const dirtyDimensions = useRef<Set<PaperDimension>>(new Set());
   const id = useId();
 
@@ -176,7 +253,12 @@ export function PaperSection({
       formatDimension(profile.toolWidthMillimeters, displayUnit),
     );
     dirtyDimensions.current.clear();
-    setError(null);
+    if (rejectedFieldError.current === null) {
+      setError(null);
+    } else {
+      setError(rejectedFieldError.current);
+      rejectedFieldError.current = null;
+    }
   }, [
     displayUnit,
     profile.height,
@@ -209,6 +291,17 @@ export function PaperSection({
     dirtyDimensions.current.clear();
   };
 
+  // Focused numeric fields may briefly contain an incomplete number. Keep the
+  // validation result for blur/Enter without interrupting the user's typing.
+  const reportFieldError = (nextError: PaperError): void => {
+    if (activeField.current === null) {
+      setError(nextError);
+      return;
+    }
+    activeField.current.pendingError = nextError;
+    setError(null);
+  };
+
   const routeCandidate = (
     candidate: PlotProfile,
     source: PaperProfileCandidateSource,
@@ -223,6 +316,9 @@ export function PaperSection({
 
     const decision = routeProfileCandidate(candidate, source);
     if (decision.kind === "reject") {
+      if (activeField.current !== null) {
+        activeField.current.pendingError = null;
+      }
       restoreControlledDrafts();
       setError({ target, message: decision.message });
       return null;
@@ -247,16 +343,46 @@ export function PaperSection({
   const beginField = (field: PaperField): void => {
     if (activeField.current?.field === field) return;
     dirtyDimensions.current.clear();
-    activeField.current = { field, snapshot: copyProfile(profile) };
+    rejectedFieldError.current = null;
+    activeField.current = {
+      field,
+      snapshot: copyProfile(profile),
+      pendingError: null,
+    };
     if ("transaction" in editProps && editProps.transaction !== undefined) {
       editProps.transaction.onBegin();
     }
   };
 
   const commitField = (field: PaperField): void => {
-    if (activeField.current?.field !== field) return;
+    const active = activeField.current;
+    if (active?.field !== field) return;
     activeField.current = null;
     dirtyDimensions.current.clear();
+    if (active.pendingError !== null) {
+      const rejected = active.pendingError;
+      rejectedFieldError.current = sameProfile(profile, active.snapshot)
+        ? null
+        : rejected;
+      setDimensionDrafts({
+        width: formatDimension(active.snapshot.width, displayUnit),
+        height: formatDimension(active.snapshot.height, displayUnit),
+      });
+      const inset = linkedInset(active.snapshot);
+      setMarginDraft(
+        inset === null ? "" : formatDimension(inset, displayUnit),
+      );
+      setToolWidthDraft(
+        formatDimension(active.snapshot.toolWidthMillimeters, displayUnit),
+      );
+      setError(rejected);
+      if ("transaction" in editProps && editProps.transaction !== undefined) {
+        editProps.transaction.onCancel();
+      } else {
+        editProps.onChange(active.snapshot);
+      }
+      return;
+    }
     if ("transaction" in editProps && editProps.transaction !== undefined) {
       editProps.transaction.onCommit();
     }
@@ -266,6 +392,7 @@ export function PaperSection({
     const active = activeField.current;
     if (active?.field !== field) return;
     activeField.current = null;
+    rejectedFieldError.current = null;
     dirtyDimensions.current.clear();
     const snapshot = active.snapshot;
     setDimensionDrafts({
@@ -313,24 +440,19 @@ export function PaperSection({
           : routeCandidate(candidate, source, target);
       if (routed === null) return;
       validatePlotProfile(routed.profile);
+      if (activeField.current !== null) {
+        activeField.current.pendingError = null;
+      }
       setError(null);
       if (routed.kind === "handled") return;
       preview(routed.profile);
-    } catch (cause) {
-      const message =
-        cause instanceof Error ? cause.message : "Invalid paper dimensions";
-      // Dimension edits can accumulate as transient drafts, so validation may
-      // identify the OTHER dirty dimension. Core's messages name the affected
-      // axis; format changes remain owned by the select as a single operation.
-      const resolvedTarget =
-        target !== "width" && target !== "height"
-          ? target
-          : message.includes("width") || message.includes("horizontal")
-            ? "width"
-            : message.includes("height") || message.includes("vertical")
-              ? "height"
-              : target;
-      setError({ target: resolvedTarget, message });
+    } catch {
+      const validationError = paperValidationError(
+        candidate,
+        target,
+        displayUnit,
+      );
+      reportFieldError(validationError);
     }
   };
 
@@ -343,10 +465,11 @@ export function PaperSection({
     for (const dirty of dirtyDimensions.current) {
       const dirtyDraft = nextDrafts[dirty];
       if (dirtyDraft.trim() === "") {
-        setError({
+        const validationError = {
           target: dirty,
           message: `${dirty[0]!.toUpperCase()}${dirty.slice(1)} is required.`,
-        });
+        } as const;
+        reportFieldError(validationError);
         return;
       }
       const displayValue = Number(dirtyDraft);
@@ -381,12 +504,8 @@ export function PaperSection({
       } else {
         editProps.onChange(accepted);
       }
-    } catch (cause) {
-      setError({
-        target,
-        message:
-          cause instanceof Error ? cause.message : "Invalid paper dimensions",
-      });
+    } catch {
+      setError(paperValidationError(candidate, target, displayUnit));
     }
   };
 
@@ -412,7 +531,11 @@ export function PaperSection({
   const editMargin = (draft: string): void => {
     setMarginDraft(draft);
     if (draft.trim() === "") {
-      setError({ target: "margin", message: "Margin is required." });
+      const validationError = {
+        target: "margin",
+        message: "Margin is required.",
+      } as const;
+      reportFieldError(validationError);
       return;
     }
 
@@ -437,7 +560,11 @@ export function PaperSection({
   const editToolWidth = (draft: string): void => {
     setToolWidthDraft(draft);
     if (draft.trim() === "") {
-      setError({ target: "toolWidth", message: "Tool width is required." });
+      const validationError = {
+        target: "toolWidth",
+        message: "Tool width is required.",
+      } as const;
+      reportFieldError(validationError);
       return;
     }
 
