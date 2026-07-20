@@ -19,7 +19,7 @@ import nicePinecone from '../sketches/photo-scribble/presets/nice-pinecone.json'
 const FRAME = { width: 1, height: 0.75 }
 // Exercise the real generator but stop early; this is a geometry-preservation
 // regression, not the deferred high-density performance/visual campaign.
-const BOUNDED_STOP_POINT = 0.5
+const BOUNDED_STOP_POINT = 1
 const PIXELS: DecodedPixels = {
   width: 2,
   height: 2,
@@ -63,23 +63,23 @@ describe('Photo Scribble production presets', () => {
 
       expect(preset.params).not.toHaveProperty('detailInfluence')
       expect(reconciled.params.detailInfluence).toBe(0)
-      expect(
-        photoScribble.generate(
-          afterParams,
-          reconciled.seed,
-          0,
-          FRAME,
-          zeroInfluenceEnvironment,
-        ),
-      ).toEqual(
-        photoScribble.generate(
-          beforeParams,
-          preset.seed,
-          0,
-          FRAME,
-          zeroInfluenceEnvironment,
-        ),
+      const baseline = photoScribble.generate(
+        beforeParams,
+        preset.seed,
+        0,
+        FRAME,
+        zeroInfluenceEnvironment,
       )
+      const reconciledScene = photoScribble.generate(
+        afterParams,
+        reconciled.seed,
+        0,
+        FRAME,
+        zeroInfluenceEnvironment,
+      )
+
+      expect(baseline.primitives.length).toBeGreaterThan(0)
+      expect(reconciledScene).toEqual(baseline)
     },
   )
 
