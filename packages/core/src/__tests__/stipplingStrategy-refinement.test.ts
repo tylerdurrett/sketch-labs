@@ -5,6 +5,7 @@ import type { CoordinateSpace } from '../scene'
 import {
   createShadingMask,
   createToneField,
+  sampleEffectiveTone,
   type ToneSource,
 } from '../shadingFields'
 import { isMaskPermittedStipple } from '../stipplingStrategy/mask'
@@ -19,7 +20,7 @@ import type {
   StipplingControls,
   StipplingModel,
 } from '../stipplingStrategy/types'
-import type { Point } from '../types'
+import type { Point, Random } from '../types'
 
 const FRAME: CoordinateSpace = Object.freeze({ width: 100, height: 100 })
 
@@ -258,6 +259,47 @@ describe('bounded Stipple refinement', () => {
     expect(evaluations).toBeGreaterThan(1)
     expect(outcome.marks).toBe(initial)
     expect(outcome.error).toBe(initialError)
+  })
+
+  it('keeps refined centers out of an off-lattice exact-zero tone hole', () => {
+    const holeCenter: Point = [20.2, 20.2]
+    const holeSource = source(([x, y]) =>
+      Math.hypot(x - holeCenter[0], y - holeCenter[1]) <= 0.2 ? 0 : 1,
+    )
+    const target = model(holeSource)
+    const column = Math.floor(holeCenter[0] / target.lattice.cellWidth)
+    const row = Math.floor(holeCenter[1] / target.lattice.cellHeight)
+    const cellIndex = row * target.lattice.columns + column
+    const cellStartX = column * target.lattice.cellWidth
+    const cellStartY = row * target.lattice.cellHeight
+    const initial = frozenMarks([[[90, 90], 0.75]])
+    const errorByX = {
+      ...target,
+      distributionError: (marks: readonly StippleMark[]) =>
+        marks[0]?.center[0] ?? 0,
+    } satisfies StipplingModel
+    const draws = [
+      0,
+      (cellIndex + 0.5) / target.lattice.sampleCount,
+      (holeCenter[0] - cellStartX) / target.lattice.cellWidth,
+      (holeCenter[1] - cellStartY) / target.lattice.cellHeight,
+      0,
+    ]
+    const rng = {
+      value: () => draws.shift() ?? 0,
+    } as Random
+
+    expect(target.lattice.samples[cellIndex]!.demand).toBe(1)
+    expect(sampleEffectiveTone(holeSource, holeCenter)).toBe(0)
+
+    const outcome = refineStipples(errorByX, rng, initial, {
+      maxAttempts: 1,
+    })
+
+    expect(outcome.marks).toBe(initial)
+    for (const stipple of outcome.marks) {
+      expect(sampleEffectiveTone(holeSource, stipple.center)).toBeGreaterThan(0)
+    }
   })
 
   it('extends lower attempt budgets as an exact deterministic prefix', () => {

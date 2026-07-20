@@ -1,3 +1,4 @@
+import { sampleEffectiveTone } from '../shadingFields'
 import type { Point, Random } from '../types'
 import { isMaskPermittedStipple } from './mask'
 import type { StippleMark, StipplingModel } from './types'
@@ -144,54 +145,17 @@ class RefinementCenterIndex {
   }
 }
 
-interface DemandDistribution {
-  readonly cumulative: Float64Array
-  readonly total: number
-}
-
-function buildDemandDistribution(
-  model: Readonly<StipplingModel>,
-): DemandDistribution {
-  const cumulative = new Float64Array(model.lattice.sampleCount)
-  let total = 0
-
-  for (let index = 0; index < model.lattice.sampleCount; index++) {
-    const demand = model.lattice.samples[index]!.demand
-    if (Number.isFinite(demand) && demand > 0) total += demand
-    cumulative[index] = total
-  }
-
-  return { cumulative, total }
-}
-
-function demandSampleIndex(
-  distribution: DemandDistribution,
-  unitValue: number,
-): number | undefined {
-  if (distribution.total <= 0 || distribution.cumulative.length === 0) {
-    return undefined
-  }
-
-  const target = unitValue * distribution.total
-  let low = 0
-  let high = distribution.cumulative.length - 1
-  while (low < high) {
-    const middle = low + Math.floor((high - low) / 2)
-    if (distribution.cumulative[middle]! > target) high = middle
-    else low = middle + 1
-  }
-  return low
-}
-
 function candidateCenter(
   model: Readonly<StipplingModel>,
-  distribution: DemandDistribution,
-  demandDraw: number,
+  cellDraw: number,
   xDraw: number,
   yDraw: number,
 ): Point | undefined {
-  const index = demandSampleIndex(distribution, demandDraw)
-  if (index === undefined) return undefined
+  if (model.lattice.sampleCount === 0) return undefined
+  const index = Math.min(
+    model.lattice.sampleCount - 1,
+    Math.floor(cellDraw * model.lattice.sampleCount),
+  )
 
   const column = index % model.lattice.columns
   const row = Math.floor(index / model.lattice.columns)
@@ -217,12 +181,14 @@ function endpointsFor(
 /**
  * Improve an ordered Stipple draft with bounded demand-weighted relocations.
  *
- * Every attempt consumes exactly four values from the supplied mutable random
- * stream, regardless of rejection. Consequently a larger attempt budget is a
- * strict prefix extension of a smaller run from the same state. Candidates keep
- * their selected mark's index and orientation, and are committed only when the
- * complete fixed-length segment is mask-safe, its center remains blue-noise
- * separated, and the model reports a strictly lower finite distribution error.
+ * Every attempt consumes exactly five values from the supplied mutable random
+ * stream, regardless of rejection. Equal-area proposals are accepted linearly
+ * by effective demand sampled at their actual center, so off-lattice zero-tone
+ * holes remain empty. Consequently a larger attempt budget is a strict prefix
+ * extension of a smaller run from the same state. Candidates keep their selected
+ * mark's index and orientation, and are committed only when the complete
+ * fixed-length segment is mask-safe, its center remains blue-noise separated,
+ * and the model reports a strictly lower finite distribution error.
  */
 export function refineStipples(
   model: Readonly<StipplingModel>,
@@ -236,7 +202,6 @@ export function refineStipples(
     : Object.freeze([...marks])
   let currentMarks = originalMarks
   let currentError = computeStipplingDistributionError(model, currentMarks)
-  const demandDistribution = buildDemandDistribution(model)
   const centerIndex = new RefinementCenterIndex(
     currentMarks,
     model.scales.minimumSpacing,
@@ -244,9 +209,10 @@ export function refineStipples(
 
   for (let attempt = 0; attempt < attemptLimit; attempt++) {
     const markDraw = rng.value()
-    const demandDraw = rng.value()
+    const cellDraw = rng.value()
     const xDraw = rng.value()
     const yDraw = rng.value()
+    const acceptanceDraw = rng.value()
 
     if (currentMarks.length === 0) continue
     const markIndex = Math.min(
@@ -256,12 +222,12 @@ export function refineStipples(
     const previous = currentMarks[markIndex]!
     const center = candidateCenter(
       model,
-      demandDistribution,
-      demandDraw,
+      cellDraw,
       xDraw,
       yDraw,
     )
     if (center === undefined) continue
+    if (acceptanceDraw >= sampleEffectiveTone(model.source, center)) continue
     if (!centerIndex.isSeparated(center, markIndex)) continue
 
     const [start, end] = endpointsFor(
