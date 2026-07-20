@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createShadingMask,
@@ -56,6 +56,75 @@ describe("rasterizeToneReference", () => {
       [5, 30],
       [15, 30],
     ]);
+  });
+
+  it("maps pixel centers over an asymmetric committed Page Frame origin and extent", () => {
+    const sampled: Array<readonly [number, number]> = [];
+    rasterizeToneReference(
+      source((point) => {
+        sampled.push(point);
+        return 0;
+      }),
+      { width: 20, height: 40 },
+      2,
+      2,
+      { x: 2, y: 4, width: 12, height: 24 },
+    );
+
+    expect(sampled).toEqual([
+      [5, 10],
+      [11, 10],
+      [5, 22],
+      [11, 22],
+    ]);
+  });
+
+  it.each([
+    ["left", { x: -10, y: 0, width: 20, height: 10 }, 2, 1, [255, 0]],
+    ["right", { x: 0, y: 0, width: 20, height: 10 }, 2, 1, [0, 255]],
+    ["top", { x: 0, y: -10, width: 10, height: 20 }, 1, 2, [255, 0]],
+    ["bottom", { x: 0, y: 0, width: 10, height: 20 }, 1, 2, [0, 255]],
+  ] as const)(
+    "renders %s padding as paper white without sampling beyond the Composition",
+    (_side, pageFrame, width, height, expectedGray) => {
+      const tone = vi.fn(() => 1);
+      const mask = vi.fn(() => 1);
+      const raster = rasterizeToneReference(
+        source(tone, mask),
+        { width: 10, height: 10 },
+        width,
+        height,
+        pageFrame,
+      );
+
+      expect(
+        Array.from({ length: width * height }, (_, index) =>
+          raster.data[index * 4],
+        ),
+      ).toEqual(expectedGray);
+      expect(tone).toHaveBeenCalledOnce();
+      expect(mask).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("keeps mixed crop-and-padding white outside both Composition axes", () => {
+    const tone = vi.fn(() => 1);
+    const mask = vi.fn(() => 1);
+    const raster = rasterizeToneReference(
+      source(tone, mask),
+      { width: 10, height: 10 },
+      2,
+      2,
+      { x: 5, y: -5, width: 10, height: 10 },
+    );
+
+    expect(
+      Array.from({ length: 4 }, (_, index) => raster.data[index * 4]),
+    ).toEqual([255, 255, 0, 255]);
+    expect(tone).toHaveBeenCalledOnce();
+    expect(tone).toHaveBeenCalledWith([7.5, 2.5]);
+    expect(mask).toHaveBeenCalledOnce();
+    expect(mask).toHaveBeenCalledWith([7.5, 2.5]);
   });
 
   it("rasterizes Tone Calibration's two ramps and hard off-axis boundary to exact bytes", () => {

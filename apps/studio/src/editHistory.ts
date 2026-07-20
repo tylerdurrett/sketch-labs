@@ -1,4 +1,4 @@
-import type { Params, PlotProfile, Seed } from "@harness/core";
+import type { PageFrame, Params, PlotProfile, Seed } from "@harness/core";
 
 /** The maximum number of committed edit states retained for Undo. */
 export const EDIT_HISTORY_LIMIT = 100;
@@ -7,6 +7,16 @@ export const EDIT_HISTORY_LIMIT = 100;
 export type StudioEditProfile = Readonly<Omit<PlotProfile, "insets">> & {
   readonly insets: Readonly<PlotProfile["insets"]>;
 };
+
+/** Pair-safe absence or committed Page Frame with its frozen generation basis. */
+export type StudioFramingState =
+  | { readonly kind: "unframed" }
+  | {
+      readonly kind: "framed";
+      readonly pageFrame: Readonly<PageFrame>;
+      readonly generationAspect: number;
+      readonly aspectLocked: boolean;
+    };
 
 /**
  * The complete authored state of one mounted Sketch session.
@@ -19,6 +29,7 @@ export interface StudioEditState {
   readonly seed: Seed;
   readonly locks: ReadonlySet<string>;
   readonly profile: StudioEditProfile;
+  readonly framing: StudioFramingState;
   readonly tolerance: number;
 }
 
@@ -148,6 +159,7 @@ export function sameStudioEditState(
     Object.is(left.seed, right.seed) &&
     sameLocks(left.locks, right.locks) &&
     sameProfile(left.profile, right.profile) &&
+    sameFraming(left.framing, right.framing) &&
     Object.is(left.tolerance, right.tolerance)
   );
 }
@@ -206,5 +218,21 @@ function sameProfile(
     Object.is(left.insets.left, right.insets.left) &&
     left.includeFrame === right.includeFrame &&
     Object.is(left.toolWidthMillimeters, right.toolWidthMillimeters)
+  );
+}
+
+function sameFraming(
+  left: StudioFramingState,
+  right: StudioFramingState,
+): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "unframed" || right.kind === "unframed") return true;
+  return (
+    Object.is(left.pageFrame.x, right.pageFrame.x) &&
+    Object.is(left.pageFrame.y, right.pageFrame.y) &&
+    Object.is(left.pageFrame.width, right.pageFrame.width) &&
+    Object.is(left.pageFrame.height, right.pageFrame.height) &&
+    Object.is(left.generationAspect, right.generationAspect) &&
+    left.aspectLocked === right.aspectLocked
   );
 }

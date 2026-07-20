@@ -43,7 +43,6 @@ function identity(amount = 1): OutlineComputeIdentity {
     sampledT: 0,
     compositionFrame: source.space,
     tolerance: 0,
-    includeFrame: false,
     sourceScene: source,
   });
 }

@@ -1,10 +1,14 @@
 import type { Scene } from "@harness/core";
 
 import {
+  immutableOutlineComputeIdentity,
+  immutableScene,
   mutableScene,
   outlineComputeIdentitiesEqual,
+  outlineGeometryIdentitiesEqual,
   type CompletedOutline,
   type HiddenLineExportSnapshot,
+  type ImmutableScene,
   type OutlineComputeIdentity,
 } from "./outlineComputeProtocol";
 
@@ -25,7 +29,7 @@ export interface OutlineSourceProvenance {
 
 export interface OutlineSessionCache extends OutlineSourceProvenance {
   readonly identity: OutlineComputeIdentity;
-  readonly scene: Scene;
+  readonly scene: ImmutableScene;
   readonly t: number;
 }
 
@@ -354,17 +358,21 @@ export function outlineSessionReducer(
       const cacheProvenance =
         exportProvenance.contentRevision === undefined &&
         state.cache !== null &&
-        outlineComputeIdentitiesEqual(
+        outlineGeometryIdentitiesEqual(
           state.cache.identity,
           action.completedOutline.identity,
         )
           ? sourceProvenanceOf(state.cache)
           : exportProvenance;
+      const identity = immutableOutlineComputeIdentity(
+        action.completedOutline.identity,
+      );
+      const scene = immutableScene(action.completedOutline.scene);
       return finishExport(state, action.token, {
         cache: {
-          identity: action.completedOutline.identity,
-          scene: mutableScene(action.completedOutline.scene),
-          t: action.completedOutline.identity.sampledT,
+          identity,
+          scene,
+          t: identity.sampledT,
           ...cacheProvenance,
         },
         exportFailure: null,
@@ -387,19 +395,28 @@ export function outlineSessionReducer(
       }
       if (
         state.cache !== null &&
-        outlineComputeIdentitiesEqual(state.cache.identity, action.identity) &&
+        outlineGeometryIdentitiesEqual(state.cache.identity, action.identity) &&
         sameProvenance(state.cache, action)
       ) {
+        const identity = immutableOutlineComputeIdentity(action.identity);
+        const scene = state.cache.scene;
+        const provenance = sourceProvenanceOf(action);
         return {
           ...state,
           phase: {
             kind: "outline",
-            scene: state.cache.scene,
-            t: state.cache.t,
-            ...sourceProvenanceOf(state.cache),
+            scene: mutableScene(scene),
+            t: action.t,
+            ...provenance,
           },
           capture: null,
           active: null,
+          cache: {
+            identity,
+            scene,
+            t: action.t,
+            ...provenance,
+          },
           failure: null,
         };
       }
@@ -432,9 +449,11 @@ export function outlineSessionReducer(
       ) {
         return state;
       }
-      const cache = {
-        identity: action.identity,
-        scene: action.scene,
+      const identity = immutableOutlineComputeIdentity(action.identity);
+      const scene = immutableScene(action.scene);
+      const cache: OutlineSessionCache = {
+        identity,
+        scene,
         t: active.t,
         ...sourceProvenanceOf(active),
       };
@@ -442,7 +461,7 @@ export function outlineSessionReducer(
         ...state,
         phase: {
           kind: "outline",
-          scene: action.scene,
+          scene: mutableScene(scene),
           t: active.t,
           ...sourceProvenanceOf(active),
         },

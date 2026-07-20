@@ -5,6 +5,8 @@ import type { ParamSchema, PlotProfile, Scene } from "@harness/core";
 import {
   createHiddenLineExportSnapshot,
   createOutlineComputeIdentity,
+  outlineComputeIdentitiesEqual,
+  type OutlineComputeIdentity,
 } from "./outlineComputeProtocol";
 import {
   createOutlineSessionState,
@@ -40,12 +42,29 @@ function identity(amount = 1) {
     sampledT: 2,
     compositionFrame: fill.space,
     tolerance: 0,
-    includeFrame: false,
     sourceScene: fill,
   });
 }
 
-function activeSession(): OutlineSessionState {
+function specializedIdentity(toolWidthMillimeters = 0.3) {
+  return createOutlineComputeIdentity({
+    sketchId: "test-specialized",
+    schema,
+    params: { amount: 1 },
+    seed: 1,
+    sampledT: 2,
+    compositionFrame: fill.space,
+    tolerance: 0,
+    outlineTarget: {
+      toolWidthMillimeters,
+      millimetersPerSceneUnit: 0.18,
+    },
+  });
+}
+
+function activeSessionFor(
+  computeIdentity: OutlineComputeIdentity,
+): OutlineSessionState {
   const requested = outlineSessionReducer(createOutlineSessionState(), {
     type: "request-outline",
   });
@@ -53,10 +72,14 @@ function activeSession(): OutlineSessionState {
     type: "fill-captured",
     token: requested.capture!.token,
     inputRevision: requested.inputRevision,
-    identity: identity(),
+    identity: computeIdentity,
     scene: fill,
     t: 2,
   });
+}
+
+function activeSession(): OutlineSessionState {
+  return activeSessionFor(identity());
 }
 
 function exportSnapshot(amount = 1, width = profile.width) {
@@ -92,7 +115,11 @@ describe("outlineSessionReducer", () => {
     });
     expect(complete.phase).toEqual({ kind: "outline", scene: outline, t: 2 });
     expect(complete.active).toBeNull();
-    expect(complete.cache?.scene).toBe(outline);
+    expect(complete.cache?.scene).toEqual(outline);
+    expect(complete.cache?.scene).not.toBe(outline);
+    expect(complete.phase.kind === "outline" && complete.phase.scene).not.toBe(
+      outline,
+    );
   });
 
   it("rejects stale capture and success tokens without changing current state", () => {
@@ -178,6 +205,95 @@ describe("outlineSessionReducer", () => {
     });
     expect(reused.phase).toEqual({ kind: "outline", scene: outline, t: 2 });
     expect(reused.active).toBeNull();
+  });
+
+  it("reuses opt-in geometry across a target-only change and makes the new strict identity authoritative", () => {
+    const priorIdentity = specializedIdentity(0.3);
+    const active = activeSessionFor(priorIdentity);
+    const complete = outlineSessionReducer(active, {
+      type: "succeeded",
+      token: active.active!.token,
+      identity: priorIdentity,
+      scene: outline,
+    });
+    const immutableGeometry = complete.cache!.scene;
+    const fillMode = outlineSessionReducer(complete, { type: "request-fill" });
+    const requested = outlineSessionReducer(fillMode, {
+      type: "request-outline",
+    });
+    const currentIdentity = structuredClone(specializedIdentity(0.31));
+    const reused = outlineSessionReducer(requested, {
+      type: "fill-captured",
+      token: requested.capture!.token,
+      inputRevision: requested.inputRevision,
+      identity: currentIdentity,
+      scene: fill,
+      t: 2,
+    });
+
+    expect(reused.active).toBeNull();
+    expect(reused.slot).toBeNull();
+    expect(reused.cache!.scene).toBe(immutableGeometry);
+    expect(reused.phase).toEqual({ kind: "outline", scene: outline, t: 2 });
+    expect(reused.phase.kind === "outline" && reused.phase.scene).not.toBe(
+      immutableGeometry,
+    );
+    expect(
+      outlineComputeIdentitiesEqual(reused.cache!.identity, currentIdentity),
+    ).toBe(true);
+    expect(reused.cache!.identity).not.toBe(currentIdentity);
+
+    (
+      currentIdentity.outlineTarget as { toolWidthMillimeters: number }
+    ).toolWidthMillimeters = 9;
+    expect(reused.cache!.identity.sourceKind).toBe("specialized-sketch");
+    if (reused.cache!.identity.sourceKind !== "specialized-sketch") {
+      throw new Error("expected specialized cache identity");
+    }
+    expect(reused.cache!.identity.outlineTarget.toolWidthMillimeters).toBe(0.31);
+  });
+
+  it("keeps exact identity authoritative for active success staleness", () => {
+    const active = activeSessionFor(specializedIdentity(0.31));
+    const staleTargetSuccess = outlineSessionReducer(active, {
+      type: "succeeded",
+      token: active.active!.token,
+      identity: specializedIdentity(0.3),
+      scene: outline,
+    });
+
+    expect(staleTargetSuccess).toBe(active);
+  });
+
+  it("takes defensive identity and geometry snapshots on completion", () => {
+    const expectedIdentity = specializedIdentity(0.3);
+    const active = activeSessionFor(expectedIdentity);
+    const responseIdentity = structuredClone(expectedIdentity);
+    const responseScene = structuredClone(outline);
+    const complete = outlineSessionReducer(active, {
+      type: "succeeded",
+      token: active.active!.token,
+      identity: responseIdentity,
+      scene: responseScene,
+    });
+
+    (
+      responseIdentity.outlineTarget as { toolWidthMillimeters: number }
+    ).toolWidthMillimeters = 9;
+    responseScene.primitives[0]!.points[0]![0] = 99;
+
+    expect(
+      outlineComputeIdentitiesEqual(complete.cache!.identity, expectedIdentity),
+    ).toBe(true);
+    expect(complete.cache!.scene.primitives[0]!.points[0]![0]).toBe(0);
+    expect(
+      complete.phase.kind === "outline" &&
+        complete.phase.scene.primitives[0]!.points[0]![0],
+    ).toBe(0);
+    expect(Object.isFrozen(complete.cache!.scene)).toBe(true);
+    expect(
+      Object.isFrozen(complete.cache!.scene.primitives[0]!.points[0]),
+    ).toBe(true);
   });
 
   it("waits for acknowledged Scribble content and preserves provenance through completion", () => {

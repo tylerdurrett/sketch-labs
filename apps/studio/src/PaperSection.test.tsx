@@ -9,7 +9,11 @@ import {
   type PlotProfile,
 } from "@harness/core";
 
-import { PAPER_DISPLAY_UNIT_STORAGE_KEY, PaperSection } from "./PaperSection";
+import {
+  PAPER_DISPLAY_UNIT_STORAGE_KEY,
+  PaperSection,
+  type PaperProfileCandidateRouter,
+} from "./PaperSection";
 import type { EditTransactionLifecycle } from "./editHistory";
 
 (
@@ -74,7 +78,14 @@ function blurInput(input: HTMLInputElement): void {
   act(() => input.blur());
 }
 
-function mountTransactional(initialProfile: PlotProfile = profile) {
+function mountTransactional(
+  initialProfile: PlotProfile = profile,
+  options: {
+    routeProfileCandidate?: PaperProfileCandidateRouter;
+    aspectLocked?: boolean;
+    onAspectLockedChange?: (locked: boolean) => void;
+  } = {},
+) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -111,6 +122,14 @@ function mountTransactional(initialProfile: PlotProfile = profile) {
         profile={current}
         transaction={transaction}
         onAtomicChange={onAtomicChange}
+        routeProfileCandidate={options.routeProfileCandidate}
+        {...(options.aspectLocked === undefined ||
+        options.onAspectLockedChange === undefined
+          ? {}
+          : {
+              aspectLocked: options.aspectLocked,
+              onAspectLockedChange: options.onAspectLockedChange,
+            })}
         includePaperMargins
         onIncludePaperMarginsChange={onIncludePaperMarginsChange}
       />,
@@ -209,6 +228,259 @@ describe("PaperSection", () => {
     expect(events).toEqual(["begin", "preview", "commit"]);
     expect(controlled()).toEqual({ ...profile, width: 220 });
     expect(onAtomicChange).not.toHaveBeenCalled();
+  });
+
+  it("routes a dimension candidate through owner normalization before preview", () => {
+    const routeProfileCandidate = vi.fn<
+      Parameters<PaperProfileCandidateRouter>,
+      ReturnType<PaperProfileCandidateRouter>
+    >(
+      (candidate, source) => ({
+        kind: "accept",
+        profile:
+          source === "width" ? { ...candidate, height: 330 } : candidate,
+      }),
+    );
+    const { el, events, profile: controlled } = mountTransactional(profile, {
+      routeProfileCandidate,
+    });
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    focusInput(width);
+    setInput(width, "220");
+
+    expect(routeProfileCandidate).toHaveBeenCalledWith(
+      { ...profile, width: 220 },
+      "width",
+    );
+    expect(events).toEqual(["begin", "preview"]);
+    expect(controlled()).toEqual({ ...profile, width: 220, height: 330 });
+    expect(width.value).toBe("220");
+    expect(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Paper height (mm)"]',
+      )!.value,
+    ).toBe("330");
+  });
+
+  it("routes height candidates before transactional preview", () => {
+    const routeProfileCandidate = vi.fn<
+      Parameters<PaperProfileCandidateRouter>,
+      ReturnType<PaperProfileCandidateRouter>
+    >((candidate) => ({ kind: "accept", profile: candidate }));
+    const { el, events, profile: controlled } = mountTransactional(profile, {
+      routeProfileCandidate,
+    });
+    const height = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper height (mm)"]',
+    )!;
+
+    focusInput(height);
+    setInput(height, "310");
+
+    expect(routeProfileCandidate).toHaveBeenCalledWith(
+      { ...profile, height: 310 },
+      "height",
+    );
+    expect(events).toEqual(["begin", "preview"]);
+    expect(controlled().height).toBe(310);
+  });
+
+  it("reconciles an owner-handled dimension without previewing or reporting an error", () => {
+    const handled: PlotProfile = { ...profile, width: 225, height: 315 };
+    const routeProfileCandidate = vi.fn<
+      Parameters<PaperProfileCandidateRouter>,
+      ReturnType<PaperProfileCandidateRouter>
+    >(() => ({ kind: "handled", profile: handled }));
+    const { el, events, onAtomicChange, profile: controlled } =
+      mountTransactional(profile, { routeProfileCandidate });
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    focusInput(width);
+    setInput(width, "220");
+
+    expect(routeProfileCandidate).toHaveBeenCalledWith(
+      { ...profile, width: 220 },
+      "width",
+    );
+    expect(events).toEqual(["begin"]);
+    expect(onAtomicChange).not.toHaveBeenCalled();
+    expect(controlled()).toEqual(profile);
+    expect(width.value).toBe("225");
+    expect(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Paper height (mm)"]',
+      )!.value,
+    ).toBe("315");
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("restores a rejected locked margin draft without previewing history", () => {
+    const routeProfileCandidate = vi.fn<
+      Parameters<PaperProfileCandidateRouter>,
+      ReturnType<PaperProfileCandidateRouter>
+    >(
+      (_candidate, source) => ({
+        kind: "reject",
+        message: `Unlock Page aspect before changing ${source}.`,
+      }),
+    );
+    const { el, events, onAtomicChange, profile: controlled } =
+      mountTransactional(profile, { routeProfileCandidate });
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+
+    focusInput(margin);
+    setInput(margin, "12");
+
+    expect(routeProfileCandidate).toHaveBeenCalledWith(
+      {
+        ...profile,
+        insets: { top: 12, right: 12, bottom: 12, left: 12 },
+      },
+      "margin",
+    );
+    expect(events).toEqual(["begin"]);
+    expect(onAtomicChange).not.toHaveBeenCalled();
+    expect(controlled()).toEqual(profile);
+    expect(margin.value).toBe("10");
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+      "Unlock Page aspect",
+    );
+  });
+
+  it("allows a same-aspect linked margin candidate through the routing seam", () => {
+    const square: PlotProfile = {
+      ...profile,
+      width: 200,
+      height: 200,
+    };
+    const routeProfileCandidate = vi.fn<
+      Parameters<PaperProfileCandidateRouter>,
+      ReturnType<PaperProfileCandidateRouter>
+    >(
+      (candidate) => ({ kind: "accept", profile: candidate }),
+    );
+    const { el, events, profile: controlled } = mountTransactional(square, {
+      routeProfileCandidate,
+    });
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+
+    focusInput(margin);
+    setInput(margin, "20");
+
+    expect(routeProfileCandidate).toHaveBeenCalledWith(
+      {
+        ...square,
+        insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      },
+      "margin",
+    );
+    expect(events).toEqual(["begin", "preview"]);
+    expect(controlled().insets).toEqual({
+      top: 20,
+      right: 20,
+      bottom: 20,
+      left: 20,
+    });
+  });
+
+  it.each([
+    ["format", () => selectFormat(container, "square")],
+    ["orientation", () => clickButton(container, "Swap to landscape")],
+  ] as const)(
+    "reports unlock-required rejection for locked %s candidates before atomic commit",
+    (source, change) => {
+      const routeProfileCandidate = vi.fn<
+        Parameters<PaperProfileCandidateRouter>,
+        ReturnType<PaperProfileCandidateRouter>
+      >(
+        () => ({
+          kind: "reject",
+          message: "Unlock Page aspect before changing its proportions.",
+        }),
+      );
+      const { el, events, onAtomicChange, profile: controlled } =
+        mountTransactional(profile, { routeProfileCandidate });
+
+      change();
+
+      expect(routeProfileCandidate).toHaveBeenCalledWith(
+        expect.any(Object),
+        source,
+      );
+      expect(events).toEqual([]);
+      expect(onAtomicChange).not.toHaveBeenCalled();
+      expect(controlled()).toEqual(profile);
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+        "Unlock Page aspect",
+      );
+      expect(el.querySelector("select")?.value).toBe("a4");
+    },
+  );
+
+  it("shows a controlled Page aspect lock only for committed framing", () => {
+    const unframed = mountTransactional();
+    expect(
+      unframed.el.querySelector<HTMLInputElement>(
+        'input[aria-label="Lock Page aspect"]',
+      ),
+    ).toBeNull();
+    act(() => root.unmount());
+    container.remove();
+
+    const onAspectLockedChange = vi.fn();
+    const framed = mountTransactional(profile, {
+      aspectLocked: true,
+      onAspectLockedChange,
+    });
+    const lock = framed.el.querySelector<HTMLInputElement>(
+      'input[aria-label="Lock Page aspect"]',
+    )!;
+    expect(lock.checked).toBe(true);
+
+    act(() =>
+      lock.dispatchEvent(new MouseEvent("click", { bubbles: true })),
+    );
+
+    expect(onAspectLockedChange).toHaveBeenCalledWith(false);
+    expect(lock.checked).toBe(true);
+  });
+
+  it("keeps tool width and include-frame edits outside aspect routing", () => {
+    const routeProfileCandidate = vi.fn<
+      Parameters<PaperProfileCandidateRouter>,
+      ReturnType<PaperProfileCandidateRouter>
+    >(() => ({ kind: "reject", message: "should not route" }));
+    const { el, events, onAtomicChange, profile: controlled } =
+      mountTransactional(profile, { routeProfileCandidate });
+    const toolWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Tool width (mm)"]',
+    )!;
+
+    focusInput(toolWidth);
+    setInput(toolWidth, "0.5");
+    blurInput(toolWidth);
+    act(() =>
+      frameCheckbox(el).dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      ),
+    );
+
+    expect(routeProfileCandidate).not.toHaveBeenCalled();
+    expect(events).toEqual(["begin", "preview", "commit", "atomic"]);
+    expect(controlled().toolWidthMillimeters).toBe(0.5);
+    expect(onAtomicChange).toHaveBeenCalledWith({
+      ...controlled(),
+      includeFrame: true,
+    });
   });
 
   it("commits a field once on blur", () => {

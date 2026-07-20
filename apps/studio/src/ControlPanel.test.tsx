@@ -228,6 +228,172 @@ describe("ControlPanel", () => {
     expect(html).toContain(`/image-assets/${healthy}.png`);
   });
 
+  it("routes each Image Asset row's exact selected ID and dimensions independently", () => {
+    const portraitId = "portrait-image-0123456789ab";
+    const landscapeId = "landscape-image-abcdef012345";
+    const dimensions = new Map([
+      [portraitId, { width: 900, height: 1600 }],
+      [landscapeId, { width: 1800, height: 1200 }],
+    ]);
+    const getImageAssetDimensions = vi.fn((id: string) => dimensions.get(id));
+    const onRecomposeToImageAspect = vi.fn();
+    const el = mount(
+      <ControlPanel
+        schema={{
+          portrait: {
+            kind: "image-asset",
+            default: "unused-default-aaaaaaaaaaaa",
+          },
+          landscape: {
+            kind: "image-asset",
+            default: "unused-default-bbbbbbbbbbbb",
+          },
+        }}
+        params={{ portrait: portraitId, landscape: landscapeId }}
+        locks={new Set()}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+        getImageAssetDimensions={getImageAssetDimensions}
+        onRecomposeToImageAspect={onRecomposeToImageAspect}
+      />,
+    );
+
+    const actions = [
+      ...el.querySelectorAll<HTMLButtonElement>("button"),
+    ].filter(
+      (candidate) =>
+        candidate.textContent === "Recompose to this image’s aspect",
+    );
+    expect(actions).toHaveLength(2);
+    expect(actions.map((action) => action.disabled)).toEqual([false, false]);
+    expect(getImageAssetDimensions).toHaveBeenCalledTimes(2);
+    expect(getImageAssetDimensions).toHaveBeenNthCalledWith(1, portraitId);
+    expect(getImageAssetDimensions).toHaveBeenNthCalledWith(2, landscapeId);
+
+    act(() => {
+      actions[1]!.click();
+      actions[0]!.click();
+    });
+
+    expect(onRecomposeToImageAspect.mock.calls).toEqual([
+      [
+        {
+          paramKey: "landscape",
+          imageAssetId: landscapeId,
+          dimensions: { width: 1800, height: 1200 },
+        },
+      ],
+      [
+        {
+          paramKey: "portrait",
+          imageAssetId: portraitId,
+          dimensions: { width: 900, height: 1600 },
+        },
+      ],
+    ]);
+  });
+
+  it("disables only the Image Asset row whose exact decoded record is absent", () => {
+    const unavailableId = "unavailable-image-0123456789ab";
+    const availableId = "available-image-abcdef012345";
+    const getImageAssetDimensions = vi.fn((id: string) =>
+      id === availableId ? { width: 1200, height: 800 } : undefined,
+    );
+    const onRecomposeToImageAspect = vi.fn();
+    const el = mount(
+      <ControlPanel
+        schema={{
+          unavailable: {
+            kind: "image-asset",
+            default: "first-default-aaaaaaaaaaaa",
+          },
+          available: {
+            kind: "image-asset",
+            default: "second-default-bbbbbbbbbbbb",
+          },
+        }}
+        params={{ unavailable: unavailableId, available: availableId }}
+        locks={new Set()}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+        getImageAssetDimensions={getImageAssetDimensions}
+        onRecomposeToImageAspect={onRecomposeToImageAspect}
+      />,
+    );
+
+    const actions = [
+      ...el.querySelectorAll<HTMLButtonElement>("button"),
+    ].filter(
+      (candidate) =>
+        candidate.textContent === "Recompose to this image’s aspect",
+    );
+    expect(actions.map((action) => action.disabled)).toEqual([true, false]);
+    expect(getImageAssetDimensions.mock.calls).toEqual([
+      [unavailableId],
+      [availableId],
+    ]);
+
+    act(() => actions[1]!.click());
+    expect(onRecomposeToImageAspect).toHaveBeenCalledTimes(1);
+    expect(onRecomposeToImageAspect).toHaveBeenCalledWith({
+      paramKey: "available",
+      imageAssetId: availableId,
+      dimensions: { width: 1200, height: 800 },
+    });
+  });
+
+  it("uses each row's effective fallback ID without choosing another image", () => {
+    const firstDefault = "first-default-0123456789ab";
+    const secondSelected = "second-selected-abcdef012345";
+    const getImageAssetDimensions = vi.fn((id: string) =>
+      id === firstDefault
+        ? { width: 640, height: 480 }
+        : id === secondSelected
+          ? { width: 1000, height: 1000 }
+          : undefined,
+    );
+    const onRecomposeToImageAspect = vi.fn();
+    const el = mount(
+      <ControlPanel
+        schema={{
+          first: { kind: "image-asset", default: firstDefault },
+          second: {
+            kind: "image-asset",
+            default: "ignored-default-bbbbbbbbbbbb",
+          },
+        }}
+        params={{ second: secondSelected }}
+        locks={new Set()}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+        getImageAssetDimensions={getImageAssetDimensions}
+        onRecomposeToImageAspect={onRecomposeToImageAspect}
+      />,
+    );
+
+    const actions = [
+      ...el.querySelectorAll<HTMLButtonElement>("button"),
+    ].filter(
+      (candidate) =>
+        candidate.textContent === "Recompose to this image’s aspect",
+    );
+    expect(getImageAssetDimensions.mock.calls).toEqual([
+      [firstDefault],
+      [secondSelected],
+    ]);
+
+    act(() => actions[1]!.click());
+    expect(onRecomposeToImageAspect).toHaveBeenCalledTimes(1);
+    expect(onRecomposeToImageAspect).toHaveBeenCalledWith({
+      paramKey: "second",
+      imageAssetId: secondSelected,
+      dimensions: { width: 1000, height: 1000 },
+    });
+    expect(onRecomposeToImageAspect).not.toHaveBeenCalledWith(
+      expect.objectContaining({ imageAssetId: firstDefault }),
+    );
+  });
+
   it("routes an Image Asset choice through the ordinary lock-free setter", async () => {
     vi.stubGlobal("fetch", () =>
       Promise.resolve({
