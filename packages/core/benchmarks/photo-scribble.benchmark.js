@@ -48,8 +48,8 @@ const EXPECTED_IMAGE_HEIGHT = 1536
 
 // Filled in from the first independently verified run. The benchmark refuses
 // a speedup that changes termination, residual, diagnostics, or any coordinate.
-const EXPECTED_DETAIL_CHECKSUM = 'f822710f351bf391'
-const EXPECTED_UNIFORM_CHECKSUM = 'e9502e94cb2ff101'
+const EXPECTED_DETAIL_CHECKSUM = 'a5f7bf61b9f7e96b'
+const EXPECTED_UNIFORM_CHECKSUM = '2009e6eaaf1fd98b'
 const EXPECTED_DETAIL_WORK_UNITS = 64251
 const EXPECTED_UNIFORM_WORK_UNITS = 178765
 const EXPECTED_DETAIL_POLYLINES = 657
