@@ -1,4 +1,5 @@
 import type { CoordinateSpace } from '../scene'
+import type { ScribbleScaleField } from '../scribbleScaleField'
 import type { ToneSource } from '../shadingFields'
 import type { NumberParamSpec } from '../sketch'
 import type { Point } from '../types'
@@ -70,18 +71,39 @@ export const defaultScribbleControls: Readonly<ScribbleControls> = Object.freeze
   stopPoint: scribbleControlSchema.stopPoint.default,
 })
 
-/** Internal lengths and thresholds coherently derived for one run. */
-export interface ScribbleScales {
-  /** Geometric-mean frame extent: invariant for equal-area aspect changes. */
-  readonly frameScale: number
+/** Point-local geometry derived coherently from one Scribble scale sample. */
+export interface ScribbleLocalScales {
   readonly segmentLength: number
   readonly coverageRadius: number
-  readonly residualSpacing: number
   readonly maskCheckSpacing: number
+}
+
+/** Internal authored fine/global lengths and thresholds for one run. */
+export interface ScribbleScales extends ScribbleLocalScales {
+  /** Geometric-mean frame extent: invariant for equal-area aspect changes. */
+  readonly frameScale: number
+  readonly residualSpacing: number
   /** Peak darkness added by one pass; inverse to authored path density. */
   readonly coveragePerPass: number
   /** Permission-weighted residual at or below which work is complete. */
   readonly completionThreshold: number
+}
+
+/** One deterministic fine-safe local-scale station on an exact segment. */
+export interface ScribbleSegmentScaleSample {
+  readonly point: Readonly<Point>
+  /** Normalized position on the exact segment, including both 0 and 1. */
+  readonly progress: number
+  readonly scales: ScribbleLocalScales
+}
+
+/** Conservative local-scale bounds sampled along one exact segment. */
+export interface ScribbleSegmentScaleProfile {
+  readonly length: number
+  readonly samples: readonly ScribbleSegmentScaleSample[]
+  readonly minimumSegmentLength: number
+  readonly minimumMaskCheckSpacing: number
+  readonly maximumCoverageRadius: number
 }
 
 /** Fixed lattice geometry. Every cell has the same area and a center sample. */
@@ -110,8 +132,27 @@ export interface ScribbleResidualSample {
 export interface ScribbleModel {
   readonly source: ToneSource
   readonly controls: Readonly<ScribbleControls>
+  /** Optional spatial scale, kept independent of tone and authored controls. */
+  readonly scaleField?: ScribbleScaleField
+  /** Authored fine/global scales; never widened by the optional field. */
   readonly scales: ScribbleScales
   readonly lattice: ScribbleLattice
+
+  /** Resolve coupled scene-unit geometry at one Composition Frame point. */
+  localScalesAt(point: Readonly<Point>): ScribbleLocalScales
+  /**
+   * Profile exact-segment local geometry at authored-fine-safe intervals.
+   * Invalid/non-finite geometry has no profile.
+   */
+  profileSegment(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): ScribbleSegmentScaleProfile | undefined
+  /**
+   * Apply the shared conservative scale, mask, and frame safety decision.
+   * Without a field this is exactly the original uniform mask check.
+   */
+  isSegmentSafe(start: Readonly<Point>, end: Readonly<Point>): boolean
 
   /** `sum(permission * max(0, tone - coverage)) / sampleCount`. */
   residualError(): number

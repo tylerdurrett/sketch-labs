@@ -1,19 +1,27 @@
 import type { CoordinateSpace } from '../scene'
 import {
+  sampleScribbleScaleField,
+  type ScribbleScaleField,
+} from '../scribbleScaleField'
+import {
   sampleShadingMask,
   sampleToneField,
   type ToneSource,
 } from '../shadingFields'
 import type { Point } from '../types'
+import { isMaskPermittedSegment } from './mask'
 import {
   defaultScribbleControls,
   scribbleControlSchema,
   type ScribbleControlName,
   type ScribbleControls,
   type ScribbleLattice,
+  type ScribbleLocalScales,
   type ScribbleModel,
   type ScribbleResidualSample,
   type ScribbleScales,
+  type ScribbleSegmentScaleProfile,
+  type ScribbleSegmentScaleSample,
 } from './types'
 
 // Ratios belong to the strategy, not the authored parameter surface. The values
@@ -216,6 +224,7 @@ export function createScribbleModel(
   source: ToneSource,
   frame: CoordinateSpace,
   controls: Partial<ScribbleControls> = defaultScribbleControls,
+  scaleField?: ScribbleScaleField,
 ): ScribbleModel {
   const normalizedControls = normalizeScribbleControls(controls)
   const scales = resolveScribbleScales(frame, normalizedControls)
@@ -224,6 +233,142 @@ export function createScribbleModel(
   const tone = new Float64Array(lattice.sampleCount)
   const permission = new Float64Array(lattice.sampleCount)
   const coverage = new Float64Array(lattice.sampleCount)
+
+  function localScalesAt(point: Readonly<Point>): ScribbleLocalScales {
+    if (scaleField === undefined) return scales
+
+    const localAuthoredScale = sampleScribbleScaleField(
+      scaleField,
+      point,
+      normalizedControls.scribbleScale,
+    )
+    if (localAuthoredScale === normalizedControls.scribbleScale) return scales
+
+    const multiplier = localAuthoredScale / normalizedControls.scribbleScale
+    const segmentLength = scales.segmentLength * multiplier
+    const coverageRadius = segmentLength * COVERAGE_TO_SEGMENT
+    const maskCheckSpacing = segmentLength * MASK_CHECK_TO_SEGMENT
+
+    // A valid dimensionless field sample can still overflow when converted to
+    // scene units. Keep all coupled geometry at the authored fine anchor rather
+    // than allowing one non-finite length to escape into traversal or deposits.
+    if (
+      !Number.isFinite(segmentLength) ||
+      segmentLength <= 0 ||
+      !Number.isFinite(coverageRadius) ||
+      coverageRadius <= 0 ||
+      !Number.isFinite(maskCheckSpacing) ||
+      maskCheckSpacing <= 0
+    ) {
+      return scales
+    }
+
+    return Object.freeze({
+      segmentLength,
+      coverageRadius,
+      maskCheckSpacing,
+    })
+  }
+
+  function profileSegment(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): ScribbleSegmentScaleProfile | undefined {
+    const deltaX = end[0] - start[0]
+    const deltaY = end[1] - start[1]
+    const length = Math.hypot(deltaX, deltaY)
+    if (!Number.isFinite(length)) return undefined
+
+    const intervalCount = Math.ceil(length / scales.maskCheckSpacing)
+    if (!Number.isSafeInteger(intervalCount)) return undefined
+
+    const samples: ScribbleSegmentScaleSample[] = []
+    let minimumSegmentLength = Number.POSITIVE_INFINITY
+    let minimumMaskCheckSpacing = Number.POSITIVE_INFINITY
+    let maximumCoverageRadius = 0
+
+    for (let interval = 0; interval <= intervalCount; interval++) {
+      const progress = intervalCount === 0 ? 0 : interval / intervalCount
+      const point = Object.freeze([
+        interval === intervalCount ? end[0] : start[0] + deltaX * progress,
+        interval === intervalCount ? end[1] : start[1] + deltaY * progress,
+      ] as Point)
+      const localScales = localScalesAt(point)
+
+      if (
+        !Number.isFinite(localScales.segmentLength) ||
+        localScales.segmentLength <= 0 ||
+        !Number.isFinite(localScales.coverageRadius) ||
+        localScales.coverageRadius <= 0 ||
+        !Number.isFinite(localScales.maskCheckSpacing) ||
+        localScales.maskCheckSpacing <= 0
+      ) {
+        return undefined
+      }
+
+      minimumSegmentLength = Math.min(
+        minimumSegmentLength,
+        localScales.segmentLength,
+      )
+      minimumMaskCheckSpacing = Math.min(
+        minimumMaskCheckSpacing,
+        localScales.maskCheckSpacing,
+      )
+      maximumCoverageRadius = Math.max(
+        maximumCoverageRadius,
+        localScales.coverageRadius,
+      )
+      samples.push(Object.freeze({ point, progress, scales: localScales }))
+    }
+
+    return Object.freeze({
+      length,
+      samples: Object.freeze(samples),
+      minimumSegmentLength,
+      minimumMaskCheckSpacing,
+      maximumCoverageRadius,
+    })
+  }
+
+  function isSegmentSafe(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): boolean {
+    // Keep the established uniform-scale arithmetic and sampling path exact.
+    if (scaleField === undefined) {
+      return isMaskPermittedSegment(
+        source.shadingMask,
+        lattice.frame,
+        start,
+        end,
+        scales.maskCheckSpacing,
+      )
+    }
+
+    const profile = profileSegment(start, end)
+    if (profile === undefined) return false
+
+    // Endpoints produced with sin/cos can differ from the requested length by
+    // a few ulps. Admit only that representational noise, not a meaningful
+    // excursion beyond the most restrictive sampled local length.
+    const comparisonTolerance =
+      Number.EPSILON *
+      8 *
+      Math.max(1, profile.length, profile.minimumSegmentLength)
+    if (
+      profile.length > profile.minimumSegmentLength + comparisonTolerance
+    ) {
+      return false
+    }
+
+    return isMaskPermittedSegment(
+      source.shadingMask,
+      lattice.frame,
+      start,
+      end,
+      profile.minimumMaskCheckSpacing,
+    )
+  }
 
   for (let row = 0; row < lattice.rows; row++) {
     for (let column = 0; column < lattice.columns; column++) {
@@ -297,8 +442,12 @@ export function createScribbleModel(
   return {
     source,
     controls: normalizedControls,
+    ...(scaleField === undefined ? {} : { scaleField }),
     scales,
     lattice,
+    localScalesAt,
+    profileSegment,
+    isSegmentSafe,
     residualError(): number {
       // Every term is bounded [0,1], and sampleCount is always positive.
       return Math.min(1, Math.max(0, residualTotal / lattice.sampleCount))
