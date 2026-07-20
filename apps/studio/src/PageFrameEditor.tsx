@@ -9,20 +9,23 @@ import {
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "./components/ui/button";
+import { CompositionScaleControl } from "./CompositionScaleControl";
 import { PageFramePhysicalFields } from "./PageFramePhysicalFields";
+import {
+  panFixedPageFrame,
+  setFixedPageCompositionScale,
+  setPageFrameEditMode,
+  setScalePreservingPageFrame,
+  type PageFrameEditDraft,
+} from "./pageFrameEditDraft";
 import type { PageFrameAspectConstraint } from "./pageFrameManipulation";
 import type { PaperDisplayUnit } from "./paperDisplayUnit";
 
 type PageFrameField = keyof PageFramePercentages;
 type AspectPreset = "free" | "1:1" | "4:3" | "3:2" | "16:9" | "custom";
 
-interface PageFrameEditorBaseProps {
-  compositionFrame: CoordinateSpace;
-  profile: PlotProfile;
-  representedFrame: PageFrame;
+interface PageFrameEditorCommonProps {
   displayUnit: PaperDisplayUnit;
-  onDraftChange: (frame: PageFrame) => void;
-  onApply: (frame: PageFrame) => void;
   onCancel: () => void;
   onReset: () => void;
   aspectConstraint?: PageFrameAspectConstraint;
@@ -31,12 +34,40 @@ interface PageFrameEditorBaseProps {
   ) => void;
 }
 
+interface LegacyPageFrameEditorBaseProps extends PageFrameEditorCommonProps {
+  readonly editDraft?: never;
+  compositionFrame: CoordinateSpace;
+  profile: PlotProfile;
+  representedFrame: PageFrame;
+  onDraftChange: (frame: PageFrame) => void;
+  readonly onEditDraftChange?: never;
+  onApply: (frame: PageFrame) => void;
+}
+
 /** `initialFrame` remains as a temporary compatibility seam for callers. */
-export type PageFrameEditorProps = PageFrameEditorBaseProps &
+type LegacyPageFrameEditorProps = LegacyPageFrameEditorBaseProps &
   (
     | { readonly frame: PageFrame; readonly initialFrame?: never }
     | { readonly frame?: never; readonly initialFrame: PageFrame }
   );
+
+/** Controlled transient-state path used by fixed-page framing integrations. */
+export interface PageFrameEditDraftEditorProps
+  extends PageFrameEditorCommonProps {
+  readonly editDraft: PageFrameEditDraft;
+  readonly compositionFrame?: never;
+  readonly profile?: never;
+  readonly representedFrame?: never;
+  readonly frame?: never;
+  readonly initialFrame?: never;
+  readonly onDraftChange?: never;
+  onEditDraftChange: (draft: PageFrameEditDraft) => void;
+  onApply: (draft: PageFrameEditDraft) => void;
+}
+
+export type PageFrameEditorProps =
+  | LegacyPageFrameEditorProps
+  | PageFrameEditDraftEditorProps;
 
 interface PageFrameError {
   readonly field: PageFrameField;
@@ -49,6 +80,8 @@ interface CustomAspectError {
 }
 
 const FIELDS = ["x", "y", "width", "height"] as const;
+const UNREPRESENTABLE_SCALE_MESSAGE =
+  "Composition scale cannot be represented by finite Page geometry.";
 const LABELS: Record<PageFrameField, string> = {
   x: "X",
   y: "Y",
@@ -124,6 +157,62 @@ function parseDraft(
       },
     };
   }
+}
+
+/** Fixed-page positioning must never round-trip its locked extents through %. */
+function parseFixedPagePosition(
+  draft: Readonly<Record<PageFrameField, string>>,
+  compositionFrame: CoordinateSpace,
+  frame: PageFrame,
+):
+  | { readonly frame: PageFrame; readonly error: null }
+  | { readonly frame: null; readonly error: PageFrameError } {
+  const positions = {} as Record<"x" | "y", number>;
+  for (const field of ["x", "y"] as const) {
+    const raw = draft[field].trim();
+    const percentage = raw === "" ? Number.NaN : Number(raw);
+    if (!Number.isFinite(percentage)) {
+      return {
+        frame: null,
+        error: { field, message: `${LABELS[field]} must be a finite number.` },
+      };
+    }
+
+    const compositionExtent =
+      field === "x" ? compositionFrame.width : compositionFrame.height;
+    const pageExtent = field === "x" ? frame.width : frame.height;
+    const position = percentage * (compositionExtent / 100);
+    const farEdge = position + pageExtent;
+    if (!Number.isFinite(position)) {
+      return {
+        frame: null,
+        error: {
+          field,
+          message: `${LABELS[field]} must produce a finite Page position.`,
+        },
+      };
+    }
+    if (!Number.isFinite(farEdge) || farEdge <= position) {
+      return {
+        frame: null,
+        error: {
+          field,
+          message: `${LABELS[field]} must leave a finite far edge greater than its origin.`,
+        },
+      };
+    }
+    positions[field] = position;
+  }
+
+  return {
+    frame: {
+      x: positions.x,
+      y: positions.y,
+      width: frame.width,
+      height: frame.height,
+    },
+    error: null,
+  };
 }
 
 function sameFrame(left: PageFrame, right: PageFrame): boolean {
@@ -234,26 +323,49 @@ function parseCustomAspect(
 }
 
 /** Transient numeric editor for a Page Frame expressed in Composition percentages. */
-export function PageFrameEditor({
-  compositionFrame,
-  frame,
-  initialFrame,
-  profile,
-  representedFrame,
-  displayUnit,
-  onDraftChange,
-  onApply,
-  onCancel,
-  onReset,
-  aspectConstraint: controlledAspectConstraint,
-  onAspectConstraintChange,
-}: PageFrameEditorProps) {
-  const controlledFrame = frame ?? initialFrame;
+export function PageFrameEditor(props: PageFrameEditorProps) {
+  const legacyProps =
+    props.editDraft === undefined
+      ? (props as LegacyPageFrameEditorProps)
+      : null;
+  const editDraftProps =
+    props.editDraft === undefined
+      ? null
+      : (props as PageFrameEditDraftEditorProps);
+  const controlledEditDraft = editDraftProps?.editDraft ?? null;
+  const compositionFrame =
+    controlledEditDraft?.compositionFrame ?? legacyProps!.compositionFrame;
+  const controlledFrame =
+    controlledEditDraft?.frame ??
+    legacyProps!.frame ??
+    legacyProps!.initialFrame;
+  const profile = controlledEditDraft?.profile ?? legacyProps!.profile;
+  const representedFrame =
+    controlledEditDraft === null
+      ? legacyProps!.representedFrame
+      : controlledEditDraft.mode === "scale-preserving"
+        ? controlledEditDraft.representedFrame
+        : controlledEditDraft.frame;
+  const {
+    displayUnit,
+    onCancel,
+    onReset,
+    aspectConstraint: controlledAspectConstraint,
+    onAspectConstraintChange,
+  } = props;
+  const fixedPage = controlledEditDraft?.mode === "fixed-page";
+  const controlledCompositionScale =
+    controlledEditDraft?.mode === "fixed-page"
+      ? controlledEditDraft.compositionScale
+      : null;
   const [draft, setDraft] = useState(() =>
     initialDraft(controlledFrame, compositionFrame),
   );
   const [error, setError] = useState<PageFrameError | null>(null);
   const [physicalFieldsValid, setPhysicalFieldsValid] = useState(true);
+  const [scaleControlValid, setScaleControlValid] = useState(true);
+  const [scaleRepresentabilityError, setScaleRepresentabilityError] =
+    useState<string | null>(null);
   const [uncontrolledAspectConstraint, setUncontrolledAspectConstraint] =
     useState<PageFrameAspectConstraint>({ kind: "free" });
   const aspectConstraint =
@@ -334,6 +446,17 @@ export function PageFrameEditor({
     setCustomAspectError(null);
   }, [controlledAspectConstraint]);
 
+  useEffect(() => {
+    if (!fixedPage) {
+      setScaleControlValid(true);
+      setScaleRepresentabilityError(null);
+    }
+  }, [fixedPage]);
+
+  useEffect(() => {
+    setScaleRepresentabilityError(null);
+  }, [controlledCompositionScale]);
+
   const emitAspectConstraint = (
     next: PageFrameAspectConstraint,
   ): void => {
@@ -344,6 +467,24 @@ export function PageFrameEditor({
       lastEmittedConstraint.current = next;
     }
     onAspectConstraintChange?.(next);
+  };
+
+  const emitFrame = (
+    nextFrame: PageFrame,
+    preserveLocalNumericDraft = true,
+  ): PageFrameEditDraft | null => {
+    if (preserveLocalNumericDraft) lastEmittedFrame.current = nextFrame;
+    if (controlledEditDraft === null) {
+      legacyProps!.onDraftChange(nextFrame);
+      return null;
+    }
+
+    const next =
+      controlledEditDraft.mode === "fixed-page"
+        ? panFixedPageFrame(controlledEditDraft, nextFrame)
+        : setScalePreservingPageFrame(controlledEditDraft, nextFrame);
+    editDraftProps!.onEditDraftChange(next);
+    return next;
   };
 
   const updateAspectPreset = (preset: AspectPreset): void => {
@@ -378,6 +519,7 @@ export function PageFrameEditor({
   };
 
   const updateField = (field: PageFrameField, value: string): void => {
+    if (fixedPage && (field === "width" || field === "height")) return;
     const next = pairedDimensionDraft(
       { ...draft, [field]: value },
       field,
@@ -386,22 +528,55 @@ export function PageFrameEditor({
     );
     setDraft(next);
     setError(null);
-    const parsed = parseDraft(next, compositionFrame);
+    const parsed =
+      controlledEditDraft?.mode === "fixed-page"
+        ? parseFixedPagePosition(next, compositionFrame, controlledFrame)
+        : parseDraft(next, compositionFrame);
     if (parsed.frame !== null) {
-      lastEmittedFrame.current = parsed.frame;
-      onDraftChange(parsed.frame);
+      emitFrame(parsed.frame);
     }
   };
 
   const apply = (): void => {
-    if (!physicalFieldsValid) return;
-    const parsed = parseDraft(draft, compositionFrame);
+    if (
+      !physicalFieldsValid ||
+      !scaleControlValid ||
+      scaleRepresentabilityError !== null
+    ) {
+      return;
+    }
+    const parsed =
+      controlledEditDraft?.mode === "fixed-page"
+        ? parseFixedPagePosition(draft, compositionFrame, controlledFrame)
+        : parseDraft(draft, compositionFrame);
     if (parsed.frame === null) {
       setError(parsed.error);
       return;
     }
     setError(null);
-    onApply(parsed.frame);
+    if (controlledEditDraft === null) {
+      legacyProps!.onApply(parsed.frame);
+      return;
+    }
+    const next =
+      controlledEditDraft.mode === "fixed-page"
+        ? panFixedPageFrame(controlledEditDraft, parsed.frame)
+        : setScalePreservingPageFrame(controlledEditDraft, parsed.frame);
+    editDraftProps!.onApply(next);
+  };
+
+  const setFixedPage = (checked: boolean): void => {
+    if (controlledEditDraft === null) return;
+    const next = setPageFrameEditMode(
+      controlledEditDraft,
+      checked ? "fixed-page" : "scale-preserving",
+    );
+    setDraft(initialDraft(next.frame, next.compositionFrame));
+    setError(null);
+    setCustomAspectError(null);
+    setScaleControlValid(true);
+    setScaleRepresentabilityError(null);
+    editDraftProps!.onEditDraftChange(next);
   };
 
   return (
@@ -411,9 +586,22 @@ export function PageFrameEditor({
           Edit Page Frame
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Percent of the original Composition Frame
+          {fixedPage
+            ? "Position the Composition behind the fixed Page"
+            : "Percent of the original Composition Frame"}
         </p>
       </div>
+      {controlledEditDraft !== null && (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            name="keepPageSizeFixed"
+            type="checkbox"
+            checked={fixedPage}
+            onChange={(event) => setFixedPage(event.currentTarget.checked)}
+          />
+          <span>Keep Page size fixed</span>
+        </label>
+      )}
       <div className="grid grid-cols-2 gap-3">
         {FIELDS.map((field) => (
           <label key={field} className="flex flex-col gap-1 text-sm">
@@ -425,6 +613,9 @@ export function PageFrameEditor({
                 step="any"
                 autoFocus={field === "x"}
                 value={draft[field]}
+                disabled={
+                  fixedPage && (field === "width" || field === "height")
+                }
                 aria-invalid={error?.field === field || undefined}
                 aria-describedby={error?.field === field ? errorId : undefined}
                 onChange={(event) => updateField(field, event.target.value)}
@@ -442,15 +633,36 @@ export function PageFrameEditor({
         representedFrame={representedFrame}
         frame={controlledFrame}
         displayUnit={displayUnit}
-        onFrameChange={onDraftChange}
+        onFrameChange={(nextFrame) => emitFrame(nextFrame, false)}
         onValidityChange={setPhysicalFieldsValid}
+        readOnly={fixedPage}
       />
+      {fixedPage && controlledEditDraft?.mode === "fixed-page" && (
+        <CompositionScaleControl
+          scalePercent={controlledEditDraft.compositionScale * 100}
+          onScalePercentChange={(scalePercent) => {
+            try {
+              const next = setFixedPageCompositionScale(
+                controlledEditDraft,
+                scalePercent / 100,
+              );
+              setScaleRepresentabilityError(null);
+              editDraftProps!.onEditDraftChange(next);
+            } catch {
+              setScaleRepresentabilityError(UNREPRESENTABLE_SCALE_MESSAGE);
+            }
+          }}
+          validationError={scaleRepresentabilityError}
+          onValidityChange={setScaleControlValid}
+        />
+      )}
       <div className="flex flex-col gap-2">
         <label className="flex flex-col gap-1 text-sm">
           <span>Aspect ratio</span>
           <select
             name="aspectConstraint"
             value={aspectPreset}
+            disabled={fixedPage}
             onChange={(event) =>
               updateAspectPreset(event.target.value as AspectPreset)
             }
@@ -472,6 +684,7 @@ export function PageFrameEditor({
                 name="customAspectWidth"
                 type="number"
                 step="any"
+                disabled={fixedPage}
                 value={customAspectWidth}
                 aria-invalid={
                   customAspectError?.field === "customAspectWidth" || undefined
@@ -497,6 +710,7 @@ export function PageFrameEditor({
                 name="customAspectHeight"
                 type="number"
                 step="any"
+                disabled={fixedPage}
                 value={customAspectHeight}
                 aria-invalid={
                   customAspectError?.field === "customAspectHeight" || undefined
@@ -517,6 +731,7 @@ export function PageFrameEditor({
               type="button"
               variant="outline"
               size="sm"
+              disabled={fixedPage}
               onClick={applyCustomAspect}
             >
               Use Custom Ratio
@@ -533,10 +748,9 @@ export function PageFrameEditor({
           </p>
         )}
         <p className="text-xs text-muted-foreground">
-          Drag an edge or corner to resize. Drag inside the frame to pan the
-          composition. Hold Shift while dragging for a temporary aspect lock.
-          Aspect constraints also pair W and H edits and stay active until
-          Freeform is selected.
+          {fixedPage
+            ? "Page width, height, and insets are locked. Drag inside the frame or use X and Y to position the Composition."
+            : "Drag an edge or corner to resize. Drag inside the frame to pan the composition. Hold Shift while dragging for a temporary aspect lock. Aspect constraints also pair W and H edits and stay active until Freeform is selected."}
         </p>
       </div>
       {error !== null && (

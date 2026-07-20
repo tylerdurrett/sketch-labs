@@ -3,6 +3,7 @@ import {
   derivePageFramePlotProfile,
   fullCompositionPageFrame,
   plotDrawableRectangle,
+  resolveCompositionFrame,
   resolvePlotCompositionFrame,
   type PageFrame,
   type PlotProfile,
@@ -17,15 +18,25 @@ import {
 } from "./editHistory";
 import {
   applyPageFrameEdit,
+  applyPageFrameEditDraft,
   initialPageFrameForEdit,
   recomposePageToProfile,
   resetPageFrame,
+  resetPageFrameEditDraft,
   resolveStudioCompositionFrame,
   sameStudioPhysicalScale,
   studioGenerationAspect,
   studioMillimetersPerCompositionUnit,
   setPageAspectLocked,
 } from "./pageFrameEditing";
+import {
+  openPageFrameEditDraft,
+  panFixedPageFrame,
+  setFixedPageCompositionScale,
+  setPageFrameEditMode,
+  setScalePreservingPageFrame,
+  type PageFrameEditDraft,
+} from "./pageFrameEditDraft";
 
 const PROFILE: PlotProfile = {
   width: 220,
@@ -61,6 +72,23 @@ function scaleFrame(
     width: values.width * frame.width,
     height: values.height * frame.height,
   };
+}
+
+function openDraft(current: StudioEditState): PageFrameEditDraft {
+  return openPageFrameEditDraft({
+    profile: current.profile,
+    representedFrame: initialPageFrameForEdit(current),
+    compositionFrame: resolveStudioCompositionFrame(current),
+    generationAspect: studioGenerationAspect(current),
+  });
+}
+
+function fixedDraft(current: StudioEditState) {
+  const draft = setPageFrameEditMode(openDraft(current), "fixed-page");
+  if (draft.mode !== "fixed-page") {
+    throw new Error("expected fixed-page draft");
+  }
+  return draft;
 }
 
 describe("Page Frame editing commands", () => {
@@ -366,14 +394,23 @@ describe("Page Frame editing commands", () => {
   it("keeps drafts and Cancel outside history until Apply", () => {
     const initial = state();
     const history = createEditHistory(initial);
-    const draft = {
-      ...initialPageFrameForEdit(initial),
+    const opened = openDraft(initial);
+    if (opened.mode !== "scale-preserving") {
+      throw new Error("expected scale-preserving draft");
+    }
+    const ordinary = setScalePreservingPageFrame(opened, {
+      ...opened.frame,
       x: 123,
-      width: 456,
-    };
+      width: opened.frame.width * 0.75,
+    });
+    const fixed = setPageFrameEditMode(ordinary, "fixed-page");
+    if (fixed.mode !== "fixed-page") {
+      throw new Error("expected fixed-page draft");
+    }
+    const draft = setFixedPageCompositionScale(fixed, 2);
 
     // Cancel is discarding this caller-owned value; no history command runs.
-    expect(draft).not.toEqual(initialPageFrameForEdit(initial));
+    expect(draft.frame).not.toEqual(initialPageFrameForEdit(initial));
     expect(history).toEqual(createEditHistory(initial));
     expect(history.present).toBe(initial);
   });
@@ -386,5 +423,339 @@ describe("Page Frame editing commands", () => {
       resolvePlotCompositionFrame(initial.profile),
     );
     expect(resetPageFrame(history)).toBe(history);
+  });
+});
+
+describe("draft-aware Page Frame history commands", () => {
+  it("applies one ordinary draft atomically and restores the full result through Undo and Redo", () => {
+    const initial = state();
+    const history = createEditHistory(initial);
+    const opened = openDraft(initial);
+    if (opened.mode !== "scale-preserving") {
+      throw new Error("expected scale-preserving draft");
+    }
+    const frame = scaleFrame(opened.compositionFrame, {
+      x: 0.12,
+      y: -0.08,
+      width: 0.7,
+      height: 1.2,
+    });
+    const draft = setScalePreservingPageFrame(opened, frame);
+    const expectedProfile = derivePageFramePlotProfile(
+      draft.profile,
+      draft.representedFrame,
+      draft.frame,
+    );
+
+    const applied = applyPageFrameEditDraft(history, draft);
+
+    expect(applied.past).toEqual([initial]);
+    expect(applied.future).toEqual([]);
+    expect(applied.present).toEqual({
+      ...initial,
+      profile: expectedProfile,
+      framing: {
+        kind: "framed",
+        pageFrame: draft.frame,
+        generationAspect: draft.generationAspect,
+        aspectLocked: true,
+      },
+    });
+
+    const undone = undoEdit(applied);
+    expect(undone.present).toBe(initial);
+    expect(undone.future).toEqual([applied.present]);
+    const redone = redoEdit(undone);
+    expect(redone.present).toBe(applied.present);
+    expect(redone.present.profile).toBe(applied.present.profile);
+    expect(redone.present.framing).toBe(applied.present.framing);
+  });
+
+  it("applies the exact fixed profile and scaled frame after an ordinary-to-fixed mode switch", () => {
+    const initial = state();
+    const opened = openDraft(initial);
+    if (opened.mode !== "scale-preserving") {
+      throw new Error("expected scale-preserving draft");
+    }
+    const resized = setScalePreservingPageFrame(
+      opened,
+      scaleFrame(opened.compositionFrame, {
+        x: 0.1,
+        y: 0.15,
+        width: 0.75,
+        height: 0.6,
+      }),
+    );
+    const switched = setPageFrameEditMode(resized, "fixed-page");
+    if (switched.mode !== "fixed-page") {
+      throw new Error("expected fixed-page draft");
+    }
+    const draft = setFixedPageCompositionScale(switched, 2.25);
+
+    const applied = applyPageFrameEditDraft(createEditHistory(initial), draft);
+
+    expect(applied.past).toEqual([initial]);
+    expect(applied.present.profile).toBe(draft.profile);
+    expect(applied.present.profile).toEqual(
+      derivePageFramePlotProfile(
+        resized.profile,
+        resized.representedFrame,
+        resized.frame,
+      ),
+    );
+    expect(applied.present.framing).toEqual({
+      kind: "framed",
+      pageFrame: draft.frame,
+      generationAspect: draft.generationAspect,
+      aspectLocked: true,
+    });
+    expect(undoEdit(applied).present).toBe(initial);
+    expect(redoEdit(undoEdit(applied)).present).toBe(applied.present);
+  });
+
+  it("applies ordinary derivation from the rebased fixed result after switching back", () => {
+    const initial = state();
+    const fixed = setPageFrameEditMode(openDraft(initial), "fixed-page");
+    if (fixed.mode !== "fixed-page") {
+      throw new Error("expected fixed-page draft");
+    }
+    const scaled = setFixedPageCompositionScale(fixed, 1.8);
+    const rebased = setPageFrameEditMode(scaled, "scale-preserving");
+    if (rebased.mode !== "scale-preserving") {
+      throw new Error("expected scale-preserving draft");
+    }
+    const draft = setScalePreservingPageFrame(rebased, {
+      ...rebased.frame,
+      width: rebased.frame.width * 1.3,
+      height: rebased.frame.height * 0.8,
+    });
+
+    const applied = applyPageFrameEditDraft(createEditHistory(initial), draft);
+
+    expect(applied.present.profile).toEqual(
+      derivePageFramePlotProfile(
+        rebased.profile,
+        rebased.representedFrame,
+        draft.frame,
+      ),
+    );
+    expect(applied.present.framing).toMatchObject({
+      kind: "framed",
+      pageFrame: draft.frame,
+      generationAspect: studioGenerationAspect(initial),
+    });
+    expect(applied.past).toEqual([initial]);
+  });
+
+  it("resets an ordinary draft to full Composition at its basis scale in one undoable commit", () => {
+    const initial = state();
+    const composition = resolveStudioCompositionFrame(initial);
+    const committed = applyPageFrameEdit(
+      createEditHistory(initial),
+      scaleFrame(composition, {
+        x: 0.2,
+        y: 0.1,
+        width: 0.6,
+        height: 0.75,
+      }),
+    ).present;
+    const opened = openDraft(committed);
+    if (opened.mode !== "scale-preserving") {
+      throw new Error("expected scale-preserving draft");
+    }
+    const edited = setScalePreservingPageFrame(opened, {
+      ...opened.frame,
+      x: opened.frame.x + 123,
+      width: opened.frame.width * 0.5,
+    });
+    const expectedProfile = derivePageFramePlotProfile(
+      opened.profile,
+      opened.representedFrame,
+      fullCompositionPageFrame(opened.compositionFrame),
+    );
+
+    const reset = resetPageFrameEditDraft(createEditHistory(committed), edited);
+
+    expect(reset.past).toEqual([committed]);
+    expect(reset.present.profile).toEqual(expectedProfile);
+    expect(reset.present.framing).toEqual({ kind: "unframed" });
+    const undone = undoEdit(reset);
+    expect(undone.present).toBe(committed);
+    const redone = redoEdit(undone);
+    expect(redone.present).toBe(reset.present);
+    expect(redone.present.profile).toBe(reset.present.profile);
+    expect(redone.present.framing).toBe(reset.present.framing);
+  });
+
+  it("resets fixed mode to its exact profile and keeps framing for mismatch padding", () => {
+    const representedFrame: PageFrame = {
+      x: 40,
+      y: 10,
+      width: 1_000,
+      height: 800,
+    };
+    const initial: StudioEditState = {
+      ...state(),
+      framing: {
+        kind: "framed",
+        pageFrame: representedFrame,
+        generationAspect: 16 / 9,
+        aspectLocked: true,
+      },
+    };
+    const fixed = fixedDraft(initial);
+    const scaled = setFixedPageCompositionScale(fixed, 2);
+    const draft = panFixedPageFrame(scaled, {
+      ...scaled.frame,
+      x: scaled.frame.x + 51,
+      y: scaled.frame.y - 37,
+    });
+
+    const reset = resetPageFrameEditDraft(createEditHistory(initial), draft);
+
+    expect(draft.fitFrame).not.toEqual(
+      fullCompositionPageFrame(resolveCompositionFrame(16 / 9)),
+    );
+    expect(reset.past).toEqual([initial]);
+    expect(reset.present.profile).toBe(draft.profile);
+    expect(reset.present.framing).toEqual({
+      kind: "framed",
+      pageFrame: draft.fitFrame,
+      generationAspect: 16 / 9,
+      aspectLocked: true,
+    });
+    const undone = undoEdit(reset);
+    expect(undone.present).toBe(initial);
+    expect(redoEdit(undone).present).toBe(reset.present);
+  });
+
+  it("clears fixed framing when the scale-one fit is full Composition", () => {
+    const generationAspect = 200 / 160;
+    const compositionFrame = resolveCompositionFrame(generationAspect);
+    const committed: StudioEditState = {
+      ...state(),
+      framing: {
+        kind: "framed",
+        pageFrame: fullCompositionPageFrame(compositionFrame),
+        generationAspect,
+        aspectLocked: true,
+      },
+    };
+    const fixed = fixedDraft(committed);
+    const draft = setFixedPageCompositionScale(fixed, 3);
+
+    const reset = resetPageFrameEditDraft(createEditHistory(committed), draft);
+
+    expect(draft.fitFrame).toEqual(
+      fullCompositionPageFrame(draft.compositionFrame),
+    );
+    expect(reset.past).toEqual([committed]);
+    expect(reset.present.profile).toBe(draft.profile);
+    expect(reset.present.framing).toEqual({ kind: "unframed" });
+  });
+
+  it("treats realistic A4 round-trip noise as full Composition without adding history", () => {
+    const a4Profile: PlotProfile = {
+      ...PROFILE,
+      width: 210,
+      height: 297,
+    };
+    const initial = state(a4Profile);
+    const history = createEditHistory(initial);
+    const fixed = fixedDraft(initial);
+    const draft = setFixedPageCompositionScale(fixed, 2.5);
+    const fullComposition = fullCompositionPageFrame(draft.compositionFrame);
+
+    // Re-resolving the drawable aspect introduces only machine-scale padding.
+    expect(fixed.fitFrame).not.toEqual(fullComposition);
+    expect(Math.abs(fixed.fitFrame.x - fullComposition.x)).toBeLessThan(1e-10);
+
+    const reset = resetPageFrameEditDraft(history, draft);
+
+    expect(reset).toBe(history);
+    expect(reset.past).toEqual([]);
+    expect(reset.present).toBe(initial);
+  });
+
+  it("collapses padding only inside the Page Frame EPSILON tolerance", () => {
+    const framedSquare = (relativeWidthDelta: number): StudioEditState => {
+      const profile: PlotProfile = {
+        ...PROFILE,
+        width: 1_000 * (1 + relativeWidthDelta),
+        height: 1_000,
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+      };
+      return {
+        ...state(profile),
+        framing: {
+          kind: "framed",
+          pageFrame: {
+            x: 0,
+            y: 0,
+            width: profile.width,
+            height: profile.height,
+          },
+          generationAspect: 1,
+          aspectLocked: true,
+        },
+      };
+    };
+    const inside = framedSquare(Number.EPSILON * 4);
+    const outside = framedSquare(Number.EPSILON * 32);
+    const insideDraft = fixedDraft(inside);
+    const outsideDraft = fixedDraft(outside);
+
+    const insideReset = resetPageFrameEditDraft(
+      createEditHistory(inside),
+      insideDraft,
+    );
+    const outsideReset = resetPageFrameEditDraft(
+      createEditHistory(outside),
+      outsideDraft,
+    );
+
+    expect(insideReset.present.framing).toEqual({ kind: "unframed" });
+    expect(outsideReset.present.framing).toEqual({
+      kind: "framed",
+      pageFrame: outsideDraft.fitFrame,
+      generationAspect: 1,
+      aspectLocked: true,
+    });
+  });
+
+  it("rejects forged ordinary and fixed drafts before touching history", () => {
+    const initial = state();
+    const history = createEditHistory(initial);
+    const ordinary = openDraft(initial);
+    if (ordinary.mode !== "scale-preserving") {
+      throw new Error("expected scale-preserving draft");
+    }
+    const invalidOrdinary = {
+      ...ordinary,
+      representedFrame: {
+        ...ordinary.representedFrame,
+        height: ordinary.representedFrame.height * 0.5,
+      },
+    };
+    const fixed = fixedDraft(initial);
+    const invalidFixed = {
+      ...fixed,
+      fitFrame: { ...fixed.fitFrame, x: fixed.fitFrame.x + 1 },
+    };
+
+    expect(() => applyPageFrameEditDraft(history, invalidOrdinary)).toThrow(
+      /equivalent physical scales/,
+    );
+    expect(() => resetPageFrameEditDraft(history, invalidOrdinary)).toThrow(
+      /equivalent physical scales/,
+    );
+    expect(() => applyPageFrameEditDraft(history, invalidFixed)).toThrow(
+      /fitFrame must be the centered/,
+    );
+    expect(() => resetPageFrameEditDraft(history, invalidFixed)).toThrow(
+      /fitFrame must be the centered/,
+    );
+    expect(history).toEqual(createEditHistory(initial));
+    expect(history.present).toBe(initial);
   });
 });

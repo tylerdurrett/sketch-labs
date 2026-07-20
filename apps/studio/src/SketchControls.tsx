@@ -24,7 +24,6 @@ import {
   renderToSVG,
   resizePageFramePlotProfileProportionally,
   resolveOutputProfile,
-  type PageFrame,
   type PlotProfile,
   type Preset,
   type PresetFraming,
@@ -53,16 +52,23 @@ import {
   type StudioEditState,
 } from "./editHistory";
 import {
-  applyPageFrameEdit,
+  applyPageFrameEditDraft,
   initialPageFrameForEdit,
   recomposePageToProfile,
-  resetPageFrame,
+  resetPageFrameEditDraft,
   resolveStudioCompositionFrame,
   sameStudioPhysicalScale,
   studioGenerationAspect,
   studioMillimetersPerCompositionUnit,
   setPageAspectLocked,
 } from "./pageFrameEditing";
+import {
+  openPageFrameEditDraft,
+  pageFrameEditDraftProfile,
+  panFixedPageFrame,
+  setScalePreservingPageFrame,
+  type PageFrameEditDraft,
+} from "./pageFrameEditDraft";
 import {
   detectHistoryShortcutPlatform,
   fieldOwnsHistoryShortcut,
@@ -84,8 +90,9 @@ import {
   createHiddenLineExportSnapshot,
   createOutlineComputeIdentity,
   mutableScene,
-  outlineComputeIdentitiesEqual,
+  outlineGeometryIdentitiesEqual,
 } from "./outlineComputeProtocol";
+import type { OutlineFinalizationStrokePolicy } from "./outlineScene";
 import {
   createOutlineSessionState,
   outlineSessionReducer,
@@ -172,10 +179,7 @@ function outlineIdentitySourceFor(
   | { sourceScene: Scene }
   | { outlineTarget: OutlineTarget }
   | { sourceScene: Scene; outlineTarget: OutlineTarget } {
-  const outlineTarget = {
-    toolWidthMillimeters: edit.profile.toolWidthMillimeters,
-    millimetersPerSceneUnit: studioMillimetersPerCompositionUnit(edit),
-  };
+  const outlineTarget = outlineTargetFor(edit);
   if (sketch.deriveOutlineSource !== undefined) {
     return { sourceScene, outlineTarget };
   }
@@ -183,31 +187,74 @@ function outlineIdentitySourceFor(
   return { sourceScene };
 }
 
-/** Whether moving between two authored states invalidates prepared Outline geometry. */
-function outlineInputsChanged(
+function outlineTargetFor(edit: StudioEditState): OutlineTarget {
+  return {
+    toolWidthMillimeters: edit.profile.toolWidthMillimeters,
+    millimetersPerSceneUnit: studioMillimetersPerCompositionUnit(edit),
+  };
+}
+
+/** Resolve the transient Page editor's physical target without committing it. */
+function outlineEditForPageDraft(
+  edit: StudioEditState,
+  draft: PageFrameEditDraft | null,
+): StudioEditState {
+  if (draft === null) return edit;
+  return {
+    ...edit,
+    profile: pageFrameEditDraftProfile(draft),
+    framing: {
+      kind: "framed",
+      pageFrame: draft.frame,
+      generationAspect: draft.generationAspect,
+      aspectLocked:
+        edit.framing.kind === "framed" && edit.framing.aspectLocked,
+    },
+  };
+}
+
+type OutlineEditChange =
+  | "geometry"
+  | "physical-style"
+  | "placement"
+  | "none";
+
+/** Classify authored edits by the cheapest work needed for current Outline. */
+function classifyOutlineEdit(
   previous: StudioEditState,
   next: StudioEditState,
   usesPhysicalTool: boolean,
-): boolean {
+): OutlineEditChange {
   if (
     !sameParams(previous.params, next.params) ||
     previous.seed !== next.seed ||
     previous.tolerance !== next.tolerance ||
-    !Object.is(
-      previous.profile.toolWidthMillimeters,
-      next.profile.toolWidthMillimeters,
+    !plotDrawableAspectsEquivalent(
+      studioGenerationAspect(previous),
+      studioGenerationAspect(next),
     )
   ) {
-    return true;
+    return "geometry";
   }
 
-  if (usesPhysicalTool && !sameStudioPhysicalScale(previous, next)) {
-    return true;
+  if (
+    usesPhysicalTool &&
+    (!Object.is(
+      previous.profile.toolWidthMillimeters,
+      next.profile.toolWidthMillimeters,
+    ) ||
+      !sameStudioPhysicalScale(previous, next))
+  ) {
+    return "physical-style";
   }
-  return !plotDrawableAspectsEquivalent(
-    studioGenerationAspect(previous),
-    studioGenerationAspect(next),
-  );
+
+  if (
+    previous.profile !== next.profile ||
+    previous.framing !== next.framing
+  ) {
+    return "placement";
+  }
+  return "none";
 }
 
 /** Whether an edit changes the time-invariant Scribble worker identity. */
@@ -320,7 +367,8 @@ export function SketchControls({
   const historyRef = useRef(history);
   historyRef.current = history;
   const { params, seed, locks, profile, tolerance } = history.present;
-  const [pageFrameDraft, setPageFrameDraft] = useState<PageFrame | null>(null);
+  const [pageFrameEditDraft, setPageFrameEditDraft] =
+    useState<PageFrameEditDraft | null>(null);
   // Aspect is editing chrome, not authored state. It survives closing and
   // reopening the editor within this keyed Sketch session, but never enters
   // history, Presets, reproduction metadata, or the committed Page Frame.
@@ -331,8 +379,8 @@ export function SketchControls({
   // Page Frame percentages are relative to the Composition basis captured on
   // mode entry. Keep history fixed until Apply, Cancel, or Reset closes the mode
   // so a draft can never outlive the basis its strings describe.
-  const pageFrameDraftRef = useRef(pageFrameDraft);
-  pageFrameDraftRef.current = pageFrameDraft;
+  const pageFrameEditDraftRef = useRef(pageFrameEditDraft);
+  pageFrameEditDraftRef.current = pageFrameEditDraft;
   // Tone reference is diagnostic Studio chrome, not authored state. Keeping it
   // beside (rather than inside) the edit-history model excludes it from Undo,
   // Presets, locks, profiles, and every reproduction envelope by construction.
@@ -634,7 +682,14 @@ export function SketchControls({
     if (hasScribblePreparation && scribbleChanged) {
       scribbleInputRevisionRef.current += 1;
     }
-    if (hasScribblePreparation && scribbleAction === "preview") {
+    if (
+      hasScribblePreparation &&
+      scribbleAction === "preview" &&
+      scribbleChanged
+    ) {
+      if (!scribblePreparation.getSessionSnapshot().transactionOpen) {
+        scribblePreparation.beginTransaction();
+      }
       scribblePreparation.previewAuthoredState(
         authoredScribbleState(next.present),
       );
@@ -645,14 +700,22 @@ export function SketchControls({
     ) {
       scribblePreparation.requestAtomic(authoredScribbleState(next.present));
     }
-    const invalidated = outlineInputsChanged(
+    const outlineChange = classifyOutlineEdit(
       current.present,
       next.present,
       sketch.generateOutlineSource !== undefined ||
         sketch.deriveOutlineSource !== undefined,
     );
-    if (invalidated) {
+    if (outlineChange === "geometry") {
       cancelOutlineCoordinator();
+      // Paper transactions defer this boundary until their first geometry edit.
+      // Target/style-only previews can therefore keep painting retained Outline.
+      if (
+        hasActiveTransaction(next) &&
+        !outlineSessionRef.current.transactionOpen
+      ) {
+        dispatchOutline({ type: "transaction-began" });
+      }
       const retainsPaintedScribble =
         hasScribblePreparation && !scribbleChanged && scribblePaintIsCurrent;
       dispatchOutline({
@@ -737,7 +800,7 @@ export function SketchControls({
       // Page Frame edit mode owns a transient draft outside Studio history.
       // Ignoring the shortcut (without preventing it) keeps global history and
       // the Composition basis stable while preserving native input Undo/Redo.
-      if (pageFrameDraftRef.current !== null) return;
+      if (pageFrameEditDraftRef.current !== null) return;
 
       const current = historyRef.current;
       if (
@@ -857,42 +920,84 @@ export function SketchControls({
     updateHistory(beginEditTransaction, false);
     if (hasScribblePreparation) scribblePreparation.beginTransaction();
   };
+  const beginProfileTransaction = (): void => {
+    // A profile gesture may prove to be physical style or Page placement only.
+    // Keep the current Outline until a preview actually crosses a geometry
+    // boundary; classification in updateHistory opens the session lazily then.
+    updateHistory(beginEditTransaction, false);
+  };
   const settleTransaction = (
     transition: (current: EditHistory) => EditHistory,
   ): void => {
+    const outlineTransactionOpen = outlineSessionRef.current.transactionOpen;
+    const scribbleTransactionOpen =
+      hasScribblePreparation &&
+      scribblePreparation.getSessionSnapshot().transactionOpen;
     updateHistory(transition, false);
-    if (hasScribblePreparation) {
+    if (scribbleTransactionOpen) {
       scribblePreparation.settleTransaction(authoredScribbleState());
     }
     // Settlement belongs to the session reducer: outside export it resamples the
     // final Fill exactly once; during export it retains only a deferred request,
     // which the export terminal action releases after relinquishing the slot.
-    dispatchOutline({
-      type: "transaction-settled",
-      launch: environmentReadyNow() && !hasScribblePreparation,
-    });
+    if (outlineTransactionOpen) {
+      dispatchOutline({
+        type: "transaction-settled",
+        launch: environmentReadyNow() && !hasScribblePreparation,
+      });
+    }
   };
   const commitTransaction = (): void => settleTransaction(commitEditTransaction);
   const cancelTransaction = (): void => settleTransaction(cancelEditTransaction);
 
   const openPageFrameEditor = (): void => {
-    setPageFrameDraft(initialPageFrameForEdit(historyRef.current.present));
+    const current = historyRef.current.present;
+    const draft = openPageFrameEditDraft({
+      profile: current.profile,
+      representedFrame: initialPageFrameForEdit(current),
+      compositionFrame: resolveStudioCompositionFrame(current),
+      generationAspect: studioGenerationAspect(current),
+    });
+    pageFrameEditDraftRef.current = draft;
+    setPageFrameEditDraft(draft);
   };
 
   const closePageFrameEditor = (): void => {
     restoreCropFocusRef.current = true;
-    setPageFrameDraft(null);
+    pageFrameEditDraftRef.current = null;
+    setPageFrameEditDraft(null);
   };
 
   useLayoutEffect(() => {
-    if (pageFrameDraft !== null || !restoreCropFocusRef.current) return;
+    if (pageFrameEditDraft !== null || !restoreCropFocusRef.current) return;
     restoreCropFocusRef.current = false;
     cropButtonRef.current?.focus();
-  }, [pageFrameDraft]);
+  }, [pageFrameEditDraft]);
 
-  const applyPageFrame = (frame: PageFrame): void => {
+  const updatePageFrameEditDraft = (next: PageFrameEditDraft): void => {
+    const previous = pageFrameEditDraftRef.current;
+    if (previous?.mode === "scale-preserving" && next.mode === "fixed-page") {
+      setPageFrameAspectConstraint({ kind: "free" });
+    }
+    pageFrameEditDraftRef.current = next;
+    setPageFrameEditDraft(next);
+  };
+
+  const updatePageFrameFromCanvas = (
+    frame: PageFrameEditDraft["frame"],
+  ): void => {
+    const current = pageFrameEditDraftRef.current;
+    if (current === null) return;
+    updatePageFrameEditDraft(
+      current.mode === "fixed-page"
+        ? panFixedPageFrame(current, frame)
+        : setScalePreservingPageFrame(current, frame),
+    );
+  };
+
+  const applyPageFrame = (draft: PageFrameEditDraft): void => {
     updateHistory(
-      (current) => applyPageFrameEdit(current, frame),
+      (current) => applyPageFrameEditDraft(current, draft),
       true,
       "atomic",
     );
@@ -900,7 +1005,13 @@ export function SketchControls({
   };
 
   const resetFrame = (): void => {
-    updateHistory(resetPageFrame, true, "atomic");
+    const draft = pageFrameEditDraftRef.current;
+    if (draft === null) return;
+    updateHistory(
+      (current) => resetPageFrameEditDraft(current, draft),
+      true,
+      "atomic",
+    );
     closePageFrameEditor();
   };
 
@@ -1082,6 +1193,27 @@ export function SketchControls({
     );
     dispatchOutline({ type: "source-ready", provenance });
   };
+
+  const outlineDisplayTarget = outlineTargetFor(
+    outlineEditForPageDraft(history.present, pageFrameEditDraft),
+  );
+  const outlineFinalizationStrokePolicy =
+    useMemo<OutlineFinalizationStrokePolicy>(
+      () => ({
+        kind:
+          sketch.generateOutlineSource === undefined &&
+          sketch.deriveOutlineSource === undefined
+            ? "legacy-scene"
+            : "physical-tool",
+        target: outlineDisplayTarget,
+      }),
+      [
+        sketch.generateOutlineSource,
+        sketch.deriveOutlineSource,
+        outlineDisplayTarget.toolWidthMillimeters,
+        outlineDisplayTarget.millimetersPerSceneUnit,
+      ],
+    );
 
   const renderState: LiveCanvasRenderState =
     unavailableEnvironmentStatus !== null
@@ -1420,7 +1552,7 @@ export function SketchControls({
       includePaperMargins,
       filename,
       ...(cachedOutline !== null &&
-      outlineComputeIdentitiesEqual(identity, cachedOutline.identity)
+      outlineGeometryIdentitiesEqual(identity, cachedOutline.identity)
         ? {
             reusableOutline: {
               identity: cachedOutline.identity,
@@ -1576,15 +1708,22 @@ export function SketchControls({
             params={params}
             seed={seed}
             compositionFrame={compositionFrame}
-            profile={profile}
+            profile={
+              pageFrameEditDraft === null
+                ? profile
+                : pageFrameEditDraftProfile(pageFrameEditDraft)
+            }
             inputRevision={outlineSession.inputRevision}
             fillCaptureRequest={outlineSession.capture}
             onFillCaptured={onFillCaptured}
             onDisplayedSceneCommitted={onDisplayedSceneCommitted}
             renderState={renderState}
             tolerance={tolerance}
-            pageFrameDraft={pageFrameDraft}
-            onPageFrameDraftChange={setPageFrameDraft}
+            outlineFinalizationStrokePolicy={
+              outlineFinalizationStrokePolicy
+            }
+            pageFrameEditDraft={pageFrameEditDraft}
+            onPageFrameDraftChange={updatePageFrameFromCanvas}
             pageFrameAspectConstraint={pageFrameAspectConstraint}
             pageFrame={
               history.present.framing.kind === "framed"
@@ -1611,16 +1750,13 @@ export function SketchControls({
         hidden={collapsed}
       >
         {switcher}
-        {pageFrameDraft !== null ? (
+        {pageFrameEditDraft !== null ? (
           <PageFrameEditor
-            compositionFrame={compositionFrame}
-            frame={pageFrameDraft}
-            profile={profile}
-            representedFrame={initialPageFrameForEdit(history.present)}
+            editDraft={pageFrameEditDraft}
             displayUnit={readPaperDisplayUnit()}
             aspectConstraint={pageFrameAspectConstraint}
             onAspectConstraintChange={setPageFrameAspectConstraint}
-            onDraftChange={setPageFrameDraft}
+            onEditDraftChange={updatePageFrameEditDraft}
             onApply={applyPageFrame}
             onCancel={closePageFrameEditor}
             onReset={resetFrame}
@@ -1630,7 +1766,7 @@ export function SketchControls({
         <PaperSection
           profile={profile}
           transaction={{
-            onBegin: beginTransaction,
+            onBegin: beginProfileTransaction,
             onPreview: (next) => previewLeaf("profile", next),
             onCommit: commitTransaction,
             onCancel: cancelTransaction,

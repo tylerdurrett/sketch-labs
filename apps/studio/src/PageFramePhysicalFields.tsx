@@ -24,6 +24,12 @@ export interface PageFramePhysicalFieldsProps {
   onFrameChange: (frame: PageFrame) => void;
   /** Lets a containing commit boundary block while a local text draft is invalid. */
   onValidityChange?: (valid: boolean) => void;
+  /**
+   * Present the exact profile dimensions without allowing Page-size edits.
+   * Fixed-page framing owns scale and position instead, so the profile and all
+   * four of its physical insets remain visible but immutable.
+   */
+  readOnly?: boolean;
 }
 
 interface PhysicalFieldError {
@@ -32,6 +38,12 @@ interface PhysicalFieldError {
 }
 
 const DIMENSIONS = ["width", "height"] as const;
+const INSET_LABELS = {
+  top: "Top inset",
+  right: "Right inset",
+  bottom: "Bottom inset",
+  left: "Left inset",
+} as const;
 
 function physicalDrafts(
   profile: PlotProfile,
@@ -62,6 +74,7 @@ export function PageFramePhysicalFields({
   displayUnit,
   onFrameChange,
   onValidityChange,
+  readOnly = false,
 }: PageFramePhysicalFieldsProps) {
   const [drafts, setDrafts] = useState(() =>
     physicalDrafts(profile, representedFrame, frame, displayUnit),
@@ -77,6 +90,7 @@ export function PageFramePhysicalFields({
     onValidityChange?.(true);
   }, [
     displayUnit,
+    readOnly,
     frame.height,
     frame.width,
     profile.height,
@@ -93,6 +107,7 @@ export function PageFramePhysicalFields({
     dimension: PageFramePhysicalDimension,
     raw: string,
   ): void => {
+    if (readOnly) return;
     setDrafts((current) => ({ ...current, [dimension]: raw }));
 
     const displayValue = raw.trim() === "" ? Number.NaN : Number(raw);
@@ -164,6 +179,7 @@ export function PageFramePhysicalFields({
               type="number"
               step="any"
               value={drafts[dimension]}
+              readOnly={readOnly}
               aria-label={`${dimensionLabel(dimension)} (${displayUnit})`}
               aria-invalid={error?.field === dimension || undefined}
               aria-describedby={
@@ -180,6 +196,31 @@ export function PageFramePhysicalFields({
           </span>
         </label>
       ))}
+      {readOnly && (
+        <div className="col-span-2 grid grid-cols-2 gap-3">
+          {(["top", "right", "bottom", "left"] as const).map((side) => (
+            <label key={side} className="flex flex-col gap-1 text-sm">
+              <span>{INSET_LABELS[side]}</span>
+              <span className="flex items-center gap-1">
+                <input
+                  name={`physical-inset-${side}`}
+                  type="number"
+                  value={formatPaperDimension(
+                    profile.insets[side],
+                    displayUnit,
+                  )}
+                  aria-label={`Page ${side} inset (${displayUnit})`}
+                  readOnly
+                  className="min-w-0 flex-1 rounded-md border bg-muted px-2 py-1.5 text-right text-sm text-muted-foreground tabular-nums"
+                />
+                <span className="text-muted-foreground" aria-hidden>
+                  {displayUnit}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
       {error !== null && (
         <p
           id={errorId}

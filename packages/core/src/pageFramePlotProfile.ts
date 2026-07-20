@@ -1,30 +1,181 @@
 /**
  * Physical Plot Profile derivation for Page Frame edits (ADR-0015).
  *
- * A committed Page Frame changes which Composition-coordinate extent the page
- * represents, but it must not change the uniform Scene-to-physical scale. The
- * current Plot Profile and the Page Frame represented by its drawable rectangle
- * together carry that scale. Re-deriving from that pair makes first edits,
- * repeated edits, and Reset-to-full-Composition all the same operation.
+ * Ordinary Page Frame edits preserve the uniform Scene-to-physical scale by
+ * resizing the Plot Profile around the new Composition-coordinate extent. The
+ * explicit fixed-page inverse instead locks that profile and changes the Page
+ * Frame extent proportionally, uniformly scaling the frozen Scene behind it.
  *
- * Physical plot margins are outside the drawable Page extent. They therefore
- * remain fixed in millimeters while only paper width and height grow or shrink.
+ * Physical plot margins remain outside the drawable Page extent: ordinary
+ * framing keeps them fixed while paper dimensions change, and fixed-page
+ * scaling keeps the entire profile—including those margins—exactly untouched.
  */
 
 import type { PageFrame } from './pageFrame'
-import { validatePageFrame } from './pageFrame'
+import { fullCompositionPageFrame, validatePageFrame } from './pageFrame'
 import {
   PLOT_DRAWABLE_ASPECT_RELATIVE_TOLERANCE,
   plotDrawableRectangle,
   type PlotProfile,
   validatePlotProfile,
 } from './plotProfile'
+import type { CoordinateSpace } from './scene'
 
 const SCALE_RELATIVE_TOLERANCE = Number.EPSILON * 8
 const CANCELLATION_ERROR_FACTOR = 4
 
 /** A total paper dimension that drives a physical Page resize. */
 export type PageFramePhysicalDimension = 'width' | 'height'
+
+/**
+ * Build the fixed-page scale reference for a frozen Composition Frame.
+ *
+ * The reference has the locked Plot Profile drawable's aspect and is centered
+ * around the full Composition. Its extent contains the complete Composition:
+ * the narrower axis is expanded when the two aspects differ, creating
+ * geometry-free padding rather than cropping generated Scene geometry.
+ *
+ * This frame is both the stable `1` composition-scale reference and the Reset
+ * result. Scaling a panned frame back to `1` deliberately preserves its center;
+ * callers that mean Reset use this centered reference directly.
+ *
+ * The Plot Profile is validated but never cloned or modified.
+ *
+ * @throws if the profile or Composition Frame is invalid, its drawable aspect
+ *   is not finite and positive, or the centered reference is not representable.
+ */
+export function centeredFixedPageFrame(
+  profile: PlotProfile,
+  composition: CoordinateSpace,
+): PageFrame {
+  const operation = 'centeredFixedPageFrame'
+  const drawable = plotDrawableRectangle(profile)
+  const compositionFrame = fullCompositionPageFrame(composition)
+  const drawableAspect = drawable.width / drawable.height
+
+  if (!Number.isFinite(drawableAspect) || drawableAspect <= 0) {
+    throw new Error(
+      `${operation}: Plot Profile drawable aspect must be a finite positive width/height ratio, got ${drawableAspect}`,
+    )
+  }
+
+  const compositionAspect = composition.width / composition.height
+  const reference: PageFrame =
+    drawableAspect > compositionAspect
+      ? {
+          x:
+            (composition.width - composition.height * drawableAspect) /
+            2,
+          y: 0,
+          width: composition.height * drawableAspect,
+          height: composition.height,
+        }
+      : drawableAspect < compositionAspect
+        ? {
+            x: 0,
+            y:
+              (composition.height - composition.width / drawableAspect) /
+              2,
+            width: composition.width,
+            height: composition.width / drawableAspect,
+          }
+        : compositionFrame
+
+  validatePageFrame(reference)
+  pageFramePhysicalScale(profile, reference, operation)
+  return reference
+}
+
+/**
+ * Read a Page Frame's absolute composition scale against its fixed-page fit.
+ *
+ * Scale is `fit extent / current extent` on both axes: values above one zoom in
+ * and values below one zoom out. Both frames must retain the locked drawable
+ * aspect, and their per-axis ratios must describe one uniform scale.
+ *
+ * @throws if the profile or either frame is invalid, either frame is
+ *   incompatible with the locked drawable aspect, or the ratios are not one
+ *   finite positive uniform scale.
+ */
+export function fixedPageCompositionScale(
+  profile: PlotProfile,
+  referenceFrame: PageFrame,
+  pageFrame: PageFrame,
+): number {
+  const operation = 'fixedPageCompositionScale'
+  validatePlotProfile(profile)
+  validatePageFrame(referenceFrame)
+  validatePageFrame(pageFrame)
+
+  const horizontalScale = referenceFrame.width / pageFrame.width
+  const verticalScale = referenceFrame.height / pageFrame.height
+  if (!scalesStrictlyEquivalent(horizontalScale, verticalScale)) {
+    throw new Error(
+      `${operation}: reference and current Page Frame extents must describe one finite positive uniform composition scale`,
+    )
+  }
+
+  pageFramePhysicalScale(profile, referenceFrame, operation)
+  pageFramePhysicalScale(profile, pageFrame, operation)
+  return horizontalScale
+}
+
+/**
+ * Apply an absolute fixed-page composition scale around the current Page center.
+ *
+ * Extents are always derived from the immutable centered-fit reference rather
+ * than the previously scaled extents, avoiding compounding drift. The current
+ * center is retained so scaling after a pan does not move the artwork anchor.
+ * The locked Plot Profile is validation-only and remains exactly untouched.
+ *
+ * @throws if the profile/reference/current frame relationship is invalid, the
+ *   scale is not finite and strictly positive, or the scaled frame cannot be
+ *   represented as finite Page geometry.
+ */
+export function scaleFixedPageFrame(
+  profile: PlotProfile,
+  referenceFrame: PageFrame,
+  currentFrame: PageFrame,
+  compositionScale: number,
+): PageFrame {
+  const operation = 'scaleFixedPageFrame'
+  if (!Number.isFinite(compositionScale) || compositionScale <= 0) {
+    throw new Error(
+      `${operation}: composition scale must be a finite positive number, got ${compositionScale}`,
+    )
+  }
+  const currentScale = fixedPageCompositionScale(
+    profile,
+    referenceFrame,
+    currentFrame,
+  )
+  if (scalesStrictlyEquivalent(currentScale, compositionScale)) {
+    return currentFrame
+  }
+
+  const width = referenceFrame.width / compositionScale
+  const height = referenceFrame.height / compositionScale
+  const scaled: PageFrame = {
+    x: currentFrame.x + (currentFrame.width - width) / 2,
+    y: currentFrame.y + (currentFrame.height - height) / 2,
+    width,
+    height,
+  }
+  validatePageFrame(scaled)
+  pageFramePhysicalScale(profile, scaled, operation)
+
+  const representedScale = fixedPageCompositionScale(
+    profile,
+    referenceFrame,
+    scaled,
+  )
+  if (!scalesStrictlyEquivalent(representedScale, compositionScale)) {
+    throw new Error(
+      `${operation}: composition scale ${compositionScale} cannot be represented as finite Page Frame geometry`,
+    )
+  }
+  return scaled
+}
 
 /**
  * Derive the Plot Profile for a target Page Frame at the current physical scale.
@@ -344,6 +495,21 @@ function pageFramePhysicalScale(
     )
   }
   return horizontalMillimetersPerUnit
+}
+
+/** Compare two positive scales relatively, without a unit-scale floor. */
+function scalesStrictlyEquivalent(left: number, right: number): boolean {
+  if (
+    !Number.isFinite(left) ||
+    left <= 0 ||
+    !Number.isFinite(right) ||
+    right <= 0
+  ) {
+    return false
+  }
+  if (left === right) return true
+  const scale = Math.max(Math.abs(left), Math.abs(right))
+  return Math.abs(left - right) <= SCALE_RELATIVE_TOLERANCE * scale
 }
 
 /**

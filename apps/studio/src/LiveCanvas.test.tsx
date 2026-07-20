@@ -6,6 +6,30 @@ import { act, createRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const outlineFinalizationCalls = vi.hoisted(() => ({
+  style: 0,
+  placement: 0,
+}));
+
+vi.mock("./outlineScene", async (importActual) => {
+  const actual = await importActual<typeof import("./outlineScene")>();
+  return {
+    ...actual,
+    applyOutlineArtworkStrokePolicy: (
+      ...args: Parameters<typeof actual.applyOutlineArtworkStrokePolicy>
+    ) => {
+      outlineFinalizationCalls.style += 1;
+      return actual.applyOutlineArtworkStrokePolicy(...args);
+    },
+    finalizeStyledOutlineScene: (
+      ...args: Parameters<typeof actual.finalizeStyledOutlineScene>
+    ) => {
+      outlineFinalizationCalls.placement += 1;
+      return actual.finalizeStyledOutlineScene(...args);
+    },
+  };
+});
+
 import {
   createShadingMask,
   createToneField,
@@ -26,20 +50,36 @@ import {
   type LiveCanvasHandle,
   type LiveCanvasProps,
 } from "./LiveCanvas";
-import { finalizeOutlineScene } from "./outlineScene";
+import {
+  finalizeOutlineScene,
+  type OutlineFinalizationStrokePolicy,
+} from "./outlineScene";
+import {
+  openPageFrameEditDraft,
+  panFixedPageFrame,
+  setFixedPageCompositionScale,
+  setPageFrameEditMode,
+  type FixedPageFrameEditDraft,
+} from "./pageFrameEditDraft";
+import {
+  FIXED_PAGE_PARITY_COMPOSITION,
+  FIXED_PAGE_PARITY_FRAME,
+  FIXED_PAGE_PARITY_PROFILE,
+  fixedPageParityScene,
+  fixedPageParityToneSource,
+} from "./fixedPageOutputParity.test-support";
 
 /** Keep legacy tests terse while the production component requires an explicit frame. */
 function LiveCanvas(
   props: Omit<LiveCanvasProps, "compositionFrame" | "profile"> &
     Partial<Pick<LiveCanvasProps, "compositionFrame" | "profile">>,
 ) {
-  return (
-    <RawLiveCanvas
-      {...props}
-      compositionFrame={props.compositionFrame ?? DEFAULT_COMPOSITION_FRAME}
-      profile={props.profile ?? HARNESS_FALLBACK_PLOT_PROFILE}
-    />
-  );
+  const normalized = {
+    ...props,
+    compositionFrame: props.compositionFrame ?? DEFAULT_COMPOSITION_FRAME,
+    profile: props.profile ?? HARNESS_FALLBACK_PLOT_PROFILE,
+  } as LiveCanvasProps;
+  return <RawLiveCanvas {...normalized} />;
 }
 
 /**
@@ -211,9 +251,13 @@ function pixelRecordingContext(): {
   ctx: CanvasRenderingContext2D;
   counts: Record<string, number>;
   images: Uint8ClampedArray[];
+  calls: Array<{ method: string; args: unknown[] }>;
+  fillRectStyles: unknown[];
 } {
   const counts: Record<string, number> = {};
   const images: Uint8ClampedArray[] = [];
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const fillRectStyles: unknown[] = [];
   const ctx = new Proxy({} as Record<string, unknown>, {
     get: (target, prop) => {
       if (prop in target) return target[prop as string];
@@ -227,11 +271,20 @@ function pixelRecordingContext(): {
       if (prop === "putImageData") {
         return (imageData: ImageData) => {
           counts.putImageData = (counts.putImageData ?? 0) + 1;
+          calls.push({ method: "putImageData", args: [imageData] });
           images.push(new Uint8ClampedArray(imageData.data));
         };
       }
-      return (..._args: unknown[]) => {
+      if (prop === "fillRect") {
+        return (...args: unknown[]) => {
+          counts.fillRect = (counts.fillRect ?? 0) + 1;
+          calls.push({ method: "fillRect", args });
+          fillRectStyles.push(target.fillStyle);
+        };
+      }
+      return (...args: unknown[]) => {
         counts[prop as string] = (counts[prop as string] ?? 0) + 1;
+        calls.push({ method: prop as string, args });
       };
     },
     set: (target, prop, value) => {
@@ -243,6 +296,8 @@ function pixelRecordingContext(): {
     ctx: ctx as unknown as CanvasRenderingContext2D,
     counts,
     images,
+    calls,
+    fillRectStyles,
   };
 }
 
@@ -373,6 +428,8 @@ function installPointerCapture(element: HTMLElement) {
 }
 
 beforeEach(() => {
+  outlineFinalizationCalls.style = 0;
+  outlineFinalizationCalls.placement = 0;
   now = 0;
   rafCallbacks = [];
   nextRafId = 1;
@@ -1340,6 +1397,524 @@ describe("LiveCanvas Page Frame direct manipulation (#346)", () => {
   });
 });
 
+describe("LiveCanvas fixed-page draft presentation (#362)", () => {
+  const compositionFrame = resolveCompositionFrame(2);
+  const representedFrame = {
+    x: 0,
+    y: 0,
+    width: compositionFrame.width,
+    height: compositionFrame.height,
+  };
+  const lockedProfile: PlotProfile = {
+    width: 240,
+    height: 140,
+    insets: { top: 20, right: 20, bottom: 20, left: 20 },
+    includeFrame: true,
+    toolWidthMillimeters: 0.31,
+  };
+
+  function fixedDraft(): FixedPageFrameEditDraft {
+    return setPageFrameEditMode(
+      openPageFrameEditDraft({
+        profile: lockedProfile,
+        representedFrame,
+        compositionFrame,
+        generationAspect: 2,
+      }),
+      "fixed-page",
+    ) as FixedPageFrameEditDraft;
+  }
+
+  function retainedSceneFixture() {
+    const source: Scene = {
+      space: compositionFrame,
+      primitives: [
+        {
+          points: [[10, 10], [40, 10], [40, 30], [10, 30]],
+          closed: true,
+          fill: { color: "tomato" },
+        },
+      ],
+    };
+    const generate = vi.fn(() => source);
+    return {
+      source,
+      generate,
+      sketch: {
+        id: "fixed-page-presentation",
+        name: "Fixed Page Presentation",
+        schema: {},
+        generate,
+      } as unknown as Sketch,
+    };
+  }
+
+  it("keeps the exact locked sheet, insets, and drawable boundary stationary while scale reframes the retained Fill", () => {
+    const fixture = retainedSceneFixture();
+    const handle = createRef<LiveCanvasHandle>();
+    const initial = fixedDraft();
+    const scaled = setFixedPageCompositionScale(initial, 2);
+    const params = {};
+    const render = (draft: FixedPageFrameEditDraft) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={HARNESS_FALLBACK_PLOT_PROFILE}
+        pageFrameEditDraft={draft}
+        onPageFrameDraftChange={() => {}}
+      />
+    );
+    const el = mount(render(initial));
+    const canvas = canvasEl(el);
+    const boundary = el.querySelector("[data-testid='page-frame-boundary']")!;
+    const boundaryAttributes = ["x", "y", "width", "height"].map((name) =>
+      boundary.getAttribute(name),
+    );
+    const first = handle.current!.captureDisplayedFrame()!;
+
+    expect(first.displayedScene).toEqual(frameScene(fixture.source, initial.frame));
+    expect(el.querySelectorAll(".page-frame-resize-handle")).toHaveLength(0);
+    expect(el.querySelector("[data-testid='page-frame-discarded']")).toBeNull();
+    const sheet = el.querySelector<HTMLElement>(".plot-sheet")!;
+    expect(sheet.getAttribute("aria-label")).toBe("Page Frame edit preview");
+    expect(sheet.style.getPropertyValue("--sheet-aspect")).toBe(String(240 / 140));
+    expect(sheet.style.getPropertyValue("--plot-inset-top")).toBe(`${(20 / 140) * 100}%`);
+    expect(sheet.style.getPropertyValue("--plot-inset-right")).toBe(`${(20 / 240) * 100}%`);
+    expect(boundaryAttributes).toEqual(["20", "20", "200", "100"]);
+
+    act(() => root!.render(render(scaled)));
+
+    const next = handle.current!.captureDisplayedFrame()!;
+    expect(canvasEl(el)).toBe(canvas);
+    expect(fixture.generate).toHaveBeenCalledOnce();
+    expect(next.sourceScene).toBe(first.sourceScene);
+    expect(next.displayedScene).toEqual(frameScene(fixture.source, scaled.frame));
+    expect(["x", "y", "width", "height"].map((name) =>
+      el.querySelector("[data-testid='page-frame-boundary']")!.getAttribute(name),
+    )).toEqual(boundaryAttributes);
+  });
+
+  it("pans the retained composition through the stationary drawable viewport using inverse frame origins", () => {
+    const fixture = retainedSceneFixture();
+    const changes = vi.fn();
+    const handle = createRef<LiveCanvasHandle>();
+    const params = {};
+
+    function ControlledFixedCanvas() {
+      const [draft, setDraft] = useState(fixedDraft);
+      return (
+        <LiveCanvas
+          handleRef={handle}
+          sketch={fixture.sketch}
+          params={params}
+          seed={1}
+          compositionFrame={compositionFrame}
+          pageFrameEditDraft={draft}
+          onPageFrameDraftChange={(frame) => {
+            const next = panFixedPageFrame(draft, frame);
+            setDraft(next);
+            changes(next);
+          }}
+        />
+      );
+    }
+
+    const el = mount(<ControlledFixedCanvas />);
+    const viewport = el.querySelector<HTMLElement>(".plot-drawable")!;
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 100,
+      toJSON: () => ({}),
+    });
+    const layer = el.querySelector<HTMLElement>(".page-frame-interaction")!;
+    installPointerCapture(layer);
+    const boundary = el.querySelector("[data-testid='page-frame-boundary']")!;
+    const before = ["x", "y", "width", "height"].map((name) =>
+      boundary.getAttribute(name),
+    );
+
+    dispatchPointer(el.querySelector(".page-frame-pan-target")!, "pointerdown", {
+      x: 50,
+      y: 25,
+    });
+    dispatchPointer(layer, "pointermove", { x: 70, y: 35 });
+
+    const movedFrame = changes.mock.lastCall?.[0].frame;
+    expect(movedFrame).toMatchObject({
+      width: compositionFrame.width,
+      height: compositionFrame.height,
+    });
+    expect(movedFrame.x).toBeCloseTo(-compositionFrame.width / 10);
+    expect(movedFrame.y).toBeCloseTo(-compositionFrame.height / 10);
+    expect(["x", "y", "width", "height"].map((name) =>
+      boundary.getAttribute(name),
+    )).toEqual(before);
+    expect(handle.current!.captureDisplayedFrame()!.displayedScene).toEqual(
+      frameScene(fixture.source, movedFrame),
+    );
+    expect(fixture.generate).toHaveBeenCalledOnce();
+  });
+
+  it("changes only cheap framing while preserving live preparation and the sampled Scene identity", () => {
+    const fixture = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    const handle = createRef<LiveCanvasHandle>();
+    const initial = fixedDraft();
+    const scaled = setFixedPageCompositionScale(initial, 1.25);
+    const params = { value: 4 };
+    const render = (draft: FixedPageFrameEditDraft) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={params}
+        seed={2}
+        compositionFrame={compositionFrame}
+        pageFrameEditDraft={draft}
+      />
+    );
+    mount(render(initial));
+    tick(750);
+    const before = handle.current!.captureDisplayedFrame()!;
+    expect(fixture.prepare).toHaveBeenCalledOnce();
+    expect(fixture.samplers[0]).toHaveBeenCalledOnce();
+
+    act(() => root!.render(render(scaled)));
+
+    const after = handle.current!.captureDisplayedFrame()!;
+    expect(fixture.prepare).toHaveBeenCalledOnce();
+    expect(fixture.samplers[0]).toHaveBeenCalledOnce();
+    expect(after.t).toBe(before.t);
+    expect(after.sourceScene).toBe(before.sourceScene);
+    expect(after.displayedScene).toEqual(
+      frameScene(before.sourceScene, scaled.frame),
+    );
+  });
+
+  it("cheaply reframes caller-owned Outline geometry and honors the draft include-frame value", () => {
+    const fixture = retainedSceneFixture();
+    const handle = createRef<LiveCanvasHandle>();
+    const initial = fixedDraft();
+    const scaled = setFixedPageCompositionScale(initial, 1.5);
+    const render = (draft: FixedPageFrameEditDraft) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={{ ...lockedProfile, includeFrame: false }}
+        pageFrameEditDraft={draft}
+        renderState={{
+          kind: "outline",
+          scene: fixture.source,
+          t: 3,
+          contentRevision: 44,
+        }}
+      />
+    );
+    mount(render(initial));
+    act(() => root!.render(render(scaled)));
+
+    expect(fixture.generate).not.toHaveBeenCalled();
+    expect(handle.current!.captureDisplayedFrame()).toMatchObject({
+      sourceScene: fixture.source,
+      displayedScene: finalizeOutlineScene(fixture.source, scaled.frame, true),
+      t: 3,
+      renderMode: "outline",
+      includeFrame: true,
+      contentRevision: 44,
+    });
+  });
+
+  it("gives fixed Tone the same pixels as the identical committed frame without preparing or generating", () => {
+    const { ctx, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 4, height: 2 } as DOMRect,
+    );
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const draft = setFixedPageCompositionScale(fixedDraft(), 2);
+    const source: ToneSource = {
+      toneField: createToneField(([x, y]) => (x + y) / 300),
+      shadingMask: createShadingMask(() => 1),
+    };
+    const params = {};
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={lockedProfile}
+        pageFrame={draft.frame}
+        renderState={{ kind: "tone-reference", source }}
+      />,
+    );
+    const committed = images.at(-1)!;
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={params}
+          seed={1}
+          compositionFrame={compositionFrame}
+          pageFrameEditDraft={draft}
+          renderState={{ kind: "tone-reference", source }}
+        />,
+      );
+    });
+
+    expect(images.at(-1)).toEqual(committed);
+    expect(canvasEl(el).style.getPropertyValue("--paper-aspect")).toBe("2");
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("keeps one asymmetric fixed Page identical across draft and committed Fill, Tone, and Outline output", () => {
+    const { ctx, images, calls, fillRectStyles } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 265,
+      height: 159,
+    } as DOMRect);
+    const source = fixedPageParityScene();
+    const generate = vi.fn(() => source);
+    const sketch = {
+      id: "fixed-page-output-parity",
+      name: "Fixed Page Output Parity",
+      schema: {},
+      generate,
+    } as unknown as Sketch;
+    const representedFrame = {
+      x: 0,
+      y: 0,
+      ...FIXED_PAGE_PARITY_COMPOSITION,
+    };
+    const initial = setPageFrameEditMode(
+      openPageFrameEditDraft({
+        profile: FIXED_PAGE_PARITY_PROFILE,
+        representedFrame,
+        compositionFrame: FIXED_PAGE_PARITY_COMPOSITION,
+        generationAspect:
+          FIXED_PAGE_PARITY_COMPOSITION.width / FIXED_PAGE_PARITY_COMPOSITION.height,
+      }),
+      "fixed-page",
+    ) as FixedPageFrameEditDraft;
+    const draft = panFixedPageFrame(
+      setFixedPageCompositionScale(initial, 2),
+      FIXED_PAGE_PARITY_FRAME,
+    );
+    const handle = createRef<LiveCanvasHandle>();
+    const params = {};
+    const fillState = {
+      kind: "fill-held" as const,
+      scene: source,
+      t: 4,
+      sourceInputRevision: 2,
+      contentRevision: 3,
+    };
+    const renderCommitted = (renderState: NonNullable<LiveCanvasProps["renderState"]>) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={FIXED_PAGE_PARITY_COMPOSITION}
+        profile={FIXED_PAGE_PARITY_PROFILE}
+        pageFrame={FIXED_PAGE_PARITY_FRAME}
+        renderState={renderState}
+      />
+    );
+    const renderDraft = (renderState: NonNullable<LiveCanvasProps["renderState"]>) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={FIXED_PAGE_PARITY_COMPOSITION}
+        profile={FIXED_PAGE_PARITY_PROFILE}
+        pageFrameEditDraft={draft}
+        renderState={renderState}
+      />
+    );
+
+    const el = mount(renderCommitted(fillState));
+    const expectedFill = frameScene(source, FIXED_PAGE_PARITY_FRAME);
+    const committedFill = handle.current!.captureDisplayedFrame()!;
+    const callsBeforeDraft = calls.length;
+    act(() => root!.render(renderDraft(fillState)));
+    const draftFill = handle.current!.captureDisplayedFrame()!;
+
+    expect(draft.profile).toBe(initial.profile);
+    expect(draft.frame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(draftFill.sourceScene).toBe(committedFill.sourceScene);
+    expect(draftFill.displayedScene).toEqual(committedFill.displayedScene);
+    expect(draftFill.displayedScene).toEqual(expectedFill);
+    expect(draftFill.displayedScene).toMatchObject({
+      space: {
+        width: FIXED_PAGE_PARITY_FRAME.width,
+        height: FIXED_PAGE_PARITY_FRAME.height,
+      },
+      background: source.background,
+    });
+    expect(draftFill.displayedScene.primitives[0]!.points).toEqual([
+      [FIXED_PAGE_PARITY_COMPOSITION.width * 0.1, FIXED_PAGE_PARITY_COMPOSITION.height * 0.05],
+      [FIXED_PAGE_PARITY_COMPOSITION.width * 0.5, FIXED_PAGE_PARITY_COMPOSITION.height * 0.45],
+    ]);
+    const draftTransforms = calls
+      .slice(callsBeforeDraft)
+      .filter(({ method }) => method === "setTransform");
+    const paintTransform = draftTransforms.at(-1)!.args;
+    expect(paintTransform[0]).toBeCloseTo(paintTransform[3] as number, 12);
+    expect(paintTransform.slice(1, 3)).toEqual([0, 0]);
+    expect(paintTransform.slice(4)).toEqual([0, 0]);
+    expect(fillRectStyles.at(-1)).toBe("#f4efe6");
+    expect(canvasEl(el)).toMatchObject({ width: 265, height: 159 });
+    expect(canvasEl(el).style.getPropertyValue("--paper-aspect")).toBe(String(5 / 3));
+    const sheet = el.querySelector<HTMLElement>(".plot-sheet")!;
+    expect(sheet.style.getPropertyValue("--sheet-aspect")).toBe(String(323 / 217));
+    expect(sheet.style.getPropertyValue("--plot-inset-left")).toBe(`${(17 / 323) * 100}%`);
+    expect(sheet.style.getPropertyValue("--plot-inset-bottom")).toBe(`${(39 / 217) * 100}%`);
+
+    const toneState = {
+      kind: "tone-reference" as const,
+      source: fixedPageParityToneSource(),
+    };
+    act(() => root!.render(renderCommitted(toneState)));
+    const committedTone = images.at(-1)!;
+    act(() => root!.render(renderDraft(toneState)));
+    const draftTone = images.at(-1)!;
+
+    expect(draftTone).toEqual(committedTone);
+    expect(draftTone).toHaveLength(265 * 159 * 4);
+    // The negative Page x origin makes the first fifth geometry-free paper.
+    expect([...draftTone.slice(0, 4)]).toEqual([255, 255, 255, 255]);
+    expect(draftTone[60 * 4]).toBeLessThan(255);
+
+    const millimetersPerSceneUnit = 265 / FIXED_PAGE_PARITY_FRAME.width;
+    const outlinePolicy: OutlineFinalizationStrokePolicy = {
+      kind: "physical-tool",
+      target: {
+        toolWidthMillimeters: FIXED_PAGE_PARITY_PROFILE.toolWidthMillimeters,
+        millimetersPerSceneUnit,
+      },
+    };
+    const outlineState = {
+      kind: "outline" as const,
+      scene: source,
+      t: 4,
+      sourceInputRevision: 2,
+      contentRevision: 3,
+    };
+    act(() =>
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={1}
+          compositionFrame={FIXED_PAGE_PARITY_COMPOSITION}
+          profile={FIXED_PAGE_PARITY_PROFILE}
+          pageFrame={FIXED_PAGE_PARITY_FRAME}
+          renderState={outlineState}
+          outlineFinalizationStrokePolicy={outlinePolicy}
+        />,
+      ),
+    );
+    const committedOutline = handle.current!.captureDisplayedFrame()!;
+    act(() =>
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={1}
+          compositionFrame={FIXED_PAGE_PARITY_COMPOSITION}
+          profile={FIXED_PAGE_PARITY_PROFILE}
+          pageFrameEditDraft={draft}
+          renderState={outlineState}
+          outlineFinalizationStrokePolicy={outlinePolicy}
+        />,
+      ),
+    );
+    const draftOutline = handle.current!.captureDisplayedFrame()!;
+
+    expect(draftOutline.sourceScene).toBe(committedOutline.sourceScene);
+    expect(draftOutline.displayedScene).toEqual(committedOutline.displayedScene);
+    expect(draftOutline.displayedScene).toEqual(
+      finalizeOutlineScene(source, FIXED_PAGE_PARITY_FRAME, true, outlinePolicy),
+    );
+    expect(draftOutline.displayedScene.primitives).toHaveLength(2);
+    expect(
+      draftOutline.displayedScene.primitives.map((primitive) => primitive.stroke?.width),
+    ).toEqual([
+      FIXED_PAGE_PARITY_PROFILE.toolWidthMillimeters / millimetersPerSceneUnit,
+      FIXED_PAGE_PARITY_PROFILE.toolWidthMillimeters / millimetersPerSceneUnit,
+    ]);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the new scale-preserving draft prop equivalent to the legacy overlay path", () => {
+    const fixture = retainedSceneFixture();
+    const ordinary = openPageFrameEditDraft({
+      profile: lockedProfile,
+      representedFrame,
+      compositionFrame,
+      generationAspect: 2,
+    });
+    const handle = createRef<LiveCanvasHandle>();
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrameEditDraft={ordinary}
+        onPageFrameDraftChange={() => {}}
+      />,
+    );
+
+    expect(el.querySelector(".page-frame-edit-view")).not.toBeNull();
+    expect(el.querySelectorAll(".page-frame-resize-handle")).toHaveLength(8);
+    expect(handle.current!.captureDisplayedFrame()!.displayedScene).toBe(
+      fixture.source,
+    );
+    expect(fixture.generate).toHaveBeenCalledOnce();
+  });
+
+  it("rejects simultaneous active legacy and mode-bearing drafts at runtime", () => {
+    const fixture = retainedSceneFixture();
+    expect(() =>
+      mount(
+        <RawLiveCanvas
+          {...({
+            sketch: fixture.sketch,
+            params: {},
+            seed: 1,
+            compositionFrame,
+            profile: lockedProfile,
+            pageFrameDraft: representedFrame,
+            pageFrameEditDraft: fixedDraft(),
+          } as unknown as LiveCanvasProps)}
+        />,
+      ),
+    ).toThrow(/mutually exclusive/);
+  });
+});
+
 describe("LiveCanvas retained Page Frame derivation (#344 PF-06)", () => {
   const compositionFrame = { width: 200, height: 100 };
   const crop = { x: 20, y: 10, width: 100, height: 50 };
@@ -1804,6 +2379,114 @@ describe("LiveCanvas cached Outline Page finalization (#345 PF03)", () => {
       expect(generate).not.toHaveBeenCalled();
     },
   );
+
+  it("styles target-dependent artwork once, then gives pan one placement finalization and paint", () => {
+    const { ctx } = recordingContext();
+    useRecordingContext(ctx);
+    const handle = createRef<LiveCanvasHandle>();
+    const onDisplayedSceneCommitted = vi.fn();
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const params = { value: 1 };
+    const physicalPolicy = {
+      kind: "physical-tool" as const,
+      target: {
+        toolWidthMillimeters: 0.6,
+        millimetersPerSceneUnit: 0.2,
+      },
+    };
+    const render = (
+      frame: typeof crop,
+      policy: typeof physicalPolicy,
+    ) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={profile(true)}
+        pageFrame={frame}
+        renderState={outlineState}
+        outlineFinalizationStrokePolicy={policy}
+        onDisplayedSceneCommitted={onDisplayedSceneCommitted}
+      />
+    );
+
+    mount(render(crop, physicalPolicy));
+    const initiallyDisplayed = handle.current!.captureDisplayedFrame()!;
+    expect(initiallyDisplayed.sourceScene).toBe(source);
+    expect(
+      initiallyDisplayed.displayedScene.primitives[0]?.stroke?.width,
+    ).toBeCloseTo(3, 12);
+    expect(
+      initiallyDisplayed.displayedScene.primitives.at(-1)?.stroke?.width,
+    ).toBeCloseTo(3, 12);
+    expect(outlineFinalizationCalls).toEqual({ style: 1, placement: 1 });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+
+    outlineFinalizationCalls.style = 0;
+    outlineFinalizationCalls.placement = 0;
+    onDisplayedSceneCommitted.mockClear();
+    const panned = { ...crop, x: crop.x + 5, y: crop.y - 3 };
+    act(() => root!.render(render(panned, physicalPolicy)));
+
+    expect(outlineFinalizationCalls).toEqual({ style: 0, placement: 1 });
+    expect(onDisplayedSceneCommitted).toHaveBeenCalledOnce();
+    expect(handle.current!.captureDisplayedFrame()!.sourceScene).toBe(source);
+
+    const assertTargetRepaint = (policy: typeof physicalPolicy) => {
+      outlineFinalizationCalls.style = 0;
+      outlineFinalizationCalls.placement = 0;
+      onDisplayedSceneCommitted.mockClear();
+      act(() => root!.render(render(panned, policy)));
+      expect(outlineFinalizationCalls).toEqual({ style: 1, placement: 1 });
+      expect(onDisplayedSceneCommitted).toHaveBeenCalledOnce();
+    };
+
+    assertTargetRepaint({
+      ...physicalPolicy,
+      target: { ...physicalPolicy.target, toolWidthMillimeters: 0.5 },
+    });
+    assertTargetRepaint({
+      ...physicalPolicy,
+      target: {
+        toolWidthMillimeters: 0.5,
+        millimetersPerSceneUnit: 0.1,
+      },
+    });
+  });
+
+  it("keeps legacy artwork authored while painting the Page boundary at the current physical width", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const { sketch } = animatedSketch(undefined);
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={profile(true)}
+        pageFrame={crop}
+        renderState={outlineState}
+        outlineFinalizationStrokePolicy={{
+          kind: "legacy-scene",
+          target: {
+            toolWidthMillimeters: 0.6,
+            millimetersPerSceneUnit: 0.2,
+          },
+        }}
+      />,
+    );
+
+    const displayed = handle.current!.captureDisplayedFrame()!.displayedScene;
+    expect(displayed.primitives[0]?.stroke?.width).toBe(1);
+    expect(displayed.primitives.at(-1)?.stroke?.width).toBeCloseTo(3, 12);
+  });
 
   it("re-finalizes one exact cached source across frame, edit, Apply, Reset, and includeFrame changes", () => {
     const handle = createRef<LiveCanvasHandle>();

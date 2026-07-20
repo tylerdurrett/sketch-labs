@@ -3,9 +3,103 @@ import {
   frameScene,
   hiddenLinePass,
   type HiddenLineObserver,
+  type OutlineTarget,
   type PageFrame,
   type Scene,
 } from "@harness/core";
+
+/**
+ * Artwork-stroke behavior for cheap Outline finalization.
+ *
+ * Both variants carry the current physical target so the Harness-owned Page
+ * outline can always use the active tool width. Only Sketches that provide an
+ * Outline source hook opt into artwork-stroke retargeting; arbitrary legacy
+ * Scenes retain their authored widths.
+ */
+export type OutlineFinalizationStrokePolicy =
+  | {
+      readonly kind: "legacy-scene";
+      readonly target: Readonly<OutlineTarget>;
+    }
+  | {
+      readonly kind: "physical-tool";
+      readonly target: Readonly<OutlineTarget>;
+    };
+
+function physicalStrokeWidth(target: Readonly<OutlineTarget>): number {
+  if (
+    !Number.isFinite(target.toolWidthMillimeters) ||
+    target.toolWidthMillimeters <= 0
+  ) {
+    throw new RangeError("toolWidthMillimeters must be finite and positive");
+  }
+  if (
+    !Number.isFinite(target.millimetersPerSceneUnit) ||
+    target.millimetersPerSceneUnit <= 0
+  ) {
+    throw new RangeError(
+      "millimetersPerSceneUnit must be finite and positive",
+    );
+  }
+  return target.toolWidthMillimeters / target.millimetersPerSceneUnit;
+}
+
+/** Apply only target-dependent artwork styling, without Page placement. */
+export function applyOutlineArtworkStrokePolicy(
+  scene: Scene,
+  policy: OutlineFinalizationStrokePolicy | undefined,
+): Scene {
+  if (policy?.kind !== "physical-tool") return scene;
+
+  const width = physicalStrokeWidth(policy.target);
+  return {
+    ...scene,
+    primitives: scene.primitives.map((primitive) =>
+      primitive.stroke === undefined
+        ? primitive
+        : {
+            ...primitive,
+            stroke: { ...primitive.stroke, width },
+          },
+    ),
+  };
+}
+
+/** Apply only Page placement and its optional boundary to already-styled artwork. */
+export function finalizeStyledOutlineScene(
+  styled: Scene,
+  pageFrame: PageFrame | null,
+  includeFrame: boolean,
+  strokePolicy?: OutlineFinalizationStrokePolicy,
+): Scene {
+  const finalized = pageFrame === null ? styled : frameScene(styled, pageFrame);
+  if (!includeFrame) return finalized;
+
+  const { width, height } = finalized.space;
+  const frameStroke =
+    strokePolicy === undefined
+      ? DEFAULT_STROKE
+      : {
+          ...DEFAULT_STROKE,
+          width: physicalStrokeWidth(strokePolicy.target),
+        };
+  return {
+    ...finalized,
+    primitives: [
+      ...finalized.primitives,
+      {
+        points: [
+          [0, 0],
+          [width, 0],
+          [width, height],
+          [0, height],
+          [0, 0],
+        ],
+        stroke: frameStroke,
+      },
+    ],
+  };
+}
 
 /**
  * The shared preview == export Outline pipeline (issue #220, feature #4).
@@ -54,30 +148,24 @@ export function outlineScene(
  * rectangle or finalize the same retained Hidden-line result through a new Page
  * Frame without rerunning {@link outlineScene}. With no committed Page Frame,
  * the source Composition coordinate space remains the final Page space.
+ *
+ * Supplying a stroke policy makes the current physical target explicit. An
+ * opt-in physical-tool source has each stroke retargeted before Page framing so
+ * clipping uses its current physical footprint; a legacy Scene keeps every
+ * authored stroke. In either case the Harness-owned Page outline uses the
+ * current physical width. Omitting the policy preserves historical behavior
+ * for callers that have not migrated.
  */
 export function finalizeOutlineScene(
   base: Scene,
   pageFrame: PageFrame | null,
   includeFrame: boolean,
+  strokePolicy?: OutlineFinalizationStrokePolicy,
 ): Scene {
-  const finalized = pageFrame === null ? base : frameScene(base, pageFrame);
-  if (!includeFrame) return finalized;
-
-  const { width, height } = finalized.space;
-  return {
-    ...finalized,
-    primitives: [
-      ...finalized.primitives,
-      {
-        points: [
-          [0, 0],
-          [width, 0],
-          [width, height],
-          [0, height],
-          [0, 0],
-        ],
-        stroke: DEFAULT_STROKE,
-      },
-    ],
-  };
+  return finalizeStyledOutlineScene(
+    applyOutlineArtworkStrokePolicy(base, strokePolicy),
+    pageFrame,
+    includeFrame,
+    strokePolicy,
+  );
 }

@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { resolveCompositionFrame } from '../compositionFrame'
 import { fullCompositionPageFrame, type PageFrame } from '../pageFrame'
 import {
+  centeredFixedPageFrame,
   derivePageFramePlotProfile,
   fitPageFramePlotProfileToAspect,
+  fixedPageCompositionScale,
   resizePageFrameFromPhysicalDimension,
   resizePageFramePlotProfileProportionally,
+  scaleFixedPageFrame,
 } from '../pageFramePlotProfile'
 import { inchToMm } from '../paperCatalog'
 import { plotDrawableRectangle, type PlotProfile } from '../plotProfile'
@@ -20,6 +23,305 @@ const profile: PlotProfile = {
 
 // The 200 x 160 mm drawable maps to this frame at exactly 0.2 mm per unit.
 const fullFrame: PageFrame = { x: 0, y: 0, width: 1_000, height: 800 }
+
+describe('fixed-page composition scale', () => {
+  describe('centeredFixedPageFrame', () => {
+    it.each([
+      [
+        'wide Composition',
+        { width: 1_200, height: 600 },
+        { x: 0, y: -180, width: 1_200, height: 960 },
+      ],
+      [
+        'tall Composition',
+        { width: 600, height: 1_200 },
+        { x: -450, y: 0, width: 1_500, height: 1_200 },
+      ],
+      [
+        'matching Composition',
+        { width: 1_000, height: 800 },
+        { x: 0, y: 0, width: 1_000, height: 800 },
+      ],
+    ] as const)(
+      'centers and contain-fits a %s at the locked drawable aspect',
+      (_name, composition, expected) => {
+        const reference = centeredFixedPageFrame(profile, composition)
+
+        expect(reference).toEqual(expected)
+        expect(reference.width / reference.height).toBe(200 / 160)
+        expect(reference.x).toBeLessThanOrEqual(0)
+        expect(reference.y).toBeLessThanOrEqual(0)
+        expect(reference.x + reference.width).toBeGreaterThanOrEqual(
+          composition.width,
+        )
+        expect(reference.y + reference.height).toBeGreaterThanOrEqual(
+          composition.height,
+        )
+      },
+    )
+
+    it('uses the drawable inside asymmetric physical margins, not total paper aspect', () => {
+      const reference = centeredFixedPageFrame(profile, {
+        width: 1_200,
+        height: 600,
+      })
+
+      expect(reference.width / reference.height).toBe(1.25)
+      expect(reference.width / reference.height).not.toBe(
+        profile.width / profile.height,
+      )
+    })
+
+    it('rejects invalid inputs and unrepresentable finite geometry', () => {
+      expect(() =>
+        centeredFixedPageFrame(profile, {
+          width: Number.POSITIVE_INFINITY,
+          height: 800,
+        }),
+      ).toThrow(/fullCompositionPageFrame/)
+
+      const infiniteAspectProfile: PlotProfile = {
+        ...profile,
+        width: Number.MAX_VALUE,
+        height: Number.MIN_VALUE,
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+      }
+      expect(() =>
+        centeredFixedPageFrame(infiniteAspectProfile, {
+          width: 1_000,
+          height: 800,
+        }),
+      ).toThrow(/drawable aspect must be a finite positive/)
+
+      const enormousAspectProfile: PlotProfile = {
+        ...profile,
+        width: 1e300,
+        height: 1,
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+      }
+      expect(() =>
+        centeredFixedPageFrame(enormousAspectProfile, {
+          width: 1,
+          height: 1e300,
+        }),
+      ).toThrow(/validatePageFrame/)
+    })
+  })
+
+  describe('fixedPageCompositionScale', () => {
+    it('reads the absolute scale as the uniform fit/frame ratio', () => {
+      const reference = centeredFixedPageFrame(profile, fullFrame)
+      const pannedAtDoubleScale = {
+        x: 125,
+        y: -40,
+        width: 500,
+        height: 400,
+      }
+
+      expect(
+        fixedPageCompositionScale(profile, reference, pannedAtDoubleScale),
+      ).toBe(2)
+    })
+
+    it('rejects nonuniform reference/frame ratios deterministically', () => {
+      expect(() =>
+        fixedPageCompositionScale(profile, fullFrame, {
+          x: 0,
+          y: 0,
+          width: 500,
+          height: 500,
+        }),
+      ).toThrow(/one finite positive uniform composition scale/)
+    })
+
+    it('rejects uniform frames incompatible with the locked drawable aspect', () => {
+      expect(() =>
+        fixedPageCompositionScale(
+          profile,
+          { x: 0, y: 0, width: 1_000, height: 1_000 },
+          { x: 100, y: 100, width: 500, height: 500 },
+        ),
+      ).toThrow(/equivalent physical scales/)
+    })
+
+    it('rejects invalid frame values and non-finite fit/frame ratios', () => {
+      expect(() =>
+        fixedPageCompositionScale(profile, fullFrame, {
+          x: Number.NaN,
+          y: 0,
+          width: 500,
+          height: 400,
+        }),
+      ).toThrow(/validatePageFrame/)
+
+      const microscopicFrame = {
+        x: 0,
+        y: 0,
+        width: Number.MIN_VALUE,
+        height: Number.MIN_VALUE,
+      }
+      expect(() =>
+        fixedPageCompositionScale(
+          {
+            ...profile,
+            width: 1,
+            height: 1,
+            insets: { top: 0, right: 0, bottom: 0, left: 0 },
+          },
+          { x: 0, y: 0, width: 1, height: 1 },
+          microscopicFrame,
+        ),
+      ).toThrow(/one finite positive uniform composition scale/)
+    })
+  })
+
+  describe('scaleFixedPageFrame', () => {
+    it('applies an absolute uniform scale while preserving a panned center', () => {
+      const reference = centeredFixedPageFrame(profile, fullFrame)
+      const pannedAtDoubleScale = {
+        x: 125,
+        y: -40,
+        width: 500,
+        height: 400,
+      }
+
+      const scaled = scaleFixedPageFrame(
+        profile,
+        reference,
+        pannedAtDoubleScale,
+        4,
+      )
+
+      expect(scaled).toEqual({ x: 250, y: 60, width: 250, height: 200 })
+      expect(scaled.width / scaled.height).toBe(
+        pannedAtDoubleScale.width / pannedAtDoubleScale.height,
+      )
+      expect(scaled.x + scaled.width / 2).toBe(
+        pannedAtDoubleScale.x + pannedAtDoubleScale.width / 2,
+      )
+      expect(scaled.y + scaled.height / 2).toBe(
+        pannedAtDoubleScale.y + pannedAtDoubleScale.height / 2,
+      )
+      expect(fixedPageCompositionScale(profile, reference, scaled)).toBe(4)
+    })
+
+    it('derives every extent from the stable reference without scale drift', () => {
+      const reference = centeredFixedPageFrame(profile, fullFrame)
+      const pannedAtDoubleScale = {
+        x: 125,
+        y: -40,
+        width: 500,
+        height: 400,
+      }
+      const first = scaleFixedPageFrame(
+        profile,
+        reference,
+        pannedAtDoubleScale,
+        3,
+      )
+      const intermediate = scaleFixedPageFrame(
+        profile,
+        reference,
+        first,
+        0.75,
+      )
+      const repeated = scaleFixedPageFrame(
+        profile,
+        reference,
+        intermediate,
+        3,
+      )
+
+      expect(repeated.width).toBe(first.width)
+      expect(repeated.height).toBe(first.height)
+      expect(repeated.x + repeated.width / 2).toBeCloseTo(
+        first.x + first.width / 2,
+        12,
+      )
+      expect(repeated.y + repeated.height / 2).toBeCloseTo(
+        first.y + first.height / 2,
+        12,
+      )
+      expect(fixedPageCompositionScale(profile, reference, repeated)).toBe(3)
+    })
+
+    it('returns the exact current frame when its absolute scale is untouched', () => {
+      const current = { x: 125, y: -40, width: 500, height: 400 }
+
+      expect(scaleFixedPageFrame(profile, fullFrame, current, 2)).toBe(
+        current,
+      )
+    })
+
+    it('keeps scale-one pan distinct from the centered Reset reference', () => {
+      const reference = centeredFixedPageFrame(profile, {
+        width: 1_200,
+        height: 600,
+      })
+      const pannedAtReferenceScale = {
+        ...reference,
+        x: reference.x + 90,
+        y: reference.y - 35,
+      }
+
+      expect(
+        scaleFixedPageFrame(
+          profile,
+          reference,
+          pannedAtReferenceScale,
+          1,
+        ),
+      ).toBe(pannedAtReferenceScale)
+      expect(pannedAtReferenceScale).not.toEqual(reference)
+      expect(reference).toEqual({ x: 0, y: -180, width: 1_200, height: 960 })
+    })
+
+    it('never modifies or replaces any locked Plot Profile field', () => {
+      const before = structuredClone(profile)
+      const insets = profile.insets
+      const reference = centeredFixedPageFrame(profile, fullFrame)
+
+      scaleFixedPageFrame(profile, reference, fullFrame, 2)
+
+      expect(profile).toEqual(before)
+      expect(profile.insets).toBe(insets)
+    })
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+      'rejects invalid composition scale %s',
+      (compositionScale) => {
+        expect(() =>
+          scaleFixedPageFrame(
+            profile,
+            fullFrame,
+            fullFrame,
+            compositionScale,
+          ),
+        ).toThrow(/composition scale must be a finite positive number/)
+      },
+    )
+
+    it('rejects scales whose finite Page Frame geometry is unrepresentable', () => {
+      expect(() =>
+        scaleFixedPageFrame(
+          profile,
+          fullFrame,
+          fullFrame,
+          Number.MIN_VALUE,
+        ),
+      ).toThrow(/validatePageFrame/)
+
+      expect(() =>
+        scaleFixedPageFrame(
+          profile,
+          fullFrame,
+          fullFrame,
+          Number.MAX_VALUE,
+        ),
+      ).toThrow(/validatePageFrame/)
+    })
+  })
+})
 
 describe('derivePageFramePlotProfile', () => {
   it('is exactly inert when the represented extent is unchanged', () => {

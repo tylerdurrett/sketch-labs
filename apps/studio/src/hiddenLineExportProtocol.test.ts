@@ -13,6 +13,7 @@ import {
   type HiddenLineExportSnapshot,
   type LegacyOutlineComputeIdentity,
   type OutlineComputeIdentity,
+  type SpecializedOutlineComputeIdentity,
 } from "./outlineComputeProtocol";
 
 const schema: ParamSchema = {
@@ -59,6 +60,22 @@ function completedSceneIdentity(): CompletedSceneOutlineComputeIdentity {
     compositionFrame: { width: 100, height: 80 },
     tolerance: 0.5,
     sourceScene: sourceScene(),
+    outlineTarget: {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.18,
+    },
+  });
+}
+
+function specializedIdentity(): SpecializedOutlineComputeIdentity {
+  return createOutlineComputeIdentity({
+    sketchId: "generated-lines",
+    schema,
+    params: { amount: 3 },
+    seed: 42,
+    sampledT: 1.25,
+    compositionFrame: { width: 100, height: 80 },
+    tolerance: 0.5,
     outlineTarget: {
       toolWidthMillimeters: 0.3,
       millimetersPerSceneUnit: 0.18,
@@ -229,7 +246,7 @@ describe("hidden-line export snapshot", () => {
     ).toThrow("Hidden-line export Page Frame is invalid");
   });
 
-  it("copies and reuses completed-Scene specialization only on exact Scene and target identity", () => {
+  it("copies completed-Scene geometry across a target-only change but not a Scene change", () => {
     const requested = completedSceneIdentity();
     const matching = createHiddenLineExportSnapshot({
       identity: requested,
@@ -263,7 +280,7 @@ describe("hidden-line export snapshot", () => {
       any
     >;
     staleTarget.outlineTarget.toolWidthMillimeters = 0.31;
-    const targetMiss = createHiddenLineExportSnapshot({
+    const targetReuse = createHiddenLineExportSnapshot({
       ...matching,
       identity: requested,
       profile: profile(),
@@ -271,7 +288,33 @@ describe("hidden-line export snapshot", () => {
         staleTarget as unknown as OutlineComputeIdentity,
       ),
     });
-    expect(targetMiss.reusableOutline).toBeUndefined();
+    expect(targetReuse.reusableOutline).toBeDefined();
+    expect(targetReuse.identity).toEqual(requested);
+    expect(targetReuse.reusableOutline?.identity).toEqual(staleTarget);
+  });
+
+  it("copies specialized geometry across a target-only change while retaining the strict new request", () => {
+    const requested = specializedIdentity();
+    const oldTarget = structuredClone(requested) as unknown as Record<
+      string,
+      any
+    >;
+    oldTarget.outlineTarget = {
+      toolWidthMillimeters: 0.9,
+      millimetersPerSceneUnit: 0.4,
+    };
+
+    const captured = snapshot({
+      identity: requested,
+      reusableOutline: completed(
+        oldTarget as unknown as OutlineComputeIdentity,
+      ),
+    });
+
+    expect(captured.identity).toEqual(requested);
+    expect(captured.reusableOutline?.identity).toEqual(oldTarget);
+    expect(captured.reusableOutline?.scene).toEqual(sourceScene());
+    expect(isHiddenLineExportSnapshot(captured)).toBe(true);
   });
 
   it.each(identityMismatches)(
