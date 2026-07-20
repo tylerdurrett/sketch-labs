@@ -65,13 +65,18 @@
  *
  * BLADE SILHOUETTES / PHYSICAL PALETTE: blades are traced by the private
  * tapered-outline generator as filled-and-stroked shapes — never single stroked
- * lines. Every outline explicitly repeats its root. Default geometry retains
- * `closed: true` for exact compatibility; active foreground zoom uses open path
- * metadata so bounds clipping cannot synthesize a new last-to-first stroke
- * across a clipped blade. The explicit root closure keeps the uncut fill and
- * contour unchanged. The background, hill fills, and blade fills default to
- * paper white; authored hill and blade contours default to black. All five
- * colors are tunable without participating in geometry or RNG.
+ * lines. Every uncut outline explicitly repeats its root. Default geometry
+ * retains `closed: true` for exact compatibility; two triggers switch to open
+ * path metadata. Active foreground zoom opens paths so bounds clipping cannot
+ * synthesize a new last-to-first stroke across a clipped blade. Active
+ * `bladeRootSink` cuts the buried bottom fraction of every silhouette away —
+ * a cut, not a translation, because painter order means nothing can occlude a
+ * blade from its own hill — leaving two distinct cut endpoints that an open
+ * path never bridges with a stroke chord tick while fills and Hidden-line
+ * occlusion still close implicitly. The explicit root closure keeps the uncut
+ * fill and contour unchanged. The background, hill fills, and blade fills
+ * default to paper white; authored hill and blade contours default to black.
+ * All five colors are tunable without participating in geometry or RNG.
  *
  * STATIC / DETERMINISTIC / PREPARED: there is no `time` metadata. All terrain
  * randomness comes from the explicit Seed, with no clock reads, `Math.random`,
@@ -245,6 +250,7 @@ interface PreparedGrassHills {
   readonly bladeColor: string
   readonly bladeStrokeColor: string
   readonly bladePathsClosed: boolean
+  readonly bladeRootSink: number
   readonly hills: ReadonlyArray<PreparedHill>
 }
 
@@ -306,6 +312,7 @@ function prepareGrassHills(
     'bladeLengthVariance',
   )
   const bladeWidth = numberParam(params, schema, 'bladeWidth')
+  const bladeRootSink = numberParam(params, schema, 'bladeRootSink')
   const stiffnessVariance = numberParam(
     params,
     schema,
@@ -436,7 +443,8 @@ function prepareGrassHills(
     hillStrokeColor,
     bladeColor,
     bladeStrokeColor,
-    bladePathsClosed: foregroundZoom === 1,
+    bladePathsClosed: foregroundZoom === 1 && bladeRootSink === 0,
+    bladeRootSink,
     hills,
   })
 }
@@ -463,7 +471,9 @@ function sampleGrassHills(prepared: PreparedGrassHills, _t: number): Scene {
     for (const descriptor of hill.blades) {
       const [rootX, rootY] = descriptor.projected
       builder.addPath(
-        blade(descriptor.shape).map(([x, y]) => [x + rootX, y + rootY]),
+        blade(descriptor.shape, { rootSink: prepared.bladeRootSink }).map(
+          ([x, y]) => [x + rootX, y + rootY],
+        ),
         {
           closed: prepared.bladePathsClosed,
           fill: { color: prepared.bladeColor },

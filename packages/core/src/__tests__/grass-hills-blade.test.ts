@@ -144,4 +144,56 @@ describe('grass-hills blade', () => {
     expect(surface).not.toHaveProperty('blade')
     expect(surface).not.toHaveProperty('BladeShape')
   })
+
+  it('treats rootSink 0 and absent options as the exact closed emission', () => {
+    const closed = blade(baseShape)
+
+    expect(blade(baseShape, { rootSink: 0 })).toEqual(closed)
+    expect(blade(baseShape, {})).toEqual(closed)
+    const leaned = { ...baseShape, lean: -0.4, stiffness: 3 }
+    expect(blade(leaned, { rootSink: 0 })).toEqual(blade(leaned))
+  })
+
+  it('cuts the buried fraction open at rootSink 0.25', () => {
+    const shape = { ...baseShape, lean: 0.35 }
+    const outline = blade(shape, { rootSink: 0.25 })
+    const tipOffset = shape.lean * shape.length
+    const cutSpineX = tipOffset * 0.25 ** (shape.stiffness + 1)
+    const cutHalfWidth = shape.width * (2 * 0.25 * (1 - 0.25))
+
+    expect(outline).toHaveLength(7)
+    expect(outline[0]).toEqual([cutSpineX + cutHalfWidth, 0])
+    expect(outline.at(-1)).toEqual([cutSpineX - cutHalfWidth, 0])
+    expect(outline[0]).not.toEqual(outline.at(-1))
+    expect(outline[0]![0] - outline.at(-1)![0]).toBeCloseTo(
+      2 * shape.width * (2 * 0.25 * 0.75),
+      12,
+    )
+    expect(outline[3]).toEqual([tipOffset, -0.75 * shape.length])
+    for (const point of outline) {
+      expect(point.every(Number.isFinite)).toBe(true)
+    }
+  })
+
+  it('deduplicates the mid station at the maximum rootSink 0.5', () => {
+    const outline = blade(baseShape, { rootSink: 0.5 })
+    const cutHalfWidth = baseShape.width * (2 * 0.5 * (1 - 0.5))
+
+    expect(outline).toHaveLength(5)
+    expect(outline[0]).toEqual([cutHalfWidth, 0])
+    expect(outline.at(-1)).toEqual([-cutHalfWidth, 0])
+    expect(outline[2]).toEqual([0, -0.5 * baseShape.length])
+  })
+
+  it('rejects rootSink values outside the finite [0, 0.5] domain', () => {
+    expect(() => blade(baseShape, { rootSink: 0.5 })).not.toThrow()
+    expect(() => blade(baseShape, { rootSink: -0.01 })).toThrow(RangeError)
+    expect(() =>
+      blade(baseShape, { rootSink: 0.5 + Number.EPSILON }),
+    ).toThrow(RangeError)
+    expect(() => blade(baseShape, { rootSink: Number.NaN })).toThrow(RangeError)
+    expect(() =>
+      blade(baseShape, { rootSink: Number.POSITIVE_INFINITY }),
+    ).toThrow(RangeError)
+  })
 })
