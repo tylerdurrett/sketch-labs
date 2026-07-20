@@ -413,6 +413,15 @@
   user-select: text;
 }
 
+.live-canvas-unavailable__retry {
+  border: 1px solid #777;
+  border-radius: 0.25rem;
+  padding: 0.4rem 0.75rem;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+}
+
 /*
  * NOTE: the numeric control rows, their lock affordance, and the schema-driven
  * control surface are now Tailwind/shadcn components (#157) — NumberControl,

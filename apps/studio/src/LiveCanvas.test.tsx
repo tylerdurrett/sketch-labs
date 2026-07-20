@@ -31,6 +31,7 @@ vi.mock("./outlineScene", async (importActual) => {
 });
 
 import {
+  createDetailField,
   createShadingMask,
   createToneField,
   DEFAULT_COMPOSITION_FRAME,
@@ -3676,5 +3677,174 @@ describe("LiveCanvas Tone reference pixels (#316)", () => {
     });
     tick(8500);
     expect(lastDrawnT(generate)).toBeCloseTo(2.5, 5);
+  });
+});
+
+describe("LiveCanvas Detail reference pixels (#367)", () => {
+  it("paints native grayscale without Sketch sampling or Scene/export commits", () => {
+    const { ctx, counts, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 3, height: 1 } as DOMRect,
+    );
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const handle = createRef<LiveCanvasHandle>();
+    const onCommitted = vi.fn();
+
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={{ width: 3, height: 1 }}
+        renderState={{
+          kind: "detail-reference",
+          field: createDetailField(([x]) => (x < 1 ? 0 : x < 2 ? 0.5 : 1)),
+        }}
+        onDisplayedSceneCommitted={onCommitted}
+      />,
+    );
+
+    expect([...images[0]!]).toEqual([
+      0, 0, 0, 255,
+      128, 128, 128, 255,
+      255, 255, 255, 255,
+    ]);
+    expect(counts.putImageData).toBe(1);
+    expect(counts.setTransform ?? 0).toBe(0);
+    expect(counts.fillRect ?? 0).toBe(0);
+    expect(generate).not.toHaveBeenCalled();
+    tick(4000);
+    expect(generate).not.toHaveBeenCalled();
+    expect(onCommitted).not.toHaveBeenCalled();
+    expect(handle.current?.captureDisplayedFrame()).toBeNull();
+    expect(handle.current?.captureDisplayedFillFrame()).toBeNull();
+    expect(handle.current?.getDisplayedScene()).toBeNull();
+    expect(el.querySelector(".transport")).toBeNull();
+  });
+
+  it("clears retained artwork identity when Detail atomically replaces Fill", () => {
+    const { ctx } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 1, height: 1 } as DOMRect,
+    );
+    const { sketch } = animatedSketch(undefined);
+    const handle = createRef<LiveCanvasHandle>();
+    const params = {};
+    mount(
+      <LiveCanvas handleRef={handle} sketch={sketch} params={params} seed={1} />,
+    );
+    expect(handle.current?.captureDisplayedFillFrame()).not.toBeNull();
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={1}
+          renderState={{
+            kind: "detail-reference",
+            field: createDetailField(() => 1),
+          }}
+        />,
+      );
+    });
+
+    expect(handle.current?.captureDisplayedFrame()).toBeNull();
+    expect(handle.current?.captureDisplayedFillFrame()).toBeNull();
+  });
+
+  it("re-rasterizes ready Detail on backing resize and Page-frame settlement", () => {
+    const { ctx, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    let width = 2;
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => ({ width, height: 1 }) as DOMRect,
+    );
+    const { sketch, generate } = animatedSketch(undefined);
+    const sample = vi.fn(() => 1);
+    const field = createDetailField(sample);
+    const params = {};
+    const render = (
+      pageFrame: NonNullable<LiveCanvasProps["pageFrame"]> | null,
+    ) => (
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={{ width: 10, height: 10 }}
+        pageFrame={pageFrame}
+        renderState={{ kind: "detail-reference", field }}
+      />
+    );
+    mount(render(null));
+    expect(sample).toHaveBeenCalledTimes(2);
+
+    width = 4;
+    act(() => fireResizeObserver?.());
+    expect(sample).toHaveBeenCalledTimes(6);
+    expect(images.at(-1)).toHaveLength(16);
+
+    act(() => root!.render(render({ x: -5, y: 0, width: 20, height: 10 })));
+    expect(
+      Array.from({ length: 4 }, (_, index) => images.at(-1)![index * 4]),
+    ).toEqual([0, 255, 255, 0]);
+    expect(sample).toHaveBeenCalledTimes(8);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("neutralizes loading/failure states and exposes bounded retry plumbing", () => {
+    const { ctx, counts } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 2, height: 1 } as DOMRect,
+    );
+    const { sketch, generate } = animatedSketch({ duration: 10, mode: "loop" });
+    const handle = createRef<LiveCanvasHandle>();
+    const retry = vi.fn();
+    const params = {};
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        renderState={{ kind: "detail-reference-loading" }}
+      />,
+    );
+
+    expect(el.querySelector("[role='status']")?.textContent).toContain(
+      "Detail analysis loading",
+    );
+    expect(canvasEl(el).getAttribute("aria-hidden")).toBe("true");
+    expect(counts.clearRect).toBe(1);
+    expect(el.querySelector(".transport")).toBeNull();
+    tick(3000);
+    expect(generate).not.toHaveBeenCalled();
+    expect(handle.current?.captureDisplayedFrame()).toBeNull();
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={1}
+          renderState={{ kind: "detail-reference-failure", onRetry: retry }}
+        />,
+      );
+    });
+    expect(el.querySelector("[role='alert']")?.textContent).toContain(
+      "Detail analysis could not be completed",
+    );
+    expect(el.querySelector("[role='alert']")?.textContent).not.toContain(
+      "Error:",
+    );
+    clickButton(el, "Retry Detail analysis");
+    expect(retry).toHaveBeenCalledOnce();
+    expect(generate).not.toHaveBeenCalled();
   });
 });
