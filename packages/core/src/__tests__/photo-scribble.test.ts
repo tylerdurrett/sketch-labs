@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DecodedPixels, SketchEnvironment } from '../imageAssets'
+import {
+  IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+  type PreparedImageDetailAnalysis,
+} from '../imageDetailAnalysis'
 import { applyPreset } from '../preset'
 import { createRasterToneSource } from '../rasterToneSource'
-import { defaultParams, type Params } from '../sketch'
+import { defaultParams, randomize, type Params } from '../sketch'
 import type { ScribbleStrategyInput } from '../scribbleStrategy'
 import { scribbleStrategy } from '../scribbleStrategy'
 import {
   PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
   createPhotoScribble,
+  createPhotoScribbleDetailField,
   createPhotoScribbleSchema,
   createPhotoScribbleSource,
   generatePhotoScribble,
@@ -16,6 +21,8 @@ import {
   photoScribble,
 } from '../sketches/photo-scribble'
 import { applyPhotoToneControls } from '../sketches/photo-scribble/tone'
+import { scribbleMoon } from '../sketches/scribble-moon'
+import { toneCalibration } from '../sketches/tone-calibration'
 
 vi.mock('../scribbleStrategy', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../scribbleStrategy')>()
@@ -83,6 +90,7 @@ describe('Photo Scribble headless composition', () => {
       'toneContrast',
       'tonePivot',
       'toneGamma',
+      'detailSensitivity',
       'pathDensity',
       'scribbleScale',
       'momentum',
@@ -103,11 +111,13 @@ describe('Photo Scribble headless composition', () => {
     })
     expect(schema.toneGamma).toEqual(schema.toneContrast)
     expect(schema.tonePivot).toEqual(schema.toneContrast)
+    expect(schema.detailSensitivity).toEqual(schema.toneContrast)
     expect(defaultParams(schema)).toEqual({
       imageAsset: HEADLESS_FIXTURE_LOOKUP_KEY,
       toneContrast: 0.5,
       tonePivot: 0.5,
       toneGamma: 0.5,
+      detailSensitivity: 0.5,
       pathDensity: 1,
       scribbleScale: 1,
       momentum: 0.75,
@@ -160,6 +170,112 @@ describe('Photo Scribble headless composition', () => {
     })
 
     expect(restored.params.tonePivot).toBe(0.5)
+  })
+
+  it('reconciles legacy Detail sensitivity and randomizes or locks it through the ordinary schema spine', () => {
+    const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const legacyParams = defaultParams(schema)
+    delete legacyParams.detailSensitivity
+
+    const restored = applyPreset(schema, {
+      version: 1,
+      sketch: 'photo-scribble',
+      name: 'legacy-without-detail-sensitivity',
+      seed: 'legacy-seed',
+      params: legacyParams,
+      locks: [],
+    })
+    const randomized = randomize(
+      schema,
+      restored.params,
+      new Set(Object.keys(schema).filter((key) => key !== 'detailSensitivity')),
+      () => 0.25,
+    )
+    const locked = randomize(
+      schema,
+      restored.params,
+      new Set(Object.keys(schema)),
+      () => {
+        throw new Error('locked controls must not consume randomness')
+      },
+    )
+
+    expect(restored.params.detailSensitivity).toBe(0.5)
+    expect(randomized.detailSensitivity).toBe(0.25)
+    expect(locked.detailSensitivity).toBe(0.5)
+  })
+
+  it('resolves prepared detail by exact asset and definition identity and ignores tone controls', () => {
+    const prepared: PreparedImageDetailAnalysis = {
+      definitionId: IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+      sourceWidth: 1,
+      sourceHeight: 1,
+      gridWidth: 1,
+      gridHeight: 1,
+      data: Float64Array.of(0.25),
+    }
+    const lookup = vi.fn(
+      (
+        assetId: string,
+        definitionId: typeof IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+      ) =>
+        assetId === SELECTED_FIXTURE_LOOKUP_KEY &&
+        definitionId === IMAGE_DETAIL_ANALYSIS_DEFINITION_ID
+          ? prepared
+          : undefined,
+    )
+    const env: SketchEnvironment = {
+      imageAssets: vi.fn(() => FIXTURE_PIXELS),
+      getPreparedImageDetailAnalysis: lookup,
+    }
+    const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const selected = params({
+      imageAsset: SELECTED_FIXTURE_LOOKUP_KEY,
+      detailSensitivity: 1,
+      toneGamma: 0,
+      toneContrast: 1,
+      tonePivot: 0,
+    })
+    const direct = createPhotoScribbleDetailField(selected, FRAME, schema, env)
+    const toneChanged = createPhotoScribbleDetailField(
+      {
+        ...selected,
+        toneGamma: 1,
+        toneContrast: 0,
+        tonePivot: 1,
+      },
+      FRAME,
+      schema,
+      env,
+    )
+    const throughSketch = createPhotoScribble(
+      HEADLESS_FIXTURE_LOOKUP_KEY,
+    ).generateDetailField?.(selected, FRAME, env)
+
+    expect(direct.sample([10, 5])).toBe(0.25 ** 0.25)
+    expect(toneChanged.sample([10, 5])).toBe(direct.sample([10, 5]))
+    expect(throughSketch?.sample([10, 5])).toBe(direct.sample([10, 5]))
+    expect(lookup).toHaveBeenCalledTimes(3)
+    expect(lookup).toHaveBeenCalledWith(
+      SELECTED_FIXTURE_LOOKUP_KEY,
+      IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+    )
+    expect(env.imageAssets).not.toHaveBeenCalled()
+  })
+
+  it('returns a safe zero Detail Field when no prepared analysis is resolved', () => {
+    const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const field = createPhotoScribbleDetailField(params(), FRAME, schema)
+
+    expect(field.sample([10, 5])).toBe(0)
+  })
+
+  it('keeps the Detail capability Photo-only', () => {
+    expect(
+      createPhotoScribble(HEADLESS_FIXTURE_LOOKUP_KEY).generateDetailField,
+    ).toBeTypeOf('function')
+    expect(toneCalibration.generateDetailField).toBeUndefined()
+    expect(scribbleMoon.generateDetailField).toBeUndefined()
   })
 
   it('exports the named production Sketch with its opaque bundled default', () => {

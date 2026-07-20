@@ -155,6 +155,43 @@ beforeEach(() => {
 })
 
 describe('Photo Scribble black-box contract', () => {
+  it('reconciles legacy params to identity sensitivity without changing geometry', () => {
+    const sketch = createPhotoScribble(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const legacyParams = fastParams()
+    delete legacyParams.detailSensitivity
+    const environment = environmentFor(FIXTURE_PIXELS)
+
+    const before = sketch.generateScribbleArtwork!(
+      legacyParams,
+      'legacy-detail-sensitivity',
+      FRAME,
+      undefined,
+      environment,
+    )
+    const beforeResult = capturedResult(0)
+    const restored = applyPreset(sketch.schema, {
+      version: 1,
+      sketch: sketch.id,
+      name: 'legacy-detail-sensitivity',
+      seed: 'legacy-detail-sensitivity',
+      params: legacyParams,
+      locks: [],
+    })
+    const after = sketch.generateScribbleArtwork!(
+      restored.params,
+      restored.seed,
+      FRAME,
+      undefined,
+      environment,
+    )
+    const afterResult = capturedResult(1)
+
+    expect(restored.params.detailSensitivity).toBe(0.5)
+    expect(afterResult.polylines).toEqual(beforeResult.polylines)
+    expect(after.diagnostics).toEqual(before.diagnostics)
+    expect(after.scene).toEqual(before.scene)
+  })
+
   it('repeats termination, diagnostics, Scene, and polylines exactly', () => {
     const sketch = createPhotoScribble(HEADLESS_FIXTURE_LOOKUP_KEY)
     const params = fastParams()
