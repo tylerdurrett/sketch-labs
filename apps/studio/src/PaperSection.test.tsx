@@ -844,6 +844,10 @@ describe("PaperSection", () => {
       ...STANDARD_PAPER_NAMES,
       "custom",
     ]);
+    expect(
+      [...(select?.options ?? [])].find((option) => option.value === "6x9")
+        ?.textContent,
+    ).toBe("6x9");
   });
 
   it("derives the Harness fallback as Square with no orientation action", () => {
@@ -941,6 +945,25 @@ describe("PaperSection", () => {
     expect(onChange).toHaveBeenCalledWith({
       width: 142.24,
       height: 209.804,
+      insets: current.insets,
+      includeFrame: false,
+      toolWidthMillimeters: 0.3,
+    });
+  });
+
+  it("applies the 6x9 dimensions while preserving the active margin", () => {
+    const onChange = vi.fn();
+    const current: PlotProfile = {
+      ...profile,
+      insets: { top: 1, right: 2, bottom: 3, left: 4 },
+    };
+    const { el } = mount(onChange, current);
+
+    selectFormat(el, "6x9");
+
+    expect(onChange).toHaveBeenCalledWith({
+      width: 152,
+      height: 229,
       insets: current.insets,
       includeFrame: false,
       toolWidthMillimeters: 0.3,

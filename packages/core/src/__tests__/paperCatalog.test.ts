@@ -30,10 +30,11 @@ const PROFILE_KEYS = [
 ]
 
 describe('STANDARD_PAPERS catalog', () => {
-  it('covers the eight standard formats in portrait millimeters (AC4)', () => {
+  it('covers the nine standard formats in portrait millimeters (AC4)', () => {
     expect(STANDARD_PAPERS).toEqual({
       square: { width: 200, height: 200 },
       sketchbook: { width: 142.24, height: 209.804 },
+      '6x9': { width: 152, height: 229 },
       a2: { width: 420, height: 594 },
       a3: { width: 297, height: 420 },
       a4: { width: 210, height: 297 },
@@ -43,11 +44,12 @@ describe('STANDARD_PAPERS catalog', () => {
     })
   })
 
-  it('lists exactly the eight standard names in UI order', () => {
-    expect(STANDARD_PAPER_NAMES).toHaveLength(8)
+  it('lists exactly the nine standard names in UI order', () => {
+    expect(STANDARD_PAPER_NAMES).toHaveLength(9)
     expect([...STANDARD_PAPER_NAMES]).toEqual([
       'square',
       'sketchbook',
+      '6x9',
       'a2',
       'a3',
       'a4',
