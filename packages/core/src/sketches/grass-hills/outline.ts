@@ -2,10 +2,11 @@
  * Grass Hills' faithful production Outline source.
  *
  * Outline starts from the exact sampled Fill Scene: the same hill rings and
- * seven-point tapered blade silhouettes, in the same painter order and with the
- * same authored closure metadata. Every primitive is both a contour source and
- * an occluder, so the generic indexed Hidden-line pass reproduces painter
- * visibility without any Grass-specific reconstruction or density reduction.
+ * tapered blade silhouettes at whatever tessellation each descriptor resolved,
+ * in the same painter order and with the same authored closure metadata.
+ * Every primitive is both a contour source and an occluder, so the generic
+ * indexed Hidden-line pass reproduces painter visibility without any
+ * Grass-specific reconstruction or density reduction.
  *
  * The physical target affects only the stroke style of the processed output.
  * It never selects roots or changes geometry. Dense source generation remains

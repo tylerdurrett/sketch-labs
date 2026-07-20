@@ -196,4 +196,62 @@ describe('grass-hills blade', () => {
       blade(baseShape, { rootSink: Number.POSITIVE_INFINITY }),
     ).toThrow(RangeError)
   })
+
+  it('treats explicit legacy stations as the exact default emission', () => {
+    const shape = { ...baseShape, lean: -0.3, stiffness: 3.25 }
+
+    expect(blade(shape, { stations: [0, 0.5, 0.82, 1] })).toEqual(blade(shape))
+  })
+
+  it('emits fifteen closed root-repeated points for eight stations', () => {
+    const stations = [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1]
+    const outline = blade({ ...baseShape, lean: 0.2 }, { stations })
+
+    expect(outline).toHaveLength(15)
+    expect(outline[0]).toEqual([0, 0])
+    expect(outline.at(-1)).toEqual([0, 0])
+    expect(
+      outline.filter(([, y]) => y === -baseShape.length),
+    ).toHaveLength(1)
+    for (const [index, t] of stations.entries()) {
+      expect(outline[index]![1]).toBeCloseTo(-baseShape.length * t, 12)
+    }
+    for (const point of outline) {
+      expect(point.every(Number.isFinite)).toBe(true)
+    }
+  })
+
+  it('composes denser stations with a rootSink cut', () => {
+    const stations = [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1]
+    const outline = blade(baseShape, { stations, rootSink: 0.3 })
+    // Station set: the cut at 0.3 dedupes the equal station, then keeps the
+    // five stations above it -> six walk stations -> 11 open points.
+    const cutHalfWidth = baseShape.width * (2 * 0.3 * (1 - 0.3))
+
+    expect(outline).toHaveLength(11)
+    expect(outline[0]).toEqual([cutHalfWidth, 0])
+    expect(outline.at(-1)).toEqual([-cutHalfWidth, 0])
+    expect(outline[0]).not.toEqual(outline.at(-1))
+    expect(outline[5]).toEqual([0, -(1 - 0.3) * baseShape.length])
+  })
+
+  it('rejects station lists that break the [0 .. 1] ascending contract', () => {
+    expect(() => blade(baseShape, { stations: [0.1, 0.5, 1] })).toThrow(
+      RangeError,
+    )
+    expect(() => blade(baseShape, { stations: [0, 0.5, 0.99] })).toThrow(
+      RangeError,
+    )
+    expect(() => blade(baseShape, { stations: [0, 0.5, 0.5, 1] })).toThrow(
+      RangeError,
+    )
+    expect(() => blade(baseShape, { stations: [0, 0.7, 0.3, 1] })).toThrow(
+      RangeError,
+    )
+    expect(() => blade(baseShape, { stations: [0, Number.NaN, 1] })).toThrow(
+      RangeError,
+    )
+    expect(() => blade(baseShape, { stations: [] })).toThrow(RangeError)
+    expect(() => blade(baseShape, { stations: [0] })).toThrow(RangeError)
+  })
 })

@@ -15,6 +15,7 @@ function descriptor(
     projected,
     rolls: { length: 0.1, width: 0.2, stiffness: 0.3, lean: 0.4, survival: 0.5 },
     shape: { length: 12, width: 3, stiffness: 2.75, lean: -0.25 },
+    stations: [0, 0.5, 0.82, 1],
   }
 }
 

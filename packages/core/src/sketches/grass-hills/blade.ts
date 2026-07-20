@@ -17,12 +17,29 @@ export interface BladeShape {
   stiffness: number
 }
 
-/** Stations pinned by the approved seven-point architecture-decision fixture. */
-const FLANK_STATIONS = [0, 0.5, 0.82, 1] as const
+/**
+ * Stations pinned by the approved seven-point architecture-decision fixture.
+ * Exported so adaptive-detail resolution can return this exact array at its
+ * four-station floor, keeping the default emission byte-identical.
+ */
+export const FLANK_STATIONS = [0, 0.5, 0.82, 1] as const
 
 function requirePositiveFinite(value: number, name: 'length' | 'width'): void {
   if (!Number.isFinite(value) || value <= 0) {
     throw new RangeError(`${name} must be a finite positive number`)
+  }
+}
+
+function requireValidStations(stations: readonly number[]): void {
+  if (stations[0] !== 0 || stations[stations.length - 1] !== 1) {
+    throw new RangeError(
+      'stations must start at exactly 0 and end at exactly 1',
+    )
+  }
+  for (let index = 1; index < stations.length; index++) {
+    if (!(stations[index]! > stations[index - 1]!)) {
+      throw new RangeError('stations must be strictly ascending')
+    }
   }
 }
 
@@ -37,6 +54,12 @@ function requirePositiveFinite(value: number, name: 'length' | 'width'): void {
  * flank offsets widen from the root and taper to the single shared apex.
  * Because the two flanks share strictly ordered y stations and a non-negative
  * width at every station, they cannot cross.
+ *
+ * `stations` selects the flank tessellation: a strictly ascending list of
+ * spine fractions starting at exactly 0 and ending at exactly 1. Absent, the
+ * pinned four-station legacy array applies; adaptive detail passes the denser
+ * lists it resolved per descriptor. An uncut blade emits `2 * count - 1`
+ * points for `count` stations.
  *
  * `rootSink` buries the bottom fraction of the silhouette as a CUT, not a
  * translation: painter order means nothing can ever occlude a blade from its
@@ -54,7 +77,7 @@ function requirePositiveFinite(value: number, name: 'length' | 'width'): void {
  */
 export function blade(
   shape: BladeShape,
-  options?: { rootSink?: number },
+  options?: { rootSink?: number; stations?: readonly number[] },
 ): Polyline {
   const { length, width, lean, stiffness } = shape
   requirePositiveFinite(length, 'length')
@@ -67,6 +90,8 @@ export function blade(
   if (!Number.isFinite(rootSink) || rootSink < 0 || rootSink > 0.5) {
     throw new RangeError('rootSink must be a finite number in [0, 0.5]')
   }
+  if (options?.stations !== undefined) requireValidStations(options.stations)
+  const flankStations: readonly number[] = options?.stations ?? FLANK_STATIONS
 
   const tipOffset = lean * length
   if (!Number.isFinite(tipOffset)) {
@@ -80,13 +105,13 @@ export function blade(
   const rightFlank: Point[] = []
   const leftFlank: Point[] = []
 
-  // rootSink 0 keeps the pinned stations untouched; a positive sink re-roots
-  // the walk at the cut fraction and keeps only the stations above it (the
-  // t = 0.5 station dedupes naturally at the maximum 0.5 cut).
+  // rootSink 0 keeps the resolved stations untouched; a positive sink re-roots
+  // the walk at the cut fraction and keeps only the stations above it (any
+  // station equal to the cut fraction dedupes naturally through the filter).
   const stations: readonly number[] =
     rootSink === 0
-      ? FLANK_STATIONS
-      : [rootSink, ...FLANK_STATIONS.filter((t) => t > rootSink)]
+      ? flankStations
+      : [rootSink, ...flankStations.filter((t) => t > rootSink)]
 
   for (const t of stations) {
     if (t === 0) {

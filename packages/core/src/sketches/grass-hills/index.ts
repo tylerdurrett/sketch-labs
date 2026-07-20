@@ -54,11 +54,15 @@
  *
  * DENSE / FAITHFUL OUTLINE ARCHITECTURE: the full-composition target is 10,000
  * descriptors from a seeded 100×100 stratified bank per stable hill identity.
- * Fill traces curved seven-point blade silhouettes. On-demand Outline starts
- * from that exact sampled geometry — all hill rings and every tapered blade in
- * painter order — then annotates every primitive as both source and occluder for
- * the generic indexed Hidden-line pass. There are no substitute centerline
- * spines, physical-tool root LOD, or hill-only approximation. The physical tool
+ * The protected invariant is that Fill and Outline never DIVERGE: on-demand
+ * Outline clones the exact sampled Fill Scene — all hill rings and every
+ * tapered blade in painter order — then annotates every primitive as both
+ * source and occluder for the generic indexed Hidden-line pass, so substitute
+ * centerline spines, outline-only root culling, or hill-only approximation
+ * cannot exist structurally. Resolution-proportional tessellation at the
+ * descriptor level is explicitly fine: `bladeDetail` resolves each blade's
+ * flank stations once from its perspective scale and the active zoom, and
+ * Fill and Outline both trace that single resolution. The physical tool
  * target changes output stroke width only; it never selects roots or
  * reconstructs geometry. The optional Outline-source hook keeps this dense
  * generation in Studio's worker.
@@ -313,6 +317,7 @@ function prepareGrassHills(
   )
   const bladeWidth = numberParam(params, schema, 'bladeWidth')
   const bladeRootSink = numberParam(params, schema, 'bladeRootSink')
+  const bladeDetail = Math.round(numberParam(params, schema, 'bladeDetail'))
   const stiffnessVariance = numberParam(
     params,
     schema,
@@ -400,6 +405,8 @@ function prepareGrassHills(
           hillKey: band.hillKey,
           roots,
           mask,
+          bladeDetail,
+          foregroundZoom,
           bladeLength,
           bladeLengthVariance,
           bladeWidth,
@@ -471,9 +478,10 @@ function sampleGrassHills(prepared: PreparedGrassHills, _t: number): Scene {
     for (const descriptor of hill.blades) {
       const [rootX, rootY] = descriptor.projected
       builder.addPath(
-        blade(descriptor.shape, { rootSink: prepared.bladeRootSink }).map(
-          ([x, y]) => [x + rootX, y + rootY],
-        ),
+        blade(descriptor.shape, {
+          stations: descriptor.stations,
+          rootSink: prepared.bladeRootSink,
+        }).map(([x, y]) => [x + rootX, y + rootY]),
         {
           closed: prepared.bladePathsClosed,
           fill: { color: prepared.bladeColor },

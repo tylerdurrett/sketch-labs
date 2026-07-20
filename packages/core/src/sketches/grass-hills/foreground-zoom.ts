@@ -20,7 +20,8 @@ export interface ForegroundZoomOptions {
  * This pass deliberately runs after terrain projection and blade resolution:
  * complete ridge rings, projected roots, blade lengths, and blade widths all
  * move through one shared composition transform. Stable identity, canonical
- * coordinates, random rolls, lean, and stiffness remain unchanged. The fixed
+ * coordinates, random rolls, lean, stiffness, and the resolved flank stations
+ * remain unchanged. The fixed
  * Composition Frame is not part of the returned value and therefore remains a
  * caller-owned clip boundary rather than becoming an authored crop edge.
  *
@@ -66,6 +67,9 @@ export function applyForegroundZoom(
                 stiffness: descriptor.shape.stiffness,
                 lean: descriptor.shape.lean,
               }),
+              // Stations are unitless spine fractions: zoom-invariant, so the
+              // resolved tessellation is copied verbatim, never rescaled.
+              stations: Object.freeze([...descriptor.stations]),
             }),
           ),
         ),

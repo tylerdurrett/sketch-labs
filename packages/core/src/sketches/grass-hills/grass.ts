@@ -1,6 +1,7 @@
 import { clamp, lerp } from '../../math'
 import type { Seed } from '../../sketch'
 import type { BladeShape } from './blade'
+import { resolveFlankStations } from './blade-stations'
 import { grassScaleAtY } from './depth'
 import {
   projectGrassRoot,
@@ -30,6 +31,10 @@ export interface BuildGrassBladesOptions extends GrassBladeShapeOptions {
   roots: readonly GrassRootCandidate[]
   /** Count-dependent physical mask for this hill. */
   mask: GrassHillMask
+  /** Maximum flank stations per blade at full perspective scale. */
+  bladeDetail?: number
+  /** Active zoom restores detail that perspective scale alone would shed. */
+  foregroundZoom?: number
 }
 
 /** Stable identity retained across count-dependent reprojection. */
@@ -66,6 +71,8 @@ export interface GrassBladeDescriptor {
   readonly projected: readonly [number, number]
   readonly rolls: GrassBladeRolls
   readonly shape: Readonly<BladeShape>
+  /** Flank stations resolved once here; Fill and Outline both trace them. */
+  readonly stations: readonly number[]
 }
 
 /** Maximum pre-perspective reach supplied when constructing a hill mask. */
@@ -84,12 +91,16 @@ export function resolveMaximumUnscaledBladeLength(
  * collapsing a control's variance never shifts any other property or blade.
  * The survival roll participates only in exclusion, never geometry: it is
  * drawn even when exclusion is off so enabling it cannot reroll any blade.
+ * Flank stations also resolve here, from the same perspective scale the shape
+ * uses, so every later consumer traces one shared tessellation per blade.
  */
 export function buildGrassBlades({
   seed,
   hillKey,
   roots,
   mask,
+  bladeDetail = 4,
+  foregroundZoom = 1,
   bladeLength,
   bladeLengthVariance,
   bladeWidth,
@@ -142,6 +153,9 @@ export function buildGrassBlades({
             signed(rolls.lean) * BASELINE_LEAN_VARIATION +
             windLean * lerp(0.8, 1.2, rolls.lean),
         }),
+        stations: Object.freeze(
+          resolveFlankStations(bladeDetail, scale, foregroundZoom),
+        ),
       })
     }),
   )
