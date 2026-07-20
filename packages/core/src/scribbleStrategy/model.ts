@@ -511,24 +511,87 @@ export function createScribbleModel(
       ),
     )
 
+    function depositCell(row: number, column: number): void {
+      const index = row * lattice.columns + column
+      const point = points[index]!
+      const projection = projectionOntoSegment(point, start, end)
+      const radius = localScalesAt(projection.point).coverageRadius
+      const radiusSquared = radius * radius
+      if (projection.distanceSquared >= radiusSquared) return
+
+      // One cell receives one kernel evaluation for the complete segment.
+      // This keeps peak darkness independent of profile sampling density.
+      const normalizedDistanceSquared =
+        projection.distanceSquared / radiusSquared
+      const shoulder = 1 - normalizedDistanceSquared
+      const amount = scales.coveragePerPass * shoulder * shoulder
+      const previousResidual = cellResidual(index)
+      coverage[index] = Math.min(1, coverage[index]! + amount)
+      residualTotal += cellResidual(index) - previousResidual
+    }
+
     for (let row = minRow; row <= maxRow; row++) {
       for (let column = minColumn; column <= maxColumn; column++) {
-        const index = row * lattice.columns + column
-        const point = points[index]!
-        const projection = projectionOntoSegment(point, start, end)
-        const radius = localScalesAt(projection.point).coverageRadius
-        const radiusSquared = radius * radius
-        if (projection.distanceSquared >= radiusSquared) continue
+        depositCell(row, column)
+      }
+    }
 
-        // One cell receives one kernel evaluation for the complete segment.
-        // This keeps peak darkness independent of profile sampling density.
-        const normalizedDistanceSquared =
-          projection.distanceSquared / radiusSquared
-        const shoulder = 1 - normalizedDistanceSquared
-        const amount = scales.coveragePerPass * shoulder * shoulder
-        const previousResidual = cellResidual(index)
-        coverage[index] = Math.min(1, coverage[index]! + amount)
-        residualTotal += cellResidual(index) - previousResidual
+    const deltaX = end[0] - start[0]
+    const deltaY = end[1] - start[1]
+    const lengthSquared = deltaX * deltaX + deltaY * deltaY
+    if (lengthSquared === 0) return
+
+    // A field callback is opaque and need not be continuous, so profile
+    // stations cannot prove a global radius bound. Every cell outside the
+    // initial box whose nearest point is an endpoint is nevertheless excluded:
+    // both endpoint radii are in the profile and no larger than maximumRadius.
+    // Therefore only cells with a strict interior projection can reveal a
+    // missed radius. Enumerate exactly that oblique strip row by row rather
+    // than unconditionally sampling the complete lattice.
+    for (let row = 0; row < lattice.rows; row++) {
+      const y = (row + 0.5) * lattice.cellHeight
+      let firstColumn = 0
+      let lastColumn = lattice.columns - 1
+
+      if (deltaX === 0) {
+        const dot = (y - start[1]) * deltaY
+        if (dot <= 0 || dot >= lengthSquared) continue
+      } else {
+        const verticalDot = (y - start[1]) * deltaY
+        const firstBoundary = start[0] - verticalDot / deltaX
+        const secondBoundary =
+          start[0] + (lengthSquared - verticalDot) / deltaX
+        const minimumX = Math.min(firstBoundary, secondBoundary)
+        const maximumX = Math.max(firstBoundary, secondBoundary)
+
+        // Include one conservative boundary column on either side; the exact
+        // dot-product test below removes endpoint projections.
+        firstColumn = Math.max(
+          0,
+          Math.floor(minimumX / lattice.cellWidth - 0.5),
+        )
+        lastColumn = Math.min(
+          lattice.columns - 1,
+          Math.ceil(maximumX / lattice.cellWidth - 0.5),
+        )
+      }
+
+      for (let column = firstColumn; column <= lastColumn; column++) {
+        if (
+          row >= minRow &&
+          row <= maxRow &&
+          column >= minColumn &&
+          column <= maxColumn
+        ) {
+          continue
+        }
+
+        const point = points[row * lattice.columns + column]!
+        const dot =
+          (point[0] - start[0]) * deltaX +
+          (point[1] - start[1]) * deltaY
+        if (dot <= 0 || dot >= lengthSquared) continue
+        depositCell(row, column)
       }
     }
   }

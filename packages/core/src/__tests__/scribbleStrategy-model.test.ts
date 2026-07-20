@@ -705,6 +705,89 @@ describe('Scribble virtual coverage', () => {
     expect(fineSideOutsideLocalRadius!.coverage).toBe(0)
   })
 
+  it('does not clip a broad maximum between profile stations', () => {
+    const baseline = createScribbleModel(source(constantTone(1)), SQUARE)
+    const start = [450, 450] as const
+    const end = [462, 450 + Math.PI] as const
+    const deltaX = end[0] - start[0]
+    const deltaY = end[1] - start[1]
+    const lengthSquared = deltaX * deltaX + deltaY * deltaY
+    const broadScale = 3
+    const candidate = baseline.samples().find(({ point }) => {
+      const progress =
+        ((point[0] - start[0]) * deltaX +
+          (point[1] - start[1]) * deltaY) /
+        lengthSquared
+      if (progress <= 0 || progress >= 1) return false
+      const projection = [
+        start[0] + progress * deltaX,
+        start[1] + progress * deltaY,
+      ] as const
+      const distance = Math.hypot(
+        point[0] - projection[0],
+        point[1] - projection[1],
+      )
+      return (
+        distance >
+          baseline.scales.coverageRadius + baseline.lattice.cellHeight &&
+        distance < baseline.scales.coverageRadius * broadScale
+      )
+    })!
+    const progress =
+      ((candidate.point[0] - start[0]) * deltaX +
+        (candidate.point[1] - start[1]) * deltaY) /
+      lengthSquared
+    const projectedMaximum = [
+      start[0] + progress * deltaX,
+      start[1] + progress * deltaY,
+    ] as const
+    const field = createScribbleScaleField(1, ([x, y]) =>
+      Math.abs(x - projectedMaximum[0]) < 1e-9 &&
+      Math.abs(y - projectedMaximum[1]) < 1e-9
+        ? broadScale
+        : 1,
+    )
+    const model = createScribbleModel(
+      source(constantTone(1)),
+      SQUARE,
+      {},
+      field,
+    )
+    const profile = model.profileSegment(start, end)!
+    const target = model.samples().find(
+      ({ point }) =>
+        point[0] === candidate.point[0] && point[1] === candidate.point[1],
+    )!
+
+    expect(
+      profile.samples.every(
+        ({ point }) =>
+          Math.abs(point[0] - projectedMaximum[0]) >= 1e-9 ||
+          Math.abs(point[1] - projectedMaximum[1]) >= 1e-9,
+      ),
+    ).toBe(true)
+    expect(profile.maximumCoverageRadius).toBe(model.scales.coverageRadius)
+    expect(target.point[1]).toBeLessThan(
+      Math.min(start[1], end[1]) - profile.maximumCoverageRadius,
+    )
+
+    model.depositSegment(start, end)
+
+    const distanceSquared =
+      (target.point[0] - projectedMaximum[0]) ** 2 +
+      (target.point[1] - projectedMaximum[1]) ** 2
+    const broadRadius = model.scales.coverageRadius * broadScale
+    const expected =
+      model.scales.coveragePerPass *
+      (1 - distanceSquared / (broadRadius * broadRadius)) ** 2
+    expect(model.coverageAt(target.point)).toBeCloseTo(expected, 12)
+    expect(
+      model.samples().find(({ point }) =>
+        point[0] === target.point[0] && point[1] === target.point[1],
+      )!.coverage,
+    ).toBeCloseTo(expected, 12)
+  })
+
   it('keeps field-aware cached residuals exact while deposits converge monotonically', () => {
     const model = createScribbleModel(
       source(horizontalGradientTone(SQUARE), featheredBoundaryMask(SQUARE)),
