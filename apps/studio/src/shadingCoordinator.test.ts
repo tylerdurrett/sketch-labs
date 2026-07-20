@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ParamSchema, Scene, ScribbleDiagnostics } from "@harness/core";
+import type { ParamSchema, Scene, ShadingDiagnostics } from "@harness/core";
 
 import {
-  ScribbleCoordinator,
-  type ScribbleWorkerPort,
-} from "./scribbleCoordinator";
+  ShadingCoordinator,
+  type ShadingWorkerPort,
+} from "./shadingCoordinator";
 import {
-  createScribbleComputeIdentity,
-  type ScribbleComputeIdentity,
-  type ScribbleComputeRequest,
-} from "./scribbleComputeProtocol";
+  createShadingComputeIdentity,
+  type ShadingComputeIdentity,
+  type ShadingComputeRequest,
+} from "./shadingComputeProtocol";
 
 const schema: ParamSchema = {
   amount: { kind: "number", min: 0, max: 10, default: 1 },
@@ -36,17 +36,17 @@ const scene: Scene = {
   ],
 };
 
-const diagnostics: ScribbleDiagnostics = {
+const diagnostics: ShadingDiagnostics = {
   termination: "completed",
-  residualError: 0.05,
   pathLength: 20,
   polylineCount: 1,
   penLiftCount: 0,
+  fidelity: { kind: "scribble", residualError: 0.05 },
 };
 
-function identity(amount = 1): ScribbleComputeIdentity {
-  return createScribbleComputeIdentity({
-    sketchId: "test-scribble",
+function identity(amount = 1): ShadingComputeIdentity {
+  return createShadingComputeIdentity({
+    sketchId: "test-shading",
     schema,
     params: { amount },
     seed: 123,
@@ -54,8 +54,8 @@ function identity(amount = 1): ScribbleComputeIdentity {
   });
 }
 
-function imageIdentity(seed: string): ScribbleComputeIdentity {
-  return createScribbleComputeIdentity({
+function imageIdentity(seed: string): ShadingComputeIdentity {
+  return createShadingComputeIdentity({
     sketchId: "photo-scribble",
     schema: imageAssetSchema,
     params: { imageAsset: "pinecone-4330aa0314f7" },
@@ -64,8 +64,8 @@ function imageIdentity(seed: string): ScribbleComputeIdentity {
   });
 }
 
-class FakeWorker implements ScribbleWorkerPort {
-  request: ScribbleComputeRequest | null = null;
+class FakeWorker implements ShadingWorkerPort {
+  request: ShadingComputeRequest | null = null;
   readonly terminate = vi.fn(() => {
     if (this.terminateError !== undefined) throw this.terminateError;
   });
@@ -77,7 +77,7 @@ class FakeWorker implements ScribbleWorkerPort {
     Array<(event: any) => void>
   >();
 
-  postMessage(message: ScribbleComputeRequest): void {
+  postMessage(message: ShadingComputeRequest): void {
     this.request = message;
     if (this.postError !== undefined) throw this.postError;
   }
@@ -136,11 +136,11 @@ function progressResponse(
   };
 }
 
-describe("ScribbleCoordinator", () => {
+describe("ShadingCoordinator", () => {
   it("creates one worker per job and returns the complete typed success", async () => {
     const worker = new FakeWorker();
     const factory = vi.fn(() => worker);
-    const coordinator = new ScribbleCoordinator(factory);
+    const coordinator = new ShadingCoordinator(factory);
     const result = coordinator.start(identity());
 
     expect(coordinator.busy).toBe(true);
@@ -167,12 +167,12 @@ describe("ScribbleCoordinator", () => {
     expect(coordinator.busy).toBe(false);
   });
 
-  it("applies Scribble's monotonic filter and accepts only a newly terminal equal count", async () => {
+  it("applies Shading's monotonic filter and accepts only a newly terminal equal count", async () => {
     const worker = new FakeWorker();
     let now = 0;
     const updates = vi.fn();
     const clock = vi.fn(() => now);
-    const coordinator = new ScribbleCoordinator(() => worker, clock);
+    const coordinator = new ShadingCoordinator(() => worker, clock);
     const result = coordinator.start(identity(), updates);
     const first = progressResponse(worker, 10);
 
@@ -235,7 +235,7 @@ describe("ScribbleCoordinator", () => {
   it("forces zero ETA for a first, early terminal progress snapshot", async () => {
     const worker = new FakeWorker();
     const updates = vi.fn();
-    const coordinator = new ScribbleCoordinator(() => worker, () => 50);
+    const coordinator = new ShadingCoordinator(() => worker, () => 50);
     const result = coordinator.start(identity(), updates);
 
     worker.emit("message", progressResponse(worker, 3, 40, true));
@@ -256,7 +256,7 @@ describe("ScribbleCoordinator", () => {
     const worker = new FakeWorker();
     let now = 0;
     const updates = vi.fn();
-    const coordinator = new ScribbleCoordinator(
+    const coordinator = new ShadingCoordinator(
       () => worker,
       () => now,
     );
@@ -293,7 +293,7 @@ describe("ScribbleCoordinator", () => {
     const worker = new FakeWorker();
     let now = 0;
     const updates = vi.fn();
-    const coordinator = new ScribbleCoordinator(
+    const coordinator = new ShadingCoordinator(
       () => worker,
       () => now,
     );
@@ -322,7 +322,7 @@ describe("ScribbleCoordinator", () => {
     const worker = new FakeWorker();
     let now = 0;
     const updates = vi.fn();
-    const coordinator = new ScribbleCoordinator(
+    const coordinator = new ShadingCoordinator(
       () => worker,
       () => now,
     );
@@ -345,12 +345,36 @@ describe("ScribbleCoordinator", () => {
     await result;
   });
 
+  it("isolates progress observers from the active worker lifecycle", async () => {
+    const worker = new FakeWorker();
+    const updates = vi.fn(
+      (update: { snapshot: { completedWorkUnits: number } }) => {
+        update.snapshot.completedWorkUnits = 99;
+        throw new Error("diagnostic observer failed");
+      },
+    );
+    const coordinator = new ShadingCoordinator(() => worker);
+    const result = coordinator.start(identity(), updates);
+
+    expect(() =>
+      worker.emit("message", progressResponse(worker, 10)),
+    ).not.toThrow();
+    expect(() =>
+      worker.emit("message", progressResponse(worker, 20)),
+    ).not.toThrow();
+    expect(updates).toHaveBeenCalledTimes(2);
+    expect(updates.mock.calls[0]![0].snapshot.completedWorkUnits).toBe(10);
+
+    worker.emit("message", successResponse(worker));
+    await expect(result).resolves.toMatchObject({ status: "success" });
+  });
+
   it("cancels, recreates with a fresh ETA, and ignores the old worker", async () => {
     const firstWorker = new FakeWorker();
     const secondWorker = new FakeWorker();
     const workers = [firstWorker, secondWorker];
     let now = 0;
-    const coordinator = new ScribbleCoordinator(
+    const coordinator = new ShadingCoordinator(
       () => workers.shift()!,
       () => now,
     );
@@ -394,7 +418,7 @@ describe("ScribbleCoordinator", () => {
     const firstWorker = new FakeWorker();
     const secondWorker = new FakeWorker();
     const workers = [firstWorker, secondWorker];
-    const coordinator = new ScribbleCoordinator(() => workers.shift()!);
+    const coordinator = new ShadingCoordinator(() => workers.shift()!);
 
     const first = coordinator.start(imageIdentity("seed-a"));
     expect(firstWorker.request).toEqual({
@@ -427,7 +451,7 @@ describe("ScribbleCoordinator", () => {
 
   it("ignores well-formed foreign ids and identities until the current response", async () => {
     const worker = new FakeWorker();
-    const coordinator = new ScribbleCoordinator(() => worker);
+    const coordinator = new ShadingCoordinator(() => worker);
     const result = coordinator.start(identity());
     const current = successResponse(worker);
 
@@ -447,7 +471,7 @@ describe("ScribbleCoordinator", () => {
 
   it("returns bounded failures from valid worker failure responses", async () => {
     const worker = new FakeWorker();
-    const coordinator = new ScribbleCoordinator(() => worker);
+    const coordinator = new ShadingCoordinator(() => worker);
     const result = coordinator.start(identity());
 
     worker.emit("message", failureResponse(worker, "x".repeat(600)));
@@ -479,7 +503,7 @@ describe("ScribbleCoordinator", () => {
     },
   ])("settles and terminates once after a $name", async ({ emit, error }) => {
     const worker = new FakeWorker();
-    const coordinator = new ScribbleCoordinator(() => worker);
+    const coordinator = new ShadingCoordinator(() => worker);
     const result = coordinator.start(identity());
 
     emit(worker);
@@ -494,7 +518,7 @@ describe("ScribbleCoordinator", () => {
   });
 
   it("converts worker construction, listener, and post failures to typed results", async () => {
-    const constructorCoordinator = new ScribbleCoordinator(() => {
+    const constructorCoordinator = new ShadingCoordinator(() => {
       throw new Error("construction failed");
     });
     await expect(constructorCoordinator.start(identity())).resolves.toEqual({
@@ -506,7 +530,7 @@ describe("ScribbleCoordinator", () => {
 
     const listenerWorker = new FakeWorker();
     listenerWorker.listenError = new Error("listener failed");
-    const listenerCoordinator = new ScribbleCoordinator(() => listenerWorker);
+    const listenerCoordinator = new ShadingCoordinator(() => listenerWorker);
     await expect(listenerCoordinator.start(identity())).resolves.toEqual({
       status: "failure",
       jobId: 1,
@@ -516,7 +540,7 @@ describe("ScribbleCoordinator", () => {
 
     const postWorker = new FakeWorker();
     postWorker.postError = new Error("clone failed");
-    const postCoordinator = new ScribbleCoordinator(() => postWorker);
+    const postCoordinator = new ShadingCoordinator(() => postWorker);
     await expect(postCoordinator.start(identity())).resolves.toEqual({
       status: "failure",
       jobId: 1,
@@ -528,7 +552,7 @@ describe("ScribbleCoordinator", () => {
   it("permanently closes on disposal and terminates an active worker once", async () => {
     const worker = new FakeWorker();
     const factory = vi.fn(() => worker);
-    const coordinator = new ScribbleCoordinator(factory);
+    const coordinator = new ShadingCoordinator(factory);
     const result = coordinator.start(identity());
 
     coordinator.dispose();
@@ -543,7 +567,7 @@ describe("ScribbleCoordinator", () => {
   it("still settles when worker termination itself throws", async () => {
     const worker = new FakeWorker();
     worker.terminateError = new Error("termination failed");
-    const coordinator = new ScribbleCoordinator(() => worker);
+    const coordinator = new ShadingCoordinator(() => worker);
     const result = coordinator.start(identity());
 
     worker.emit("message", successResponse(worker));

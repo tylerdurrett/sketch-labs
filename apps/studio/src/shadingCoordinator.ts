@@ -1,11 +1,11 @@
-import type { Scene, ScribbleDiagnostics, ScribbleProgress } from "@harness/core";
+import type { Scene, ShadingDiagnostics, ShadingProgress } from "@harness/core";
 
 import {
-  isScribbleWorkerMessage,
-  scribbleComputeIdentitiesEqual,
-  type ScribbleComputeIdentity,
-  type ScribbleComputeRequest,
-} from "./scribbleComputeProtocol";
+  isShadingWorkerMessage,
+  shadingComputeIdentitiesEqual,
+  type ShadingComputeIdentity,
+  type ShadingComputeRequest,
+} from "./shadingComputeProtocol";
 import {
   createRollingEtaEstimator,
   type RollingEtaEstimate,
@@ -30,44 +30,44 @@ interface FailureResult {
   readonly error: string;
 }
 
-export type ScribbleComputeResult =
+export type ShadingComputeResult =
   | {
       readonly status: "success";
       readonly jobId: number;
-      readonly identity: ScribbleComputeIdentity;
+      readonly identity: ShadingComputeIdentity;
       readonly scene: Scene;
-      readonly diagnostics: ScribbleDiagnostics;
+      readonly diagnostics: ShadingDiagnostics;
       readonly computeTimeMs: number;
     }
   | CancelledResult
   | FailureResult;
 
-export type ScribbleWorkerPort = WorkerPort<ScribbleComputeRequest>;
-export type ScribbleWorkerFactory = WorkerFactory<ScribbleComputeRequest>;
-export type ScribbleMonotonicClock = () => number;
+export type ShadingWorkerPort = WorkerPort<ShadingComputeRequest>;
+export type ShadingWorkerFactory = WorkerFactory<ShadingComputeRequest>;
+export type ShadingMonotonicClock = () => number;
 
-export interface ScribbleProgressUpdate {
-  readonly snapshot: ScribbleProgress;
+export interface ShadingProgressUpdate {
+  readonly snapshot: ShadingProgress;
   readonly eta: RollingEtaEstimate;
 }
 
-export type ScribbleProgressObserver = (
-  update: ScribbleProgressUpdate,
+export type ShadingProgressObserver = (
+  update: ShadingProgressUpdate,
 ) => void;
 
 interface ActiveJob {
   readonly jobId: number;
-  readonly identity: ScribbleComputeIdentity;
+  readonly identity: ShadingComputeIdentity;
   readonly terminateWorker: () => void;
-  readonly resolve: (result: ScribbleComputeResult) => void;
-  readonly observeProgress: ScribbleProgressObserver | undefined;
+  readonly resolve: (result: ShadingComputeResult) => void;
+  readonly observeProgress: ShadingProgressObserver | undefined;
   readonly capEta: RollingEtaEstimator;
   readonly convergenceEta: RollingEtaEstimator;
   etaRevision: number;
-  lastProgress: ScribbleProgress | null;
+  lastProgress: ShadingProgress | null;
 }
 
-const defaultClock: ScribbleMonotonicClock = () => performance.now();
+const defaultClock: ShadingMonotonicClock = () => performance.now();
 
 function earliestEstimate(
   revision: number,
@@ -85,20 +85,20 @@ function earliestEstimate(
 }
 
 /**
- * Owns the one-worker-per-job Scribble compute lifecycle.
+ * Owns the one-worker-per-job Shading compute lifecycle.
  *
- * Scribble deliberately keeps a separate protocol and progress reducer from
+ * Shading deliberately keeps a separate protocol and progress reducer from
  * Outline. Only the structural Worker boundary and rolling ETA primitives are
  * shared between the two coordinators.
  */
-export class ScribbleCoordinator {
+export class ShadingCoordinator {
   private nextJobId = 1;
   private active: ActiveJob | null = null;
   private disposed = false;
 
   constructor(
-    private readonly workerFactory: ScribbleWorkerFactory,
-    private readonly clock: ScribbleMonotonicClock = defaultClock,
+    private readonly workerFactory: ShadingWorkerFactory,
+    private readonly clock: ShadingMonotonicClock = defaultClock,
   ) {}
 
   get busy(): boolean {
@@ -106,25 +106,25 @@ export class ScribbleCoordinator {
   }
 
   start(
-    identity: ScribbleComputeIdentity,
-    observeProgress?: ScribbleProgressObserver,
-  ): Promise<ScribbleComputeResult> {
+    identity: ShadingComputeIdentity,
+    observeProgress?: ShadingProgressObserver,
+  ): Promise<ShadingComputeResult> {
     if (this.disposed) {
-      return Promise.reject(new Error("Scribble coordinator is disposed"));
+      return Promise.reject(new Error("Shading coordinator is disposed"));
     }
     if (this.active !== null) {
-      return Promise.reject(new Error("A Scribble job is already active"));
+      return Promise.reject(new Error("A Shading job is already active"));
     }
 
     const jobId = this.nextJobId++;
-    let worker: ScribbleWorkerPort;
+    let worker: ShadingWorkerPort;
     try {
       worker = this.workerFactory();
     } catch (error) {
       return Promise.resolve({
         status: "failure",
         jobId,
-        error: workerErrorDetail(error, "Scribble worker failed"),
+        error: workerErrorDetail(error, "Shading worker failed"),
       });
     }
 
@@ -145,8 +145,8 @@ export class ScribbleCoordinator {
       try {
         worker.addEventListener("message", (event) => {
           if (this.active !== active) return;
-          if (!isScribbleWorkerMessage(event.data)) {
-            this.fail(active, "Scribble worker returned an invalid response");
+          if (!isShadingWorkerMessage(event.data)) {
+            this.fail(active, "Shading worker returned an invalid response");
             return;
           }
           if (event.data.jobId !== active.jobId) return;
@@ -155,7 +155,7 @@ export class ScribbleCoordinator {
             return;
           }
           if (
-            !scribbleComputeIdentitiesEqual(event.data.identity, active.identity)
+            !shadingComputeIdentitiesEqual(event.data.identity, active.identity)
           ) {
             return;
           }
@@ -174,19 +174,19 @@ export class ScribbleCoordinator {
         });
         worker.addEventListener("error", (event) => {
           if (this.active === active) {
-            this.fail(active, workerEventDetail(event, "Scribble worker failed"));
+            this.fail(active, workerEventDetail(event, "Shading worker failed"));
           }
         });
         worker.addEventListener("messageerror", () => {
           if (this.active === active) {
-            this.fail(active, "Scribble worker response could not be decoded");
+            this.fail(active, "Shading worker response could not be decoded");
           }
         });
         worker.postMessage({ type: "compute", jobId, identity });
       } catch (error) {
         this.fail(
           active,
-          workerErrorDetail(error, "Scribble worker could not start"),
+          workerErrorDetail(error, "Shading worker could not start"),
         );
       }
     });
@@ -207,7 +207,7 @@ export class ScribbleCoordinator {
 
   private reportProgress(
     active: ActiveJob,
-    candidate: ScribbleProgress,
+    candidate: ShadingProgress,
   ): void {
     const previous = active.lastProgress;
     if (
@@ -224,7 +224,7 @@ export class ScribbleCoordinator {
       return;
     }
 
-    const snapshot = { ...candidate };
+    const snapshot = Object.freeze({ ...candidate });
     active.lastProgress = snapshot;
     const timestampMs = this.clock();
     const revision = ++active.etaRevision;
@@ -250,7 +250,11 @@ export class ScribbleCoordinator {
                 }),
               ]),
         ]);
-    active.observeProgress?.({ snapshot, eta });
+    try {
+      active.observeProgress?.({ snapshot, eta });
+    } catch {
+      // Progress is observational: callback failures cannot own worker state.
+    }
   }
 
   private fail(active: ActiveJob, error: string): void {
@@ -259,12 +263,12 @@ export class ScribbleCoordinator {
       jobId: active.jobId,
       error:
         error.trim() === ""
-          ? "Scribble computation failed"
+          ? "Shading computation failed"
           : error.slice(0, 500),
     });
   }
 
-  private finish(active: ActiveJob, result: ScribbleComputeResult): void {
+  private finish(active: ActiveJob, result: ShadingComputeResult): void {
     if (this.active !== active) return;
     this.active = null;
     try {
