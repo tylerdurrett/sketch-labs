@@ -1,0 +1,306 @@
+import type { Point, Random } from '../types'
+import { isMaskPermittedStipple } from './mask'
+import type { StippleMark, StipplingModel } from './types'
+
+const DEFAULT_ATTEMPTS_PER_MARK = 20
+const MAXIMUM_REFINEMENT_ATTEMPTS = 1_000_000
+
+/** Optional deterministic work bound for distribution refinement. */
+export interface StipplingRefinementOptions {
+  /** Exact relocation-attempt budget. Must be a safe integer in `[0, 1e6]`. */
+  readonly maxAttempts?: number
+}
+
+/** Immutable result of one bounded distribution-refinement pass. */
+export interface StipplingRefinementOutcome {
+  /** Marks in their original order, with accepted centers replaced in place. */
+  readonly marks: readonly Readonly<StippleMark>[]
+  /** Final strategy-specific distribution error. */
+  readonly error: number
+  /** Relocation attempts consumed, including rejected candidates. */
+  readonly attemptsUsed: number
+  /** Whether the exact requested refinement-attempt budget was consumed. */
+  readonly requestedRefinementReached: boolean
+}
+
+/** Evaluate the model's typed distribution metric and reject invalid results. */
+export function computeStipplingDistributionError(
+  model: Readonly<StipplingModel>,
+  marks: readonly StippleMark[],
+): number {
+  const error = model.distributionError(marks)
+  if (!Number.isFinite(error)) {
+    throw new Error('Stippling distribution error must be finite')
+  }
+  return error
+}
+
+function resolveAttemptLimit(
+  model: Readonly<StipplingModel>,
+  markCount: number,
+  options: StipplingRefinementOptions,
+): number {
+  const requested = options.maxAttempts
+  if (requested !== undefined) {
+    if (
+      !Number.isSafeInteger(requested) ||
+      requested < 0 ||
+      requested > MAXIMUM_REFINEMENT_ATTEMPTS
+    ) {
+      throw new RangeError(
+        `maxAttempts must be a safe integer in [0, ${MAXIMUM_REFINEMENT_ATTEMPTS}], got ${requested}`,
+      )
+    }
+    return requested
+  }
+
+  return Math.min(
+    MAXIMUM_REFINEMENT_ATTEMPTS,
+    Math.round(
+      markCount *
+        DEFAULT_ATTEMPTS_PER_MARK *
+        model.controls.distributionFidelity,
+    ),
+  )
+}
+
+function cellKey(x: number, y: number): string {
+  return `${x},${y}`
+}
+
+/** Mutable fixed-radius index supporting one-for-one center relocation. */
+class RefinementCenterIndex {
+  private readonly cells = new Map<string, Set<number>>()
+  private readonly centers: Readonly<Point>[]
+  private readonly minimumDistanceSquared: number
+
+  constructor(
+    marks: readonly StippleMark[],
+    private readonly cellSize: number,
+  ) {
+    this.centers = marks.map(({ center }) => center)
+    this.minimumDistanceSquared = cellSize * cellSize
+    for (let index = 0; index < marks.length; index++) {
+      this.add(index, marks[index]!.center)
+    }
+  }
+
+  private coordinates(center: Readonly<Point>): readonly [number, number] {
+    return [
+      Math.floor(center[0] / this.cellSize),
+      Math.floor(center[1] / this.cellSize),
+    ]
+  }
+
+  private add(index: number, center: Readonly<Point>): void {
+    const [cellX, cellY] = this.coordinates(center)
+    const key = cellKey(cellX, cellY)
+    const bucket = this.cells.get(key)
+    if (bucket === undefined) this.cells.set(key, new Set([index]))
+    else bucket.add(index)
+  }
+
+  private remove(index: number, center: Readonly<Point>): void {
+    const [cellX, cellY] = this.coordinates(center)
+    const key = cellKey(cellX, cellY)
+    const bucket = this.cells.get(key)
+    bucket?.delete(index)
+    if (bucket?.size === 0) this.cells.delete(key)
+  }
+
+  isSeparated(center: Readonly<Point>, excludedIndex: number): boolean {
+    const [cellX, cellY] = this.coordinates(center)
+
+    for (let y = cellY - 1; y <= cellY + 1; y++) {
+      for (let x = cellX - 1; x <= cellX + 1; x++) {
+        const bucket = this.cells.get(cellKey(x, y))
+        if (bucket === undefined) continue
+        for (const index of bucket) {
+          if (index === excludedIndex) continue
+          const existing = this.centers[index]!
+          const deltaX = center[0] - existing[0]
+          const deltaY = center[1] - existing[1]
+          if (
+            deltaX * deltaX + deltaY * deltaY <
+            this.minimumDistanceSquared
+          ) {
+            return false
+          }
+        }
+      }
+    }
+
+    return true
+  }
+
+  replace(
+    index: number,
+    previous: Readonly<Point>,
+    replacement: Readonly<Point>,
+  ): void {
+    this.remove(index, previous)
+    this.centers[index] = replacement
+    this.add(index, replacement)
+  }
+}
+
+interface DemandDistribution {
+  readonly cumulative: Float64Array
+  readonly total: number
+}
+
+function buildDemandDistribution(
+  model: Readonly<StipplingModel>,
+): DemandDistribution {
+  const cumulative = new Float64Array(model.lattice.sampleCount)
+  let total = 0
+
+  for (let index = 0; index < model.lattice.sampleCount; index++) {
+    const demand = model.lattice.samples[index]!.demand
+    if (Number.isFinite(demand) && demand > 0) total += demand
+    cumulative[index] = total
+  }
+
+  return { cumulative, total }
+}
+
+function demandSampleIndex(
+  distribution: DemandDistribution,
+  unitValue: number,
+): number | undefined {
+  if (distribution.total <= 0 || distribution.cumulative.length === 0) {
+    return undefined
+  }
+
+  const target = unitValue * distribution.total
+  let low = 0
+  let high = distribution.cumulative.length - 1
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2)
+    if (distribution.cumulative[middle]! > target) high = middle
+    else low = middle + 1
+  }
+  return low
+}
+
+function candidateCenter(
+  model: Readonly<StipplingModel>,
+  distribution: DemandDistribution,
+  demandDraw: number,
+  xDraw: number,
+  yDraw: number,
+): Point | undefined {
+  const index = demandSampleIndex(distribution, demandDraw)
+  if (index === undefined) return undefined
+
+  const column = index % model.lattice.columns
+  const row = Math.floor(index / model.lattice.columns)
+  return [
+    (column + xDraw) * model.lattice.cellWidth,
+    (row + yDraw) * model.lattice.cellHeight,
+  ]
+}
+
+function endpointsFor(
+  center: Readonly<Point>,
+  orientation: number,
+  length: number,
+): readonly [Readonly<Point>, Readonly<Point>] {
+  const halfDeltaX = (Math.cos(orientation) * length) / 2
+  const halfDeltaY = (Math.sin(orientation) * length) / 2
+  return [
+    [center[0] - halfDeltaX, center[1] - halfDeltaY],
+    [center[0] + halfDeltaX, center[1] + halfDeltaY],
+  ]
+}
+
+/**
+ * Improve an ordered Stipple draft with bounded demand-weighted relocations.
+ *
+ * Every attempt consumes exactly four values from the supplied mutable random
+ * stream, regardless of rejection. Consequently a larger attempt budget is a
+ * strict prefix extension of a smaller run from the same state. Candidates keep
+ * their selected mark's index and orientation, and are committed only when the
+ * complete fixed-length segment is mask-safe, its center remains blue-noise
+ * separated, and the model reports a strictly lower finite distribution error.
+ */
+export function refineStipples(
+  model: Readonly<StipplingModel>,
+  rng: Random,
+  marks: readonly StippleMark[],
+  options: StipplingRefinementOptions = {},
+): Readonly<StipplingRefinementOutcome> {
+  const attemptLimit = resolveAttemptLimit(model, marks.length, options)
+  const originalMarks: readonly Readonly<StippleMark>[] = Object.isFrozen(marks)
+    ? marks
+    : Object.freeze([...marks])
+  let currentMarks = originalMarks
+  let currentError = computeStipplingDistributionError(model, currentMarks)
+  const demandDistribution = buildDemandDistribution(model)
+  const centerIndex = new RefinementCenterIndex(
+    currentMarks,
+    model.scales.minimumSpacing,
+  )
+
+  for (let attempt = 0; attempt < attemptLimit; attempt++) {
+    const markDraw = rng.value()
+    const demandDraw = rng.value()
+    const xDraw = rng.value()
+    const yDraw = rng.value()
+
+    if (currentMarks.length === 0) continue
+    const markIndex = Math.min(
+      currentMarks.length - 1,
+      Math.floor(markDraw * currentMarks.length),
+    )
+    const previous = currentMarks[markIndex]!
+    const center = candidateCenter(
+      model,
+      demandDistribution,
+      demandDraw,
+      xDraw,
+      yDraw,
+    )
+    if (center === undefined) continue
+    if (!centerIndex.isSeparated(center, markIndex)) continue
+
+    const [start, end] = endpointsFor(
+      center,
+      previous.orientation,
+      model.scales.stippleLength,
+    )
+    if (
+      !isMaskPermittedStipple(
+        model.source.shadingMask,
+        model.frame,
+        start,
+        end,
+        model.scales.maskCheckSpacing,
+      )
+    ) {
+      continue
+    }
+
+    const replacement = Object.freeze({
+      center: Object.freeze(center),
+      orientation: previous.orientation,
+    })
+    const candidateMarks = [...currentMarks]
+    candidateMarks[markIndex] = replacement
+    const candidateError = model.distributionError(candidateMarks)
+    if (!Number.isFinite(candidateError) || candidateError >= currentError) {
+      continue
+    }
+
+    currentMarks = Object.freeze(candidateMarks)
+    currentError = candidateError
+    centerIndex.replace(markIndex, previous.center, replacement.center)
+  }
+
+  return Object.freeze({
+    marks: currentMarks,
+    error: currentError,
+    attemptsUsed: attemptLimit,
+    requestedRefinementReached: true,
+  })
+}
