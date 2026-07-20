@@ -20,6 +20,8 @@ export type ScribbleScaleFieldProducer = (
 export interface ScribbleScaleField {
   /** Runtime/type discriminant keeping local scale distinct from other fields. */
   readonly kind: 'scribble-scale-field'
+  /** Optional finite upper bound in authored Scribble-scale units. */
+  readonly maximumScale?: number
   /** Sample one Composition Frame point in authored Scribble-scale units. */
   sample(point: Readonly<Point>): number
 }
@@ -40,29 +42,54 @@ function isFinitePoint(point: Readonly<Point>): boolean {
   )
 }
 
-function normalizeScaleSample(value: number, fineAnchor: number): number {
+function normalizeScaleSample(
+  value: number,
+  fineAnchor: number,
+  maximumScale?: number,
+): number {
   if (!Number.isFinite(value) || value < fineAnchor) return fineAnchor
-  return value
+  return maximumScale === undefined ? value : Math.min(value, maximumScale)
+}
+
+function normalizedMaximumScale(
+  maximumScale: number | undefined,
+  fineAnchor: number,
+): number | undefined {
+  return maximumScale !== undefined &&
+    Number.isFinite(maximumScale) &&
+    maximumScale >= fineAnchor
+    ? maximumScale
+    : undefined
 }
 
 /**
- * Wrap a local-scale producer using one eagerly validated fine-detail anchor.
+ * Wrap a local-scale producer using one eagerly validated fine-detail anchor
+ * and, when supplied, an enforced finite upper bound.
  *
- * Invalid points resolve to the anchor without invoking source work. Valid
- * finite samples are intentionally not capped: the field contract only guards
- * its safe lower bound.
+ * Invalid points resolve to the anchor without invoking source work. Fields
+ * without a declared maximum retain the original uncapped behavior.
  */
 export function createScribbleScaleField(
   fineAnchor: number,
   producer: ScribbleScaleFieldProducer,
+  maximumScale?: number,
 ): ScribbleScaleField {
   assertFineAnchor(fineAnchor, 'createScribbleScaleField')
+  if (
+    maximumScale !== undefined &&
+    normalizedMaximumScale(maximumScale, fineAnchor) === undefined
+  ) {
+    throw new Error(
+      `createScribbleScaleField: maximum scale must be finite and at least the fine anchor, got ${maximumScale}`,
+    )
+  }
 
   return Object.freeze({
     kind: 'scribble-scale-field' as const,
+    ...(maximumScale === undefined ? {} : { maximumScale }),
     sample(point: Readonly<Point>): number {
       if (!isFinitePoint(point)) return fineAnchor
-      return normalizeScaleSample(producer(point), fineAnchor)
+      return normalizeScaleSample(producer(point), fineAnchor, maximumScale)
     },
   })
 }
@@ -80,5 +107,9 @@ export function sampleScribbleScaleField(
 ): number {
   assertFineAnchor(fineAnchor, 'sampleScribbleScaleField')
   if (!isFinitePoint(point)) return fineAnchor
-  return normalizeScaleSample(field.sample(point), fineAnchor)
+  return normalizeScaleSample(
+    field.sample(point),
+    fineAnchor,
+    normalizedMaximumScale(field.maximumScale, fineAnchor),
+  )
 }

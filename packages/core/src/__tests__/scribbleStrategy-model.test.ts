@@ -20,6 +20,7 @@ import {
   defaultScribbleControls,
   scribbleControlSchema,
 } from '../scribbleStrategy/types'
+import type { Point } from '../types'
 import {
   constantTone,
   featheredBoundaryMask,
@@ -786,6 +787,36 @@ describe('Scribble virtual coverage', () => {
         point[0] === target.point[0] && point[1] === target.point[1],
       )!.coverage,
     ).toBeCloseTo(expected, 12)
+  })
+
+  it('keeps bounded and unbounded field deposits exactly equivalent', () => {
+    const producer = ([x, y]: Readonly<Point>) =>
+      1 + 2 * (0.5 + 0.5 * Math.sin(x / 71) * Math.cos(y / 83))
+    const unbounded = createScribbleModel(
+      source(horizontalGradientTone(SQUARE), featheredBoundaryMask(SQUARE)),
+      SQUARE,
+      {},
+      createScribbleScaleField(1, producer),
+    )
+    const bounded = createScribbleModel(
+      source(horizontalGradientTone(SQUARE), featheredBoundaryMask(SQUARE)),
+      SQUARE,
+      {},
+      createScribbleScaleField(1, producer, 3),
+    )
+    const segments = [
+      [[100, 500], [900, 500]],
+      [[500, 100], [500, 900]],
+      [[125, 850], [875, 175]],
+      [[425, 510], [425, 510]],
+    ] as const
+
+    for (const segment of segments) {
+      unbounded.depositSegment(...segment)
+      bounded.depositSegment(...segment)
+      expect(bounded.samples()).toEqual(unbounded.samples())
+      expect(bounded.residualError()).toBe(unbounded.residualError())
+    }
   })
 
   it('keeps field-aware cached residuals exact while deposits converge monotonically', () => {

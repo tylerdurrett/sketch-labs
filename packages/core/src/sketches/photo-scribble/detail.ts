@@ -71,8 +71,12 @@ export function createPhotoScribbleScaleField(
   influence: number,
 ): ScribbleScaleField {
   const broadening = photoDetailBroadeningFactor(influence)
-  return createScribbleScaleField(scribbleScale, (point) => {
-    const detail = sampleDetailField(detailField, point)
-    return scribbleScale * broadening ** (1 - detail)
-  })
+  return createScribbleScaleField(
+    scribbleScale,
+    (point) => {
+      const detail = sampleDetailField(detailField, point)
+      return scribbleScale * broadening ** (1 - detail)
+    },
+    scribbleScale * broadening,
+  )
 }

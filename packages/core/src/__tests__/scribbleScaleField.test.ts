@@ -38,6 +38,30 @@ describe('Scribble Scale Field', () => {
     },
   )
 
+  it('enforces an optional declared maximum scale', () => {
+    const field = createScribbleScaleField(0.5, ([x]) => x, 2)
+
+    expect(field.maximumScale).toBe(2)
+    expect(field.sample([1, 0])).toBe(1)
+    expect(field.sample([3, 0])).toBe(2)
+    expect(
+      sampleScribbleScaleField(
+        { kind: 'scribble-scale-field', maximumScale: 2, sample: () => 3 },
+        [1, 0],
+        0.5,
+      ),
+    ).toBe(2)
+  })
+
+  it.each([0.25, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid maximum scale %s',
+    (maximumScale) => {
+      expect(() =>
+        createScribbleScaleField(0.5, () => 1, maximumScale),
+      ).toThrow('maximum scale must be finite and at least the fine anchor')
+    },
+  )
+
   it.each([
     [Number.NaN, 0],
     [0, Number.NEGATIVE_INFINITY],

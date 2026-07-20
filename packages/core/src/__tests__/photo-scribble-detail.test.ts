@@ -57,6 +57,7 @@ describe('Photo Scribble Detail influence', () => {
     const detail = createDetailField(([x]) => x)
     const scale = createPhotoScribbleScaleField(detail, 1.5, 1)
 
+    expect(scale.maximumScale).toBe(6)
     expect(scale.sample([0, 0])).toBe(6)
     expect(scale.sample([0.5, 0])).toBe(3)
     expect(scale.sample([1, 0])).toBe(1.5)

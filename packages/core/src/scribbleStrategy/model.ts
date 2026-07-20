@@ -541,14 +541,65 @@ export function createScribbleModel(
     const lengthSquared = deltaX * deltaX + deltaY * deltaY
     if (lengthSquared === 0) return
 
-    // A field callback is opaque and need not be continuous, so profile
-    // stations cannot prove a global radius bound. Every cell outside the
-    // initial box whose nearest point is an endpoint is nevertheless excluded:
-    // both endpoint radii are in the profile and no larger than maximumRadius.
-    // Therefore only cells with a strict interior projection can reveal a
-    // missed radius. Enumerate exactly that oblique strip row by row rather
-    // than unconditionally sampling the complete lattice.
-    for (let row = 0; row < lattice.rows; row++) {
+    const boundedMaximumScale =
+      scaleField?.maximumScale !== undefined &&
+      Number.isFinite(scaleField.maximumScale) &&
+      scaleField.maximumScale >= normalizedControls.scribbleScale
+        ? scaleField.maximumScale
+        : undefined
+    const boundedMaximumRadius =
+      boundedMaximumScale === undefined
+        ? undefined
+        : scales.coverageRadius *
+          (boundedMaximumScale / normalizedControls.scribbleScale)
+    const fallbackMinRow =
+      boundedMaximumRadius === undefined
+        ? 0
+        : Math.max(
+            0,
+            Math.floor(
+              (Math.min(start[1], end[1]) - boundedMaximumRadius) /
+                lattice.cellHeight,
+            ),
+          )
+    const fallbackMaxRow =
+      boundedMaximumRadius === undefined
+        ? lattice.rows - 1
+        : Math.min(
+            lattice.rows - 1,
+            Math.floor(
+              (Math.max(start[1], end[1]) + boundedMaximumRadius) /
+                lattice.cellHeight,
+            ),
+          )
+    const fallbackMinColumn =
+      boundedMaximumRadius === undefined
+        ? 0
+        : Math.max(
+            0,
+            Math.floor(
+              (Math.min(start[0], end[0]) - boundedMaximumRadius) /
+                lattice.cellWidth,
+            ),
+          )
+    const fallbackMaxColumn =
+      boundedMaximumRadius === undefined
+        ? lattice.columns - 1
+        : Math.min(
+            lattice.columns - 1,
+            Math.floor(
+              (Math.max(start[0], end[0]) + boundedMaximumRadius) /
+                lattice.cellWidth,
+            ),
+          )
+
+    // Without a declared field maximum, profile stations cannot prove a global
+    // radius bound because the callback may be discontinuous. A declared bound
+    // safely clips this fallback to the segment's largest possible footprint.
+    // In either case, only strict interior projections can reveal a radius that
+    // the station-derived initial box missed. Preserve row-major visitation so
+    // the residual-total arithmetic stays bit-for-bit stable.
+    for (let row = fallbackMinRow; row <= fallbackMaxRow; row++) {
       const y = (row + 0.5) * lattice.cellHeight
       let firstColumn = 0
       let lastColumn = lattice.columns - 1
@@ -575,6 +626,9 @@ export function createScribbleModel(
           Math.ceil(maximumX / lattice.cellWidth - 0.5),
         )
       }
+
+      firstColumn = Math.max(firstColumn, fallbackMinColumn)
+      lastColumn = Math.min(lastColumn, fallbackMaxColumn)
 
       for (let column = firstColumn; column <= lastColumn; column++) {
         if (
