@@ -7184,6 +7184,345 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     };
   }
 
+  function renderModeButtons(el: HTMLElement): HTMLButtonElement[] {
+    return [
+      ...el.querySelectorAll<HTMLButtonElement>(
+        '[role="group"][aria-label="Render mode"] button',
+      ),
+    ];
+  }
+
+  function renderState(el: HTMLElement): string | undefined {
+    return el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')?.dataset
+      .renderState;
+  }
+
+  async function resolveManagedEnvironment(
+    id = assetA,
+    gray = 96,
+    index = 0,
+  ): Promise<void> {
+    await act(async () => {
+      sketchEnvironmentJob.starts[index]!.resolve(
+        resolvedAssetEnvironment(id, gray),
+      );
+      await Promise.resolve();
+    });
+  }
+
+  it("shows capability-based atomic modes, adding Detail only to Detail-capable Photo Scribble", async () => {
+    const el = mount(
+      <SketchControls
+        key="photo"
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+
+    expect(renderModeButtons(el).map(({ textContent }) => textContent)).toEqual([
+      "Fill",
+      "Outline",
+      "Tone",
+      "Detail",
+    ]);
+    const pressed = () =>
+      renderModeButtons(el)
+        .filter((button) => button.getAttribute("aria-pressed") === "true")
+        .map(({ textContent }) => textContent);
+    expect(pressed()).toEqual(["Fill"]);
+
+    clickButton(el, "Tone");
+    expect(pressed()).toEqual(["Tone"]);
+    clickButton(el, "Detail");
+    expect(pressed()).toEqual(["Detail"]);
+    clickButton(el, "Outline");
+    expect(pressed()).toEqual(["Outline"]);
+    clickButton(el, "Fill");
+    expect(pressed()).toEqual(["Fill"]);
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(historyCapture.transactionCommits).toHaveLength(0);
+
+    act(() => {
+      root!.render(<SketchControls key="calibration" sketch={toneCalibration} />);
+    });
+    expect(renderModeButtons(el).map(({ textContent }) => textContent)).toEqual([
+      "Fill",
+      "Outline",
+      "Tone",
+    ]);
+
+    act(() => {
+      root!.render(<SketchControls key="moon" sketch={scribbleMoon} />);
+    });
+    expect(renderModeButtons(el).map(({ textContent }) => textContent)).toEqual([
+      "Fill",
+      "Outline",
+      "Tone",
+    ]);
+
+    act(() => {
+      root!.render(<SketchControls key="plain" sketch={sketchWith("plain", {})} />);
+    });
+    expect(renderModeButtons(el)).toHaveLength(0);
+    expect(
+      el.querySelector('[aria-label="Toggle outline render mode"]'),
+    ).not.toBeNull();
+    expect(el.querySelector('[aria-label="Show Detail reference"]')).toBeNull();
+  });
+
+  it("shows Detail loading and safe failure, and retries only Detail preparation", async () => {
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    const scribbleStarts = scribbleJob.starts.length;
+
+    clickButton(el, "Detail");
+    expect(renderState(el)).toBe("detail-reference-loading");
+    const first = detailJob.starts[0]!;
+    await act(async () => {
+      detailJob.active = null;
+      first.resolve({
+        status: "failure",
+        jobId: 1,
+        identity: first.identity,
+        error: "analysis unavailable",
+      });
+      await Promise.resolve();
+    });
+    expect(renderState(el)).toBe("detail-reference-failure");
+    expect(lastDetailRetry).not.toBeNull();
+
+    act(() => lastDetailRetry?.());
+    expect(renderState(el)).toBe("detail-reference-loading");
+    expect(detailJob.starts).toHaveLength(2);
+    expect(scribbleJob.starts).toHaveLength(scribbleStarts);
+    expect(outlineJob.starts).toBe(0);
+  });
+
+  it("cancels active Detail analysis and replaces it by exact asset identity", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      { id: assetA, name: "portrait alpha", url: `/image-assets/${assetA}.png` },
+      { id: assetB, name: "portrait beta", url: `/image-assets/${assetB}.png` },
+    ]);
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    clickButton(el, "Detail");
+    expect(detailJob.starts[0]!.identity.imageAssetId).toBe(assetA);
+
+    const assetBChoice = await openAssetBChoice(el);
+    act(() => assetBChoice.click());
+    expect(detailJob.cancelCount).toBe(1);
+    expect(detailJob.starts).toHaveLength(2);
+    expect(detailJob.starts[1]!.identity.imageAssetId).toBe(assetB);
+    expect(renderState(el)).toBe("unavailable");
+
+    await resolveManagedEnvironment(assetB, 192, 1);
+    expect(detailJob.starts).toHaveLength(2);
+    expect(renderState(el)).toBe("detail-reference-loading");
+    await completeDetail(1, 192);
+    expect(renderState(el)).toBe("detail-reference");
+  });
+
+  it("keeps Detail pixels exactly independent of tone controls and Seed", async () => {
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    clickButton(el, "Detail");
+    await completeDetail(0);
+    const points: [number, number][] = [
+      [0, 0],
+      [lastCompositionFrame!.width / 2, lastCompositionFrame!.height / 2],
+      [lastCompositionFrame!.width, lastCompositionFrame!.height],
+    ];
+    const samples = () => points.map((point) => lastDetailField!.sample(point));
+    const before = samples();
+
+    for (const [key, value] of [
+      ["toneGamma", "0.1"],
+      ["toneContrast", "0.9"],
+      ["tonePivot", "0.2"],
+    ] as const) {
+      const input = paramInput(el, key);
+      act(() => input.focus());
+      setInput(input, value);
+      act(() => input.blur());
+    }
+    vi.spyOn(Math, "random").mockReturnValue(0.75);
+    clickButton(el, "New seed");
+
+    expect(samples()).toEqual(before);
+    expect(detailJob.starts).toHaveLength(1);
+  });
+
+  it("binds Detail to the active Composition Frame while Page framing remains display-only", async () => {
+    const generateDetailField = vi.fn(photoScribble.generateDetailField!);
+    const el = mount(
+      <SketchControls
+        sketch={{
+          ...managedPhotoScribble(photoScribble.generateToneSource!),
+          generateDetailField,
+        }}
+      />,
+    );
+    await resolveManagedEnvironment();
+    const composition = { ...lastCompositionFrame! };
+    clickButton(el, "Detail");
+    await completeDetail(0);
+    expect(generateDetailField.mock.calls.at(-1)?.[1]).toEqual(composition);
+
+    clickButton(el, "Crop");
+    for (const [name, value] of Object.entries({
+      x: 10,
+      y: 20,
+      width: 60,
+      height: 50,
+    })) {
+      setInput(
+        el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+        String(value),
+      );
+    }
+    clickButton(el, "Apply");
+
+    expect(lastCommittedPageFrame).toEqual({
+      x: composition.width * 0.1,
+      y: composition.height * 0.2,
+      width: composition.width * 0.6,
+      height: composition.height * 0.5,
+    });
+    expect(generateDetailField.mock.calls.at(-1)?.[1]).toEqual(composition);
+    expect(lastCompositionFrame).toEqual(composition);
+    expect(detailJob.starts).toHaveLength(1);
+    expect(renderState(el)).toBe("detail-reference");
+  });
+
+  it("threads Detail sensitivity through lock, Randomize, Undo/Redo, and current Preset reload", async () => {
+    listPresets.mockResolvedValue(["detail-current"]);
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await flush();
+    const sensitivity = paramInput(el, "detailSensitivity");
+    act(() => sensitivity.focus());
+    setInput(sensitivity, "0.73");
+    act(() => sensitivity.blur());
+
+    const lock = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="detailSensitivity lock"]',
+    )!;
+    act(() => lock.click());
+    vi.spyOn(Math, "random").mockReturnValue(0.12);
+    clickButton(el, "Randomize");
+    expect(paramInput(el, "detailSensitivity").value).toBe("0.73");
+
+    act(() => lock.click());
+    vi.mocked(Math.random).mockReturnValue(0.25);
+    clickButton(el, "Randomize");
+    expect(paramInput(el, "detailSensitivity").value).toBe("0.25");
+    pressHistoryShortcut(window, { ctrlKey: true });
+    expect(paramInput(el, "detailSensitivity").value).toBe("0.73");
+    pressHistoryShortcut(window, { key: "y", ctrlKey: true });
+    expect(paramInput(el, "detailSensitivity").value).toBe("0.25");
+
+    clickButton(el, "Detail");
+    await completeDetail(0);
+    expect(renderState(el)).toBe("detail-reference");
+    setInput(
+      el.querySelector<HTMLInputElement>('input[aria-label="preset name"]')!,
+      "detail-current",
+    );
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    clickButton(el, "Save");
+    await flush();
+    const saved = savePreset.mock.calls.at(-1)![0];
+    expect(saved.params.detailSensitivity).toBe(0.25);
+    expect(JSON.stringify(saved)).not.toMatch(/diagnostic|reference|renderMode/i);
+    loadPreset.mockResolvedValue(saved);
+
+    const changed = paramInput(el, "detailSensitivity");
+    act(() => changed.focus());
+    setInput(changed, "0.91");
+    act(() => changed.blur());
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    act(() => {
+      picker.value = "detail-current";
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    clickButton(el, "Reload");
+    await flush();
+    expect(paramInput(el, "detailSensitivity").value).toBe("0.25");
+    expect(renderState(el)).toBe("detail-reference");
+    clickButton(el, "Outline");
+    expect(
+      renderModeButtons(el).find(({ textContent }) => textContent === "Outline")
+        ?.getAttribute("aria-pressed"),
+    ).toBe("true");
+    clickButton(el, "Fill");
+    expect(
+      renderModeButtons(el).find(({ textContent }) => textContent === "Fill")
+        ?.getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  it("blocks same-batch Detail PNG, ordinary SVG, and plotter SVG handlers", async () => {
+    const toBlob = vi.fn();
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await completeScribble(0, preparedScene(117));
+    const detail = renderModeButtons(el).find(
+      ({ textContent }) => textContent === "Detail",
+    )!;
+    const exports = ["Export PNG", "Export SVG", "Export Hidden-line SVG"].map(
+      (label) =>
+        [...el.querySelectorAll<HTMLButtonElement>("button")].find(
+          ({ textContent }) => textContent === label,
+        )!,
+    );
+
+    act(() => {
+      detail.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      for (const action of exports) {
+        action.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(renderState(el)).toBe("detail-reference-loading");
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+
+    await completeDetail(0);
+    expect(renderState(el)).toBe("detail-reference");
+    for (const action of exports) expect(action.disabled).toBe(true);
+    exposeAndClick(exports);
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
   it("suspends Scribble before requesting Detail and rejects stale pre-entry paint", async () => {
     const generateDetailField = vi.fn(photoScribble.generateDetailField!);
     const el = mount(

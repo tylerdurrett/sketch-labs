@@ -414,6 +414,7 @@ export function SketchControls({
   const diagnosticSelectionRef = useRef(diagnosticSelection);
   diagnosticSelectionRef.current = diagnosticSelection;
   const toneReferenceActive = diagnosticSelection === "tone";
+  const diagnosticReferenceActive = diagnosticSelection !== null;
   // Export-document intent is Studio-wide and deliberately independent of the
   // keyed Sketch session: remounts lazily restore the persisted preference,
   // while Plot Profile, Preset, reproduction, and composition state stay pure.
@@ -1545,7 +1546,9 @@ export function SketchControls({
   // static Sketch omits `t` entirely so the name carries no segment.
   const exportPng = () => {
     if (
-      diagnosticSelectionRef.current === "tone" ||
+      // LiveCanvas stays mounted in Detail mode, so this handler gate is the
+      // final authority preventing its diagnostic backing pixels from escaping.
+      diagnosticSelectionRef.current !== null ||
       !environmentReadyNow()
     ) return;
     const handle = canvasHandle.current;
@@ -1610,7 +1613,7 @@ export function SketchControls({
   // `undefined`, not 0.
   const exportSvg = () => {
     if (
-      diagnosticSelectionRef.current === "tone" ||
+      diagnosticSelectionRef.current !== null ||
       !environmentReadyNow()
     ) return;
     const handle = canvasHandle.current;
@@ -1679,7 +1682,7 @@ export function SketchControls({
   // reads React state or the live canvas again.
   const exportHiddenLineSvg = () => {
     if (
-      diagnosticSelectionRef.current === "tone" ||
+      diagnosticSelectionRef.current !== null ||
       hiddenLineBusy ||
       !environmentReadyNow()
     ) {
@@ -2274,7 +2277,7 @@ export function SketchControls({
             className="flex-1"
             onClick={exportPng}
             disabled={
-              toneReferenceActive ||
+              diagnosticReferenceActive ||
               !environmentReady ||
               (!scribblePaintIsCurrent && hasScribblePreparation)
             }
@@ -2288,7 +2291,7 @@ export function SketchControls({
             className="flex-1"
             onClick={exportSvg}
             disabled={
-              toneReferenceActive ||
+              diagnosticReferenceActive ||
               !environmentReady ||
               (!scribblePaintIsCurrent && hasScribblePreparation)
             }
@@ -2304,7 +2307,7 @@ export function SketchControls({
                 className="flex-1"
                 onClick={exportHiddenLineSvg}
                 disabled={
-                  toneReferenceActive ||
+                  diagnosticReferenceActive ||
                   !environmentReady ||
                   hiddenLineBusy ||
                   (!scribblePaintIsCurrent && hasScribblePreparation)
