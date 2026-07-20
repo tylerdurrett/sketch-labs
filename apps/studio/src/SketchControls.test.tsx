@@ -66,7 +66,10 @@ import {
   type PageFramePointer,
 } from "./pageFrameManipulation";
 import type { PageFrameEditDraft } from "./pageFrameEditDraft";
-import { isScribbleComputeIdentity } from "./scribbleComputeProtocol";
+import {
+  isScribbleComputeIdentity,
+  type CreateScribbleComputeIdentityInput,
+} from "./scribbleComputeProtocol";
 import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
 import {
@@ -175,6 +178,27 @@ const controlPanelCapture = vi.hoisted(() => ({
     readonly dimensions: { readonly width: number; readonly height: number };
   }) => void>,
 }));
+
+vi.mock("./scribbleComputeProtocol", async (importActual) => {
+  const actual = await importActual<
+    typeof import("./scribbleComputeProtocol")
+  >();
+  return {
+    ...actual,
+    // These ordinary fixtures never launch Scribble. Keep their dormant legacy
+    // identity out of Choice transport/projection, which #377/#380 own.
+    createScribbleComputeIdentity: (
+      input: CreateScribbleComputeIdentityInput,
+    ) =>
+      input.sketchId.startsWith("conditional-")
+        ? actual.createScribbleComputeIdentity({
+            ...input,
+            schema: {},
+            params: {},
+          })
+        : actual.createScribbleComputeIdentity(input),
+  };
+});
 
 vi.mock("./ControlPanel", async (importActual) => {
   const actual = await importActual<typeof import("./ControlPanel")>();

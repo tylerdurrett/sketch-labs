@@ -1,13 +1,12 @@
-import {
-  validateChoiceParamValue,
-  type CoordinateSpace,
-  type HiddenLineRole,
-  type ParamSchema,
-  type Params,
-  type Scene,
-  type ScribbleDiagnostics,
-  type ScribbleProgress,
-  type Seed,
+import type {
+  CoordinateSpace,
+  HiddenLineRole,
+  ParamSchema,
+  Params,
+  Scene,
+  ScribbleDiagnostics,
+  ScribbleProgress,
+  Seed,
 } from "@harness/core";
 
 /** A schema-backed authored value that can cross the Worker boundary. */
@@ -116,9 +115,6 @@ function copyParamValue(
   if (spec.kind === "number" && isFiniteNumber(value)) return value;
   if (spec.kind === "color" && typeof value === "string") return value;
   if (spec.kind === "image-asset" && typeof value === "string") return value;
-  if (spec.kind === "choice") {
-    return validateChoiceParamValue(spec, value, key);
-  }
   throw new TypeError(
     `Scribble parameter ${key} does not match its ${spec.kind} schema`,
   );

@@ -26,17 +26,6 @@ const imageAssetSchema: ParamSchema = {
   imageAsset: { kind: "image-asset", default: "portrait-default" },
 };
 
-const choiceSchema: ParamSchema = {
-  strategy: {
-    kind: "choice",
-    default: "scribble",
-    options: [
-      { value: "scribble", label: "Scribble" },
-      { value: "stipple", label: "Stippling" },
-    ],
-  },
-};
-
 const scene: Scene = {
   space: { width: 120, height: 90 },
   background: { color: "ivory" },
@@ -224,24 +213,6 @@ describe("Scribble compute identity", () => {
   it("rejects only non-string Image Asset parameter values", () => {
     for (const value of [undefined, null, 42, {}, [], new String("asset")]) {
       expect(() => imageAssetIdentity(value)).toThrow(/imageAsset/);
-    }
-  });
-
-  it("copies only a declared stable Choice value", () => {
-    const create = (strategy: unknown) =>
-      createScribbleComputeIdentity({
-        sketchId: "conditional",
-        schema: choiceSchema,
-        params: { strategy },
-        seed: "seed",
-        compositionFrame: { width: 120, height: 90 },
-      });
-
-    expect(create("stipple").params).toEqual([
-      { key: "strategy", value: "stipple" },
-    ]);
-    for (const value of ["unknown", undefined, null, 42]) {
-      expect(() => create(value)).toThrow(/Choice param `strategy` value/);
     }
   });
 
