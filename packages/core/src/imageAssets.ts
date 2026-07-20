@@ -7,6 +7,11 @@
  * package.
  */
 
+import type {
+  IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+  PreparedImageDetailAnalysis,
+} from './imageDetailAnalysis'
+
 /** The two ordinary RGBA8 storage types produced by browser and Node decoders. */
 export type Rgba8Bytes = Uint8Array | Uint8ClampedArray
 
@@ -45,7 +50,19 @@ export type ImageAssetLookup = (
   id: string,
 ) => Readonly<DecodedPixels> | undefined
 
+/**
+ * Synchronously resolve one prepared analysis by both exact source identity and
+ * exact analysis-definition identity. Preparation, fetching, and decoding stay
+ * outside a pure Sketch capability call.
+ */
+export type PreparedImageDetailAnalysisLookup = (
+  imageAssetId: string,
+  analysisDefinitionId: typeof IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+) => Readonly<PreparedImageDetailAnalysis> | undefined
+
 /** Pre-resolved, synchronous inputs an environment supplies to pure Sketch code. */
 export interface SketchEnvironment {
   readonly imageAssets: ImageAssetLookup
+  /** Optional prepared-detail lookup; its absence means no analysis is resolved. */
+  readonly getPreparedImageDetailAnalysis?: PreparedImageDetailAnalysisLookup
 }

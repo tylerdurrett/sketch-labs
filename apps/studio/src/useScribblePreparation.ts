@@ -66,6 +66,10 @@ export interface UseScribblePreparationResult {
   readonly progress: ScribblePreparationProgress | null;
   /** Read the reducer's latest synchronous state, including same-batch edits. */
   readonly getSessionSnapshot: () => ScribbleSessionState;
+  /** Synchronously pause worker ownership while retaining latest authored state. */
+  readonly suspend: () => void;
+  /** Resume with no work when current, otherwise one request for the latest state. */
+  readonly resumeLatest: () => void;
   /** Cancel active preparation before a history transaction starts previewing. */
   readonly beginTransaction: () => void;
   /** Record the latest transaction preview without launching preparation. */
@@ -171,6 +175,17 @@ export function useScribblePreparation({
     [],
   );
 
+  const suspend = useCallback((): void => {
+    const previous = sessionRef.current;
+    const next = dispatch({ type: "suspend" });
+    cancelReplacedActive(previous, next);
+    setProgress(null);
+  }, [cancelReplacedActive, dispatch]);
+
+  const resumeLatest = useCallback((): void => {
+    dispatch({ type: "resume-latest" });
+  }, [dispatch]);
+
   const beginTransaction = useCallback((): void => {
     const previous = sessionRef.current;
     const next = dispatch({ type: "transaction-began" });
@@ -227,7 +242,8 @@ export function useScribblePreparation({
       if (
         cancelled.desiredIdentity !== null &&
         cancelled.sourceInputRevision !== null &&
-        !cancelled.transactionOpen
+        !cancelled.transactionOpen &&
+        !cancelled.suspended
       ) {
         dispatch({
           type: "transaction-settled",
@@ -244,7 +260,14 @@ export function useScribblePreparation({
     // replacement request produced by the rehearsal coordinator's cleanup.
     const pending = sessionRef.current.pending;
     const owner = coordinatorRef.current;
-    if (!enabled || pending === null || owner === null) return;
+    if (
+      !enabled ||
+      sessionRef.current.suspended ||
+      pending === null ||
+      owner === null
+    ) {
+      return;
+    }
 
     const started = startedRequestRef.current;
     if (
@@ -337,6 +360,8 @@ export function useScribblePreparation({
     session,
     progress,
     getSessionSnapshot: () => sessionRef.current,
+    suspend,
+    resumeLatest,
     beginTransaction,
     previewAuthoredState,
     settleTransaction,

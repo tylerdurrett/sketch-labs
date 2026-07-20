@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest'
 
 import {
   IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+  assertPreparedImageDetailAnalysis,
   createImageDetailField,
   createRasterToneSource,
   prepareImageDetailAnalysis,
@@ -69,6 +70,7 @@ function clonePrepared(
 describe('public image-detail analysis', () => {
   it('exports the fixed two-stage API without authored analysis controls', () => {
     expect(prepareImageDetailAnalysis.length).toBe(1)
+    expect(assertPreparedImageDetailAnalysis.length).toBe(1)
     expect(createImageDetailField.length).toBe(2)
     expectTypeOf(prepareImageDetailAnalysis).parameters.toEqualTypeOf<
       [pixels: Readonly<DecodedPixels>]
@@ -288,6 +290,10 @@ describe('public image-detail analysis', () => {
     ).toBe(true)
     expect(cloned).toEqual(first)
     expect(cloned.data).toBeInstanceOf(Float64Array)
+    expect(first.data.byteOffset).toBe(0)
+    expect(first.data.byteLength).toBe(first.data.buffer.byteLength)
+    expect(Object.getPrototypeOf(first.data)).toBe(Float64Array.prototype)
+    expect(() => assertPreparedImageDetailAnalysis(first)).not.toThrow()
 
     const frame = { width: 300, height: 200 }
     const originalField = createImageDetailField(first, frame)
@@ -337,6 +343,7 @@ describe('public image-detail analysis', () => {
     }
 
     const valid = unitPrepared(4, 2)
+    class DerivedFloat64Array extends Float64Array {}
     const malformedPrepared: unknown[] = [
       null,
       clonePrepared(valid, { definitionId: 'wrong' as never }),
@@ -346,7 +353,19 @@ describe('public image-detail analysis', () => {
       clonePrepared(valid, { gridHeight: 0 }),
       clonePrepared(valid, { data: new Float64Array(valid.data.length - 1) }),
       clonePrepared(valid, { data: new Float32Array(valid.data) as never }),
+      clonePrepared(valid, {
+        data: new DerivedFloat64Array(valid.data) as Float64Array,
+      }),
       clonePrepared(valid, { data: [1, 1] as never }),
+      clonePrepared(valid, {
+        data: new Float64Array(
+          new ArrayBuffer(
+            (valid.data.length + 1) * Float64Array.BYTES_PER_ELEMENT,
+          ),
+          Float64Array.BYTES_PER_ELEMENT,
+          valid.data.length,
+        ),
+      }),
       clonePrepared(valid, {
         data: Float64Array.from(valid.data, (_, index) =>
           index === 0 ? Number.NaN : 1,
@@ -365,6 +384,9 @@ describe('public image-detail analysis', () => {
     ]
 
     for (const malformed of malformedPrepared) {
+      expect(() => assertPreparedImageDetailAnalysis(malformed)).toThrowError(
+        TypeError,
+      )
       expect(() =>
         createImageDetailField(malformed as PreparedImageDetailAnalysis, {
           width: 100,
@@ -372,6 +394,7 @@ describe('public image-detail analysis', () => {
         }),
       ).toThrowError(TypeError)
     }
+    expect(() => assertPreparedImageDetailAnalysis(valid)).not.toThrow()
     expect(IMAGE_DETAIL_ANALYSIS_DEFINITION_ID).toBe(valid.definitionId)
   })
 

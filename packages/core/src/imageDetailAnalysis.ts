@@ -42,11 +42,13 @@ export interface PreparedImageDetailAnalysis {
   readonly gridWidth: number
   readonly gridHeight: number
   /**
-   * Caller-immutable normalized row-major scalars.
+   * Normalized row-major scalars in one exact, standalone Float64Array.
    *
-   * Preparation owns this copy. A bound Detail Field borrows it rather than
-   * copying it again, so callers must not mutate the array while that field is
-   * in use. Non-finite mutations still fail closed at the public sampler.
+   * The prepared record owns the array and its complete ArrayBuffer: views,
+   * shared storage, and subclassed typed arrays are not valid prepared data.
+   * A bound Detail Field borrows this immutable-by-contract storage rather than
+   * copying it again. JavaScript cannot freeze typed-array elements, so owners
+   * must not mutate them while the record or a derived field is in use.
    */
   readonly data: Float64Array
 }
@@ -73,9 +75,17 @@ function invalidPreparedAnalysis(): TypeError {
   )
 }
 
-function validatePreparedAnalysis(
-  prepared: Readonly<PreparedImageDetailAnalysis>,
-): void {
+/**
+ * Assert the canonical worker-safe prepared image-detail record shape.
+ *
+ * This is the single trust boundary shared by direct field binding and worker
+ * protocols. Valid scalar storage is an exact Float64Array owning its complete,
+ * non-shared ArrayBuffer so it can be transferred without exposing unrelated
+ * bytes or aliases.
+ */
+export function assertPreparedImageDetailAnalysis(
+  prepared: unknown,
+): asserts prepared is PreparedImageDetailAnalysis {
   if (typeof prepared !== 'object' || prepared === null) {
     throw invalidPreparedAnalysis()
   }
@@ -87,20 +97,30 @@ function validatePreparedAnalysis(
     gridWidth,
     gridHeight,
     data,
-  } = prepared
+  } = prepared as Partial<PreparedImageDetailAnalysis>
+  const hasExactOwnedData =
+    data instanceof Float64Array &&
+    Object.getPrototypeOf(data) === Float64Array.prototype &&
+    data.buffer instanceof ArrayBuffer &&
+    data.byteOffset === 0 &&
+    data.byteLength === data.buffer.byteLength
   if (
     definitionId !== IMAGE_DETAIL_ANALYSIS_DEFINITION_ID ||
+    typeof sourceWidth !== 'number' ||
     !Number.isSafeInteger(sourceWidth) ||
     sourceWidth <= 0 ||
+    typeof sourceHeight !== 'number' ||
     !Number.isSafeInteger(sourceHeight) ||
     sourceHeight <= 0 ||
     !Number.isSafeInteger(sourceWidth * sourceHeight) ||
     !Number.isSafeInteger(sourceWidth * sourceHeight * 4) ||
+    typeof gridWidth !== 'number' ||
     !Number.isSafeInteger(gridWidth) ||
     gridWidth <= 0 ||
+    typeof gridHeight !== 'number' ||
     !Number.isSafeInteger(gridHeight) ||
     gridHeight <= 0 ||
-    !(data instanceof Float64Array)
+    !hasExactOwnedData
   ) {
     throw invalidPreparedAnalysis()
   }
@@ -114,7 +134,8 @@ function validatePreparedAnalysis(
     gridWidth !== expectedWidth ||
     gridHeight !== expectedHeight ||
     !Number.isSafeInteger(length) ||
-    data.length !== length
+    data.length !== length ||
+    data.byteLength !== length * Float64Array.BYTES_PER_ELEMENT
   ) {
     throw invalidPreparedAnalysis()
   }
@@ -175,7 +196,7 @@ export function createImageDetailField(
   prepared: Readonly<PreparedImageDetailAnalysis>,
   compositionFrame: Readonly<CoordinateSpace>,
 ): DetailField {
-  validatePreparedAnalysis(prepared)
+  assertPreparedImageDetailAnalysis(prepared)
 
   const fit = createRasterContainFit(
     { width: prepared.sourceWidth, height: prepared.sourceHeight },

@@ -41,6 +41,8 @@ export interface ControlPanelProps {
   onChange: (key: string, value: number | string) => void;
   /** Shared transaction lifecycle, adapted to each schema key automatically. */
   editHistory?: EditTransactionLifecycle<Params> | undefined;
+  /** Optional key-aware begin seam for params with cheaper preview ownership. */
+  onParamEditBegin?: ((key: string) => void) | undefined;
   /** Toggle a numeric param's lock membership. */
   onToggleLock: (key: string) => void;
   /** Longest normalized source edge for Image Asset imports. */
@@ -85,10 +87,14 @@ function renderControl(
     request: ImageAssetControlRecomposeRequest,
   ) => void,
   editHistory?: EditTransactionLifecycle<Params>,
+  onParamEditBegin?: (key: string) => void,
 ) {
   const rowHistory = editHistory
     ? {
-        onBegin: editHistory.onBegin,
+        onBegin: () =>
+          onParamEditBegin === undefined
+            ? editHistory.onBegin()
+            : onParamEditBegin(key),
         onPreview: (next: number | string) =>
           editHistory.onPreview({ ...params, [key]: next }),
         onCommit: editHistory.onCommit,
@@ -171,6 +177,7 @@ export function ControlPanel({
   imageAssetResolution,
   getImageAssetDimensions,
   onRecomposeToImageAspect,
+  onParamEditBegin,
 }: ControlPanelProps) {
   return (
     <div className="flex flex-col gap-4">
@@ -188,6 +195,7 @@ export function ControlPanel({
           getImageAssetDimensions,
           onRecomposeToImageAspect,
           editHistory,
+          onParamEditBegin,
         ),
       )}
     </div>

@@ -10,8 +10,12 @@
  * background.
  */
 
-import { createScene } from '../../scene'
-import type { CoordinateSpace, Scene } from '../../scene'
+import { createDetailField, sampleDetailField } from '../../detailFields'
+import type { DetailField } from '../../detailFields'
+import {
+  createImageDetailField,
+  IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+} from '../../imageDetailAnalysis'
 import {
   scribbleControlSchema,
   scribbleStrategy,
@@ -19,6 +23,8 @@ import {
   type ScribbleObserver,
   type ScribbleResult,
 } from '../../scribbleStrategy'
+import { createScene } from '../../scene'
+import type { CoordinateSpace, Scene } from '../../scene'
 import {
   createScribbleDiagnostics,
   type ParamSpec,
@@ -30,6 +36,12 @@ import {
 import type { SketchEnvironment } from '../../imageAssets'
 import { imageAssetParam, numberParam } from '../sketch-util'
 import {
+  applyPhotoDetailSensitivity,
+  PHOTO_DETAIL_SENSITIVITY_DEFAULT,
+  PHOTO_DETAIL_SENSITIVITY_MAX,
+  PHOTO_DETAIL_SENSITIVITY_MIN,
+} from './detail'
+import {
   PHOTO_TONE_CONTROL_DEFAULT,
   PHOTO_TONE_CONTROL_MAX,
   PHOTO_TONE_CONTROL_MIN,
@@ -38,10 +50,13 @@ import {
 import { createResolvedPhotoScribbleSource } from './source'
 
 export * from './source'
+export * from './detail'
 export * from './tone'
 
 const PHOTO_TONE_CONTROL_STEP = 0.01
+const PHOTO_DETAIL_SENSITIVITY_STEP = 0.01
 const PREVIEW_STROKE = Object.freeze({ color: 'black', width: 1 })
+const ZERO_PHOTO_DETAIL_FIELD = createDetailField(() => 0)
 
 /** Opaque stable ID of the bundled sample; its filename and bytes live in Studio. */
 export const PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID =
@@ -71,6 +86,13 @@ export function createPhotoScribbleSchema(defaultImageAssetId: string) {
       max: PHOTO_TONE_CONTROL_MAX,
       default: PHOTO_TONE_CONTROL_DEFAULT,
       step: PHOTO_TONE_CONTROL_STEP,
+    },
+    detailSensitivity: {
+      kind: 'number',
+      min: PHOTO_DETAIL_SENSITIVITY_MIN,
+      max: PHOTO_DETAIL_SENSITIVITY_MAX,
+      default: PHOTO_DETAIL_SENSITIVITY_DEFAULT,
+      step: PHOTO_DETAIL_SENSITIVITY_STEP,
     },
     ...scribbleControlSchema,
   } satisfies Record<string, ParamSpec>)
@@ -115,6 +137,31 @@ export function createPhotoScribbleSource(
     toneControls(params, schema),
     frame,
     environment,
+  )
+}
+
+/**
+ * Derive the selected sensitivity-adjusted Detail Field from prepared analysis.
+ *
+ * This pure capability performs only a synchronous exact-identity lookup and
+ * field binding. The Harness owns asset resolution, decoding, and preparation.
+ */
+export function createPhotoScribbleDetailField(
+  params: Params,
+  frame: CoordinateSpace,
+  schema: PhotoScribbleSchema,
+  environment?: SketchEnvironment,
+): DetailField {
+  const prepared = environment?.getPreparedImageDetailAnalysis?.(
+    imageAssetParam(params, schema, 'imageAsset'),
+    IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+  )
+  if (prepared === undefined) return ZERO_PHOTO_DETAIL_FIELD
+
+  const base = createImageDetailField(prepared, frame)
+  const sensitivity = numberParam(params, schema, 'detailSensitivity')
+  return createDetailField((point) =>
+    applyPhotoDetailSensitivity(sampleDetailField(base, point), sensitivity),
   )
 }
 
@@ -185,6 +232,14 @@ export function createPhotoScribble(
     schema,
     generateToneSource(params, frame, environment) {
       return createPhotoScribbleSource(params, frame, schema, environment)
+    },
+    generateDetailField(params, frame, environment) {
+      return createPhotoScribbleDetailField(
+        params,
+        frame,
+        schema,
+        environment,
+      )
     },
     generateScribbleArtwork(params, seed, frame, observer, environment) {
       return generatePhotoScribbleArtwork(

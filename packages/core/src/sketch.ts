@@ -30,6 +30,7 @@
  */
 
 import type { SketchEnvironment } from './imageAssets'
+import type { DetailField } from './detailFields'
 import type { PlotProfile } from './plotProfile'
 import type { CoordinateSpace, Scene } from './scene'
 import type { ShadingTermination } from './shadingStrategy'
@@ -386,6 +387,20 @@ export interface SketchBase {
     frame: CoordinateSpace,
     environment?: SketchEnvironment,
   ): ToneSource
+  /**
+   * Optionally produce deterministic local visual detail for a diagnostic view
+   * or a source-side strategy adapter.
+   *
+   * Like the Tone-source seam, this hook depends only on schema params, the
+   * Composition Frame, and synchronous pre-resolved environment inputs. Seed,
+   * time, output resolution, and physical-output values are deliberately
+   * absent, and fetching, decoding, or analysis must not happen here.
+   */
+  generateDetailField?(
+    params: Params,
+    frame: CoordinateSpace,
+    environment?: SketchEnvironment,
+  ): DetailField
 }
 
 /**
