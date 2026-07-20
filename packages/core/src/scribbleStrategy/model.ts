@@ -183,6 +183,39 @@ function squaredDistanceToSegment(
   return nearestDx * nearestDx + nearestDy * nearestDy
 }
 
+function projectionOntoSegment(
+  point: Readonly<Point>,
+  start: Readonly<Point>,
+  end: Readonly<Point>,
+): { readonly point: Point; readonly distanceSquared: number } {
+  const deltaX = end[0] - start[0]
+  const deltaY = end[1] - start[1]
+  const lengthSquared = deltaX * deltaX + deltaY * deltaY
+  const progress =
+    lengthSquared === 0
+      ? 0
+      : Math.min(
+          1,
+          Math.max(
+            0,
+            ((point[0] - start[0]) * deltaX +
+              (point[1] - start[1]) * deltaY) /
+              lengthSquared,
+          ),
+        )
+  const projection: Point = [
+    start[0] + progress * deltaX,
+    start[1] + progress * deltaY,
+  ]
+  const distanceX = point[0] - projection[0]
+  const distanceY = point[1] - projection[1]
+
+  return {
+    point: projection,
+    distanceSquared: distanceX * distanceX + distanceY * distanceY,
+  }
+}
+
 function interpolatedLatticeValue(
   lattice: ScribbleLattice,
   values: Float64Array,
@@ -393,7 +426,10 @@ export function createScribbleModel(
     residualTotal += cellResidual(index)
   }
 
-  function deposit(start: Readonly<Point>, end: Readonly<Point>): void {
+  function depositWithoutScaleField(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): void {
     const radius = scales.coverageRadius
     const radiusSquared = radius * radius
     const minColumn = Math.max(
@@ -437,6 +473,74 @@ export function createScribbleModel(
         residualTotal += cellResidual(index) - previousResidual
       }
     }
+  }
+
+  function depositWithScaleField(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): void {
+    const profile = profileSegment(start, end)
+    if (profile === undefined) return
+
+    // The profile supplies one conservative candidate bound. Each cell still
+    // resolves its radius at the nearest centerline point, so a broad part of
+    // the stroke cannot widen a neighboring fine part.
+    const maximumRadius = profile.maximumCoverageRadius
+    const minColumn = Math.max(
+      0,
+      Math.floor(
+        (Math.min(start[0], end[0]) - maximumRadius) / lattice.cellWidth,
+      ),
+    )
+    const maxColumn = Math.min(
+      lattice.columns - 1,
+      Math.floor(
+        (Math.max(start[0], end[0]) + maximumRadius) / lattice.cellWidth,
+      ),
+    )
+    const minRow = Math.max(
+      0,
+      Math.floor(
+        (Math.min(start[1], end[1]) - maximumRadius) / lattice.cellHeight,
+      ),
+    )
+    const maxRow = Math.min(
+      lattice.rows - 1,
+      Math.floor(
+        (Math.max(start[1], end[1]) + maximumRadius) / lattice.cellHeight,
+      ),
+    )
+
+    for (let row = minRow; row <= maxRow; row++) {
+      for (let column = minColumn; column <= maxColumn; column++) {
+        const index = row * lattice.columns + column
+        const point = points[index]!
+        const projection = projectionOntoSegment(point, start, end)
+        const radius = localScalesAt(projection.point).coverageRadius
+        const radiusSquared = radius * radius
+        if (projection.distanceSquared >= radiusSquared) continue
+
+        // One cell receives one kernel evaluation for the complete segment.
+        // This keeps peak darkness independent of profile sampling density.
+        const normalizedDistanceSquared =
+          projection.distanceSquared / radiusSquared
+        const shoulder = 1 - normalizedDistanceSquared
+        const amount = scales.coveragePerPass * shoulder * shoulder
+        const previousResidual = cellResidual(index)
+        coverage[index] = Math.min(1, coverage[index]! + amount)
+        residualTotal += cellResidual(index) - previousResidual
+      }
+    }
+  }
+
+  function deposit(start: Readonly<Point>, end: Readonly<Point>): void {
+    // Keep the established implementation as an explicit compatibility path.
+    if (scaleField === undefined) {
+      depositWithoutScaleField(start, end)
+      return
+    }
+
+    depositWithScaleField(start, end)
   }
 
   return {
