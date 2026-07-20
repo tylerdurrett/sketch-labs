@@ -162,6 +162,63 @@ describe("detailSessionReducer", () => {
     expect(repeated.nextToken).toBe(2);
   });
 
+  it("unrequests pending and active work while rejecting every late transition", () => {
+    const pending = request(createDetailSessionState());
+    const unrequestedPending = detailSessionReducer(pending, {
+      type: "unrequested",
+    });
+    expect(unrequestedPending).toMatchObject({
+      requestedIdentity: null,
+      pending: null,
+      active: null,
+    });
+    expect(
+      detailSessionReducer(unrequestedPending, {
+        type: "launched",
+        token: pending.pending!.token,
+        identity: pending.pending!.identity,
+      }),
+    ).toBe(unrequestedPending);
+
+    const active = launch(request(createDetailSessionState()));
+    const unrequestedActive = detailSessionReducer(active, {
+      type: "unrequested",
+    });
+    expect(unrequestedActive).toMatchObject({
+      requestedIdentity: null,
+      pending: null,
+      active: null,
+    });
+    expect(
+      detailSessionReducer(unrequestedActive, {
+        type: "succeeded",
+        token: active.active!.token,
+        identity: active.active!.identity,
+        prepared: prepared(),
+      }),
+    ).toBe(unrequestedActive);
+  });
+
+  it("preserves an exact prepared cache across unrequest and re-entry", () => {
+    const completed = succeed(launch(request(createDetailSessionState())));
+    const unrequested = detailSessionReducer(completed, {
+      type: "unrequested",
+    });
+
+    expect(unrequested.prepared).toBe(completed.prepared);
+    expect(
+      selectPreparedDetailAnalysis(unrequested, firstIdentity),
+    ).toBeUndefined();
+    const reentered = request(unrequested, identity("pinecone-4330aa0314f7"));
+    expect(reentered.requestedIdentity).toEqual(firstIdentity);
+    expect(reentered.prepared).toBe(completed.prepared);
+    expect(reentered.pending).toBeNull();
+    expect(reentered.nextToken).toBe(completed.nextToken);
+    expect(selectPreparedDetailAnalysis(reentered, firstIdentity)).toBe(
+      completed.prepared!.prepared,
+    );
+  });
+
   it("bounds a retryable failure and retries the same identity without mutation", () => {
     const active = launch(request(createDetailSessionState()));
     const failed = detailSessionReducer(active, {

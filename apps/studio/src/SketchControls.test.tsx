@@ -7236,6 +7236,47 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(scribbleJob.starts).toHaveLength(2);
   });
 
+  it("cancels Detail on exit and starts no analysis for later inactive asset changes", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      { id: assetA, name: "portrait alpha", url: `/image-assets/${assetA}.png` },
+      { id: assetB, name: "portrait beta", url: `/image-assets/${assetB}.png` },
+    ]);
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 64),
+      );
+      await Promise.resolve();
+    });
+
+    clickButton(el, "Detail");
+    expect(detailJob.starts).toHaveLength(1);
+    clickButton(el, "Fill");
+    expect(detailJob.cancelCount).toBe(1);
+    expect(detailJob.active).toBeNull();
+
+    await completeDetail(0);
+    expect(
+      el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!.dataset
+        .renderState,
+    ).not.toBe("detail-reference");
+
+    const assetBChoice = await openAssetBChoice(el);
+    act(() => assetBChoice.click());
+    expect(detailJob.starts).toHaveLength(1);
+    await act(async () => {
+      sketchEnvironmentJob.starts[1]!.resolve(
+        resolvedAssetEnvironment(assetB, 192),
+      );
+      await Promise.resolve();
+    });
+    expect(detailJob.starts).toHaveLength(1);
+  });
+
   it("reuses one Detail analysis across authored edits and resumes one latest Scribble for Outline", async () => {
     managedImageAssetJob.list.mockResolvedValue([
       { id: assetA, name: "portrait alpha", url: `/image-assets/${assetA}.png` },
@@ -7316,6 +7357,16 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     clickButton(el, "Fill");
     await flush();
     expect(scribbleJob.starts).toHaveLength(1);
+
+    clickButton(el, "Detail");
+    await flush();
+    expect(detailJob.starts).toHaveLength(1);
+    expect(
+      el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!.dataset
+        .renderState,
+    ).toBe("detail-reference");
+    clickButton(el, "Fill");
+    expect(scribbleJob.starts).toHaveLength(1);
   });
 
   it("turns synchronous Detail binding assertions into retryable safe failure", async () => {
@@ -7353,6 +7404,60 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         .renderState,
     ).toBe("detail-reference-loading");
   });
+
+  it.each(["asset", "analysis definition"] as const)(
+    "fails closed when Detail asks for a mismatched %s",
+    async (mismatch) => {
+      const generateDetailField = vi.fn(
+        (
+          params: Parameters<
+            NonNullable<typeof photoScribble.generateDetailField>
+          >[0],
+          frame: Parameters<
+            NonNullable<typeof photoScribble.generateDetailField>
+          >[1],
+          environment: Parameters<
+            NonNullable<typeof photoScribble.generateDetailField>
+          >[2],
+        ) => {
+          environment!.getPreparedImageDetailAnalysis!(
+            mismatch === "asset" ? assetB : assetA,
+            mismatch === "analysis definition"
+              ? ("wrong-analysis" as typeof IMAGE_DETAIL_ANALYSIS_DEFINITION_ID)
+              : IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+          );
+          return photoScribble.generateDetailField!(
+            params,
+            frame,
+            environment,
+          );
+        },
+      );
+      const el = mount(
+        <SketchControls
+          sketch={{
+            ...managedPhotoScribble(photoScribble.generateToneSource!),
+            generateDetailField,
+          }}
+        />,
+      );
+      await act(async () => {
+        sketchEnvironmentJob.starts[0]!.resolve(
+          resolvedAssetEnvironment(assetA, 112),
+        );
+        await Promise.resolve();
+      });
+      clickButton(el, "Detail");
+      await completeDetail(0);
+
+      expect(
+        el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!.dataset
+          .renderState,
+      ).toBe("detail-reference-failure");
+      expect(lastDetailField).toBeNull();
+      expect(lastDetailRetry).not.toBeNull();
+    },
+  );
 
   function chooseImageFile(el: HTMLElement, name = "Imported Beta.webp"): void {
     const input = el.querySelector<HTMLInputElement>('input[type="file"]');

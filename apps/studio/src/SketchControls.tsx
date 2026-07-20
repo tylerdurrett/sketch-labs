@@ -642,10 +642,13 @@ export function SketchControls({
           imageAssetId,
           analysisDefinitionId,
         ) {
-          return imageAssetId === detailIdentity.imageAssetId &&
-            analysisDefinitionId === detailIdentity.analysisDefinitionId
-            ? prepared.prepared
-            : undefined;
+          if (
+            imageAssetId !== detailIdentity.imageAssetId ||
+            analysisDefinitionId !== detailIdentity.analysisDefinitionId
+          ) {
+            throw new TypeError("Detail binding identity does not match");
+          }
+          return prepared.prepared;
         },
       };
       return {
@@ -1187,6 +1190,9 @@ export function SketchControls({
 
   const leaveDetailFor = (next: Exclude<DiagnosticSelection, "detail">) => {
     const previous = diagnosticSelectionRef.current;
+    if (previous === "detail") {
+      detailPreparation.unrequest();
+    }
     diagnosticSelectionRef.current = next;
     setDiagnosticSelection(next);
     if (previous === "detail" && hasScribblePreparation) {

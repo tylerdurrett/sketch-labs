@@ -164,6 +164,59 @@ describe("useDetailPreparation", () => {
     expect(latest!.getPrepared(secondIdentity)?.data[0]).toBe(0.75);
   });
 
+  it("unrequests active work once and ignores its delayed completion", async () => {
+    const coordinator = new FakeCoordinator();
+    mount(<Probe coordinator={coordinator} />);
+    act(() => latest!.request(firstIdentity));
+    const stale = coordinator.starts[0]!;
+
+    act(() => latest!.unrequest());
+    expect(coordinator.cancelCount).toBe(1);
+    expect(latest!.session).toMatchObject({
+      requestedIdentity: null,
+      pending: null,
+      active: null,
+    });
+
+    succeed(stale);
+    await flush();
+    expect(latest!.session.prepared).toBeNull();
+    expect(coordinator.cancelCount).toBe(1);
+  });
+
+  it("clears a same-batch pending request before it can launch", () => {
+    const coordinator = new FakeCoordinator();
+    mount(<Probe coordinator={coordinator} />);
+
+    act(() => {
+      latest!.request(firstIdentity);
+      latest!.unrequest();
+    });
+
+    expect(coordinator.starts).toHaveLength(0);
+    expect(coordinator.cancelCount).toBe(0);
+    expect(latest!.session.requestedIdentity).toBeNull();
+    expect(latest!.session.pending).toBeNull();
+  });
+
+  it("preserves and reuses an exact prepared record after unrequest", async () => {
+    const coordinator = new FakeCoordinator();
+    mount(<Probe coordinator={coordinator} />);
+    act(() => latest!.request(firstIdentity));
+    succeed(coordinator.starts[0]!, prepared(0.75));
+    await flush();
+
+    const cached = latest!.session.prepared;
+    act(() => latest!.unrequest());
+    expect(latest!.session.prepared).toBe(cached);
+    expect(latest!.getPrepared(firstIdentity)).toBeUndefined();
+
+    act(() => latest!.request(identity("pinecone-4330aa0314f7")));
+    expect(coordinator.starts).toHaveLength(1);
+    expect(latest!.session.prepared).toBe(cached);
+    expect(latest!.getPrepared(firstIdentity)?.data[0]).toBe(0.75);
+  });
+
   it("reports bounded failure and retries the same identity explicitly", async () => {
     const coordinator = new FakeCoordinator();
     mount(<Probe coordinator={coordinator} />);

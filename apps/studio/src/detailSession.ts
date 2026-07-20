@@ -72,6 +72,7 @@ export type DetailSessionAction =
       readonly identity: DetailPreparationIdentity;
       readonly error: string;
     }
+  | { readonly type: "unrequested" }
   | { readonly type: "dispose" };
 
 export function createDetailSessionState(): DetailSessionState {
@@ -136,10 +137,26 @@ export function detailSessionReducer(
 
   switch (action.type) {
     case "requested":
+      if (identitiesEqual(state.prepared?.identity ?? null, action.identity)) {
+        if (
+          identitiesEqual(state.requestedIdentity, action.identity) &&
+          state.pending === null &&
+          state.active === null &&
+          state.failure === null
+        ) {
+          return state;
+        }
+        return {
+          ...state,
+          requestedIdentity: action.identity,
+          pending: null,
+          active: null,
+          failure: null,
+        };
+      }
       if (
         identitiesEqual(state.requestedIdentity, action.identity) &&
-        (identitiesEqual(state.prepared?.identity ?? null, action.identity) ||
-          identitiesEqual(state.pending?.identity ?? null, action.identity) ||
+        (identitiesEqual(state.pending?.identity ?? null, action.identity) ||
           identitiesEqual(state.active?.identity ?? null, action.identity) ||
           identitiesEqual(state.failure?.identity ?? null, action.identity))
       ) {
@@ -217,6 +234,23 @@ export function detailSessionReducer(
           identity: action.identity,
           error: boundedFailure(action.error),
         },
+      };
+
+    case "unrequested":
+      if (
+        state.requestedIdentity === null &&
+        state.pending === null &&
+        state.active === null &&
+        state.failure === null
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        requestedIdentity: null,
+        pending: null,
+        active: null,
+        failure: null,
       };
 
     case "dispose":

@@ -41,6 +41,8 @@ export interface UseDetailPreparationResult {
   readonly getSessionSnapshot: () => DetailSessionState;
   /** Explicitly request analysis; mounting a detail-capable Sketch does no work. */
   readonly request: (identity: DetailPreparationIdentity) => void;
+  /** Clear diagnostic intent and work without disposing the reusable hook. */
+  readonly unrequest: () => void;
   readonly retry: () => void;
   /** Invalidate a current record that fails later synchronous field binding. */
   readonly rejectPrepared: (
@@ -110,6 +112,17 @@ export function useDetailPreparation({
     },
     [dispatch],
   );
+
+  const unrequest = useCallback((): void => {
+    const previous = sessionRef.current;
+    dispatch({ type: "unrequested" });
+    // Pending work has not reached the coordinator and is cleared solely by the
+    // reducer. Active ownership is cancelled once; its callback is stale as soon
+    // as the synchronous reducer mirror drops the token.
+    if (previous.active !== null) {
+      coordinatorRef.current?.coordinator.cancel();
+    }
+  }, [dispatch]);
 
   const retry = useCallback((): void => {
     const current = sessionRef.current;
@@ -244,6 +257,7 @@ export function useDetailPreparation({
     session,
     getSessionSnapshot,
     request,
+    unrequest,
     retry,
     rejectPrepared,
     getPrepared,
