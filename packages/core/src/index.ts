@@ -23,6 +23,7 @@ export * from './shadingFields'
 export * from './detailFields'
 export * from './imageDetailAnalysis'
 export * from './shadingStrategy'
+export * from './scribbleScaleField'
 export {
   scribbleStrategy,
   type ScribbleObserver,

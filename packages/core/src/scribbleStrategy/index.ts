@@ -7,6 +7,7 @@
  */
 
 import { createRandom } from '../random'
+import type { ScribbleScaleField } from '../scribbleScaleField'
 import type {
   ShadingResult,
   ShadingStrategyInput,
@@ -22,7 +23,10 @@ import {
   type ScribbleOrchestratorOutcome,
   type ScribbleProgress,
 } from './orchestrator'
-import { smoothScribblePolylines } from './smooth'
+import {
+  smoothScaleFieldScribblePolylines,
+  smoothScribblePolylines,
+} from './smooth'
 import type {
   ScribbleControls,
   ScribbleLattice,
@@ -40,6 +44,8 @@ export type { ScribbleObserver, ScribbleProgress } from './orchestrator'
 /** Scribble's authored specialization of the shared strategy input. */
 export interface ScribbleStrategyInput
   extends ShadingStrategyInput<ScribbleControls> {
+  /** Optional spatial scale, independent of tone and authored controls. */
+  readonly scaleField?: ScribbleScaleField
   /** Receives immutable solver progress without affecting deterministic output. */
   readonly observer?: ScribbleObserver
 }
@@ -115,12 +121,37 @@ function assertValidOutcomeGeometry(
   }
 }
 
+function assertValidScaleFieldOutcomeGeometry(
+  polylines: readonly Polyline[],
+  isSegmentSafe: (
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ) => boolean,
+): void {
+  for (const polyline of polylines) {
+    if (polyline.length < 2 || !polyline.every(isFinitePoint)) {
+      throw new Error('Scribble orchestrator produced invalid geometry')
+    }
+
+    for (let index = 1; index < polyline.length; index++) {
+      if (!isSegmentSafe(polyline[index - 1]!, polyline[index]!)) {
+        throw new Error('Scribble orchestrator produced invalid geometry')
+      }
+    }
+  }
+}
+
 function executeScribbleStrategy(
   input: ScribbleStrategyInput,
   orchestrate: ScribbleOrchestrator,
   injectedLimits?: Readonly<ScribbleExecutionLimits>,
 ): ScribbleResult {
-  const model = createScribbleModel(input.source, input.frame, input.controls)
+  const model = createScribbleModel(
+    input.source,
+    input.frame,
+    input.controls,
+    input.scaleField,
+  )
   const initialResidual = model.residualError()
 
   // No random draw or E1 call is necessary when the authored source has no
@@ -167,20 +198,31 @@ function executeScribbleStrategy(
     throw new Error('Scribble orchestrator produced an invalid residual error')
   }
 
-  const polylines = smoothScribblePolylines(
-    outcome.polylines,
-    input.source.shadingMask,
-    input.frame,
-    model.scales.maskCheckSpacing,
-  )
+  let polylines: Polyline[]
+  if (input.scaleField === undefined) {
+    polylines = smoothScribblePolylines(
+      outcome.polylines,
+      input.source.shadingMask,
+      input.frame,
+      model.scales.maskCheckSpacing,
+    )
 
-  // E1 already validates candidate segments. This final pass guards the public
-  // boundary after mask-safe curve refinement with B's scale-derived spacing.
-  assertValidOutcomeGeometry(
-    input,
-    polylines,
-    model.scales.maskCheckSpacing,
-  )
+    // Preserve the established uniform-scale final validation path exactly.
+    assertValidOutcomeGeometry(
+      input,
+      polylines,
+      model.scales.maskCheckSpacing,
+    )
+  } else {
+    polylines = smoothScaleFieldScribblePolylines(
+      outcome.polylines,
+      model.isSegmentSafe,
+    )
+
+    // Growth already uses this predicate. Reapply it after every accepted
+    // curve-refinement pass and once more at the public strategy boundary.
+    assertValidScaleFieldOutcomeGeometry(polylines, model.isSegmentSafe)
+  }
 
   return {
     polylines,

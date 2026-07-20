@@ -5,6 +5,11 @@ import { isMaskPermittedPolyline } from './mask'
 
 const SMOOTHING_PASSES = 2
 
+type ScribbleSegmentSafety = (
+  start: Readonly<Point>,
+  end: Readonly<Point>,
+) => boolean
+
 function interpolate(
   start: Readonly<Point>,
   end: Readonly<Point>,
@@ -37,6 +42,17 @@ function smoothOnce(polyline: Readonly<Polyline>): Polyline {
   return smoothed
 }
 
+function isPolylineSegmentSafe(
+  polyline: Readonly<Polyline>,
+  isSegmentSafe: ScribbleSegmentSafety,
+): boolean {
+  for (let index = 1; index < polyline.length; index++) {
+    if (!isSegmentSafe(polyline[index - 1]!, polyline[index]!)) return false
+  }
+
+  return true
+}
+
 /**
  * Refine solver polylines into visibly curved, plotter-ready geometry.
  *
@@ -66,4 +82,32 @@ export function smoothScribblePolylines(
 
     return safe
   })
+}
+
+/**
+ * Refine field-aware paths while preserving the last representation accepted
+ * by the model's shared scale, frame, and mask predicate.
+ *
+ * Kept separate from {@link smoothScribblePolylines} so runs without a field
+ * retain their established mask traversal and arithmetic exactly.
+ */
+export function smoothScaleFieldScribblePolylines(
+  polylines: readonly Polyline[],
+  isSegmentSafe: ScribbleSegmentSafety,
+): Polyline[] {
+  let safe = polylines.map((polyline) => polyline)
+
+  for (let pass = 0; pass < SMOOTHING_PASSES; pass++) {
+    const candidate = safe.map(smoothOnce)
+    if (
+      !candidate.every((polyline) =>
+        isPolylineSegmentSafe(polyline, isSegmentSafe),
+      )
+    ) {
+      break
+    }
+    safe = candidate
+  }
+
+  return safe
 }
