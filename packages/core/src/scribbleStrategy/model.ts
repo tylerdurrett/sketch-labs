@@ -20,6 +20,7 @@ import {
   type ScribbleModel,
   type ScribbleResidualSample,
   type ScribbleScales,
+  type ScribbleSegmentScaleBounds,
   type ScribbleSegmentScaleProfile,
   type ScribbleSegmentScaleSample,
 } from './types'
@@ -267,34 +268,41 @@ export function createScribbleModel(
   const permission = new Float64Array(lattice.sampleCount)
   const coverage = new Float64Array(lattice.sampleCount)
 
-  function localScalesAt(point: Readonly<Point>): ScribbleLocalScales {
-    if (scaleField === undefined) return scales
+  function localSegmentLengthAt(point: Readonly<Point>): number {
+    if (scaleField === undefined) return scales.segmentLength
 
     const localAuthoredScale = sampleScribbleScaleField(
       scaleField,
       point,
       normalizedControls.scribbleScale,
     )
-    if (localAuthoredScale === normalizedControls.scribbleScale) return scales
+    if (localAuthoredScale === normalizedControls.scribbleScale) {
+      return scales.segmentLength
+    }
 
-    const multiplier = localAuthoredScale / normalizedControls.scribbleScale
-    const segmentLength = scales.segmentLength * multiplier
+    const segmentLength =
+      scales.segmentLength *
+      (localAuthoredScale / normalizedControls.scribbleScale)
     const coverageRadius = segmentLength * COVERAGE_TO_SEGMENT
     const maskCheckSpacing = segmentLength * MASK_CHECK_TO_SEGMENT
 
-    // A valid dimensionless field sample can still overflow when converted to
-    // scene units. Keep all coupled geometry at the authored fine anchor rather
-    // than allowing one non-finite length to escape into traversal or deposits.
-    if (
-      !Number.isFinite(segmentLength) ||
-      segmentLength <= 0 ||
-      !Number.isFinite(coverageRadius) ||
-      coverageRadius <= 0 ||
-      !Number.isFinite(maskCheckSpacing) ||
-      maskCheckSpacing <= 0
-    ) {
-      return scales
-    }
+    return Number.isFinite(segmentLength) &&
+      segmentLength > 0 &&
+      Number.isFinite(coverageRadius) &&
+      coverageRadius > 0 &&
+      Number.isFinite(maskCheckSpacing) &&
+      maskCheckSpacing > 0
+      ? segmentLength
+      : scales.segmentLength
+  }
+
+  function localScalesAt(point: Readonly<Point>): ScribbleLocalScales {
+    if (scaleField === undefined) return scales
+
+    const segmentLength = localSegmentLengthAt(point)
+    if (segmentLength === scales.segmentLength) return scales
+    const coverageRadius = segmentLength * COVERAGE_TO_SEGMENT
+    const maskCheckSpacing = segmentLength * MASK_CHECK_TO_SEGMENT
 
     return Object.freeze({
       segmentLength,
@@ -303,10 +311,21 @@ export function createScribbleModel(
     })
   }
 
-  function profileSegment(
+  function scanSegment(
     start: Readonly<Point>,
     end: Readonly<Point>,
-  ): ScribbleSegmentScaleProfile | undefined {
+    captureSamples: true,
+  ): ScribbleSegmentScaleProfile | undefined
+  function scanSegment(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+    captureSamples?: false,
+  ): ScribbleSegmentScaleBounds | undefined
+  function scanSegment(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+    captureSamples = false,
+  ): ScribbleSegmentScaleProfile | ScribbleSegmentScaleBounds | undefined {
     const deltaX = end[0] - start[0]
     const deltaY = end[1] - start[1]
     const length = Math.hypot(deltaX, deltaY)
@@ -315,57 +334,70 @@ export function createScribbleModel(
     const intervalCount = Math.ceil(length / scales.maskCheckSpacing)
     if (!Number.isSafeInteger(intervalCount)) return undefined
 
-    const samples: ScribbleSegmentScaleSample[] = []
     let minimumSegmentLength = Number.POSITIVE_INFINITY
     let minimumMaskCheckSpacing = Number.POSITIVE_INFINITY
     let maximumCoverageRadius = 0
+    const samples: ScribbleSegmentScaleSample[] | undefined = captureSamples
+      ? []
+      : undefined
 
     for (let interval = 0; interval <= intervalCount; interval++) {
       const progress = intervalCount === 0 ? 0 : interval / intervalCount
-      const point = Object.freeze([
+      const rawPoint = [
         interval === intervalCount ? end[0] : start[0] + deltaX * progress,
         interval === intervalCount ? end[1] : start[1] + deltaY * progress,
-      ] as Point)
-      const localScales = localScalesAt(point)
-
-      if (
-        !Number.isFinite(localScales.segmentLength) ||
-        localScales.segmentLength <= 0 ||
-        !Number.isFinite(localScales.coverageRadius) ||
-        localScales.coverageRadius <= 0 ||
-        !Number.isFinite(localScales.maskCheckSpacing) ||
-        localScales.maskCheckSpacing <= 0
-      ) {
-        return undefined
-      }
+      ] as Point
+      const point = captureSamples ? Object.freeze(rawPoint) : rawPoint
+      const localScales = captureSamples ? localScalesAt(point) : undefined
+      const segmentLength =
+        localScales?.segmentLength ?? localSegmentLengthAt(point)
+      const coverageRadius =
+        localScales?.coverageRadius ?? segmentLength * COVERAGE_TO_SEGMENT
+      const maskCheckSpacing =
+        localScales?.maskCheckSpacing ?? segmentLength * MASK_CHECK_TO_SEGMENT
 
       minimumSegmentLength = Math.min(
         minimumSegmentLength,
-        localScales.segmentLength,
+        segmentLength,
       )
       minimumMaskCheckSpacing = Math.min(
         minimumMaskCheckSpacing,
-        localScales.maskCheckSpacing,
+        maskCheckSpacing,
       )
       maximumCoverageRadius = Math.max(
         maximumCoverageRadius,
-        localScales.coverageRadius,
+        coverageRadius,
       )
-      samples.push(Object.freeze({ point, progress, scales: localScales }))
+      samples?.push(Object.freeze({ point, progress, scales: localScales! }))
     }
 
     return Object.freeze({
       length,
-      samples: Object.freeze(samples),
+      ...(samples === undefined ? {} : { samples: Object.freeze(samples) }),
       minimumSegmentLength,
       minimumMaskCheckSpacing,
       maximumCoverageRadius,
     })
   }
 
+  function profileSegment(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): ScribbleSegmentScaleProfile | undefined {
+    return scanSegment(start, end, true)
+  }
+
+  function profileSegmentBounds(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): ScribbleSegmentScaleBounds | undefined {
+    return scanSegment(start, end)
+  }
+
   function isSegmentSafe(
     start: Readonly<Point>,
     end: Readonly<Point>,
+    knownBounds?: ScribbleSegmentScaleBounds,
   ): boolean {
     // Keep the established uniform-scale arithmetic and sampling path exact.
     if (scaleField === undefined) {
@@ -378,8 +410,8 @@ export function createScribbleModel(
       )
     }
 
-    const profile = profileSegment(start, end)
-    if (profile === undefined) return false
+    const bounds = knownBounds ?? profileSegmentBounds(start, end)
+    if (bounds === undefined) return false
 
     // Endpoints produced with sin/cos can differ from the requested length by
     // a few ulps. Admit only that representational noise, not a meaningful
@@ -387,9 +419,9 @@ export function createScribbleModel(
     const comparisonTolerance =
       Number.EPSILON *
       8 *
-      Math.max(1, profile.length, profile.minimumSegmentLength)
+      Math.max(1, bounds.length, bounds.minimumSegmentLength)
     if (
-      profile.length > profile.minimumSegmentLength + comparisonTolerance
+      bounds.length > bounds.minimumSegmentLength + comparisonTolerance
     ) {
       return false
     }
@@ -399,7 +431,7 @@ export function createScribbleModel(
       lattice.frame,
       start,
       end,
-      profile.minimumMaskCheckSpacing,
+      bounds.minimumMaskCheckSpacing,
     )
   }
 
@@ -479,13 +511,13 @@ export function createScribbleModel(
     start: Readonly<Point>,
     end: Readonly<Point>,
   ): void {
-    const profile = profileSegment(start, end)
-    if (profile === undefined) return
+    const bounds = profileSegmentBounds(start, end)
+    if (bounds === undefined) return
 
     // The profile supplies one conservative candidate bound. Each cell still
     // resolves its radius at the nearest centerline point, so a broad part of
     // the stroke cannot widen a neighboring fine part.
-    const maximumRadius = profile.maximumCoverageRadius
+    const maximumRadius = bounds.maximumCoverageRadius
     const minColumn = Math.max(
       0,
       Math.floor(
@@ -668,6 +700,7 @@ export function createScribbleModel(
     lattice,
     localScalesAt,
     profileSegment,
+    profileSegmentBounds,
     isSegmentSafe,
     residualError(): number {
       // Every term is bounded [0,1], and sampleCount is always positive.

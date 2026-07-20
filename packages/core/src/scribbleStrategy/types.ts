@@ -98,12 +98,17 @@ export interface ScribbleSegmentScaleSample {
 }
 
 /** Conservative local-scale bounds sampled along one exact segment. */
-export interface ScribbleSegmentScaleProfile {
+export interface ScribbleSegmentScaleBounds {
   readonly length: number
-  readonly samples: readonly ScribbleSegmentScaleSample[]
   readonly minimumSegmentLength: number
   readonly minimumMaskCheckSpacing: number
   readonly maximumCoverageRadius: number
+}
+
+/** Detailed local-scale stations plus their conservative segment bounds. */
+export interface ScribbleSegmentScaleProfile
+  extends ScribbleSegmentScaleBounds {
+  readonly samples: readonly ScribbleSegmentScaleSample[]
 }
 
 /** Fixed lattice geometry. Every cell has the same area and a center sample. */
@@ -148,11 +153,21 @@ export interface ScribbleModel {
     start: Readonly<Point>,
     end: Readonly<Point>,
   ): ScribbleSegmentScaleProfile | undefined
+  /** Profile only the conservative bounds needed by solver hot paths. */
+  profileSegmentBounds(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): ScribbleSegmentScaleBounds | undefined
   /**
    * Apply the shared conservative scale, mask, and frame safety decision.
    * Without a field this is exactly the original uniform mask check.
    */
-  isSegmentSafe(start: Readonly<Point>, end: Readonly<Point>): boolean
+  isSegmentSafe(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+    /** Bounds previously profiled for this exact segment. */
+    bounds?: ScribbleSegmentScaleBounds,
+  ): boolean
 
   /** `sum(permission * max(0, tone - coverage)) / sampleCount`. */
   residualError(): number

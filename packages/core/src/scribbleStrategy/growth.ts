@@ -115,19 +115,19 @@ function scaleFieldEndpoint(
 
   for (let refinement = 0; refinement < MAX_SCALE_REFINEMENTS; refinement++) {
     const endpoint = pointAtLength(start, angle, permittedLength)
-    const profile = model.profileSegment(start, endpoint)
-    if (profile === undefined) break
+    const bounds = model.profileSegmentBounds(start, endpoint)
+    if (bounds === undefined) break
 
     const shortenedLength = Math.min(
       permittedLength,
-      profile.minimumSegmentLength,
+      bounds.minimumSegmentLength,
     )
     if (shortenedLength < permittedLength) {
       permittedLength = shortenedLength
       continue
     }
 
-    return model.isSegmentSafe(start, endpoint) ? endpoint : undefined
+    return model.isSegmentSafe(start, endpoint, bounds) ? endpoint : undefined
   }
 
   const fineEndpoint = pointAtLength(

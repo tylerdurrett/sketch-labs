@@ -328,6 +328,17 @@ describe('Scribble coherent scale model', () => {
     expect(producer).toHaveBeenCalledTimes(first.samples.length * 2)
     expect(model.samples()).toEqual(beforeSamples)
     expect(model.residualError()).toBe(beforeResidual)
+
+    const bounds = model.profileSegmentBounds([0, 10], [12, 10])!
+    expect(bounds).toEqual({
+      length: first.length,
+      minimumSegmentLength: first.minimumSegmentLength,
+      minimumMaskCheckSpacing: first.minimumMaskCheckSpacing,
+      maximumCoverageRadius: first.maximumCoverageRadius,
+    })
+    const producerCalls = producer.mock.calls.length
+    expect(model.isSegmentSafe([0, 10], [12, 10], bounds)).toBe(true)
+    expect(producer).toHaveBeenCalledTimes(producerCalls)
   })
 
   it('profiles a zero-length segment once and declines non-finite or unsafe geometry', () => {
