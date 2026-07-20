@@ -21,7 +21,7 @@ import {
   createToneField,
   sampleEffectiveTone,
 } from '../shadingFields'
-import type { ScribbleProgress } from '../scribbleStrategy'
+import type { ShadingProgress } from '../shadingStrategy'
 
 /**
  * A scripted `rand` stub: yields the given values in order, so a test can pin
@@ -962,8 +962,8 @@ describe('caller-owned prepared frames', () => {
     expect(generatedEnvironments).toEqual([environment])
   })
 
-  it('preserves an optional Scribble artwork capability on a prepared Sketch', () => {
-    const progress: ScribbleProgress[] = []
+  it('preserves an optional Shading artwork capability on a prepared Sketch', () => {
+    const progress: ShadingProgress[] = []
     const artworkScene = sceneAt(7)
     const sketch = definePreparedSketch({
       id: 'prepared-scribble',
@@ -972,7 +972,7 @@ describe('caller-owned prepared frames', () => {
       prepare() {
         return sceneAt
       },
-      generateScribbleArtwork(_params, _seed, _frame, observer) {
+      generateShadingArtwork(_params, _seed, _frame, observer) {
         observer?.({
           completedWorkUnits: 2,
           totalWorkUnits: 2,
@@ -982,17 +982,17 @@ describe('caller-owned prepared frames', () => {
           scene: artworkScene,
           diagnostics: {
             termination: 'completed',
-            residualError: 0,
             pathLength: 1,
             polylineCount: 1,
             penLiftCount: 0,
+            fidelity: { kind: 'scribble', residualError: 0 },
           },
         }
       },
     })
 
     expect(
-      sketch.generateScribbleArtwork?.(
+      sketch.generateShadingArtwork?.(
         {},
         'seed',
         DEFAULT_COMPOSITION_FRAME,
@@ -1002,10 +1002,10 @@ describe('caller-owned prepared frames', () => {
       scene: artworkScene,
       diagnostics: {
         termination: 'completed',
-        residualError: 0,
         pathLength: 1,
         polylineCount: 1,
         penLiftCount: 0,
+        fidelity: { kind: 'scribble', residualError: 0 },
       },
     })
     expect(progress).toEqual([
@@ -1112,16 +1112,16 @@ describe('optional Sketch environment', () => {
           shadingMask: createShadingMask(() => 0),
         }
       },
-      generateScribbleArtwork(_params, _seed, _frame, _observer, current) {
+      generateShadingArtwork(_params, _seed, _frame, _observer, current) {
         received.push(current)
         return {
           scene,
           diagnostics: {
             termination: 'completed',
-            residualError: 0,
             pathLength: 0,
             polylineCount: 0,
             penLiftCount: 0,
+            fidelity: { kind: 'scribble', residualError: 0 },
           },
         }
       },
@@ -1133,7 +1133,7 @@ describe('optional Sketch environment', () => {
 
     sketch.generate({}, 1, 0, DEFAULT_COMPOSITION_FRAME, environment)
     sketch.generateToneSource?.({}, DEFAULT_COMPOSITION_FRAME, environment)
-    sketch.generateScribbleArtwork?.(
+    sketch.generateShadingArtwork?.(
       {},
       1,
       DEFAULT_COMPOSITION_FRAME,

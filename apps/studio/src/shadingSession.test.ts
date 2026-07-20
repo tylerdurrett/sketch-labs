@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import type { ParamSchema, Scene, ScribbleDiagnostics } from "@harness/core";
+import type { ParamSchema, Scene, ShadingDiagnostics } from "@harness/core";
 
 import {
-  createScribbleComputeIdentity,
-  type ScribbleComputeIdentity,
-} from "./scribbleComputeProtocol";
+  createShadingComputeIdentity,
+  type ShadingComputeIdentity,
+} from "./shadingComputeProtocol";
 import {
-  createScribbleSessionState,
-  scribbleSessionReducer,
-  selectCurrentScribbleResult,
-  selectExportableScribbleResult,
-  type ScribbleSessionState,
-} from "./scribbleSession";
+  createShadingSessionState,
+  shadingSessionReducer,
+  selectCurrentShadingResult,
+  selectExportableShadingResult,
+  type ShadingSessionState,
+} from "./shadingSession";
 
 const schema: ParamSchema = {
   amount: { kind: "number", min: 0, max: 10, default: 1 },
@@ -25,26 +25,26 @@ const sceneB: Scene = {
   space: sceneA.space,
   primitives: [{ points: [[10, 0], [0, 10]] }],
 };
-const completedDiagnostics: ScribbleDiagnostics = {
+const completedDiagnostics: ShadingDiagnostics = {
   termination: "completed",
-  residualError: 0.01,
   pathLength: 42,
   polylineCount: 3,
   penLiftCount: 2,
+  fidelity: { kind: "scribble", residualError: 0.01 },
 };
-const exhaustedDiagnostics: ScribbleDiagnostics = {
+const exhaustedDiagnostics: ShadingDiagnostics = {
   ...completedDiagnostics,
   termination: "budget-exhausted",
-  residualError: 0.2,
+  fidelity: { kind: "scribble", residualError: 0.2 },
 };
-const stoppedEarlyDiagnostics: ScribbleDiagnostics = {
+const stoppedEarlyDiagnostics: ShadingDiagnostics = {
   ...completedDiagnostics,
   termination: "stopped-early",
-  residualError: 0.1,
+  fidelity: { kind: "scribble", residualError: 0.1 },
 };
 
-function identity(amount: number): ScribbleComputeIdentity {
-  return createScribbleComputeIdentity({
+function identity(amount: number): ShadingComputeIdentity {
+  return createShadingComputeIdentity({
     sketchId: "test",
     schema,
     params: { amount },
@@ -53,8 +53,8 @@ function identity(amount: number): ScribbleComputeIdentity {
   });
 }
 
-function launch(state: ScribbleSessionState): ScribbleSessionState {
-  return scribbleSessionReducer(state, {
+function launch(state: ShadingSessionState): ShadingSessionState {
+  return shadingSessionReducer(state, {
     type: "launched",
     token: state.pending!.token,
     identity: state.pending!.identity,
@@ -62,11 +62,11 @@ function launch(state: ScribbleSessionState): ScribbleSessionState {
 }
 
 function succeed(
-  state: ScribbleSessionState,
+  state: ShadingSessionState,
   scene: Scene = sceneA,
-  diagnostics: ScribbleDiagnostics = completedDiagnostics,
-): ScribbleSessionState {
-  return scribbleSessionReducer(state, {
+  diagnostics: ShadingDiagnostics = completedDiagnostics,
+): ShadingSessionState {
+  return shadingSessionReducer(state, {
     type: "succeeded",
     token: state.active!.token,
     identity: state.active!.identity,
@@ -76,13 +76,13 @@ function succeed(
   });
 }
 
-function completedA(): ScribbleSessionState {
-  return succeed(launch(createScribbleSessionState(identity(1), 10)));
+function completedA(): ShadingSessionState {
+  return succeed(launch(createShadingSessionState(identity(1), 10)));
 }
 
-describe("scribbleSessionReducer", () => {
+describe("shadingSessionReducer", () => {
   it("enqueues the initial identity once with explicit authored provenance", () => {
-    const initial = createScribbleSessionState(identity(1), 10);
+    const initial = createShadingSessionState(identity(1), 10);
 
     expect(initial.pending).toEqual({
       token: 1,
@@ -91,14 +91,14 @@ describe("scribbleSessionReducer", () => {
     });
     expect(initial.nextToken).toBe(2);
 
-    const repeatedDesired = scribbleSessionReducer(initial, {
+    const repeatedDesired = shadingSessionReducer(initial, {
       type: "desired-identity-changed",
       identity: identity(1),
       sourceInputRevision: 10,
     });
     expect(repeatedDesired).toBe(initial);
 
-    const settled = scribbleSessionReducer(initial, {
+    const settled = shadingSessionReducer(initial, {
       type: "transaction-settled",
       identity: identity(1),
       sourceInputRevision: 10,
@@ -107,16 +107,16 @@ describe("scribbleSessionReducer", () => {
   });
 
   it("moves only the matching pending token and identity into active ownership", () => {
-    const pending = createScribbleSessionState(identity(1), 10);
+    const pending = createShadingSessionState(identity(1), 10);
     expect(
-      scribbleSessionReducer(pending, {
+      shadingSessionReducer(pending, {
         type: "launched",
         token: 2,
         identity: identity(1),
       }),
     ).toBe(pending);
     expect(
-      scribbleSessionReducer(pending, {
+      shadingSessionReducer(pending, {
         type: "launched",
         token: 1,
         identity: identity(2),
@@ -130,13 +130,13 @@ describe("scribbleSessionReducer", () => {
 
   it("invalidates active work at transaction begin but retains the completed display stale", () => {
     const completed = completedA();
-    const replacement = scribbleSessionReducer(completed, {
+    const replacement = shadingSessionReducer(completed, {
       type: "transaction-settled",
       identity: identity(2),
       sourceInputRevision: 11,
     });
     const active = launch(replacement);
-    const begun = scribbleSessionReducer(active, {
+    const begun = shadingSessionReducer(active, {
       type: "transaction-began",
     });
 
@@ -144,19 +144,19 @@ describe("scribbleSessionReducer", () => {
     expect(begun.active).toBeNull();
     expect(begun.pending).toBeNull();
     expect(begun.displayed).toBe(completed.displayed);
-    expect(selectCurrentScribbleResult(begun)).toBeNull();
+    expect(selectCurrentShadingResult(begun)).toBeNull();
   });
 
   it("coalesces previews without launching and settles exactly one latest request", () => {
-    const begun = scribbleSessionReducer(completedA(), {
+    const begun = shadingSessionReducer(completedA(), {
       type: "transaction-began",
     });
-    const firstPreview = scribbleSessionReducer(begun, {
+    const firstPreview = shadingSessionReducer(begun, {
       type: "desired-identity-changed",
       identity: identity(2),
       sourceInputRevision: 11,
     });
-    const latestPreview = scribbleSessionReducer(firstPreview, {
+    const latestPreview = shadingSessionReducer(firstPreview, {
       type: "desired-identity-changed",
       identity: identity(3),
       sourceInputRevision: 12,
@@ -166,7 +166,7 @@ describe("scribbleSessionReducer", () => {
     expect(latestPreview.pending).toBeNull();
     expect(latestPreview.nextToken).toBe(begun.nextToken);
 
-    const settled = scribbleSessionReducer(latestPreview, {
+    const settled = shadingSessionReducer(latestPreview, {
       type: "transaction-settled",
       identity: identity(3),
       sourceInputRevision: 12,
@@ -177,7 +177,7 @@ describe("scribbleSessionReducer", () => {
       sourceInputRevision: 12,
     });
     expect(
-      scribbleSessionReducer(settled, {
+      shadingSessionReducer(settled, {
         type: "transaction-settled",
         identity: identity(3),
         sourceInputRevision: 12,
@@ -186,21 +186,21 @@ describe("scribbleSessionReducer", () => {
   });
 
   it("ignores delayed authored actions older than the pending or active generation", () => {
-    const begun = scribbleSessionReducer(completedA(), {
+    const begun = shadingSessionReducer(completedA(), {
       type: "transaction-began",
     });
-    const previewed = scribbleSessionReducer(begun, {
+    const previewed = shadingSessionReducer(begun, {
       type: "desired-identity-changed",
       identity: identity(3),
       sourceInputRevision: 12,
     });
-    const pending = scribbleSessionReducer(previewed, {
+    const pending = shadingSessionReducer(previewed, {
       type: "transaction-settled",
       identity: identity(3),
       sourceInputRevision: 12,
     });
 
-    const delayedPreview = scribbleSessionReducer(pending, {
+    const delayedPreview = shadingSessionReducer(pending, {
       type: "desired-identity-changed",
       identity: identity(2),
       sourceInputRevision: 11,
@@ -209,7 +209,7 @@ describe("scribbleSessionReducer", () => {
     expect(delayedPreview.pending?.sourceInputRevision).toBe(12);
 
     const active = launch(pending);
-    const delayedSettle = scribbleSessionReducer(active, {
+    const delayedSettle = shadingSessionReducer(active, {
       type: "transaction-settled",
       identity: identity(2),
       sourceInputRevision: 11,
@@ -220,9 +220,9 @@ describe("scribbleSessionReducer", () => {
 
   it("cannot roll a current display back or make stale geometry exportable", () => {
     const current = succeed(
-      launch(createScribbleSessionState(identity(3), 12)),
+      launch(createShadingSessionState(identity(3), 12)),
     );
-    const delayed = scribbleSessionReducer(current, {
+    const delayed = shadingSessionReducer(current, {
       type: "transaction-settled",
       identity: identity(2),
       sourceInputRevision: 11,
@@ -230,12 +230,12 @@ describe("scribbleSessionReducer", () => {
 
     expect(delayed).toBe(current);
     expect(delayed.sourceInputRevision).toBe(12);
-    expect(selectExportableScribbleResult(delayed)).toBe(current.displayed);
+    expect(selectExportableShadingResult(delayed)).toBe(current.displayed);
   });
 
   it("does not duplicate exact active work and advances its provenance", () => {
-    const active = launch(createScribbleSessionState(identity(1), 10));
-    const settled = scribbleSessionReducer(active, {
+    const active = launch(createShadingSessionState(identity(1), 10));
+    const settled = shadingSessionReducer(active, {
       type: "transaction-settled",
       identity: identity(1),
       sourceInputRevision: 11,
@@ -251,9 +251,9 @@ describe("scribbleSessionReducer", () => {
   });
 
   it("accepts success only when both active token and identity match", () => {
-    const active = launch(createScribbleSessionState(identity(1), 10));
+    const active = launch(createShadingSessionState(identity(1), 10));
     expect(
-      scribbleSessionReducer(active, {
+      shadingSessionReducer(active, {
         type: "succeeded",
         token: active.active!.token + 1,
         identity: active.active!.identity,
@@ -263,7 +263,7 @@ describe("scribbleSessionReducer", () => {
       }),
     ).toBe(active);
     expect(
-      scribbleSessionReducer(active, {
+      shadingSessionReducer(active, {
         type: "succeeded",
         token: active.active!.token,
         identity: identity(2),
@@ -285,27 +285,27 @@ describe("scribbleSessionReducer", () => {
 
   it("promotes exact cached A after A to B to A with current provenance and fresh content", () => {
     const a = completedA();
-    const begunB = scribbleSessionReducer(a, { type: "transaction-began" });
-    const previewB = scribbleSessionReducer(begunB, {
+    const begunB = shadingSessionReducer(a, { type: "transaction-began" });
+    const previewB = shadingSessionReducer(begunB, {
       type: "desired-identity-changed",
       identity: identity(2),
       sourceInputRevision: 11,
     });
-    const pendingB = scribbleSessionReducer(previewB, {
+    const pendingB = shadingSessionReducer(previewB, {
       type: "transaction-settled",
       identity: identity(2),
       sourceInputRevision: 11,
     });
     const activeB = launch(pendingB);
-    const begunA = scribbleSessionReducer(activeB, {
+    const begunA = shadingSessionReducer(activeB, {
       type: "transaction-began",
     });
-    const previewA = scribbleSessionReducer(begunA, {
+    const previewA = shadingSessionReducer(begunA, {
       type: "desired-identity-changed",
       identity: identity(1),
       sourceInputRevision: 12,
     });
-    const promoted = scribbleSessionReducer(previewA, {
+    const promoted = shadingSessionReducer(previewA, {
       type: "transaction-settled",
       identity: identity(1),
       sourceInputRevision: 12,
@@ -317,9 +317,9 @@ describe("scribbleSessionReducer", () => {
     expect(promoted.displayed?.sourceInputRevision).toBe(12);
     expect(promoted.displayed?.contentRevision).toBe(2);
     expect(promoted.nextContentRevision).toBe(3);
-    expect(selectCurrentScribbleResult(promoted)).toBe(promoted.displayed);
+    expect(selectCurrentShadingResult(promoted)).toBe(promoted.displayed);
     expect(
-      scribbleSessionReducer(promoted, {
+      shadingSessionReducer(promoted, {
         type: "transaction-settled",
         identity: identity(1),
         sourceInputRevision: 12,
@@ -329,27 +329,27 @@ describe("scribbleSessionReducer", () => {
 
   it("retains stale completion through cancellation and failure", () => {
     const completed = completedA();
-    const pendingB = scribbleSessionReducer(completed, {
+    const pendingB = shadingSessionReducer(completed, {
       type: "transaction-settled",
       identity: identity(2),
       sourceInputRevision: 11,
     });
     const activeB = launch(pendingB);
-    const cancelled = scribbleSessionReducer(activeB, {
+    const cancelled = shadingSessionReducer(activeB, {
       type: "cancelled",
       token: activeB.active!.token,
     });
     expect(cancelled.displayed).toBe(completed.displayed);
     expect(cancelled.failure).toBeNull();
-    expect(selectCurrentScribbleResult(cancelled)).toBeNull();
+    expect(selectCurrentShadingResult(cancelled)).toBeNull();
 
-    const pendingAgain = scribbleSessionReducer(cancelled, {
+    const pendingAgain = shadingSessionReducer(cancelled, {
       type: "transaction-settled",
       identity: identity(2),
       sourceInputRevision: 11,
     });
     const activeAgain = launch(pendingAgain);
-    const failed = scribbleSessionReducer(activeAgain, {
+    const failed = shadingSessionReducer(activeAgain, {
       type: "failed",
       token: activeAgain.active!.token,
       identity: activeAgain.active!.identity,
@@ -357,16 +357,33 @@ describe("scribbleSessionReducer", () => {
     });
     expect(failed.displayed).toBe(completed.displayed);
     expect(failed.failure).toBe("safe detail");
-    expect(selectCurrentScribbleResult(failed)).toBeNull();
+    expect(selectCurrentShadingResult(failed)).toBeNull();
+  });
+
+  it("keeps the displayed fidelity variant attached while desired controls change", () => {
+    const completed = completedA();
+    const replacement = shadingSessionReducer(completed, {
+      type: "transaction-settled",
+      identity: identity(2),
+      sourceInputRevision: 11,
+    });
+
+    expect(replacement.desiredIdentity).toEqual(identity(2));
+    expect(replacement.displayed?.diagnostics).toBe(completedDiagnostics);
+    expect(replacement.displayed?.diagnostics.fidelity).toEqual({
+      kind: "scribble",
+      residualError: 0.01,
+    });
+    expect(selectCurrentShadingResult(replacement)).toBeNull();
   });
 
   it("rejects stale cancellation and failure terminals", () => {
-    const active = launch(createScribbleSessionState(identity(1), 10));
+    const active = launch(createShadingSessionState(identity(1), 10));
     expect(
-      scribbleSessionReducer(active, { type: "cancelled", token: 99 }),
+      shadingSessionReducer(active, { type: "cancelled", token: 99 }),
     ).toBe(active);
     expect(
-      scribbleSessionReducer(active, {
+      shadingSessionReducer(active, {
         type: "failed",
         token: active.active!.token,
         identity: identity(2),
@@ -376,8 +393,8 @@ describe("scribbleSessionReducer", () => {
   });
 
   it("records an initial failure without fabricating a display", () => {
-    const active = launch(createScribbleSessionState(identity(1), 10));
-    const failed = scribbleSessionReducer(active, {
+    const active = launch(createShadingSessionState(identity(1), 10));
+    const failed = shadingSessionReducer(active, {
       type: "failed",
       token: active.active!.token,
       identity: active.active!.identity,
@@ -386,25 +403,25 @@ describe("scribbleSessionReducer", () => {
 
     expect(failed.displayed).toBeNull();
     expect(failed.failure).toBe("safe detail");
-    expect(selectExportableScribbleResult(failed)).toBeNull();
+    expect(selectExportableShadingResult(failed)).toBeNull();
   });
 
   it("re-enqueues one current failed identity and ignores obsolete retries", () => {
-    const active = launch(createScribbleSessionState(identity(2), 11));
-    const failed = scribbleSessionReducer(active, {
+    const active = launch(createShadingSessionState(identity(2), 11));
+    const failed = shadingSessionReducer(active, {
       type: "failed",
       token: active.active!.token,
       identity: active.active!.identity,
       error: "analysis failed",
     });
-    const obsolete = scribbleSessionReducer(failed, {
+    const obsolete = shadingSessionReducer(failed, {
       type: "retry",
       identity: identity(1),
       sourceInputRevision: 10,
     });
     expect(obsolete).toBe(failed);
 
-    const retried = scribbleSessionReducer(failed, {
+    const retried = shadingSessionReducer(failed, {
       type: "retry",
       identity: failed.desiredIdentity!,
       sourceInputRevision: failed.sourceInputRevision!,
@@ -417,7 +434,7 @@ describe("scribbleSessionReducer", () => {
     expect(retried.failure).toBeNull();
     expect(retried.nextToken).toBe(failed.nextToken + 1);
     expect(
-      scribbleSessionReducer(retried, {
+      shadingSessionReducer(retried, {
         type: "retry",
         identity: retried.desiredIdentity!,
         sourceInputRevision: retried.sourceInputRevision!,
@@ -428,13 +445,13 @@ describe("scribbleSessionReducer", () => {
   it("suspends active ownership synchronously while preserving desired state and display", () => {
     const completed = completedA();
     const active = launch(
-      scribbleSessionReducer(completed, {
+      shadingSessionReducer(completed, {
         type: "transaction-settled",
         identity: identity(2),
         sourceInputRevision: 11,
       }),
     );
-    const suspended = scribbleSessionReducer(active, { type: "suspend" });
+    const suspended = shadingSessionReducer(active, { type: "suspend" });
 
     expect(suspended.suspended).toBe(true);
     expect(suspended.desiredIdentity).toBe(active.desiredIdentity);
@@ -443,10 +460,10 @@ describe("scribbleSessionReducer", () => {
     expect(suspended.pending).toBeNull();
     expect(suspended.active).toBeNull();
     expect(
-      scribbleSessionReducer(suspended, { type: "suspend" }),
+      shadingSessionReducer(suspended, { type: "suspend" }),
     ).toBe(suspended);
 
-    const staleSuccess = scribbleSessionReducer(suspended, {
+    const staleSuccess = shadingSessionReducer(suspended, {
       type: "succeeded",
       token: active.active!.token,
       identity: active.active!.identity,
@@ -458,23 +475,23 @@ describe("scribbleSessionReducer", () => {
   });
 
   it("records only the latest authored state while suspended and resumes it once", () => {
-    const suspended = scribbleSessionReducer(completedA(), {
+    const suspended = shadingSessionReducer(completedA(), {
       type: "suspend",
     });
-    const begun = scribbleSessionReducer(suspended, {
+    const begun = shadingSessionReducer(suspended, {
       type: "transaction-began",
     });
-    const first = scribbleSessionReducer(begun, {
+    const first = shadingSessionReducer(begun, {
       type: "desired-identity-changed",
       identity: identity(2),
       sourceInputRevision: 11,
     });
-    const latest = scribbleSessionReducer(first, {
+    const latest = shadingSessionReducer(first, {
       type: "desired-identity-changed",
       identity: identity(3),
       sourceInputRevision: 12,
     });
-    const settled = scribbleSessionReducer(latest, {
+    const settled = shadingSessionReducer(latest, {
       type: "transaction-settled",
       identity: identity(3),
       sourceInputRevision: 12,
@@ -488,7 +505,7 @@ describe("scribbleSessionReducer", () => {
     expect(settled.desiredIdentity).toEqual(identity(3));
     expect(settled.sourceInputRevision).toBe(12);
 
-    const resumed = scribbleSessionReducer(settled, {
+    const resumed = shadingSessionReducer(settled, {
       type: "resume-latest",
     });
     expect(resumed.suspended).toBe(false);
@@ -499,19 +516,19 @@ describe("scribbleSessionReducer", () => {
     });
     expect(resumed.nextToken).toBe(suspended.nextToken + 1);
     expect(
-      scribbleSessionReducer(resumed, { type: "resume-latest" }),
+      shadingSessionReducer(resumed, { type: "resume-latest" }),
     ).toBe(resumed);
   });
 
   it("does not enqueue on resume when the displayed result is already exact", () => {
     const completed = completedA();
-    const suspended = scribbleSessionReducer(completed, { type: "suspend" });
-    const promoted = scribbleSessionReducer(suspended, {
+    const suspended = shadingSessionReducer(completed, { type: "suspend" });
+    const promoted = shadingSessionReducer(suspended, {
       type: "transaction-settled",
       identity: identity(1),
       sourceInputRevision: 11,
     });
-    const resumed = scribbleSessionReducer(promoted, {
+    const resumed = shadingSessionReducer(promoted, {
       type: "resume-latest",
     });
 
@@ -519,7 +536,7 @@ describe("scribbleSessionReducer", () => {
     expect(resumed.suspended).toBe(false);
     expect(resumed.pending).toBeNull();
     expect(resumed.nextToken).toBe(promoted.nextToken);
-    expect(selectCurrentScribbleResult(resumed)).toBe(resumed.displayed);
+    expect(selectCurrentShadingResult(resumed)).toBe(resumed.displayed);
   });
 
   it.each([
@@ -527,29 +544,29 @@ describe("scribbleSessionReducer", () => {
     ["stopped-early", stoppedEarlyDiagnostics],
   ] as const)("exports current %s completion but never stale completion", (_, diagnostics) => {
     const exhausted = succeed(
-      launch(createScribbleSessionState(identity(1), 10)),
+      launch(createShadingSessionState(identity(1), 10)),
       sceneA,
       diagnostics,
     );
-    expect(selectExportableScribbleResult(exhausted)).toBe(
+    expect(selectExportableShadingResult(exhausted)).toBe(
       exhausted.displayed,
     );
 
-    const begun = scribbleSessionReducer(exhausted, {
+    const begun = shadingSessionReducer(exhausted, {
       type: "transaction-began",
     });
-    expect(selectExportableScribbleResult(begun)).toBeNull();
-    const preview = scribbleSessionReducer(begun, {
+    expect(selectExportableShadingResult(begun)).toBeNull();
+    const preview = shadingSessionReducer(begun, {
       type: "desired-identity-changed",
       identity: identity(2),
       sourceInputRevision: 11,
     });
-    expect(selectExportableScribbleResult(preview)).toBeNull();
+    expect(selectExportableShadingResult(preview)).toBeNull();
   });
 
   it("disposal clears desired, work, display, failures, and counters", () => {
-    const active = launch(createScribbleSessionState(identity(1), 10));
-    const disposed = scribbleSessionReducer(active, { type: "dispose" });
+    const active = launch(createShadingSessionState(identity(1), 10));
+    const disposed = shadingSessionReducer(active, { type: "dispose" });
 
     expect(disposed).toEqual({
       desiredIdentity: null,
@@ -563,6 +580,6 @@ describe("scribbleSessionReducer", () => {
       nextToken: 1,
       nextContentRevision: 1,
     });
-    expect(selectCurrentScribbleResult(disposed)).toBeNull();
+    expect(selectCurrentShadingResult(disposed)).toBeNull();
   });
 });

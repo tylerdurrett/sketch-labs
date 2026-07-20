@@ -1,12 +1,12 @@
 import type { DisplayedSceneSnapshot } from "./LiveCanvas";
 import {
-  selectExportableScribbleResult,
-  type DisplayedScribbleResult,
-  type ScribbleSessionState,
-} from "./scribbleSession";
+  selectExportableShadingResult,
+  type DisplayedShadingResult,
+  type ShadingSessionState,
+} from "./shadingSession";
 
 /** The exact supplied Scene revision LiveCanvas has acknowledged painting. */
-export interface ScribblePaintAcknowledgement {
+export interface ShadingPaintAcknowledgement {
   readonly sourceInputRevision: number;
   readonly contentRevision: number;
 }
@@ -19,12 +19,12 @@ export interface ScribblePaintAcknowledgement {
  * LiveCanvas committed that result, while the fresh snapshot prevents a stale
  * canvas (including a same-batch programmatic export) from passing the guard.
  */
-export function acknowledgedCurrentScribble(
-  session: ScribbleSessionState,
-  acknowledgement: ScribblePaintAcknowledgement | null,
+export function acknowledgedCurrentShading(
+  session: ShadingSessionState,
+  acknowledgement: ShadingPaintAcknowledgement | null,
   displayed: DisplayedSceneSnapshot | null,
-): DisplayedScribbleResult | null {
-  const current = selectExportableScribbleResult(session);
+): DisplayedShadingResult | null {
+  const current = selectExportableShadingResult(session);
   if (
     current === null ||
     acknowledgement?.sourceInputRevision !== current.sourceInputRevision ||
@@ -37,12 +37,12 @@ export function acknowledgedCurrentScribble(
   return current;
 }
 
-export function isAcknowledgedCurrentScribble(
-  session: ScribbleSessionState,
-  acknowledgement: ScribblePaintAcknowledgement | null,
+export function isAcknowledgedCurrentShading(
+  session: ShadingSessionState,
+  acknowledgement: ShadingPaintAcknowledgement | null,
   displayed: DisplayedSceneSnapshot | null,
 ): boolean {
   return (
-    acknowledgedCurrentScribble(session, acknowledgement, displayed) !== null
+    acknowledgedCurrentShading(session, acknowledgement, displayed) !== null
   );
 }

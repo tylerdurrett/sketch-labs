@@ -353,7 +353,7 @@ describe("outlineSessionReducer", () => {
     expect(notReused.phase).toMatchObject(changedProvenance);
   });
 
-  it("keeps Scribble provenance when export refreshes an identical Outline cache", () => {
+  it("keeps Shading provenance when export refreshes an identical Outline cache", () => {
     const provenance = { sourceInputRevision: 4, contentRevision: 7 };
     const requested = outlineSessionReducer(createOutlineSessionState(), {
       type: "request-outline",

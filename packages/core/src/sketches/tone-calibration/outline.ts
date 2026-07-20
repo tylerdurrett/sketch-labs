@@ -1,7 +1,7 @@
 /**
  * Tone Calibration's completed-artwork Outline source.
  *
- * Scribble preparation is authoritative: Outline only clones the exact paths
+ * Shading preparation is authoritative: Outline only clones the exact paths
  * that preparation completed and applies the active physical tool width. It
  * never samples the analytic Tone reference or generates replacement geometry.
  */
