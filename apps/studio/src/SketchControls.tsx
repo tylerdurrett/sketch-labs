@@ -126,15 +126,15 @@ import {
   type ShadingPreparationDiagnostics,
 } from "./ShadingDiagnostics";
 import { SimplifyControl } from "./SimplifyControl";
-import { selectCurrentScribbleResult } from "./scribbleSession";
+import { selectCurrentShadingResult } from "./shadingSession";
 import {
-  acknowledgedCurrentScribble,
-  type ScribblePaintAcknowledgement,
-} from "./scribbleExportReadiness";
+  acknowledgedCurrentShading,
+  type ShadingPaintAcknowledgement,
+} from "./shadingExportReadiness";
 import {
-  useScribblePreparation,
-  type ScribbleAuthoredState,
-} from "./useScribblePreparation";
+  useShadingPreparation,
+  type ShadingAuthoredState,
+} from "./useShadingPreparation";
 import { useSketchEnvironment } from "./useSketchEnvironment";
 import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
 import { useDetailPreparation } from "./useDetailPreparation";
@@ -328,8 +328,8 @@ function classifyOutlineEdit(
   return "none";
 }
 
-/** Whether an edit changes the time-invariant Scribble worker identity. */
-function scribbleInputsChanged(
+/** Whether an edit changes the time-invariant Shading worker identity. */
+function shadingInputsChanged(
   sketch: Sketch,
   previous: StudioEditState,
   next: StudioEditState,
@@ -563,76 +563,76 @@ export function SketchControls({
     detailPreparation.unrequest,
   ]);
 
-  const hasScribblePreparation = sketch.generateScribbleArtwork !== undefined;
-  const scribbleInputRevisionRef = useRef(0);
-  const scribblePreparation = useScribblePreparation({
+  const hasShadingPreparation = sketch.generateShadingArtwork !== undefined;
+  const shadingInputRevisionRef = useRef(0);
+  const shadingPreparation = useShadingPreparation({
     sketch,
-    enabled: hasScribblePreparation && environmentReady,
+    enabled: hasShadingPreparation && environmentReady,
     initial: {
       params: history.present.params,
       seed: history.present.seed,
       compositionFrame,
-      inputRevision: scribbleInputRevisionRef.current,
+      inputRevision: shadingInputRevisionRef.current,
     },
   });
-  const currentScribble = environmentReady
-    ? selectCurrentScribbleResult(scribblePreparation.session)
+  const currentShading = environmentReady
+    ? selectCurrentShadingResult(shadingPreparation.session)
     : null;
   const displayedShadingDiagnostics: DisplayedShadingDiagnostics | null =
-    !environmentReady || scribblePreparation.session.displayed === null
+    !environmentReady || shadingPreparation.session.displayed === null
       ? null
       : {
-          freshness: currentScribble === null ? "stale" : "current",
-          diagnostics: scribblePreparation.session.displayed.diagnostics,
-          computeTimeMs: scribblePreparation.session.displayed.computeTimeMs,
+          freshness: currentShading === null ? "stale" : "current",
+          diagnostics: shadingPreparation.session.displayed.diagnostics,
+          computeTimeMs: shadingPreparation.session.displayed.computeTimeMs,
         };
-  const activeScribbleToken = environmentReady
-    ? (scribblePreparation.session.active?.token ??
-        scribblePreparation.session.pending?.token ??
+  const activeShadingToken = environmentReady
+    ? (shadingPreparation.session.active?.token ??
+        shadingPreparation.session.pending?.token ??
         null)
     : null;
   const shadingPreparationDiagnostics: ShadingPreparationDiagnostics =
-    activeScribbleToken !== null
+    activeShadingToken !== null
       ? {
           kind: "preparing",
           progress:
-            scribblePreparation.progress?.token === activeScribbleToken
-              ? scribblePreparation.progress.update.snapshot
+            shadingPreparation.progress?.token === activeShadingToken
+              ? shadingPreparation.progress.update.snapshot
               : null,
           eta:
-            scribblePreparation.progress?.token === activeScribbleToken
-              ? scribblePreparation.progress.update.eta
+            shadingPreparation.progress?.token === activeShadingToken
+              ? shadingPreparation.progress.update.eta
               : { kind: "estimating", revision: 0 },
         }
-      : scribblePreparation.session.failure === null
+      : shadingPreparation.session.failure === null
         ? { kind: "idle" }
         : {
             kind: "failure",
-            message: scribblePreparation.session.failure,
-            onRetry: scribblePreparation.retry,
+            message: shadingPreparation.session.failure,
+            onRetry: shadingPreparation.retry,
           };
-  const [acknowledgedScribble, setAcknowledgedScribble] =
-    useState<ScribblePaintAcknowledgement | null>(null);
-  const acknowledgedScribbleRef = useRef(acknowledgedScribble);
-  acknowledgedScribbleRef.current = acknowledgedScribble;
-  const scribblePaintIsCurrent =
+  const [acknowledgedShading, setAcknowledgedShading] =
+    useState<ShadingPaintAcknowledgement | null>(null);
+  const acknowledgedShadingRef = useRef(acknowledgedShading);
+  acknowledgedShadingRef.current = acknowledgedShading;
+  const shadingPaintIsCurrent =
     environmentReady &&
-    currentScribble !== null &&
-    acknowledgedScribble?.sourceInputRevision ===
-      currentScribble.sourceInputRevision &&
-    acknowledgedScribble.contentRevision === currentScribble.contentRevision;
-  const emptyScribbleScene = useMemo<Scene>(
+    currentShading !== null &&
+    acknowledgedShading?.sourceInputRevision ===
+      currentShading.sourceInputRevision &&
+    acknowledgedShading.contentRevision === currentShading.contentRevision;
+  const emptyShadingScene = useMemo<Scene>(
     () => ({ space: compositionFrame, primitives: [] }),
     [compositionFrame],
   );
 
-  const authoredScribbleState = (
+  const authoredShadingState = (
     edit: StudioEditState = historyRef.current.present,
-  ): ScribbleAuthoredState => ({
+  ): ShadingAuthoredState => ({
     params: artworkGenerationParams(sketch, edit.params),
     seed: edit.seed,
     compositionFrame: resolveStudioCompositionFrame(edit),
-    inputRevision: scribbleInputRevisionRef.current,
+    inputRevision: shadingInputRevisionRef.current,
   });
 
   // Sample-source derivation intentionally reads the live transaction preview
@@ -849,12 +849,12 @@ export function SketchControls({
     if (!environmentReadyNow()) return;
     dispatchOutline({
       type: "request-outline",
-      launch: !hasScribblePreparation || scribblePaintIsCurrent,
-      ...(scribblePaintIsCurrent && currentScribble !== null
+      launch: !hasShadingPreparation || shadingPaintIsCurrent,
+      ...(shadingPaintIsCurrent && currentShading !== null
         ? {
             provenance: {
-              sourceInputRevision: currentScribble.sourceInputRevision,
-              contentRevision: currentScribble.contentRevision,
+              sourceInputRevision: currentShading.sourceInputRevision,
+              contentRevision: currentShading.contentRevision,
             },
           }
         : {}),
@@ -864,38 +864,38 @@ export function SketchControls({
   const updateHistory = (
     transition: (current: EditHistory) => EditHistory,
     launchOutline = true,
-    scribbleAction: "preview" | "atomic" | null = null,
+    shadingAction: "preview" | "atomic" | null = null,
   ): void => {
     const current = historyRef.current;
     const next = transition(current);
     if (next === current) return;
     historyRef.current = next;
     cancelUnavailableEnvironmentWork();
-    const scribbleChanged = scribbleInputsChanged(
+    const shadingChanged = shadingInputsChanged(
       sketch,
       current.present,
       next.present,
     );
-    if (hasScribblePreparation && scribbleChanged) {
-      scribbleInputRevisionRef.current += 1;
+    if (hasShadingPreparation && shadingChanged) {
+      shadingInputRevisionRef.current += 1;
     }
     if (
-      hasScribblePreparation &&
-      scribbleAction === "preview" &&
-      scribbleChanged
+      hasShadingPreparation &&
+      shadingAction === "preview" &&
+      shadingChanged
     ) {
-      if (!scribblePreparation.getSessionSnapshot().transactionOpen) {
-        scribblePreparation.beginTransaction();
+      if (!shadingPreparation.getSessionSnapshot().transactionOpen) {
+        shadingPreparation.beginTransaction();
       }
-      scribblePreparation.previewAuthoredState(
-        authoredScribbleState(next.present),
+      shadingPreparation.previewAuthoredState(
+        authoredShadingState(next.present),
       );
     } else if (
-      hasScribblePreparation &&
-      scribbleAction === "atomic" &&
-      scribbleChanged
+      hasShadingPreparation &&
+      shadingAction === "atomic" &&
+      shadingChanged
     ) {
-      scribblePreparation.requestAtomic(authoredScribbleState(next.present));
+      shadingPreparation.requestAtomic(authoredShadingState(next.present));
     }
     const outlineChange = classifyOutlineEdit(
       sketch,
@@ -912,21 +912,21 @@ export function SketchControls({
       ) {
         dispatchOutline({ type: "transaction-began" });
       }
-      const retainsPaintedScribble =
-        hasScribblePreparation && !scribbleChanged && scribblePaintIsCurrent;
+      const retainsPaintedShading =
+        hasShadingPreparation && !shadingChanged && shadingPaintIsCurrent;
       dispatchOutline({
         type: "inputs-changed",
         launch:
-          environmentReadyNow() && launchOutline && !hasScribblePreparation,
-        ...(retainsPaintedScribble && currentScribble !== null
+          environmentReadyNow() && launchOutline && !hasShadingPreparation,
+        ...(retainsPaintedShading && currentShading !== null
           ? {
               provenance: {
-                sourceInputRevision: currentScribble.sourceInputRevision,
-                contentRevision: currentScribble.contentRevision,
+                sourceInputRevision: currentShading.sourceInputRevision,
+                contentRevision: currentShading.contentRevision,
               },
             }
           : {}),
-        waitForSource: hasScribblePreparation && !retainsPaintedScribble,
+        waitForSource: hasShadingPreparation && !retainsPaintedShading,
       });
     }
     setHistory(next);
@@ -1114,7 +1114,7 @@ export function SketchControls({
     cancelOutlineCoordinator();
     dispatchOutline({ type: "transaction-began" });
     updateHistory(beginEditTransaction, false);
-    if (hasScribblePreparation) scribblePreparation.beginTransaction();
+    if (hasShadingPreparation) shadingPreparation.beginTransaction();
   };
   const beginParamTransaction = (key: string): void => {
     if (!isDetailReferenceOnlyParam(sketch, key)) {
@@ -1135,12 +1135,12 @@ export function SketchControls({
     transition: (current: EditHistory) => EditHistory,
   ): void => {
     const outlineTransactionOpen = outlineSessionRef.current.transactionOpen;
-    const scribbleTransactionOpen =
-      hasScribblePreparation &&
-      scribblePreparation.getSessionSnapshot().transactionOpen;
+    const shadingTransactionOpen =
+      hasShadingPreparation &&
+      shadingPreparation.getSessionSnapshot().transactionOpen;
     updateHistory(transition, false);
-    if (scribbleTransactionOpen) {
-      scribblePreparation.settleTransaction(authoredScribbleState());
+    if (shadingTransactionOpen) {
+      shadingPreparation.settleTransaction(authoredShadingState());
     }
     // Settlement belongs to the session reducer: outside export it resamples the
     // final Fill exactly once; during export it retains only a deferred request,
@@ -1148,7 +1148,7 @@ export function SketchControls({
     if (outlineTransactionOpen) {
       dispatchOutline({
         type: "transaction-settled",
-        launch: environmentReadyNow() && !hasScribblePreparation,
+        launch: environmentReadyNow() && !hasShadingPreparation,
       });
     }
   };
@@ -1262,8 +1262,8 @@ export function SketchControls({
     }
     diagnosticSelectionRef.current = next;
     setDiagnosticSelection(next);
-    if (previous === "detail" && hasScribblePreparation) {
-      scribblePreparation.resumeLatest();
+    if (previous === "detail" && hasShadingPreparation) {
+      shadingPreparation.resumeLatest();
     }
   };
 
@@ -1302,9 +1302,9 @@ export function SketchControls({
       return;
     }
 
-    // Detail owns no Scribble geometry. Retire active ownership synchronously
+    // Detail owns no Shading geometry. Retire active ownership synchronously
     // before the diagnostic becomes observable or analysis can be requested.
-    if (hasScribblePreparation) scribblePreparation.suspend();
+    if (hasShadingPreparation) shadingPreparation.suspend();
     cancelOutlineCoordinator();
     dispatchOutline({ type: "request-fill" });
     diagnosticSelectionRef.current = "detail";
@@ -1405,23 +1405,23 @@ export function SketchControls({
     snapshot: DisplayedSceneSnapshot,
   ): void => {
     if (!environmentReadyNow()) return;
-    const latestScribble = selectCurrentScribbleResult(
-      scribblePreparation.getSessionSnapshot(),
+    const latestShading = selectCurrentShadingResult(
+      shadingPreparation.getSessionSnapshot(),
     );
     if (
-      latestScribble === null ||
+      latestShading === null ||
       snapshot.renderMode !== "fill" ||
-      snapshot.sourceInputRevision !== latestScribble.sourceInputRevision ||
-      snapshot.contentRevision !== latestScribble.contentRevision
+      snapshot.sourceInputRevision !== latestShading.sourceInputRevision ||
+      snapshot.contentRevision !== latestShading.contentRevision
     ) {
       return;
     }
     const provenance = {
-      sourceInputRevision: latestScribble.sourceInputRevision,
-      contentRevision: latestScribble.contentRevision,
+      sourceInputRevision: latestShading.sourceInputRevision,
+      contentRevision: latestShading.contentRevision,
     };
-    acknowledgedScribbleRef.current = provenance;
-    setAcknowledgedScribble((current) =>
+    acknowledgedShadingRef.current = provenance;
+    setAcknowledgedShading((current) =>
       current?.sourceInputRevision === provenance.sourceInputRevision &&
       current.contentRevision === provenance.contentRevision
         ? current
@@ -1478,19 +1478,19 @@ export function SketchControls({
       return { kind: "tone-reference", source: toneSource };
     }
     if (
-      hasScribblePreparation &&
+      hasShadingPreparation &&
       outlineSession.phase.kind === "fill-live"
     ) {
-      return scribblePreparation.session.displayed === null
-        ? { kind: "fill-held", scene: emptyScribbleScene, t: 0 }
+      return shadingPreparation.session.displayed === null
+        ? { kind: "fill-held", scene: emptyShadingScene, t: 0 }
         : {
             kind: "fill-held",
-            scene: scribblePreparation.session.displayed.scene,
+            scene: shadingPreparation.session.displayed.scene,
             t: 0,
             sourceInputRevision:
-              scribblePreparation.session.displayed.sourceInputRevision,
+              shadingPreparation.session.displayed.sourceInputRevision,
             contentRevision:
-              scribblePreparation.session.displayed.contentRevision,
+              shadingPreparation.session.displayed.contentRevision,
           };
     }
     if (outlineSession.phase.kind === "fill-live") {
@@ -1574,25 +1574,25 @@ export function SketchControls({
     );
   };
 
-  /** Re-prove Scribble session and canvas provenance at an export side effect. */
-  const captureCurrentScribbleExport = () => {
-    if (!hasScribblePreparation) return null;
+  /** Re-prove Shading session and canvas provenance at an export side effect. */
+  const captureCurrentShadingExport = () => {
+    if (!hasShadingPreparation) return null;
     const displayed = canvasHandle.current?.captureDisplayedFrame() ?? null;
-    const result = acknowledgedCurrentScribble(
-      scribblePreparation.getSessionSnapshot(),
-      acknowledgedScribbleRef.current,
+    const result = acknowledgedCurrentShading(
+      shadingPreparation.getSessionSnapshot(),
+      acknowledgedShadingRef.current,
       displayed,
     );
     return result === null || displayed === null ? null : { result, displayed };
   };
 
-  const sameScribbleExportRevision = (
-    expected: ReturnType<typeof captureCurrentScribbleExport>,
+  const sameShadingExportRevision = (
+    expected: ReturnType<typeof captureCurrentShadingExport>,
   ): boolean => {
     if (!environmentReadyNow()) return false;
-    if (!hasScribblePreparation) return true;
+    if (!hasShadingPreparation) return true;
     if (expected === null) return false;
-    const current = captureCurrentScribbleExport();
+    const current = captureCurrentShadingExport();
     return (
       current !== null &&
       current.result.sourceInputRevision ===
@@ -1620,8 +1620,8 @@ export function SketchControls({
     const handle = canvasHandle.current;
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
-    const scribbleExport = captureCurrentScribbleExport();
-    if (hasScribblePreparation && scribbleExport === null) return;
+    const shadingExport = captureCurrentShadingExport();
+    if (hasShadingPreparation && shadingExport === null) return;
     const edit = historyRef.current.present;
     // Time-gate the `-t{t}` filename segment on `sketch.time`: a time-driven
     // Sketch carries its captured moment, a static one omits `t` entirely.
@@ -1639,10 +1639,10 @@ export function SketchControls({
       framing: persistedFramingFor(edit),
     });
     // Re-read the synchronous session and the canvas at the pixel side effect.
-    if (!sameScribbleExportRevision(scribbleExport)) return;
+    if (!sameShadingExportRevision(shadingExport)) return;
     canvas.toBlob((blob) => {
       if (blob === null) return;
-      if (!sameScribbleExportRevision(scribbleExport)) return;
+      if (!sameShadingExportRevision(shadingExport)) return;
       const filename = exportFilename(
         { sketchId: sketch.id, seed: edit.seed, t },
         "png",
@@ -1651,7 +1651,7 @@ export function SketchControls({
       // the downloaded file traces back to this exact frame. Byte work is core's
       // (`insertPngMetadata`); the Studio only does the Blob ⇄ ArrayBuffer dance.
       void blob.arrayBuffer().then((buffer) => {
-        if (!sameScribbleExportRevision(scribbleExport)) return;
+        if (!sameShadingExportRevision(shadingExport)) return;
         const withMeta = insertPngMetadata(new Uint8Array(buffer), metadata);
         // `withMeta` spans its whole backing buffer (core's `concat` allocates a
         // fresh, offset-0 array), so `.buffer` is exactly these bytes.
@@ -1669,7 +1669,7 @@ export function SketchControls({
   // geometry with core's `renderToSVG`. Unframed ordinary Sketches retain their
   // cold `generate` path exactly. A committed Page Frame instead transforms the
   // exact retained full-Composition Fill, without preparation, sampling, or
-  // generation. Scribble-capable Sketches use that same final framing pass on
+  // generation. Shading-capable Sketches use that same final framing pass on
   // their acknowledged worker Scene and never regenerate expensive artwork on
   // the main thread.
   //
@@ -1684,16 +1684,16 @@ export function SketchControls({
     ) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
-    const scribbleExport = captureCurrentScribbleExport();
-    if (hasScribblePreparation && scribbleExport === null) return;
+    const shadingExport = captureCurrentShadingExport();
+    if (hasShadingPreparation && shadingExport === null) return;
     const edit = historyRef.current.present;
     const pageFrame =
       edit.framing.kind === "framed" ? edit.framing.pageFrame : null;
     const framedExport = pageFrame !== null;
-    const retainedFill = framedExport && scribbleExport === null
+    const retainedFill = framedExport && shadingExport === null
       ? handle.captureDisplayedFillFrame()
       : null;
-    if (framedExport && scribbleExport === null && retainedFill === null) {
+    if (framedExport && shadingExport === null && retainedFill === null) {
       return;
     }
     const sampledT = retainedFill?.t ?? handle.getCurrentT();
@@ -1702,7 +1702,7 @@ export function SketchControls({
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
     const sourceScene =
-      scribbleExport?.result.scene ?? retainedFill?.sourceScene ?? null;
+      shadingExport?.result.scene ?? retainedFill?.sourceScene ?? null;
     const scene =
       pageFrame !== null && sourceScene !== null
         ? frameScene(sourceScene, pageFrame)
@@ -1711,7 +1711,7 @@ export function SketchControls({
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
     const exportScene =
-      scribbleExport === null && !framedExport
+      shadingExport === null && !framedExport
         ? clipSceneToBounds(scene)
         : scene;
     // Embed the same whole authored-state snapshot as a <metadata> element.
@@ -1726,10 +1726,10 @@ export function SketchControls({
       profile: edit.profile,
       framing: persistedFramingFor(edit),
     });
-    if (!sameScribbleExportRevision(scribbleExport)) return;
+    if (!sameShadingExportRevision(shadingExport)) return;
     const svg = renderToSVG(exportScene, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
-    if (!sameScribbleExportRevision(scribbleExport)) return;
+    if (!sameShadingExportRevision(shadingExport)) return;
     downloadBlob(
       blob,
       exportFilename(
@@ -1758,9 +1758,9 @@ export function SketchControls({
     if (handle == null) return;
     const capturedDisplayed = handle.captureDisplayedFrame();
     if (capturedDisplayed === null) return;
-    const scribbleExport = captureCurrentScribbleExport();
-    if (hasScribblePreparation && scribbleExport === null) return;
-    const displayed = scribbleExport?.displayed ?? capturedDisplayed;
+    const shadingExport = captureCurrentShadingExport();
+    if (hasShadingPreparation && shadingExport === null) return;
+    const displayed = shadingExport?.displayed ?? capturedDisplayed;
 
     const edit = historyRef.current.present;
     const cachedOutline = outlineSessionRef.current.cache;
@@ -1773,7 +1773,7 @@ export function SketchControls({
         ? mutableScene(cachedOutline.identity.sourceScene)
         : undefined;
     const sourceScene =
-      scribbleExport?.result.scene ??
+      shadingExport?.result.scene ??
       (displayed.renderMode !== "outline"
         ? displayed.sourceScene
         : cachedSourceScene ??
@@ -1828,7 +1828,7 @@ export function SketchControls({
           }
         : {}),
     });
-    if (!sameScribbleExportRevision(scribbleExport)) return;
+    if (!sameShadingExportRevision(shadingExport)) return;
     const requested = dispatchOutline({
       type: "request-export",
       snapshot,
@@ -1890,7 +1890,7 @@ export function SketchControls({
             token: active.token,
             completedOutline: result.completedOutline,
           });
-          if (!sameScribbleExportRevision(scribbleExport)) return;
+          if (!sameShadingExportRevision(shadingExport)) return;
           downloadBlob(
             new Blob([result.svg], { type: "image/svg+xml" }),
             result.filename,
@@ -2126,7 +2126,7 @@ export function SketchControls({
             onCancel: cancelTransaction,
           }}
         />
-        {hasScribblePreparation ? (
+        {hasShadingPreparation ? (
           <ShadingDiagnostics
             displayed={displayedShadingDiagnostics}
             preparation={shadingPreparationDiagnostics}
@@ -2331,7 +2331,7 @@ export function SketchControls({
         {/*
          * Export controls — the shared home for every export path (PNG snapshots
          * the live canvas frame; SVG serializes ordinary cold geometry or the
-         * acknowledged Scribble Scene; Hidden-line SVG reuses an exact displayed
+         * acknowledged Shading Scene; Hidden-line SVG reuses an exact displayed
          * Scene when available, then occlusion-clips as needed for plotting). The
          * buttons split the row
          * (`flex-1`) and wrap as the group grows.
@@ -2346,7 +2346,7 @@ export function SketchControls({
             disabled={
               diagnosticReferenceActive ||
               !environmentReady ||
-              (!scribblePaintIsCurrent && hasScribblePreparation)
+              (!shadingPaintIsCurrent && hasShadingPreparation)
             }
           >
             Export PNG
@@ -2360,7 +2360,7 @@ export function SketchControls({
             disabled={
               diagnosticReferenceActive ||
               !environmentReady ||
-              (!scribblePaintIsCurrent && hasScribblePreparation)
+              (!shadingPaintIsCurrent && hasShadingPreparation)
             }
           >
             Export SVG
@@ -2377,7 +2377,7 @@ export function SketchControls({
                   diagnosticReferenceActive ||
                   !environmentReady ||
                   hiddenLineBusy ||
-                  (!scribblePaintIsCurrent && hasScribblePreparation)
+                  (!shadingPaintIsCurrent && hasShadingPreparation)
                 }
               >
                 Export Hidden-line SVG

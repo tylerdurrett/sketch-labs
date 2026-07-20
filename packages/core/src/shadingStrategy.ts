@@ -17,6 +17,24 @@ export type ShadingTermination =
   | 'stopped-early'
   | 'budget-exhausted'
 
+/** Immutable, serialization-friendly progress from one Shading preparation. */
+export interface ShadingProgress {
+  /** Completed strategy work units, whether productive or stagnant. */
+  readonly completedWorkUnits: number
+  /** Stable upper bound for the strategy's current preparation pass. */
+  readonly totalWorkUnits: number
+  /**
+   * Normalized progress toward the strategy's authored completion target.
+   * Optional because not every strategy has a meaningful convergence measure.
+   */
+  readonly convergence?: number
+  /** True only when the strategy has stopped. */
+  readonly terminal: boolean
+}
+
+/** Optional observation hook for deterministic Shading progress snapshots. */
+export type ShadingObserver = (progress: ShadingProgress) => void
+
 /** Geometry and stop condition produced by a shading strategy. */
 export interface ShadingResult {
   readonly polylines: Polyline[]

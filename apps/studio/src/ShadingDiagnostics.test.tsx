@@ -3,7 +3,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ScribbleDiagnostics } from "@harness/core";
+import type {
+  ShadingDiagnostics as CoreShadingDiagnostics,
+} from "@harness/core";
 
 import {
   ShadingDiagnostics,
@@ -14,24 +16,24 @@ import {
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-const converged: ScribbleDiagnostics = {
+const converged: CoreShadingDiagnostics = {
   termination: "completed",
-  residualError: 0.0234,
   pathLength: 1_234.567,
   polylineCount: 48,
   penLiftCount: 47,
+  fidelity: { kind: "scribble", residualError: 0.0234 },
 };
 
-const exhausted: ScribbleDiagnostics = {
+const exhausted: CoreShadingDiagnostics = {
   ...converged,
   termination: "budget-exhausted",
-  residualError: 0.2,
+  fidelity: { kind: "scribble", residualError: 0.2 },
 };
 
-const stoppedEarly: ScribbleDiagnostics = {
+const stoppedEarly: CoreShadingDiagnostics = {
   ...converged,
   termination: "stopped-early",
-  residualError: 0.12,
+  fidelity: { kind: "scribble", residualError: 0.12 },
 };
 
 let container: HTMLDivElement | null = null;
@@ -338,7 +340,7 @@ describe("ShadingDiagnostics", () => {
       },
       preparation: {
         kind: "failure",
-        message: "Scribble worker returned an invalid response",
+        message: "Shading worker returned an invalid response",
         onRetry: retry,
       },
     });
@@ -362,7 +364,7 @@ describe("ShadingDiagnostics", () => {
     const failure = lane(el, "Replacement preparation");
     const alert = failure.querySelector('[role="alert"]');
     expect(alert?.textContent).toBe(
-      "Preparation failed: Scribble worker returned an invalid response",
+      "Preparation failed: Shading worker returned an invalid response",
     );
     expect(failure.textContent).not.toContain("Residual error");
     const retryButton = failure.querySelector<HTMLButtonElement>("button");

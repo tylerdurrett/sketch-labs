@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import { createRandom } from '../random'
+import type { ShadingProgress } from '../shadingStrategy'
 import { createShadingMask, createToneField } from '../shadingFields'
 import { isMaskPermittedPolyline } from '../scribbleStrategy/mask'
 import { createScribbleModel } from '../scribbleStrategy/model'
 import {
   runScribbleOrchestrator,
   type ScribbleExecutionLimits,
-  type ScribbleProgress,
 } from '../scribbleStrategy/orchestrator'
 import type { ScribbleControls } from '../scribbleStrategy/types'
 import type { Random } from '../types'
@@ -61,7 +61,7 @@ function scriptedRandom(draws: readonly number[]): {
 
 describe('Scribble pass orchestration', () => {
   it('stops immediately when the initial residual meets the fixed threshold', () => {
-    const snapshots: ScribbleProgress[] = []
+    const snapshots: ShadingProgress[] = []
     const result = runScribbleOrchestrator({
       model: model(() => 0.2),
       rng: createRandom('already-complete'),
@@ -334,7 +334,7 @@ describe('Scribble pass orchestration', () => {
 
 describe('Scribble pass progress observation', () => {
   it('preserves byte-identical output with or without observation', () => {
-    const execute = (observer?: (progress: ScribbleProgress) => void) =>
+    const execute = (observer?: (progress: ShadingProgress) => void) =>
       runScribbleOrchestrator({
         model: model(() => 0.8),
         rng: createRandom('observed-determinism'),
@@ -342,7 +342,7 @@ describe('Scribble pass progress observation', () => {
         limits: GENEROUS_LIMITS,
         ...(observer === undefined ? {} : { observer }),
       })
-    const snapshots: ScribbleProgress[] = []
+    const snapshots: ShadingProgress[] = []
 
     const unobserved = execute()
     const observed = execute((progress) => snapshots.push(progress))
@@ -352,7 +352,7 @@ describe('Scribble pass progress observation', () => {
   })
 
   it('reports immutable, monotonic actual work against one stable total', () => {
-    const snapshots: ScribbleProgress[] = []
+    const snapshots: ShadingProgress[] = []
     const result = runScribbleOrchestrator({
       model: model(() => 0.8),
       rng: createRandom('observed-convergence'),
@@ -392,7 +392,7 @@ describe('Scribble pass progress observation', () => {
   })
 
   it('preserves the actual count when the accepted-segment budget stops work', () => {
-    const snapshots: ScribbleProgress[] = []
+    const snapshots: ShadingProgress[] = []
     const limits = {
       ...GENEROUS_LIMITS,
       maxAcceptedSegments: 1,
@@ -424,7 +424,7 @@ describe('Scribble pass progress observation', () => {
   })
 
   it('reports threshold-first convergence before a 99% authored cap', () => {
-    const snapshots: ScribbleProgress[] = []
+    const snapshots: ShadingProgress[] = []
     const authoredAcceptedSegmentLimit = Math.floor(
       GENEROUS_LIMITS.maxAcceptedSegments * 0.99,
     )
@@ -446,7 +446,7 @@ describe('Scribble pass progress observation', () => {
   })
 
   it('reports both progress signals when the authored cap wins', () => {
-    const snapshots: ScribbleProgress[] = []
+    const snapshots: ShadingProgress[] = []
     const result = runScribbleOrchestrator({
       model: model(() => 1),
       rng: createRandom('observed-authored-limit'),
@@ -475,7 +475,7 @@ describe('Scribble pass progress observation', () => {
   })
 
   it('counts a stagnant growth attempt as one completed work unit', () => {
-    const snapshots: ScribbleProgress[] = []
+    const snapshots: ShadingProgress[] = []
     const limits = {
       ...GENEROUS_LIMITS,
       maxAcceptedSegments: 3,
@@ -511,7 +511,7 @@ describe('Scribble pass progress observation', () => {
   })
 
   it('reports immediate no-demand completion as terminal zero-of-zero', () => {
-    const snapshots: ScribbleProgress[] = []
+    const snapshots: ShadingProgress[] = []
     const result = runScribbleOrchestrator({
       model: model(() => 0),
       rng: createRandom('observed-no-demand'),

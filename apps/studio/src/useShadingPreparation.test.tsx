@@ -6,21 +6,21 @@ import { afterEach, describe, expect, it } from "vitest";
 import type {
   ParamSchema,
   Scene,
-  ScribbleDiagnostics,
+  ShadingDiagnostics,
 } from "@harness/core";
 
-import type { ScribbleComputeIdentity } from "./scribbleComputeProtocol";
+import type { ShadingComputeIdentity } from "./shadingComputeProtocol";
 import type {
-  ScribbleComputeResult,
-  ScribbleProgressObserver,
-} from "./scribbleCoordinator";
+  ShadingComputeResult,
+  ShadingProgressObserver,
+} from "./shadingCoordinator";
 import {
-  useScribblePreparation,
-  type ScribbleAuthoredState,
-  type ScribbleIdentitySketch,
-  type ScribblePreparationCoordinator,
-  type UseScribblePreparationResult,
-} from "./useScribblePreparation";
+  useShadingPreparation,
+  type ShadingAuthoredState,
+  type ShadingIdentitySketch,
+  type ShadingPreparationCoordinator,
+  type UseShadingPreparationResult,
+} from "./useShadingPreparation";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -29,20 +29,20 @@ const schema: ParamSchema = {
   amount: { kind: "number", min: 0, max: 10, default: 1 },
   color: { kind: "color", default: "#112233" },
 };
-const sketch: ScribbleIdentitySketch = { id: "scribble-test", schema };
+const sketch: ShadingIdentitySketch = { id: "shading-test", schema };
 const scene: Scene = {
   space: { width: 20, height: 10 },
   primitives: [{ points: [[0, 0], [10, 10]] }],
 };
-const diagnostics: ScribbleDiagnostics = {
+const diagnostics: ShadingDiagnostics = {
   termination: "completed",
-  residualError: 0.01,
   pathLength: 42,
   polylineCount: 3,
   penLiftCount: 2,
+  fidelity: { kind: "scribble", residualError: 0.01 },
 };
 
-function authored(amount: number, inputRevision: number): ScribbleAuthoredState {
+function authored(amount: number, inputRevision: number): ShadingAuthoredState {
   return {
     params: { color: "#112233", amount, ignored: 999 },
     seed: 7,
@@ -52,20 +52,20 @@ function authored(amount: number, inputRevision: number): ScribbleAuthoredState 
 }
 
 interface StartedJob {
-  readonly identity: ScribbleComputeIdentity;
-  readonly observeProgress: ScribbleProgressObserver | undefined;
-  readonly resolve: (result: ScribbleComputeResult) => void;
+  readonly identity: ShadingComputeIdentity;
+  readonly observeProgress: ShadingProgressObserver | undefined;
+  readonly resolve: (result: ShadingComputeResult) => void;
 }
 
-class FakeCoordinator implements ScribblePreparationCoordinator {
+class FakeCoordinator implements ShadingPreparationCoordinator {
   readonly starts: StartedJob[] = [];
   cancelCount = 0;
   disposeCount = 0;
 
   start(
-    identity: ScribbleComputeIdentity,
-    observeProgress?: ScribbleProgressObserver,
-  ): Promise<ScribbleComputeResult> {
+    identity: ShadingComputeIdentity,
+    observeProgress?: ShadingProgressObserver,
+  ): Promise<ShadingComputeResult> {
     return new Promise((resolve) => {
       this.starts.push({ identity, observeProgress, resolve });
     });
@@ -84,18 +84,18 @@ class FakeCoordinator implements ScribblePreparationCoordinator {
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
-let latest: UseScribblePreparationResult | null = null;
+let latest: UseShadingPreparationResult | null = null;
 
 function Probe({
   initial = authored(1, 1),
   createCoordinator,
   suspendOnMount = false,
 }: {
-  readonly initial?: ScribbleAuthoredState;
+  readonly initial?: ShadingAuthoredState;
   readonly createCoordinator: () => FakeCoordinator;
   readonly suspendOnMount?: boolean;
 }) {
-  const preparation = useScribblePreparation({
+  const preparation = useShadingPreparation({
     sketch,
     initial,
     coordinatorFactory: createCoordinator,
@@ -137,7 +137,7 @@ afterEach(() => {
   latest = null;
 });
 
-describe("useScribblePreparation", () => {
+describe("useShadingPreparation", () => {
   it("builds the canonical initial identity and starts it automatically", () => {
     const coordinators: FakeCoordinator[] = [];
     mount(
@@ -153,7 +153,7 @@ describe("useScribblePreparation", () => {
     expect(coordinators).toHaveLength(1);
     expect(coordinators[0]!.starts).toHaveLength(1);
     expect(coordinators[0]!.starts[0]!.identity).toEqual({
-      sketchId: "scribble-test",
+      sketchId: "shading-test",
       params: [
         { key: "amount", value: 1 },
         { key: "color", value: "#112233" },

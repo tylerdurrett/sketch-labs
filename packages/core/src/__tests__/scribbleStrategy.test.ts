@@ -2,7 +2,11 @@ import { describe, expect, expectTypeOf, it } from 'vitest'
 
 import * as core from '../index'
 import { createScribbleScaleField } from '../scribbleScaleField'
-import { totalPathLength } from '../shadingStrategy'
+import {
+  totalPathLength,
+  type ShadingObserver,
+  type ShadingProgress,
+} from '../shadingStrategy'
 import { createShadingMask, type ToneSource } from '../shadingFields'
 import {
   defaultScribbleControls,
@@ -10,8 +14,6 @@ import {
   runScribbleStrategyForTesting,
   scribbleControlSchema,
   scribbleStrategy,
-  type ScribbleObserver,
-  type ScribbleProgress,
   type ScribbleResult,
   type ScribbleStrategyInput,
 } from '../scribbleStrategy/index'
@@ -175,12 +177,26 @@ describe('public Scribble strategy boundary', () => {
     expectTypeOf<ScribbleStrategyInput>().toMatchTypeOf<
       core.ShadingStrategyInput<ScribbleControls>
     >()
-    expectTypeOf<core.ScribbleObserver>().toEqualTypeOf<ScribbleObserver>()
-    expectTypeOf<core.ScribbleProgress>().toEqualTypeOf<ScribbleProgress>()
+    expectTypeOf<core.ShadingObserver>().toEqualTypeOf<ShadingObserver>()
+    expectTypeOf<core.ShadingProgress>().toEqualTypeOf<ShadingProgress>()
     expectTypeOf<ScribbleStrategyInput['scaleField']>().toEqualTypeOf<
       core.ScribbleScaleField | undefined
     >()
     expectTypeOf<ScribbleResult>().toMatchTypeOf<core.ShadingResult>()
+    expectTypeOf<keyof core.ShadingResult>().toEqualTypeOf<
+      'polylines' | 'termination'
+    >()
+    expectTypeOf<keyof core.ShadingDiagnostics>().toEqualTypeOf<
+      | 'termination'
+      | 'pathLength'
+      | 'polylineCount'
+      | 'penLiftCount'
+      | 'fidelity'
+    >()
+    expectTypeOf<core.ShadingDiagnostics['fidelity']>().toEqualTypeOf<{
+      readonly kind: 'scribble'
+      readonly residualError: number
+    }>()
 
     expect(Object.keys(scribbleControlSchema)).toEqual([
       'pathDensity',
@@ -247,7 +263,7 @@ describe('public Scribble strategy boundary', () => {
   })
 
   it('reports terminal zero-of-zero for public no-demand completion', () => {
-    const snapshots: ScribbleProgress[] = []
+    const snapshots: ShadingProgress[] = []
     const result = scribbleStrategy({
       ...input(source(constantTone(0))),
       observer: (progress) => snapshots.push(progress),
@@ -270,7 +286,7 @@ describe('public Scribble strategy boundary', () => {
   })
 
   it('reports threshold completion when no demand beats an authored stop', () => {
-    const snapshots: ScribbleProgress[] = []
+    const snapshots: ShadingProgress[] = []
     scribbleStrategy({
       ...input(source(constantTone(0)), 'authored-no-demand', {
         stopPoint: 50,

@@ -310,7 +310,7 @@ describe('Scribble Moon structural artwork', () => {
     const frame = DEFAULT_COMPOSITION_FRAME
     const params = defaultParams(scribbleMoon.schema)
     const structural = createScribbleMoonStructuralScene(frame)
-    const artwork = scribbleMoon.generateScribbleArtwork!(
+    const artwork = scribbleMoon.generateShadingArtwork!(
       params,
       'painter-order',
       frame,
@@ -329,10 +329,10 @@ describe('Scribble Moon structural artwork', () => {
     const scribblePolylines = generated.map(({ points }) => points)
     expect(artwork.diagnostics).toEqual({
       termination: expect.stringMatching(/^(completed|budget-exhausted)$/),
-      residualError: expect.any(Number),
       pathLength: totalPathLength(scribblePolylines),
       polylineCount: generated.length,
       penLiftCount: Math.max(0, generated.length - 1),
+      fidelity: { kind: 'scribble', residualError: expect.any(Number) },
     })
     expect(artwork.diagnostics.polylineCount).toBe(
       scene.primitives.length - structural.primitives.length,

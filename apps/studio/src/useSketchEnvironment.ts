@@ -135,7 +135,7 @@ export function useSketchEnvironment({
 
     return () => controller.abort();
     // The exact ID-set key is the cache boundary. Same-key param, seed, Tone,
-    // and Scribble edits must retain the environment without re-fetching bytes.
+    // and Shading edits must retain the environment without re-fetching bytes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generation, key, resolver]);
 

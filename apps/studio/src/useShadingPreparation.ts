@@ -2,70 +2,70 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { CoordinateSpace, Params, Seed, Sketch } from "@harness/core";
 
-import { createScribbleWorker } from "./createScribbleWorker";
+import { createShadingWorker } from "./createShadingWorker";
 import {
-  createScribbleComputeIdentity,
-  scribbleComputeIdentitiesEqual,
-  type ScribbleComputeIdentity,
-} from "./scribbleComputeProtocol";
+  createShadingComputeIdentity,
+  shadingComputeIdentitiesEqual,
+  type ShadingComputeIdentity,
+} from "./shadingComputeProtocol";
 import {
-  ScribbleCoordinator,
-  type ScribbleComputeResult,
-  type ScribbleProgressObserver,
-  type ScribbleProgressUpdate,
-  type ScribbleWorkerFactory,
-} from "./scribbleCoordinator";
+  ShadingCoordinator,
+  type ShadingComputeResult,
+  type ShadingProgressObserver,
+  type ShadingProgressUpdate,
+  type ShadingWorkerFactory,
+} from "./shadingCoordinator";
 import {
-  createScribbleSessionState,
-  scribbleSessionReducer,
-  type ScribbleSessionAction,
-  type ScribbleSessionState,
-} from "./scribbleSession";
+  createShadingSessionState,
+  shadingSessionReducer,
+  type ShadingSessionAction,
+  type ShadingSessionState,
+} from "./shadingSession";
 
 /** Authored inputs captured after one edit-history transition. */
-export interface ScribbleAuthoredState {
+export interface ShadingAuthoredState {
   readonly params: Readonly<Params>;
   readonly seed: Seed;
   readonly compositionFrame: Readonly<CoordinateSpace>;
   readonly inputRevision: number;
 }
 
-export type ScribbleIdentitySketch = Pick<Sketch, "id" | "schema">;
+export type ShadingIdentitySketch = Pick<Sketch, "id" | "schema">;
 
 /** Minimal coordinator seam used by the hook and its deterministic tests. */
-export interface ScribblePreparationCoordinator {
+export interface ShadingPreparationCoordinator {
   start(
-    identity: ScribbleComputeIdentity,
-    observeProgress?: ScribbleProgressObserver,
-  ): Promise<ScribbleComputeResult>;
+    identity: ShadingComputeIdentity,
+    observeProgress?: ShadingProgressObserver,
+  ): Promise<ShadingComputeResult>;
   cancel(): boolean;
   dispose(): void;
 }
 
-export type ScribblePreparationCoordinatorFactory = (
-  workerFactory: ScribbleWorkerFactory,
-) => ScribblePreparationCoordinator;
+export type ShadingPreparationCoordinatorFactory = (
+  workerFactory: ShadingWorkerFactory,
+) => ShadingPreparationCoordinator;
 
-export interface UseScribblePreparationOptions {
-  readonly sketch: ScribbleIdentitySketch;
+export interface UseShadingPreparationOptions {
+  readonly sketch: ShadingIdentitySketch;
   /** The mounted history's initial present state. Later edits use the actions below. */
-  readonly initial: ScribbleAuthoredState;
-  readonly workerFactory?: ScribbleWorkerFactory;
-  readonly coordinatorFactory?: ScribblePreparationCoordinatorFactory;
+  readonly initial: ShadingAuthoredState;
+  readonly workerFactory?: ShadingWorkerFactory;
+  readonly coordinatorFactory?: ShadingPreparationCoordinatorFactory;
   /** Keeps the hook composable for Sketches without the optional capability. */
   readonly enabled?: boolean;
 }
 
-export interface ScribblePreparationProgress {
+export interface ShadingPreparationProgress {
   readonly token: number;
-  readonly update: ScribbleProgressUpdate;
+  readonly update: ShadingProgressUpdate;
 }
 
-export interface UseScribblePreparationResult {
-  readonly session: ScribbleSessionState;
-  readonly progress: ScribblePreparationProgress | null;
+export interface UseShadingPreparationResult {
+  readonly session: ShadingSessionState;
+  readonly progress: ShadingPreparationProgress | null;
   /** Read the reducer's latest synchronous state, including same-batch edits. */
-  readonly getSessionSnapshot: () => ScribbleSessionState;
+  readonly getSessionSnapshot: () => ShadingSessionState;
   /** Synchronously pause worker ownership while retaining latest authored state. */
   readonly suspend: () => void;
   /** Resume with no work when current, otherwise one request for the latest state. */
@@ -73,25 +73,25 @@ export interface UseScribblePreparationResult {
   /** Cancel active preparation before a history transaction starts previewing. */
   readonly beginTransaction: () => void;
   /** Record the latest transaction preview without launching preparation. */
-  readonly previewAuthoredState: (authored: ScribbleAuthoredState) => void;
+  readonly previewAuthoredState: (authored: ShadingAuthoredState) => void;
   /** Settle a committed or reverted transaction after historyRef is final. */
-  readonly settleTransaction: (authored: ScribbleAuthoredState) => void;
+  readonly settleTransaction: (authored: ShadingAuthoredState) => void;
   /** Immediately request the latest state after one atomic history command. */
-  readonly requestAtomic: (authored: ScribbleAuthoredState) => void;
+  readonly requestAtomic: (authored: ShadingAuthoredState) => void;
   /** Re-enqueue the exact current identity after a bounded worker failure. */
   readonly retry: () => void;
 }
 
-const defaultCoordinatorFactory: ScribblePreparationCoordinatorFactory = (
+const defaultCoordinatorFactory: ShadingPreparationCoordinatorFactory = (
   workerFactory,
-) => new ScribbleCoordinator(workerFactory);
+) => new ShadingCoordinator(workerFactory);
 
 /** Canonical identity seam shared by initial, atomic, and transaction requests. */
-export function createScribbleIdentityForAuthoredState(
-  sketch: ScribbleIdentitySketch,
-  authored: ScribbleAuthoredState,
-): ScribbleComputeIdentity {
-  return createScribbleComputeIdentity({
+export function createShadingIdentityForAuthoredState(
+  sketch: ShadingIdentitySketch,
+  authored: ShadingAuthoredState,
+): ShadingComputeIdentity {
+  return createShadingComputeIdentity({
     sketchId: sketch.id,
     schema: sketch.schema,
     params: authored.params,
@@ -108,41 +108,41 @@ function safeErrorDetail(error: unknown): string {
         ? error
         : "";
   return detail.trim() === ""
-    ? "Scribble worker failed"
+    ? "Shading worker failed"
     : detail.slice(0, 500);
 }
 
 /**
- * Drives Scribble preparation beside (but never owns) Studio edit history.
+ * Drives Shading preparation beside (but never owns) Studio edit history.
  *
  * Callers update their synchronous history ref first, then pass that exact
  * authored snapshot to one of these actions. This keeps transaction settlement
  * atomic even when begin/preview/commit arrive in one React batch.
  */
-export function useScribblePreparation({
+export function useShadingPreparation({
   sketch,
   initial,
-  workerFactory = createScribbleWorker,
+  workerFactory = createShadingWorker,
   coordinatorFactory = defaultCoordinatorFactory,
   enabled = true,
-}: UseScribblePreparationOptions): UseScribblePreparationResult {
+}: UseShadingPreparationOptions): UseShadingPreparationResult {
   // A keyed Sketch mount owns these injected factories for its whole lifetime.
   // Capturing them once also prevents an inline test factory from replacing a
   // live coordinator on every render.
   const factoriesRef = useRef({ workerFactory, coordinatorFactory });
   const sketchRef = useRef(sketch);
   const [session, setSession] = useState(() =>
-    createScribbleSessionState(
-      createScribbleIdentityForAuthoredState(sketch, initial),
+    createShadingSessionState(
+      createShadingIdentityForAuthoredState(sketch, initial),
       initial.inputRevision,
     ),
   );
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const [progress, setProgress] =
-    useState<ScribblePreparationProgress | null>(null);
+    useState<ShadingPreparationProgress | null>(null);
   const coordinatorRef = useRef<{
-    readonly coordinator: ScribblePreparationCoordinator;
+    readonly coordinator: ShadingPreparationCoordinator;
     readonly generation: number;
   } | null>(null);
   const nextCoordinatorGenerationRef = useRef(1);
@@ -152,9 +152,9 @@ export function useScribblePreparation({
   } | null>(null);
 
   const dispatch = useCallback(
-    (action: ScribbleSessionAction): ScribbleSessionState => {
+    (action: ShadingSessionAction): ShadingSessionState => {
       const current = sessionRef.current;
-      const next = scribbleSessionReducer(current, action);
+      const next = shadingSessionReducer(current, action);
       if (next !== current) {
         sessionRef.current = next;
         setSession(next);
@@ -165,13 +165,13 @@ export function useScribblePreparation({
   );
 
   const identityFor = useCallback(
-    (authored: ScribbleAuthoredState) =>
-      createScribbleIdentityForAuthoredState(sketchRef.current, authored),
+    (authored: ShadingAuthoredState) =>
+      createShadingIdentityForAuthoredState(sketchRef.current, authored),
     [],
   );
 
   const cancelReplacedActive = useCallback(
-    (previous: ScribbleSessionState, next: ScribbleSessionState): void => {
+    (previous: ShadingSessionState, next: ShadingSessionState): void => {
       if (
         previous.active !== null &&
         next.active?.token !== previous.active.token
@@ -202,7 +202,7 @@ export function useScribblePreparation({
   }, [cancelReplacedActive, dispatch]);
 
   const previewAuthoredState = useCallback(
-    (authored: ScribbleAuthoredState): void => {
+    (authored: ShadingAuthoredState): void => {
       const previous = sessionRef.current;
       const next = dispatch({
         type: "desired-identity-changed",
@@ -215,7 +215,7 @@ export function useScribblePreparation({
   );
 
   const settleTransaction = useCallback(
-    (authored: ScribbleAuthoredState): void => {
+    (authored: ShadingAuthoredState): void => {
       const previous = sessionRef.current;
       const next = dispatch({
         type: "transaction-settled",
@@ -312,7 +312,7 @@ export function useScribblePreparation({
     });
     if (
       launched.active?.token !== pending.token ||
-      !scribbleComputeIdentitiesEqual(
+      !shadingComputeIdentitiesEqual(
         launched.active.identity,
         pending.identity,
       )
@@ -328,10 +328,10 @@ export function useScribblePreparation({
         currentOwner?.coordinator === owner.coordinator &&
         currentOwner.generation === owner.generation &&
         active?.token === pending.token &&
-        scribbleComputeIdentitiesEqual(active.identity, pending.identity)
+        shadingComputeIdentitiesEqual(active.identity, pending.identity)
       );
     };
-    const observeProgress: ScribbleProgressObserver = (update) => {
+    const observeProgress: ShadingProgressObserver = (update) => {
       if (!ownsCallback()) return;
       setProgress({ token: pending.token, update });
     };
@@ -346,7 +346,7 @@ export function useScribblePreparation({
       });
     };
 
-    let result: Promise<ScribbleComputeResult>;
+    let result: Promise<ShadingComputeResult>;
     try {
       result = owner.coordinator.start(pending.identity, observeProgress);
     } catch (error) {

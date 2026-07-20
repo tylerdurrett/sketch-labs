@@ -12,18 +12,18 @@ import { createScene } from '../../scene'
 import type { CoordinateSpace, Scene } from '../../scene'
 import {
   scribbleStrategy,
-  type ScribbleObserver,
   type ScribbleResult,
 } from '../../scribbleStrategy/index'
+import type { ShadingObserver } from '../../shadingStrategy'
 import {
   scribbleControlSchema,
   type ScribbleControls,
 } from '../../scribbleStrategy/types'
 import {
-  createScribbleDiagnostics,
+  createShadingDiagnostics,
   type Params,
-  type ScribbleArtwork,
   type Seed,
+  type ShadingArtwork,
   type StatelessSketch,
 } from '../../sketch'
 import { numberParam } from '../sketch-util'
@@ -54,7 +54,7 @@ export function generateToneCalibrationScribble(
   params: Params,
   seed: Seed,
   frame: CoordinateSpace,
-  observer?: ScribbleObserver,
+  observer?: ShadingObserver,
 ): ScribbleResult {
   return scribbleStrategy({
     source: createToneCalibrationSource(frame),
@@ -82,17 +82,20 @@ function sceneFromScribble(
   return builder.build()
 }
 
-/** Prepare Tone Calibration's complete Scene and compact Scribble diagnostics. */
-export function generateToneCalibrationScribbleArtwork(
+/** Prepare Tone Calibration's complete Shading artwork and Scribble fidelity. */
+export function generateToneCalibrationShadingArtwork(
   params: Params,
   seed: Seed,
   frame: CoordinateSpace,
-  observer?: ScribbleObserver,
-): ScribbleArtwork {
+  observer?: ShadingObserver,
+): ShadingArtwork {
   const result = generateToneCalibrationScribble(params, seed, frame, observer)
   return {
     scene: sceneFromScribble(frame, result),
-    diagnostics: createScribbleDiagnostics(result),
+    diagnostics: createShadingDiagnostics(result, {
+      kind: 'scribble',
+      residualError: result.residualError,
+    }),
   }
 }
 
@@ -107,13 +110,13 @@ export const toneCalibration: StatelessSketch = {
   deriveOutlineSource(completedScene, target) {
     return toneCalibrationOutlineSource(completedScene, target)
   },
-  generateScribbleArtwork: generateToneCalibrationScribbleArtwork,
+  generateShadingArtwork: generateToneCalibrationShadingArtwork,
   generate(
     params: Params,
     seed: Seed,
     _t: number,
     frame: CoordinateSpace,
   ): Scene {
-    return generateToneCalibrationScribbleArtwork(params, seed, frame).scene
+    return generateToneCalibrationShadingArtwork(params, seed, frame).scene
   },
 }

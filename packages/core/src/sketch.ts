@@ -33,17 +33,17 @@ import type { SketchEnvironment } from './imageAssets'
 import type { DetailField } from './detailFields'
 import type { PlotProfile } from './plotProfile'
 import type { CoordinateSpace, Scene } from './scene'
-import type { ShadingTermination } from './shadingStrategy'
+import type {
+  ShadingObserver,
+  ShadingResult,
+  ShadingTermination,
+} from './shadingStrategy'
 import {
   penLiftCount,
   polylineCount,
   totalPathLength,
 } from './shadingStrategy'
 import type { ToneSource } from './shadingFields'
-import type {
-  ScribbleObserver,
-  ScribbleResult,
-} from './scribbleStrategy/index'
 
 /**
  * The single value feeding all of a Sketch's internal randomness.
@@ -300,36 +300,47 @@ export interface OutlineTarget {
   readonly millimetersPerSceneUnit: number
 }
 
-/** Scalar diagnostics for one complete Scribble artwork preparation. */
-export interface ScribbleDiagnostics {
-  /** Truthful convergence or deterministic safety-budget stop condition. */
-  readonly termination: ShadingTermination
+/** Scribble's strategy-specific fidelity diagnostic. */
+export interface ScribbleShadingFidelity {
+  readonly kind: 'scribble'
   /** Remaining normalized source error after the last accepted segment. */
   readonly residualError: number
-  /** Sum of Scribble segment lengths in Composition Frame units. */
+}
+
+/** Exhaustive strategy-specific fidelity diagnostics carried by artwork. */
+export type ShadingFidelity = ScribbleShadingFidelity
+
+/** Scalar diagnostics for one complete Shading artwork preparation. */
+export interface ShadingDiagnostics {
+  /** Truthful convergence or deterministic safety-budget stop condition. */
+  readonly termination: ShadingTermination
+  /** Sum of generated strategy segment lengths in Composition Frame units. */
   readonly pathLength: number
-  /** Number of generated Scribble polylines, excluding structural artwork. */
+  /** Number of generated strategy polylines, excluding structural artwork. */
   readonly polylineCount: number
-  /** Pen lifts between generated Scribble polylines. */
+  /** Pen lifts between generated strategy polylines. */
   readonly penLiftCount: number
+  /** Strategy-specific fidelity meaning, carried with the displayed result. */
+  readonly fidelity: ShadingFidelity
 }
 
 /** One complete Scene plus compact diagnostics, without duplicate geometry. */
-export interface ScribbleArtwork {
+export interface ShadingArtwork {
   readonly scene: Scene
-  readonly diagnostics: ScribbleDiagnostics
+  readonly diagnostics: ShadingDiagnostics
 }
 
-/** Derive immutable scalar diagnostics from a completed Scribble pass. */
-export function createScribbleDiagnostics(
-  result: Readonly<ScribbleResult>,
-): ScribbleDiagnostics {
+/** Derive common metrics from generated strategy geometry, never the Scene. */
+export function createShadingDiagnostics(
+  result: Readonly<ShadingResult>,
+  fidelity: ShadingFidelity,
+): ShadingDiagnostics {
   return Object.freeze({
     termination: result.termination,
-    residualError: result.residualError,
     pathLength: totalPathLength(result.polylines),
     polylineCount: polylineCount(result.polylines),
     penLiftCount: penLiftCount(result.polylines),
+    fidelity: Object.freeze({ ...fidelity }),
   })
 }
 
@@ -435,19 +446,19 @@ export interface StatelessSketch extends SketchBase {
   ): Scene
 
   /**
-   * Optionally prepare this Sketch's complete Scribble-backed artwork.
+   * Optionally prepare this Sketch's complete Shading-backed artwork.
    *
    * The observer is diagnostic only. Implementations return the same complete
-   * Scene as cold `generate`, alongside scalar Scribble metrics; they do not
+   * Scene as cold `generate`, alongside scalar Shading metrics; they do not
    * duplicate the generated polylines outside the Scene.
    */
-  generateScribbleArtwork?(
+  generateShadingArtwork?(
     params: Params,
     seed: Seed,
     frame: CoordinateSpace,
-    observer?: ScribbleObserver,
+    observer?: ShadingObserver,
     environment?: SketchEnvironment,
-  ): ScribbleArtwork
+  ): ShadingArtwork
 
   /**
    * Optionally split time-invariant preparation from repeated sampling in `t`.
@@ -497,7 +508,7 @@ export interface StatelessSketch extends SketchBase {
    *
    * Unlike {@link generateOutlineSource}, this capability receives the exact
    * completed Scene instead of the inputs that could regenerate it. It is for
-   * caller-owned preparation paths such as Scribble, where the prepared result
+   * caller-owned preparation paths such as Shading, where the prepared result
    * is the authoritative artwork and must not be rerun or substituted while
    * applying physical-tool styling. As with {@link generateOutlineSource}, the
    * target may affect stroke width only: every emitted stroke uses the exact
@@ -547,7 +558,7 @@ export function definePreparedSketch(
       StatelessSketch,
       | 'deriveOutlineSource'
       | 'generateOutlineSource'
-      | 'generateScribbleArtwork'
+      | 'generateShadingArtwork'
     > & {
       prepare(
         params: Params,

@@ -48,8 +48,8 @@ const EXPECTED_IMAGE_HEIGHT = 1536
 
 // Filled in from the first independently verified run. The benchmark refuses
 // a speedup that changes termination, residual, diagnostics, or any coordinate.
-const EXPECTED_DETAIL_CHECKSUM = 'f822710f351bf391'
-const EXPECTED_UNIFORM_CHECKSUM = 'e9502e94cb2ff101'
+const EXPECTED_DETAIL_CHECKSUM = 'a5f7bf61b9f7e96b'
+const EXPECTED_UNIFORM_CHECKSUM = '2009e6eaaf1fd98b'
 const EXPECTED_DETAIL_WORK_UNITS = 64251
 const EXPECTED_UNIFORM_WORK_UNITS = 178765
 const EXPECTED_DETAIL_POLYLINES = 657
@@ -233,7 +233,8 @@ function artworkChecksum(artwork) {
     }
   }
   hash.string(diagnostics.termination)
-  hash.number(diagnostics.residualError)
+  hash.string(diagnostics.fidelity.kind)
+  hash.number(diagnostics.fidelity.residualError)
   hash.number(diagnostics.pathLength)
   hash.number(diagnostics.polylineCount)
   hash.number(diagnostics.penLiftCount)
@@ -252,7 +253,7 @@ function artworkCounts(artwork) {
     pathLength: artwork.diagnostics.pathLength,
     penLifts: artwork.diagnostics.penLiftCount,
     termination: artwork.diagnostics.termination,
-    residualError: artwork.diagnostics.residualError,
+    residualError: artwork.diagnostics.fidelity.residualError,
   }
 }
 
@@ -268,7 +269,7 @@ function createEnvironment(pixels, prepared) {
 
 function generate(params, environment) {
   let finalProgress
-  const artwork = photoScribble.generateScribbleArtwork(
+  const artwork = photoScribble.generateShadingArtwork(
     params,
     SEED,
     FRAME,
