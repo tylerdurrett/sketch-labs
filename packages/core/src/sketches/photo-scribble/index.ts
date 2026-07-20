@@ -185,6 +185,7 @@ function bindPhotoScribbleDetailField(
   sensitivity: number,
 ): DetailField {
   const base = createImageDetailField(prepared, frame)
+  if (sensitivity === PHOTO_DETAIL_SENSITIVITY_DEFAULT) return base
   return createDetailField((point) =>
     applyPhotoDetailSensitivity(sampleDetailField(base, point), sensitivity),
   )

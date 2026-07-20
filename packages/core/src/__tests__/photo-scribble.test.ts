@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DecodedPixels, SketchEnvironment } from '../imageAssets'
 import {
+  createImageDetailField,
   IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
   type PreparedImageDetailAnalysis,
 } from '../imageDetailAnalysis'
@@ -29,7 +30,16 @@ vi.mock('../scribbleStrategy', async (importOriginal) => {
   return { ...actual, scribbleStrategy: vi.fn() }
 })
 
+vi.mock('../imageDetailAnalysis', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../imageDetailAnalysis')>()
+  return {
+    ...actual,
+    createImageDetailField: vi.fn(actual.createImageDetailField),
+  }
+})
+
 const scribbleStrategyMock = vi.mocked(scribbleStrategy)
+const createImageDetailFieldMock = vi.mocked(createImageDetailField)
 const HEADLESS_FIXTURE_LOOKUP_KEY = 'headless-fixture'
 const SELECTED_FIXTURE_LOOKUP_KEY = 'selected-fixture'
 const FRAME = { width: 20, height: 10 }
@@ -79,6 +89,7 @@ function resultFor(input: ScribbleStrategyInput) {
 beforeEach(() => {
   scribbleStrategyMock.mockReset()
   scribbleStrategyMock.mockImplementation(resultFor)
+  createImageDetailFieldMock.mockClear()
 })
 
 describe('Photo Scribble headless composition', () => {
@@ -278,6 +289,30 @@ describe('Photo Scribble headless composition', () => {
       IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
     )
     expect(env.imageAssets).not.toHaveBeenCalled()
+  })
+
+  it('reuses the already-normalized image Detail Field at exact identity sensitivity', () => {
+    const prepared: PreparedImageDetailAnalysis = {
+      definitionId: IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+      sourceWidth: 1,
+      sourceHeight: 1,
+      gridWidth: 1,
+      gridHeight: 1,
+      data: Float64Array.of(0.25),
+    }
+    const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const field = createPhotoScribbleDetailField(
+      params({ detailSensitivity: 0.5 }),
+      FRAME,
+      schema,
+      {
+        imageAssets: () => FIXTURE_PIXELS,
+        getPreparedImageDetailAnalysis: () => prepared,
+      },
+    )
+
+    expect(createImageDetailFieldMock).toHaveBeenCalledOnce()
+    expect(field).toBe(createImageDetailFieldMock.mock.results[0]!.value)
   })
 
   it('returns a safe zero Detail Field when no prepared analysis is resolved', () => {
