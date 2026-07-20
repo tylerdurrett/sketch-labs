@@ -1,12 +1,13 @@
-import type {
-  CoordinateSpace,
-  HiddenLineRole,
-  ParamSchema,
-  Params,
-  Scene,
-  ShadingDiagnostics,
-  ShadingProgress,
-  Seed,
+import {
+  activeParams,
+  type CoordinateSpace,
+  type HiddenLineRole,
+  type ParamSchema,
+  type Params,
+  type Scene,
+  type ShadingDiagnostics,
+  type ShadingProgress,
+  type Seed,
 } from "@harness/core";
 
 /** A schema-backed authored value that can cross the Worker boundary. */
@@ -124,17 +125,19 @@ function copyParamValue(
 }
 
 /**
- * Snapshot authored inputs in the Parameter Schema's canonical declaration order.
- * Incidental insertion order and extra keys in the inhabited params object do not
+ * Snapshot active authored inputs in the Parameter Schema's declaration order.
+ * Core owns applicability, Choice validation, and absent-value defaults;
+ * incidental insertion order, inactive values, and Params-only extras do not
  * participate in cache identity.
  */
 export function createShadingComputeIdentity(
   input: CreateShadingComputeIdentityInput,
 ): ShadingComputeIdentity {
-  const params = Object.keys(input.schema).map((key) =>
+  const projectedParams = activeParams(input.schema, input.params);
+  const params = Object.keys(projectedParams).map((key) =>
     Object.freeze({
       key,
-      value: copyParamValue(input.params[key], key, input.schema[key]!),
+      value: copyParamValue(projectedParams[key], key, input.schema[key]!),
     }),
   );
   const identity = Object.freeze({
