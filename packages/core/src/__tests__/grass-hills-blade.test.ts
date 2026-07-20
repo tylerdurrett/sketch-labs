@@ -144,4 +144,114 @@ describe('grass-hills blade', () => {
     expect(surface).not.toHaveProperty('blade')
     expect(surface).not.toHaveProperty('BladeShape')
   })
+
+  it('treats rootSink 0 and absent options as the exact closed emission', () => {
+    const closed = blade(baseShape)
+
+    expect(blade(baseShape, { rootSink: 0 })).toEqual(closed)
+    expect(blade(baseShape, {})).toEqual(closed)
+    const leaned = { ...baseShape, lean: -0.4, stiffness: 3 }
+    expect(blade(leaned, { rootSink: 0 })).toEqual(blade(leaned))
+  })
+
+  it('cuts the buried fraction open at rootSink 0.25', () => {
+    const shape = { ...baseShape, lean: 0.35 }
+    const outline = blade(shape, { rootSink: 0.25 })
+    const tipOffset = shape.lean * shape.length
+    const cutSpineX = tipOffset * 0.25 ** (shape.stiffness + 1)
+    const cutHalfWidth = shape.width * (2 * 0.25 * (1 - 0.25))
+
+    expect(outline).toHaveLength(7)
+    expect(outline[0]).toEqual([cutSpineX + cutHalfWidth, 0])
+    expect(outline.at(-1)).toEqual([cutSpineX - cutHalfWidth, 0])
+    expect(outline[0]).not.toEqual(outline.at(-1))
+    expect(outline[0]![0] - outline.at(-1)![0]).toBeCloseTo(
+      2 * shape.width * (2 * 0.25 * 0.75),
+      12,
+    )
+    expect(outline[3]).toEqual([tipOffset, -0.75 * shape.length])
+    for (const point of outline) {
+      expect(point.every(Number.isFinite)).toBe(true)
+    }
+  })
+
+  it('deduplicates the mid station at the maximum rootSink 0.5', () => {
+    const outline = blade(baseShape, { rootSink: 0.5 })
+    const cutHalfWidth = baseShape.width * (2 * 0.5 * (1 - 0.5))
+
+    expect(outline).toHaveLength(5)
+    expect(outline[0]).toEqual([cutHalfWidth, 0])
+    expect(outline.at(-1)).toEqual([-cutHalfWidth, 0])
+    expect(outline[2]).toEqual([0, -0.5 * baseShape.length])
+  })
+
+  it('rejects rootSink values outside the finite [0, 0.5] domain', () => {
+    expect(() => blade(baseShape, { rootSink: 0.5 })).not.toThrow()
+    expect(() => blade(baseShape, { rootSink: -0.01 })).toThrow(RangeError)
+    expect(() =>
+      blade(baseShape, { rootSink: 0.5 + Number.EPSILON }),
+    ).toThrow(RangeError)
+    expect(() => blade(baseShape, { rootSink: Number.NaN })).toThrow(RangeError)
+    expect(() =>
+      blade(baseShape, { rootSink: Number.POSITIVE_INFINITY }),
+    ).toThrow(RangeError)
+  })
+
+  it('treats explicit legacy stations as the exact default emission', () => {
+    const shape = { ...baseShape, lean: -0.3, stiffness: 3.25 }
+
+    expect(blade(shape, { stations: [0, 0.5, 0.82, 1] })).toEqual(blade(shape))
+  })
+
+  it('emits fifteen closed root-repeated points for eight stations', () => {
+    const stations = [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1]
+    const outline = blade({ ...baseShape, lean: 0.2 }, { stations })
+
+    expect(outline).toHaveLength(15)
+    expect(outline[0]).toEqual([0, 0])
+    expect(outline.at(-1)).toEqual([0, 0])
+    expect(
+      outline.filter(([, y]) => y === -baseShape.length),
+    ).toHaveLength(1)
+    for (const [index, t] of stations.entries()) {
+      expect(outline[index]![1]).toBeCloseTo(-baseShape.length * t, 12)
+    }
+    for (const point of outline) {
+      expect(point.every(Number.isFinite)).toBe(true)
+    }
+  })
+
+  it('composes denser stations with a rootSink cut', () => {
+    const stations = [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1]
+    const outline = blade(baseShape, { stations, rootSink: 0.3 })
+    // Station set: the cut at 0.3 dedupes the equal station, then keeps the
+    // five stations above it -> six walk stations -> 11 open points.
+    const cutHalfWidth = baseShape.width * (2 * 0.3 * (1 - 0.3))
+
+    expect(outline).toHaveLength(11)
+    expect(outline[0]).toEqual([cutHalfWidth, 0])
+    expect(outline.at(-1)).toEqual([-cutHalfWidth, 0])
+    expect(outline[0]).not.toEqual(outline.at(-1))
+    expect(outline[5]).toEqual([0, -(1 - 0.3) * baseShape.length])
+  })
+
+  it('rejects station lists that break the [0 .. 1] ascending contract', () => {
+    expect(() => blade(baseShape, { stations: [0.1, 0.5, 1] })).toThrow(
+      RangeError,
+    )
+    expect(() => blade(baseShape, { stations: [0, 0.5, 0.99] })).toThrow(
+      RangeError,
+    )
+    expect(() => blade(baseShape, { stations: [0, 0.5, 0.5, 1] })).toThrow(
+      RangeError,
+    )
+    expect(() => blade(baseShape, { stations: [0, 0.7, 0.3, 1] })).toThrow(
+      RangeError,
+    )
+    expect(() => blade(baseShape, { stations: [0, Number.NaN, 1] })).toThrow(
+      RangeError,
+    )
+    expect(() => blade(baseShape, { stations: [] })).toThrow(RangeError)
+    expect(() => blade(baseShape, { stations: [0] })).toThrow(RangeError)
+  })
 })

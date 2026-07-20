@@ -28,6 +28,17 @@ describe('Grass Hills production presets', () => {
     expect(reconciled.params).toEqual({
       ...preset.params,
       foregroundZoom: 1,
+      terrainOctaves: 4,
+      terrainRoughness: 0.5,
+      terrainContrast: 1,
+      terrainSharpness: 0,
+      ridgeSamples: 128,
+      treelineHeight: 1,
+      treelineFalloff: 0.5,
+      treelineStrength: 0,
+      slopeBareness: 0,
+      bladeRootSink: 0,
+      bladeDetail: 4,
     })
     expect(reconciled.seed).toBe(preset.seed)
     expect(reconciled.profile).toEqual(preset.profile)

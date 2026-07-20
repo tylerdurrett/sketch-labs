@@ -66,13 +66,14 @@ function build(
 }
 
 describe('grass blade descriptors', () => {
-  it('uses exactly four root-local draws in length, width, stiffness, lean order', () => {
+  it('uses exactly five root-local draws in length, width, stiffness, lean, survival order', () => {
     const [descriptor] = build({ roots: [ROOTS[0]!] })
     const random = createStableScalarRandom('seed-a-grass-blade-2/3:3')
     const lengthRoll = random.value()
     const widthRoll = random.value()
     const stiffnessRoll = random.value()
     const leanRoll = random.value()
+    const survivalRoll = random.value()
     const scale = grassScaleAtY(descriptor!.projected[1], PROJECTION)
     const unscaledLength = clamp(
       SHAPE_OPTIONS.bladeLength +
@@ -86,6 +87,7 @@ describe('grass blade descriptors', () => {
       width: widthRoll,
       stiffness: stiffnessRoll,
       lean: leanRoll,
+      survival: survivalRoll,
     })
     expect(descriptor!.shape).toEqual({
       length: unscaledLength * scale,
@@ -107,7 +109,7 @@ describe('grass blade descriptors', () => {
         (2 * leanRoll - 1) * BASELINE_LEAN_VARIATION +
         SHAPE_OPTIONS.windLean * lerp(0.8, 1.2, leanRoll),
     })
-    // A fifth draw must not leak into any stored property.
+    // A sixth draw must not leak into any stored property.
     expect(Object.values(descriptor!.rolls)).not.toContain(random.value())
   })
 
@@ -153,6 +155,7 @@ describe('grass blade descriptors', () => {
       width: random.value(),
       stiffness: random.value(),
       lean: random.value(),
+      survival: random.value(),
     })
     expect(descriptor!.shape.length).toBe(20)
     expect(descriptor!.shape.stiffness).toBe(2.5)

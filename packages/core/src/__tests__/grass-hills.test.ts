@@ -23,10 +23,21 @@ const SCHEMA_KEYS = [
   'ridgeScale',
   'ridgeAmplitude',
   'terrainDrift',
+  'terrainOctaves',
+  'terrainRoughness',
+  'terrainContrast',
+  'terrainSharpness',
+  'ridgeSamples',
   'bladeDensity',
+  'treelineHeight',
+  'treelineFalloff',
+  'treelineStrength',
+  'slopeBareness',
   'bladeLength',
   'bladeLengthVariance',
   'bladeWidth',
+  'bladeRootSink',
+  'bladeDetail',
   'stiffnessVariance',
   'windLean',
   'backgroundColor',
@@ -177,10 +188,75 @@ describe('grass-hills Sketch contract', () => {
         default: 1.25,
         step: 0.05,
       },
+      terrainOctaves: {
+        kind: 'number',
+        min: 1,
+        max: 8,
+        default: 4,
+        step: 1,
+        integer: true,
+      },
+      terrainRoughness: {
+        kind: 'number',
+        min: 0.1,
+        max: 0.9,
+        default: 0.5,
+        step: 0.05,
+      },
+      terrainContrast: {
+        kind: 'number',
+        min: 0.25,
+        max: 4,
+        default: 1,
+        step: 0.05,
+      },
+      terrainSharpness: {
+        kind: 'number',
+        min: 0,
+        max: 1,
+        default: 0,
+        step: 0.05,
+      },
+      ridgeSamples: {
+        kind: 'number',
+        min: 64,
+        max: 1024,
+        default: 128,
+        step: 1,
+        integer: true,
+      },
       bladeDensity: {
         kind: 'number',
         min: 0,
         max: 10,
+        default: 0,
+        step: 0.05,
+      },
+      treelineHeight: {
+        kind: 'number',
+        min: 0,
+        max: 2,
+        default: 1,
+        step: 0.05,
+      },
+      treelineFalloff: {
+        kind: 'number',
+        min: 0,
+        max: 2,
+        default: 0.5,
+        step: 0.05,
+      },
+      treelineStrength: {
+        kind: 'number',
+        min: 0,
+        max: 1,
+        default: 0,
+        step: 0.05,
+      },
+      slopeBareness: {
+        kind: 'number',
+        min: 0,
+        max: 1,
         default: 0,
         step: 0.05,
       },
@@ -204,6 +280,21 @@ describe('grass-hills Sketch contract', () => {
         max: 12,
         default: 3,
         step: 0.1,
+      },
+      bladeRootSink: {
+        kind: 'number',
+        min: 0,
+        max: 0.5,
+        default: 0,
+        step: 0.01,
+      },
+      bladeDetail: {
+        kind: 'number',
+        min: 4,
+        max: 16,
+        default: 4,
+        step: 1,
+        integer: true,
       },
       stiffnessVariance: {
         kind: 'number',
@@ -361,6 +452,46 @@ describe('grass-hills Sketch contract', () => {
     for (let index = 1; index < baselineYs.length; index++) {
       expect(baselineYs[index]).toBeGreaterThan(baselineYs[index - 1]!)
     }
+  })
+
+  it('resolves ridgeSamples and terrain shaping into finite resized rings', () => {
+    const shaped = grassHills.generate(
+      {
+        ridgeSamples: 512,
+        terrainOctaves: 8,
+        terrainSharpness: 1,
+        bladeDensity: 0,
+      },
+      'shaped-resolution',
+      0,
+      WIDE,
+    )
+
+    expect(hills(shaped)).toHaveLength(10)
+    for (const primitive of hills(shaped)) {
+      expect(primitive.points).toHaveLength(512 + 6)
+      expect(
+        primitive.points.every(
+          ([x, y]) => Number.isFinite(x) && Number.isFinite(y),
+        ),
+      ).toBe(true)
+    }
+
+    expect(
+      grassHills.generate(
+        { ridgeSamples: 128, bladeDensity: 0.004 },
+        'shaped-resolution',
+        0,
+        WIDE,
+      ),
+    ).toEqual(
+      grassHills.generate(
+        { bladeDensity: 0.004 },
+        'shaped-resolution',
+        0,
+        WIDE,
+      ),
+    )
   })
 })
 

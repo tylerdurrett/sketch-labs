@@ -8,6 +8,13 @@
  * rolling unrelated profiles; `terrainDrift` controls how far that shared
  * landscape moves between depths. Relief scales with each band's local height,
  * so distant ridges flatten with the same perspective cue as their spacing.
+ * `terrainOctaves` and `terrainRoughness` feed the shared field's fBm octave
+ * count and gain directly, while `terrainSharpness` (a ridged fold toward
+ * `1 - 2|h|`) and `terrainContrast` (a sign-preserving power curve) reshape
+ * each sampled height inside the terrain module before its clamp; their
+ * defaults structurally skip both steps, so the untouched field stays
+ * byte-identical. `ridgeSamples` sets the horizontal resolution every
+ * prepared ridgeline is resolved at.
  *
  * FOREGROUND ZOOM / COMPOSITION: `foregroundZoom` uniformly magnifies the
  * completed scene around the horizon center. Terrain, projected roots, blade
@@ -32,32 +39,48 @@
  *
  * GRASS / CANONICAL STABILITY: every hill owns a canonical 100 x 100 stable-cell
  * root bank keyed by its reduced depth identity. Priority-prefix selection and
- * the four per-blade rolls stay in that hill-local space, so a shared hill
+ * the five per-blade rolls stay in that hill-local space, so a shared hill
  * retains its arrangement and variation when `hillCount` changes. Only the
  * final projection follows the count-dependent terrain mask. Each hill is
  * emitted before its blades, whose ascending root-y order lets lower blades
  * cover higher ones before the next, nearer hill covers the whole group.
  *
+ * GRASS EXCLUSION: `treelineStrength` and `slopeBareness` compare each root's
+ * unconditional fifth roll against a per-band survival probability built from
+ * band-relative elevation and the depth-invariant terrain slope. The filter
+ * runs before painter sorting and foreground zoom, so survivors never move or
+ * reroll; with both knobs at zero the filter is skipped structurally and no
+ * survival probability is ever evaluated.
+ *
  * DENSE / FAITHFUL OUTLINE ARCHITECTURE: the full-composition target is 10,000
  * descriptors from a seeded 100×100 stratified bank per stable hill identity.
- * Fill traces curved seven-point blade silhouettes. On-demand Outline starts
- * from that exact sampled geometry — all hill rings and every tapered blade in
- * painter order — then annotates every primitive as both source and occluder for
- * the generic indexed Hidden-line pass. There are no substitute centerline
- * spines, physical-tool root LOD, or hill-only approximation. The physical tool
+ * The protected invariant is that Fill and Outline never DIVERGE: on-demand
+ * Outline clones the exact sampled Fill Scene — all hill rings and every
+ * tapered blade in painter order — then annotates every primitive as both
+ * source and occluder for the generic indexed Hidden-line pass, so substitute
+ * centerline spines, outline-only root culling, or hill-only approximation
+ * cannot exist structurally. Resolution-proportional tessellation at the
+ * descriptor level is explicitly fine: `bladeDetail` resolves each blade's
+ * flank stations once from its perspective scale and the active zoom, and
+ * Fill and Outline both trace that single resolution. The physical tool
  * target changes output stroke width only; it never selects roots or
  * reconstructs geometry. The optional Outline-source hook keeps this dense
  * generation in Studio's worker.
  *
  * BLADE SILHOUETTES / PHYSICAL PALETTE: blades are traced by the private
  * tapered-outline generator as filled-and-stroked shapes — never single stroked
- * lines. Every outline explicitly repeats its root. Default geometry retains
- * `closed: true` for exact compatibility; active foreground zoom uses open path
- * metadata so bounds clipping cannot synthesize a new last-to-first stroke
- * across a clipped blade. The explicit root closure keeps the uncut fill and
- * contour unchanged. The background, hill fills, and blade fills default to
- * paper white; authored hill and blade contours default to black. All five
- * colors are tunable without participating in geometry or RNG.
+ * lines. Every uncut outline explicitly repeats its root. Default geometry
+ * retains `closed: true` for exact compatibility; two triggers switch to open
+ * path metadata. Active foreground zoom opens paths so bounds clipping cannot
+ * synthesize a new last-to-first stroke across a clipped blade. Active
+ * `bladeRootSink` cuts the buried bottom fraction of every silhouette away —
+ * a cut, not a translation, because painter order means nothing can occlude a
+ * blade from its own hill — leaving two distinct cut endpoints that an open
+ * path never bridges with a stroke chord tick while fills and Hidden-line
+ * occlusion still close implicitly. The explicit root closure keeps the uncut
+ * fill and contour unchanged. The background, hill fills, and blade fills
+ * default to paper white; authored hill and blade contours default to black.
+ * All five colors are tunable without participating in geometry or RNG.
  *
  * STATIC / DETERMINISTIC / PREPARED: there is no `time` metadata. All terrain
  * randomness comes from the explicit Seed, with no clock reads, `Math.random`,
@@ -88,6 +111,7 @@ import {
   resolveMaximumUnscaledBladeLength,
   type GrassBladeDescriptor,
 } from './grass'
+import { createGrassSurvival } from './grass-exclusion'
 import { createGrassHillMask } from './grass-placement'
 import {
   grassHillsOutlineSource,
@@ -136,14 +160,63 @@ const schema = {
   ridgeAmplitude: { kind: 'number', min: 0, max: 25, default: 0.8, step: 0.01 },
   /** Travel through the shared terrain field from foreground to horizon. */
   terrainDrift: { kind: 'number', min: 0, max: 8, default: 1.25, step: 0.05 },
+  /** fBm octave count for the shared terrain field. Whole-number domain. */
+  terrainOctaves: {
+    kind: 'number',
+    min: 1,
+    max: 8,
+    default: 4,
+    step: 1,
+    integer: true,
+  },
+  /** fBm per-octave gain; higher values roughen the shared terrain field. */
+  terrainRoughness: {
+    kind: 'number',
+    min: 0.1,
+    max: 0.9,
+    default: 0.5,
+    step: 0.05,
+  },
+  /** Post-fBm power curve; above one sharpens relief, below one softens. */
+  terrainContrast: { kind: 'number', min: 0.25, max: 4, default: 1, step: 0.05 },
+  /** Blend toward ridged terrain creases; zero keeps plain fBm. */
+  terrainSharpness: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
+  /** Horizontal segments used to resolve each prepared ridgeline. */
+  ridgeSamples: {
+    kind: 'number',
+    min: 64,
+    max: 1024,
+    default: RIDGE_SAMPLES,
+    step: 1,
+    integer: true,
+  },
   /** Relative density: 2 is the adopted 10k scene; 10 explores up to 50k. */
   bladeDensity: { kind: 'number', min: 0, max: 10, default: 0, step: 0.05 },
+  /** Elevation (band-height fraction) where the treeline fade begins. */
+  treelineHeight: { kind: 'number', min: 0, max: 2, default: 1, step: 0.05 },
+  /** Elevation span of the treeline fade; zero yields a hard cut. */
+  treelineFalloff: { kind: 'number', min: 0, max: 2, default: 0.5, step: 0.05 },
+  /** Fraction of blades culled above the treeline; zero disables it. */
+  treelineStrength: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
+  /** Fraction of blades culled on steep slopes; zero disables it. */
+  slopeBareness: { kind: 'number', min: 0, max: 1, default: 0, step: 0.05 },
   /** Nominal foreground blade length in Composition Frame units. */
   bladeLength: { kind: 'number', min: 4, max: 80, default: 28, step: 1 },
   /** Symmetric seeded variation around the nominal blade length. */
   bladeLengthVariance: { kind: 'number', min: 0, max: 40, default: 8, step: 1 },
   /** Nominal foreground blade silhouette width. */
   bladeWidth: { kind: 'number', min: 0.5, max: 12, default: 3, step: 0.1 },
+  /** Fraction of each blade sunk below its root; cuts the silhouette open. */
+  bladeRootSink: { kind: 'number', min: 0, max: 0.5, default: 0, step: 0.01 },
+  /** Maximum flank stations per blade at full scale. Whole-number domain. */
+  bladeDetail: {
+    kind: 'number',
+    min: 4,
+    max: 16,
+    default: 4,
+    step: 1,
+    integer: true,
+  },
   /** Seeded variation in how far toward the tip each blade bends. */
   stiffnessVariance: {
     kind: 'number',
@@ -181,6 +254,7 @@ interface PreparedGrassHills {
   readonly bladeColor: string
   readonly bladeStrokeColor: string
   readonly bladePathsClosed: boolean
+  readonly bladeRootSink: number
   readonly hills: ReadonlyArray<PreparedHill>
 }
 
@@ -223,7 +297,18 @@ function prepareGrassHills(
   const ridgeScale = numberParam(params, schema, 'ridgeScale')
   const ridgeAmplitude = numberParam(params, schema, 'ridgeAmplitude')
   const terrainDrift = numberParam(params, schema, 'terrainDrift')
+  const terrainOctaves = Math.round(
+    numberParam(params, schema, 'terrainOctaves'),
+  )
+  const terrainRoughness = numberParam(params, schema, 'terrainRoughness')
+  const terrainContrast = numberParam(params, schema, 'terrainContrast')
+  const terrainSharpness = numberParam(params, schema, 'terrainSharpness')
+  const ridgeSamples = Math.round(numberParam(params, schema, 'ridgeSamples'))
   const bladeDensity = numberParam(params, schema, 'bladeDensity')
+  const treelineHeight = numberParam(params, schema, 'treelineHeight')
+  const treelineFalloff = numberParam(params, schema, 'treelineFalloff')
+  const treelineStrength = numberParam(params, schema, 'treelineStrength')
+  const slopeBareness = numberParam(params, schema, 'slopeBareness')
   const bladeLength = numberParam(params, schema, 'bladeLength')
   const bladeLengthVariance = numberParam(
     params,
@@ -231,6 +316,8 @@ function prepareGrassHills(
     'bladeLengthVariance',
   )
   const bladeWidth = numberParam(params, schema, 'bladeWidth')
+  const bladeRootSink = numberParam(params, schema, 'bladeRootSink')
+  const bladeDetail = Math.round(numberParam(params, schema, 'bladeDetail'))
   const stiffnessVariance = numberParam(
     params,
     schema,
@@ -249,13 +336,20 @@ function prepareGrassHills(
     depthFalloff,
   }
   const bands = layoutHillBands(hillCount, projection)
-  const terrainAt = createTerrainField(seed, { ridgeScale, terrainDrift })
+  const terrainAt = createTerrainField(seed, {
+    ridgeScale,
+    terrainDrift,
+    terrainOctaves,
+    terrainRoughness,
+    terrainContrast,
+    terrainSharpness,
+  })
   const ridges = buildRidgeBands({
     frame: preparedFrame,
     bands,
     terrainAt,
     ridgeAmplitude,
-    ridgeSamples: RIDGE_SAMPLES,
+    ridgeSamples,
   })
   const maxUnscaledBladeLength = resolveMaximumUnscaledBladeLength(
     bladeLength,
@@ -288,19 +382,47 @@ function prepareGrassHills(
           : {}),
         maxUnscaledBladeLength,
       })
-      const descriptors = [
+      // Exclusion runs pre-sort and pre-zoom against the survival roll, so
+      // survivors keep their exact descriptors. Both knobs at zero skip the
+      // filter (and every survival evaluation) entirely — today's code path.
+      const survivalAt =
+        treelineStrength === 0 && slopeBareness === 0
+          ? undefined
+          : createGrassSurvival({
+              band,
+              terrainAt,
+              ridgeAmplitude,
+              knobs: {
+                treelineHeight,
+                treelineFalloff,
+                treelineStrength,
+                slopeBareness,
+              },
+            })
+      const built = [
         ...buildGrassBlades({
           seed,
           hillKey: band.hillKey,
           roots,
           mask,
+          bladeDetail,
+          foregroundZoom,
           bladeLength,
           bladeLengthVariance,
           bladeWidth,
           stiffnessVariance,
           windLean,
         }),
-      ].sort(
+      ]
+      const descriptors = (
+        survivalAt === undefined
+          ? built
+          : built.filter(
+              (descriptor) =>
+                descriptor.rolls.survival <
+                survivalAt(descriptor.canonical.u, descriptor.projected[1]),
+            )
+      ).sort(
         (a, b) =>
           a.projected[1] - b.projected[1] ||
           a.projected[0] - b.projected[0] ||
@@ -328,7 +450,8 @@ function prepareGrassHills(
     hillStrokeColor,
     bladeColor,
     bladeStrokeColor,
-    bladePathsClosed: foregroundZoom === 1,
+    bladePathsClosed: foregroundZoom === 1 && bladeRootSink === 0,
+    bladeRootSink,
     hills,
   })
 }
@@ -355,7 +478,10 @@ function sampleGrassHills(prepared: PreparedGrassHills, _t: number): Scene {
     for (const descriptor of hill.blades) {
       const [rootX, rootY] = descriptor.projected
       builder.addPath(
-        blade(descriptor.shape).map(([x, y]) => [x + rootX, y + rootY]),
+        blade(descriptor.shape, {
+          stations: descriptor.stations,
+          rootSink: prepared.bladeRootSink,
+        }).map(([x, y]) => [x + rootX, y + rootY]),
         {
           closed: prepared.bladePathsClosed,
           fill: { color: prepared.bladeColor },
