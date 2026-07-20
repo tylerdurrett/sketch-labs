@@ -3,11 +3,13 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import {
   defaultParams,
   definePreparedSketch,
+  isParamActive,
   newSeed,
   prepareSketch,
   randomize,
   validateChoiceParamSpec,
   validateChoiceParamValue,
+  validateParamSchema,
 } from '../sketch'
 import type { Params, ParamSchema, StatelessSketch } from '../sketch'
 import type { Scene } from '../scene'
@@ -178,6 +180,172 @@ describe('validateChoiceParamValue', () => {
     expect(() =>
       validateChoiceParamValue(spec, 'hatching', 'strategy'),
     ).toThrow(/value must be one of its declared option values/)
+  })
+})
+
+describe('conditional parameter applicability', () => {
+  const strategy = {
+    kind: 'choice',
+    options: [
+      { value: 'scribble', label: 'Scribble' },
+      { value: 'stippling', label: 'Stippling' },
+    ],
+    default: 'scribble',
+  } as const
+
+  it.each([
+    ['number', { kind: 'number', min: 0, max: 1, default: 0.5 }],
+    ['color', { kind: 'color', default: '#1a2b3c' }],
+    ['image asset', { kind: 'image-asset', default: 'portrait-a1b2c3d4' }],
+    [
+      'Choice',
+      {
+        kind: 'choice',
+        options: [{ value: 'fine', label: 'Fine' }],
+        default: 'fine',
+      },
+    ],
+  ] as const)(
+    'supports activeWhen on a %s parameter',
+    (_name, dependentSpec) => {
+      const schema = {
+        strategy,
+        dependent: {
+          ...dependentSpec,
+          activeWhen: { key: 'strategy', equals: 'stippling' },
+        },
+      } satisfies ParamSchema
+
+      expect(() => validateParamSchema(schema)).not.toThrow()
+      expect(isParamActive(schema, { strategy: 'stippling' }, 'dependent')).toBe(
+        true,
+      )
+      expect(isParamActive(schema, { strategy: 'scribble' }, 'dependent')).toBe(
+        false,
+      )
+    },
+  )
+
+  it('treats an unconditional parameter as active', () => {
+    const schema = { strategy } satisfies ParamSchema
+    expect(isParamActive(schema, {}, 'strategy')).toBe(true)
+  })
+
+  it('uses the validated Choice default when the controller value is missing', () => {
+    const schema = {
+      strategy,
+      scribbleDensity: {
+        kind: 'number',
+        min: 1,
+        max: 10,
+        default: 5,
+        activeWhen: { key: 'strategy', equals: 'scribble' },
+      },
+      stippleDensity: {
+        kind: 'number',
+        min: 1,
+        max: 10,
+        default: 5,
+        activeWhen: { key: 'strategy', equals: 'stippling' },
+      },
+    } satisfies ParamSchema
+
+    expect(isParamActive(schema, {}, 'scribbleDensity')).toBe(true)
+    expect(isParamActive(schema, {}, 'stippleDensity')).toBe(false)
+  })
+
+  it('rejects a present controller value outside its declared options', () => {
+    const schema = {
+      strategy,
+      density: {
+        kind: 'number',
+        min: 1,
+        max: 10,
+        default: 5,
+        activeWhen: { key: 'strategy', equals: 'stippling' },
+      },
+    } satisfies ParamSchema
+
+    expect(() =>
+      isParamActive(schema, { strategy: 'hatching' }, 'density'),
+    ).toThrow(/Choice param `strategy` value must be one of/)
+  })
+
+  it.each([
+    [
+      'a missing controller',
+      {
+        activeWhen: { key: 'missing', equals: 'stippling' },
+      },
+      /missing controller `missing`/,
+    ],
+    [
+      'a non-Choice controller',
+      {
+        activeWhen: { key: 'amount', equals: 'stippling' },
+      },
+      /controller `amount` must be a Choice param/,
+    ],
+    [
+      'a self-reference',
+      {
+        activeWhen: { key: 'dependent', equals: 'stippling' },
+      },
+      /cannot reference itself/,
+    ],
+    [
+      'an undeclared comparison value',
+      {
+        activeWhen: { key: 'strategy', equals: 'hatching' },
+      },
+      /equals must be a declared option/,
+    ],
+  ])('rejects %s', (_name, overrides, message) => {
+    const schema = {
+      strategy,
+      amount: { kind: 'number', min: 0, max: 1, default: 0.5 },
+      dependent: {
+        kind: 'number',
+        min: 0,
+        max: 1,
+        default: 0.5,
+        ...overrides,
+      },
+    } as ParamSchema
+
+    expect(() => validateParamSchema(schema)).toThrow(message)
+    expect(() => defaultParams(schema)).toThrow(message)
+  })
+
+  it('is pure and does not recursively evaluate the Choice controller', () => {
+    const schema = Object.freeze({
+      mode: Object.freeze({
+        kind: 'choice' as const,
+        options: Object.freeze([
+          Object.freeze({ value: 'advanced', label: 'Advanced' }),
+        ]),
+        default: 'advanced',
+      }),
+      strategy: Object.freeze({
+        kind: 'choice' as const,
+        options: Object.freeze([
+          Object.freeze({ value: 'stippling', label: 'Stippling' }),
+        ]),
+        default: 'stippling',
+        activeWhen: Object.freeze({ key: 'mode', equals: 'never-declared' }),
+      }),
+      density: Object.freeze({
+        kind: 'number' as const,
+        min: 0,
+        max: 1,
+        default: 0.5,
+        activeWhen: Object.freeze({ key: 'strategy', equals: 'stippling' }),
+      }),
+    }) as ParamSchema
+    const params = Object.freeze({ strategy: 'stippling' })
+
+    expect(isParamActive(schema, params, 'density')).toBe(true)
+    expect(params).toEqual({ strategy: 'stippling' })
   })
 })
 

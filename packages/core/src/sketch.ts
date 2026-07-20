@@ -57,6 +57,22 @@ import type {
 export type Seed = string | number
 
 /**
+ * One narrow applicability dependency between parameters.
+ *
+ * The named controller must be a Choice parameter in the same schema and
+ * `equals` must be one of that Choice's declared stable option values. The rule
+ * is deliberately direct and nonrecursive: a dependent's activity is decided
+ * only by the controller's current value, even when that controller has an
+ * applicability rule of its own.
+ */
+export interface ParamActiveWhen {
+  /** Schema key of the Choice parameter that controls applicability. */
+  key: string
+  /** Stable Choice option value for which this parameter is active. */
+  equals: string
+}
+
+/**
  * A numeric knob's declaration — a continuous (or whole-number) range with a
  * default. The founding {@link ParamSpec} member (issue #47), joined by
  * {@link ColorParamSpec}, {@link ImageAssetParamSpec}, and
@@ -95,6 +111,8 @@ export interface NumberParamSpec {
    * absent ⇒ any real in `[min, max]` is legal.
    */
   integer?: boolean
+  /** Optional direct Choice dependency controlling this parameter's activity. */
+  activeWhen?: ParamActiveWhen
 }
 
 /**
@@ -118,6 +136,8 @@ export interface ColorParamSpec {
    * `'#1a2b3c'` (see the type doc for why the domain is hex).
    */
   default: string
+  /** Optional direct Choice dependency controlling this parameter's activity. */
+  activeWhen?: ParamActiveWhen
 }
 
 /**
@@ -137,6 +157,8 @@ export interface ImageAssetParamSpec {
   kind: 'image-asset'
   /** The stable logical Image Asset ID seeded by {@link defaultParams}. */
   default: string
+  /** Optional direct Choice dependency controlling this parameter's activity. */
+  activeWhen?: ParamActiveWhen
 }
 
 /**
@@ -169,6 +191,8 @@ export interface ChoiceParamSpec {
   options: readonly ChoiceOption[]
   /** The declared option value seeded by {@link defaultParams}. */
   default: string
+  /** Optional direct Choice dependency controlling this parameter's activity. */
+  activeWhen?: ParamActiveWhen
 }
 
 /**
@@ -292,6 +316,112 @@ export function validateChoiceParamValue<Spec extends ChoiceParamSpec>(
 }
 
 /**
+ * Validate the Choice and applicability invariants of a Parameter Schema.
+ *
+ * This is intentionally a narrow boundary: it validates Choice declarations
+ * and `activeWhen` relationships only. It does not add runtime validation for
+ * the established Number, Color, or Image Asset value domains.
+ *
+ * @param schema - The complete Parameter Schema whose relationships to check.
+ * @throws If a Choice declaration is malformed, or an `activeWhen` controller
+ *   is missing, is not a Choice, names the dependent itself, or compares to an
+ *   undeclared stable option value.
+ */
+export function validateParamSchema(schema: ParamSchema): void {
+  for (const [key, spec] of Object.entries(schema)) {
+    if (spec.kind === 'choice') validateChoiceParamSpec(spec, key)
+    validateParamApplicability(schema, key, spec)
+  }
+}
+
+/** Validate one spec's direct applicability relationship. */
+function validateParamApplicability(
+  schema: ParamSchema,
+  key: string,
+  spec: ParamSpec,
+): void {
+  const dependency = spec.activeWhen
+  if (dependency === undefined) return
+
+  if (typeof dependency !== 'object' || dependency === null) {
+    throw new Error(`Param \`${key}\` activeWhen must be an object`)
+  }
+  if (typeof dependency.key !== 'string' || dependency.key.length === 0) {
+    throw new Error(`Param \`${key}\` activeWhen key must name a parameter`)
+  }
+  if (dependency.key === key) {
+    throw new Error(`Param \`${key}\` activeWhen cannot reference itself`)
+  }
+
+  const controller = schema[dependency.key]
+  if (controller === undefined) {
+    throw new Error(
+      `Param \`${key}\` activeWhen references missing controller \`${dependency.key}\``,
+    )
+  }
+  if (controller.kind !== 'choice') {
+    throw new Error(
+      `Param \`${key}\` activeWhen controller \`${dependency.key}\` must be a Choice param`,
+    )
+  }
+
+  validateChoiceParamSpec(controller, dependency.key)
+  if (
+    typeof dependency.equals !== 'string' ||
+    !controller.options.some((option) => option.value === dependency.equals)
+  ) {
+    throw new Error(
+      `Param \`${key}\` activeWhen equals must be a declared option of Choice param \`${dependency.key}\``,
+    )
+  }
+}
+
+/**
+ * Report whether one parameter is applicable for the current complete Params.
+ *
+ * Parameters without `activeWhen` are always active. A dependent uses exact
+ * equality against its direct Choice controller's validated current value. If
+ * that controller key is absent from Params, its validated schema default is
+ * used. The controller's own applicability is never traversed.
+ *
+ * @param schema - The complete Parameter Schema.
+ * @param params - Current values; read only and never completed or mutated.
+ * @param key - Schema key whose activity to evaluate.
+ * @returns Whether the parameter is active.
+ * @throws If `key`, its applicability relationship, the Choice declaration, or
+ *   a present Choice value is malformed.
+ */
+export function isParamActive(
+  schema: ParamSchema,
+  params: Params,
+  key: string,
+): boolean {
+  const spec = schema[key]
+  if (spec === undefined) {
+    throw new Error(`Unknown param \`${key}\``)
+  }
+
+  validateParamApplicability(schema, key, spec)
+  const dependency = spec.activeWhen
+  if (dependency === undefined) return true
+
+  const controller = schema[dependency.key] as ChoiceParamSpec
+  let controllerValue: string
+  if (Object.prototype.hasOwnProperty.call(params, dependency.key)) {
+    controllerValue = validateChoiceParamValue(
+      controller,
+      params[dependency.key],
+      dependency.key,
+    )
+  } else {
+    validateChoiceParamSpec(controller, dependency.key)
+    controllerValue = controller.default
+  }
+
+  return controllerValue === dependency.equals
+}
+
+/**
  * Derive the inhabited default params from a schema: every key set to its spec's
  * `default`. Pure and headless — the first of the core engine functions
  * (randomize / newSeed are siblings), and the value the Harness starts a Sketch
@@ -301,9 +431,9 @@ export function validateChoiceParamValue<Spec extends ChoiceParamSpec>(
  * @returns A {@link Params} with one entry per schema key, each its spec default.
  */
 export function defaultParams(schema: ParamSchema): Params {
+  validateParamSchema(schema)
   const params: Params = {}
   for (const [key, spec] of Object.entries(schema)) {
-    if (spec.kind === 'choice') validateChoiceParamSpec(spec, key)
     params[key] = spec.default
   }
   return params
