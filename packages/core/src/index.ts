@@ -37,6 +37,17 @@ export {
   type ScribbleControlName,
   type ScribbleControls,
 } from './scribbleStrategy/types'
+export {
+  defaultStipplingControls,
+  stipplingControlSchema,
+  stipplingStrategy,
+  type StipplingControlName,
+  type StipplingControls,
+  type StipplingObserver,
+  type StipplingProgress,
+  type StipplingResult,
+  type StipplingStrategyInput,
+} from './stipplingStrategy/index'
 export * from './plotProfile'
 export * from './plotMapping'
 export * from './plotterSvg'
