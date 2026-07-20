@@ -14,6 +14,7 @@ import { placeInitialStipples } from '../stipplingStrategy/placement'
 import {
   computeStipplingDistributionError,
   refineStipples,
+  resolveStipplingRefinementAttempts,
 } from '../stipplingStrategy/refinement'
 import type {
   StippleMark,
@@ -103,6 +104,28 @@ describe('Stipple distribution error', () => {
 })
 
 describe('bounded Stipple refinement', () => {
+  it('resolves and validates the shared authored refinement-work policy', () => {
+    expect(resolveStipplingRefinementAttempts(6, 0)).toBe(0)
+    expect(resolveStipplingRefinementAttempts(6, 0.5)).toBe(60)
+    expect(resolveStipplingRefinementAttempts(6, 1)).toBe(120)
+    expect(
+      resolveStipplingRefinementAttempts(Number.MAX_SAFE_INTEGER, 1),
+    ).toBe(1_000_000)
+
+    expect(() => resolveStipplingRefinementAttempts(-1, 0.5)).toThrow(
+      /markCount/,
+    )
+    expect(() => resolveStipplingRefinementAttempts(1.5, 0.5)).toThrow(
+      /markCount/,
+    )
+    expect(() => resolveStipplingRefinementAttempts(1, Number.NaN)).toThrow(
+      /distributionFidelity/,
+    )
+    expect(() => resolveStipplingRefinementAttempts(1, 1.1)).toThrow(
+      /distributionFidelity/,
+    )
+  })
+
   it('returns exact frozen identity for zero requested attempts', () => {
     const target = model()
     const initial = frozenMarks([[[25, 25], 0.5]])

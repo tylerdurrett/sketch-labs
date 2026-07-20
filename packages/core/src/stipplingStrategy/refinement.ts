@@ -6,6 +6,30 @@ import type { StippleMark, StipplingModel } from './types'
 const DEFAULT_ATTEMPTS_PER_MARK = 20
 const MAXIMUM_REFINEMENT_ATTEMPTS = 1_000_000
 
+/** Resolve authored fidelity into exact bounded relocation work. */
+export function resolveStipplingRefinementAttempts(
+  markCount: number,
+  distributionFidelity: number,
+): number {
+  if (!Number.isSafeInteger(markCount) || markCount < 0) {
+    throw new RangeError('markCount must be a non-negative safe integer')
+  }
+  if (
+    !Number.isFinite(distributionFidelity) ||
+    distributionFidelity < 0 ||
+    distributionFidelity > 1
+  ) {
+    throw new RangeError('distributionFidelity must be finite and within [0, 1]')
+  }
+
+  return Math.min(
+    MAXIMUM_REFINEMENT_ATTEMPTS,
+    Math.round(
+      markCount * DEFAULT_ATTEMPTS_PER_MARK * distributionFidelity,
+    ),
+  )
+}
+
 /** Optional deterministic work bound for distribution refinement. */
 export interface StipplingRefinementOptions {
   /** Exact relocation-attempt budget. Must be a safe integer in `[0, 1e6]`. */
@@ -55,13 +79,9 @@ function resolveAttemptLimit(
     return requested
   }
 
-  return Math.min(
-    MAXIMUM_REFINEMENT_ATTEMPTS,
-    Math.round(
-      markCount *
-        DEFAULT_ATTEMPTS_PER_MARK *
-        model.controls.distributionFidelity,
-    ),
+  return resolveStipplingRefinementAttempts(
+    markCount,
+    model.controls.distributionFidelity,
   )
 }
 
