@@ -1,0 +1,43 @@
+{
+  "version": 3,
+  "sketch": "photo-scribble",
+  "name": "pinecone-detail-aware",
+  "seed": 4084018301128305,
+  "params": {
+    "imageAsset": "pinecone-4330aa0314f7",
+    "toneContrast": 0.81,
+    "tonePivot": 0.87,
+    "toneGamma": 0.5,
+    "detailSensitivity": 0.5,
+    "detailInfluence": 0.29,
+    "pathDensity": 20,
+    "scribbleScale": 0.4,
+    "momentum": 0.75,
+    "chaos": 0.73,
+    "toneFidelity": 0.64,
+    "stopPoint": 100
+  },
+  "locks": [],
+  "profile": {
+    "width": 152.39999999999998,
+    "height": 228.6,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true,
+    "toolWidthMillimeters": 0.3
+  },
+  "framing": {
+    "pageFrame": {
+      "x": 253.311515658629,
+      "y": 97.20536259681796,
+      "width": 483.09178743961354,
+      "height": 761.1249762832583
+    },
+    "generationAspect": 1,
+    "aspectLocked": true
+  }
+}

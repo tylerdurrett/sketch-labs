@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { resolveCompositionFrame } from '../compositionFrame'
+import {
+  createScribbleScaleField,
+  type ScribbleScaleField,
+} from '../scribbleScaleField'
 import {
   createShadingMask,
   createToneField,
@@ -16,6 +20,7 @@ import {
   defaultScribbleControls,
   scribbleControlSchema,
 } from '../scribbleStrategy/types'
+import type { Point } from '../types'
 import {
   constantTone,
   featheredBoundaryMask,
@@ -186,6 +191,220 @@ describe('Scribble coherent scale model', () => {
       12,
     )
     expect(model.samples()).toEqual(samples)
+  })
+
+  it('resolves analytic fine, intermediate, and broad local scales at exact coupled ratios', () => {
+    const scaleField = createScribbleScaleField(
+      1,
+      ([x]) => 1 + (2 * x) / SQUARE.width,
+    )
+    const model = createScribbleModel(source(), SQUARE, {}, scaleField)
+
+    const fine = model.localScalesAt([0, 500])
+    const intermediate = model.localScalesAt([500, 500])
+    const broad = model.localScalesAt([1000, 500])
+
+    expect(fine).toBe(model.scales)
+    expect(
+      [fine, intermediate, broad].map(({ segmentLength }) => segmentLength),
+    ).toEqual([12, 24, 36])
+    for (const local of [fine, intermediate, broad]) {
+      expect(local.coverageRadius / local.segmentLength).toBeCloseTo(1.5, 12)
+      expect(local.maskCheckSpacing / local.segmentLength).toBeCloseTo(0.25, 12)
+    }
+  })
+
+  it('keeps authored scales, controls, lattice, and residual samples globally fixed with a field', () => {
+    const toneSource = source(
+      horizontalGradientTone(SQUARE),
+      featheredBoundaryMask(SQUARE),
+    )
+    const controls = {
+      pathDensity: 2.5,
+      scribbleScale: 0.5,
+      momentum: 0.6,
+      chaos: 0.4,
+      toneFidelity: 0.75,
+      stopPoint: 80,
+    }
+    const uniform = createScribbleModel(toneSource, SQUARE, controls)
+    const variable = createScribbleModel(
+      toneSource,
+      SQUARE,
+      controls,
+      createScribbleScaleField(0.5, ([x]) => 0.5 + x / 100),
+    )
+
+    expect(variable.controls).toEqual(uniform.controls)
+    expect(variable.scales).toEqual(uniform.scales)
+    expect(variable.scales.coveragePerPass).toBe(
+      uniform.scales.coveragePerPass,
+    )
+    expect(variable.scales.completionThreshold).toBe(
+      uniform.scales.completionThreshold,
+    )
+    expect(variable.lattice).toEqual(uniform.lattice)
+    expect(variable.samples()).toEqual(uniform.samples())
+    expect(variable.residualError()).toBe(uniform.residualError())
+  })
+
+  it('falls back atomically to authored fine scales for invalid samples and scene-unit overflow', () => {
+    const invalidSamples = [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      -1,
+      0,
+    ]
+
+    for (const sample of invalidSamples) {
+      const model = createScribbleModel(
+        source(),
+        SQUARE,
+        {},
+        createScribbleScaleField(1, () => sample),
+      )
+      expect(model.localScalesAt([500, 500])).toBe(model.scales)
+    }
+
+    const overflowingField: ScribbleScaleField = {
+      kind: 'scribble-scale-field',
+      sample: () => Number.MAX_VALUE,
+    }
+    const overflowing = createScribbleModel(
+      source(),
+      SQUARE,
+      {},
+      overflowingField,
+    )
+
+    expect(overflowing.localScalesAt([500, 500])).toBe(overflowing.scales)
+    expect(
+      Object.values(overflowing.localScalesAt([500, 500])).every(
+        Number.isFinite,
+      ),
+    ).toBe(true)
+  })
+
+  it('profiles exact segments deterministically at authored-fine-safe stations including endpoints', () => {
+    const producer = vi.fn(([x]: Readonly<[number, number]>) => 1 + x / 12)
+    const model = createScribbleModel(
+      source(),
+      SQUARE,
+      {},
+      createScribbleScaleField(1, producer),
+    )
+    const beforeSamples = model.samples()
+    const beforeResidual = model.residualError()
+
+    const first = model.profileSegment([0, 10], [12, 10])!
+    const second = model.profileSegment([0, 10], [12, 10])!
+
+    expect(first).toEqual(second)
+    expect(first.samples.map(({ point }) => point)).toEqual([
+      [0, 10],
+      [3, 10],
+      [6, 10],
+      [9, 10],
+      [12, 10],
+    ])
+    expect(first.samples.map(({ progress }) => progress)).toEqual([
+      0,
+      0.25,
+      0.5,
+      0.75,
+      1,
+    ])
+    expect(first.minimumSegmentLength).toBe(12)
+    expect(first.minimumMaskCheckSpacing).toBe(3)
+    expect(first.maximumCoverageRadius).toBe(36)
+    for (let index = 1; index < first.samples.length; index++) {
+      const previous = first.samples[index - 1]!.point
+      const current = first.samples[index]!.point
+      expect(
+        Math.hypot(current[0] - previous[0], current[1] - previous[1]),
+      ).toBeLessThanOrEqual(model.scales.maskCheckSpacing)
+    }
+    expect(producer).toHaveBeenCalledTimes(first.samples.length * 2)
+    expect(model.samples()).toEqual(beforeSamples)
+    expect(model.residualError()).toBe(beforeResidual)
+
+    const bounds = model.profileSegmentBounds([0, 10], [12, 10])!
+    expect(bounds).toEqual({
+      length: first.length,
+      minimumSegmentLength: first.minimumSegmentLength,
+      minimumMaskCheckSpacing: first.minimumMaskCheckSpacing,
+      maximumCoverageRadius: first.maximumCoverageRadius,
+    })
+    const producerCalls = producer.mock.calls.length
+    expect(model.isSegmentSafe([0, 10], [12, 10], bounds)).toBe(true)
+    expect(producer).toHaveBeenCalledTimes(producerCalls)
+  })
+
+  it('profiles a zero-length segment once and declines non-finite or unsafe geometry', () => {
+    const producer = vi.fn(() => 2)
+    const model = createScribbleModel(
+      source(),
+      SQUARE,
+      {},
+      createScribbleScaleField(1, producer),
+    )
+
+    const point = model.profileSegment([4, 5], [4, 5])!
+    expect(point.length).toBe(0)
+    expect(point.samples).toHaveLength(1)
+    expect(point.samples[0]).toMatchObject({ point: [4, 5], progress: 0 })
+    expect(producer).toHaveBeenCalledTimes(1)
+    expect(model.profileSegment([Number.NaN, 0], [1, 0])).toBeUndefined()
+    expect(model.profileSegment([0, 0], [Number.MAX_VALUE, 0])).toBeUndefined()
+  })
+
+  it('uses one conservative field-aware segment predicate for length, mask, and frame safety', () => {
+    const fineBand = createScribbleScaleField(1, ([x]) =>
+      x >= 5 && x <= 7 ? 1 : 2,
+    )
+    const model = createScribbleModel(source(), SQUARE, {}, fineBand)
+
+    expect(model.isSegmentSafe([0, 10], [10, 10])).toBe(true)
+    expect(model.isSegmentSafe([0, 10], [20, 10])).toBe(false)
+    expect(model.isSegmentSafe([995, 10], [1005, 10])).toBe(false)
+
+    const narrowMask = createShadingMask(([x]) => (x === 3 ? 0 : 1))
+    const narrowFineStation = createScribbleScaleField(1, ([x]) =>
+      x === 3 ? 1 : 2,
+    )
+    const masked = createScribbleModel(
+      source(constantTone(1), narrowMask),
+      SQUARE,
+      {},
+      narrowFineStation,
+    )
+    expect(masked.isSegmentSafe([0, 10], [12, 10])).toBe(false)
+  })
+
+  it('retains the original uniform mask path when no field is present', () => {
+    const sample = vi.fn(() => 1)
+    const model = createScribbleModel(
+      source(constantTone(1), createShadingMask(sample)),
+      SQUARE,
+    )
+    sample.mockClear()
+
+    expect(model.scaleField).toBeUndefined()
+    expect(model.isSegmentSafe([0, 10], [30, 10])).toBe(true)
+    expect(sample.mock.calls.map(([point]) => point)).toEqual([
+      [0, 10],
+      [3, 10],
+      [6, 10],
+      [9, 10],
+      [12, 10],
+      [15, 10],
+      [18, 10],
+      [21, 10],
+      [24, 10],
+      [27, 10],
+      [30, 10],
+    ])
   })
 })
 
@@ -368,6 +587,285 @@ describe('Scribble virtual coverage', () => {
 
     expect(model.coverageAt([SQUARE.width * 0.5, y])).toBeGreaterThan(0)
     expect(model.coverageAt([SQUARE.width * 0.1, y])).toBe(0)
+  })
+
+  it('widens constant local-scale footprints at equal peak coverage', () => {
+    const fine = createScribbleModel(
+      source(constantTone(1)),
+      SQUARE,
+      {},
+      createScribbleScaleField(1, () => 1),
+    )
+    const broad = createScribbleModel(
+      source(constantTone(1)),
+      SQUARE,
+      {},
+      createScribbleScaleField(1, () => 3),
+    )
+    const center =
+      fine.samples()[Math.floor(fine.lattice.sampleCount / 2)]!.point
+    const fineRadius = fine.localScalesAt(center).coverageRadius
+    const broadRadius = broad.localScalesAt(center).coverageRadius
+
+    fine.depositPoint(center)
+    broad.depositPoint(center)
+
+    expect(broadRadius / fineRadius).toBe(3)
+    expect(fine.coverageAt(center)).toBeCloseTo(
+      fine.scales.coveragePerPass,
+      12,
+    )
+    expect(broad.coverageAt(center)).toBeCloseTo(
+      broad.scales.coveragePerPass,
+      12,
+    )
+
+    for (const [model, radius] of [
+      [fine, fineRadius],
+      [broad, broadRadius],
+    ] as const) {
+      for (const sample of model.samples()) {
+        const distanceSquared =
+          (sample.point[0] - center[0]) ** 2 +
+          (sample.point[1] - center[1]) ** 2
+        const expected =
+          distanceSquared < radius * radius
+            ? model.scales.coveragePerPass *
+              (1 - distanceSquared / (radius * radius)) ** 2
+            : 0
+        expect(sample.coverage).toBeCloseTo(expected, 12)
+      }
+    }
+
+    expect(
+      broad.samples().filter(({ coverage }) => coverage > 0),
+    ).toHaveLength(
+      broad.samples().filter(({ point }) => {
+        const distance = Math.hypot(
+          point[0] - center[0],
+          point[1] - center[1],
+        )
+        return distance < broadRadius
+      }).length,
+    )
+    expect(
+      broad.samples().filter(({ coverage }) => coverage > 0).length,
+    ).toBeGreaterThan(
+      fine.samples().filter(({ coverage }) => coverage > 0).length,
+    )
+  })
+
+  it('uses one projected local kernel across a continuous scale transition', () => {
+    const model = createScribbleModel(
+      source(constantTone(1)),
+      SQUARE,
+      {},
+      createScribbleScaleField(
+        1,
+        ([x]) => 1 + (2 * x) / SQUARE.width,
+      ),
+    )
+    const samples = model.samples()
+    const row = Math.floor(model.lattice.rows / 2)
+    const start = samples[row * model.lattice.columns + 18]!.point
+    const end = samples[row * model.lattice.columns + 55]!.point
+
+    model.depositSegment(start, end)
+
+    for (const sample of model.samples()) {
+      const projectionX = Math.min(end[0], Math.max(start[0], sample.point[0]))
+      const distanceSquared =
+        (sample.point[0] - projectionX) ** 2 +
+        (sample.point[1] - start[1]) ** 2
+      const radius = model.localScalesAt([
+        projectionX,
+        start[1],
+      ]).coverageRadius
+      const expected =
+        distanceSquared < radius * radius
+          ? model.scales.coveragePerPass *
+            (1 - distanceSquared / (radius * radius)) ** 2
+          : 0
+      expect(sample.coverage).toBeCloseTo(expected, 12)
+    }
+
+    const centerline = model
+      .samples()
+      .filter(
+        ({ point }) =>
+          point[1] === start[1] &&
+          point[0] >= start[0] &&
+          point[0] <= end[0],
+      )
+    expect(centerline.length).toBeGreaterThan(1)
+    expect(
+      centerline.every(
+        ({ coverage }) => coverage === model.scales.coveragePerPass,
+      ),
+    ).toBe(true)
+
+    const maximumRadius = model.profileSegment(start, end)!.maximumCoverageRadius
+    const fineSideOutsideLocalRadius = model.samples().find(({ point }) => {
+      if (point[0] !== start[0]) return false
+      const distance = Math.abs(point[1] - start[1])
+      return (
+        distance > model.localScalesAt(start).coverageRadius &&
+        distance < maximumRadius
+      )
+    })
+    expect(fineSideOutsideLocalRadius).toBeDefined()
+    expect(fineSideOutsideLocalRadius!.coverage).toBe(0)
+  })
+
+  it('keeps a bounded broad maximum between profile stations exact', () => {
+    const baseline = createScribbleModel(source(constantTone(1)), SQUARE)
+    const start = [450, 450] as const
+    const end = [462, 450 + Math.PI] as const
+    const deltaX = end[0] - start[0]
+    const deltaY = end[1] - start[1]
+    const lengthSquared = deltaX * deltaX + deltaY * deltaY
+    const broadScale = 3
+    const candidate = baseline.samples().find(({ point }) => {
+      const progress =
+        ((point[0] - start[0]) * deltaX +
+          (point[1] - start[1]) * deltaY) /
+        lengthSquared
+      if (progress <= 0 || progress >= 1) return false
+      const projection = [
+        start[0] + progress * deltaX,
+        start[1] + progress * deltaY,
+      ] as const
+      const distance = Math.hypot(
+        point[0] - projection[0],
+        point[1] - projection[1],
+      )
+      return (
+        distance >
+          baseline.scales.coverageRadius + baseline.lattice.cellHeight &&
+        distance < baseline.scales.coverageRadius * broadScale
+      )
+    })!
+    const progress =
+      ((candidate.point[0] - start[0]) * deltaX +
+        (candidate.point[1] - start[1]) * deltaY) /
+      lengthSquared
+    const projectedMaximum = [
+      start[0] + progress * deltaX,
+      start[1] + progress * deltaY,
+    ] as const
+    const producer = ([x, y]: Readonly<Point>) =>
+      Math.abs(x - projectedMaximum[0]) < 1e-9 &&
+      Math.abs(y - projectedMaximum[1]) < 1e-9
+        ? broadScale
+        : 1
+    const model = createScribbleModel(
+      source(constantTone(1)),
+      SQUARE,
+      {},
+      createScribbleScaleField(1, producer),
+    )
+    const bounded = createScribbleModel(
+      source(constantTone(1)),
+      SQUARE,
+      {},
+      createScribbleScaleField(1, producer, broadScale),
+    )
+    const profile = model.profileSegment(start, end)!
+    const target = model.samples().find(
+      ({ point }) =>
+        point[0] === candidate.point[0] && point[1] === candidate.point[1],
+    )!
+
+    expect(
+      profile.samples.every(
+        ({ point }) =>
+          Math.abs(point[0] - projectedMaximum[0]) >= 1e-9 ||
+          Math.abs(point[1] - projectedMaximum[1]) >= 1e-9,
+      ),
+    ).toBe(true)
+    expect(profile.maximumCoverageRadius).toBe(model.scales.coverageRadius)
+    expect(target.point[1]).toBeLessThan(
+      Math.min(start[1], end[1]) - profile.maximumCoverageRadius,
+    )
+
+    model.depositSegment(start, end)
+    bounded.depositSegment(start, end)
+
+    const distanceSquared =
+      (target.point[0] - projectedMaximum[0]) ** 2 +
+      (target.point[1] - projectedMaximum[1]) ** 2
+    const broadRadius = model.scales.coverageRadius * broadScale
+    const expected =
+      model.scales.coveragePerPass *
+      (1 - distanceSquared / (broadRadius * broadRadius)) ** 2
+    expect(model.coverageAt(target.point)).toBeCloseTo(expected, 12)
+    expect(
+      model.samples().find(({ point }) =>
+        point[0] === target.point[0] && point[1] === target.point[1],
+      )!.coverage,
+    ).toBeCloseTo(expected, 12)
+    expect(bounded.samples()).toEqual(model.samples())
+    expect(bounded.residualError()).toBe(model.residualError())
+  })
+
+  it('keeps bounded and unbounded field deposits exactly equivalent', () => {
+    const producer = ([x, y]: Readonly<Point>) =>
+      1 + 2 * (0.5 + 0.5 * Math.sin(x / 71) * Math.cos(y / 83))
+    const unbounded = createScribbleModel(
+      source(horizontalGradientTone(SQUARE), featheredBoundaryMask(SQUARE)),
+      SQUARE,
+      {},
+      createScribbleScaleField(1, producer),
+    )
+    const bounded = createScribbleModel(
+      source(horizontalGradientTone(SQUARE), featheredBoundaryMask(SQUARE)),
+      SQUARE,
+      {},
+      createScribbleScaleField(1, producer, 3),
+    )
+    const segments = [
+      [[100, 500], [900, 500]],
+      [[500, 100], [500, 900]],
+      [[125, 850], [875, 175]],
+      [[425, 510], [425, 510]],
+    ] as const
+
+    for (const segment of segments) {
+      unbounded.depositSegment(...segment)
+      bounded.depositSegment(...segment)
+      expect(bounded.samples()).toEqual(unbounded.samples())
+      expect(bounded.residualError()).toBe(unbounded.residualError())
+    }
+  })
+
+  it('keeps field-aware cached residuals exact while deposits converge monotonically', () => {
+    const model = createScribbleModel(
+      source(horizontalGradientTone(SQUARE), featheredBoundaryMask(SQUARE)),
+      SQUARE,
+      { pathDensity: 3.5, scribbleScale: 0.5 },
+      createScribbleScaleField(
+        0.5,
+        ([x]) => 0.5 + (1.5 * x) / SQUARE.width,
+      ),
+    )
+    const segment = [[100, 500], [900, 500]] as const
+    const initial = model.residualError()
+    let previous = initial
+
+    for (let pass = 0; pass < 8; pass++) {
+      model.depositSegment(...segment)
+      const samples = model.samples()
+      const independentlySummed =
+        samples.reduce((sum, sample) => sum + sample.residual, 0) /
+        samples.length
+      const current = model.residualError()
+
+      expect(current).toBeCloseTo(independentlySummed, 12)
+      expect(current).toBeLessThanOrEqual(previous)
+      previous = current
+    }
+
+    expect(previous).toBeLessThan(initial)
   })
 
   it('makes path density inversely control per-pass coverage', () => {

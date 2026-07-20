@@ -17,6 +17,7 @@ import {
   prepareSketch,
   type Canvas2DContext,
   type CoordinateSpace,
+  type DetailField,
   type Params,
   type PageFrame,
   type PlotProfile,
@@ -27,6 +28,7 @@ import {
   type ToneSource,
 } from "@harness/core";
 
+import { rasterizeDetailReference } from "./detailReference";
 import { rasterizeToneReference } from "./toneReference";
 import {
   PAGE_FRAME_RESIZE_HANDLES,
@@ -116,6 +118,13 @@ export type LiveCanvasRenderState =
   | ({ readonly kind: "outline"; readonly scene: Scene; readonly t: number } &
       SuppliedSceneProvenance)
   | { readonly kind: "tone-reference"; readonly source: ToneSource }
+  | { readonly kind: "detail-reference"; readonly field: DetailField }
+  | { readonly kind: "detail-reference-loading" }
+  | {
+      readonly kind: "detail-reference-failure";
+      /** Retries the caller-owned preparation session; LiveCanvas owns no work. */
+      readonly onRetry: () => void;
+    }
   | {
       /**
        * Fail-closed presentation for authored Image Asset IDs that are not yet
@@ -210,9 +219,9 @@ interface LiveCanvasBaseProps {
   /** Reports a Scene only after that exact Scene was successfully painted. */
   onDisplayedSceneCommitted?: (snapshot: DisplayedSceneSnapshot) => void;
   /**
-   * Selects live Fill sampling, caller-owned held/Outline geometry, a
-   * pixel-native Tone reference, or an explicit fail-closed unavailable state.
-   * No non-live state invokes the Sketch generator.
+   * Selects live Fill sampling, caller-owned held/Outline geometry,
+   * pixel-native Tone/Detail diagnostics, or an explicit fail-closed state. No
+   * non-live state invokes the Sketch generator.
    */
   renderState?: LiveCanvasRenderState;
   /** Export identity metadata retained in the displayed-scene handle. */
@@ -428,6 +437,29 @@ function paintToneReference(
   return true;
 }
 
+/** Paint a Detail reference directly into the canvas backing store. */
+function paintDetailReference(
+  canvas: HTMLCanvasElement,
+  field: DetailField,
+  compositionFrame: CoordinateSpace,
+  pageFrame: PageFrame | null,
+): boolean {
+  const ctx = canvas.getContext("2d");
+  if (ctx === null || canvas.width === 0 || canvas.height === 0) return false;
+
+  const raster = rasterizeDetailReference(
+    field,
+    compositionFrame,
+    canvas.width,
+    canvas.height,
+    pageFrame,
+  );
+  const imageData = ctx.createImageData(raster.width, raster.height);
+  imageData.data.set(raster.data);
+  ctx.putImageData(imageData, 0, 0);
+  return true;
+}
+
 /** Remove every previously painted pixel without deriving replacement content. */
 function neutralizeCanvas(canvas: HTMLCanvasElement): void {
   const ctx = canvas.getContext("2d");
@@ -490,9 +522,10 @@ export function sizeToBox(canvas: HTMLCanvasElement, dpr: number): boolean {
  * `frameId` and cancels exactly that frame).
  *
  * Live Fill is the only state that samples a Sketch. Held Fill and completed
- * Outline states paint exact caller-supplied geometry; Tone reference samples
- * only its headless source into pixels. All non-live states suspend animation.
- * Resize and DPR changes repaint or re-rasterize without deriving geometry.
+ * Outline states paint exact caller-supplied geometry; Tone and ready Detail
+ * references sample only their headless fields into pixels. All non-live states
+ * suspend animation. Resize and DPR changes repaint or re-rasterize without
+ * deriving geometry.
  */
 export function LiveCanvas({
   sketch,
@@ -555,6 +588,16 @@ export function LiveCanvas({
   const compositionHeight = compositionFrame.height;
   const toneReferenceSource =
     renderState.kind === "tone-reference" ? renderState.source : null;
+  const detailReferenceField =
+    renderState.kind === "detail-reference" ? renderState.field : null;
+  const detailReferenceStatus =
+    renderState.kind === "detail-reference"
+      ? "ready"
+      : renderState.kind === "detail-reference-loading"
+        ? "loading"
+        : renderState.kind === "detail-reference-failure"
+          ? "failure"
+          : null;
   const suppliedScene =
     renderState.kind === "fill-held" || renderState.kind === "outline"
       ? renderState.scene
@@ -1058,6 +1101,40 @@ export function LiveCanvas({
     neutralizeCanvas(canvas);
   }, [renderState]);
 
+  // Detail-reference pixels are diagnostic-only. Clear every retained Scene
+  // identity before the browser can paint the new mode, then either rasterize
+  // the ready field or leave a neutral surface under bounded loading/failure UI.
+  // The caller owns preparation and retry; this boundary samples no Sketch and
+  // commits no Scene or export snapshot.
+  useLayoutEffect(() => {
+    if (detailReferenceStatus === null) return;
+    displayedSceneRef.current = null;
+    displayedFillRef.current = null;
+    const canvas = canvasRef.current;
+    if (canvas === null) return;
+    sizeToBox(canvas, window.devicePixelRatio || 1);
+    if (detailReferenceField === null) {
+      neutralizeCanvas(canvas);
+      return;
+    }
+    paintDetailReference(
+      canvas,
+      detailReferenceField,
+      compositionFrame,
+      pageFrameForPaint,
+    );
+  }, [
+    detailReferenceField,
+    detailReferenceStatus,
+    compositionAspect,
+    compositionWidth,
+    compositionHeight,
+    pageFrameForPaint?.x,
+    pageFrameForPaint?.y,
+    pageFrameForPaint?.width,
+    pageFrameForPaint?.height,
+  ]);
+
   // The transport's PLAYING gate. An animated Sketch mounts playing (ADR-0005):
   // the rAF loop drives `t` and the scrubber thumb follows. Grabbing the scrubber
   // flips this to `false`, pausing the loop so `t` is held at the scrubbed frame.
@@ -1248,7 +1325,24 @@ export function LiveCanvas({
       );
       return;
     }
-    if (state.kind === "unavailable") return;
+    if (state.kind === "detail-reference") {
+      displayedSceneRef.current = null;
+      displayedFillRef.current = null;
+      paintDetailReference(
+        canvas,
+        state.field,
+        compositionFrameRef.current,
+        pageFrameForPaintRef.current,
+      );
+      return;
+    }
+    if (
+      state.kind === "detail-reference-loading" ||
+      state.kind === "detail-reference-failure" ||
+      state.kind === "unavailable"
+    ) {
+      return;
+    }
     const displayed = displayedSceneRef.current;
     if (displayed !== null) paintFrame(canvas, displayed.displayedScene);
   }, []);
@@ -1271,11 +1365,9 @@ export function LiveCanvas({
       return;
     }
     if (
-      renderState.kind === "tone-reference" ||
-      renderState.kind === "unavailable"
-    ) {
-      return;
-    }
+      renderState.kind !== "fill-held" &&
+      renderState.kind !== "outline"
+    ) return;
     tRef.current = renderState.t;
     resumeTRef.current = renderState.t;
     if (scrubberRef.current !== null) {
@@ -1405,11 +1497,10 @@ export function LiveCanvas({
   // sent through hidden-line work.
   useEffect(() => {
     if (
-      renderState.kind === "tone-reference" ||
-      renderState.kind === "unavailable"
-    ) {
-      return;
-    }
+      renderState.kind !== "fill-live" &&
+      renderState.kind !== "fill-held" &&
+      renderState.kind !== "outline"
+    ) return;
     const canvas = canvasRef.current;
     if (canvas === null) return;
     sizeToBox(canvas, window.devicePixelRatio || 1);
@@ -1580,13 +1671,20 @@ export function LiveCanvas({
       : unavailableState?.status === "missing"
         ? `${unavailableSubject} unavailable`
         : `${unavailableSubject} could not be loaded`;
+  const detailReferencePending =
+    renderState.kind === "detail-reference-loading" ||
+    renderState.kind === "detail-reference-failure"
+      ? renderState
+      : null;
+  const surfaceUnavailable =
+    unavailableState !== null || detailReferencePending !== null;
   const canvasSurface = (
     <>
       <canvas
         ref={canvasRef}
         className="live-canvas"
         style={paperStyle}
-        aria-hidden={unavailableState === null ? undefined : true}
+        aria-hidden={surfaceUnavailable ? true : undefined}
       />
       {unavailableState !== null && (
         <div
@@ -1610,6 +1708,37 @@ export function LiveCanvas({
               <code key={`${index}:${id}`}>{id}</code>
             ))}
           </span>
+        </div>
+      )}
+      {detailReferencePending !== null && (
+        <div
+          className="live-canvas-unavailable"
+          role={
+            detailReferencePending.kind === "detail-reference-loading"
+              ? "status"
+              : "alert"
+          }
+          aria-live={
+            detailReferencePending.kind === "detail-reference-loading"
+              ? "polite"
+              : "assertive"
+          }
+          aria-atomic="true"
+        >
+          <strong className="live-canvas-unavailable__message">
+            {detailReferencePending.kind === "detail-reference-loading"
+              ? "Detail analysis loading"
+              : "Detail analysis could not be completed"}
+          </strong>
+          {detailReferencePending.kind === "detail-reference-failure" && (
+            <button
+              type="button"
+              className="live-canvas-unavailable__retry"
+              onClick={detailReferencePending.onRetry}
+            >
+              Retry Detail analysis
+            </button>
+          )}
         </div>
       )}
     </>
@@ -1749,7 +1878,9 @@ export function LiveCanvas({
         </div>
       </div>
       {/* The slim transport bar, pinned to the bottom of the canvas area (#156). */}
-      {time !== undefined && unavailableState === null && (
+      {time !== undefined &&
+        unavailableState === null &&
+        detailReferenceStatus === null && (
         <div className="transport">
           <button
             type="button"

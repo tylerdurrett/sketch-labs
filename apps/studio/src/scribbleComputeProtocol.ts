@@ -244,17 +244,21 @@ export function isScribbleComputeRequest(
 function isScribbleProgressSnapshot(value: unknown): value is ScribbleProgress {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, [
-      "completedWorkUnits",
-      "totalWorkUnits",
-      "terminal",
-    ]) ||
+    !hasExactKeys(
+      value,
+      ["completedWorkUnits", "totalWorkUnits", "terminal"],
+      ["convergence"],
+    ) ||
     !Number.isSafeInteger(value.completedWorkUnits) ||
     (value.completedWorkUnits as number) < 0 ||
     !Number.isSafeInteger(value.totalWorkUnits) ||
     (value.totalWorkUnits as number) < 0 ||
     (value.completedWorkUnits as number) > (value.totalWorkUnits as number) ||
-    typeof value.terminal !== "boolean"
+    typeof value.terminal !== "boolean" ||
+    (hasOwn(value, "convergence") &&
+      (!isFiniteNumber(value.convergence) ||
+        value.convergence < 0 ||
+        value.convergence > 1))
   ) {
     return false;
   }

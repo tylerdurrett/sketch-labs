@@ -122,11 +122,17 @@ function progressResponse(
   completedWorkUnits: number,
   totalWorkUnits = 100,
   terminal = false,
+  convergence?: number,
 ) {
   return {
     type: "progress" as const,
     jobId: worker.request!.jobId,
-    snapshot: { completedWorkUnits, totalWorkUnits, terminal },
+    snapshot: {
+      completedWorkUnits,
+      totalWorkUnits,
+      ...(convergence === undefined ? {} : { convergence }),
+      terminal,
+    },
   };
 }
 
@@ -240,6 +246,99 @@ describe("ScribbleCoordinator", () => {
         terminal: true,
       },
       eta: { kind: "remaining", revision: 1, remainingMs: 0 },
+    });
+
+    worker.emit("message", successResponse(worker));
+    await result;
+  });
+
+  it("estimates threshold convergence instead of projecting to the safety cap", async () => {
+    const worker = new FakeWorker();
+    let now = 0;
+    const updates = vi.fn();
+    const coordinator = new ScribbleCoordinator(
+      () => worker,
+      () => now,
+    );
+    const result = coordinator.start(identity(), updates);
+
+    // Work-only extrapolation would report 8 seconds remaining at the second
+    // snapshot: 80 safety units at 10 units/second. Residual convergence says
+    // the threshold is 70% complete and has advanced 30% in one second.
+    worker.emit("message", progressResponse(worker, 10, 100, false, 0.4));
+    now = 1_000;
+    worker.emit("message", progressResponse(worker, 20, 100, false, 0.7));
+
+    expect(updates).toHaveBeenLastCalledWith({
+      snapshot: {
+        completedWorkUnits: 20,
+        totalWorkUnits: 100,
+        convergence: 0.7,
+        terminal: false,
+      },
+      eta: expect.objectContaining({
+        kind: "remaining",
+        revision: 2,
+      }),
+    });
+    expect(updates.mock.calls.at(-1)![0].eta).toMatchObject({
+      remainingMs: expect.closeTo(1_000, 8),
+    });
+
+    worker.emit("message", successResponse(worker));
+    await result;
+  });
+
+  it("uses cap-work ETA when it wins the race against convergence", async () => {
+    const worker = new FakeWorker();
+    let now = 0;
+    const updates = vi.fn();
+    const coordinator = new ScribbleCoordinator(
+      () => worker,
+      () => now,
+    );
+    const result = coordinator.start(identity(), updates);
+
+    worker.emit("message", progressResponse(worker, 10, 100, false, 0.1));
+    now = 1_000;
+    worker.emit("message", progressResponse(worker, 20, 100, false, 0.11));
+
+    // Cap work predicts 8 seconds while convergence predicts 89 seconds.
+    expect(updates).toHaveBeenLastCalledWith({
+      snapshot: {
+        completedWorkUnits: 20,
+        totalWorkUnits: 100,
+        convergence: 0.11,
+        terminal: false,
+      },
+      eta: { kind: "remaining", revision: 2, remainingMs: 8_000 },
+    });
+
+    worker.emit("message", successResponse(worker));
+    await result;
+  });
+
+  it("retains cap-work ETA for legacy snapshots without convergence", async () => {
+    const worker = new FakeWorker();
+    let now = 0;
+    const updates = vi.fn();
+    const coordinator = new ScribbleCoordinator(
+      () => worker,
+      () => now,
+    );
+    const result = coordinator.start(identity(), updates);
+
+    worker.emit("message", progressResponse(worker, 10, 100));
+    now = 1_000;
+    worker.emit("message", progressResponse(worker, 20, 100));
+
+    expect(updates).toHaveBeenLastCalledWith({
+      snapshot: {
+        completedWorkUnits: 20,
+        totalWorkUnits: 100,
+        terminal: false,
+      },
+      eta: { kind: "remaining", revision: 2, remainingMs: 8_000 },
     });
 
     worker.emit("message", successResponse(worker));

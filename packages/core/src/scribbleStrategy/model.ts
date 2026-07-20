@@ -1,19 +1,28 @@
 import type { CoordinateSpace } from '../scene'
 import {
+  sampleScribbleScaleField,
+  type ScribbleScaleField,
+} from '../scribbleScaleField'
+import {
   sampleShadingMask,
   sampleToneField,
   type ToneSource,
 } from '../shadingFields'
 import type { Point } from '../types'
+import { isMaskPermittedSegment } from './mask'
 import {
   defaultScribbleControls,
   scribbleControlSchema,
   type ScribbleControlName,
   type ScribbleControls,
   type ScribbleLattice,
+  type ScribbleLocalScales,
   type ScribbleModel,
   type ScribbleResidualSample,
   type ScribbleScales,
+  type ScribbleSegmentScaleBounds,
+  type ScribbleSegmentScaleProfile,
+  type ScribbleSegmentScaleSample,
 } from './types'
 
 // Ratios belong to the strategy, not the authored parameter surface. The values
@@ -175,6 +184,39 @@ function squaredDistanceToSegment(
   return nearestDx * nearestDx + nearestDy * nearestDy
 }
 
+function projectionOntoSegment(
+  point: Readonly<Point>,
+  start: Readonly<Point>,
+  end: Readonly<Point>,
+): { readonly point: Point; readonly distanceSquared: number } {
+  const deltaX = end[0] - start[0]
+  const deltaY = end[1] - start[1]
+  const lengthSquared = deltaX * deltaX + deltaY * deltaY
+  const progress =
+    lengthSquared === 0
+      ? 0
+      : Math.min(
+          1,
+          Math.max(
+            0,
+            ((point[0] - start[0]) * deltaX +
+              (point[1] - start[1]) * deltaY) /
+              lengthSquared,
+          ),
+        )
+  const projection: Point = [
+    start[0] + progress * deltaX,
+    start[1] + progress * deltaY,
+  ]
+  const distanceX = point[0] - projection[0]
+  const distanceY = point[1] - projection[1]
+
+  return {
+    point: projection,
+    distanceSquared: distanceX * distanceX + distanceY * distanceY,
+  }
+}
+
 function interpolatedLatticeValue(
   lattice: ScribbleLattice,
   values: Float64Array,
@@ -216,6 +258,7 @@ export function createScribbleModel(
   source: ToneSource,
   frame: CoordinateSpace,
   controls: Partial<ScribbleControls> = defaultScribbleControls,
+  scaleField?: ScribbleScaleField,
 ): ScribbleModel {
   const normalizedControls = normalizeScribbleControls(controls)
   const scales = resolveScribbleScales(frame, normalizedControls)
@@ -224,6 +267,173 @@ export function createScribbleModel(
   const tone = new Float64Array(lattice.sampleCount)
   const permission = new Float64Array(lattice.sampleCount)
   const coverage = new Float64Array(lattice.sampleCount)
+
+  function localSegmentLengthAt(point: Readonly<Point>): number {
+    if (scaleField === undefined) return scales.segmentLength
+
+    const localAuthoredScale = sampleScribbleScaleField(
+      scaleField,
+      point,
+      normalizedControls.scribbleScale,
+    )
+    if (localAuthoredScale === normalizedControls.scribbleScale) {
+      return scales.segmentLength
+    }
+
+    const segmentLength =
+      scales.segmentLength *
+      (localAuthoredScale / normalizedControls.scribbleScale)
+    const coverageRadius = segmentLength * COVERAGE_TO_SEGMENT
+    const maskCheckSpacing = segmentLength * MASK_CHECK_TO_SEGMENT
+
+    return Number.isFinite(segmentLength) &&
+      segmentLength > 0 &&
+      Number.isFinite(coverageRadius) &&
+      coverageRadius > 0 &&
+      Number.isFinite(maskCheckSpacing) &&
+      maskCheckSpacing > 0
+      ? segmentLength
+      : scales.segmentLength
+  }
+
+  function localScalesAt(point: Readonly<Point>): ScribbleLocalScales {
+    if (scaleField === undefined) return scales
+
+    const segmentLength = localSegmentLengthAt(point)
+    if (segmentLength === scales.segmentLength) return scales
+    const coverageRadius = segmentLength * COVERAGE_TO_SEGMENT
+    const maskCheckSpacing = segmentLength * MASK_CHECK_TO_SEGMENT
+
+    return Object.freeze({
+      segmentLength,
+      coverageRadius,
+      maskCheckSpacing,
+    })
+  }
+
+  function scanSegment(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+    captureSamples: true,
+  ): ScribbleSegmentScaleProfile | undefined
+  function scanSegment(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+    captureSamples?: false,
+  ): ScribbleSegmentScaleBounds | undefined
+  function scanSegment(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+    captureSamples = false,
+  ): ScribbleSegmentScaleProfile | ScribbleSegmentScaleBounds | undefined {
+    const deltaX = end[0] - start[0]
+    const deltaY = end[1] - start[1]
+    const length = Math.hypot(deltaX, deltaY)
+    if (!Number.isFinite(length)) return undefined
+
+    const intervalCount = Math.ceil(length / scales.maskCheckSpacing)
+    if (!Number.isSafeInteger(intervalCount)) return undefined
+
+    let minimumSegmentLength = Number.POSITIVE_INFINITY
+    let minimumMaskCheckSpacing = Number.POSITIVE_INFINITY
+    let maximumCoverageRadius = 0
+    const samples: ScribbleSegmentScaleSample[] | undefined = captureSamples
+      ? []
+      : undefined
+
+    for (let interval = 0; interval <= intervalCount; interval++) {
+      const progress = intervalCount === 0 ? 0 : interval / intervalCount
+      const rawPoint = [
+        interval === intervalCount ? end[0] : start[0] + deltaX * progress,
+        interval === intervalCount ? end[1] : start[1] + deltaY * progress,
+      ] as Point
+      const point = captureSamples ? Object.freeze(rawPoint) : rawPoint
+      const localScales = captureSamples ? localScalesAt(point) : undefined
+      const segmentLength =
+        localScales?.segmentLength ?? localSegmentLengthAt(point)
+      const coverageRadius =
+        localScales?.coverageRadius ?? segmentLength * COVERAGE_TO_SEGMENT
+      const maskCheckSpacing =
+        localScales?.maskCheckSpacing ?? segmentLength * MASK_CHECK_TO_SEGMENT
+
+      minimumSegmentLength = Math.min(
+        minimumSegmentLength,
+        segmentLength,
+      )
+      minimumMaskCheckSpacing = Math.min(
+        minimumMaskCheckSpacing,
+        maskCheckSpacing,
+      )
+      maximumCoverageRadius = Math.max(
+        maximumCoverageRadius,
+        coverageRadius,
+      )
+      samples?.push(Object.freeze({ point, progress, scales: localScales! }))
+    }
+
+    return Object.freeze({
+      length,
+      ...(samples === undefined ? {} : { samples: Object.freeze(samples) }),
+      minimumSegmentLength,
+      minimumMaskCheckSpacing,
+      maximumCoverageRadius,
+    })
+  }
+
+  function profileSegment(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): ScribbleSegmentScaleProfile | undefined {
+    return scanSegment(start, end, true)
+  }
+
+  function profileSegmentBounds(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): ScribbleSegmentScaleBounds | undefined {
+    return scanSegment(start, end)
+  }
+
+  function isSegmentSafe(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+    knownBounds?: ScribbleSegmentScaleBounds,
+  ): boolean {
+    // Keep the established uniform-scale arithmetic and sampling path exact.
+    if (scaleField === undefined) {
+      return isMaskPermittedSegment(
+        source.shadingMask,
+        lattice.frame,
+        start,
+        end,
+        scales.maskCheckSpacing,
+      )
+    }
+
+    const bounds = knownBounds ?? profileSegmentBounds(start, end)
+    if (bounds === undefined) return false
+
+    // Endpoints produced with sin/cos can differ from the requested length by
+    // a few ulps. Admit only that representational noise, not a meaningful
+    // excursion beyond the most restrictive sampled local length.
+    const comparisonTolerance =
+      Number.EPSILON *
+      8 *
+      Math.max(1, bounds.length, bounds.minimumSegmentLength)
+    if (
+      bounds.length > bounds.minimumSegmentLength + comparisonTolerance
+    ) {
+      return false
+    }
+
+    return isMaskPermittedSegment(
+      source.shadingMask,
+      lattice.frame,
+      start,
+      end,
+      bounds.minimumMaskCheckSpacing,
+    )
+  }
 
   for (let row = 0; row < lattice.rows; row++) {
     for (let column = 0; column < lattice.columns; column++) {
@@ -248,7 +458,10 @@ export function createScribbleModel(
     residualTotal += cellResidual(index)
   }
 
-  function deposit(start: Readonly<Point>, end: Readonly<Point>): void {
+  function depositWithoutScaleField(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): void {
     const radius = scales.coverageRadius
     const radiusSquared = radius * radius
     const minColumn = Math.max(
@@ -294,11 +507,201 @@ export function createScribbleModel(
     }
   }
 
+  function depositWithScaleField(
+    start: Readonly<Point>,
+    end: Readonly<Point>,
+  ): void {
+    const bounds = profileSegmentBounds(start, end)
+    if (bounds === undefined) return
+
+    // The profile supplies one conservative candidate bound. Each cell still
+    // resolves its radius at the nearest centerline point, so a broad part of
+    // the stroke cannot widen a neighboring fine part.
+    const maximumRadius = bounds.maximumCoverageRadius
+    const minColumn = Math.max(
+      0,
+      Math.floor(
+        (Math.min(start[0], end[0]) - maximumRadius) / lattice.cellWidth,
+      ),
+    )
+    const maxColumn = Math.min(
+      lattice.columns - 1,
+      Math.floor(
+        (Math.max(start[0], end[0]) + maximumRadius) / lattice.cellWidth,
+      ),
+    )
+    const minRow = Math.max(
+      0,
+      Math.floor(
+        (Math.min(start[1], end[1]) - maximumRadius) / lattice.cellHeight,
+      ),
+    )
+    const maxRow = Math.min(
+      lattice.rows - 1,
+      Math.floor(
+        (Math.max(start[1], end[1]) + maximumRadius) / lattice.cellHeight,
+      ),
+    )
+
+    function depositCell(row: number, column: number): void {
+      const index = row * lattice.columns + column
+      const point = points[index]!
+      const projection = projectionOntoSegment(point, start, end)
+      const radius = localScalesAt(projection.point).coverageRadius
+      const radiusSquared = radius * radius
+      if (projection.distanceSquared >= radiusSquared) return
+
+      // One cell receives one kernel evaluation for the complete segment.
+      // This keeps peak darkness independent of profile sampling density.
+      const normalizedDistanceSquared =
+        projection.distanceSquared / radiusSquared
+      const shoulder = 1 - normalizedDistanceSquared
+      const amount = scales.coveragePerPass * shoulder * shoulder
+      const previousResidual = cellResidual(index)
+      coverage[index] = Math.min(1, coverage[index]! + amount)
+      residualTotal += cellResidual(index) - previousResidual
+    }
+
+    for (let row = minRow; row <= maxRow; row++) {
+      for (let column = minColumn; column <= maxColumn; column++) {
+        depositCell(row, column)
+      }
+    }
+
+    const deltaX = end[0] - start[0]
+    const deltaY = end[1] - start[1]
+    const lengthSquared = deltaX * deltaX + deltaY * deltaY
+    if (lengthSquared === 0) return
+
+    const boundedMaximumScale =
+      scaleField?.maximumScale !== undefined &&
+      Number.isFinite(scaleField.maximumScale) &&
+      scaleField.maximumScale >= normalizedControls.scribbleScale
+        ? scaleField.maximumScale
+        : undefined
+    const boundedMaximumRadius =
+      boundedMaximumScale === undefined
+        ? undefined
+        : scales.coverageRadius *
+          (boundedMaximumScale / normalizedControls.scribbleScale)
+    const fallbackMinRow =
+      boundedMaximumRadius === undefined
+        ? 0
+        : Math.max(
+            0,
+            Math.floor(
+              (Math.min(start[1], end[1]) - boundedMaximumRadius) /
+                lattice.cellHeight,
+            ),
+          )
+    const fallbackMaxRow =
+      boundedMaximumRadius === undefined
+        ? lattice.rows - 1
+        : Math.min(
+            lattice.rows - 1,
+            Math.floor(
+              (Math.max(start[1], end[1]) + boundedMaximumRadius) /
+                lattice.cellHeight,
+            ),
+          )
+    const fallbackMinColumn =
+      boundedMaximumRadius === undefined
+        ? 0
+        : Math.max(
+            0,
+            Math.floor(
+              (Math.min(start[0], end[0]) - boundedMaximumRadius) /
+                lattice.cellWidth,
+            ),
+          )
+    const fallbackMaxColumn =
+      boundedMaximumRadius === undefined
+        ? lattice.columns - 1
+        : Math.min(
+            lattice.columns - 1,
+            Math.floor(
+              (Math.max(start[0], end[0]) + boundedMaximumRadius) /
+                lattice.cellWidth,
+            ),
+          )
+
+    // Without a declared field maximum, profile stations cannot prove a global
+    // radius bound because the callback may be discontinuous. A declared bound
+    // safely clips this fallback to the segment's largest possible footprint.
+    // In either case, only strict interior projections can reveal a radius that
+    // the station-derived initial box missed. Preserve row-major visitation so
+    // the residual-total arithmetic stays bit-for-bit stable.
+    for (let row = fallbackMinRow; row <= fallbackMaxRow; row++) {
+      const y = (row + 0.5) * lattice.cellHeight
+      let firstColumn = 0
+      let lastColumn = lattice.columns - 1
+
+      if (deltaX === 0) {
+        const dot = (y - start[1]) * deltaY
+        if (dot <= 0 || dot >= lengthSquared) continue
+      } else {
+        const verticalDot = (y - start[1]) * deltaY
+        const firstBoundary = start[0] - verticalDot / deltaX
+        const secondBoundary =
+          start[0] + (lengthSquared - verticalDot) / deltaX
+        const minimumX = Math.min(firstBoundary, secondBoundary)
+        const maximumX = Math.max(firstBoundary, secondBoundary)
+
+        // Include one conservative boundary column on either side; the exact
+        // dot-product test below removes endpoint projections.
+        firstColumn = Math.max(
+          0,
+          Math.floor(minimumX / lattice.cellWidth - 0.5),
+        )
+        lastColumn = Math.min(
+          lattice.columns - 1,
+          Math.ceil(maximumX / lattice.cellWidth - 0.5),
+        )
+      }
+
+      firstColumn = Math.max(firstColumn, fallbackMinColumn)
+      lastColumn = Math.min(lastColumn, fallbackMaxColumn)
+
+      for (let column = firstColumn; column <= lastColumn; column++) {
+        if (
+          row >= minRow &&
+          row <= maxRow &&
+          column >= minColumn &&
+          column <= maxColumn
+        ) {
+          continue
+        }
+
+        const point = points[row * lattice.columns + column]!
+        const dot =
+          (point[0] - start[0]) * deltaX +
+          (point[1] - start[1]) * deltaY
+        if (dot <= 0 || dot >= lengthSquared) continue
+        depositCell(row, column)
+      }
+    }
+  }
+
+  function deposit(start: Readonly<Point>, end: Readonly<Point>): void {
+    // Keep the established implementation as an explicit compatibility path.
+    if (scaleField === undefined) {
+      depositWithoutScaleField(start, end)
+      return
+    }
+
+    depositWithScaleField(start, end)
+  }
+
   return {
     source,
     controls: normalizedControls,
+    ...(scaleField === undefined ? {} : { scaleField }),
     scales,
     lattice,
+    localScalesAt,
+    profileSegment,
+    profileSegmentBounds,
+    isSegmentSafe,
     residualError(): number {
       // Every term is bounded [0,1], and sampleCount is always positive.
       return Math.min(1, Math.max(0, residualTotal / lattice.sampleCount))

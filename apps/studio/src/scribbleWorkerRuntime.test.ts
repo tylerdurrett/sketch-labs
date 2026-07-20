@@ -369,6 +369,7 @@ describe("Scribble worker runtime", () => {
         schema: photoScribble.schema,
         params: {
           ...defaultParams(photoScribble.schema),
+          detailInfluence: 1,
           pathDensity: 0.5,
           scribbleScale: 2,
           toneFidelity: 1,
@@ -431,7 +432,10 @@ describe("Scribble worker runtime", () => {
       expect(execute).toHaveBeenCalledWith(
         photoScribble.generateScribbleArtwork,
         input.identity,
-        environment,
+        expect.objectContaining({
+          imageAssets: environment.imageAssets,
+          getPreparedImageDetailAnalysis: expect.any(Function),
+        }),
         undefined,
       );
       expect(response).toMatchObject({
@@ -445,6 +449,44 @@ describe("Scribble worker runtime", () => {
       expect(JSON.stringify(response)).not.toMatch(/data|pixels|bitmap|blob/i);
     },
   );
+
+  it("skips Detail preparation at zero influence", async () => {
+    const input = request({
+      sketchId: photoScribble.id,
+      schema: photoScribble.schema,
+      params: {
+        ...defaultParams(photoScribble.schema),
+        detailInfluence: 0,
+      },
+    });
+    const environment: SketchEnvironment = {
+      imageAssets: () => ({
+        width: 1,
+        height: 1,
+        data: Uint8ClampedArray.from([0, 0, 0, 255]),
+      }),
+    };
+    const execute = vi.fn(
+      (..._args: Parameters<ScribbleArtworkExecutor>) => artwork,
+    );
+
+    const response = await handleScribbleWorkerMessage(
+      input,
+      execute,
+      undefined,
+      () => 0,
+      async () => environment,
+    );
+
+    expect(response).toMatchObject({ type: "success" });
+    expect(execute).toHaveBeenCalledWith(
+      photoScribble.generateScribbleArtwork,
+      input.identity,
+      environment,
+      undefined,
+    );
+    expect(environment.getPreparedImageDetailAnalysis).toBeUndefined();
+  });
 
   it("turns resolution failure into a bounded safe failure before generation", async () => {
     const execute = vi.fn(

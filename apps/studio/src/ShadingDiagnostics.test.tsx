@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ScribbleDiagnostics } from "@harness/core";
 
@@ -329,6 +329,7 @@ describe("ShadingDiagnostics", () => {
   });
 
   it("attributes a safe preparation failure without erasing the stale display warning", () => {
+    const retry = vi.fn();
     const el = mount({
       displayed: {
         freshness: "stale",
@@ -338,6 +339,7 @@ describe("ShadingDiagnostics", () => {
       preparation: {
         kind: "failure",
         message: "Scribble worker returned an invalid response",
+        onRetry: retry,
       },
     });
 
@@ -363,6 +365,10 @@ describe("ShadingDiagnostics", () => {
       "Preparation failed: Scribble worker returned an invalid response",
     );
     expect(failure.textContent).not.toContain("Residual error");
+    const retryButton = failure.querySelector<HTMLButtonElement>("button");
+    expect(retryButton?.textContent).toBe("Retry");
+    act(() => retryButton?.click());
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 
   it("shows an accessible empty state without inventing result metrics", () => {

@@ -66,6 +66,10 @@ export interface UseScribblePreparationResult {
   readonly progress: ScribblePreparationProgress | null;
   /** Read the reducer's latest synchronous state, including same-batch edits. */
   readonly getSessionSnapshot: () => ScribbleSessionState;
+  /** Synchronously pause worker ownership while retaining latest authored state. */
+  readonly suspend: () => void;
+  /** Resume with no work when current, otherwise one request for the latest state. */
+  readonly resumeLatest: () => void;
   /** Cancel active preparation before a history transaction starts previewing. */
   readonly beginTransaction: () => void;
   /** Record the latest transaction preview without launching preparation. */
@@ -74,6 +78,8 @@ export interface UseScribblePreparationResult {
   readonly settleTransaction: (authored: ScribbleAuthoredState) => void;
   /** Immediately request the latest state after one atomic history command. */
   readonly requestAtomic: (authored: ScribbleAuthoredState) => void;
+  /** Re-enqueue the exact current identity after a bounded worker failure. */
+  readonly retry: () => void;
 }
 
 const defaultCoordinatorFactory: ScribblePreparationCoordinatorFactory = (
@@ -95,9 +101,15 @@ export function createScribbleIdentityForAuthoredState(
 }
 
 function safeErrorDetail(error: unknown): string {
-  return error instanceof Error && error.message.trim() !== ""
-    ? error.message.slice(0, 500)
-    : "Scribble worker failed";
+  const detail =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+  return detail.trim() === ""
+    ? "Scribble worker failed"
+    : detail.slice(0, 500);
 }
 
 /**
@@ -171,6 +183,17 @@ export function useScribblePreparation({
     [],
   );
 
+  const suspend = useCallback((): void => {
+    const previous = sessionRef.current;
+    const next = dispatch({ type: "suspend" });
+    cancelReplacedActive(previous, next);
+    setProgress(null);
+  }, [cancelReplacedActive, dispatch]);
+
+  const resumeLatest = useCallback((): void => {
+    dispatch({ type: "resume-latest" });
+  }, [dispatch]);
+
   const beginTransaction = useCallback((): void => {
     const previous = sessionRef.current;
     const next = dispatch({ type: "transaction-began" });
@@ -206,6 +229,22 @@ export function useScribblePreparation({
 
   const requestAtomic = settleTransaction;
 
+  const retry = useCallback((): void => {
+    const current = sessionRef.current;
+    if (
+      current.failure === null ||
+      current.desiredIdentity === null ||
+      current.sourceInputRevision === null
+    ) {
+      return;
+    }
+    dispatch({
+      type: "retry",
+      identity: current.desiredIdentity,
+      sourceInputRevision: current.sourceInputRevision,
+    });
+  }, [dispatch]);
+
   useEffect(() => {
     if (!enabled) return;
     const generation = nextCoordinatorGenerationRef.current++;
@@ -227,7 +266,8 @@ export function useScribblePreparation({
       if (
         cancelled.desiredIdentity !== null &&
         cancelled.sourceInputRevision !== null &&
-        !cancelled.transactionOpen
+        !cancelled.transactionOpen &&
+        !cancelled.suspended
       ) {
         dispatch({
           type: "transaction-settled",
@@ -244,7 +284,14 @@ export function useScribblePreparation({
     // replacement request produced by the rehearsal coordinator's cleanup.
     const pending = sessionRef.current.pending;
     const owner = coordinatorRef.current;
-    if (!enabled || pending === null || owner === null) return;
+    if (
+      !enabled ||
+      sessionRef.current.suspended ||
+      pending === null ||
+      owner === null
+    ) {
+      return;
+    }
 
     const started = startedRequestRef.current;
     if (
@@ -326,7 +373,7 @@ export function useScribblePreparation({
             type: "failed",
             token: pending.token,
             identity: pending.identity,
-            error: outcome.error,
+            error: safeErrorDetail(outcome.error),
           });
         }
       })
@@ -337,9 +384,12 @@ export function useScribblePreparation({
     session,
     progress,
     getSessionSnapshot: () => sessionRef.current,
+    suspend,
+    resumeLatest,
     beginTransaction,
     previewAuthoredState,
     settleTransaction,
     requestAtomic,
+    retry,
   };
 }

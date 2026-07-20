@@ -327,6 +327,8 @@ describe("App — Photo Scribble integration (#333)", () => {
       "control-toneContrast",
       "control-tonePivot",
       "control-toneGamma",
+      "control-detailSensitivity",
+      "control-detailInfluence",
       "control-pathDensity",
       "control-scribbleScale",
       "control-momentum",
@@ -344,6 +346,8 @@ describe("App — Photo Scribble integration (#333)", () => {
         toneContrast: 0.5,
         tonePivot: 0.5,
         toneGamma: 0.5,
+        detailSensitivity: 0.5,
+        detailInfluence: 0,
         pathDensity: 1,
         scribbleScale: 1,
         momentum: 0.75,
@@ -398,7 +402,7 @@ describe("App — Photo Scribble integration (#333)", () => {
     ).toBe("fill-held");
     expect(
       document.querySelectorAll('#inspector input[id^="control-"]'),
-    ).toHaveLength(9);
+    ).toHaveLength(11);
     expect(
       document.querySelector(
         '[aria-label="imageAsset image asset identity"]',

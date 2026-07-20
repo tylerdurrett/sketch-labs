@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, StrictMode, type ReactNode } from "react";
+import { act, StrictMode, useLayoutEffect, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -89,15 +89,21 @@ let latest: UseScribblePreparationResult | null = null;
 function Probe({
   initial = authored(1, 1),
   createCoordinator,
+  suspendOnMount = false,
 }: {
   readonly initial?: ScribbleAuthoredState;
   readonly createCoordinator: () => FakeCoordinator;
+  readonly suspendOnMount?: boolean;
 }) {
-  latest = useScribblePreparation({
+  const preparation = useScribblePreparation({
     sketch,
     initial,
     coordinatorFactory: createCoordinator,
   });
+  latest = preparation;
+  useLayoutEffect(() => {
+    if (suspendOnMount) preparation.suspend();
+  }, [preparation.suspend, suspendOnMount]);
   return null;
 }
 
@@ -274,6 +280,159 @@ describe("useScribblePreparation", () => {
     await flush();
     expect(latest!.session.displayed?.identity).toBe(current.identity);
     expect(latest!.progress).toBeNull();
+  });
+
+  it("retries the current failed identity exactly once", async () => {
+    const coordinator = new FakeCoordinator();
+    mount(<Probe createCoordinator={() => coordinator} />);
+    coordinator.starts[0]!.resolve({
+      status: "failure",
+      jobId: 1,
+      error: "analysis failed",
+    });
+    await flush();
+    expect(latest!.session.failure).toBe("analysis failed");
+
+    act(() => {
+      latest!.retry();
+      latest!.retry();
+    });
+
+    expect(coordinator.starts).toHaveLength(2);
+    expect(coordinator.starts[1]!.identity).toBe(
+      coordinator.starts[0]!.identity,
+    );
+    expect(latest!.session.active).toMatchObject({
+      token: 2,
+      sourceInputRevision: 1,
+    });
+    expect(latest!.session.failure).toBeNull();
+  });
+
+  it("suspends synchronously, cancels active work once, and rejects its callbacks", async () => {
+    const coordinator = new FakeCoordinator();
+    mount(<Probe createCoordinator={() => coordinator} />);
+    succeed(coordinator.starts[0]!);
+    await flush();
+
+    act(() => latest!.requestAtomic(authored(2, 2)));
+    const cancelledJob = coordinator.starts[1]!;
+    let snapshotAfterSuspend = latest!.getSessionSnapshot();
+    act(() => {
+      latest!.suspend();
+      snapshotAfterSuspend = latest!.getSessionSnapshot();
+      latest!.suspend();
+    });
+
+    expect(snapshotAfterSuspend.suspended).toBe(true);
+    expect(snapshotAfterSuspend.active).toBeNull();
+    expect(snapshotAfterSuspend.pending).toBeNull();
+    expect(snapshotAfterSuspend.displayed?.identity.params[0]?.value).toBe(1);
+    expect(coordinator.cancelCount).toBe(1);
+
+    act(() => {
+      cancelledJob.observeProgress?.({
+        snapshot: {
+          completedWorkUnits: 1,
+          totalWorkUnits: 2,
+          terminal: false,
+        },
+        eta: { kind: "remaining", revision: 1, remainingMs: 10 },
+      });
+    });
+    succeed(cancelledJob, 2);
+    await flush();
+    expect(latest!.progress).toBeNull();
+    expect(latest!.session.displayed?.identity.params[0]?.value).toBe(1);
+  });
+
+  it("accepts authored updates without launching while suspended, then starts only the latest", async () => {
+    const coordinator = new FakeCoordinator();
+    mount(<Probe createCoordinator={() => coordinator} />);
+    succeed(coordinator.starts[0]!);
+    await flush();
+
+    act(() => {
+      latest!.suspend();
+      latest!.requestAtomic(authored(2, 2));
+      latest!.beginTransaction();
+      latest!.previewAuthoredState(authored(3, 3));
+      latest!.previewAuthoredState(authored(4, 4));
+      latest!.settleTransaction(authored(5, 5));
+    });
+    expect(coordinator.starts).toHaveLength(1);
+    expect(latest!.session.suspended).toBe(true);
+    expect(latest!.session.desiredIdentity?.params[0]?.value).toBe(5);
+    expect(latest!.session.sourceInputRevision).toBe(5);
+
+    act(() => {
+      latest!.resumeLatest();
+      latest!.resumeLatest();
+    });
+    expect(coordinator.starts).toHaveLength(2);
+    expect(coordinator.starts[1]!.identity.params[0]?.value).toBe(5);
+    expect(latest!.session.active?.sourceInputRevision).toBe(5);
+
+    succeed(coordinator.starts[1]!, 2);
+    await flush();
+    expect(latest!.session.displayed?.sourceInputRevision).toBe(5);
+  });
+
+  it("resumes without work when the displayed result is already current", async () => {
+    const coordinator = new FakeCoordinator();
+    mount(<Probe createCoordinator={() => coordinator} />);
+    succeed(coordinator.starts[0]!);
+    await flush();
+
+    act(() => {
+      latest!.suspend();
+      latest!.resumeLatest();
+    });
+    expect(coordinator.starts).toHaveLength(1);
+    expect(latest!.session.suspended).toBe(false);
+    expect(latest!.session.active).toBeNull();
+  });
+
+  it("keeps StrictMode recreation suspended until one explicit latest resume", () => {
+    const coordinators: FakeCoordinator[] = [];
+    mount(
+      <StrictMode>
+        <Probe
+          suspendOnMount
+          createCoordinator={() => {
+            const coordinator = new FakeCoordinator();
+            coordinators.push(coordinator);
+            return coordinator;
+          }}
+        />
+      </StrictMode>,
+    );
+
+    expect(coordinators).toHaveLength(2);
+    expect(coordinators[0]!.starts).toHaveLength(0);
+    expect(coordinators[0]!.disposeCount).toBe(1);
+    expect(coordinators[1]!.starts).toHaveLength(0);
+    expect(latest!.getSessionSnapshot().suspended).toBe(true);
+
+    act(() => latest!.resumeLatest());
+    expect(coordinators[1]!.starts).toHaveLength(1);
+    expect(coordinators[1]!.starts[0]!.identity.params[0]?.value).toBe(1);
+  });
+
+  it("disposes the coordinator without restarting work while suspended", async () => {
+    const coordinator = new FakeCoordinator();
+    mount(<Probe createCoordinator={() => coordinator} />);
+    const stale = coordinator.starts[0]!;
+    act(() => latest!.suspend());
+    expect(coordinator.cancelCount).toBe(1);
+
+    act(() => root!.unmount());
+    root = null;
+    expect(coordinator.disposeCount).toBe(1);
+    expect(coordinator.starts).toHaveLength(1);
+
+    succeed(stale);
+    await flush();
   });
 
   it("replaces the StrictMode rehearsal job once and disposes both coordinator lifetimes", async () => {

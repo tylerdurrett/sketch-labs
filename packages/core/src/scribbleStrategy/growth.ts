@@ -8,6 +8,7 @@ const MAX_FAN_HALF_ANGLE = Math.PI
 const LOOK_AHEAD_WEIGHT = 0.45
 const MIN_CONTINUITY_WEIGHT = 0.08
 const MIN_SCORE = 1e-12
+const MAX_SCALE_REFINEMENTS = 16
 
 export interface ScribbleGrowthInput {
   readonly model: ScribbleModel
@@ -38,6 +39,103 @@ interface ScoredCandidate {
   readonly point: Point
   readonly heading: number
   readonly score: number
+}
+
+function pointAtLength(
+  start: Readonly<Point>,
+  angle: number,
+  length: number,
+): Point {
+  return [
+    start[0] + Math.cos(angle) * length,
+    start[1] + Math.sin(angle) * length,
+  ]
+}
+
+function maximumInFrameRayLength(
+  model: ScribbleModel,
+  start: Readonly<Point>,
+  angle: number,
+): number | undefined {
+  const { width, height } = model.lattice.frame
+  if (
+    start[0] < 0 ||
+    start[0] > width ||
+    start[1] < 0 ||
+    start[1] > height
+  ) {
+    return undefined
+  }
+
+  const directionX = Math.cos(angle)
+  const directionY = Math.sin(angle)
+  let maximumLength = Number.POSITIVE_INFINITY
+
+  if (directionX > 0) {
+    maximumLength = Math.min(maximumLength, (width - start[0]) / directionX)
+  } else if (directionX < 0) {
+    maximumLength = Math.min(maximumLength, -start[0] / directionX)
+  }
+  if (directionY > 0) {
+    maximumLength = Math.min(maximumLength, (height - start[1]) / directionY)
+  } else if (directionY < 0) {
+    maximumLength = Math.min(maximumLength, -start[1] / directionY)
+  }
+
+  if (!Number.isFinite(maximumLength) || maximumLength <= 0) return undefined
+
+  // Stay a few ulps inside the inclusive frame so reconstructing the endpoint
+  // with sin/cos cannot round it just beyond the boundary.
+  return maximumLength * (1 - Number.EPSILON * 8)
+}
+
+/**
+ * Resolve one field-aware ray without consuming the run's random stream.
+ *
+ * Every shortened segment is reprofiled because its changed sampling grid can
+ * reveal a still finer station. Refinement is monotone; pathological fields
+ * that keep revealing smaller values reach the authored fine fallback after a
+ * fixed bound. The shared model predicate makes the final scale, frame, and
+ * mask decision at that profile's minimum spacing.
+ */
+function scaleFieldEndpoint(
+  model: ScribbleModel,
+  start: Readonly<Point>,
+  angle: number,
+  proposedLength?: number,
+): Point | undefined {
+  const maximumLength = maximumInFrameRayLength(model, start, angle)
+  if (maximumLength === undefined) return undefined
+
+  const rayLength = Math.min(
+    proposedLength ?? model.localScalesAt(start).segmentLength,
+    maximumLength,
+  )
+  let permittedLength = rayLength
+
+  for (let refinement = 0; refinement < MAX_SCALE_REFINEMENTS; refinement++) {
+    const endpoint = pointAtLength(start, angle, permittedLength)
+    const bounds = model.profileSegmentBounds(start, endpoint)
+    if (bounds === undefined) break
+
+    const shortenedLength = Math.min(
+      permittedLength,
+      bounds.minimumSegmentLength,
+    )
+    if (shortenedLength < permittedLength) {
+      permittedLength = shortenedLength
+      continue
+    }
+
+    return model.isSegmentSafe(start, endpoint, bounds) ? endpoint : undefined
+  }
+
+  const fineEndpoint = pointAtLength(
+    start,
+    angle,
+    Math.min(model.scales.segmentLength, maximumLength),
+  )
+  return model.isSegmentSafe(start, fineEndpoint) ? fineEndpoint : undefined
 }
 
 function normalizeAngle(angle: number): number {
@@ -79,6 +177,32 @@ function scoreCandidate(
   previousAngle: number | undefined,
 ): number {
   const { source, scales, lattice, controls } = model
+
+  if (model.scaleField !== undefined) {
+    const lookAhead = scaleFieldEndpoint(model, point, candidateAngle)
+    // residualAt already contains the model's linear permission weighting.
+    // Multiplying permission here again would incorrectly steer by permission².
+    const endpointDemand = model.residualAt(point)
+    const futureDemand =
+      lookAhead === undefined ? 0 : model.residualAt(lookAhead)
+    const demand = endpointDemand + LOOK_AHEAD_WEIGHT * futureDemand
+    if (demand <= MIN_SCORE) return 0
+
+    if (previousAngle === undefined || !Number.isFinite(previousAngle)) {
+      return demand
+    }
+
+    const turn = angularDistance(candidateAngle, previousAngle)
+    const alignment = (Math.cos(turn) + 1) / 2
+    const continuity = alignment * alignment
+    const continuityWeight =
+      1 -
+      controls.momentum +
+      controls.momentum *
+        (MIN_CONTINUITY_WEIGHT + (1 - MIN_CONTINUITY_WEIGHT) * continuity)
+    return demand * continuityWeight
+  }
+
   if (
     !isMaskPermittedSegment(
       source.shadingMask,
@@ -164,6 +288,10 @@ export function chooseScribbleGrowthStep({
   heading,
 }: ScribbleGrowthInput): ScribbleGrowthStep {
   const candidates: ScoredCandidate[] = []
+  const currentSegmentLength =
+    model.scaleField === undefined
+      ? undefined
+      : model.localScalesAt(current).segmentLength
 
   for (let index = 0; index < HEADING_COUNT; index++) {
     const candidateAngle = candidateHeading(
@@ -172,10 +300,22 @@ export function chooseScribbleGrowthStep({
       model.controls.chaos,
       rng,
     )
-    const point: Point = [
-      current[0] + Math.cos(candidateAngle) * model.scales.segmentLength,
-      current[1] + Math.sin(candidateAngle) * model.scales.segmentLength,
-    ]
+    let point: Point
+    if (model.scaleField === undefined) {
+      point = [
+        current[0] + Math.cos(candidateAngle) * model.scales.segmentLength,
+        current[1] + Math.sin(candidateAngle) * model.scales.segmentLength,
+      ]
+    } else {
+      const scaleAwarePoint = scaleFieldEndpoint(
+        model,
+        current,
+        candidateAngle,
+        currentSegmentLength,
+      )
+      if (scaleAwarePoint === undefined) continue
+      point = scaleAwarePoint
+    }
     const score = scoreCandidate(
       model,
       current,

@@ -246,6 +246,7 @@ describe("Scribble compute protocol guards", () => {
       snapshot: {
         completedWorkUnits: 2,
         totalWorkUnits: 10,
+        convergence: 0.25,
         terminal: false,
       },
     };
@@ -359,6 +360,9 @@ describe("Scribble compute protocol guards", () => {
         ...progress,
         snapshot: { ...progress.snapshot, totalWorkUnits: Infinity },
       },
+      { ...progress, snapshot: { ...progress.snapshot, convergence: -0.1 } },
+      { ...progress, snapshot: { ...progress.snapshot, convergence: 1.1 } },
+      { ...progress, snapshot: { ...progress.snapshot, convergence: NaN } },
       { ...progress, snapshot: { ...progress.snapshot, terminal: "no" } },
       { ...progress, snapshot: { ...progress.snapshot, extra: true } },
     ];

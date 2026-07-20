@@ -389,6 +389,139 @@ describe("scribbleSessionReducer", () => {
     expect(selectExportableScribbleResult(failed)).toBeNull();
   });
 
+  it("re-enqueues one current failed identity and ignores obsolete retries", () => {
+    const active = launch(createScribbleSessionState(identity(2), 11));
+    const failed = scribbleSessionReducer(active, {
+      type: "failed",
+      token: active.active!.token,
+      identity: active.active!.identity,
+      error: "analysis failed",
+    });
+    const obsolete = scribbleSessionReducer(failed, {
+      type: "retry",
+      identity: identity(1),
+      sourceInputRevision: 10,
+    });
+    expect(obsolete).toBe(failed);
+
+    const retried = scribbleSessionReducer(failed, {
+      type: "retry",
+      identity: failed.desiredIdentity!,
+      sourceInputRevision: failed.sourceInputRevision!,
+    });
+    expect(retried.pending).toEqual({
+      token: failed.nextToken,
+      identity: failed.desiredIdentity,
+      sourceInputRevision: 11,
+    });
+    expect(retried.failure).toBeNull();
+    expect(retried.nextToken).toBe(failed.nextToken + 1);
+    expect(
+      scribbleSessionReducer(retried, {
+        type: "retry",
+        identity: retried.desiredIdentity!,
+        sourceInputRevision: retried.sourceInputRevision!,
+      }),
+    ).toBe(retried);
+  });
+
+  it("suspends active ownership synchronously while preserving desired state and display", () => {
+    const completed = completedA();
+    const active = launch(
+      scribbleSessionReducer(completed, {
+        type: "transaction-settled",
+        identity: identity(2),
+        sourceInputRevision: 11,
+      }),
+    );
+    const suspended = scribbleSessionReducer(active, { type: "suspend" });
+
+    expect(suspended.suspended).toBe(true);
+    expect(suspended.desiredIdentity).toBe(active.desiredIdentity);
+    expect(suspended.sourceInputRevision).toBe(11);
+    expect(suspended.displayed).toBe(completed.displayed);
+    expect(suspended.pending).toBeNull();
+    expect(suspended.active).toBeNull();
+    expect(
+      scribbleSessionReducer(suspended, { type: "suspend" }),
+    ).toBe(suspended);
+
+    const staleSuccess = scribbleSessionReducer(suspended, {
+      type: "succeeded",
+      token: active.active!.token,
+      identity: active.active!.identity,
+      scene: sceneB,
+      diagnostics: completedDiagnostics,
+      computeTimeMs: 20,
+    });
+    expect(staleSuccess).toBe(suspended);
+  });
+
+  it("records only the latest authored state while suspended and resumes it once", () => {
+    const suspended = scribbleSessionReducer(completedA(), {
+      type: "suspend",
+    });
+    const begun = scribbleSessionReducer(suspended, {
+      type: "transaction-began",
+    });
+    const first = scribbleSessionReducer(begun, {
+      type: "desired-identity-changed",
+      identity: identity(2),
+      sourceInputRevision: 11,
+    });
+    const latest = scribbleSessionReducer(first, {
+      type: "desired-identity-changed",
+      identity: identity(3),
+      sourceInputRevision: 12,
+    });
+    const settled = scribbleSessionReducer(latest, {
+      type: "transaction-settled",
+      identity: identity(3),
+      sourceInputRevision: 12,
+    });
+
+    expect(settled.suspended).toBe(true);
+    expect(settled.transactionOpen).toBe(false);
+    expect(settled.pending).toBeNull();
+    expect(settled.active).toBeNull();
+    expect(settled.nextToken).toBe(suspended.nextToken);
+    expect(settled.desiredIdentity).toEqual(identity(3));
+    expect(settled.sourceInputRevision).toBe(12);
+
+    const resumed = scribbleSessionReducer(settled, {
+      type: "resume-latest",
+    });
+    expect(resumed.suspended).toBe(false);
+    expect(resumed.pending).toEqual({
+      token: suspended.nextToken,
+      identity: settled.desiredIdentity,
+      sourceInputRevision: 12,
+    });
+    expect(resumed.nextToken).toBe(suspended.nextToken + 1);
+    expect(
+      scribbleSessionReducer(resumed, { type: "resume-latest" }),
+    ).toBe(resumed);
+  });
+
+  it("does not enqueue on resume when the displayed result is already exact", () => {
+    const completed = completedA();
+    const suspended = scribbleSessionReducer(completed, { type: "suspend" });
+    const promoted = scribbleSessionReducer(suspended, {
+      type: "transaction-settled",
+      identity: identity(1),
+      sourceInputRevision: 11,
+    });
+    const resumed = scribbleSessionReducer(promoted, {
+      type: "resume-latest",
+    });
+
+    expect(promoted.displayed?.sourceInputRevision).toBe(11);
+    expect(resumed.suspended).toBe(false);
+    expect(resumed.pending).toBeNull();
+    expect(resumed.nextToken).toBe(promoted.nextToken);
+    expect(selectCurrentScribbleResult(resumed)).toBe(resumed.displayed);
+  });
+
   it.each([
     ["budget-exhausted", exhaustedDiagnostics],
     ["stopped-early", stoppedEarlyDiagnostics],
@@ -422,6 +555,7 @@ describe("scribbleSessionReducer", () => {
       desiredIdentity: null,
       sourceInputRevision: null,
       transactionOpen: false,
+      suspended: false,
       pending: null,
       active: null,
       displayed: null,

@@ -12,6 +12,7 @@ import {
   applyPreset,
   buildReproMetadata,
   clipSceneToBounds,
+  IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
   defaultParams,
   exportFilename,
   fitPageFramePlotProfileToAspect,
@@ -27,15 +28,22 @@ import {
   type PlotProfile,
   type Preset,
   type PresetFraming,
+  type DetailField,
   type OutlineTarget,
   type Scene,
   type Sketch,
+  type SketchEnvironment,
 } from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
 import type { ImageAssetControlRecomposeRequest } from "./ImageAssetControl";
 import { Button } from "./components/ui/button";
 import { downloadBlob } from "./downloadBlob";
+import {
+  createDetailPreparationIdentity,
+  detailPreparationIdentitiesEqual,
+  type DetailPreparationIdentity,
+} from "./detailPreparationProtocol";
 import {
   beginEditTransaction,
   canRedo,
@@ -129,6 +137,21 @@ import {
 } from "./useScribblePreparation";
 import { useSketchEnvironment } from "./useSketchEnvironment";
 import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
+import { useDetailPreparation } from "./useDetailPreparation";
+
+type DiagnosticSelection = null | "tone" | "detail";
+
+type DetailReferenceDerivation =
+  | { readonly kind: "ready"; readonly field: DetailField }
+  | { readonly kind: "loading" }
+  | {
+      readonly kind: "failure";
+      readonly rejection?: {
+        readonly token: number;
+        readonly identity: DetailPreparationIdentity;
+        readonly error: unknown;
+      };
+    };
 
 function formatOutlineEta(remainingMs: number): string {
   const seconds = Math.max(1, Math.ceil(remainingMs / 1_000));
@@ -155,6 +178,53 @@ function sameParams(
     leftKeys.every(
       (key) => Object.hasOwn(right, key) && Object.is(left[key], right[key]),
     )
+  );
+}
+
+const DETAIL_REFERENCE_ONLY_PARAM = "detailSensitivity";
+const DETAIL_INFLUENCE_PARAM = "detailInfluence";
+
+/** Normalize sensitivity out of artwork identity only when Detail is disabled. */
+function artworkGenerationParams(
+  sketch: Pick<Sketch, "schema" | "generateDetailField">,
+  params: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const spec = sketch.schema[DETAIL_REFERENCE_ONLY_PARAM];
+  const influenceSpec = sketch.schema[DETAIL_INFLUENCE_PARAM];
+  const influence =
+    influenceSpec?.kind === "number" &&
+    typeof params[DETAIL_INFLUENCE_PARAM] === "number"
+      ? params[DETAIL_INFLUENCE_PARAM]
+      : influenceSpec?.kind === "number"
+        ? influenceSpec.default
+        : 0;
+  if (
+    sketch.generateDetailField === undefined ||
+    spec?.kind !== "number" ||
+    influence > 0 ||
+    Object.is(params[DETAIL_REFERENCE_ONLY_PARAM], spec.default)
+  ) {
+    return params;
+  }
+  return { ...params, [DETAIL_REFERENCE_ONLY_PARAM]: spec.default };
+}
+
+function artworkGenerationParamsEqual(
+  sketch: Pick<Sketch, "schema" | "generateDetailField">,
+  left: Readonly<Record<string, unknown>>,
+  right: Readonly<Record<string, unknown>>,
+): boolean {
+  return sameParams(
+    artworkGenerationParams(sketch, left),
+    artworkGenerationParams(sketch, right),
+  );
+}
+
+function isDetailReferenceOnlyParam(sketch: Sketch, key: string): boolean {
+  return (
+    key === DETAIL_REFERENCE_ONLY_PARAM &&
+    sketch.generateDetailField !== undefined &&
+    sketch.schema[key]?.kind === "number"
   );
 }
 
@@ -221,12 +291,12 @@ type OutlineEditChange =
 
 /** Classify authored edits by the cheapest work needed for current Outline. */
 function classifyOutlineEdit(
+  sketch: Sketch,
   previous: StudioEditState,
   next: StudioEditState,
-  usesPhysicalTool: boolean,
 ): OutlineEditChange {
   if (
-    !sameParams(previous.params, next.params) ||
+    !artworkGenerationParamsEqual(sketch, previous.params, next.params) ||
     previous.seed !== next.seed ||
     previous.tolerance !== next.tolerance ||
     !plotDrawableAspectsEquivalent(
@@ -238,7 +308,8 @@ function classifyOutlineEdit(
   }
 
   if (
-    usesPhysicalTool &&
+    (sketch.generateOutlineSource !== undefined ||
+      sketch.deriveOutlineSource !== undefined) &&
     (!Object.is(
       previous.profile.toolWidthMillimeters,
       next.profile.toolWidthMillimeters,
@@ -259,10 +330,14 @@ function classifyOutlineEdit(
 
 /** Whether an edit changes the time-invariant Scribble worker identity. */
 function scribbleInputsChanged(
+  sketch: Sketch,
   previous: StudioEditState,
   next: StudioEditState,
 ): boolean {
-  if (!sameParams(previous.params, next.params) || previous.seed !== next.seed) {
+  if (
+    !artworkGenerationParamsEqual(sketch, previous.params, next.params) ||
+    previous.seed !== next.seed
+  ) {
     return true;
   }
   return !plotDrawableAspectsEquivalent(
@@ -381,16 +456,17 @@ export function SketchControls({
   // so a draft can never outlive the basis its strings describe.
   const pageFrameEditDraftRef = useRef(pageFrameEditDraft);
   pageFrameEditDraftRef.current = pageFrameEditDraft;
-  // Tone reference is diagnostic Studio chrome, not authored state. Keeping it
-  // beside (rather than inside) the edit-history model excludes it from Undo,
-  // Presets, locks, profiles, and every reproduction envelope by construction.
-  const [toneReferenceActive, setToneReferenceActive] = useState(false);
-  // Mirror selection synchronously so even a programmatic export dispatched in
-  // the same React batch as mode entry hits the handler-level guard.
-  const toneReferenceActiveRef = useRef(toneReferenceActive);
-  useLayoutEffect(() => {
-    toneReferenceActiveRef.current = toneReferenceActive;
-  }, [toneReferenceActive]);
+  // Diagnostic selection is Studio chrome, not authored state. Keeping the
+  // mutually-exclusive Tone/Detail choice beside edit history excludes it from
+  // Undo, Presets, locks, profiles, and every reproduction envelope.
+  const [diagnosticSelection, setDiagnosticSelection] =
+    useState<DiagnosticSelection>(null);
+  // Event handlers also update this mirror before React renders. Same-batch
+  // transitions and side effects therefore see one atomic diagnostic choice.
+  const diagnosticSelectionRef = useRef(diagnosticSelection);
+  diagnosticSelectionRef.current = diagnosticSelection;
+  const toneReferenceActive = diagnosticSelection === "tone";
+  const diagnosticReferenceActive = diagnosticSelection !== null;
   // Export-document intent is Studio-wide and deliberately independent of the
   // keyed Sketch session: remounts lazily restore the persisted preference,
   // while Plot Profile, Preset, reproduction, and composition state stay pure.
@@ -450,6 +526,43 @@ export function SketchControls({
       ? ("error" as const)
       : sketchEnvironment.status;
 
+  const detailPreparation = useDetailPreparation();
+  const detailImageAssetId =
+    sketch.generateDetailField !== undefined &&
+    sketchEnvironment.requiredIds.length === 1
+      ? sketchEnvironment.requiredIds[0]!
+      : null;
+  const detailIdentity = useMemo(
+    () => {
+      if (detailImageAssetId === null) return null;
+      try {
+        return createDetailPreparationIdentity({
+          imageAssetId: detailImageAssetId,
+          analysisDefinitionId: IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+        });
+      } catch {
+        // Authored malformed IDs are already surfaced by environment readiness;
+        // diagnostic identity construction must not become a render crash.
+        return null;
+      }
+    },
+    [detailImageAssetId],
+  );
+
+  useEffect(() => {
+    if (diagnosticSelection !== "detail") return;
+    if (detailIdentity === null) {
+      detailPreparation.unrequest();
+      return;
+    }
+    detailPreparation.request(detailIdentity);
+  }, [
+    diagnosticSelection,
+    detailIdentity,
+    detailPreparation.request,
+    detailPreparation.unrequest,
+  ]);
+
   const hasScribblePreparation = sketch.generateScribbleArtwork !== undefined;
   const scribbleInputRevisionRef = useRef(0);
   const scribblePreparation = useScribblePreparation({
@@ -496,6 +609,7 @@ export function SketchControls({
         : {
             kind: "failure",
             message: scribblePreparation.session.failure,
+            onRetry: scribblePreparation.retry,
           };
   const [acknowledgedScribble, setAcknowledgedScribble] =
     useState<ScribblePaintAcknowledgement | null>(null);
@@ -515,7 +629,7 @@ export function SketchControls({
   const authoredScribbleState = (
     edit: StudioEditState = historyRef.current.present,
   ): ScribbleAuthoredState => ({
-    params: edit.params,
+    params: artworkGenerationParams(sketch, edit.params),
     seed: edit.seed,
     compositionFrame: resolveStudioCompositionFrame(edit),
     inputRevision: scribbleInputRevisionRef.current,
@@ -544,6 +658,85 @@ export function SketchControls({
       sketchEnvironment.environment,
     ],
   );
+
+  // Bind only the exact prepared record requested for the current asset and
+  // analyzer definition. The Sketch capability remains synchronous and pure;
+  // a malformed prepared record or binding assertion becomes an honest Detail
+  // failure instead of escaping through React or silently substituting zero.
+  const detailReferenceDerivation: DetailReferenceDerivation | null = (() => {
+    if (diagnosticSelection !== "detail") return null;
+    if (!environmentReady || detailIdentity === null) {
+      return { kind: "loading" };
+    }
+
+    const failure = detailPreparation.session.failure;
+    if (
+      failure !== null &&
+      detailPreparationIdentitiesEqual(failure.identity, detailIdentity)
+    ) {
+      return { kind: "failure" };
+    }
+
+    const prepared = detailPreparation.session.prepared;
+    if (
+      prepared === null ||
+      !detailPreparationIdentitiesEqual(prepared.identity, detailIdentity)
+    ) {
+      return { kind: "loading" };
+    }
+
+    try {
+      const baseEnvironment = sketchEnvironment.environment;
+      const generateDetailField = sketch.generateDetailField;
+      if (baseEnvironment === undefined || generateDetailField === undefined) {
+        throw new TypeError("Detail binding environment is unavailable");
+      }
+      const detailEnvironment: SketchEnvironment = {
+        imageAssets: baseEnvironment.imageAssets,
+        getPreparedImageDetailAnalysis(
+          imageAssetId,
+          analysisDefinitionId,
+        ) {
+          if (
+            imageAssetId !== detailIdentity.imageAssetId ||
+            analysisDefinitionId !== detailIdentity.analysisDefinitionId
+          ) {
+            throw new TypeError("Detail binding identity does not match");
+          }
+          return prepared.prepared;
+        },
+      };
+      return {
+        kind: "ready",
+        field: generateDetailField(
+          params,
+          compositionFrame,
+          detailEnvironment,
+        ),
+      };
+    } catch (error) {
+      return {
+        kind: "failure",
+        rejection: {
+          token: prepared.token,
+          identity: prepared.identity,
+          error,
+        },
+      };
+    }
+  })();
+  const detailBindingRejection =
+    detailReferenceDerivation?.kind === "failure"
+      ? detailReferenceDerivation.rejection
+      : undefined;
+  useEffect(() => {
+    if (detailBindingRejection === undefined) return;
+    detailPreparation.rejectPrepared(
+      detailBindingRejection.token,
+      detailBindingRejection.identity,
+      detailBindingRejection.error,
+    );
+  }, [detailBindingRejection, detailPreparation.rejectPrepared]);
 
   const [outlineSession, setOutlineSession] = useState(
     createOutlineSessionState,
@@ -678,7 +871,11 @@ export function SketchControls({
     if (next === current) return;
     historyRef.current = next;
     cancelUnavailableEnvironmentWork();
-    const scribbleChanged = scribbleInputsChanged(current.present, next.present);
+    const scribbleChanged = scribbleInputsChanged(
+      sketch,
+      current.present,
+      next.present,
+    );
     if (hasScribblePreparation && scribbleChanged) {
       scribbleInputRevisionRef.current += 1;
     }
@@ -701,10 +898,9 @@ export function SketchControls({
       scribblePreparation.requestAtomic(authoredScribbleState(next.present));
     }
     const outlineChange = classifyOutlineEdit(
+      sketch,
       current.present,
       next.present,
-      sketch.generateOutlineSource !== undefined ||
-        sketch.deriveOutlineSource !== undefined,
     );
     if (outlineChange === "geometry") {
       cancelOutlineCoordinator();
@@ -920,6 +1116,15 @@ export function SketchControls({
     updateHistory(beginEditTransaction, false);
     if (hasScribblePreparation) scribblePreparation.beginTransaction();
   };
+  const beginParamTransaction = (key: string): void => {
+    if (!isDetailReferenceOnlyParam(sketch, key)) {
+      beginTransaction();
+      return;
+    }
+    // Sensitivity is a live Detail remap in #367, so merely focusing it must
+    // not relinquish retained Fill/Outline ownership or suspend artwork work.
+    updateHistory(beginEditTransaction, false);
+  };
   const beginProfileTransaction = (): void => {
     // A profile gesture may prove to be physical style or Page placement only.
     // Keep the current Outline until a preview actually crosses a geometry
@@ -1050,8 +1255,20 @@ export function SketchControls({
     }
   };
 
+  const leaveDetailFor = (next: Exclude<DiagnosticSelection, "detail">) => {
+    const previous = diagnosticSelectionRef.current;
+    if (previous === "detail") {
+      detailPreparation.unrequest();
+    }
+    diagnosticSelectionRef.current = next;
+    setDiagnosticSelection(next);
+    if (previous === "detail" && hasScribblePreparation) {
+      scribblePreparation.resumeLatest();
+    }
+  };
+
   const selectFill = (): void => {
-    setToneReferenceActive(false);
+    leaveDetailFor(null);
     if (outlineSessionRef.current.desired === "outline") {
       cancelOutlineCoordinator();
       dispatchOutline({ type: "request-fill" });
@@ -1059,7 +1276,7 @@ export function SketchControls({
   };
 
   const selectOutline = (): void => {
-    setToneReferenceActive(false);
+    leaveDetailFor(null);
     if (!environmentReadyNow()) return;
     if (outlineSessionRef.current.desired !== "outline") {
       requestOutlineForCurrentInputs();
@@ -1072,8 +1289,27 @@ export function SketchControls({
     // reset intent to Fill before switching LiveCanvas to the pixel source.
     cancelOutlineCoordinator();
     dispatchOutline({ type: "request-fill" });
-    toneReferenceActiveRef.current = true;
-    setToneReferenceActive(true);
+    leaveDetailFor("tone");
+  };
+
+  const selectDetailReference = (): void => {
+    if (
+      sketch.generateDetailField === undefined ||
+      !environmentReadyNow() ||
+      detailIdentity === null ||
+      diagnosticSelectionRef.current === "detail"
+    ) {
+      return;
+    }
+
+    // Detail owns no Scribble geometry. Retire active ownership synchronously
+    // before the diagnostic becomes observable or analysis can be requested.
+    if (hasScribblePreparation) scribblePreparation.suspend();
+    cancelOutlineCoordinator();
+    dispatchOutline({ type: "request-fill" });
+    diagnosticSelectionRef.current = "detail";
+    setDiagnosticSelection("detail");
+    detailPreparation.request(detailIdentity);
   };
 
   const onFillCaptured = (capture: FillCapture): void => {
@@ -1092,7 +1328,7 @@ export function SketchControls({
     const identity = createOutlineComputeIdentity({
       sketchId: sketch.id,
       schema: sketch.schema,
-      params: edit.params,
+      params: artworkGenerationParams(sketch, edit.params),
       seed: edit.seed,
       sampledT: capture.t,
       compositionFrame,
@@ -1215,45 +1451,68 @@ export function SketchControls({
       ],
     );
 
-  const renderState: LiveCanvasRenderState =
-    unavailableEnvironmentStatus !== null
-      ? {
-          kind: "unavailable",
-          status: unavailableEnvironmentStatus,
-          unresolvedAssetIds: sketchEnvironment.requiredIds,
-        }
-      : toneSource !== undefined
-      ? { kind: "tone-reference", source: toneSource }
-      : hasScribblePreparation && outlineSession.phase.kind === "fill-live"
-        ? scribblePreparation.session.displayed === null
-          ? { kind: "fill-held", scene: emptyScribbleScene, t: 0 }
+  const renderState: LiveCanvasRenderState = (() => {
+    if (unavailableEnvironmentStatus !== null) {
+      return {
+        kind: "unavailable",
+        status: unavailableEnvironmentStatus,
+        unresolvedAssetIds: sketchEnvironment.requiredIds,
+      };
+    }
+    if (detailReferenceDerivation?.kind === "ready") {
+      return {
+        kind: "detail-reference",
+        field: detailReferenceDerivation.field,
+      };
+    }
+    if (detailReferenceDerivation?.kind === "loading") {
+      return { kind: "detail-reference-loading" };
+    }
+    if (detailReferenceDerivation?.kind === "failure") {
+      return {
+        kind: "detail-reference-failure",
+        onRetry: detailPreparation.retry,
+      };
+    }
+    if (toneSource !== undefined) {
+      return { kind: "tone-reference", source: toneSource };
+    }
+    if (
+      hasScribblePreparation &&
+      outlineSession.phase.kind === "fill-live"
+    ) {
+      return scribblePreparation.session.displayed === null
+        ? { kind: "fill-held", scene: emptyScribbleScene, t: 0 }
+        : {
+            kind: "fill-held",
+            scene: scribblePreparation.session.displayed.scene,
+            t: 0,
+            sourceInputRevision:
+              scribblePreparation.session.displayed.sourceInputRevision,
+            contentRevision:
+              scribblePreparation.session.displayed.contentRevision,
+          };
+    }
+    if (outlineSession.phase.kind === "fill-live") {
+      return { kind: "fill-live" };
+    }
+    if (outlineSession.phase.kind === "fill-held-pending") {
+      return {
+        kind: "fill-held",
+        scene: outlineSession.phase.scene,
+        t: outlineSession.phase.t,
+        ...(outlineSession.phase.sourceInputRevision === undefined
+          ? {}
           : {
-              kind: "fill-held",
-              scene: scribblePreparation.session.displayed.scene,
-              t: 0,
-              sourceInputRevision:
-                scribblePreparation.session.displayed.sourceInputRevision,
-              contentRevision:
-                scribblePreparation.session.displayed.contentRevision,
-            }
-        : outlineSession.phase.kind === "fill-live"
-        ? { kind: "fill-live" }
-        : outlineSession.phase.kind === "fill-held-pending"
-          ? {
-              kind: "fill-held",
-              scene: outlineSession.phase.scene,
-              t: outlineSession.phase.t,
-              ...(outlineSession.phase.sourceInputRevision === undefined
-                ? {}
-                : {
-                    sourceInputRevision:
-                      outlineSession.phase.sourceInputRevision,
-                  }),
-              ...(outlineSession.phase.contentRevision === undefined
-                ? {}
-                : { contentRevision: outlineSession.phase.contentRevision }),
-            }
-          : outlineSession.phase;
+              sourceInputRevision: outlineSession.phase.sourceInputRevision,
+            }),
+        ...(outlineSession.phase.contentRevision === undefined
+          ? {}
+          : { contentRevision: outlineSession.phase.contentRevision }),
+      };
+    }
+    return outlineSession.phase;
+  })();
 
   // New seed: roll a fresh arrangement, leaving every param value untouched —
   // the seed axis is independent of the param (Randomize) axis.
@@ -1352,7 +1611,12 @@ export function SketchControls({
   // Sketch passes the captured `t` (the last-drawn moment from the handle), a
   // static Sketch omits `t` entirely so the name carries no segment.
   const exportPng = () => {
-    if (toneReferenceActiveRef.current || !environmentReadyNow()) return;
+    if (
+      // LiveCanvas stays mounted in Detail mode, so this handler gate is the
+      // final authority preventing its diagnostic backing pixels from escaping.
+      diagnosticSelectionRef.current !== null ||
+      !environmentReadyNow()
+    ) return;
     const handle = canvasHandle.current;
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
@@ -1414,7 +1678,10 @@ export function SketchControls({
   // existing paths keep reading the handle's current time. Static Sketches pass
   // `undefined`, not 0.
   const exportSvg = () => {
-    if (toneReferenceActiveRef.current || !environmentReadyNow()) return;
+    if (
+      diagnosticSelectionRef.current !== null ||
+      !environmentReadyNow()
+    ) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
     const scribbleExport = captureCurrentScribbleExport();
@@ -1481,7 +1748,7 @@ export function SketchControls({
   // reads React state or the live canvas again.
   const exportHiddenLineSvg = () => {
     if (
-      toneReferenceActiveRef.current ||
+      diagnosticSelectionRef.current !== null ||
       hiddenLineBusy ||
       !environmentReadyNow()
     ) {
@@ -1518,7 +1785,7 @@ export function SketchControls({
     const identity = createOutlineComputeIdentity({
       sketchId: sketch.id,
       schema: sketch.schema,
-      params: edit.params,
+      params: artworkGenerationParams(sketch, edit.params),
       seed: edit.seed,
       sampledT: displayed.t,
       compositionFrame,
@@ -1793,6 +2060,7 @@ export function SketchControls({
             onCommit: commitTransaction,
             onCancel: cancelTransaction,
           }}
+          onParamEditBegin={beginParamTransaction}
           onToggleLock={toggleLock}
           imageAssetLongEdgeCap={imageAssetLongEdgeCap}
           imageAssetResolution={{
@@ -1880,7 +2148,8 @@ export function SketchControls({
           <span className="flex-none min-w-16 text-sm text-muted-foreground">
             render
           </span>
-          {sketch.generateToneSource === undefined ? (
+          {sketch.generateToneSource === undefined &&
+          sketch.generateDetailField === undefined ? (
             <Button
               type="button"
               variant={
@@ -1905,14 +2174,16 @@ export function SketchControls({
               <Button
                 type="button"
                 variant={
-                  !toneReferenceActive && outlineSession.desired === "fill"
+                  diagnosticSelection === null &&
+                  outlineSession.desired === "fill"
                     ? "default"
                     : "outline"
                 }
                 size="sm"
                 className="flex-1"
                 aria-pressed={
-                  !toneReferenceActive && outlineSession.desired === "fill"
+                  diagnosticSelection === null &&
+                  outlineSession.desired === "fill"
                 }
                 onClick={selectFill}
                 disabled={exportBusy}
@@ -1922,14 +2193,16 @@ export function SketchControls({
               <Button
                 type="button"
                 variant={
-                  !toneReferenceActive && outlineSession.desired === "outline"
+                  diagnosticSelection === null &&
+                  outlineSession.desired === "outline"
                     ? "default"
                     : "outline"
                 }
                 size="sm"
                 className="flex-1"
                 aria-pressed={
-                  !toneReferenceActive && outlineSession.desired === "outline"
+                  diagnosticSelection === null &&
+                  outlineSession.desired === "outline"
                 }
                 aria-busy={outlineBusy}
                 onClick={selectOutline}
@@ -1937,18 +2210,38 @@ export function SketchControls({
               >
                 Outline
               </Button>
-              <Button
-                type="button"
-                variant={toneReferenceActive ? "default" : "outline"}
-                size="sm"
-                className="flex-1"
-                aria-pressed={toneReferenceActive}
-                aria-label="Show Tone reference"
-                onClick={selectToneReference}
-                disabled={exportBusy}
-              >
-                Tone
-              </Button>
+              {sketch.generateToneSource === undefined ? null : (
+                <Button
+                  type="button"
+                  variant={toneReferenceActive ? "default" : "outline"}
+                  size="sm"
+                  className="flex-1"
+                  aria-pressed={toneReferenceActive}
+                  aria-label="Show Tone reference"
+                  onClick={selectToneReference}
+                  disabled={exportBusy}
+                >
+                  Tone
+                </Button>
+              )}
+              {sketch.generateDetailField === undefined ? null : (
+                <Button
+                  type="button"
+                  variant={
+                    diagnosticSelection === "detail" ? "default" : "outline"
+                  }
+                  size="sm"
+                  className="flex-1"
+                  aria-pressed={diagnosticSelection === "detail"}
+                  aria-label="Show Detail reference"
+                  onClick={selectDetailReference}
+                  disabled={
+                    exportBusy || !environmentReady || detailIdentity === null
+                  }
+                >
+                  Detail
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -2051,7 +2344,7 @@ export function SketchControls({
             className="flex-1"
             onClick={exportPng}
             disabled={
-              toneReferenceActive ||
+              diagnosticReferenceActive ||
               !environmentReady ||
               (!scribblePaintIsCurrent && hasScribblePreparation)
             }
@@ -2065,7 +2358,7 @@ export function SketchControls({
             className="flex-1"
             onClick={exportSvg}
             disabled={
-              toneReferenceActive ||
+              diagnosticReferenceActive ||
               !environmentReady ||
               (!scribblePaintIsCurrent && hasScribblePreparation)
             }
@@ -2081,7 +2374,7 @@ export function SketchControls({
                 className="flex-1"
                 onClick={exportHiddenLineSvg}
                 disabled={
-                  toneReferenceActive ||
+                  diagnosticReferenceActive ||
                   !environmentReady ||
                   hiddenLineBusy ||
                   (!scribblePaintIsCurrent && hasScribblePreparation)

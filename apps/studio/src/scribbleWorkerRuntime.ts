@@ -1,4 +1,7 @@
 import {
+  IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+  photoScribble,
+  prepareImageDetailAnalysis,
   registry,
   type ParamSchema,
   type Params,
@@ -55,6 +58,39 @@ function schemaMismatch(sketchId: string): TypeError {
   return new TypeError(
     `Scribble request parameters do not match ${sketchId} schema`,
   );
+}
+
+function prepareDetailEnvironment(
+  identity: ScribbleComputeIdentity,
+  params: Params,
+  environment: SketchEnvironment,
+): SketchEnvironment {
+  if (
+    identity.sketchId !== photoScribble.id ||
+    typeof params.detailInfluence !== "number" ||
+    params.detailInfluence <= 0
+  ) {
+    return environment;
+  }
+
+  const imageAssetId = params.imageAsset;
+  if (typeof imageAssetId !== "string") {
+    throw schemaMismatch(identity.sketchId);
+  }
+  const pixels = environment.imageAssets(imageAssetId);
+  if (pixels === undefined) {
+    throw new Error("Photo Scribble Image Asset is unavailable");
+  }
+  const prepared = prepareImageDetailAnalysis(pixels);
+  return {
+    imageAssets: environment.imageAssets,
+    getPreparedImageDetailAnalysis(assetId, analysisDefinitionId) {
+      return assetId === imageAssetId &&
+        analysisDefinitionId === IMAGE_DETAIL_ANALYSIS_DEFINITION_ID
+        ? prepared
+        : undefined;
+    },
+  };
 }
 
 interface ResolvedScribbleRequest {
@@ -165,7 +201,12 @@ export async function handleScribbleWorkerMessage(
     // trigger any fetch or decode. The resolver creates fresh worker-owned
     // records for this job; decoded pixels never join protocol identity.
     const { generate, schema, params } = resolveScribbleRequest(value.identity);
-    const environment = await resolveEnvironment(schema, params);
+    const resolvedEnvironment = await resolveEnvironment(schema, params);
+    const environment = prepareDetailEnvironment(
+      value.identity,
+      params,
+      resolvedEnvironment,
+    );
     const startedAt = now();
     const artwork = execute(
       generate,

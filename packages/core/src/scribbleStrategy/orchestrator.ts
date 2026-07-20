@@ -22,6 +22,13 @@ export interface ScribbleProgress {
   readonly completedWorkUnits: number
   /** Stable upper bound from the accepted-segment and stagnation budgets. */
   readonly totalWorkUnits: number
+  /**
+   * Normalized residual progress toward the authored completion threshold.
+   * This is independent of the safety budget: `0` is the initial residual and
+   * `1` means the threshold has been reached. Optional so existing observer
+   * implementations remain structurally compatible.
+   */
+  readonly convergence?: number
   /** True only when the solver has stopped. */
   readonly terminal: boolean
 }
@@ -181,12 +188,23 @@ export function runScribbleOrchestrator({
   const polylines: Polyline[] = []
   const rejectedStarts = new Set<number>()
   let residualError = model.residualError()
+  const initialResidualError = residualError
   let acceptedSegments = 0
   let stagnations = 0
   let restarts = 0
   const acceptedSegmentLimit =
     authoredAcceptedSegmentLimit ?? limits.maxAcceptedSegments
   const configuredWorkUnits = acceptedSegmentLimit + limits.maxStagnations
+
+  const convergence = (): number => {
+    if (residualError <= residualThreshold) return 1
+    const requiredReduction = initialResidualError - residualThreshold
+    if (requiredReduction <= MIN_MEANINGFUL_RESIDUAL) return 0
+    return Math.min(
+      1,
+      Math.max(0, (initialResidualError - residualError) / requiredReduction),
+    )
+  }
 
   const reportProgress = (terminal: boolean): void => {
     if (observer === undefined) return
@@ -195,6 +213,7 @@ export function runScribbleOrchestrator({
     const progress = Object.freeze({
       completedWorkUnits,
       totalWorkUnits: completedWorkUnits === 0 ? 0 : configuredWorkUnits,
+      convergence: convergence(),
       terminal,
     })
     try {

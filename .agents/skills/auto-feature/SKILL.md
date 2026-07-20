@@ -10,4 +10,6 @@ Now, I want you to act as orchestrator. You should delegate the implementation o
 
 Any parallel sub agents you create to work on individual slices should be able to communicate with each other if needed so they can coordinate in cases where they think they might risk overlapping or conflicting work.
 
+Instead of having each subagent attempt to take me to the slice pr branch, wait until all slices are complete and open the feature PR and take me to the feature pr branch
+
 Get up to speed and then proceed to orchestrate the development of the issues the user provided. Do not do more than the user requested. If they gave you specific set of issues, do those only.

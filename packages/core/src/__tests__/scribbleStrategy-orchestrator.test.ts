@@ -81,7 +81,12 @@ describe('Scribble pass orchestration', () => {
     expect(result.acceptedSegments).toBe(0)
     expect(result.stopCause).toBe('threshold-reached')
     expect(snapshots).toEqual([
-      { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
+      {
+        completedWorkUnits: 0,
+        totalWorkUnits: 0,
+        convergence: 1,
+        terminal: true,
+      },
     ])
     expect(Object.keys(result)).toEqual([
       'polylines',
@@ -376,7 +381,11 @@ describe('Scribble pass progress observation', () => {
     for (let index = 0; index < intermediate.length; index++) {
       expect(intermediate[index]!.completedWorkUnits).toBe(index + 1)
       expect(intermediate[index]!.terminal).toBe(false)
+      expect(intermediate[index]!.convergence).toBeGreaterThanOrEqual(
+        index === 0 ? 0 : intermediate[index - 1]!.convergence!,
+      )
     }
+    expect(snapshots.at(-1)!.convergence).toBe(1)
     expect(snapshots.at(-1)!.completedWorkUnits).toBeGreaterThanOrEqual(
       result.acceptedSegments,
     )
@@ -399,12 +408,44 @@ describe('Scribble pass progress observation', () => {
 
     expect(result.stopCause).toBe('budget-reached')
     expect(snapshots).toEqual([
-      { completedWorkUnits: 1, totalWorkUnits: 6, terminal: false },
-      { completedWorkUnits: 1, totalWorkUnits: 6, terminal: true },
+      expect.objectContaining({
+        completedWorkUnits: 1,
+        totalWorkUnits: 6,
+        terminal: false,
+      }),
+      expect.objectContaining({
+        completedWorkUnits: 1,
+        totalWorkUnits: 6,
+        terminal: true,
+      }),
     ])
+    expect(snapshots[0]!.convergence).toBeGreaterThan(0)
+    expect(snapshots[1]!.convergence).toBe(snapshots[0]!.convergence)
   })
 
-  it('uses the authored cap in the stable progress total', () => {
+  it('reports threshold-first convergence before a 99% authored cap', () => {
+    const snapshots: ScribbleProgress[] = []
+    const authoredAcceptedSegmentLimit = Math.floor(
+      GENEROUS_LIMITS.maxAcceptedSegments * 0.99,
+    )
+    const result = runScribbleOrchestrator({
+      model: model(() => 0.8),
+      rng: createRandom('observed-threshold-before-99-percent'),
+      residualThreshold: 0.55,
+      authoredAcceptedSegmentLimit,
+      limits: GENEROUS_LIMITS,
+      observer: (progress) => snapshots.push(progress),
+    })
+
+    expect(result.stopCause).toBe('threshold-reached')
+    expect(result.acceptedSegments).toBeLessThan(authoredAcceptedSegmentLimit)
+    expect(snapshots.at(-1)).toMatchObject({
+      convergence: 1,
+      terminal: true,
+    })
+  })
+
+  it('reports both progress signals when the authored cap wins', () => {
     const snapshots: ScribbleProgress[] = []
     const result = runScribbleOrchestrator({
       model: model(() => 1),
@@ -417,9 +458,20 @@ describe('Scribble pass progress observation', () => {
 
     expect(result.stopCause).toBe('authored-limit-reached')
     expect(snapshots).toEqual([
-      { completedWorkUnits: 1, totalWorkUnits: 6, terminal: false },
-      { completedWorkUnits: 1, totalWorkUnits: 6, terminal: true },
+      expect.objectContaining({
+        completedWorkUnits: 1,
+        totalWorkUnits: 6,
+        terminal: false,
+      }),
+      expect.objectContaining({
+        completedWorkUnits: 1,
+        totalWorkUnits: 6,
+        terminal: true,
+      }),
     ])
+    expect(snapshots[0]!.convergence).toBeGreaterThan(0)
+    expect(snapshots[0]!.convergence).toBeLessThan(1)
+    expect(snapshots[1]!.convergence).toBe(snapshots[0]!.convergence)
   })
 
   it('counts a stagnant growth attempt as one completed work unit', () => {
@@ -443,8 +495,18 @@ describe('Scribble pass progress observation', () => {
     expect(result.acceptedSegments).toBe(0)
     expect(result.stopCause).toBe('budget-reached')
     expect(snapshots).toEqual([
-      { completedWorkUnits: 1, totalWorkUnits: 4, terminal: false },
-      { completedWorkUnits: 1, totalWorkUnits: 4, terminal: true },
+      {
+        completedWorkUnits: 1,
+        totalWorkUnits: 4,
+        convergence: 0,
+        terminal: false,
+      },
+      {
+        completedWorkUnits: 1,
+        totalWorkUnits: 4,
+        convergence: 0,
+        terminal: true,
+      },
     ])
   })
 
@@ -460,7 +522,12 @@ describe('Scribble pass progress observation', () => {
 
     expect(result.stopCause).toBe('threshold-reached')
     expect(snapshots).toEqual([
-      { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
+      {
+        completedWorkUnits: 0,
+        totalWorkUnits: 0,
+        convergence: 1,
+        terminal: true,
+      },
     ])
   })
 })

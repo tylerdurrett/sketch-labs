@@ -34,6 +34,8 @@ export interface ScribbleSessionState {
   readonly desiredIdentity: ScribbleComputeIdentity | null;
   readonly sourceInputRevision: number | null;
   readonly transactionOpen: boolean;
+  /** Whether worker ownership is explicitly paused while authored state advances. */
+  readonly suspended: boolean;
   readonly pending: PendingScribbleRequest | null;
   readonly active: ActiveScribbleRequest | null;
   readonly displayed: DisplayedScribbleResult | null;
@@ -43,6 +45,8 @@ export interface ScribbleSessionState {
 }
 
 export type ScribbleSessionAction =
+  | { readonly type: "suspend" }
+  | { readonly type: "resume-latest" }
   | { readonly type: "transaction-began" }
   | {
       readonly type: "desired-identity-changed";
@@ -74,6 +78,11 @@ export type ScribbleSessionAction =
       readonly identity: ScribbleComputeIdentity;
       readonly error: string;
     }
+  | {
+      readonly type: "retry";
+      readonly identity: ScribbleComputeIdentity;
+      readonly sourceInputRevision: number;
+    }
   | { readonly type: "dispose" };
 
 function emptyScribbleSessionState(): ScribbleSessionState {
@@ -81,6 +90,7 @@ function emptyScribbleSessionState(): ScribbleSessionState {
     desiredIdentity: null,
     sourceInputRevision: null,
     transactionOpen: false,
+    suspended: false,
     pending: null,
     active: null,
     displayed: null,
@@ -183,6 +193,29 @@ function settleDesiredIdentity(
     };
   }
 
+  // Suspension records settled authored provenance without allocating work.
+  // The single latest request, if still necessary, is derived on resume.
+  if (state.suspended) {
+    if (
+      desiredIsUnchanged &&
+      !state.transactionOpen &&
+      state.pending === null &&
+      state.active === null &&
+      state.failure === null
+    ) {
+      return state;
+    }
+    return {
+      ...state,
+      desiredIdentity: identity,
+      sourceInputRevision,
+      transactionOpen: false,
+      pending: null,
+      active: null,
+      failure: null,
+    };
+  }
+
   if (requestsSameIdentity(state.active, identity)) {
     const alreadySettled =
       desiredIsUnchanged &&
@@ -238,6 +271,51 @@ export function scribbleSessionReducer(
   action: ScribbleSessionAction,
 ): ScribbleSessionState {
   switch (action.type) {
+    case "suspend":
+      if (
+        state.suspended &&
+        state.pending === null &&
+        state.active === null
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        suspended: true,
+        pending: null,
+        active: null,
+      };
+    case "resume-latest": {
+      if (!state.suspended) return state;
+
+      const resumed = { ...state, suspended: false };
+      if (
+        resumed.transactionOpen ||
+        resumed.desiredIdentity === null ||
+        resumed.sourceInputRevision === null ||
+        (resumed.displayed !== null &&
+          resumed.displayed.sourceInputRevision ===
+            resumed.sourceInputRevision &&
+          identitiesEqual(
+            resumed.displayed.identity,
+            resumed.desiredIdentity,
+          ))
+      ) {
+        return resumed;
+      }
+
+      const token = resumed.nextToken;
+      return {
+        ...resumed,
+        pending: {
+          token,
+          identity: resumed.desiredIdentity,
+          sourceInputRevision: resumed.sourceInputRevision,
+        },
+        failure: null,
+        nextToken: token + 1,
+      };
+    }
     case "transaction-began":
       if (
         state.transactionOpen &&
@@ -331,6 +409,29 @@ export function scribbleSessionReducer(
         active: null,
         failure: action.error,
       };
+    case "retry": {
+      if (
+        state.failure === null ||
+        state.transactionOpen ||
+        state.suspended ||
+        state.pending !== null ||
+        state.active !== null ||
+        !desiredMatches(state, action.identity, action.sourceInputRevision)
+      ) {
+        return state;
+      }
+      const token = state.nextToken;
+      return {
+        ...state,
+        pending: {
+          token,
+          identity: action.identity,
+          sourceInputRevision: action.sourceInputRevision,
+        },
+        failure: null,
+        nextToken: token + 1,
+      };
+    }
     case "dispose":
       return emptyScribbleSessionState();
   }
