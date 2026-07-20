@@ -717,7 +717,7 @@ describe('Scribble virtual coverage', () => {
     expect(fineSideOutsideLocalRadius!.coverage).toBe(0)
   })
 
-  it('does not clip a broad maximum between profile stations', () => {
+  it('keeps a bounded broad maximum between profile stations exact', () => {
     const baseline = createScribbleModel(source(constantTone(1)), SQUARE)
     const start = [450, 450] as const
     const end = [462, 450 + Math.PI] as const
@@ -753,17 +753,22 @@ describe('Scribble virtual coverage', () => {
       start[0] + progress * deltaX,
       start[1] + progress * deltaY,
     ] as const
-    const field = createScribbleScaleField(1, ([x, y]) =>
+    const producer = ([x, y]: Readonly<Point>) =>
       Math.abs(x - projectedMaximum[0]) < 1e-9 &&
       Math.abs(y - projectedMaximum[1]) < 1e-9
         ? broadScale
-        : 1,
-    )
+        : 1
     const model = createScribbleModel(
       source(constantTone(1)),
       SQUARE,
       {},
-      field,
+      createScribbleScaleField(1, producer),
+    )
+    const bounded = createScribbleModel(
+      source(constantTone(1)),
+      SQUARE,
+      {},
+      createScribbleScaleField(1, producer, broadScale),
     )
     const profile = model.profileSegment(start, end)!
     const target = model.samples().find(
@@ -784,6 +789,7 @@ describe('Scribble virtual coverage', () => {
     )
 
     model.depositSegment(start, end)
+    bounded.depositSegment(start, end)
 
     const distanceSquared =
       (target.point[0] - projectedMaximum[0]) ** 2 +
@@ -798,6 +804,8 @@ describe('Scribble virtual coverage', () => {
         point[0] === target.point[0] && point[1] === target.point[1],
       )!.coverage,
     ).toBeCloseTo(expected, 12)
+    expect(bounded.samples()).toEqual(model.samples())
+    expect(bounded.residualError()).toBe(model.residualError())
   })
 
   it('keeps bounded and unbounded field deposits exactly equivalent', () => {
