@@ -39,6 +39,14 @@ function mean(grid: Readonly<ScalarGrid>): number {
   return total(grid) / grid.values.length
 }
 
+function linearGrayByte(value: number): number {
+  const srgb =
+    value <= 0.0031308
+      ? value * 12.92
+      : 1.055 * value ** (1 / 2.4) - 0.055
+  return Math.round(srgb * 255)
+}
+
 function interiorMean(grid: Readonly<ScalarGrid>, border: number): number {
   let sum = 0
   let count = 0
@@ -79,6 +87,22 @@ describe('detail-analysis band energy', () => {
     expect(interiorMean(ramp, 12)).toBeLessThan(
       interiorMean(edge, 12) * 0.001,
     )
+  })
+
+  it('keeps capped high-resolution ramps negligible across the whole field', () => {
+    const width = 1024
+    const height = 512
+    for (const axis of ['horizontal', 'vertical'] as const) {
+      const energy = energyOf(
+        pixels(width, height, (x, y) => {
+          const position =
+            axis === 'horizontal' ? x / (width - 1) : y / (height - 1)
+          const value = linearGrayByte(position)
+          return [value, value, value, 255]
+        }),
+      )
+      expect(Math.max(...energy.values)).toBeLessThan(2e-5)
+    }
   })
 
   it('registers fixed fine and medium periodic bands', () => {
@@ -140,6 +164,26 @@ describe('detail-analysis band energy', () => {
         const alpha = Math.round(Math.max(0, Math.min(1, (40 - x) / 16)) * 255)
         return [0, 0, 0, alpha]
       }),
+    )
+
+    expect(total(hard)).toBeGreaterThan(0)
+    expect(total(soft)).toBeGreaterThan(0)
+    expect(total(soft)).toBeLessThan(total(hard))
+  })
+
+  it('preserves alpha transitions beside the repaired capped margin', () => {
+    const hard = energyOf(
+      pixels(64, 32, (x) => [0, 0, 0, x < 10 ? 255 : 0]),
+      16,
+    )
+    const soft = energyOf(
+      pixels(64, 32, (x) => {
+        const alpha = Math.round(
+          Math.max(0, Math.min(1, (16 - x) / 12)) * 255,
+        )
+        return [0, 0, 0, alpha]
+      }),
+      16,
     )
 
     expect(total(hard)).toBeGreaterThan(0)

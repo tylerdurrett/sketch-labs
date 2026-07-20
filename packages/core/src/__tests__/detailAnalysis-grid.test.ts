@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { DecodedPixels } from '../imageAssets'
 import {
+  analysisResampleOperationCount,
   createScalarGrid,
   prepareAnalysisGrid,
 } from '../detailAnalysis/grid'
@@ -62,6 +63,15 @@ describe('detail-analysis grid', () => {
       200,
     )!
     expect([small.luminance.width, small.luminance.height]).toEqual([7, 3])
+  })
+
+  it('bounds destination-oriented resampling work linearly in source pixels', () => {
+    for (const dimension of [512, 1024, 2048]) {
+      const sourcePixels = dimension * dimension
+      const operations = analysisResampleOperationCount(dimension, dimension)!
+      expect(operations).toBeLessThan(sourcePixels * 20)
+    }
+    expect(analysisResampleOperationCount(0, 10)).toBeNull()
   })
 
   it('area-averages alpha independently and ignores hidden RGB across a mixed cell', () => {

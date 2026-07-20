@@ -1,17 +1,16 @@
 /**
  * Internal, bounded scalar lattices used while preparing image detail.
  *
- * Decoded pixels are reduced with exact source-pixel area overlap rather than
- * point sampling. Luminance is accumulated in linear light and premultiplied
- * by alpha, so RGB belonging to fully transparent pixels cannot leak into the
- * visible signal when an analysis cell straddles an alpha boundary.
+ * Decoded pixels are antialiased and reduced with combined Gaussian and exact
+ * source-area weights rather than point sampling. Luminance is accumulated in
+ * linear light and premultiplied by alpha, so RGB belonging to fully
+ * transparent pixels cannot leak into the visible signal.
  */
 
 import type { DecodedPixels } from '../imageAssets'
 import {
   srgbByteToLinear,
   validateDecodedRaster,
-  type ValidatedDecodedRaster,
 } from '../rasterSampling'
 
 const ANALYSIS_GRID_MAX_DIMENSION = 256
@@ -120,130 +119,184 @@ interface FilteredRow {
   readonly premultipliedLuminance: Float64Array
 }
 
-function createFilteredRowReader(
-  raster: Readonly<ValidatedDecodedRaster>,
-  horizontalKernel: readonly number[],
-  verticalKernel: readonly number[],
-): (sourceY: number) => FilteredRow {
-  const horizontalRadius = (horizontalKernel.length - 1) / 2
-  const verticalRadius = (verticalKernel.length - 1) / 2
-  const horizontalRows = new Map<number, FilteredRow>()
-  let boundaryAlpha = 0
-  let boundaryPremultipliedLuminance = 0
-  const pixelCount = raster.width * raster.height
-  for (let offset = 0; offset < raster.data.length; offset += 4) {
-    const alpha = raster.data[offset + 3]! / BYTE_MAX
-    boundaryAlpha += alpha
-    if (alpha > 0) {
-      boundaryPremultipliedLuminance +=
-        alpha * linearLuminance(raster.data, offset)
-    }
-  }
-  boundaryAlpha /= pixelCount
-  boundaryPremultipliedLuminance /= pixelCount
+interface AxisWeight {
+  readonly source: number
+  readonly weight: number
+}
 
-  // Extend the finite raster with its DC component during antialiasing. A
-  // reflected arbitrary texture phase can otherwise turn an above-Nyquist
-  // pattern into a false low-frequency edge at the first or last analysis
-  // cell. Both channels use their own premultiplied means, so the extension
-  // cannot reveal RGB from zero-alpha pixels.
-  const horizontalRow = (sourceY: number): FilteredRow => {
-    const cached = horizontalRows.get(sourceY)
-    if (cached !== undefined) return cached
+type AxisWeights = readonly (readonly AxisWeight[])[]
 
-    const sourceAlpha = new Float64Array(raster.width)
-    const sourcePremultipliedLuminance = new Float64Array(raster.width)
-    for (let sourceX = 0; sourceX < raster.width; sourceX += 1) {
-      const offset = (sourceY * raster.width + sourceX) * 4
-      const alpha = raster.data[offset + 3]! / BYTE_MAX
-      sourceAlpha[sourceX] = alpha
-      if (alpha > 0) {
-        sourcePremultipliedLuminance[sourceX] =
-          alpha * linearLuminance(raster.data, offset)
-      }
+function antialiasTargetMargin(
+  sourceLength: number,
+  targetLength: number,
+): number | null {
+  const sourcePerCell = sourceLength / targetLength
+  const kernel = antialiasKernel(sourcePerCell)
+  if (kernel === null) return null
+  return Math.ceil((kernel.length - 1) / 2 / sourcePerCell)
+}
+
+/** Combine source-space Gaussian filtering and exact area overlap per cell. */
+function buildAxisWeights(
+  sourceLength: number,
+  targetLength: number,
+): AxisWeights | null {
+  const sourcePerCell = sourceLength / targetLength
+  const kernel = antialiasKernel(sourcePerCell)
+  if (kernel === null) return null
+  const radius = (kernel.length - 1) / 2
+  const result: AxisWeight[][] = []
+
+  for (let target = 0; target < targetLength; target += 1) {
+    if (sourcePerCell === 1) {
+      result.push([Object.freeze({ source: target, weight: 1 })])
+      continue
     }
 
-    let row: FilteredRow
-    if (horizontalRadius === 0) {
-      row = {
-        alpha: sourceAlpha,
-        premultipliedLuminance: sourcePremultipliedLuminance,
-      }
-    } else {
-      const alpha = new Float64Array(raster.width)
-      const premultipliedLuminance = new Float64Array(raster.width)
-      for (let sourceX = 0; sourceX < raster.width; sourceX += 1) {
-        let alphaSum = 0
-        let luminanceSum = 0
-        for (
-          let kernelIndex = 0;
-          kernelIndex < horizontalKernel.length;
-          kernelIndex += 1
-        ) {
-          const filteredX = sourceX + kernelIndex - horizontalRadius
-          const weight = horizontalKernel[kernelIndex]!
-          if (filteredX < 0 || filteredX >= raster.width) {
-            alphaSum += boundaryAlpha * weight
-            luminanceSum += boundaryPremultipliedLuminance * weight
-          } else {
-            alphaSum += sourceAlpha[filteredX]! * weight
-            luminanceSum +=
-              sourcePremultipliedLuminance[filteredX]! * weight
-          }
-        }
-        alpha[sourceX] = alphaSum
-        premultipliedLuminance[sourceX] = luminanceSum
-      }
-      row = { alpha, premultipliedLuminance }
-    }
+    const left = target * sourcePerCell
+    const right = (target + 1) * sourcePerCell
+    const firstAreaSource = Math.floor(left)
+    const lastAreaSource = Math.min(sourceLength - 1, Math.ceil(right) - 1)
+    const combined = new Map<number, number>()
+    let boundaryDcWeight = 0
 
-    horizontalRows.set(sourceY, row)
-    return row
-  }
+    for (
+      let areaSource = firstAreaSource;
+      areaSource <= lastAreaSource;
+      areaSource += 1
+    ) {
+      const overlap =
+        Math.min(right, areaSource + 1) - Math.max(left, areaSource)
+      if (overlap <= 0) continue
+      const areaWeight = overlap / sourcePerCell
 
-  return (sourceY: number): FilteredRow => {
-    let row: FilteredRow
-    if (verticalRadius === 0) {
-      row = horizontalRow(sourceY)
-    } else {
-      const alpha = new Float64Array(raster.width)
-      const premultipliedLuminance = new Float64Array(raster.width)
-      for (
-        let kernelIndex = 0;
-        kernelIndex < verticalKernel.length;
-        kernelIndex += 1
-      ) {
-        const weight = verticalKernel[kernelIndex]!
-        const filteredY = sourceY + kernelIndex - verticalRadius
-        if (filteredY < 0 || filteredY >= raster.height) {
-          for (let sourceX = 0; sourceX < raster.width; sourceX += 1) {
-            alpha[sourceX] = alpha[sourceX]! + boundaryAlpha * weight
-            premultipliedLuminance[sourceX] =
-              premultipliedLuminance[sourceX]! +
-              boundaryPremultipliedLuminance * weight
-          }
+      for (let kernelIndex = 0; kernelIndex < kernel.length; kernelIndex += 1) {
+        const source = areaSource + kernelIndex - radius
+        const weight = areaWeight * kernel[kernelIndex]!
+        if (source < 0 || source >= sourceLength) {
+          boundaryDcWeight += weight
         } else {
-          const horizontal = horizontalRow(filteredY)
-          for (let sourceX = 0; sourceX < raster.width; sourceX += 1) {
-            alpha[sourceX] =
-              alpha[sourceX]! + horizontal.alpha[sourceX]! * weight
-            premultipliedLuminance[sourceX] =
-              premultipliedLuminance[sourceX]! +
-              horizontal.premultipliedLuminance[sourceX]! * weight
-          }
+          combined.set(source, (combined.get(source) ?? 0) + weight)
         }
       }
-      row = { alpha, premultipliedLuminance }
+    }
+    if (boundaryDcWeight > 0) {
+      const contribution = boundaryDcWeight / sourceLength
+      for (let source = 0; source < sourceLength; source += 1) {
+        combined.set(source, (combined.get(source) ?? 0) + contribution)
+      }
     }
 
-    // Source rows are requested monotonically by area reduction. Retain only
-    // the filtered neighborhood a repeated/current or later row can need.
-    const oldestNeeded = sourceY - verticalRadius
-    for (const cachedY of horizontalRows.keys()) {
-      if (cachedY < oldestNeeded) horizontalRows.delete(cachedY)
-    }
-    return row
+    // Out-of-bounds filter mass uses this axis signal's own DC component. A
+    // narrow destination-space repair below removes that finite-padding edge
+    // before energy analysis while keeping oscillatory boundary phase quiet.
+    const total = [...combined.values()].reduce((sum, value) => sum + value, 0)
+    if (!Number.isFinite(total) || total === 0) return null
+    result.push(
+      [...combined.entries()]
+        .filter(([, weight]) => weight !== 0)
+        .sort(([leftSource], [rightSource]) => leftSource - rightSource)
+        .map(([source, weight]) =>
+          Object.freeze({ source, weight: weight / total }),
+        ),
+    )
   }
+
+  return Object.freeze(result.map((weights) => Object.freeze(weights)))
+}
+
+function repairFinitePaddingMargin(
+  values: number[],
+  width: number,
+  height: number,
+  horizontalMargin: number,
+  verticalMargin: number,
+): void {
+  const repairLine = (
+    length: number,
+    margin: number,
+    indexAt: (position: number) => number,
+  ): void => {
+    if (margin <= 0) return
+    if (length <= margin * 2) {
+      const constant = values[indexAt(Math.floor(length / 2))]!
+      for (let position = 0; position < length; position += 1) {
+        values[indexAt(position)] = constant
+      }
+      return
+    }
+    const repairedMargin = Math.min(margin, Math.floor((length - 1) / 2))
+    const firstSafe = repairedMargin
+    const lastSafe = length - repairedMargin - 1
+    if (firstSafe === lastSafe) {
+      const constant = values[indexAt(firstSafe)]!
+      for (let position = 0; position < length; position += 1) {
+        values[indexAt(position)] = constant
+      }
+      return
+    }
+
+    const firstValue = values[indexAt(firstSafe)]!
+    const firstSlope = values[indexAt(firstSafe + 1)]! - firstValue
+    for (let position = 0; position < firstSafe; position += 1) {
+      values[indexAt(position)] =
+        firstValue + (position - firstSafe) * firstSlope
+    }
+    const lastValue = values[indexAt(lastSafe)]!
+    const lastSlope = lastValue - values[indexAt(lastSafe - 1)]!
+    for (let position = lastSafe + 1; position < length; position += 1) {
+      values[indexAt(position)] =
+        lastValue + (position - lastSafe) * lastSlope
+    }
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    repairLine(width, horizontalMargin, (x) => y * width + x)
+  }
+  for (let x = 0; x < width; x += 1) {
+    repairLine(height, verticalMargin, (y) => y * width + x)
+  }
+}
+
+/** Internal complexity evidence for the destination-oriented resampler. */
+export function analysisResampleOperationCount(
+  sourceWidth: number,
+  sourceHeight: number,
+  maxDimension = ANALYSIS_GRID_MAX_DIMENSION,
+): number | null {
+  if (
+    !Number.isSafeInteger(sourceWidth) ||
+    sourceWidth <= 0 ||
+    !Number.isSafeInteger(sourceHeight) ||
+    sourceHeight <= 0 ||
+    !Number.isSafeInteger(sourceWidth * sourceHeight)
+  ) {
+    return null
+  }
+  const dimensions = analysisDimensions(
+    sourceWidth,
+    sourceHeight,
+    maxDimension,
+  )
+  if (dimensions === null) return null
+  const [targetWidth, targetHeight] = dimensions
+  const horizontal = buildAxisWeights(sourceWidth, targetWidth)
+  const vertical = buildAxisWeights(sourceHeight, targetHeight)
+  if (horizontal === null || vertical === null) return null
+  const horizontalWeightCount = horizontal.reduce(
+    (sum, weights) => sum + weights.length,
+    0,
+  )
+  const verticalWeightCount = vertical.reduce(
+    (sum, weights) => sum + weights.length,
+    0,
+  )
+  const operationCount =
+    sourceWidth * sourceHeight +
+    sourceHeight * horizontalWeightCount +
+    targetWidth * verticalWeightCount +
+    targetWidth * targetHeight * 4
+  return Number.isSafeInteger(operationCount) ? operationCount : null
 }
 
 /**
@@ -270,80 +323,112 @@ export function prepareAnalysisGrid(
 
   const luminance = new Array<number>(width * height)
   const alpha = new Array<number>(width * height)
-  const sourcePerCellX = raster.width / width
-  const sourcePerCellY = raster.height / height
-  const cellArea = sourcePerCellX * sourcePerCellY
-  const horizontalKernel = antialiasKernel(sourcePerCellX)
-  const verticalKernel = antialiasKernel(sourcePerCellY)
-  if (horizontalKernel === null || verticalKernel === null) return null
-  const filteredRow = createFilteredRowReader(
-    raster,
-    horizontalKernel,
-    verticalKernel,
-  )
+  const premultipliedLuminance = new Array<number>(width * height)
+  const horizontalWeights = buildAxisWeights(raster.width, width)
+  const verticalWeights = buildAxisWeights(raster.height, height)
+  const horizontalMargin = antialiasTargetMargin(raster.width, width)
+  const verticalMargin = antialiasTargetMargin(raster.height, height)
+  if (
+    horizontalWeights === null ||
+    verticalWeights === null ||
+    horizontalMargin === null ||
+    verticalMargin === null
+  ) {
+    return null
+  }
+  const rowCache = new Map<number, FilteredRow>()
+
+  const horizontallyReducedRow = (sourceY: number): FilteredRow => {
+    const cached = rowCache.get(sourceY)
+    if (cached !== undefined) return cached
+
+    const sourceAlpha = new Float64Array(raster.width)
+    const sourcePremultipliedLuminance = new Float64Array(raster.width)
+    for (let sourceX = 0; sourceX < raster.width; sourceX += 1) {
+      const offset = (sourceY * raster.width + sourceX) * 4
+      const valueAlpha = raster.data[offset + 3]! / BYTE_MAX
+      sourceAlpha[sourceX] = valueAlpha
+      if (valueAlpha > 0) {
+        sourcePremultipliedLuminance[sourceX] =
+          valueAlpha * linearLuminance(raster.data, offset)
+      }
+    }
+
+    const reducedAlpha = new Float64Array(width)
+    const reducedPremultipliedLuminance = new Float64Array(width)
+    for (let targetX = 0; targetX < width; targetX += 1) {
+      for (const coefficient of horizontalWeights[targetX]!) {
+        reducedAlpha[targetX] =
+          reducedAlpha[targetX]! +
+          sourceAlpha[coefficient.source]! * coefficient.weight
+        reducedPremultipliedLuminance[targetX] =
+          reducedPremultipliedLuminance[targetX]! +
+          sourcePremultipliedLuminance[coefficient.source]! *
+            coefficient.weight
+      }
+    }
+
+    const row = {
+      alpha: reducedAlpha,
+      premultipliedLuminance: reducedPremultipliedLuminance,
+    }
+    rowCache.set(sourceY, row)
+    return row
+  }
 
   for (let targetY = 0; targetY < height; targetY += 1) {
-    const sourceTop = targetY * sourcePerCellY
-    const sourceBottom = (targetY + 1) * sourcePerCellY
-    const firstSourceY = Math.floor(sourceTop)
-    const lastSourceY = Math.min(
-      raster.height - 1,
-      Math.ceil(sourceBottom) - 1,
-    )
-    const sourceRows: Array<
-      Readonly<{ overlapY: number; filtered: FilteredRow }>
-    > = []
-    for (let sourceY = firstSourceY; sourceY <= lastSourceY; sourceY += 1) {
-      const overlapY =
-        Math.min(sourceBottom, sourceY + 1) - Math.max(sourceTop, sourceY)
-      if (overlapY > 0) {
-        sourceRows.push({ overlapY, filtered: filteredRow(sourceY) })
+    const reducedAlpha = new Float64Array(width)
+    const reducedPremultipliedLuminance = new Float64Array(width)
+    for (const coefficient of verticalWeights[targetY]!) {
+      const row = horizontallyReducedRow(coefficient.source)
+      for (let targetX = 0; targetX < width; targetX += 1) {
+        reducedAlpha[targetX] =
+          reducedAlpha[targetX]! +
+          row.alpha[targetX]! * coefficient.weight
+        reducedPremultipliedLuminance[targetX] =
+          reducedPremultipliedLuminance[targetX]! +
+          row.premultipliedLuminance[targetX]! * coefficient.weight
+      }
+    }
+
+    const nextFirstSource = verticalWeights[targetY + 1]?.[0]?.source
+    if (nextFirstSource !== undefined) {
+      for (const cachedSource of rowCache.keys()) {
+        if (cachedSource < nextFirstSource) rowCache.delete(cachedSource)
       }
     }
 
     for (let targetX = 0; targetX < width; targetX += 1) {
-      const sourceLeft = targetX * sourcePerCellX
-      const sourceRight = (targetX + 1) * sourcePerCellX
-      const firstSourceX = Math.floor(sourceLeft)
-      const lastSourceX = Math.min(
-        raster.width - 1,
-        Math.ceil(sourceRight) - 1,
-      )
-      let alphaArea = 0
-      let premultipliedLuminanceArea = 0
-
-      for (const { overlapY, filtered } of sourceRows) {
-        for (
-          let sourceX = firstSourceX;
-          sourceX <= lastSourceX;
-          sourceX += 1
-        ) {
-          const overlapX =
-            Math.min(sourceRight, sourceX + 1) -
-            Math.max(sourceLeft, sourceX)
-          if (overlapX <= 0) continue
-
-          const area = overlapX * overlapY
-          const sourceAlpha = filtered.alpha[sourceX]!
-          const coveredArea = area * sourceAlpha
-          alphaArea += coveredArea
-          if (sourceAlpha > 0) {
-            premultipliedLuminanceArea +=
-              area * filtered.premultipliedLuminance[sourceX]!
-          }
-        }
-      }
-
       const index = targetY * width + targetX
-      alpha[index] = Math.max(0, Math.min(1, alphaArea / cellArea))
-      luminance[index] =
-        alphaArea > 0
-          ? Math.max(
-              0,
-              Math.min(1, premultipliedLuminanceArea / alphaArea),
-            )
-          : 0
+      alpha[index] = reducedAlpha[targetX]!
+      premultipliedLuminance[index] =
+        reducedPremultipliedLuminance[targetX]!
     }
+  }
+
+  repairFinitePaddingMargin(
+    alpha,
+    width,
+    height,
+    horizontalMargin,
+    verticalMargin,
+  )
+  repairFinitePaddingMargin(
+    premultipliedLuminance,
+    width,
+    height,
+    horizontalMargin,
+    verticalMargin,
+  )
+  for (let index = 0; index < alpha.length; index += 1) {
+    const valueAlpha = Math.max(0, Math.min(1, alpha[index]!))
+    const valuePremultipliedLuminance = Math.max(
+      0,
+      Math.min(valueAlpha, premultipliedLuminance[index]!),
+    )
+    alpha[index] = valueAlpha
+    luminance[index] =
+      valueAlpha > 0 ? valuePremultipliedLuminance / valueAlpha : 0
   }
 
   const luminanceGrid = createScalarGrid(width, height, luminance)
