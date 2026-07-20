@@ -20,6 +20,7 @@ export * from './frameScene'
 export * from './imageAssets'
 export * from './rasterToneSource'
 export * from './shadingFields'
+export * from './detailFields'
 export * from './shadingStrategy'
 export {
   scribbleStrategy,
