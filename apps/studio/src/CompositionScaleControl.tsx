@@ -93,7 +93,7 @@ export function CompositionScaleControl({
     <fieldset className="flex flex-col gap-2">
       <legend className="text-sm text-foreground">Composition scale</legend>
       <p id={descriptionId} className="text-xs text-muted-foreground">
-        100% centers and fits the full Composition.
+        100% uses the full-Composition fit size. Reset Frame recenters.
       </p>
       <div className="flex items-center gap-2">
         <input

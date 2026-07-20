@@ -56,7 +56,7 @@ afterEach(() => {
 });
 
 describe("CompositionScaleControl", () => {
-  it("identifies 100% as the centered full-Composition fit", () => {
+  it("identifies 100% as the full-Composition fit size and Reset as recentering", () => {
     const el = mount({
       scalePercent: 100,
       onScalePercentChange: vi.fn(),
@@ -65,7 +65,7 @@ describe("CompositionScaleControl", () => {
     expect(numericInput(el).value).toBe("100");
     expect(rangeInput(el).value).toBe("100");
     expect(el.textContent).toContain(
-      "100% centers and fits the full Composition.",
+      "100% uses the full-Composition fit size. Reset Frame recenters.",
     );
   });
 
