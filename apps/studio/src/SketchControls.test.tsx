@@ -7172,6 +7172,23 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     return match;
   }
 
+  function readBlobText(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+  }
+
+  function historyWriteCount(): number {
+    return (
+      historyCapture.atomic.length +
+      historyCapture.transactionCommits.length +
+      historyCapture.cancels.length
+    );
+  }
+
   const shadingParamEntries = (params: Params) =>
     Object.entries(activeParams(toneCalibration.schema, params)).map(
       ([key, value]) => ({ key, value }),
@@ -9883,6 +9900,188 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     clickButton(el, "Fill");
     expect(exportButton(el, "Export SVG").disabled).toBe(false);
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("keeps a Scribble → Stippling race on exact displayed and current identities through retry, paint, and bounded completion", async () => {
+    const toBlob = vi.fn((callback: BlobCallback) => {
+      callback(new Blob([MINIMAL_PNG], { type: "image/png" }));
+    });
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const diagnosticsPanel = shadingDisclosure(el);
+    const png = exportButton(el, "Export PNG");
+    const svg = exportButton(el, "Export SVG");
+    const scribbleScene = preparedScene(120);
+
+    await completeShading(0, scribbleScene, {
+      ...diagnostics,
+      fidelity: { kind: "scribble", residualError: 0.04 },
+    });
+    expect([png.disabled, svg.disabled]).toEqual([false, false]);
+    expect(diagnosticsPanel.textContent).toContain("Residual error4.00%");
+    expect(diagnosticsPanel.textContent).not.toContain("Distribution error");
+
+    // Keep the initial Scribble paint acknowledged, then require explicit paint
+    // acknowledgement for every replacement below.
+    autoAcknowledgeDisplayedScene = false;
+    const density = paramInput(el, "pathDensity");
+    act(() => density.focus());
+    setInput(density, "2");
+    act(() => density.blur());
+    expect(shadingJob.starts).toHaveLength(2);
+
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    expect(shadingJob.cancelCount).toBeGreaterThan(0);
+    expect(shadingJob.starts).toHaveLength(3);
+    expect(shadingJob.starts[2]!.identity.params).toEqual([
+      { key: "strategy", value: "stippling" },
+      { key: "stippleDensity", value: 1 },
+      { key: "distributionFidelity", value: 0.5 },
+    ]);
+    expect(lastRenderScene).toBe(scribbleScene);
+    expect(canvas.dataset.sourceInputRevision).toBe("0");
+    expect(diagnosticsPanel.textContent).toContain("Displayed result: stale");
+    expect(diagnosticsPanel.textContent).toContain("Residual error4.00%");
+    expect(diagnosticsPanel.textContent).not.toContain("Distribution error");
+    expect([png.disabled, svg.disabled]).toEqual([true, true]);
+
+    reportShadingProgress(2, 35, 100, {
+      kind: "remaining",
+      revision: 2,
+      remainingMs: 4_000,
+    });
+    expect(diagnosticsPanel.textContent).toContain(
+      "35% (35 of 100 work units)",
+    );
+    expect(diagnosticsPanel.textContent).toContain("4.0 s");
+
+    // The canceled Scribble worker may still have callbacks queued. Neither its
+    // progress nor its successful completion may replace the retained Scribble
+    // metrics or the current Stippling progress lane.
+    reportShadingProgress(1, 90, 100, {
+      kind: "remaining",
+      revision: 3,
+      remainingMs: 100,
+    });
+    await completeShading(1, preparedScene(121));
+    expect(lastRenderScene).toBe(scribbleScene);
+    expect(diagnosticsPanel.textContent).toContain(
+      "35% (35 of 100 work units)",
+    );
+    expect(diagnosticsPanel.textContent).not.toContain("Preparing 90%");
+    expect(diagnosticsPanel.textContent).toContain("Residual error4.00%");
+
+    const writesAfterStrategy = historyWriteCount();
+    await failShading(2, "safe retryable Stippling failure");
+    expect(diagnosticsPanel.textContent).toContain("Preparation failed");
+    expect(diagnosticsPanel.textContent).toContain(
+      "safe retryable Stippling failure",
+    );
+    const failedIdentity = shadingJob.starts[2]!.identity;
+    clickButton(el, "Retry");
+    expect(shadingJob.starts).toHaveLength(4);
+    expect(shadingJob.starts[3]!.identity).toEqual(failedIdentity);
+    expect(historyWriteCount()).toBe(writesAfterStrategy);
+
+    // An active Stippling edit supersedes that exact retry. Its late failure is
+    // ignored, while only the newly-authored identity owns current progress.
+    const stippleDensity = paramInput(el, "stippleDensity");
+    act(() => stippleDensity.focus());
+    setInput(stippleDensity, "1.4");
+    expect([png.disabled, svg.disabled]).toEqual([true, true]);
+    expect(lastRenderScene).toBe(scribbleScene);
+    act(() => stippleDensity.blur());
+    expect(shadingJob.starts).toHaveLength(5);
+    expect(shadingJob.starts[4]!.identity.params).toContainEqual({
+      key: "stippleDensity",
+      value: 1.4,
+    });
+    reportShadingProgress(4, 20, 100, {
+      kind: "remaining",
+      revision: 2,
+      remainingMs: 8_000,
+    });
+    await failShading(3, "obsolete retry failure");
+    expect(diagnosticsPanel.textContent).not.toContain(
+      "obsolete retry failure",
+    );
+    expect(diagnosticsPanel.textContent).toContain(
+      "20% (20 of 100 work units)",
+    );
+
+    const stipplingScene = preparedScene(122);
+    await completeShading(4, stipplingScene, {
+      ...diagnostics,
+      fidelity: { kind: "stippling", distributionError: 0.08 },
+    });
+    expect(lastRenderScene).toBe(stipplingScene);
+    expect(diagnosticsPanel.textContent).toContain("Distribution error8.00%");
+    expect(diagnosticsPanel.textContent).not.toContain("Residual error");
+    expect([png.disabled, svg.disabled]).toEqual([true, true]);
+    act(() => acknowledgeDisplayedScene?.());
+    expect([png.disabled, svg.disabled]).toEqual([false, false]);
+
+    // Exercise an honest bounded Stippling completion while observational state
+    // is live, then prove none of it enters history or a saved Preset.
+    const distributionFidelity = paramInput(el, "distributionFidelity");
+    act(() => distributionFidelity.focus());
+    setInput(distributionFidelity, "0.75");
+    act(() => distributionFidelity.blur());
+    expect(shadingJob.starts).toHaveLength(6);
+    reportShadingProgress(5, 60, 100, {
+      kind: "remaining",
+      revision: 2,
+      remainingMs: 3_000,
+    });
+    const authoredWrites = historyWriteCount();
+    expect(JSON.stringify(historyCapture)).not.toMatch(
+      /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+    );
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      "stippling-race",
+    );
+    clickButton(el, "Save");
+    await flush();
+    expect(historyWriteCount()).toBe(authoredWrites);
+    expect(JSON.stringify(savePreset.mock.calls.at(-1)![0])).not.toMatch(
+      /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+    );
+
+    const boundedScene = preparedScene(123);
+    await completeShading(5, boundedScene, {
+      ...diagnostics,
+      termination: "budget-exhausted",
+      fidelity: { kind: "stippling", distributionError: 1.25 },
+    });
+    expect(lastRenderScene).toBe(boundedScene);
+    expect(diagnosticsPanel.textContent).toContain("Budget exhausted");
+    expect(diagnosticsPanel.textContent).toContain(
+      "bounded partial result, not a computation error",
+    );
+    expect(diagnosticsPanel.textContent).toContain(
+      "Distribution error125.00%",
+    );
+    expect([png.disabled, svg.disabled]).toEqual([true, true]);
+    act(() => acknowledgeDisplayedScene?.());
+    expect([png.disabled, svg.disabled]).toEqual([false, false]);
+
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).toBe(boundedScene);
+    clickButton(el, "Export PNG");
+    await flush();
+    expect(toBlob).toHaveBeenCalledOnce();
+    expect(downloadBlob).toHaveBeenCalledTimes(2);
+    expect(historyWriteCount()).toBe(authoredWrites);
+
+    const svgText = await readBlobText(downloadBlob.mock.calls[0]![0]);
+    const pngText = await readBlobText(downloadBlob.mock.calls[1]![0]);
+    for (const reproduction of [svgText, pngText]) {
+      expect(reproduction).not.toMatch(
+        /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+      );
+    }
   });
 
   it("gates every export on current painted provenance and never generates Shading synchronously", async () => {
