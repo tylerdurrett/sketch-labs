@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "sketch": "photo-scribble",
+  "name": "doggo",
+  "seed": 8408904470317508,
+  "params": {
+    "imageAsset": "img-0525-9cded1ad73bb",
+    "toneContrast": 0.77,
+    "tonePivot": 1,
+    "toneGamma": 0.5,
+    "pathDensity": 17.6,
+    "scribbleScale": 0.55,
+    "momentum": 0.75,
+    "chaos": 0.25,
+    "toneFidelity": 0.99,
+    "stopPoint": 100
+  },
+  "locks": [],
+  "profile": {
+    "width": 200,
+    "height": 155,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true,
+    "toolWidthMillimeters": 0.3
+  }
+}
