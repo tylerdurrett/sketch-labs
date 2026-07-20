@@ -269,7 +269,7 @@ describe('public Scribble strategy boundary', () => {
     expect(Object.isFrozen(snapshots[0])).toBe(true)
   })
 
-  it('keeps authored-stop no-demand progress on the cap-work contract', () => {
+  it('reports threshold completion when no demand beats an authored stop', () => {
     const snapshots: ScribbleProgress[] = []
     scribbleStrategy({
       ...input(source(constantTone(0)), 'authored-no-demand', {
@@ -279,7 +279,12 @@ describe('public Scribble strategy boundary', () => {
     })
 
     expect(snapshots).toEqual([
-      { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
+      {
+        completedWorkUnits: 0,
+        totalWorkUnits: 0,
+        convergence: 1,
+        terminal: true,
+      },
     ])
   })
 

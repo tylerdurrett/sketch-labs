@@ -289,7 +289,36 @@ describe("ScribbleCoordinator", () => {
     await result;
   });
 
-  it("retains cap-work ETA when an authored stop omits convergence", async () => {
+  it("uses cap-work ETA when it wins the race against convergence", async () => {
+    const worker = new FakeWorker();
+    let now = 0;
+    const updates = vi.fn();
+    const coordinator = new ScribbleCoordinator(
+      () => worker,
+      () => now,
+    );
+    const result = coordinator.start(identity(), updates);
+
+    worker.emit("message", progressResponse(worker, 10, 100, false, 0.1));
+    now = 1_000;
+    worker.emit("message", progressResponse(worker, 20, 100, false, 0.11));
+
+    // Cap work predicts 8 seconds while convergence predicts 89 seconds.
+    expect(updates).toHaveBeenLastCalledWith({
+      snapshot: {
+        completedWorkUnits: 20,
+        totalWorkUnits: 100,
+        convergence: 0.11,
+        terminal: false,
+      },
+      eta: { kind: "remaining", revision: 2, remainingMs: 8_000 },
+    });
+
+    worker.emit("message", successResponse(worker));
+    await result;
+  });
+
+  it("retains cap-work ETA for legacy snapshots without convergence", async () => {
     const worker = new FakeWorker();
     let now = 0;
     const updates = vi.fn();

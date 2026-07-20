@@ -61,11 +61,28 @@ interface ActiveJob {
   readonly terminateWorker: () => void;
   readonly resolve: (result: ScribbleComputeResult) => void;
   readonly observeProgress: ScribbleProgressObserver | undefined;
-  readonly eta: RollingEtaEstimator;
+  readonly capEta: RollingEtaEstimator;
+  readonly convergenceEta: RollingEtaEstimator;
+  etaRevision: number;
   lastProgress: ScribbleProgress | null;
 }
 
 const defaultClock: ScribbleMonotonicClock = () => performance.now();
+
+function earliestEstimate(
+  revision: number,
+  estimates: readonly RollingEtaEstimate[],
+): RollingEtaEstimate {
+  let remainingMs = Number.POSITIVE_INFINITY;
+  for (const estimate of estimates) {
+    if (estimate.kind === "remaining") {
+      remainingMs = Math.min(remainingMs, estimate.remainingMs);
+    }
+  }
+  return Number.isFinite(remainingMs)
+    ? { kind: "remaining", revision, remainingMs }
+    : { kind: "estimating", revision };
+}
 
 /**
  * Owns the one-worker-per-job Scribble compute lifecycle.
@@ -118,7 +135,9 @@ export class ScribbleCoordinator {
         terminateWorker: terminateWorkerOnce(worker),
         resolve,
         observeProgress,
-        eta: createRollingEtaEstimator(),
+        capEta: createRollingEtaEstimator(),
+        convergenceEta: createRollingEtaEstimator(),
+        etaRevision: 0,
         lastProgress: null,
       };
       this.active = active;
@@ -208,21 +227,29 @@ export class ScribbleCoordinator {
     const snapshot = { ...candidate };
     active.lastProgress = snapshot;
     const timestampMs = this.clock();
+    const revision = ++active.etaRevision;
     const eta: RollingEtaEstimate = snapshot.terminal
       ? {
           kind: "remaining",
-          revision: active.eta.estimate.revision + 1,
+          revision,
           remainingMs: 0,
         }
-      : active.eta.observe({
-          timestampMs,
-          // Scribble normally stops at its residual threshold, long before its
-          // emergency work cap. Legacy/custom snapshots can still use cap work.
-          completedWork:
-            snapshot.convergence ?? snapshot.completedWorkUnits,
-          totalWork:
-            snapshot.convergence === undefined ? snapshot.totalWorkUnits : 1,
-        });
+      : earliestEstimate(revision, [
+          active.capEta.observe({
+            timestampMs,
+            completedWork: snapshot.completedWorkUnits,
+            totalWork: snapshot.totalWorkUnits,
+          }),
+          ...(snapshot.convergence === undefined
+            ? []
+            : [
+                active.convergenceEta.observe({
+                  timestampMs,
+                  completedWork: snapshot.convergence,
+                  totalWork: 1,
+                }),
+              ]),
+        ]);
     active.observeProgress?.({ snapshot, eta });
   }
 
