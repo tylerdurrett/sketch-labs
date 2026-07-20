@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "sketch": "photo-scribble",
+  "name": "flower-detail-2",
+  "seed": 4238989185794291,
+  "params": {
+    "imageAsset": "img-0672-79d639daec62",
+    "toneContrast": 0.79,
+    "tonePivot": 0.93,
+    "toneGamma": 0.5,
+    "detailSensitivity": 0.8,
+    "detailInfluence": 0.64,
+    "pathDensity": 15,
+    "scribbleScale": 0.45,
+    "momentum": 0.75,
+    "chaos": 0.85,
+    "toneFidelity": 0.3,
+    "stopPoint": 100
+  },
+  "locks": [],
+  "profile": {
+    "width": 155,
+    "height": 200,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true,
+    "toolWidthMillimeters": 0.3
+  }
+}

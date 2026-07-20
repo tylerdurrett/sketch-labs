@@ -1,0 +1,43 @@
+{
+  "version": 3,
+  "sketch": "photo-scribble",
+  "name": "flower-detail-framed-3",
+  "seed": 4238989185794291,
+  "params": {
+    "imageAsset": "img-0672-79d639daec62",
+    "toneContrast": 0.79,
+    "tonePivot": 0.93,
+    "toneGamma": 0.5,
+    "detailSensitivity": 0.8,
+    "detailInfluence": 0.64,
+    "pathDensity": 15,
+    "scribbleScale": 0.45,
+    "momentum": 0.75,
+    "chaos": 0.85,
+    "toneFidelity": 0.3,
+    "stopPoint": 100
+  },
+  "locks": [],
+  "profile": {
+    "width": 152.39999999999998,
+    "height": 228.6,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true,
+    "toolWidthMillimeters": 0.3
+  },
+  "framing": {
+    "pageFrame": {
+      "x": 60.76413817599786,
+      "y": 95.73564368212351,
+      "width": 675.1570908444212,
+      "height": 1063.7293742458178
+    },
+    "generationAspect": 0.6347075743048897,
+    "aspectLocked": true
+  }
+}
