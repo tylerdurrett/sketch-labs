@@ -389,6 +389,42 @@ describe("scribbleSessionReducer", () => {
     expect(selectExportableScribbleResult(failed)).toBeNull();
   });
 
+  it("re-enqueues one current failed identity and ignores obsolete retries", () => {
+    const active = launch(createScribbleSessionState(identity(2), 11));
+    const failed = scribbleSessionReducer(active, {
+      type: "failed",
+      token: active.active!.token,
+      identity: active.active!.identity,
+      error: "analysis failed",
+    });
+    const obsolete = scribbleSessionReducer(failed, {
+      type: "retry",
+      identity: identity(1),
+      sourceInputRevision: 10,
+    });
+    expect(obsolete).toBe(failed);
+
+    const retried = scribbleSessionReducer(failed, {
+      type: "retry",
+      identity: failed.desiredIdentity!,
+      sourceInputRevision: failed.sourceInputRevision!,
+    });
+    expect(retried.pending).toEqual({
+      token: failed.nextToken,
+      identity: failed.desiredIdentity,
+      sourceInputRevision: 11,
+    });
+    expect(retried.failure).toBeNull();
+    expect(retried.nextToken).toBe(failed.nextToken + 1);
+    expect(
+      scribbleSessionReducer(retried, {
+        type: "retry",
+        identity: retried.desiredIdentity!,
+        sourceInputRevision: retried.sourceInputRevision!,
+      }),
+    ).toBe(retried);
+  });
+
   it("suspends active ownership synchronously while preserving desired state and display", () => {
     const completed = completedA();
     const active = launch(

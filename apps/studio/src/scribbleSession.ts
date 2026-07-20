@@ -78,6 +78,11 @@ export type ScribbleSessionAction =
       readonly identity: ScribbleComputeIdentity;
       readonly error: string;
     }
+  | {
+      readonly type: "retry";
+      readonly identity: ScribbleComputeIdentity;
+      readonly sourceInputRevision: number;
+    }
   | { readonly type: "dispose" };
 
 function emptyScribbleSessionState(): ScribbleSessionState {
@@ -404,6 +409,29 @@ export function scribbleSessionReducer(
         active: null,
         failure: action.error,
       };
+    case "retry": {
+      if (
+        state.failure === null ||
+        state.transactionOpen ||
+        state.suspended ||
+        state.pending !== null ||
+        state.active !== null ||
+        !desiredMatches(state, action.identity, action.sourceInputRevision)
+      ) {
+        return state;
+      }
+      const token = state.nextToken;
+      return {
+        ...state,
+        pending: {
+          token,
+          identity: action.identity,
+          sourceInputRevision: action.sourceInputRevision,
+        },
+        failure: null,
+        nextToken: token + 1,
+      };
+    }
     case "dispose":
       return emptyScribbleSessionState();
   }

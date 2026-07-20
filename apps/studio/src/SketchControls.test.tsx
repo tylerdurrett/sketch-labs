@@ -7430,6 +7430,10 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     clickButton(el, "Outline");
     const retainedOutline = outlineJob.lastCompletedScene;
     expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.lastIdentity?.params).toContainEqual({
+      key: "detailSensitivity",
+      value: 0.5,
+    });
     expect(canvas.dataset.renderMode).toBe("outline");
     editSensitivity("0.7");
     expect(outlineJob.starts).toBe(1);
@@ -7457,6 +7461,105 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       initialProvenance.contentRevision,
     );
     expect(exportButton(el, "Export SVG").disabled).toBe(false);
+  });
+
+  it("replaces positive-influence artwork and carries its completed Scene through Fill and both exports", async () => {
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await completeScribble(0, preparedScene(95));
+
+    const influence = paramInput(el, "detailInfluence");
+    act(() => influence.focus());
+    setInput(influence, "0.5");
+    act(() => influence.blur());
+    expect(scribbleJob.starts).toHaveLength(2);
+    await completeScribble(1, preparedScene(96));
+
+    const sensitivity = paramInput(el, "detailSensitivity");
+    act(() => sensitivity.focus());
+    setInput(sensitivity, "0.8");
+    act(() => sensitivity.blur());
+
+    expect(scribbleJob.starts).toHaveLength(3);
+    expect(scribbleJob.starts[2]!.identity.params).toContainEqual({
+      key: "detailSensitivity",
+      value: 0.8,
+    });
+    const detailScene = preparedScene(97);
+    await completeScribble(2, detailScene);
+
+    expect(lastRenderScene).toBe(detailScene);
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).toBe(detailScene);
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.lastIdentity?.params).toContainEqual({
+      key: "detailSensitivity",
+      value: 0.8,
+    });
+    expect(outlineJob.lastIdentity).toMatchObject({
+      sourceKind: "legacy-scene",
+      sourceScene: detailScene,
+    });
+
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(outlineJob.lastExportSnapshot?.identity).toMatchObject({
+      sourceKind: "legacy-scene",
+      sourceScene: detailScene,
+    });
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(plotterExportCapture.current?.scene).toEqual(
+      finalizedPlotterScene(outlineJob.lastCompletedScene!),
+    );
+  });
+
+  it("retains visibly stale artwork after required Detail failure and retries only the current identity", async () => {
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    const retainedScene = preparedScene(98);
+    await completeScribble(0, retainedScene);
+
+    const influence = paramInput(el, "detailInfluence");
+    act(() => influence.focus());
+    setInput(influence, "0.5");
+    act(() => influence.blur());
+    const longFailure = `analysis failed: ${"x".repeat(700)}`;
+    await failScribble(1, longFailure);
+
+    const diagnosticsPanel = shadingDisclosure(el);
+    expect(lastRenderScene).toBe(retainedScene);
+    expect(diagnosticsPanel.textContent).toContain("Displayed result: stale");
+    expect(diagnosticsPanel.textContent).toContain("analysis failed:");
+    expect(diagnosticsPanel.textContent).not.toContain(longFailure);
+    expect(
+      ["Export PNG", "Export SVG", "Export Hidden-line SVG"].map(
+        (label) => exportButton(el, label).disabled,
+      ),
+    ).toEqual([true, true, true]);
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(0);
+    expect(lastRenderScene).toBe(retainedScene);
+    clickButton(el, "Fill");
+
+    clickButton(el, "Retry");
+    expect(scribbleJob.starts).toHaveLength(3);
+    expect(scribbleJob.starts[2]!.identity).toEqual(
+      scribbleJob.starts[1]!.identity,
+    );
+    expect(diagnosticsPanel.textContent).toContain("Preparing replacement");
+    expect(diagnosticsPanel.textContent).not.toContain("Preparation failed:");
   });
 
   it("keeps Detail pixels exactly independent of tone controls and Seed", async () => {
