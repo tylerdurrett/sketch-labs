@@ -21,8 +21,10 @@ import {
   frameScene,
   HARNESS_FALLBACK_PLOT_PROFILE,
   hiddenLinePass,
+  IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
   leafField,
   photoScribble,
+  prepareImageDetailAnalysis,
   renderPlotterSVG,
   resolveCompositionFrame,
   resolvePlotCompositionFrame,
@@ -30,6 +32,7 @@ import {
   toneCalibration,
   type ParamSchema,
   type CoordinateSpace,
+  type DetailField,
   type PageFrame,
   type PlotProfile,
   type Preset,
@@ -136,6 +139,19 @@ const scribbleJob = vi.hoisted(() => ({
       | undefined;
   }>,
 }));
+const detailJob = vi.hoisted(() => ({
+  cancelCount: 0,
+  disposals: 0,
+  starts: [] as Array<{
+    identity: import("./detailPreparationProtocol").DetailPreparationIdentity;
+    resolve: (result: unknown) => void;
+  }>,
+  active: null as null | {
+    identity: import("./detailPreparationProtocol").DetailPreparationIdentity;
+    resolve: (result: unknown) => void;
+  },
+}));
+const orchestrationEvents = vi.hoisted(() => [] as string[]);
 const sketchEnvironmentJob = vi.hoisted(() => ({
   starts: [] as Array<{
     params: Readonly<Record<string, unknown>>;
@@ -219,12 +235,14 @@ vi.mock("./scribbleCoordinator", () => ({
       identity: import("./scribbleComputeProtocol").ScribbleComputeIdentity,
       observeProgress?: import("./scribbleCoordinator").ScribbleProgressObserver,
     ) {
+      orchestrationEvents.push("scribble:start");
       return new Promise((resolve) => {
         scribbleJob.starts.push({ identity, resolve, observeProgress });
       });
     }
 
     cancel() {
+      orchestrationEvents.push("scribble:cancel");
       scribbleJob.cancelCount += 1;
       return true;
     }
@@ -233,6 +251,39 @@ vi.mock("./scribbleCoordinator", () => ({
       if (this.disposed) return;
       this.disposed = true;
       scribbleJob.disposals += 1;
+      this.cancel();
+    }
+  },
+}));
+
+vi.mock("./detailCoordinator", () => ({
+  DetailCoordinator: class {
+    private disposed = false;
+
+    start(
+      identity: import("./detailPreparationProtocol").DetailPreparationIdentity,
+    ) {
+      orchestrationEvents.push("detail:start");
+      return new Promise((resolve) => {
+        const active = { identity, resolve };
+        detailJob.active = active;
+        detailJob.starts.push(active);
+      });
+    }
+
+    cancel() {
+      detailJob.cancelCount += 1;
+      const active = detailJob.active;
+      if (active === null) return false;
+      detailJob.active = null;
+      active.resolve({ status: "cancelled", jobId: 1 });
+      return true;
+    }
+
+    dispose() {
+      if (this.disposed) return;
+      this.disposed = true;
+      detailJob.disposals += 1;
       this.cancel();
     }
   },
@@ -491,6 +542,8 @@ let lastCommittedPageFrame: PageFrame | null = null;
 let lastPageFrameAspectConstraint: PageFrameAspectConstraint | null = null;
 let lastOnPageFrameDraftChange: ((frame: PageFrame) => void) | null = null;
 let lastToneSource: ToneSource | null = null;
+let lastDetailField: DetailField | null = null;
+let lastDetailRetry: (() => void) | null = null;
 let lastRenderScene: Scene | null = null;
 let lastOutlineFinalizationStrokePolicy:
   | OutlineFinalizationStrokePolicy
@@ -533,6 +586,8 @@ vi.mock("./LiveCanvas", () => ({
       scene?: unknown;
       t?: number;
       source?: ToneSource;
+      field?: DetailField;
+      onRetry?: () => void;
       sourceInputRevision?: number;
       contentRevision?: number;
       status?: string;
@@ -650,6 +705,8 @@ vi.mock("./LiveCanvas", () => ({
     lastPageFrameAspectConstraint = pageFrameAspectConstraint ?? null;
     lastOnPageFrameDraftChange = onPageFrameDraftChange ?? null;
     lastToneSource = renderState?.source ?? null;
+    lastDetailField = renderState?.field ?? null;
+    lastDetailRetry = renderState?.onRetry ?? null;
     lastRenderScene = (renderState?.scene as Scene | undefined) ?? null;
     lastOutlineFinalizationStrokePolicy = outlineFinalizationStrokePolicy;
     // Model the outline pass finishing: fire the "computed" signal after each
@@ -867,6 +924,11 @@ beforeEach(() => {
   scribbleJob.disposals = 0;
   scribbleJob.cancelCount = 0;
   scribbleJob.starts = [];
+  detailJob.cancelCount = 0;
+  detailJob.disposals = 0;
+  detailJob.starts = [];
+  detailJob.active = null;
+  orchestrationEvents.length = 0;
   sketchEnvironmentJob.starts = [];
   managedImageAssetJob.list.mockReset().mockResolvedValue([]);
   managedImageAssetJob.normalize.mockReset().mockResolvedValue({
@@ -903,6 +965,8 @@ beforeEach(() => {
   lastPageFrameAspectConstraint = null;
   lastOnPageFrameDraftChange = null;
   lastToneSource = null;
+  lastDetailField = null;
+  lastDetailRetry = null;
   lastRenderScene = null;
   lastOutlineFinalizationStrokePolicy = undefined;
   autoAcknowledgeDisplayedScene = true;
@@ -6405,6 +6469,31 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     });
   }
 
+  async function completeDetail(index: number, value = 128): Promise<void> {
+    const job = detailJob.starts[index];
+    if (job === undefined) throw new Error(`no Detail job ${index}`);
+    const prepared = prepareImageDetailAnalysis({
+      width: 2,
+      height: 2,
+      data: new Uint8ClampedArray([
+        value, value, value, 255,
+        0, 0, 0, 255,
+        255, 255, 255, 255,
+        value, value, value, 255,
+      ]),
+    });
+    await act(async () => {
+      if (detailJob.active === job) detailJob.active = null;
+      job.resolve({
+        status: "success",
+        jobId: index + 1,
+        identity: job.identity,
+        prepared,
+      });
+      await Promise.resolve();
+    });
+  }
+
   function reportScribbleProgress(
     index: number,
     completedWorkUnits: number,
@@ -7094,6 +7183,176 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       generateToneSource,
     };
   }
+
+  it("suspends Scribble before requesting Detail and rejects stale pre-entry paint", async () => {
+    const generateDetailField = vi.fn(photoScribble.generateDetailField!);
+    const el = mount(
+      <SketchControls
+        sketch={{
+          ...managedPhotoScribble(photoScribble.generateToneSource!),
+          generateDetailField,
+        }}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 96),
+      );
+      await Promise.resolve();
+    });
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(detailJob.starts).toHaveLength(0);
+
+    orchestrationEvents.length = 0;
+    clickButton(el, "Detail");
+    expect(orchestrationEvents).toEqual(["scribble:cancel", "detail:start"]);
+    expect(detailJob.starts[0]!.identity).toEqual({
+      imageAssetId: assetA,
+      analysisDefinitionId: IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+    });
+    expect(
+      el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!.dataset
+        .renderState,
+    ).toBe("detail-reference-loading");
+
+    await completeScribble(0, preparedScene(91));
+    expect(
+      el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!.dataset
+        .renderState,
+    ).toBe("detail-reference-loading");
+    expect(lastRenderScene).toBeNull();
+
+    await completeDetail(0);
+    expect(
+      el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!.dataset
+        .renderState,
+    ).toBe("detail-reference");
+    expect(lastDetailField).not.toBeNull();
+    expect(generateDetailField).toHaveBeenCalledOnce();
+
+    clickButton(el, "Fill");
+    await flush();
+    expect(orchestrationEvents.at(-1)).toBe("scribble:start");
+    expect(scribbleJob.starts).toHaveLength(2);
+  });
+
+  it("reuses one Detail analysis across authored edits and resumes one latest Scribble for Outline", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      { id: assetA, name: "portrait alpha", url: `/image-assets/${assetA}.png` },
+      { id: assetB, name: "portrait beta", url: `/image-assets/${assetB}.png` },
+    ]);
+    const generateDetailField = vi.fn(photoScribble.generateDetailField!);
+    const el = mount(
+      <SketchControls
+        sketch={{
+          ...managedPhotoScribble(photoScribble.generateToneSource!),
+          generateDetailField,
+        }}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 64),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(92));
+    clickButton(el, "Detail");
+    await completeDetail(0);
+
+    for (const [key, value] of [
+      ["detailSensitivity", "0.8"],
+      ["toneContrast", "0.2"],
+    ] as const) {
+      const input = paramInput(el, key);
+      act(() => input.focus());
+      setInput(input, value);
+      act(() => input.blur());
+    }
+    clickButton(el, "New seed");
+    expect(detailJob.starts).toHaveLength(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generateDetailField.mock.calls.length).toBeGreaterThan(1);
+
+    const assetBChoice = await openAssetBChoice(el);
+    act(() => assetBChoice.click());
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(detailJob.starts).toHaveLength(2);
+    expect(detailJob.starts[1]!.identity.imageAssetId).toBe(assetB);
+    await act(async () => {
+      sketchEnvironmentJob.starts[1]!.resolve(
+        resolvedAssetEnvironment(assetB, 192),
+      );
+      await Promise.resolve();
+    });
+    expect(detailJob.starts).toHaveLength(2);
+    expect(scribbleJob.starts).toHaveLength(1);
+    await completeDetail(1, 192);
+
+    clickButton(el, "Outline");
+    await flush();
+    expect(scribbleJob.starts).toHaveLength(2);
+    expect(outlineJob.starts).toBe(0);
+    await completeScribble(1, preparedScene(93));
+    await flush();
+    expect(outlineJob.starts).toBe(1);
+  });
+
+  it("resumes no Scribble work when Detail exits with authored inputs already current", async () => {
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 80),
+      );
+      await Promise.resolve();
+    });
+    await completeScribble(0, preparedScene(94));
+    clickButton(el, "Detail");
+    await completeDetail(0);
+    clickButton(el, "Fill");
+    await flush();
+    expect(scribbleJob.starts).toHaveLength(1);
+  });
+
+  it("turns synchronous Detail binding assertions into retryable safe failure", async () => {
+    const generateDetailField = vi.fn(() => {
+      throw new TypeError("malformed prepared binding");
+    });
+    const el = mount(
+      <SketchControls
+        sketch={{
+          ...managedPhotoScribble(photoScribble.generateToneSource!),
+          generateDetailField,
+        }}
+      />,
+    );
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(
+        resolvedAssetEnvironment(assetA, 112),
+      );
+      await Promise.resolve();
+    });
+    clickButton(el, "Detail");
+    await completeDetail(0);
+
+    expect(
+      el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!.dataset
+        .renderState,
+    ).toBe("detail-reference-failure");
+    expect(lastDetailField).toBeNull();
+    expect(lastDetailRetry).not.toBeNull();
+
+    act(() => lastDetailRetry?.());
+    expect(detailJob.starts).toHaveLength(2);
+    expect(
+      el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!.dataset
+        .renderState,
+    ).toBe("detail-reference-loading");
+  });
 
   function chooseImageFile(el: HTMLElement, name = "Imported Beta.webp"): void {
     const input = el.querySelector<HTMLInputElement>('input[type="file"]');
