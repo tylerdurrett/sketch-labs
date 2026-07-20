@@ -78,8 +78,8 @@ describe('detail-analysis grid', () => {
       1,
     )!
 
-    expect(blackHidden.alpha.values).toEqual([0.5])
-    expect(blackHidden.luminance.values).toEqual([1])
+    expect(blackHidden.alpha.values[0]).toBeCloseTo(0.5, 14)
+    expect(blackHidden.luminance.values[0]).toBeCloseTo(1, 14)
     expect(redHidden).toEqual(blackHidden)
   })
 
@@ -108,12 +108,18 @@ describe('detail-analysis grid', () => {
     expect(second).toEqual(first)
     expect(source.data).toEqual(before)
     expect(
+      first!.luminance.values.every((value) => value >= 0 && value <= 1),
+    ).toBe(true)
+    expect(first!.alpha.values.every((value) => value >= 0 && value <= 1)).toBe(
+      true,
+    )
+    expect(
       prepareAnalysisGrid({ width: 1, height: 1, data: new Uint8Array(3) }),
     ).toBeNull()
     expect(prepareAnalysisGrid(source, 0)).toBeNull()
   })
 
-  it('area low-pass removes a pattern above the capped lattice Nyquist rate', () => {
+  it('antialiases commensurate and noncommensurate patterns above the capped lattice Nyquist rate', () => {
     const reduced = prepareAnalysisGrid(
       pixels(64, 8, (x) =>
         x % 2 === 0 ? [0, 0, 0, 255] : [255, 255, 255, 255],
@@ -122,8 +128,50 @@ describe('detail-analysis grid', () => {
     )!
     const energy = localStructureEnergy(reduced.luminance, 1)!
 
-    expect(reduced.luminance.values.every((value) => value === 0.5)).toBe(true)
-    expect(energy.values.every((value) => value === 0)).toBe(true)
+    const commensurateMean =
+      energy.values.reduce((sum, value) => sum + value, 0) /
+      energy.values.length
+    const residualMeans = [commensurateMean]
+    for (const { width, period } of [
+      { width: 64, period: 3 },
+      { width: 67, period: 5 },
+    ]) {
+      const noncommensurate = prepareAnalysisGrid(
+        pixels(width, 8, (x) => {
+          const value = Math.round(
+            127.5 + 127.5 * Math.sin((x * Math.PI * 2) / period),
+          )
+          return [value, value, value, 255]
+        }),
+        16,
+      )!
+      const noncommensurateEnergy = localStructureEnergy(
+        noncommensurate.luminance,
+        1,
+      )!
+      residualMeans.push(
+        noncommensurateEnergy.values.reduce((sum, value) => sum + value, 0) /
+          noncommensurateEnergy.values.length,
+      )
+    }
+
+    const retained = prepareAnalysisGrid(
+      pixels(64, 8, (x) => {
+        const value = Math.round(
+          127.5 + 127.5 * Math.sin((x * Math.PI * 2) / 16),
+        )
+        return [value, value, value, 255]
+      }),
+      16,
+    )!
+    const retainedEnergy = localStructureEnergy(retained.luminance, 1)!
+    const retainedMean =
+      retainedEnergy.values.reduce((sum, value) => sum + value, 0) /
+      retainedEnergy.values.length
+    expect(retainedMean).toBeGreaterThan(1e-3)
+    for (const residual of residualMeans) {
+      expect(residual).toBeLessThan(retainedMean * 0.005)
+    }
   })
 })
 

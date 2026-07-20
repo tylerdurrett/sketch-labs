@@ -35,6 +35,10 @@ function total(grid: Readonly<ScalarGrid>): number {
   return grid.values.reduce((sum, value) => sum + value, 0)
 }
 
+function mean(grid: Readonly<ScalarGrid>): number {
+  return total(grid) / grid.values.length
+}
+
 function interiorMean(grid: Readonly<ScalarGrid>, border: number): number {
   let sum = 0
   let count = 0
@@ -113,6 +117,7 @@ describe('detail-analysis band energy', () => {
       pixels(64, 32, (x) =>
         x < 32 ? [180, 180, 180, 255] : [0, 0, 0, 0],
       ),
+      16,
     )
     const withPatternHidden = energyOf(
       pixels(64, 32, (x, y) =>
@@ -120,6 +125,7 @@ describe('detail-analysis band energy', () => {
           ? [180, 180, 180, 255]
           : [(x * 71) % 256, (y * 97) % 256, ((x + y) * 43) % 256, 0],
       ),
+      16,
     )
 
     expect(withPatternHidden).toEqual(withBlackHidden)
@@ -179,14 +185,50 @@ describe('detail-analysis band energy', () => {
   })
 
   it('does not alias above-Nyquist source detail into a lower band after capping', () => {
-    const energy = energyOf(
-      pixels(64, 8, (x) =>
-        x % 2 === 0 ? [0, 0, 0, 255] : [255, 255, 255, 255],
-      ),
-      16,
-    )
+    const residuals: ScalarGrid[] = []
+    for (const { width, period } of [
+      { width: 64, period: 2 },
+      { width: 64, period: 3 },
+      { width: 67, period: 5 },
+    ]) {
+      const energy = energyOf(
+        pixels(width, 8, (x) => {
+          let value = x % 2 === 0 ? 0 : 255
+          if (period !== 2) {
+            value = Math.round(
+              127.5 + 127.5 * Math.sin((x * Math.PI * 2) / period),
+            )
+          }
+          return [value, value, value, 255]
+        }),
+        16,
+      )
+      residuals.push(energy)
+    }
 
-    expect(Math.max(...energy.values)).toBeLessThan(1e-28)
+    const retained = [16, 32].map((period) =>
+      energyOf(
+        pixels(64, 8, (x) => {
+          const value = Math.round(
+            127.5 + 127.5 * Math.sin((x * Math.PI * 2) / period),
+          )
+          return [value, value, value, 255]
+        }),
+        16,
+      ),
+    )
+    const fine = retained[0]!
+    const medium = retained[1]!
+    expect(mean(fine)).toBeGreaterThan(1e-3)
+    expect(mean(medium)).toBeGreaterThan(1e-3)
+    for (const residual of residuals) {
+      expect(mean(residual)).toBeLessThan(mean(fine) * 0.0025)
+      expect(mean(residual)).toBeLessThan(mean(medium) * 0.001)
+      expect(Math.max(...residual.values)).toBeLessThan(2e-5)
+      expect(Math.max(...residual.values)).toBeLessThan(
+        Math.max(...fine.values) * 0.01,
+      )
+    }
   })
 
   it('is deterministic, finite, immutable, and fails closed on invalid grids', () => {
