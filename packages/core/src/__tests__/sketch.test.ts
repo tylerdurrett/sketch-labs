@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 
 import {
   defaultParams,
@@ -7,6 +7,7 @@ import {
   prepareSketch,
   randomize,
   validateChoiceParamSpec,
+  validateChoiceParamValue,
 } from '../sketch'
 import type { Params, ParamSchema, StatelessSketch } from '../sketch'
 import type { Scene } from '../scene'
@@ -148,6 +149,35 @@ describe('validateChoiceParamSpec', () => {
       strategy: { ...valid, default: 'hatching' },
     } as unknown as ParamSchema
     expect(() => defaultParams(schema)).toThrow(/Choice param `strategy` default/)
+  })
+})
+
+describe('validateChoiceParamValue', () => {
+  const spec = {
+    kind: 'choice',
+    options: [
+      { value: 'scribble', label: 'Scribble' },
+      { value: 'stippling', label: 'Stippling' },
+    ],
+    default: 'scribble',
+  } as const
+
+  it('returns a declared string value', () => {
+    const value = validateChoiceParamValue(spec, 'stippling', 'strategy')
+    expect(value).toBe('stippling')
+    expectTypeOf(value).toEqualTypeOf<'scribble' | 'stippling'>()
+  })
+
+  it('rejects a non-string present value directly', () => {
+    expect(() => validateChoiceParamValue(spec, 42, 'strategy')).toThrow(
+      /value must be one of its declared option values/,
+    )
+  })
+
+  it('rejects an undeclared string value directly', () => {
+    expect(() =>
+      validateChoiceParamValue(spec, 'hatching', 'strategy'),
+    ).toThrow(/value must be one of its declared option values/)
   })
 })
 

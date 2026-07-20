@@ -14,7 +14,10 @@ import type {
   Params,
   ParamSpec,
 } from '../sketch'
-import { validateChoiceParamSpec } from '../sketch'
+import {
+  validateChoiceParamSpec,
+  validateChoiceParamValue,
+} from '../sketch'
 import type { Point } from '../types'
 
 // The fixed 1000×1000 WIDTH/HEIGHT extent was retired in issue #252: every Sketch
@@ -117,21 +120,13 @@ export function choiceParam<
 >(params: Params, schema: S, key: K): ChoiceValue<S[K]> {
   const stringKey = key as string
   const spec = schema[key]! as ChoiceParamSpec
-  validateChoiceParamSpec(spec, stringKey)
 
   if (!Object.prototype.hasOwnProperty.call(params, stringKey)) {
+    validateChoiceParamSpec(spec, stringKey)
     return spec.default as ChoiceValue<S[K]>
   }
 
-  const value = params[stringKey]
-  if (
-    typeof value !== 'string' ||
-    !spec.options.some((option) => option.value === value)
-  ) {
-    throw new Error(
-      `Choice param \`${stringKey}\` value must be one of its declared option values`,
-    )
-  }
+  const value = validateChoiceParamValue(spec, params[stringKey], stringKey)
   return value as ChoiceValue<S[K]>
 }
 

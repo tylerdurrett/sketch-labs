@@ -261,6 +261,37 @@ export function validateChoiceParamSpec(
 }
 
 /**
+ * Validate and return one present runtime value for a Choice declaration.
+ *
+ * The declaration is checked first via {@link validateChoiceParamSpec}; the
+ * value must then be a string identity from its option set. Missing-value
+ * fallback is intentionally not handled here because only a Params-aware caller
+ * can distinguish an absent key from an explicitly present invalid value.
+ *
+ * @param spec - The Choice declaration whose option set defines the domain.
+ * @param value - The explicitly present runtime value to validate.
+ * @param key - Optional schema key included in diagnostics.
+ * @returns The validated value, narrowed to the declaration's option values.
+ * @throws If the declaration is malformed or the value is not declared.
+ */
+export function validateChoiceParamValue<Spec extends ChoiceParamSpec>(
+  spec: Spec,
+  value: unknown,
+  key = '<choice>',
+): Spec['options'][number]['value'] {
+  validateChoiceParamSpec(spec, key)
+  if (
+    typeof value !== 'string' ||
+    !spec.options.some((option) => option.value === value)
+  ) {
+    throw new Error(
+      `Choice param \`${key}\` value must be one of its declared option values`,
+    )
+  }
+  return value as Spec['options'][number]['value']
+}
+
+/**
  * Derive the inhabited default params from a schema: every key set to its spec's
  * `default`. Pure and headless — the first of the core engine functions
  * (randomize / newSeed are siblings), and the value the Harness starts a Sketch
