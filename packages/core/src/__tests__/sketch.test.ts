@@ -527,6 +527,115 @@ describe('activeParams', () => {
 })
 
 describe('randomize', () => {
+  const conditionalSchema = {
+    strategy: {
+      kind: 'choice',
+      options: [
+        { value: 'scribble', label: 'Scribble' },
+        { value: 'stippling', label: 'Stippling' },
+      ],
+      default: 'scribble',
+    },
+    scribbleDensity: {
+      kind: 'number',
+      min: 0,
+      max: 10,
+      default: 4,
+      activeWhen: { key: 'strategy', equals: 'scribble' },
+    },
+    stippleSpacing: {
+      kind: 'number',
+      min: 20,
+      max: 100,
+      default: 60,
+      activeWhen: { key: 'strategy', equals: 'stippling' },
+    },
+    lockedActive: {
+      kind: 'number',
+      min: 0,
+      max: 100,
+      default: 50,
+    },
+    always: { kind: 'number', min: 0, max: 100, default: 50 },
+    ink: { kind: 'color', default: '#1a2b3c' },
+    image: { kind: 'image-asset', default: 'portrait-default' },
+  } as const satisfies ParamSchema
+
+  const conditionalParams = {
+    strategy: 'scribble',
+    scribbleDensity: 4,
+    stippleSpacing: 60,
+    lockedActive: 50,
+    always: 50,
+    ink: '#c0ffee',
+    image: 'portrait-selected',
+    extra: 'keep-me',
+  }
+
+  it('consumes RNG only for active unlocked Number params in schema order', () => {
+    const rand = vi.fn(scriptedRand([0.25, 0.75]))
+    const next = randomize(
+      conditionalSchema,
+      conditionalParams,
+      new Set(['strategy', 'lockedActive']),
+      rand,
+    )
+
+    expect(rand).toHaveBeenCalledTimes(2)
+    expect(next).toEqual({
+      strategy: 'scribble',
+      scribbleDensity: 2.5,
+      stippleSpacing: 60,
+      lockedActive: 50,
+      always: 75,
+      ink: '#c0ffee',
+      image: 'portrait-selected',
+      extra: 'keep-me',
+    })
+  })
+
+  it('switches which conditional Number consumes the scripted sample', () => {
+    const next = randomize(
+      conditionalSchema,
+      { ...conditionalParams, strategy: 'stippling' },
+      new Set(['lockedActive', 'always']),
+      scriptedRand([0.25]),
+    )
+
+    expect(next.scribbleDensity).toBe(4)
+    expect(next.stippleSpacing).toBe(40)
+    expect(next.always).toBe(50)
+  })
+
+  it('uses the Choice default to determine activity when its value is absent', () => {
+    const params = { ...conditionalParams }
+    delete (params as Partial<typeof params>).strategy
+
+    const next = randomize(
+      conditionalSchema,
+      params,
+      new Set(['lockedActive', 'always']),
+      scriptedRand([0.5]),
+    )
+
+    expect(next.scribbleDensity).toBe(5)
+    expect(next.stippleSpacing).toBe(60)
+  })
+
+  it('rejects an invalid present controlling Choice before consuming RNG', () => {
+    const rand = vi.fn(scriptedRand([]))
+
+    expect(() =>
+      randomize(
+        conditionalSchema,
+        { ...conditionalParams, strategy: 'hatching' },
+        new Set(['lockedActive', 'always']),
+        rand,
+      ),
+    ).toThrow(/Choice param `strategy` value must be one of/)
+    expect(rand).not.toHaveBeenCalled()
+  })
+
   it('rolls each unlocked numeric param within its own [min, max] via min + rand()*(max-min)', () => {
     const schema: ParamSchema = {
       count: { kind: 'number', min: 1, max: 80, default: 24 },
@@ -621,7 +730,7 @@ describe('randomize', () => {
     expect(next.image).toBe('portrait-selected')
   })
 
-  it('passes a Choice value through untouched without consuming randomness', () => {
+  it('passes a locked Choice value through untouched without consuming randomness', () => {
     const schema: ParamSchema = {
       strategy: {
         kind: 'choice',
@@ -635,7 +744,7 @@ describe('randomize', () => {
     const next = randomize(
       schema,
       { strategy: 'stippling' },
-      new Set(),
+      new Set(['strategy']),
       scriptedRand([]),
     )
     expect(next.strategy).toBe('stippling')

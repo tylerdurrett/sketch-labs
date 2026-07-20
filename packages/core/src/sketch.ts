@@ -492,11 +492,13 @@ export function defaultParams(schema: ParamSchema): Params {
  * later passes a `Math.random`-backed one — same shape as `value()` in
  * `random.ts`).
  *
- * For each schema key whose spec is a numeric param (`kind === 'number'`) AND is
- * NOT locked, a new value is rolled uniformly across the spec's `[min, max]` via
+ * For each schema key whose spec is a numeric param (`kind === 'number'`), is
+ * active according to {@link isParamActive}, AND is NOT locked, a new value is
+ * rolled uniformly across the spec's `[min, max]` via
  * `min + rand() * (max - min)`, then `Math.round`ed iff the spec's `integer` is
- * `true`. The spec's `step` is IGNORED — `step` is a UI drag-granularity hint, not
- * a value-domain constraint (see {@link NumberParamSpec}).
+ * `true`. Inactive numeric values consume no randomness and pass through
+ * unchanged. The spec's `step` is IGNORED — `step` is a UI drag-granularity
+ * hint, not a value-domain constraint (see {@link NumberParamSpec}).
  *
  * Everything else passes through from `params` UNCHANGED: locked params (Lock is
  * Randomize-exclusion only), and any non-numeric spec the `kind` check doesn't
@@ -507,10 +509,10 @@ export function defaultParams(schema: ParamSchema): Params {
  * `kind: 'choice'` value likewise represents an explicit selection and never
  * rolls. Thus Randomize is numeric-only for now and all three string-valued
  * kinds survive every roll untouched, locked or not. (A future palette or
- * asset-selection mechanism would be its own decision.) This is PER-PARAM only
- * — there are deliberately NO cross-param constraints (CONTEXT.md
- * "Deliberately deferred"); a Sketch owns its own inter-param coherence inside
- * `generate`.
+ * asset-selection mechanism would be its own decision.) The narrow
+ * `activeWhen` rule controls only numeric Randomize eligibility; there are no
+ * broader cross-param constraints (CONTEXT.md "Deliberately deferred"), and a
+ * Sketch still owns its own inter-param coherence inside `generate`.
  *
  * @param schema - The Sketch's Parameter Schema.
  * @param params - The current inhabited param values; NOT mutated.
@@ -529,10 +531,11 @@ export function randomize(
   locks: ReadonlySet<string>,
   rand: () => number,
 ): Params {
+  validateParamSchema(schema)
   const next: Params = { ...params }
   for (const [key, spec] of Object.entries(schema)) {
     if (locks.has(key)) continue
-    if (spec.kind === 'number') {
+    if (spec.kind === 'number' && isParamActive(schema, params, key)) {
       const rolled = spec.min + rand() * (spec.max - spec.min)
       next[key] = spec.integer ? Math.round(rolled) : rolled
     }
