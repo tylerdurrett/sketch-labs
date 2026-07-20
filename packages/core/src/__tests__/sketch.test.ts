@@ -6,6 +6,7 @@ import {
   newSeed,
   prepareSketch,
   randomize,
+  validateChoiceParamSpec,
 } from '../sketch'
 import type { Params, ParamSchema, StatelessSketch } from '../sketch'
 import type { Scene } from '../scene'
@@ -75,6 +76,78 @@ describe('defaultParams', () => {
       image: { kind: 'image-asset', default: 'portrait-a1b2c3d4' },
     }
     expect(defaultParams(schema)).toEqual({ image: 'portrait-a1b2c3d4' })
+  })
+
+  it('seeds a Choice param with its declared stable-value default', () => {
+    const schema: ParamSchema = {
+      strategy: {
+        kind: 'choice',
+        options: [
+          { value: 'scribble', label: 'Scribble' },
+          { value: 'stippling', label: 'Stippling' },
+        ],
+        default: 'scribble',
+      },
+    }
+    expect(defaultParams(schema)).toEqual({ strategy: 'scribble' })
+  })
+})
+
+describe('validateChoiceParamSpec', () => {
+  const valid = {
+    kind: 'choice',
+    options: [
+      { value: 'scribble', label: 'Scribble' },
+      { value: 'stippling', label: 'Stippling' },
+    ],
+    default: 'scribble',
+  } as const
+
+  it('accepts a nonempty option set with unique stable values and a declared default', () => {
+    expect(() => validateChoiceParamSpec(valid, 'strategy')).not.toThrow()
+  })
+
+  it.each([
+    [
+      'an empty option set',
+      { ...valid, options: [] },
+      /must declare at least one option/,
+    ],
+    [
+      'an empty value',
+      { ...valid, options: [{ value: ' ', label: 'Scribble' }] },
+      /nonempty string value/,
+    ],
+    [
+      'an empty label',
+      { ...valid, options: [{ value: 'scribble', label: '' }] },
+      /nonempty string label/,
+    ],
+    [
+      'a repeated stable value',
+      {
+        ...valid,
+        options: [
+          { value: 'scribble', label: 'Scribble' },
+          { value: 'scribble', label: 'Another label' },
+        ],
+      },
+      /duplicate option value/,
+    ],
+    [
+      'a default outside the option set',
+      { ...valid, default: 'hatching' },
+      /default must be one of its declared option values/,
+    ],
+  ])('rejects %s', (_name, spec, message) => {
+    expect(() => validateChoiceParamSpec(spec, 'strategy')).toThrow(message)
+  })
+
+  it('makes defaultParams a loud Choice declaration boundary', () => {
+    const schema = {
+      strategy: { ...valid, default: 'hatching' },
+    } as unknown as ParamSchema
+    expect(() => defaultParams(schema)).toThrow(/Choice param `strategy` default/)
   })
 })
 
@@ -171,6 +244,26 @@ describe('randomize', () => {
       scriptedRand([]),
     )
     expect(next.image).toBe('portrait-selected')
+  })
+
+  it('passes a Choice value through untouched without consuming randomness', () => {
+    const schema: ParamSchema = {
+      strategy: {
+        kind: 'choice',
+        options: [
+          { value: 'scribble', label: 'Scribble' },
+          { value: 'stippling', label: 'Stippling' },
+        ],
+        default: 'scribble',
+      },
+    }
+    const next = randomize(
+      schema,
+      { strategy: 'stippling' },
+      new Set(),
+      scriptedRand([]),
+    )
+    expect(next.strategy).toBe('stippling')
   })
 
   it('passes non-rolled keys present in params but absent from schema through unchanged', () => {

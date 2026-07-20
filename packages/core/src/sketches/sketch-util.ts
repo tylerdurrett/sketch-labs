@@ -7,12 +7,14 @@
  */
 
 import type {
+  ChoiceParamSpec,
   ColorParamSpec,
   ImageAssetParamSpec,
   NumberParamSpec,
   Params,
   ParamSpec,
 } from '../sketch'
+import { validateChoiceParamSpec } from '../sketch'
 import type { Point } from '../types'
 
 // The fixed 1000×1000 WIDTH/HEIGHT extent was retired in issue #252: every Sketch
@@ -23,7 +25,7 @@ import type { Point } from '../types'
 /**
  * The keys of a frozen schema `S` whose spec is the {@link ParamSpec} member
  * with discriminant `K` — the type-level filter behind {@link numberParam},
- * {@link colorParam}, and {@link imageAssetParam}.
+ * {@link colorParam}, {@link imageAssetParam}, and {@link choiceParam}.
  *
  * Since non-numeric members joined the union, a schema may MIX kinds (e.g.
  * numeric controls plus color and Image Asset selections), so a helper
@@ -94,6 +96,43 @@ export function imageAssetParam<S extends Record<string, ParamSpec>>(
   const value = params[key as string]
   if (typeof value === 'string') return value
   return (schema[key]! as ImageAssetParamSpec).default
+}
+
+/** The exact declared string-value union of one Choice spec. */
+type ChoiceValue<Spec> = Spec extends ChoiceParamSpec
+  ? Spec['options'][number]['value']
+  : never
+
+/**
+ * Read a Choice value while preserving the schema's exact declared value union.
+ *
+ * An absent key falls back to the validated schema default, matching the other
+ * typed param helpers. A present value is different: it must be a declared
+ * string value, so malformed authored or persisted state fails loudly instead
+ * of silently selecting a different strategy.
+ */
+export function choiceParam<
+  S extends Record<string, ParamSpec>,
+  K extends KeysOfKind<S, 'choice'>,
+>(params: Params, schema: S, key: K): ChoiceValue<S[K]> {
+  const stringKey = key as string
+  const spec = schema[key]! as ChoiceParamSpec
+  validateChoiceParamSpec(spec, stringKey)
+
+  if (!Object.prototype.hasOwnProperty.call(params, stringKey)) {
+    return spec.default as ChoiceValue<S[K]>
+  }
+
+  const value = params[stringKey]
+  if (
+    typeof value !== 'string' ||
+    !spec.options.some((option) => option.value === value)
+  ) {
+    throw new Error(
+      `Choice param \`${stringKey}\` value must be one of its declared option values`,
+    )
+  }
+  return value as ChoiceValue<S[K]>
 }
 
 /** Axis-aligned bounding box of a list of points. */

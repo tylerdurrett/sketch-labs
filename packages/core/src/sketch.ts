@@ -59,7 +59,8 @@ export type Seed = string | number
 /**
  * A numeric knob's declaration — a continuous (or whole-number) range with a
  * default. The founding {@link ParamSpec} member (issue #47), joined by
- * {@link ColorParamSpec} and {@link ImageAssetParamSpec}.
+ * {@link ColorParamSpec}, {@link ImageAssetParamSpec}, and
+ * {@link ChoiceParamSpec}.
  *
  * `integer` and `step` are ORTHOGONAL and answer different questions:
  *
@@ -139,14 +140,47 @@ export interface ImageAssetParamSpec {
 }
 
 /**
+ * One stable, user-facing option in a {@link ChoiceParamSpec}.
+ *
+ * `value` is the deterministic value stored in Params and Presets. `label` is
+ * presentation only: changing a label must not migrate persisted state, while a
+ * value must remain stable once published.
+ */
+export interface ChoiceOption {
+  /** Stable string identity stored as the inhabited parameter value. */
+  value: string
+  /** Human-readable text exposed by schema-derived controls. */
+  label: string
+}
+
+/**
+ * A lock-free selection from a finite set of stable, labelled string values.
+ *
+ * Choice options are authored in display order. Their values are unique stable
+ * identities; labels are presentation text and therefore need not be unique.
+ * The default must name one declared option. Call
+ * {@link validateChoiceParamSpec} at runtime boundaries before consuming a
+ * declaration that did not originate in type-checked source.
+ */
+export interface ChoiceParamSpec {
+  /** Discriminant. The open {@link ParamSpec} union is keyed on this. */
+  kind: 'choice'
+  /** Nonempty, ordered set of labelled stable values. */
+  options: readonly ChoiceOption[]
+  /** The declared option value seeded by {@link defaultParams}. */
+  default: string
+}
+
+/**
  * One tweakable knob's declaration within a {@link ParamSchema}.
  *
  * An OPEN union discriminated on `kind`, mirroring the open {@link Sketch} union
  * in this same file: {@link NumberParamSpec} (`kind: 'number'`, the founding
  * member, issue #47), {@link ColorParamSpec} (`kind: 'color'`, the first
- * non-numeric widening, ADR-0010), and {@link ImageAssetParamSpec}
- * (`kind: 'image-asset'`) are the inhabited members today. Future control kinds
- * (boolean, enum, …) join as new `kind`-tagged members WITHOUT reworking these —
+ * non-numeric widening, ADR-0010), {@link ImageAssetParamSpec}
+ * (`kind: 'image-asset'`), and {@link ChoiceParamSpec} (`kind: 'choice'`) are the
+ * inhabited members today. Future control kinds join as new `kind`-tagged
+ * members WITHOUT reworking these —
  * purely additive. The control panel, Randomize, and Preset shape are derived
  * views that widen alongside the union; affordances such as numeric-only Lock
  * remain meaningful only for the kinds they affect.
@@ -155,6 +189,7 @@ export type ParamSpec =
   | NumberParamSpec
   | ColorParamSpec
   | ImageAssetParamSpec
+  | ChoiceParamSpec
 
 /**
  * The single declaration a Sketch makes of its tweakable knobs — the spine of
@@ -174,6 +209,58 @@ export type ParamSchema = Record<string, ParamSpec>
 export type Params = Record<string, unknown>
 
 /**
+ * Validate the Choice-specific declaration invariants at a runtime boundary.
+ *
+ * This deliberately does not validate Number, Color, or Image Asset specs: it
+ * is the narrow loud boundary needed by Choice consumers, not a retrofit of new
+ * semantics onto the existing parameter kinds.
+ *
+ * @param spec - The Choice declaration to validate.
+ * @param key - Optional schema key included in diagnostics.
+ * @throws If options are empty or malformed, option values repeat, or the
+ *   default is not one of the declared values.
+ */
+export function validateChoiceParamSpec(
+  spec: ChoiceParamSpec,
+  key = '<choice>',
+): void {
+  if (!Array.isArray(spec.options) || spec.options.length === 0) {
+    throw new Error(`Choice param \`${key}\` must declare at least one option`)
+  }
+
+  const values = new Set<string>()
+  for (const [index, option] of spec.options.entries()) {
+    if (
+      typeof option !== 'object' ||
+      option === null ||
+      typeof option.value !== 'string' ||
+      option.value.trim().length === 0
+    ) {
+      throw new Error(
+        `Choice param \`${key}\` option ${index} must have a nonempty string value`,
+      )
+    }
+    if (typeof option.label !== 'string' || option.label.trim().length === 0) {
+      throw new Error(
+        `Choice param \`${key}\` option ${index} must have a nonempty string label`,
+      )
+    }
+    if (values.has(option.value)) {
+      throw new Error(
+        `Choice param \`${key}\` has duplicate option value \`${option.value}\``,
+      )
+    }
+    values.add(option.value)
+  }
+
+  if (typeof spec.default !== 'string' || !values.has(spec.default)) {
+    throw new Error(
+      `Choice param \`${key}\` default must be one of its declared option values`,
+    )
+  }
+}
+
+/**
  * Derive the inhabited default params from a schema: every key set to its spec's
  * `default`. Pure and headless — the first of the core engine functions
  * (randomize / newSeed are siblings), and the value the Harness starts a Sketch
@@ -185,6 +272,7 @@ export type Params = Record<string, unknown>
 export function defaultParams(schema: ParamSchema): Params {
   const params: Params = {}
   for (const [key, spec] of Object.entries(schema)) {
+    if (spec.kind === 'choice') validateChoiceParamSpec(spec, key)
     params[key] = spec.default
   }
   return params
@@ -209,19 +297,22 @@ export function defaultParams(schema: ParamSchema): Params {
  * roll. For `kind: 'color'` this pass-through is a STATED CONTRACT, not an
  * accident of the implementation (ADR-0010): a color is a deliberate aesthetic
  * choice, not a numeric range. The same is true for `kind: 'image-asset'`: its
- * string is a stable asset selection, so Randomize must never replace it. Thus
- * Randomize is numeric-only for now and both string-valued kinds survive every
- * roll untouched, locked or not. (A future palette or asset-selection mechanism
- * would be its own decision.) This is PER-PARAM only — there are deliberately NO
- * cross-param constraints (CONTEXT.md "Deliberately deferred"); a Sketch owns
- * its own inter-param coherence inside `generate`.
+ * string is a stable asset selection, so Randomize must never replace it. A
+ * `kind: 'choice'` value likewise represents an explicit selection and never
+ * rolls. Thus Randomize is numeric-only for now and all three string-valued
+ * kinds survive every roll untouched, locked or not. (A future palette or
+ * asset-selection mechanism would be its own decision.) This is PER-PARAM only
+ * — there are deliberately NO cross-param constraints (CONTEXT.md
+ * "Deliberately deferred"); a Sketch owns its own inter-param coherence inside
+ * `generate`.
  *
  * @param schema - The Sketch's Parameter Schema.
  * @param params - The current inhabited param values; NOT mutated.
  * @param locks - The generic set of locked param keys; only READ (the Studio
  *   owns the lock state). A locked numeric key keeps its current value. A
- *   persisted color or Image Asset key is harmless and inert because both kinds
- *   already pass through every roll; callers need not filter or migrate it.
+ *   persisted color, Image Asset, or Choice key is harmless and inert because
+ *   all three kinds already pass through every roll; callers need not filter or
+ *   migrate it. Choice controls themselves expose no Lock affordance.
  * @param rand - Injected uniform `[0, 1)` source (matches `value()` in
  *   `random.ts`).
  * @returns A NEW {@link Params}; unlocked numeric keys re-rolled, the rest as-is.
