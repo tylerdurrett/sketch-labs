@@ -141,6 +141,7 @@ const scribbleJob = vi.hoisted(() => ({
 }));
 const detailJob = vi.hoisted(() => ({
   cancelCount: 0,
+  resolveOnCancel: true,
   disposals: 0,
   starts: [] as Array<{
     identity: import("./detailPreparationProtocol").DetailPreparationIdentity;
@@ -276,7 +277,9 @@ vi.mock("./detailCoordinator", () => ({
       const active = detailJob.active;
       if (active === null) return false;
       detailJob.active = null;
-      active.resolve({ status: "cancelled", jobId: 1 });
+      if (detailJob.resolveOnCancel) {
+        active.resolve({ status: "cancelled", jobId: 1 });
+      }
       return true;
     }
 
@@ -925,6 +928,7 @@ beforeEach(() => {
   scribbleJob.cancelCount = 0;
   scribbleJob.starts = [];
   detailJob.cancelCount = 0;
+  detailJob.resolveOnCancel = true;
   detailJob.disposals = 0;
   detailJob.starts = [];
   detailJob.active = null;
@@ -7328,6 +7332,131 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(renderState(el)).toBe("detail-reference-loading");
     await completeDetail(1, 192);
     expect(renderState(el)).toBe("detail-reference");
+  });
+
+  it("unrequests active Detail when a Preset authors a malformed asset identity", async () => {
+    const malformed = "../portrait alpha.png?raw=1";
+    listPresets.mockResolvedValue(["malformed", "valid"]);
+    loadPreset.mockImplementation(async (_sketchId, name) => ({
+      version: 2,
+      sketch: photoScribble.id,
+      name,
+      seed: 22,
+      params: {
+        ...defaultParams(photoScribble.schema),
+        imageAsset: name === "malformed" ? malformed : assetA,
+      },
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    }));
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await flush();
+    clickButton(el, "Detail");
+    expect(detailJob.starts).toHaveLength(1);
+
+    // Model a worker that wins its race with cancellation and reports success.
+    // Dropping session ownership must still reject that obsolete completion.
+    detailJob.resolveOnCancel = false;
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    const selectPreset = (name: string) => {
+      act(() => {
+        picker.value = name;
+        picker.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      clickButton(el, "Reload");
+    };
+    selectPreset("malformed");
+    await flush();
+
+    expect(detailJob.cancelCount).toBe(1);
+    expect(detailJob.active).toBeNull();
+    expect(detailJob.starts).toHaveLength(1);
+    expect(renderState(el)).toBe("unavailable");
+    await completeDetail(0, 192);
+    expect(lastDetailField).toBeNull();
+    expect(renderState(el)).toBe("unavailable");
+    expect(detailJob.starts).toHaveLength(1);
+
+    // Re-selecting a valid identity must launch again: the late A completion
+    // was neither accepted for paint nor retained in the exact-result cache.
+    selectPreset("valid");
+    await flush();
+    expect(detailJob.starts).toHaveLength(2);
+    expect(detailJob.starts[1]!.identity.imageAssetId).toBe(assetA);
+    expect(renderState(el)).toBe("unavailable");
+    await resolveManagedEnvironment(assetA, 96, 2);
+    await completeDetail(1, 96);
+    expect(renderState(el)).toBe("detail-reference");
+  });
+
+  it("keeps sensitivity-only edits outside Fill, Outline, and Scribble provenance", async () => {
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await completeScribble(0, preparedScene(94));
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const initialProvenance = {
+      sourceInputRevision: canvas.dataset.sourceInputRevision,
+      contentRevision: canvas.dataset.contentRevision,
+    };
+    const sensitivity = paramInput(el, "detailSensitivity");
+    const editSensitivity = (value: string) => {
+      act(() => sensitivity.focus());
+      setInput(sensitivity, value);
+      act(() => sensitivity.blur());
+    };
+
+    editSensitivity("0.6");
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(scribbleJob.cancelCount).toBe(0);
+    expect(canvas.dataset.sourceInputRevision).toBe(
+      initialProvenance.sourceInputRevision,
+    );
+    expect(canvas.dataset.contentRevision).toBe(
+      initialProvenance.contentRevision,
+    );
+    expect(exportButton(el, "Export SVG").disabled).toBe(false);
+
+    clickButton(el, "Outline");
+    const retainedOutline = outlineJob.lastCompletedScene;
+    expect(outlineJob.starts).toBe(1);
+    expect(canvas.dataset.renderMode).toBe("outline");
+    editSensitivity("0.7");
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.lastCompletedScene).toBe(retainedOutline);
+    expect(canvas.dataset.renderMode).toBe("outline");
+    expect(canvas.dataset.sourceInputRevision).toBe(
+      initialProvenance.sourceInputRevision,
+    );
+    expect(canvas.dataset.contentRevision).toBe(
+      initialProvenance.contentRevision,
+    );
+    expect(exportButton(el, "Export Hidden-line SVG").disabled).toBe(false);
+
+    clickButton(el, "Detail");
+    await completeDetail(0);
+    editSensitivity("0.8");
+    clickButton(el, "Fill");
+    await flush();
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(scribbleJob.cancelCount).toBe(0);
+    expect(canvas.dataset.sourceInputRevision).toBe(
+      initialProvenance.sourceInputRevision,
+    );
+    expect(canvas.dataset.contentRevision).toBe(
+      initialProvenance.contentRevision,
+    );
+    expect(exportButton(el, "Export SVG").disabled).toBe(false);
   });
 
   it("keeps Detail pixels exactly independent of tone controls and Seed", async () => {

@@ -181,6 +181,43 @@ function sameParams(
   );
 }
 
+const DETAIL_REFERENCE_ONLY_PARAM = "detailSensitivity";
+
+/** Keep #367's diagnostic control outside artwork identity until #369 owns it. */
+function artworkGenerationParams(
+  sketch: Pick<Sketch, "schema" | "generateDetailField">,
+  params: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const spec = sketch.schema[DETAIL_REFERENCE_ONLY_PARAM];
+  if (
+    sketch.generateDetailField === undefined ||
+    spec?.kind !== "number" ||
+    Object.is(params[DETAIL_REFERENCE_ONLY_PARAM], spec.default)
+  ) {
+    return params;
+  }
+  return { ...params, [DETAIL_REFERENCE_ONLY_PARAM]: spec.default };
+}
+
+function artworkGenerationParamsEqual(
+  sketch: Pick<Sketch, "schema" | "generateDetailField">,
+  left: Readonly<Record<string, unknown>>,
+  right: Readonly<Record<string, unknown>>,
+): boolean {
+  return sameParams(
+    artworkGenerationParams(sketch, left),
+    artworkGenerationParams(sketch, right),
+  );
+}
+
+function isDetailReferenceOnlyParam(sketch: Sketch, key: string): boolean {
+  return (
+    key === DETAIL_REFERENCE_ONLY_PARAM &&
+    sketch.generateDetailField !== undefined &&
+    sketch.schema[key]?.kind === "number"
+  );
+}
+
 /** Convert committed Studio framing to the persistence/export envelope shape. */
 function persistedFramingFor(
   edit: StudioEditState,
@@ -244,12 +281,12 @@ type OutlineEditChange =
 
 /** Classify authored edits by the cheapest work needed for current Outline. */
 function classifyOutlineEdit(
+  sketch: Sketch,
   previous: StudioEditState,
   next: StudioEditState,
-  usesPhysicalTool: boolean,
 ): OutlineEditChange {
   if (
-    !sameParams(previous.params, next.params) ||
+    !artworkGenerationParamsEqual(sketch, previous.params, next.params) ||
     previous.seed !== next.seed ||
     previous.tolerance !== next.tolerance ||
     !plotDrawableAspectsEquivalent(
@@ -261,7 +298,8 @@ function classifyOutlineEdit(
   }
 
   if (
-    usesPhysicalTool &&
+    (sketch.generateOutlineSource !== undefined ||
+      sketch.deriveOutlineSource !== undefined) &&
     (!Object.is(
       previous.profile.toolWidthMillimeters,
       next.profile.toolWidthMillimeters,
@@ -282,10 +320,14 @@ function classifyOutlineEdit(
 
 /** Whether an edit changes the time-invariant Scribble worker identity. */
 function scribbleInputsChanged(
+  sketch: Sketch,
   previous: StudioEditState,
   next: StudioEditState,
 ): boolean {
-  if (!sameParams(previous.params, next.params) || previous.seed !== next.seed) {
+  if (
+    !artworkGenerationParamsEqual(sketch, previous.params, next.params) ||
+    previous.seed !== next.seed
+  ) {
     return true;
   }
   return !plotDrawableAspectsEquivalent(
@@ -498,16 +540,17 @@ export function SketchControls({
   );
 
   useEffect(() => {
-    if (
-      diagnosticSelection === "detail" &&
-      detailIdentity !== null
-    ) {
-      detailPreparation.request(detailIdentity);
+    if (diagnosticSelection !== "detail") return;
+    if (detailIdentity === null) {
+      detailPreparation.unrequest();
+      return;
     }
+    detailPreparation.request(detailIdentity);
   }, [
     diagnosticSelection,
     detailIdentity,
     detailPreparation.request,
+    detailPreparation.unrequest,
   ]);
 
   const hasScribblePreparation = sketch.generateScribbleArtwork !== undefined;
@@ -575,7 +618,7 @@ export function SketchControls({
   const authoredScribbleState = (
     edit: StudioEditState = historyRef.current.present,
   ): ScribbleAuthoredState => ({
-    params: edit.params,
+    params: artworkGenerationParams(sketch, edit.params),
     seed: edit.seed,
     compositionFrame: resolveStudioCompositionFrame(edit),
     inputRevision: scribbleInputRevisionRef.current,
@@ -817,7 +860,11 @@ export function SketchControls({
     if (next === current) return;
     historyRef.current = next;
     cancelUnavailableEnvironmentWork();
-    const scribbleChanged = scribbleInputsChanged(current.present, next.present);
+    const scribbleChanged = scribbleInputsChanged(
+      sketch,
+      current.present,
+      next.present,
+    );
     if (hasScribblePreparation && scribbleChanged) {
       scribbleInputRevisionRef.current += 1;
     }
@@ -840,10 +887,9 @@ export function SketchControls({
       scribblePreparation.requestAtomic(authoredScribbleState(next.present));
     }
     const outlineChange = classifyOutlineEdit(
+      sketch,
       current.present,
       next.present,
-      sketch.generateOutlineSource !== undefined ||
-        sketch.deriveOutlineSource !== undefined,
     );
     if (outlineChange === "geometry") {
       cancelOutlineCoordinator();
@@ -1059,6 +1105,15 @@ export function SketchControls({
     updateHistory(beginEditTransaction, false);
     if (hasScribblePreparation) scribblePreparation.beginTransaction();
   };
+  const beginParamTransaction = (key: string): void => {
+    if (!isDetailReferenceOnlyParam(sketch, key)) {
+      beginTransaction();
+      return;
+    }
+    // Sensitivity is a live Detail remap in #367, so merely focusing it must
+    // not relinquish retained Fill/Outline ownership or suspend artwork work.
+    updateHistory(beginEditTransaction, false);
+  };
   const beginProfileTransaction = (): void => {
     // A profile gesture may prove to be physical style or Page placement only.
     // Keep the current Outline until a preview actually crosses a geometry
@@ -1262,7 +1317,7 @@ export function SketchControls({
     const identity = createOutlineComputeIdentity({
       sketchId: sketch.id,
       schema: sketch.schema,
-      params: edit.params,
+      params: artworkGenerationParams(sketch, edit.params),
       seed: edit.seed,
       sampledT: capture.t,
       compositionFrame,
@@ -1719,7 +1774,7 @@ export function SketchControls({
     const identity = createOutlineComputeIdentity({
       sketchId: sketch.id,
       schema: sketch.schema,
-      params: edit.params,
+      params: artworkGenerationParams(sketch, edit.params),
       seed: edit.seed,
       sampledT: displayed.t,
       compositionFrame,
@@ -1994,6 +2049,7 @@ export function SketchControls({
             onCommit: commitTransaction,
             onCancel: cancelTransaction,
           }}
+          onParamEditBegin={beginParamTransaction}
           onToggleLock={toggleLock}
           imageAssetLongEdgeCap={imageAssetLongEdgeCap}
           imageAssetResolution={{
