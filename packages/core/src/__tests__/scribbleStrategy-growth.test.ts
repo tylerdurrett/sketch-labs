@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { createRandom } from '../random'
+import { createScribbleScaleField } from '../scribbleScaleField'
 import { createShadingMask, createToneField } from '../shadingFields'
 import { chooseScribbleGrowthStep } from '../scribbleStrategy/growth'
 import { createScribbleModel } from '../scribbleStrategy/model'
@@ -18,6 +19,28 @@ function model(
     FRAME,
     controls,
   )
+}
+
+function fieldModel(
+  sample: (point: Readonly<Point>) => number,
+  mask = createShadingMask(() => 1),
+) {
+  return createScribbleModel(
+    { toneField: createToneField(() => 1), shadingMask: mask },
+    FRAME,
+    {},
+    createScribbleScaleField(1, sample),
+  )
+}
+
+function segmentLength(
+  current: Readonly<Point>,
+  step: ReturnType<typeof chooseScribbleGrowthStep>,
+): number {
+  expect(step.kind).toBe('advanced')
+  return step.kind === 'advanced'
+    ? Math.hypot(step.point[0] - current[0], step.point[1] - current[1])
+    : 0
 }
 
 function growHeadings(
@@ -199,5 +222,206 @@ describe('Scribble candidate growth', () => {
       reason: 'no-viable-candidate',
     })
     expect(second).toEqual(first)
+  })
+
+  it('uses a constant broad field as the local candidate length', () => {
+    const current: Point = [50, 50]
+    const residual = fieldModel(() => 2)
+    const next = chooseScribbleGrowthStep({
+      model: residual,
+      rng: createRandom('constant-broad-field'),
+      current,
+      heading: 0,
+    })
+
+    expect(segmentLength(current, next)).toBeCloseTo(
+      residual.scales.segmentLength * 2,
+      12,
+    )
+  })
+
+  it('responds continuously to broad local scale values', () => {
+    const current: Point = [50, 50]
+    const scales = [1.1, 1.35, 1.7, 2].map((scale) => {
+      const residual = fieldModel(() => scale)
+      return segmentLength(
+        current,
+        chooseScribbleGrowthStep({
+          model: residual,
+          rng: createRandom('continuous-field-response'),
+          current,
+          heading: 0,
+        }),
+      )
+    })
+
+    expect(scales).toEqual([...scales].sort((a, b) => a - b))
+    expect(scales).toEqual([
+      expect.closeTo(1.32, 12),
+      expect.closeTo(1.62, 12),
+      expect.closeTo(2.04, 12),
+      expect.closeTo(2.4, 12),
+    ])
+  })
+
+  it('detects a narrow fine band between broad ray endpoints', () => {
+    const current: Point = [50, 50]
+    const residual = fieldModel((point) => {
+      const radius = Math.hypot(point[0] - current[0], point[1] - current[1])
+      return radius >= 1.7 && radius <= 2 ? 1 : 3
+    })
+    const next = chooseScribbleGrowthStep({
+      model: residual,
+      rng: createRandom('narrow-fine-band'),
+      current,
+      heading: 0,
+    })
+
+    expect(segmentLength(current, next)).toBeCloseTo(
+      residual.scales.segmentLength,
+      12,
+    )
+    if (next.kind === 'advanced') {
+      expect(
+        Math.hypot(next.point[0] - current[0], next.point[1] - current[1]),
+      ).toBeLessThan(1.7)
+    }
+  })
+
+  it('does not stagnate solely because a field ray contains fine scale', () => {
+    const current: Point = [50, 50]
+    const residual = fieldModel((point) => {
+      const radius = Math.hypot(point[0] - current[0], point[1] - current[1])
+      return radius >= 1.7 && radius <= 2 ? 1 : 3
+    })
+
+    for (let index = 0; index < 40; index++) {
+      expect(
+        chooseScribbleGrowthStep({
+          model: residual,
+          rng: createRandom(`scale-only-${index}`),
+          current,
+          heading: 0,
+        }).kind,
+      ).toBe('advanced')
+    }
+  })
+
+  it('does not consume shared RNG draws while profiling a field', () => {
+    function callsFor(residual: ReturnType<typeof model>) {
+      const source = createRandom('profile-rng-count')
+      let rangeCalls = 0
+      let valueCalls = 0
+      const next = chooseScribbleGrowthStep({
+        model: residual,
+        rng: {
+          ...source,
+          range(min: number, max: number): number {
+            rangeCalls++
+            return source.range(min, max)
+          },
+          value(): number {
+            valueCalls++
+            return source.value()
+          },
+        },
+        current: [50, 50],
+        heading: 0,
+      })
+
+      expect(next.kind).toBe('advanced')
+      return { rangeCalls, valueCalls }
+    }
+
+    expect(callsFor(fieldModel(() => 2))).toEqual(callsFor(model()))
+    expect(callsFor(fieldModel(() => 2))).toEqual({
+      rangeCalls: 17,
+      valueCalls: 1,
+    })
+  })
+
+  it('shortens demand look-ahead through the same field-safe path', () => {
+    const current: Point = [50, 50]
+    const demandSamples: Point[] = []
+    const base = fieldModel((point) => {
+      const radius = Math.hypot(point[0] - current[0], point[1] - current[1])
+      return radius >= 2.9 && radius <= 3.2 ? 1 : 3
+    })
+    const residual = {
+      ...base,
+      residualAt(point: Readonly<Point>): number {
+        demandSamples.push([point[0], point[1]])
+        return 1
+      },
+    }
+
+    const next = chooseScribbleGrowthStep({
+      model: residual,
+      rng: createRandom('field-look-ahead'),
+      current,
+      heading: 0,
+    })
+
+    expect(next.kind).toBe('advanced')
+    expect(
+      Math.max(
+        ...demandSamples.map((point) =>
+          Math.hypot(point[0] - current[0], point[1] - current[1]),
+        ),
+      ),
+    ).toBeCloseTo(base.scales.segmentLength * 2, 12)
+  })
+
+  it('keeps field sampling and seeded routing deterministic without model mutation', () => {
+    function run(seed: string) {
+      const sampledPoints: Point[] = []
+      const residual = fieldModel((point) => {
+        sampledPoints.push([point[0], point[1]])
+        return 1.5 + (point[0] >= 50 ? 0.5 : 0)
+      })
+      const samplesBefore = residual.samples()
+      const next = chooseScribbleGrowthStep({
+        model: residual,
+        rng: createRandom(seed),
+        current: [50, 50],
+      })
+
+      return {
+        next,
+        sampledPoints,
+        samplesAfter: residual.samples(),
+        samplesBefore,
+      }
+    }
+
+    const first = run('field-route-a')
+    const repeated = run('field-route-a')
+    const changed = run('field-route-b')
+
+    expect(repeated).toEqual(first)
+    expect(changed.next).not.toEqual(first.next)
+    expect(first.samplesAfter).toEqual(first.samplesBefore)
+    expect(changed.samplesAfter).toEqual(first.samplesBefore)
+  })
+
+  it('checks a field-aware candidate against mask barriers', () => {
+    const current: Point = [50, 50]
+    const barrier = createShadingMask((point) => {
+      const radius = Math.hypot(point[0] - current[0], point[1] - current[1])
+      return radius >= 0.22 && radius <= 0.32 ? 0 : 1
+    })
+    const residual = fieldModel((point) => {
+      const radius = Math.hypot(point[0] - current[0], point[1] - current[1])
+      return radius >= 0.5 && radius <= 0.8 ? 1 : 3
+    }, barrier)
+
+    expect(
+      chooseScribbleGrowthStep({
+        model: residual,
+        rng: createRandom('field-mask-barrier'),
+        current,
+        heading: 0,
+      }),
+    ).toEqual({ kind: 'stagnated', reason: 'no-viable-candidate' })
   })
 })

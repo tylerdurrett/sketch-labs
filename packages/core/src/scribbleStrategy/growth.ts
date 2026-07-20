@@ -40,6 +40,53 @@ interface ScoredCandidate {
   readonly score: number
 }
 
+function pointAtLength(
+  start: Readonly<Point>,
+  angle: number,
+  length: number,
+): Point {
+  return [
+    start[0] + Math.cos(angle) * length,
+    start[1] + Math.sin(angle) * length,
+  ]
+}
+
+/**
+ * Resolve one field-aware ray without consuming the run's random stream.
+ *
+ * The first profile sees fine regions between two broad endpoints. Reprofiling
+ * after shortening catches a still more restrictive station introduced by the
+ * new interval boundaries; the shared model predicate makes the final scale,
+ * frame, and mask decision at that profile's minimum spacing.
+ */
+function scaleFieldEndpoint(
+  model: ScribbleModel,
+  start: Readonly<Point>,
+  angle: number,
+  proposedLength?: number,
+): Point | undefined {
+  const rayLength =
+    proposedLength ?? model.localScalesAt(start).segmentLength
+  const proposed = pointAtLength(start, angle, rayLength)
+  const proposedProfile = model.profileSegment(start, proposed)
+  if (proposedProfile === undefined) return undefined
+
+  let permittedLength = Math.min(
+    rayLength,
+    proposedProfile.minimumSegmentLength,
+  )
+  let endpoint = pointAtLength(start, angle, permittedLength)
+  const shortenedProfile = model.profileSegment(start, endpoint)
+  if (shortenedProfile === undefined) return undefined
+
+  if (shortenedProfile.minimumSegmentLength < permittedLength) {
+    permittedLength = shortenedProfile.minimumSegmentLength
+    endpoint = pointAtLength(start, angle, permittedLength)
+  }
+
+  return model.isSegmentSafe(start, endpoint) ? endpoint : undefined
+}
+
 function normalizeAngle(angle: number): number {
   const turn = Math.PI * 2
   return ((angle + Math.PI) % turn + turn) % turn - Math.PI
@@ -79,6 +126,32 @@ function scoreCandidate(
   previousAngle: number | undefined,
 ): number {
   const { source, scales, lattice, controls } = model
+
+  if (model.scaleField !== undefined) {
+    const lookAhead = scaleFieldEndpoint(model, point, candidateAngle)
+    // residualAt already contains the model's linear permission weighting.
+    // Multiplying permission here again would incorrectly steer by permission².
+    const endpointDemand = model.residualAt(point)
+    const futureDemand =
+      lookAhead === undefined ? 0 : model.residualAt(lookAhead)
+    const demand = endpointDemand + LOOK_AHEAD_WEIGHT * futureDemand
+    if (demand <= MIN_SCORE) return 0
+
+    if (previousAngle === undefined || !Number.isFinite(previousAngle)) {
+      return demand
+    }
+
+    const turn = angularDistance(candidateAngle, previousAngle)
+    const alignment = (Math.cos(turn) + 1) / 2
+    const continuity = alignment * alignment
+    const continuityWeight =
+      1 -
+      controls.momentum +
+      controls.momentum *
+        (MIN_CONTINUITY_WEIGHT + (1 - MIN_CONTINUITY_WEIGHT) * continuity)
+    return demand * continuityWeight
+  }
+
   if (
     !isMaskPermittedSegment(
       source.shadingMask,
@@ -164,6 +237,10 @@ export function chooseScribbleGrowthStep({
   heading,
 }: ScribbleGrowthInput): ScribbleGrowthStep {
   const candidates: ScoredCandidate[] = []
+  const currentSegmentLength =
+    model.scaleField === undefined
+      ? undefined
+      : model.localScalesAt(current).segmentLength
 
   for (let index = 0; index < HEADING_COUNT; index++) {
     const candidateAngle = candidateHeading(
@@ -172,10 +249,22 @@ export function chooseScribbleGrowthStep({
       model.controls.chaos,
       rng,
     )
-    const point: Point = [
-      current[0] + Math.cos(candidateAngle) * model.scales.segmentLength,
-      current[1] + Math.sin(candidateAngle) * model.scales.segmentLength,
-    ]
+    let point: Point
+    if (model.scaleField === undefined) {
+      point = [
+        current[0] + Math.cos(candidateAngle) * model.scales.segmentLength,
+        current[1] + Math.sin(candidateAngle) * model.scales.segmentLength,
+      ]
+    } else {
+      const scaleAwarePoint = scaleFieldEndpoint(
+        model,
+        current,
+        candidateAngle,
+        currentSegmentLength,
+      )
+      if (scaleAwarePoint === undefined) continue
+      point = scaleAwarePoint
+    }
     const score = scoreCandidate(
       model,
       current,
