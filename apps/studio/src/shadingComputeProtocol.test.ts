@@ -97,6 +97,12 @@ function success() {
   } as const;
 }
 
+function successWithFidelity(fidelity: unknown) {
+  const candidate = structuredClone(success()) as Record<string, any>;
+  candidate.diagnostics.fidelity = fidelity;
+  return candidate;
+}
+
 function changed(
   mutate: (copy: Record<string, any>) => void,
 ): ShadingComputeIdentity {
@@ -263,6 +269,24 @@ describe("Shading compute identity", () => {
 });
 
 describe("Shading compute protocol guards", () => {
+  it("accepts exact Scribble and Stippling fidelity variants at their boundaries", () => {
+    for (const residualError of [0, 1]) {
+      expect(
+        isShadingComputeSuccess(
+          successWithFidelity({ kind: "scribble", residualError }),
+        ),
+      ).toBe(true);
+    }
+
+    for (const distributionError of [0, 1.25, 2]) {
+      expect(
+        isShadingComputeSuccess(
+          successWithFidelity({ kind: "stippling", distributionError }),
+        ),
+      ).toBe(true);
+    }
+  });
+
   it("accepts strict request, progress, success, and failure messages", () => {
     const request = { type: "compute", jobId: 7, identity: identity() };
     const progress = {
@@ -442,6 +466,7 @@ describe("Shading compute protocol guards", () => {
       (copy) => (copy.diagnostics.fidelity.residualError = -0.1),
       (copy) => (copy.diagnostics.fidelity.residualError = 1.1),
       (copy) => (copy.diagnostics.fidelity.residualError = NaN),
+      (copy) => (copy.diagnostics.fidelity.residualError = Infinity),
       (copy) => (copy.computeTimeMs = NaN),
       (copy) => (copy.computeTimeMs = -1),
     ];
@@ -449,6 +474,27 @@ describe("Shading compute protocol guards", () => {
       const candidate = structuredClone(success()) as Record<string, any>;
       mutate(candidate);
       expect(isShadingComputeSuccess(candidate)).toBe(false);
+    }
+  });
+
+  it("rejects malformed, out-of-range, mixed, and extra Stippling fidelity", () => {
+    const malformedFidelity: readonly unknown[] = [
+      null,
+      { kind: "stippling" },
+      { kind: "stippling", distributionError: "1.25" },
+      { kind: "stippling", distributionError: -0.1 },
+      { kind: "stippling", distributionError: 2.1 },
+      { kind: "stippling", distributionError: NaN },
+      { kind: "stippling", distributionError: Infinity },
+      { kind: "stippling", distributionError: 1.25, residualError: 0.1 },
+      { kind: "stippling", distributionError: 1.25, extra: true },
+      { kind: "scribble", residualError: 0.1, distributionError: 1.25 },
+    ];
+
+    for (const fidelity of malformedFidelity) {
+      expect(
+        isShadingComputeSuccess(successWithFidelity(fidelity)),
+      ).toBe(false);
     }
   });
 

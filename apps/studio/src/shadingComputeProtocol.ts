@@ -356,14 +356,26 @@ function isScene(value: unknown): value is Scene {
 function isShadingFidelity(
   value: unknown,
 ): value is ShadingDiagnostics["fidelity"] {
-  return (
-    isRecord(value) &&
-    hasExactKeys(value, ["kind", "residualError"]) &&
-    value.kind === "scribble" &&
-    isFiniteNumber(value.residualError) &&
-    value.residualError >= 0 &&
-    value.residualError <= 1
-  );
+  if (!isRecord(value)) return false;
+
+  switch (value.kind) {
+    case "scribble":
+      return (
+        hasExactKeys(value, ["kind", "residualError"]) &&
+        isFiniteNumber(value.residualError) &&
+        value.residualError >= 0 &&
+        value.residualError <= 1
+      );
+    case "stippling":
+      return (
+        hasExactKeys(value, ["kind", "distributionError"]) &&
+        isFiniteNumber(value.distributionError) &&
+        value.distributionError >= 0 &&
+        value.distributionError <= 2
+      );
+    default:
+      return false;
+  }
 }
 
 function isShadingDiagnostics(value: unknown): value is ShadingDiagnostics {

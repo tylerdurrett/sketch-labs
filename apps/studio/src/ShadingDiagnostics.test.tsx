@@ -36,6 +36,12 @@ const stoppedEarly: CoreShadingDiagnostics = {
   fidelity: { kind: "scribble", residualError: 0.12 },
 };
 
+const stipplingExhausted: CoreShadingDiagnostics = {
+  ...converged,
+  termination: "budget-exhausted",
+  fidelity: { kind: "stippling", distributionError: 1.25 },
+};
+
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
@@ -212,6 +218,36 @@ describe("ShadingDiagnostics", () => {
     expect(displayed.textContent).toContain("TerminationBudget exhausted");
     expect(displayed.textContent).toContain("Residual error20.00%");
     expect(displayed.textContent).toContain("Compute time1 min 5 s");
+  });
+
+  it("labels retained Stippling fidelity and preserves the bounded-partial warning", () => {
+    const el = mount({
+      displayed: {
+        freshness: "stale",
+        diagnostics: stipplingExhausted,
+        computeTimeMs: 842,
+      },
+      preparation: {
+        kind: "preparing",
+        progress: {
+          completedWorkUnits: 3,
+          totalWorkUnits: 10,
+          terminal: false,
+        },
+        eta: { kind: "remaining", revision: 1, remainingMs: 1_000 },
+      },
+    });
+    expand(el);
+
+    const retained = lane(el, "Displayed result (stale)");
+    expect(retained.textContent).toContain("Distribution error125.00%");
+    expect(retained.textContent).not.toContain("Residual error");
+    expect(retained.textContent).toContain("bounded partial result");
+    expect(retained.querySelector('[role="alert"]')).toBeNull();
+
+    const replacement = lane(el, "Preparing replacement");
+    expect(replacement.textContent).not.toContain("Distribution error");
+    expect(replacement.textContent).not.toContain("Residual error");
   });
 
   it("presents an authored early stop as a neutral finished result", () => {
