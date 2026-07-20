@@ -7463,7 +7463,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(exportButton(el, "Export SVG").disabled).toBe(false);
   });
 
-  it("replaces positive-influence artwork when Detail sensitivity changes and carries it into Outline identity", async () => {
+  it("replaces positive-influence artwork and carries its completed Scene through Fill and both exports", async () => {
     const el = mount(
       <SketchControls
         sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
@@ -7489,7 +7489,12 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       key: "detailSensitivity",
       value: 0.8,
     });
-    await completeScribble(2, preparedScene(97));
+    const detailScene = preparedScene(97);
+    await completeScribble(2, detailScene);
+
+    expect(lastRenderScene).toBe(detailScene);
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).toBe(detailScene);
 
     clickButton(el, "Outline");
     expect(outlineJob.starts).toBe(1);
@@ -7497,6 +7502,22 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       key: "detailSensitivity",
       value: 0.8,
     });
+    expect(outlineJob.lastIdentity).toMatchObject({
+      sourceKind: "legacy-scene",
+      sourceScene: detailScene,
+    });
+
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(outlineJob.lastExportSnapshot?.identity).toMatchObject({
+      sourceKind: "legacy-scene",
+      sourceScene: detailScene,
+    });
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(plotterExportCapture.current?.scene).toEqual(
+      finalizedPlotterScene(outlineJob.lastCompletedScene!),
+    );
   });
 
   it("retains visibly stale artwork after required Detail failure and retries only the current identity", async () => {
