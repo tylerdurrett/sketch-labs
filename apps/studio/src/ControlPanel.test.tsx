@@ -28,6 +28,17 @@ function mount(node: React.ReactElement): HTMLDivElement {
   return container;
 }
 
+function choose(select: HTMLSelectElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLSelectElement.prototype,
+    "value",
+  )!.set!;
+  act(() => {
+    setter.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
 afterEach(() => {
   act(() => root?.unmount());
   container?.remove();
@@ -48,6 +59,185 @@ const numberSpec = (over: Record<string, unknown> = {}): ParamSpec =>
   }) as ParamSpec;
 
 describe("ControlPanel", () => {
+  const conditionalSchema = {
+    strategy: {
+      kind: "choice",
+      options: [
+        { value: "scribble", label: "Scribble" },
+        { value: "stippling", label: "Stippling" },
+      ],
+      default: "scribble",
+    },
+    scribbleDensity: {
+      kind: "number",
+      min: 0,
+      max: 100,
+      default: 40,
+      activeWhen: { key: "strategy", equals: "scribble" },
+    },
+    stippleSpacing: {
+      kind: "number",
+      min: 0,
+      max: 100,
+      default: 60,
+      activeWhen: { key: "strategy", equals: "stippling" },
+    },
+  } as const satisfies ParamSchema;
+
+  it("renders Choice as a lock-free schema-derived control", () => {
+    const html = renderToStaticMarkup(
+      <ControlPanel
+        schema={conditionalSchema}
+        params={{
+          strategy: "scribble",
+          scribbleDensity: 40,
+          stippleSpacing: 60,
+        }}
+        locks={new Set(["strategy"])}
+        onChange={() => {}}
+        onToggleLock={() => {}}
+      />,
+    );
+
+    expect(html).toContain("Scribble");
+    expect(html).toContain("Stippling");
+    expect(html).toContain('id="control-strategy"');
+    expect(html).not.toContain('aria-label="strategy lock"');
+    expect(html).not.toContain("unsupported control kind");
+  });
+
+  it("switches conditional visibility while retained values reappear", () => {
+    const onChange = vi.fn();
+    const onToggleLock = vi.fn();
+    const scribbleParams = {
+      strategy: "scribble",
+      scribbleDensity: 27,
+      stippleSpacing: 83,
+    };
+    const el = mount(
+      <ControlPanel
+        schema={conditionalSchema}
+        params={scribbleParams}
+        locks={new Set(["strategy", "scribbleDensity", "stippleSpacing"])}
+        onChange={onChange}
+        onToggleLock={onToggleLock}
+      />,
+    );
+
+    expect(el.querySelector('#control-scribbleDensity')).not.toBeNull();
+    expect(el.querySelector('#control-stippleSpacing')).toBeNull();
+    expect(el.querySelectorAll('[aria-label$=" lock"]')).toHaveLength(1);
+
+    choose(el.querySelector<HTMLSelectElement>("#control-strategy")!, "stippling");
+    expect(onChange).toHaveBeenCalledWith("strategy", "stippling");
+    expect(onToggleLock).not.toHaveBeenCalled();
+
+    act(() =>
+      root!.render(
+        <ControlPanel
+          schema={conditionalSchema}
+          params={{ ...scribbleParams, strategy: "stippling" }}
+          locks={new Set(["strategy", "scribbleDensity", "stippleSpacing"])}
+          onChange={onChange}
+          onToggleLock={onToggleLock}
+        />,
+      ),
+    );
+    expect(el.querySelector('#control-scribbleDensity')).toBeNull();
+    expect(
+      el.querySelector<HTMLInputElement>('#control-stippleSpacing')?.value,
+    ).toBe("83");
+    expect(el.querySelectorAll('[aria-label$=" lock"]')).toHaveLength(1);
+
+    act(() =>
+      root!.render(
+        <ControlPanel
+          schema={conditionalSchema}
+          params={scribbleParams}
+          locks={new Set(["strategy", "scribbleDensity", "stippleSpacing"])}
+          onChange={onChange}
+          onToggleLock={onToggleLock}
+        />,
+      ),
+    );
+    expect(
+      el.querySelector<HTMLInputElement>('#control-scribbleDensity')?.value,
+    ).toBe("27");
+    expect(el.querySelector('#control-stippleSpacing')).toBeNull();
+  });
+
+  it("hides inactive rows without mutating values, locks, or callbacks", () => {
+    const params = Object.freeze({
+      strategy: "scribble",
+      scribbleDensity: 27,
+      stippleSpacing: 83,
+    });
+    const locks = new Set(["stippleSpacing"]);
+    const onChange = vi.fn();
+    const onToggleLock = vi.fn();
+
+    renderToStaticMarkup(
+      <ControlPanel
+        schema={conditionalSchema}
+        params={params}
+        locks={locks}
+        onChange={onChange}
+        onToggleLock={onToggleLock}
+      />,
+    );
+
+    expect(params).toEqual({
+      strategy: "scribble",
+      scribbleDensity: 27,
+      stippleSpacing: 83,
+    });
+    expect([...locks]).toEqual(["stippleSpacing"]);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onToggleLock).not.toHaveBeenCalled();
+  });
+
+  it("fails loudly for malformed applicability and inactive Choice values", () => {
+    const malformedDependency = {
+      strategy: conditionalSchema.strategy,
+      amount: {
+        ...conditionalSchema.scribbleDensity,
+        activeWhen: { key: "missing", equals: "scribble" },
+      },
+    } as const satisfies ParamSchema;
+    expect(() =>
+      renderToStaticMarkup(
+        <ControlPanel
+          schema={malformedDependency}
+          params={{ strategy: "scribble", amount: 40 }}
+          locks={new Set()}
+          onChange={() => {}}
+          onToggleLock={() => {}}
+        />,
+      ),
+    ).toThrow(/missing controller `missing`/);
+
+    const inactiveChoice = {
+      ...conditionalSchema,
+      stippleQuality: {
+        kind: "choice",
+        options: [{ value: "fine", label: "Fine" }],
+        default: "fine",
+        activeWhen: { key: "strategy", equals: "stippling" },
+      },
+    } as const satisfies ParamSchema;
+    expect(() =>
+      renderToStaticMarkup(
+        <ControlPanel
+          schema={inactiveChoice}
+          params={{ strategy: "scribble", stippleQuality: "coarse" }}
+          locks={new Set()}
+          onChange={() => {}}
+          onToggleLock={() => {}}
+        />,
+      ),
+    ).toThrow(/Choice param `stippleQuality` value/);
+  });
+
   it("renders exactly one control per schema entry", () => {
     const schema: ParamSchema = {
       radius: numberSpec({ default: 10 }),

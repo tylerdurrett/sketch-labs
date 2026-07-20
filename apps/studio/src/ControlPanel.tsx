@@ -1,5 +1,13 @@
-import type { ParamSchema, Params, ParamSpec } from "@harness/core";
+import {
+  isParamActive,
+  validateChoiceParamValue,
+  validateParamSchema,
+  type ParamSchema,
+  type Params,
+  type ParamSpec,
+} from "@harness/core";
 
+import { ChoiceControl } from "./ChoiceControl";
 import { ColorControl } from "./ColorControl";
 import type { EditTransactionLifecycle } from "./editHistory";
 import {
@@ -20,7 +28,7 @@ import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
  * remounting that wrapper — not by anything in here.
  */
 export interface ControlPanelProps {
-  /** The Sketch's Parameter Schema — one control is rendered per entry. */
+  /** The Sketch's Parameter Schema — one control is rendered per active entry. */
   schema: ParamSchema;
   /** The current value of every param, keyed as in `schema`. */
   params: Params;
@@ -34,8 +42,9 @@ export interface ControlPanelProps {
    * Update a single param by key when no transaction lifecycle is supplied.
    * The value type widens with the `ParamSpec`
    * union: `number` from a NumberControl, a hex color `string` from a
-   * ColorControl or an Image Asset ID from ImageAssetControl. The owner's
-   * params state is already `Record<string, unknown>`,
+   * ColorControl, an Image Asset ID from ImageAssetControl, or a stable Choice
+   * value from ChoiceControl. The owner's params state is already
+   * `Record<string, unknown>`,
    * so this widening is purely at the handler seam.
    */
   onChange: (key: string, value: number | string) => void;
@@ -64,11 +73,12 @@ export interface ControlPanelProps {
  *
  * `kind: 'number'` → a lock-aware {@link NumberControl}; `kind: 'color'` → a
  * lock-free {@link ColorControl}; `kind: 'image-asset'` → a lock-free,
- * reusable picker/import {@link ImageAssetControl}. An UNKNOWN kind renders a
- * LOUD, visible fallback (never a silent skip) so an unsupported control
- * surfaces in the UI as a defect to fix rather than vanishing. As the open
- * `ParamSpec` union widens further (boolean, enum, …) this switch grows a case
- * per kind; the `default` branch is the safety net for any kind not yet handled.
+ * reusable picker/import {@link ImageAssetControl}; `kind: 'choice'` → a
+ * lock-free {@link ChoiceControl}. An UNKNOWN kind renders a LOUD, visible
+ * fallback (never a silent skip) so an unsupported control surfaces in the UI
+ * as a defect to fix rather than vanishing. As the open `ParamSpec` union widens
+ * further (boolean, enum, …) this switch grows a case per kind; the `default`
+ * branch is the safety net for any kind not yet handled.
  */
 function renderControl(
   key: string,
@@ -143,6 +153,17 @@ function renderControl(
         />
       );
     }
+    case "choice":
+      return (
+        <ChoiceControl
+          key={key}
+          paramKey={key}
+          spec={spec}
+          value={value as string}
+          onChange={(next) => onChange(key, next)}
+          editHistory={rowHistory}
+        />
+      );
     default:
       return (
         <div
@@ -158,13 +179,16 @@ function renderControl(
 }
 
 /**
- * The schema-driven control surface: one control per declared param, derived
- * ENTIRELY from the Sketch's {@link ParamSchema} — no bespoke per-Sketch UI.
+ * The schema-driven control surface: one control per active declared param,
+ * derived ENTIRELY from the Sketch's {@link ParamSchema} and complete current
+ * Params — no bespoke per-Sketch UI.
  *
  * It iterates the schema entries in declaration order and delegates each to
- * {@link renderControl}, which switches on `spec.kind`. Every param therefore
- * gets a working control (or a loud fallback for an unsupported kind) with zero
- * per-Sketch code.
+ * {@link renderControl}, which switches on `spec.kind`. Applicability affects
+ * presentation only: an inactive row is omitted without changing its value,
+ * default, or Lock state, so it reappears with prior tuning when its controller
+ * switches back. Every active param therefore gets a working control (or a loud
+ * fallback for an unsupported kind) with zero per-Sketch code.
  */
 export function ControlPanel({
   schema,
@@ -179,13 +203,26 @@ export function ControlPanel({
   onRecomposeToImageAspect,
   onParamEditBegin,
 }: ControlPanelProps) {
+  validateParamSchema(schema);
+  const choiceValues = new Map<string, string>();
+  for (const [key, spec] of Object.entries(schema)) {
+    if (spec.kind !== "choice") continue;
+    choiceValues.set(
+      key,
+      Object.prototype.hasOwnProperty.call(params, key)
+        ? validateChoiceParamValue(spec, params[key], key)
+        : spec.default,
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
-      {Object.entries(schema).map(([key, spec]) =>
-        renderControl(
+      {Object.entries(schema).map(([key, spec]) => {
+        if (!isParamActive(schema, params, key)) return null;
+        return renderControl(
           key,
           spec,
-          params[key],
+          spec.kind === "choice" ? choiceValues.get(key) : params[key],
           locks.has(key),
           params,
           onChange,
@@ -196,8 +233,8 @@ export function ControlPanel({
           onRecomposeToImageAspect,
           editHistory,
           onParamEditBegin,
-        ),
-      )}
+        );
+      })}
     </div>
   );
 }
