@@ -220,14 +220,39 @@ describe("Shading worker runtime", () => {
   );
 
   it.each([
-    ["missing", (params: any[]) => params.pop()],
-    ["extra", (params: any[]) => params.push({ key: "extra", value: 1 })],
-    ["reordered", (params: any[]) => params.reverse()],
-    ["wrong-kind", (params: any[]) => (params[0].value = "not-a-number")],
+    ["missing active", (params: any[]) => params.pop()],
+    [
+      "extra inactive",
+      (params: any[]) =>
+        params.push({ key: "stippleDensity", value: 1 }),
+    ],
+    [
+      "wrong order",
+      (params: any[]) =>
+        params.splice(1, 2, params[2], params[1]),
+    ],
+    [
+      "wrong kind",
+      (params: any[]) =>
+        (params.find(({ key }) => key === "pathDensity").value = "1"),
+    ],
+    ["wrong type", (params: any[]) => (params[0].value = 1)],
+    ["wrong value", (params: any[]) => (params[0].value = "hatching")],
+    ["cross-branch", (params: any[]) => (params[0].value = "stippling")],
   ])(
-    "rejects %s params that are structurally valid but not schema-canonical",
+    "rejects %s Tone params before environment resolution or execution",
     async (_case, mutate) => {
-      const input = structuredClone(request()) as Record<string, any>;
+      const input = structuredClone(
+        request({
+          params: {
+            ...defaultParams(toneCalibration.schema),
+            strategy: "scribble",
+            pathDensity: 0.5,
+            scribbleScale: 2,
+            toneFidelity: 0,
+          },
+        }),
+      ) as Record<string, any>;
       mutate(input.identity.params);
       const execute = vi.fn(
         (..._args: Parameters<ShadingArtworkExecutor>) => artwork,
@@ -330,21 +355,50 @@ describe("Shading worker runtime", () => {
     });
   });
 
-  it.each([toneCalibration, scribbleMoon])(
-    "executes the real $id registry hook with complete diagnostics",
-    async (sketch) => {
-      const params = {
-        ...defaultParams(sketch.schema),
+  it.each([
+    {
+      strategy: "scribble",
+      params: {
+        ...defaultParams(toneCalibration.schema),
+        strategy: "scribble",
         pathDensity: 0.5,
         scribbleScale: 2,
         toneFidelity: 0,
-      };
+        stopPoint: 0,
+      },
+      keys: [
+        "strategy",
+        "pathDensity",
+        "scribbleScale",
+        "momentum",
+        "chaos",
+        "toneFidelity",
+        "stopPoint",
+      ],
+      metric: "residualError",
+      termination: /^(completed|budget-exhausted|stopped-early)$/,
+    },
+    {
+      strategy: "stippling",
+      params: {
+        ...defaultParams(toneCalibration.schema),
+        strategy: "stippling",
+        stippleDensity: 0.25,
+        distributionFidelity: 0,
+      },
+      keys: ["strategy", "stippleDensity", "distributionFidelity"],
+      metric: "distributionError",
+      termination: /^(completed|budget-exhausted)$/,
+    },
+  ])(
+    "executes Tone Calibration's real $strategy generator from exactly its active branch",
+    async ({ strategy, params, keys, metric, termination }) => {
       const response = await handleShadingWorkerMessage(
         request({
-          sketchId: sketch.id,
-          schema: sketch.schema,
+          sketchId: toneCalibration.id,
+          schema: toneCalibration.schema,
           params,
-          frame: { width: 80, height: 60 },
+          frame: { width: 40, height: 30 },
         }),
         undefined,
         undefined,
@@ -353,22 +407,67 @@ describe("Shading worker runtime", () => {
 
       expect(response).toMatchObject({
         type: "success",
-        identity: { sketchId: sketch.id },
-        scene: { space: { width: 80, height: 60 } },
+        identity: { sketchId: toneCalibration.id },
+        scene: { space: { width: 40, height: 30 } },
         diagnostics: {
-          termination: expect.stringMatching(/^(completed|budget-exhausted)$/),
+          termination: expect.stringMatching(termination),
           pathLength: expect.any(Number),
           polylineCount: expect.any(Number),
           penLiftCount: expect.any(Number),
-          fidelity: {
-            kind: "scribble",
-            residualError: expect.any(Number),
-          },
+          fidelity: expect.objectContaining({
+            kind: strategy,
+            [metric]: expect.any(Number),
+          }),
         },
         computeTimeMs: 0,
       });
+      if (response?.type !== "success") throw new Error("expected success");
+      expect(response.identity.params.map(({ key }) => key)).toEqual(keys);
+      expect(response.identity.params).toHaveLength(keys.length);
+      expect(Object.keys(response.diagnostics.fidelity)).toEqual([
+        "kind",
+        metric,
+      ]);
     },
   );
+
+  it("keeps every unconditional Scribble Moon schema param and executes its real generator", async () => {
+    const params = {
+      ...defaultParams(scribbleMoon.schema),
+      pathDensity: 0.5,
+      scribbleScale: 2,
+      toneFidelity: 0,
+      stopPoint: 0,
+    };
+    const input = request({
+      sketchId: scribbleMoon.id,
+      schema: scribbleMoon.schema,
+      params,
+      frame: { width: 40, height: 30 },
+    });
+
+    expect(input.identity.params.map(({ key }) => key)).toEqual(
+      Object.keys(scribbleMoon.schema),
+    );
+
+    const response = await handleShadingWorkerMessage(
+      input,
+      undefined,
+      undefined,
+      () => 10,
+    );
+
+    expect(response).toMatchObject({
+      type: "success",
+      scene: { space: { width: 40, height: 30 } },
+      diagnostics: {
+        fidelity: {
+          kind: "scribble",
+          residualError: expect.any(Number),
+        },
+      },
+    });
+  });
 
   it(
     "validates first, resolves opaque IDs per job, and enters compute with only worker-owned pixels",

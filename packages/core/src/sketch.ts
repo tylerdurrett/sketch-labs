@@ -616,8 +616,17 @@ export interface ScribbleShadingFidelity {
   readonly residualError: number
 }
 
+/** Stippling's strategy-specific fidelity diagnostic. */
+export interface StipplingShadingFidelity {
+  readonly kind: 'stippling'
+  /** Normalized distribution error after bounded placement and refinement. */
+  readonly distributionError: number
+}
+
 /** Exhaustive strategy-specific fidelity diagnostics carried by artwork. */
-export type ShadingFidelity = ScribbleShadingFidelity
+export type ShadingFidelity =
+  | ScribbleShadingFidelity
+  | StipplingShadingFidelity
 
 /** Scalar diagnostics for one complete Shading artwork preparation. */
 export interface ShadingDiagnostics {

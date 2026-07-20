@@ -158,9 +158,16 @@ function FidelityMetric({
           value={formatPercent(fidelity.residualError)}
         />
       );
+    case "stippling":
+      return (
+        <Metric
+          label="Distribution error"
+          value={formatPercent(fidelity.distributionError)}
+        />
+      );
   }
 
-  return assertNever(fidelity.kind);
+  return assertNever(fidelity);
 }
 
 function DisplayedLane({
