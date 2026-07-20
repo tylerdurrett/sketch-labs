@@ -353,12 +353,12 @@ function validateParamApplicability(
     throw new Error(`Param \`${key}\` activeWhen cannot reference itself`)
   }
 
-  const controller = schema[dependency.key]
-  if (controller === undefined) {
+  if (!Object.prototype.hasOwnProperty.call(schema, dependency.key)) {
     throw new Error(
       `Param \`${key}\` activeWhen references missing controller \`${dependency.key}\``,
     )
   }
+  const controller = schema[dependency.key]!
   if (controller.kind !== 'choice') {
     throw new Error(
       `Param \`${key}\` activeWhen controller \`${dependency.key}\` must be a Choice param`,
@@ -396,10 +396,10 @@ export function isParamActive(
   params: Params,
   key: string,
 ): boolean {
-  const spec = schema[key]
-  if (spec === undefined) {
+  if (!Object.prototype.hasOwnProperty.call(schema, key)) {
     throw new Error(`Unknown param \`${key}\``)
   }
+  const spec = schema[key]!
 
   validateParamApplicability(schema, key, spec)
   const dependency = spec.activeWhen

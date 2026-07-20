@@ -317,6 +317,33 @@ describe('conditional parameter applicability', () => {
     expect(() => defaultParams(schema)).toThrow(message)
   })
 
+  it('rejects a requested key inherited through the schema prototype', () => {
+    const schema = Object.create({ inherited: strategy }) as ParamSchema
+
+    expect(() => isParamActive(schema, {}, 'inherited')).toThrow(
+      /Unknown param `inherited`/,
+    )
+  })
+
+  it('rejects an activeWhen controller supplied by the schema prototype', () => {
+    const schema = Object.assign(Object.create({ strategy }), {
+      density: {
+        kind: 'number' as const,
+        min: 0,
+        max: 1,
+        default: 0.5,
+        activeWhen: { key: 'strategy', equals: 'stippling' },
+      },
+    }) as ParamSchema
+
+    expect(() => validateParamSchema(schema)).toThrow(
+      /missing controller `strategy`/,
+    )
+    expect(() =>
+      isParamActive(schema, { strategy: 'stippling' }, 'density'),
+    ).toThrow(/missing controller `strategy`/)
+  })
+
   it('is pure and does not recursively evaluate the Choice controller', () => {
     const schema = Object.freeze({
       mode: Object.freeze({
