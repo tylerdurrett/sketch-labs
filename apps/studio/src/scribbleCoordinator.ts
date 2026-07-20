@@ -196,6 +196,9 @@ export class ScribbleCoordinator {
       (previous !== null &&
         (candidate.totalWorkUnits !== previous.totalWorkUnits ||
           candidate.completedWorkUnits < previous.completedWorkUnits ||
+          (candidate.convergence !== undefined &&
+            previous.convergence !== undefined &&
+            candidate.convergence < previous.convergence) ||
           (candidate.completedWorkUnits === previous.completedWorkUnits &&
             !candidate.terminal)))
     ) {
@@ -213,8 +216,12 @@ export class ScribbleCoordinator {
         }
       : active.eta.observe({
           timestampMs,
-          completedWork: snapshot.completedWorkUnits,
-          totalWork: snapshot.totalWorkUnits,
+          // Scribble normally stops at its residual threshold, long before its
+          // emergency work cap. Legacy/custom snapshots can still use cap work.
+          completedWork:
+            snapshot.convergence ?? snapshot.completedWorkUnits,
+          totalWork:
+            snapshot.convergence === undefined ? snapshot.totalWorkUnits : 1,
         });
     active.observeProgress?.({ snapshot, eta });
   }

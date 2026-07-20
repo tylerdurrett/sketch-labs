@@ -259,7 +259,12 @@ describe('public Scribble strategy boundary', () => {
       residualError: 0,
     })
     expect(snapshots).toEqual([
-      { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
+      {
+        completedWorkUnits: 0,
+        totalWorkUnits: 0,
+        convergence: 1,
+        terminal: true,
+      },
     ])
     expect(Object.isFrozen(snapshots[0])).toBe(true)
   })
