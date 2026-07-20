@@ -5,41 +5,41 @@ import {
   registry,
   type ParamSchema,
   type Params,
-  type ScribbleArtwork,
-  type ScribbleObserver,
+  type ShadingArtwork,
+  type ShadingObserver,
   type SketchEnvironment,
   type StatelessSketch,
 } from "@harness/core";
 
 import {
-  createScribbleComputeIdentity,
-  isScribbleComputeProgress,
-  isScribbleComputeRequest,
-  isScribbleComputeResponse,
-  scribbleComputeIdentitiesEqual,
-  type ScribbleComputeIdentity,
-  type ScribbleComputeProgress,
-  type ScribbleComputeResponse,
-} from "./scribbleComputeProtocol";
+  createShadingComputeIdentity,
+  isShadingComputeProgress,
+  isShadingComputeRequest,
+  isShadingComputeResponse,
+  shadingComputeIdentitiesEqual,
+  type ShadingComputeIdentity,
+  type ShadingComputeProgress,
+  type ShadingComputeResponse,
+} from "./shadingComputeProtocol";
 import {
   createWorkerProgressEmitter,
   type MonotonicClock,
 } from "./workerProgress";
 import { resolveSketchEnvironment } from "./imageAssetResolver";
 
-type ProgressSink = (progress: ScribbleComputeProgress) => void;
-type ScribbleArtworkGenerator = NonNullable<
-  StatelessSketch["generateScribbleArtwork"]
+type ProgressSink = (progress: ShadingComputeProgress) => void;
+type ShadingArtworkGenerator = NonNullable<
+  StatelessSketch["generateShadingArtwork"]
 >;
 
-export type ScribbleArtworkExecutor = (
-  generate: ScribbleArtworkGenerator,
-  identity: ScribbleComputeIdentity,
+export type ShadingArtworkExecutor = (
+  generate: ShadingArtworkGenerator,
+  identity: ShadingComputeIdentity,
   environment: SketchEnvironment,
-  observer?: ScribbleObserver,
-) => ScribbleArtwork;
+  observer?: ShadingObserver,
+) => ShadingArtwork;
 
-export type ScribbleEnvironmentResolver = (
+export type ShadingEnvironmentResolver = (
   schema: ParamSchema,
   params: Params,
 ) => Promise<SketchEnvironment>;
@@ -48,7 +48,7 @@ function systemMonotonicClock(): number {
   return performance.now();
 }
 
-function paramsFromIdentity(identity: ScribbleComputeIdentity): Params {
+function paramsFromIdentity(identity: ShadingComputeIdentity): Params {
   const params = Object.create(null) as Params;
   for (const entry of identity.params) params[entry.key] = entry.value;
   return params;
@@ -56,12 +56,12 @@ function paramsFromIdentity(identity: ScribbleComputeIdentity): Params {
 
 function schemaMismatch(sketchId: string): TypeError {
   return new TypeError(
-    `Scribble request parameters do not match ${sketchId} schema`,
+    `Shading request parameters do not match ${sketchId} schema`,
   );
 }
 
 function prepareDetailEnvironment(
-  identity: ScribbleComputeIdentity,
+  identity: ShadingComputeIdentity,
   params: Params,
   environment: SketchEnvironment,
 ): SketchEnvironment {
@@ -93,26 +93,26 @@ function prepareDetailEnvironment(
   };
 }
 
-interface ResolvedScribbleRequest {
-  readonly generate: ScribbleArtworkGenerator;
+interface ResolvedShadingRequest {
+  readonly generate: ShadingArtworkGenerator;
   readonly schema: ParamSchema;
   readonly params: Params;
 }
 
-function resolveScribbleRequest(
-  identity: ScribbleComputeIdentity,
-): ResolvedScribbleRequest {
+function resolveShadingRequest(
+  identity: ShadingComputeIdentity,
+): ResolvedShadingRequest {
   const sketch = registry.get(identity.sketchId);
-  if (sketch.generateScribbleArtwork === undefined) {
+  if (sketch.generateShadingArtwork === undefined) {
     throw new Error(
-      `Sketch ${identity.sketchId} has no Scribble artwork generator`,
+      `Sketch ${identity.sketchId} has no Shading artwork generator`,
     );
   }
 
   const params = paramsFromIdentity(identity);
-  let canonicalIdentity: ScribbleComputeIdentity;
+  let canonicalIdentity: ShadingComputeIdentity;
   try {
-    canonicalIdentity = createScribbleComputeIdentity({
+    canonicalIdentity = createShadingComputeIdentity({
       sketchId: sketch.id,
       schema: sketch.schema,
       params,
@@ -122,18 +122,18 @@ function resolveScribbleRequest(
   } catch {
     throw schemaMismatch(sketch.id);
   }
-  if (!scribbleComputeIdentitiesEqual(identity, canonicalIdentity)) {
+  if (!shadingComputeIdentitiesEqual(identity, canonicalIdentity)) {
     throw schemaMismatch(sketch.id);
   }
   return {
-    generate: sketch.generateScribbleArtwork,
+    generate: sketch.generateShadingArtwork,
     schema: sketch.schema,
     params,
   };
 }
 
-/** Execute the already-resolved Sketch-owned Scribble preparation hook. */
-export const executeScribbleArtwork: ScribbleArtworkExecutor = (
+/** Execute the already-resolved Sketch-owned Shading preparation hook. */
+export const executeShadingArtwork: ShadingArtworkExecutor = (
   generate,
   identity,
   environment,
@@ -159,7 +159,7 @@ function safeError(error: unknown): string {
       // Fall through to the stable domain failure below.
     }
   }
-  return "Scribble computation failed";
+  return "Shading computation failed";
 }
 
 function finiteElapsed(startedAt: number, completedAt: number): number {
@@ -171,36 +171,36 @@ function progressReporter(
   jobId: number,
   emit: ProgressSink,
   now: MonotonicClock,
-): ScribbleObserver {
+): ShadingObserver {
   return createWorkerProgressEmitter((snapshot) => {
-    const progress: ScribbleComputeProgress = {
+    const progress: ShadingComputeProgress = {
       type: "progress",
       jobId,
       snapshot,
     };
-    if (!isScribbleComputeProgress(progress)) {
-      throw new TypeError("Scribble worker produced invalid progress");
+    if (!isShadingComputeProgress(progress)) {
+      throw new TypeError("Shading worker produced invalid progress");
     }
     emit(progress);
   }, now);
 }
 
-/** Execute one validated Scribble request without sharing Outline messages. */
-export async function handleScribbleWorkerMessage(
+/** Execute one validated Shading request without sharing Outline messages. */
+export async function handleShadingWorkerMessage(
   value: unknown,
-  execute: ScribbleArtworkExecutor = executeScribbleArtwork,
+  execute: ShadingArtworkExecutor = executeShadingArtwork,
   emitProgress?: ProgressSink,
   now: MonotonicClock = systemMonotonicClock,
-  resolveEnvironment: ScribbleEnvironmentResolver = (schema, params) =>
+  resolveEnvironment: ShadingEnvironmentResolver = (schema, params) =>
     resolveSketchEnvironment(schema, params),
-): Promise<ScribbleComputeResponse | null> {
-  if (!isScribbleComputeRequest(value)) return null;
+): Promise<ShadingComputeResponse | null> {
+  if (!isShadingComputeRequest(value)) return null;
 
   try {
     // Canonicalize against the registry before an opaque Image Asset ID can
     // trigger any fetch or decode. The resolver creates fresh worker-owned
     // records for this job; decoded pixels never join protocol identity.
-    const { generate, schema, params } = resolveScribbleRequest(value.identity);
+    const { generate, schema, params } = resolveShadingRequest(value.identity);
     const resolvedEnvironment = await resolveEnvironment(schema, params);
     const environment = prepareDetailEnvironment(
       value.identity,
@@ -216,7 +216,7 @@ export async function handleScribbleWorkerMessage(
         ? undefined
         : progressReporter(value.jobId, emitProgress, now),
     );
-    const response: ScribbleComputeResponse = {
+    const response: ShadingComputeResponse = {
       type: "success",
       jobId: value.jobId,
       identity: value.identity,
@@ -224,19 +224,19 @@ export async function handleScribbleWorkerMessage(
       diagnostics: artwork.diagnostics,
       computeTimeMs: finiteElapsed(startedAt, now()),
     };
-    if (!isScribbleComputeResponse(response)) {
-      throw new TypeError("Scribble worker produced an invalid result");
+    if (!isShadingComputeResponse(response)) {
+      throw new TypeError("Shading worker produced an invalid result");
     }
     return response;
   } catch (error) {
-    const failure: ScribbleComputeResponse = {
+    const failure: ShadingComputeResponse = {
       type: "failure",
       jobId: value.jobId,
       identity: value.identity,
       error: safeError(error),
     };
-    if (!isScribbleComputeResponse(failure)) {
-      throw new TypeError("Scribble worker produced an invalid failure");
+    if (!isShadingComputeResponse(failure)) {
+      throw new TypeError("Shading worker produced an invalid failure");
     }
     return failure;
   }

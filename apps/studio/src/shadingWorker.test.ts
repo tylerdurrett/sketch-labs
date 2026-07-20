@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createScribbleComputeIdentity } from "./scribbleComputeProtocol";
+import { createShadingComputeIdentity } from "./shadingComputeProtocol";
 
-describe("Scribble worker entry", () => {
+describe("Shading worker entry", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.resetModules();
   });
 
-  it("answers only validated Scribble requests through its dedicated runtime", async () => {
+  it("answers only validated Shading requests through its dedicated runtime", async () => {
     let messageListener: ((event: MessageEvent<unknown>) => void) | undefined;
     const workerScope = {
       addEventListener: vi.fn(
@@ -19,7 +19,7 @@ describe("Scribble worker entry", () => {
       postMessage: vi.fn(),
     };
     vi.stubGlobal("self", workerScope);
-    await import("./scribbleWorker");
+    await import("./shadingWorker");
 
     messageListener?.({ data: null } as MessageEvent<unknown>);
     messageListener?.({
@@ -27,7 +27,7 @@ describe("Scribble worker entry", () => {
     } as MessageEvent<unknown>);
     expect(workerScope.postMessage).not.toHaveBeenCalled();
 
-    const identity = createScribbleComputeIdentity({
+    const identity = createShadingComputeIdentity({
       sketchId: "circles",
       schema: {},
       params: {},
@@ -46,7 +46,7 @@ describe("Scribble worker entry", () => {
       type: "failure",
       jobId: 3,
       identity,
-      error: "Sketch circles has no Scribble artwork generator",
+      error: "Sketch circles has no Shading artwork generator",
     });
   });
 });
