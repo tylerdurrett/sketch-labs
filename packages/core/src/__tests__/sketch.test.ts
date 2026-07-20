@@ -502,6 +502,28 @@ describe('activeParams', () => {
       /Choice param `strategy` value must be one of/,
     )
   })
+
+  it.each([42, 'coarse'])(
+    'rejects an invalid present inactive Choice value (%s)',
+    (inactiveValue) => {
+      const withInactiveChoice = {
+        ...schema,
+        stippleQuality: {
+          kind: 'choice',
+          options: [{ value: 'fine', label: 'Fine' }],
+          default: 'fine',
+          activeWhen: { key: 'strategy', equals: 'stippling' },
+        },
+      } as const satisfies ParamSchema
+
+      expect(() =>
+        activeParams(withInactiveChoice, {
+          strategy: 'scribble',
+          stippleQuality: inactiveValue,
+        }),
+      ).toThrow(/Choice param `stippleQuality` value must be one of/)
+    },
+  )
 })
 
 describe('randomize', () => {

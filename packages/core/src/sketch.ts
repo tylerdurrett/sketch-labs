@@ -439,6 +439,16 @@ export function isParamActive(
  */
 export function activeParams(schema: ParamSchema, params: Params): Params {
   validateParamSchema(schema)
+  const choiceValues = new Map<string, string>()
+  for (const [key, spec] of Object.entries(schema)) {
+    if (
+      spec.kind === 'choice' &&
+      Object.prototype.hasOwnProperty.call(params, key)
+    ) {
+      choiceValues.set(key, validateChoiceParamValue(spec, params[key], key))
+    }
+  }
+
   const entries: [string, unknown][] = []
 
   for (const [key, spec] of Object.entries(schema)) {
@@ -446,10 +456,7 @@ export function activeParams(schema: ParamSchema, params: Params): Params {
 
     let value: unknown
     if (Object.prototype.hasOwnProperty.call(params, key)) {
-      value =
-        spec.kind === 'choice'
-          ? validateChoiceParamValue(spec, params[key], key)
-          : params[key]
+      value = spec.kind === 'choice' ? choiceValues.get(key)! : params[key]
     } else {
       value = spec.default
     }
