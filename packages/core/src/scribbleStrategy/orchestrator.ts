@@ -1,4 +1,5 @@
 import type { Point, Polyline, Random } from '../types'
+import type { ShadingObserver } from '../shadingStrategy'
 import { chooseScribbleGrowthStep } from './growth'
 import type { ScribbleModel } from './types'
 
@@ -16,26 +17,6 @@ export interface ScribbleExecutionLimits {
   readonly maxRestarts: number
 }
 
-/** Immutable, serialization-friendly progress from one Scribble solver pass. */
-export interface ScribbleProgress {
-  /** Completed growth attempts, whether advanced or stagnant. */
-  readonly completedWorkUnits: number
-  /** Stable upper bound from the accepted-segment and stagnation budgets. */
-  readonly totalWorkUnits: number
-  /**
-   * Normalized residual progress toward the authored completion threshold.
-   * This is independent of the safety budget: `0` is the initial residual and
-   * `1` means the threshold has been reached. Optional so existing observer
-   * implementations remain structurally compatible.
-   */
-  readonly convergence?: number
-  /** True only when the solver has stopped. */
-  readonly terminal: boolean
-}
-
-/** Optional observation hook for deterministic Scribble progress snapshots. */
-export type ScribbleObserver = (progress: ScribbleProgress) => void
-
 /** Policy-neutral input for one deterministic Scribble solver pass. */
 export interface ScribbleOrchestratorInput {
   readonly model: ScribbleModel
@@ -47,7 +28,7 @@ export interface ScribbleOrchestratorInput {
   /** Optional authored cap, bounded by the accepted-segment safety limit. */
   readonly authoredAcceptedSegmentLimit?: number
   /** Receives isolated snapshots after completed growth attempts and at stop. */
-  readonly observer?: ScribbleObserver
+  readonly observer?: ShadingObserver
 }
 
 export type ScribbleOrchestratorStopCause =

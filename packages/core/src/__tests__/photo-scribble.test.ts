@@ -18,7 +18,7 @@ import {
   createPhotoScribbleSchema,
   createPhotoScribbleSource,
   generatePhotoScribble,
-  generatePhotoScribbleArtwork,
+  generatePhotoScribbleShadingArtwork,
   photoScribble,
 } from '../sketches/photo-scribble'
 import { applyPhotoToneControls } from '../sketches/photo-scribble/tone'
@@ -551,7 +551,7 @@ describe('Photo Scribble headless composition', () => {
 
   it('emits only open black generated source paths and scalar diagnostics', () => {
     const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
-    const artwork = generatePhotoScribbleArtwork(
+    const artwork = generatePhotoScribbleShadingArtwork(
       params(),
       'seed',
       FRAME,
@@ -587,10 +587,10 @@ describe('Photo Scribble headless composition', () => {
     )
     expect(artwork.diagnostics).toEqual({
       termination: 'completed',
-      residualError: 0.125,
       pathLength: 2 * Math.hypot(2, 2),
       polylineCount: 2,
       penLiftCount: 1,
+      fidelity: { kind: 'scribble', residualError: 0.125 },
     })
     expect(artwork).not.toHaveProperty('polylines')
     expect(artwork.diagnostics).not.toHaveProperty('polylines')
@@ -600,7 +600,7 @@ describe('Photo Scribble headless composition', () => {
     const sketch = createPhotoScribble(HEADLESS_FIXTURE_LOOKUP_KEY)
     const currentParams = params()
     const env = environment()
-    const prepared = sketch.generateScribbleArtwork?.(
+    const prepared = sketch.generateShadingArtwork?.(
       currentParams,
       'seed',
       FRAME,

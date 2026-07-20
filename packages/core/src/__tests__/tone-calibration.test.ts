@@ -20,10 +20,8 @@ import {
   toneCalibration as publicToneCalibration,
   toneCalibrationSchema as publicToneCalibrationSchema,
 } from '../index'
-import type {
-  ScribbleProgress,
-  ScribbleStrategyInput,
-} from '../scribbleStrategy/index'
+import type { ShadingProgress } from '../shadingStrategy'
+import type { ScribbleStrategyInput } from '../scribbleStrategy/index'
 import { createScribbleModel } from '../scribbleStrategy/model'
 import {
   generateToneCalibrationScribble,
@@ -270,8 +268,8 @@ describe('Tone Calibration Scribble integration', () => {
 
   it('prepares exactly the cold Scene with public progress and scalar-only diagnostics', () => {
     const controls = params({ toneFidelity: 0 })
-    const progress: ScribbleProgress[] = []
-    const artwork = toneCalibration.generateScribbleArtwork!(
+    const progress: ShadingProgress[] = []
+    const artwork = toneCalibration.generateShadingArtwork!(
       controls,
       'capability',
       FRAME,
@@ -283,10 +281,10 @@ describe('Tone Calibration Scribble integration', () => {
     )
     expect(artwork.diagnostics).toEqual({
       termination: 'completed',
-      residualError: expect.any(Number),
       pathLength: expect.any(Number),
       polylineCount: artwork.scene.primitives.length,
       penLiftCount: Math.max(0, artwork.scene.primitives.length - 1),
+      fidelity: { kind: 'scribble', residualError: expect.any(Number) },
     })
     expect(artwork.diagnostics.pathLength).toBeGreaterThan(0)
     expect(progress.length).toBeGreaterThan(0)
@@ -460,7 +458,7 @@ describe('Tone Calibration Scribble integration', () => {
       residualError: 0.4,
     })
 
-    const artwork = toneCalibration.generateScribbleArtwork!(
+    const artwork = toneCalibration.generateShadingArtwork!(
       params(),
       'forced-budget',
       FRAME,
@@ -468,10 +466,10 @@ describe('Tone Calibration Scribble integration', () => {
     const { scene } = artwork
     expect(artwork.diagnostics).toEqual({
       termination: 'budget-exhausted',
-      residualError: 0.4,
       pathLength: Math.hypot(20, 20) + Math.hypot(20, 5),
       polylineCount: 1,
       penLiftCount: 0,
+      fidelity: { kind: 'scribble', residualError: 0.4 },
     })
     expect(scene.primitives).toEqual([
       {
@@ -508,7 +506,7 @@ describe('Tone Calibration Scribble integration', () => {
       termination: 'completed',
       residualError: 0.01,
     })
-    const completed = toneCalibration.generateScribbleArtwork!(
+    const completed = toneCalibration.generateShadingArtwork!(
       params(),
       'exact-prepared-result',
       FRAME,

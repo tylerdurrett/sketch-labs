@@ -20,18 +20,18 @@ import {
   scribbleControlSchema,
   scribbleStrategy,
   type ScribbleControls,
-  type ScribbleObserver,
   type ScribbleResult,
 } from '../../scribbleStrategy'
+import type { ShadingObserver } from '../../shadingStrategy'
 import { normalizeScribbleControls } from '../../scribbleStrategy/model'
 import { createScene } from '../../scene'
 import type { CoordinateSpace, Scene } from '../../scene'
 import {
-  createScribbleDiagnostics,
+  createShadingDiagnostics,
   type ParamSpec,
   type Params,
-  type ScribbleArtwork,
   type Seed,
+  type ShadingArtwork,
   type StatelessSketch,
 } from '../../sketch'
 import type { SketchEnvironment } from '../../imageAssets'
@@ -231,7 +231,7 @@ export function generatePhotoScribble(
   seed: Seed,
   frame: CoordinateSpace,
   schema: PhotoScribbleSchema,
-  observer?: ScribbleObserver,
+  observer?: ShadingObserver,
   environment?: SketchEnvironment,
 ): ScribbleResult {
   const controls = scribbleControls(params, schema)
@@ -267,15 +267,15 @@ function sceneFromScribble(
   return builder.build()
 }
 
-/** Complete Photo Scribble Scene plus compact scalar diagnostics. */
-export function generatePhotoScribbleArtwork(
+/** Prepare Photo Scribble's complete Shading artwork and Scribble fidelity. */
+export function generatePhotoScribbleShadingArtwork(
   params: Params,
   seed: Seed,
   frame: CoordinateSpace,
   schema: PhotoScribbleSchema,
-  observer?: ScribbleObserver,
+  observer?: ShadingObserver,
   environment?: SketchEnvironment,
-): ScribbleArtwork {
+): ShadingArtwork {
   const result = generatePhotoScribble(
     params,
     seed,
@@ -286,7 +286,10 @@ export function generatePhotoScribbleArtwork(
   )
   return {
     scene: sceneFromScribble(frame, result),
-    diagnostics: createScribbleDiagnostics(result),
+    diagnostics: createShadingDiagnostics(result, {
+      kind: 'scribble',
+      residualError: result.residualError,
+    }),
   }
 }
 
@@ -310,8 +313,8 @@ export function createPhotoScribble(
         environment,
       )
     },
-    generateScribbleArtwork(params, seed, frame, observer, environment) {
-      return generatePhotoScribbleArtwork(
+    generateShadingArtwork(params, seed, frame, observer, environment) {
+      return generatePhotoScribbleShadingArtwork(
         params,
         seed,
         frame,
@@ -321,7 +324,7 @@ export function createPhotoScribble(
       )
     },
     generate(params, seed, _t, frame, environment) {
-      return generatePhotoScribbleArtwork(
+      return generatePhotoScribbleShadingArtwork(
         params,
         seed,
         frame,
