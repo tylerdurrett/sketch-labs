@@ -422,6 +422,44 @@ export function isParamActive(
 }
 
 /**
+ * Project the current Params down to the schema keys that are active.
+ *
+ * The projection iterates the schema's own enumerable keys, preserving schema
+ * order and excluding Params-only extras. Present non-Choice values are copied
+ * exactly; an absent value falls back to its spec default. Present Choice values
+ * pass through the same loud declared-option validation as other Choice
+ * consumers. The schema and input Params are only read, and the result is a new
+ * object.
+ *
+ * @param schema - The complete Parameter Schema and ordering authority.
+ * @param params - Current parameter values; never mutated.
+ * @returns A fresh Params object containing only active schema keys.
+ * @throws If a Choice declaration/value or applicability relationship is
+ *   malformed.
+ */
+export function activeParams(schema: ParamSchema, params: Params): Params {
+  validateParamSchema(schema)
+  const entries: [string, unknown][] = []
+
+  for (const [key, spec] of Object.entries(schema)) {
+    if (!isParamActive(schema, params, key)) continue
+
+    let value: unknown
+    if (Object.prototype.hasOwnProperty.call(params, key)) {
+      value =
+        spec.kind === 'choice'
+          ? validateChoiceParamValue(spec, params[key], key)
+          : params[key]
+    } else {
+      value = spec.default
+    }
+    entries.push([key, value])
+  }
+
+  return Object.fromEntries(entries)
+}
+
+/**
  * Derive the inhabited default params from a schema: every key set to its spec's
  * `default`. Pure and headless — the first of the core engine functions
  * (randomize / newSeed are siblings), and the value the Harness starts a Sketch

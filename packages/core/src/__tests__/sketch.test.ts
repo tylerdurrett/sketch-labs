@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 
 import {
+  activeParams,
   defaultParams,
   definePreparedSketch,
   isParamActive,
@@ -373,6 +374,133 @@ describe('conditional parameter applicability', () => {
 
     expect(isParamActive(schema, params, 'density')).toBe(true)
     expect(params).toEqual({ strategy: 'stippling' })
+  })
+})
+
+describe('activeParams', () => {
+  const schema = {
+    strategy: {
+      kind: 'choice',
+      options: [
+        { value: 'scribble', label: 'Scribble' },
+        { value: 'stippling', label: 'Stippling' },
+      ],
+      default: 'scribble',
+    },
+    always: { kind: 'color', default: '#1a2b3c' },
+    scribbleDensity: {
+      kind: 'number',
+      min: 1,
+      max: 10,
+      default: 4,
+      activeWhen: { key: 'strategy', equals: 'scribble' },
+    },
+    stippleSource: {
+      kind: 'image-asset',
+      default: 'portrait-default',
+      activeWhen: { key: 'strategy', equals: 'stippling' },
+    },
+  } as const satisfies ParamSchema
+
+  it('projects a mixed schema to active keys with exact present values', () => {
+    expect(
+      activeParams(schema, {
+        strategy: 'scribble',
+        always: '#abcdef',
+        scribbleDensity: 99,
+        stippleSource: 'portrait-selected',
+      }),
+    ).toEqual({
+      strategy: 'scribble',
+      always: '#abcdef',
+      scribbleDensity: 99,
+    })
+  })
+
+  it('switches the projected dependent while retaining inactive input values', () => {
+    const params = {
+      strategy: 'stippling',
+      always: '#abcdef',
+      scribbleDensity: 7,
+      stippleSource: 'portrait-selected',
+    }
+
+    expect(activeParams(schema, params)).toEqual({
+      strategy: 'stippling',
+      always: '#abcdef',
+      stippleSource: 'portrait-selected',
+    })
+    expect(params).toEqual({
+      strategy: 'stippling',
+      always: '#abcdef',
+      scribbleDensity: 7,
+      stippleSource: 'portrait-selected',
+    })
+  })
+
+  it('uses validated defaults for absent active values', () => {
+    expect(activeParams(schema, {})).toEqual({
+      strategy: 'scribble',
+      always: '#1a2b3c',
+      scribbleDensity: 4,
+    })
+  })
+
+  it('preserves schema order and excludes extras and inherited schema keys', () => {
+    const withInherited = Object.assign(
+      Object.create({ inherited: { kind: 'color', default: '#000000' } }),
+      schema,
+    ) as ParamSchema
+    const projected = activeParams(withInherited, {
+      extra: 'discarded',
+      strategy: 'scribble',
+      scribbleDensity: 6,
+    })
+
+    expect(Object.keys(projected)).toEqual([
+      'strategy',
+      'always',
+      'scribbleDensity',
+    ])
+    expect(projected).not.toHaveProperty('extra')
+    expect(projected).not.toHaveProperty('inherited')
+  })
+
+  it('is pure over frozen schema and Params inputs', () => {
+    const frozenSchema = Object.freeze(schema)
+    const params = Object.freeze({ strategy: 'scribble', scribbleDensity: 8 })
+
+    const projected = activeParams(frozenSchema, params)
+
+    expect(projected).toEqual({
+      strategy: 'scribble',
+      always: '#1a2b3c',
+      scribbleDensity: 8,
+    })
+    expect(projected).not.toBe(params)
+  })
+
+  it('rejects a malformed applicability relationship before projecting', () => {
+    const malformed = {
+      strategy: schema.strategy,
+      density: {
+        kind: 'number',
+        min: 1,
+        max: 10,
+        default: 4,
+        activeWhen: { key: 'strategy', equals: 'hatching' },
+      },
+    } as const satisfies ParamSchema
+
+    expect(() => activeParams(malformed, {})).toThrow(
+      /equals must be a declared option/,
+    )
+  })
+
+  it('rejects an invalid present Choice value before projecting', () => {
+    expect(() => activeParams(schema, { strategy: 'hatching' })).toThrow(
+      /Choice param `strategy` value must be one of/,
+    )
   })
 })
 
