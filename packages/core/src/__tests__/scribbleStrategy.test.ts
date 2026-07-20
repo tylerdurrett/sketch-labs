@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
 
 import * as core from '../index'
+import { createScribbleScaleField } from '../scribbleScaleField'
 import { totalPathLength } from '../shadingStrategy'
 import { createShadingMask, type ToneSource } from '../shadingFields'
 import {
@@ -176,6 +177,9 @@ describe('public Scribble strategy boundary', () => {
     >()
     expectTypeOf<core.ScribbleObserver>().toEqualTypeOf<ScribbleObserver>()
     expectTypeOf<core.ScribbleProgress>().toEqualTypeOf<ScribbleProgress>()
+    expectTypeOf<ScribbleStrategyInput['scaleField']>().toEqualTypeOf<
+      core.ScribbleScaleField | undefined
+    >()
     expectTypeOf<ScribbleResult>().toMatchTypeOf<core.ShadingResult>()
 
     expect(Object.keys(scribbleControlSchema)).toEqual([
@@ -450,6 +454,32 @@ describe('public Scribble strategy boundary', () => {
     expect(result.polylines).toEqual([raw])
   })
 
+  it('keeps the last scale-safe path when corner rounding enters a fine region', () => {
+    const raw: Polyline = [
+      [45.2, 50],
+      [50, 50],
+      [50, 45.2],
+    ]
+    const scaleField = createScribbleScaleField(1, ([x, y]) =>
+      x < 49.9 && y < 49.9 ? 1 : 4,
+    )
+    const result = runScribbleStrategyForTesting(
+      {
+        ...input(source(), 'scale-safe-smoothing'),
+        scaleField,
+      },
+      TINY_LIMITS,
+      ({ model }) => ({
+        polylines: [raw],
+        residualError: model.residualError(),
+        acceptedSegments: raw.length - 1,
+        stopCause: 'budget-reached',
+      }),
+    )
+
+    expect(result.polylines).toEqual([raw])
+  })
+
   it('rejects invalid E1 geometry at B-derived mask resolution without regenerating', () => {
     let calls = 0
     expect(() =>
@@ -468,6 +498,166 @@ describe('public Scribble strategy boundary', () => {
       ),
     ).toThrow(/invalid geometry/)
     expect(calls).toBe(1)
+  })
+
+  it('rejects field-aware E1 geometry that exceeds its local scale', () => {
+    let calls = 0
+    expect(() =>
+      runScribbleStrategyForTesting(
+        {
+          ...input(source(), 'field-final-safety'),
+          scaleField: createScribbleScaleField(1, () => 1),
+        },
+        TINY_LIMITS,
+        ({ model }) => {
+          calls++
+          return {
+            polylines: [[[25, 50], [75, 50]]],
+            residualError: model.residualError(),
+            acceptedSegments: 1,
+            stopCause: 'budget-reached',
+          }
+        },
+      ),
+    ).toThrow(/invalid geometry/)
+    expect(calls).toBe(1)
+  })
+})
+
+describe('Scribble Scale Field end-to-end acceptance', () => {
+  const field = createScribbleScaleField(1, ([x, y]) =>
+    1 + 0.75 * (x / FRAME.width) + 0.25 * (y / FRAME.height),
+  )
+
+  it('accepts scale separately from tone and completes zero-mask demand safely', () => {
+    const zeroMaskSource = Object.freeze({
+      toneField: constantTone(1),
+      shadingMask: createShadingMask(() => 0),
+    })
+    const result = scribbleStrategy({
+      ...input(zeroMaskSource, 'field-zero-mask'),
+      scaleField: field,
+    })
+
+    expect(result).toEqual({
+      polylines: [],
+      termination: 'completed',
+      residualError: 0,
+    })
+    expect(field.kind).toBe('scribble-scale-field')
+    expect(zeroMaskSource.toneField.kind).toBe('tone-field')
+  })
+
+  it('converges under a continuous analytic field without entering zero permission', () => {
+    const fixture = source(
+      constantTone(0.8),
+      thinZeroBarrierMask(FRAME),
+    )
+    const result = scribbleStrategy({
+      ...input(fixture, 'field-convergence', { toneFidelity: 0 }),
+      scaleField: field,
+    })
+
+    expect(result.termination).toBe('completed')
+    expect(result.residualError).toBeLessThanOrEqual(0.12)
+    expect(independentlyMaskSafe(result, fixture, 0.1)).toBe(true)
+  })
+
+  it('honors zero and nonzero authored early stops with a field', () => {
+    const fixture = source(constantTone(1))
+    const stoppedAtZero = scribbleStrategy({
+      ...input(fixture, 'field-stop-zero', { stopPoint: 0 }),
+      scaleField: field,
+    })
+    const stoppedAfterWork = scribbleStrategy({
+      ...input(fixture, 'field-stop-nonzero', { stopPoint: 1 }),
+      scaleField: field,
+    })
+
+    expect(stoppedAtZero).toEqual({
+      polylines: [],
+      termination: 'stopped-early',
+      residualError: 1,
+    })
+    expect(stoppedAfterWork.termination).toBe('stopped-early')
+    expect(segmentCount(stoppedAfterWork)).toBeGreaterThan(0)
+    expect(stoppedAfterWork.residualError).toBeLessThan(1)
+  })
+
+  it('retains one scale-modulated path when a small safety budget exhausts', () => {
+    const limits: ScribbleExecutionLimits = {
+      maxAcceptedSegments: 8,
+      maxPolylines: 8,
+      maxStagnations: 8,
+      maxRestarts: 8,
+    }
+    const result = runScribbleStrategyForTesting(
+      {
+        ...input(source(constantTone(1)), 'field-budget'),
+        scaleField: field,
+      },
+      limits,
+    )
+
+    expect(result.termination).toBe('budget-exhausted')
+    expect(segmentCount(result)).toBeGreaterThanOrEqual(8)
+    expect(result.polylines).toHaveLength(1)
+    expectValidResult(result)
+  })
+
+  it('keeps the fine lattice fixed while constant fields change segment scale', () => {
+    const fixture = source(constantTone(1))
+    const fine = runScribbleStrategyForTesting(
+      {
+        ...input(fixture, 'field-scale-response'),
+        scaleField: createScribbleScaleField(1, () => 1),
+      },
+      TINY_LIMITS,
+    )
+    const broad = runScribbleStrategyForTesting(
+      {
+        ...input(fixture, 'field-scale-response'),
+        scaleField: createScribbleScaleField(1, () => 2),
+      },
+      TINY_LIMITS,
+    )
+
+    expect(fine.polylines[0]![0]).toEqual(broad.polylines[0]![0])
+    expect(meanSegmentLength(broad)).toBeCloseTo(
+      meanSegmentLength(fine) * 2,
+      10,
+    )
+    expect(fine.polylines).toHaveLength(1)
+    expect(broad.polylines).toHaveLength(1)
+  })
+
+  it('is deterministic and reroutes by Seed without mutating either field', () => {
+    const toneSource = Object.freeze({
+      toneField: horizontalGradientTone(FRAME),
+      shadingMask: FULL_MASK,
+    })
+    const scaleSamples: Point[] = []
+    const observedField = createScribbleScaleField(1, ([x, y]) => {
+      scaleSamples.push([x, y])
+      return 1 + x / FRAME.width
+    })
+    const shared = {
+      ...input(toneSource, 'field-same-seed', { stopPoint: 1 }),
+      scaleField: observedField,
+    }
+    const first = scribbleStrategy(shared)
+    const firstSampleCount = scaleSamples.length
+    const repeated = scribbleStrategy(shared)
+    const secondSampleCount = scaleSamples.length - firstSampleCount
+    const changed = scribbleStrategy({ ...shared, seed: 'field-new-seed' })
+
+    expect(repeated).toEqual(first)
+    expect(secondSampleCount).toBe(firstSampleCount)
+    expect(changed.polylines).not.toEqual(first.polylines)
+    expect(shared.source).toBe(toneSource)
+    expect(shared.scaleField).toBe(observedField)
+    expect(Object.isFrozen(toneSource)).toBe(true)
+    expect(Object.isFrozen(observedField)).toBe(true)
   })
 })
 
