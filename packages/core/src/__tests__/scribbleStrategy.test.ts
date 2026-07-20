@@ -269,6 +269,20 @@ describe('public Scribble strategy boundary', () => {
     expect(Object.isFrozen(snapshots[0])).toBe(true)
   })
 
+  it('keeps authored-stop no-demand progress on the cap-work contract', () => {
+    const snapshots: ScribbleProgress[] = []
+    scribbleStrategy({
+      ...input(source(constantTone(0)), 'authored-no-demand', {
+        stopPoint: 50,
+      }),
+      observer: (progress) => snapshots.push(progress),
+    })
+
+    expect(snapshots).toEqual([
+      { completedWorkUnits: 0, totalWorkUnits: 0, terminal: true },
+    ])
+  })
+
   it('keeps public output byte-identical when observers mutate or throw', () => {
     const strategyInput = input(
       source(constantTone(1)),

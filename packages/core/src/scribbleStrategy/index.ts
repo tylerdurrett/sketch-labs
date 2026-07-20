@@ -161,7 +161,7 @@ function executeScribbleStrategy(
       const progress: ScribbleProgress = Object.freeze({
         completedWorkUnits: 0,
         totalWorkUnits: 0,
-        convergence: 1,
+        ...(input.controls.stopPoint === 100 ? { convergence: 1 } : {}),
         terminal: true,
       })
       try {

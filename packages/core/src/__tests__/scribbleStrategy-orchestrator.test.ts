@@ -84,7 +84,6 @@ describe('Scribble pass orchestration', () => {
       {
         completedWorkUnits: 0,
         totalWorkUnits: 0,
-        convergence: 1,
         terminal: true,
       },
     ])
@@ -423,7 +422,7 @@ describe('Scribble pass progress observation', () => {
     expect(snapshots[1]!.convergence).toBe(snapshots[0]!.convergence)
   })
 
-  it('uses the authored cap in the stable progress total', () => {
+  it('uses the authored cap for progress and omits threshold convergence', () => {
     const snapshots: ScribbleProgress[] = []
     const result = runScribbleOrchestrator({
       model: model(() => 1),
@@ -436,18 +435,9 @@ describe('Scribble pass progress observation', () => {
 
     expect(result.stopCause).toBe('authored-limit-reached')
     expect(snapshots).toEqual([
-      expect.objectContaining({
-        completedWorkUnits: 1,
-        totalWorkUnits: 6,
-        terminal: false,
-      }),
-      expect.objectContaining({
-        completedWorkUnits: 1,
-        totalWorkUnits: 6,
-        terminal: true,
-      }),
+      { completedWorkUnits: 1, totalWorkUnits: 6, terminal: false },
+      { completedWorkUnits: 1, totalWorkUnits: 6, terminal: true },
     ])
-    expect(snapshots[1]!.convergence).toBe(snapshots[0]!.convergence)
   })
 
   it('counts a stagnant growth attempt as one completed work unit', () => {

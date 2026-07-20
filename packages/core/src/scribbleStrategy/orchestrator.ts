@@ -213,7 +213,9 @@ export function runScribbleOrchestrator({
     const progress = Object.freeze({
       completedWorkUnits,
       totalWorkUnits: completedWorkUnits === 0 ? 0 : configuredWorkUnits,
-      convergence: convergence(),
+      ...(authoredAcceptedSegmentLimit === undefined
+        ? { convergence: convergence() }
+        : {}),
       terminal,
     })
     try {

@@ -289,6 +289,33 @@ describe("ScribbleCoordinator", () => {
     await result;
   });
 
+  it("retains cap-work ETA when an authored stop omits convergence", async () => {
+    const worker = new FakeWorker();
+    let now = 0;
+    const updates = vi.fn();
+    const coordinator = new ScribbleCoordinator(
+      () => worker,
+      () => now,
+    );
+    const result = coordinator.start(identity(), updates);
+
+    worker.emit("message", progressResponse(worker, 10, 100));
+    now = 1_000;
+    worker.emit("message", progressResponse(worker, 20, 100));
+
+    expect(updates).toHaveBeenLastCalledWith({
+      snapshot: {
+        completedWorkUnits: 20,
+        totalWorkUnits: 100,
+        terminal: false,
+      },
+      eta: { kind: "remaining", revision: 2, remainingMs: 8_000 },
+    });
+
+    worker.emit("message", successResponse(worker));
+    await result;
+  });
+
   it("cancels, recreates with a fresh ETA, and ignores the old worker", async () => {
     const firstWorker = new FakeWorker();
     const secondWorker = new FakeWorker();
