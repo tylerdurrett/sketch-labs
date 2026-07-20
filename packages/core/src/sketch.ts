@@ -532,6 +532,15 @@ export function randomize(
   rand: () => number,
 ): Params {
   validateParamSchema(schema)
+  for (const [key, spec] of Object.entries(schema)) {
+    if (
+      spec.kind === 'choice' &&
+      Object.prototype.hasOwnProperty.call(params, key)
+    ) {
+      validateChoiceParamValue(spec, params[key], key)
+    }
+  }
+
   const next: Params = { ...params }
   for (const [key, spec] of Object.entries(schema)) {
     if (locks.has(key)) continue

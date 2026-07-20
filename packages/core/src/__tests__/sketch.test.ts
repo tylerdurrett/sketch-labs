@@ -636,6 +636,39 @@ describe('randomize', () => {
     expect(rand).not.toHaveBeenCalled()
   })
 
+  it.each([42, 'hatching'])(
+    'rejects an invalid standalone Choice value (%s) without consuming RNG',
+    (value) => {
+      const schema = {
+        strategy: conditionalSchema.strategy,
+      } satisfies ParamSchema
+      const rand = vi.fn(scriptedRand([]))
+
+      expect(() =>
+        randomize(schema, { strategy: value }, new Set(), rand),
+      ).toThrow(/Choice param `strategy` value must be one of/)
+      expect(rand).not.toHaveBeenCalled()
+    },
+  )
+
+  it('validates a Choice controller even when all its dependents are locked', () => {
+    const schema = {
+      strategy: conditionalSchema.strategy,
+      density: conditionalSchema.scribbleDensity,
+    } satisfies ParamSchema
+    const rand = vi.fn(scriptedRand([]))
+
+    expect(() =>
+      randomize(
+        schema,
+        { strategy: 'hatching', density: 4 },
+        new Set(['density']),
+        rand,
+      ),
+    ).toThrow(/Choice param `strategy` value must be one of/)
+    expect(rand).not.toHaveBeenCalled()
+  })
+
   it('rolls each unlocked numeric param within its own [min, max] via min + rand()*(max-min)', () => {
     const schema: ParamSchema = {
       count: { kind: 'number', min: 1, max: 80, default: 24 },
