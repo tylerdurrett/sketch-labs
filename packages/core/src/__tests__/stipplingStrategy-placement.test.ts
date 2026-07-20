@@ -121,6 +121,30 @@ describe('initial Stipple placement', () => {
     expect(quarter.marks.length).toBe(full.marks.length / 4)
   })
 
+  it.each([
+    [0.005, 4],
+    [0.001, 1],
+  ])(
+    'completes deterministic low soft permission %s with %s requested marks',
+    (permission, expectedCount) => {
+      const target = model(source(() => 1, () => permission))
+      const first = placeInitialStipples(
+        target,
+        createRandom(`low-permission-${permission}`),
+      )
+      const second = placeInitialStipples(
+        target,
+        createRandom(`low-permission-${permission}`),
+      )
+
+      expect(target.scales.targetCount).toBe(expectedCount)
+      expect(first).toEqual(second)
+      expect(first.requestedCountReached).toBe(true)
+      expect(first.marks).toHaveLength(expectedCount)
+      expect(first.attemptsUsed).toBeLessThanOrEqual(1_000_000)
+    },
+  )
+
   it('validates every complete fixed-length segment against exact-zero permission', () => {
     const barrierSource = source(
       () => 1,

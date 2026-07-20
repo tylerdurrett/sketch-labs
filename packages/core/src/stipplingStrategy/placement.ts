@@ -28,6 +28,7 @@ export interface StipplingPlacementOutcome {
 
 function resolveAttemptLimit(
   targetCount: number,
+  averageDemand: number,
   options: StipplingPlacementOptions,
 ): number {
   const requested = options.maxAttempts
@@ -45,11 +46,21 @@ function resolveAttemptLimit(
   }
 
   if (targetCount === 0) return 0
+  // Target count already falls linearly with average demand, while uniform
+  // darts are independently thinned by that same probability. Restore the
+  // corresponding work here so soft permission changes abundance rather than
+  // silently turning routine placement into budget exhaustion.
+  const demandAdjustedAttempts =
+    averageDemand > 0
+      ? Math.ceil(
+          (targetCount * DEFAULT_ATTEMPTS_PER_TARGET) / averageDemand,
+        )
+      : MAXIMUM_PLACEMENT_ATTEMPTS
   return Math.min(
     MAXIMUM_PLACEMENT_ATTEMPTS,
     Math.max(
       MINIMUM_DEFAULT_ATTEMPTS,
-      targetCount * DEFAULT_ATTEMPTS_PER_TARGET,
+      demandAdjustedAttempts,
     ),
   )
 }
@@ -143,7 +154,11 @@ export function placeInitialStipples(
   options: StipplingPlacementOptions = {},
 ): Readonly<StipplingPlacementOutcome> {
   const { frame, scales } = model
-  const attemptLimit = resolveAttemptLimit(scales.targetCount, options)
+  const attemptLimit = resolveAttemptLimit(
+    scales.targetCount,
+    model.lattice.averageDemand,
+    options,
+  )
   const centerIndex = new StippleCenterIndex(scales.minimumSpacing)
   const marks: Readonly<StippleMark>[] = []
   let attemptsUsed = 0
