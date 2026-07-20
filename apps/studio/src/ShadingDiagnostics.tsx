@@ -1,5 +1,6 @@
 import type { ScribbleDiagnostics, ScribbleProgress } from "@harness/core";
 
+import { Button } from "./components/ui/button";
 import type { RollingEtaEstimate } from "./rollingEta";
 
 /** Final metrics and provenance for the geometry currently retained on screen. */
@@ -17,7 +18,11 @@ export type ShadingPreparationDiagnostics =
       readonly progress: ScribbleProgress | null;
       readonly eta: RollingEtaEstimate;
     }
-  | { readonly kind: "failure"; readonly message: string };
+  | {
+      readonly kind: "failure";
+      readonly message: string;
+      readonly onRetry: () => void;
+    };
 
 export interface ShadingDiagnosticsProps {
   /** The last complete result, which may intentionally remain visible while stale. */
@@ -280,9 +285,11 @@ function PreparingLane({
 function FailureLane({
   message,
   replacing,
+  onRetry,
 }: {
   readonly message: string;
   readonly replacing: boolean;
+  readonly onRetry: () => void;
 }) {
   const laneName = replacing ? "Replacement preparation" : "Result preparation";
   return (
@@ -296,6 +303,9 @@ function FailureLane({
       >
         <strong>Preparation failed:</strong> {message}
       </p>
+      <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+        Retry
+      </Button>
     </section>
   );
 }
@@ -323,7 +333,11 @@ export function ShadingDiagnostics({
         {preparation.kind === "preparing" ? (
           <PreparingLane preparation={preparation} replacing={replacing} />
         ) : preparation.kind === "failure" ? (
-          <FailureLane message={preparation.message} replacing={replacing} />
+          <FailureLane
+            message={preparation.message}
+            replacing={replacing}
+            onRetry={preparation.onRetry}
+          />
         ) : displayed === null ? (
           <p className="text-xs text-muted-foreground">
             No shading result yet.

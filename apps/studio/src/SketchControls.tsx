@@ -182,16 +182,26 @@ function sameParams(
 }
 
 const DETAIL_REFERENCE_ONLY_PARAM = "detailSensitivity";
+const DETAIL_INFLUENCE_PARAM = "detailInfluence";
 
-/** Keep #367's diagnostic control outside artwork identity until #369 owns it. */
+/** Normalize sensitivity out of artwork identity only when Detail is disabled. */
 function artworkGenerationParams(
   sketch: Pick<Sketch, "schema" | "generateDetailField">,
   params: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
   const spec = sketch.schema[DETAIL_REFERENCE_ONLY_PARAM];
+  const influenceSpec = sketch.schema[DETAIL_INFLUENCE_PARAM];
+  const influence =
+    influenceSpec?.kind === "number" &&
+    typeof params[DETAIL_INFLUENCE_PARAM] === "number"
+      ? params[DETAIL_INFLUENCE_PARAM]
+      : influenceSpec?.kind === "number"
+        ? influenceSpec.default
+        : 0;
   if (
     sketch.generateDetailField === undefined ||
     spec?.kind !== "number" ||
+    influence > 0 ||
     Object.is(params[DETAIL_REFERENCE_ONLY_PARAM], spec.default)
   ) {
     return params;
@@ -599,6 +609,7 @@ export function SketchControls({
         : {
             kind: "failure",
             message: scribblePreparation.session.failure,
+            onRetry: scribblePreparation.retry,
           };
   const [acknowledgedScribble, setAcknowledgedScribble] =
     useState<ScribblePaintAcknowledgement | null>(null);

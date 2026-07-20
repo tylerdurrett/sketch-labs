@@ -282,6 +282,33 @@ describe("useScribblePreparation", () => {
     expect(latest!.progress).toBeNull();
   });
 
+  it("retries the current failed identity exactly once", async () => {
+    const coordinator = new FakeCoordinator();
+    mount(<Probe createCoordinator={() => coordinator} />);
+    coordinator.starts[0]!.resolve({
+      status: "failure",
+      jobId: 1,
+      error: "analysis failed",
+    });
+    await flush();
+    expect(latest!.session.failure).toBe("analysis failed");
+
+    act(() => {
+      latest!.retry();
+      latest!.retry();
+    });
+
+    expect(coordinator.starts).toHaveLength(2);
+    expect(coordinator.starts[1]!.identity).toBe(
+      coordinator.starts[0]!.identity,
+    );
+    expect(latest!.session.active).toMatchObject({
+      token: 2,
+      sourceInputRevision: 1,
+    });
+    expect(latest!.session.failure).toBeNull();
+  });
+
   it("suspends synchronously, cancels active work once, and rejects its callbacks", async () => {
     const coordinator = new FakeCoordinator();
     mount(<Probe createCoordinator={() => coordinator} />);

@@ -78,6 +78,8 @@ export interface UseScribblePreparationResult {
   readonly settleTransaction: (authored: ScribbleAuthoredState) => void;
   /** Immediately request the latest state after one atomic history command. */
   readonly requestAtomic: (authored: ScribbleAuthoredState) => void;
+  /** Re-enqueue the exact current identity after a bounded worker failure. */
+  readonly retry: () => void;
 }
 
 const defaultCoordinatorFactory: ScribblePreparationCoordinatorFactory = (
@@ -99,9 +101,15 @@ export function createScribbleIdentityForAuthoredState(
 }
 
 function safeErrorDetail(error: unknown): string {
-  return error instanceof Error && error.message.trim() !== ""
-    ? error.message.slice(0, 500)
-    : "Scribble worker failed";
+  const detail =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+  return detail.trim() === ""
+    ? "Scribble worker failed"
+    : detail.slice(0, 500);
 }
 
 /**
@@ -220,6 +228,22 @@ export function useScribblePreparation({
   );
 
   const requestAtomic = settleTransaction;
+
+  const retry = useCallback((): void => {
+    const current = sessionRef.current;
+    if (
+      current.failure === null ||
+      current.desiredIdentity === null ||
+      current.sourceInputRevision === null
+    ) {
+      return;
+    }
+    dispatch({
+      type: "retry",
+      identity: current.desiredIdentity,
+      sourceInputRevision: current.sourceInputRevision,
+    });
+  }, [dispatch]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -349,7 +373,7 @@ export function useScribblePreparation({
             type: "failed",
             token: pending.token,
             identity: pending.identity,
-            error: outcome.error,
+            error: safeErrorDetail(outcome.error),
           });
         }
       })
@@ -366,5 +390,6 @@ export function useScribblePreparation({
     previewAuthoredState,
     settleTransaction,
     requestAtomic,
+    retry,
   };
 }
