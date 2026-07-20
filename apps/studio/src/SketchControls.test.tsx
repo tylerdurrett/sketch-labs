@@ -10,6 +10,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  activeParams,
   clipSceneToBounds,
   computePlotMapping,
   createShadingMask,
@@ -30,9 +31,10 @@ import {
   resolvePlotCompositionFrame,
   scribbleMoon,
   toneCalibration,
-  type ParamSchema,
   type CoordinateSpace,
   type DetailField,
+  type Params,
+  type ParamSchema,
   type PageFrame,
   type PlotProfile,
   type Preset,
@@ -1025,6 +1027,25 @@ function paramInput(el: HTMLElement, key: string): HTMLInputElement {
   const input = el.querySelector<HTMLInputElement>(`#control-${key}`);
   if (input === null) throw new Error(`no input for param ${key}`);
   return input;
+}
+
+/** The schema-derived Choice select for a given parameter key. */
+function choiceParamSelect(el: HTMLElement, key: string): HTMLSelectElement {
+  const select = el.querySelector<HTMLSelectElement>(`select#control-${key}`);
+  if (select === null) throw new Error(`no Choice control for param ${key}`);
+  return select;
+}
+
+/** Set one controlled select through the native setter React observes. */
+function selectValue(select: HTMLSelectElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLSelectElement.prototype,
+    "value",
+  )!.set!;
+  act(() => {
+    setter.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 }
 
 function clickButton(el: HTMLElement, text: string): void {
@@ -3329,6 +3350,225 @@ describe("SketchControls — randomize / lock wiring", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(paramInput(el, "radius").value).toBe("42");
+  });
+});
+
+describe("SketchControls — conditional authored-state acceptance", () => {
+  const schema: ParamSchema = {
+    strategy: {
+      kind: "choice",
+      default: "scribble",
+      options: [
+        { value: "scribble", label: "Scribble" },
+        { value: "stipple", label: "Stippling" },
+      ],
+    },
+    scribbleDensity: {
+      kind: "number",
+      min: 0,
+      max: 100,
+      default: 10,
+      activeWhen: { key: "strategy", equals: "scribble" },
+    },
+    scribbleFidelity: {
+      kind: "number",
+      min: 0,
+      max: 100,
+      default: 20,
+      activeWhen: { key: "strategy", equals: "scribble" },
+    },
+    stippleDensity: {
+      kind: "number",
+      min: 0,
+      max: 100,
+      default: 60,
+      activeWhen: { key: "strategy", equals: "stipple" },
+    },
+  };
+
+  const commitNumber = (
+    el: HTMLElement,
+    key: string,
+    value: string,
+  ): void => {
+    const input = paramInput(el, key);
+    act(() => input.focus());
+    setInput(input, value);
+    act(() => input.blur());
+  };
+
+  it("keeps hidden tuning through one-command Choice Undo/Redo and randomizes only active unlocked numbers", async () => {
+    const el = mount(
+      <SketchControls sketch={sketchWith("conditional-history", schema)} />,
+    );
+    await flush();
+
+    expect(choiceParamSelect(el, "strategy").value).toBe("scribble");
+    expect(paramInput(el, "scribbleDensity").value).toBe("10");
+    expect(el.querySelector("#control-stippleDensity")).toBeNull();
+    commitNumber(el, "scribbleDensity", "23");
+
+    const commitsBeforeFirstSwitch = historyCapture.transactionCommits.length;
+    selectValue(choiceParamSelect(el, "strategy"), "stipple");
+    expect(historyCapture.transactionCommits).toHaveLength(
+      commitsBeforeFirstSwitch + 1,
+    );
+    const firstSwitch = historyCapture.transactionCommits.at(-1)!;
+    expect(firstSwitch.before.transactionStart?.params.strategy).toBe(
+      "scribble",
+    );
+    expect(firstSwitch.before.present.params.strategy).toBe("stipple");
+    expect(firstSwitch.after.present.params.strategy).toBe("stipple");
+    expect(firstSwitch.after.past).toHaveLength(
+      firstSwitch.before.past.length + 1,
+    );
+    expect(el.querySelector("#control-scribbleDensity")).toBeNull();
+    expect(paramInput(el, "stippleDensity").value).toBe("60");
+
+    commitNumber(el, "stippleDensity", "81");
+    const commitsBeforeReturn = historyCapture.transactionCommits.length;
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    expect(historyCapture.transactionCommits).toHaveLength(
+      commitsBeforeReturn + 1,
+    );
+    expect(paramInput(el, "scribbleDensity").value).toBe("23");
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(choiceParamSelect(el, "strategy").value).toBe("stipple");
+    expect(paramInput(el, "stippleDensity").value).toBe("81");
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(choiceParamSelect(el, "strategy").value).toBe("scribble");
+    expect(paramInput(el, "scribbleDensity").value).toBe("23");
+
+    act(() => {
+      el.querySelector('button[aria-label="scribbleDensity lock"]')!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    clickButton(el, "Randomize");
+
+    expect(paramInput(el, "scribbleDensity").value).toBe("23");
+    expect(paramInput(el, "scribbleFidelity").value).toBe("50");
+    expect(random).toHaveBeenCalledTimes(1);
+    const authored = historyCapture.atomic.at(-1)!.after.present.params as Params;
+    const authoredSnapshot = { ...authored };
+    expect(authored).toEqual({
+      strategy: "scribble",
+      scribbleDensity: 23,
+      scribbleFidelity: 50,
+      stippleDensity: 81,
+    });
+    expect(activeParams(schema, authored)).toEqual({
+      strategy: "scribble",
+      scribbleDensity: 23,
+      scribbleFidelity: 50,
+    });
+    expect(authored).toEqual(authoredSnapshot);
+
+    selectValue(choiceParamSelect(el, "strategy"), "stipple");
+    expect(paramInput(el, "stippleDensity").value).toBe("81");
+  });
+
+  it("saves complete conditional state and reloads the selected and hidden branches", async () => {
+    const loaded: Preset = {
+      version: 2,
+      sketch: "conditional-preset",
+      name: "authored",
+      seed: 777,
+      params: {
+        strategy: "stipple",
+        scribbleDensity: 31,
+        scribbleFidelity: 42,
+        stippleDensity: 87,
+      },
+      locks: ["scribbleDensity"],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    };
+    listPresets.mockResolvedValue(["authored"]);
+    loadPreset.mockResolvedValue(loaded);
+    const el = mount(
+      <SketchControls sketch={sketchWith("conditional-preset", schema)} />,
+    );
+    await flush();
+
+    commitNumber(el, "scribbleDensity", "23");
+    selectValue(choiceParamSelect(el, "strategy"), "stipple");
+    commitNumber(el, "stippleDensity", "81");
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      "conditional-save",
+    );
+    clickButton(el, "Save");
+    await flush();
+
+    expect(savePreset).toHaveBeenCalledTimes(1);
+    expect(savePreset.mock.calls[0]![0]).toMatchObject({
+      sketch: "conditional-preset",
+      name: "conditional-save",
+      params: {
+        strategy: "stipple",
+        scribbleDensity: 23,
+        scribbleFidelity: 20,
+        stippleDensity: 81,
+      },
+    });
+
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    selectValue(picker, "authored");
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(choiceParamSelect(el, "strategy").value).toBe("stipple");
+    expect(paramInput(el, "stippleDensity").value).toBe("87");
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual(
+      loaded.params,
+    );
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    expect(paramInput(el, "scribbleDensity").value).toBe("31");
+    expect(paramInput(el, "scribbleFidelity").value).toBe("42");
+  });
+
+  it("reconciles a legacy Preset missing Choice and dependent fields to live defaults", async () => {
+    listPresets.mockResolvedValue(["legacy"]);
+    loadPreset.mockResolvedValue({
+      version: 1,
+      sketch: "conditional-legacy",
+      name: "legacy",
+      seed: 888,
+      params: {},
+      locks: [],
+    });
+    const el = mount(
+      <SketchControls sketch={sketchWith("conditional-legacy", schema)} />,
+    );
+    await flush();
+
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    selectValue(picker, "legacy");
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(choiceParamSelect(el, "strategy").value).toBe("scribble");
+    expect(paramInput(el, "scribbleDensity").value).toBe("10");
+    expect(paramInput(el, "scribbleFidelity").value).toBe("20");
+    expect(el.querySelector("#control-stippleDensity")).toBeNull();
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual({
+      strategy: "scribble",
+      scribbleDensity: 10,
+      scribbleFidelity: 20,
+      stippleDensity: 60,
+    });
   });
 });
 
