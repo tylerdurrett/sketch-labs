@@ -233,7 +233,8 @@ function artworkChecksum(artwork) {
     }
   }
   hash.string(diagnostics.termination)
-  hash.number(diagnostics.residualError)
+  hash.string(diagnostics.fidelity.kind)
+  hash.number(diagnostics.fidelity.residualError)
   hash.number(diagnostics.pathLength)
   hash.number(diagnostics.polylineCount)
   hash.number(diagnostics.penLiftCount)
@@ -252,7 +253,7 @@ function artworkCounts(artwork) {
     pathLength: artwork.diagnostics.pathLength,
     penLifts: artwork.diagnostics.penLiftCount,
     termination: artwork.diagnostics.termination,
-    residualError: artwork.diagnostics.residualError,
+    residualError: artwork.diagnostics.fidelity.residualError,
   }
 }
 
@@ -268,7 +269,7 @@ function createEnvironment(pixels, prepared) {
 
 function generate(params, environment) {
   let finalProgress
-  const artwork = photoScribble.generateScribbleArtwork(
+  const artwork = photoScribble.generateShadingArtwork(
     params,
     SEED,
     FRAME,

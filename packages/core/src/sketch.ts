@@ -508,7 +508,7 @@ export interface StatelessSketch extends SketchBase {
    *
    * Unlike {@link generateOutlineSource}, this capability receives the exact
    * completed Scene instead of the inputs that could regenerate it. It is for
-   * caller-owned preparation paths such as Scribble, where the prepared result
+   * caller-owned preparation paths such as Shading, where the prepared result
    * is the authoritative artwork and must not be rerun or substituted while
    * applying physical-tool styling. As with {@link generateOutlineSource}, the
    * target may affect stroke width only: every emitted stroke uses the exact

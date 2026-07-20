@@ -179,7 +179,7 @@ function sameProvenance(
 ): boolean {
   // Ordinary live Fill revisions are transient capture bookkeeping; exact
   // Outline identity remains sufficient for their historic cache semantics.
-  // Caller-owned Scribble content carries a revision and must match both axes.
+  // Caller-owned Shading content carries a revision and must match both axes.
   if (left.contentRevision === undefined && right.contentRevision === undefined) {
     return true;
   }
