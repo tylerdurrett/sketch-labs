@@ -1,16 +1,21 @@
 import { describe, expect, it } from 'vitest'
 
 import type { PlotProfile } from '../plotProfile'
-import { applyPreset, deserialize, PRESET_VERSION } from '../preset'
+import {
+  applyPreset,
+  deserialize,
+  PRESET_VERSION,
+  type PresetFraming,
+} from '../preset'
 import { buildReproMetadata, reproFilenameStem } from '../reproMetadata'
 import type { ParamSchema } from '../sketch'
 
 /**
  * These prove the embedded payload reuses the {@link Preset} envelope (no new
  * schema) plus the frame time `t`, and that `name` carries the export filename
- * STEM. Without an active profile the JSON parses back to the v1 shape
- * `{ version:1, sketch, name, seed, params, locks, t? }`; supplying a profile
- * makes it the v2 shape that also carries `profile`.
+ * STEM. Without an active profile the JSON parses back to the v1 shape;
+ * supplying a profile makes it v2, and supplying profile plus framing makes it
+ * v3. Frame time remains an optional extension on every version.
  */
 
 /** A valid active Output Profile: A4 landscape with symmetric 10 mm insets. */
@@ -20,6 +25,31 @@ const profile: PlotProfile = {
   insets: { top: 10, right: 10, bottom: 10, left: 10 },
   includeFrame: true,
   toolWidthMillimeters: 0.3,
+}
+
+const framing: PresetFraming = {
+  pageFrame: { x: -20, y: 10, width: 320, height: 180 },
+  generationAspect: 4 / 3,
+  aspectLocked: true,
+}
+
+const fixedPageProfile: PlotProfile = {
+  width: 333.125,
+  height: 241.75,
+  insets: { top: 11, right: 19, bottom: 23, left: 7 },
+  includeFrame: false,
+  toolWidthMillimeters: 0.45,
+}
+
+const fixedPageFraming: PresetFraming = {
+  pageFrame: {
+    x: 18.75,
+    y: -8,
+    width: 600 / 7,
+    height: 415.5 / 7,
+  },
+  generationAspect: 3 / 2,
+  aspectLocked: true,
 }
 
 describe('reproFilenameStem', () => {
@@ -134,7 +164,7 @@ describe('buildReproMetadata', () => {
     })
 
     expect(JSON.parse(json)).toEqual({
-      version: PRESET_VERSION,
+      version: 2,
       sketch: 'waves',
       name: 'waves-seed123-t2.5',
       seed: 123,
@@ -143,7 +173,7 @@ describe('buildReproMetadata', () => {
       profile,
       t: 2.5,
     })
-    expect(PRESET_VERSION).toBe(2)
+    expect(PRESET_VERSION).toBe(3)
   })
 
   it.each([true, false])(
@@ -159,10 +189,138 @@ describe('buildReproMetadata', () => {
         }),
       )
 
-      expect(parsed.version).toBe(PRESET_VERSION)
+      expect(parsed.version).toBe(2)
       expect(parsed.profile.includeFrame).toBe(includeFrame)
     },
   )
+
+  it('serializes an exact static v3 snapshot when profile and framing are supplied', () => {
+    const parsed = JSON.parse(
+      buildReproMetadata({
+        sketchId: 'circles',
+        seed: 42,
+        params: { radius: 10 },
+        locks: new Set(['radius']),
+        profile,
+        framing,
+      }),
+    )
+
+    expect(parsed).toEqual({
+      version: PRESET_VERSION,
+      sketch: 'circles',
+      name: 'circles-seed42',
+      seed: 42,
+      params: { radius: 10 },
+      locks: ['radius'],
+      profile,
+      framing,
+    })
+    expect('t' in parsed).toBe(false)
+  })
+
+  it('serializes an exact timed v3 snapshot including t', () => {
+    expect(
+      JSON.parse(
+        buildReproMetadata({
+          sketchId: 'waves',
+          seed: 'framed-seed',
+          params: { radius: 10, count: 5 },
+          locks: new Set(['radius', 'count']),
+          t: 2.5,
+          profile,
+          framing,
+        }),
+      ),
+    ).toEqual({
+      version: PRESET_VERSION,
+      sketch: 'waves',
+      name: 'waves-seedframed-seed-t2.5',
+      seed: 'framed-seed',
+      params: { radius: 10, count: 5 },
+      locks: ['count', 'radius'],
+      profile,
+      framing,
+      t: 2.5,
+    })
+  })
+
+  it('round-trips framed metadata through Preset deserialize and apply', () => {
+    const schema: ParamSchema = {
+      count: { kind: 'number', min: 1, max: 80, default: 24 },
+      radius: { kind: 'number', min: 2, max: 100, default: 12 },
+    }
+    const payload = JSON.parse(
+      buildReproMetadata({
+        sketchId: 'waves',
+        seed: 'framed-seed',
+        params: { count: 5, radius: 10 },
+        locks: new Set(['radius', 'count']),
+        t: 2.5,
+        profile,
+        framing,
+      }),
+    )
+
+    expect(applyPreset(schema, deserialize(payload))).toEqual({
+      params: { count: 5, radius: 10 },
+      seed: 'framed-seed',
+      locks: ['count', 'radius'],
+      profile,
+      framing,
+    })
+  })
+
+  it('reuses the exact v3 framing envelope for fixed-page reproduction metadata', () => {
+    const schema: ParamSchema = {
+      count: { kind: 'number', min: 1, max: 80, default: 24 },
+    }
+    const payload = JSON.parse(
+      buildReproMetadata({
+        sketchId: 'circles',
+        seed: 'fixed-page-seed',
+        params: { count: 30 },
+        locks: new Set(['count']),
+        profile: fixedPageProfile,
+        framing: fixedPageFraming,
+      }),
+    )
+
+    expect(PRESET_VERSION).toBe(3)
+    expect(payload.version).toBe(3)
+    expect(Object.keys(payload).sort()).toEqual([
+      'framing',
+      'locks',
+      'name',
+      'params',
+      'profile',
+      'seed',
+      'sketch',
+      'version',
+    ])
+    expect(Object.keys(payload.framing).sort()).toEqual([
+      'aspectLocked',
+      'generationAspect',
+      'pageFrame',
+    ])
+    for (const field of [
+      'scale',
+      'center',
+      'fitReference',
+      'editMode',
+      'compositionTransform',
+    ]) {
+      expect(field in payload).toBe(false)
+      expect(field in payload.framing).toBe(false)
+    }
+    expect(applyPreset(schema, deserialize(payload))).toEqual({
+      params: { count: 30 },
+      seed: 'fixed-page-seed',
+      locks: ['count'],
+      profile: fixedPageProfile,
+      framing: fixedPageFraming,
+    })
+  })
 
   it('stays a v1 envelope with NO profile key when none is supplied', () => {
     const parsed = JSON.parse(
@@ -197,6 +355,35 @@ describe('buildReproMetadata', () => {
     expect(JSON.parse(json).profile).toEqual(profile)
   })
 
+  it('captures defensive profile, framing, and Page Frame snapshots', () => {
+    const liveProfile: PlotProfile = {
+      ...profile,
+      insets: { ...profile.insets },
+    }
+    const liveFraming: PresetFraming = {
+      ...framing,
+      pageFrame: { ...framing.pageFrame },
+    }
+    const json = buildReproMetadata({
+      sketchId: 'circles',
+      seed: 1,
+      params: {},
+      locks: new Set(),
+      profile: liveProfile,
+      framing: liveFraming,
+    })
+
+    liveProfile.width = 999
+    liveProfile.insets.top = 999
+    liveFraming.pageFrame.x = 999
+    liveFraming.generationAspect = 2
+    liveFraming.aspectLocked = false
+
+    const parsed = JSON.parse(json)
+    expect(parsed.profile).toEqual(profile)
+    expect(parsed.framing).toEqual(framing)
+  })
+
   it('captures an unresolved Image Asset ID as ordinary v2 Preset state that applies exactly', () => {
     const unresolvedImageAsset = 'unresolved/opaque ID?variant=🌲'
     const schema: ParamSchema = {
@@ -215,7 +402,7 @@ describe('buildReproMetadata', () => {
       }),
     )
 
-    expect(payload.version).toBe(PRESET_VERSION)
+    expect(payload.version).toBe(2)
     expect(payload.params.imageAsset).toBe(unresolvedImageAsset)
     expect(
       applyPreset(schema, deserialize(payload)),

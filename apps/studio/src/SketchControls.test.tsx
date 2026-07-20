@@ -11,22 +11,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clipSceneToBounds,
+  computePlotMapping,
   createShadingMask,
   createScribbleMoonStructuralScene,
   createToneField,
   crc32,
   DEFAULT_COMPOSITION_FRAME,
   defaultParams,
+  frameScene,
   HARNESS_FALLBACK_PLOT_PROFILE,
   hiddenLinePass,
   leafField,
   photoScribble,
   renderPlotterSVG,
+  resolveCompositionFrame,
   resolvePlotCompositionFrame,
   scribbleMoon,
   toneCalibration,
   type ParamSchema,
   type CoordinateSpace,
+  type PageFrame,
   type PlotProfile,
   type Preset,
   type Scene,
@@ -41,11 +45,31 @@ import type {
   LiveCanvasHandle,
 } from "./LiveCanvas";
 import { mutableScene } from "./outlineComputeProtocol";
-import { outlineScene } from "./outlineScene";
+import {
+  finalizeOutlineScene,
+  outlineScene,
+  type OutlineFinalizationStrokePolicy,
+} from "./outlineScene";
 import { ImageAssetResolutionError } from "./imageAssetResolver";
+import {
+  beginPageFrameManipulation,
+  finishPageFrameManipulation,
+  updatePageFrameManipulation,
+  type PageFrameAspectConstraint,
+  type PageFrameManipulationState,
+  type PageFrameManipulationTarget,
+  type PageFramePointer,
+} from "./pageFrameManipulation";
+import type { PageFrameEditDraft } from "./pageFrameEditDraft";
 import { isScribbleComputeIdentity } from "./scribbleComputeProtocol";
 import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
+import {
+  FIXED_PAGE_PARITY_COMPOSITION,
+  FIXED_PAGE_PARITY_FRAME,
+  FIXED_PAGE_PARITY_PROFILE,
+  fixedPageParityScene,
+} from "./fixedPageOutputParity.test-support";
 
 // Preview == export seam probe (issue #220): capture the Scene the export path
 // hands `renderToSVG`, so a test can prove it is the SAME processed Scene the
@@ -125,6 +149,29 @@ const managedImageAssetJob = vi.hoisted(() => ({
   normalize: vi.fn(),
   import: vi.fn(),
 }));
+const controlPanelCapture = vi.hoisted(() => ({
+  recomposeHandlers: [] as Array<(request: {
+    readonly paramKey: string;
+    readonly imageAssetId: string;
+    readonly dimensions: { readonly width: number; readonly height: number };
+  }) => void>,
+}));
+
+vi.mock("./ControlPanel", async (importActual) => {
+  const actual = await importActual<typeof import("./ControlPanel")>();
+  const ControlPanel = actual.ControlPanel;
+  return {
+    ...actual,
+    ControlPanel: (props: Parameters<typeof ControlPanel>[0]) => {
+      if (props.onRecomposeToImageAspect !== undefined) {
+        controlPanelCapture.recomposeHandlers.push(
+          props.onRecomposeToImageAspect,
+        );
+      }
+      return <ControlPanel {...props} />;
+    },
+  };
+});
 
 vi.mock("./imageAssetsClient", async (importActual) => {
   const actual = await importActual<typeof import("./imageAssetsClient")>();
@@ -241,10 +288,36 @@ vi.mock("./hiddenLineCoordinator", () => ({
                     primitives: [],
                   },
               snapshot.identity.tolerance,
-              snapshot.identity.includeFrame,
             )
           : mutableScene(snapshot.reusableOutline.scene);
-      const clipped = clipSceneToBounds(processed);
+      const clipped = clipSceneToBounds(
+        finalizeOutlineScene(
+          processed,
+          snapshot.pageFrame,
+          snapshot.profile.includeFrame,
+          snapshot.identity.sourceKind === "legacy-scene"
+            ? {
+                kind: "legacy-scene",
+                target: {
+                  toolWidthMillimeters:
+                    snapshot.profile.toolWidthMillimeters,
+                  millimetersPerSceneUnit: computePlotMapping(
+                    snapshot.pageFrame === null
+                      ? snapshot.identity.compositionFrame
+                      : {
+                          width: snapshot.pageFrame.width,
+                          height: snapshot.pageFrame.height,
+                        },
+                    snapshot.profile,
+                  ).scale,
+                },
+              }
+            : {
+                kind: "physical-tool",
+                target: snapshot.identity.outlineTarget,
+              },
+        ),
+      );
       outlineJob.exportFinalizations += 1;
       const payload = {
         status: "success" as const,
@@ -394,7 +467,13 @@ let fakeCanvasToBlob: HTMLCanvasElement["toBlob"];
 // The current-t the mocked handle reports — the export's `-t{t}` source.
 let fakeCurrentT = 0;
 // Atomic displayed-Scene snapshot exposed by the mocked LiveCanvas handle.
-let fakeDisplayedScene: DisplayedSceneSnapshot | null = null;
+type TestDisplayedSceneSnapshot = Omit<
+  DisplayedSceneSnapshot,
+  "sourceScene" | "displayedScene"
+> &
+  Partial<Pick<DisplayedSceneSnapshot, "sourceScene" | "displayedScene">>;
+let fakeDisplayedScene: TestDisplayedSceneSnapshot | null = null;
+let fakeDisplayedFillScene: TestDisplayedSceneSnapshot | null = null;
 let fakeFillCaptureScene: DisplayedSceneSnapshot["scene"] | null = null;
 // #228: the real LiveCanvas signals `onOutlineComputed` when an outline pass has
 // drawn, which the owner uses to clear its "Computing…" affordance. The mock
@@ -406,9 +485,19 @@ let lastOnOutlineComputed: (() => void) | null = null;
 let autoFireOutlineComputed = true;
 let lastCompositionFrame: CoordinateSpace | null = null;
 let lastProfile: PlotProfile | null = null;
+let lastPageFrameDraft: PageFrame | null = null;
+let lastPageFrameEditDraft: PageFrameEditDraft | null = null;
+let lastCommittedPageFrame: PageFrame | null = null;
+let lastPageFrameAspectConstraint: PageFrameAspectConstraint | null = null;
+let lastOnPageFrameDraftChange: ((frame: PageFrame) => void) | null = null;
 let lastToneSource: ToneSource | null = null;
+let lastRenderScene: Scene | null = null;
+let lastOutlineFinalizationStrokePolicy:
+  | OutlineFinalizationStrokePolicy
+  | undefined;
 let autoAcknowledgeDisplayedScene = true;
 let acknowledgeDisplayedScene: (() => void) | null = null;
+let generateDuringLiveCanvasRender = false;
 
 // LiveCanvas is a browser-only sink (canvas2d, ResizeObserver, matchMedia) and
 // is NOT under test here — these are wiring tests for the control state. Replace
@@ -422,8 +511,14 @@ vi.mock("./LiveCanvas", () => ({
     seed,
     renderState,
     tolerance,
+    outlineFinalizationStrokePolicy,
     compositionFrame,
     profile,
+    pageFrameDraft,
+    pageFrameEditDraft,
+    onPageFrameDraftChange,
+    pageFrameAspectConstraint,
+    pageFrame,
     handleRef,
     inputRevision = 0,
     fillCaptureRequest,
@@ -444,8 +539,14 @@ vi.mock("./LiveCanvas", () => ({
       unresolvedAssetIds?: readonly string[];
     };
     tolerance?: number;
+    outlineFinalizationStrokePolicy?: OutlineFinalizationStrokePolicy;
     compositionFrame: CoordinateSpace;
     profile: PlotProfile;
+    pageFrameDraft?: PageFrame | null;
+    pageFrameEditDraft?: PageFrameEditDraft | null;
+    onPageFrameDraftChange?: (frame: PageFrame) => void;
+    pageFrameAspectConstraint?: PageFrameAspectConstraint;
+    pageFrame?: PageFrame | null;
     handleRef?: Ref<LiveCanvasHandle>;
     inputRevision?: number;
     fillCaptureRequest?: {
@@ -457,11 +558,34 @@ vi.mock("./LiveCanvas", () => ({
     onFillCaptured?: (capture: unknown) => void;
     onDisplayedSceneCommitted?: (snapshot: DisplayedSceneSnapshot) => void;
   }) => {
-    const capturedFrame = (): DisplayedSceneSnapshot =>
-      fakeDisplayedScene ??
-      (renderState?.scene === undefined
+    if (
+      generateDuringLiveCanvasRender &&
+      renderState?.kind !== "unavailable" &&
+      renderState?.scene === undefined
+    ) {
+      sketch.generate(params, seed, fakeCurrentT, compositionFrame);
+    }
+    const capturedFrame = (
+      retained = fakeDisplayedScene,
+    ): DisplayedSceneSnapshot => {
+      if (retained !== null) {
+        return {
+          ...retained,
+          sourceScene:
+            retained.sourceScene ?? retained.scene,
+          displayedScene:
+            retained.displayedScene ?? retained.scene,
+        };
+      }
+      const scene =
+        renderState?.scene === undefined
+          ? sketch.generate(params, seed, fakeCurrentT, compositionFrame)
+          : (renderState.scene as Scene);
+      return renderState?.scene === undefined
         ? {
-            scene: sketch.generate(params, seed, fakeCurrentT, compositionFrame),
+            scene,
+            sourceScene: scene,
+            displayedScene: scene,
             t: fakeCurrentT,
             renderMode: "fill",
             tolerance: tolerance ?? 0,
@@ -469,7 +593,9 @@ vi.mock("./LiveCanvas", () => ({
             inputRevision,
           }
         : {
-            scene: renderState.scene as Scene,
+            scene,
+            sourceScene: scene,
+            displayedScene: scene,
             t: renderState.t ?? 0,
             renderMode: renderState.kind === "outline" ? "outline" : "fill",
             tolerance: tolerance ?? 0,
@@ -483,13 +609,17 @@ vi.mock("./LiveCanvas", () => ({
             ...(renderState.contentRevision === undefined
               ? {}
               : { contentRevision: renderState.contentRevision }),
-          });
+          };
+    };
     useImperativeHandle(handleRef, () => ({
       getCanvas: () =>
         ({ toBlob: fakeCanvasToBlob }) as unknown as HTMLCanvasElement,
       getCurrentT: () => fakeCurrentT,
-      getDisplayedScene: () => fakeDisplayedScene,
+      getDisplayedScene: () =>
+        fakeDisplayedScene === null ? null : capturedFrame(),
       captureDisplayedFrame: capturedFrame,
+      captureDisplayedFillFrame: () =>
+        capturedFrame(fakeDisplayedFillScene ?? fakeDisplayedScene),
     }));
     lastOnOutlineComputed = () => {
       const active = outlineJob.active;
@@ -503,7 +633,6 @@ vi.mock("./LiveCanvas", () => ({
               primitives: [],
             },
         active.identity.tolerance,
-        active.identity.includeFrame,
       );
       outlineJob.lastCompletedScene = scene;
       active.resolve({
@@ -515,20 +644,29 @@ vi.mock("./LiveCanvas", () => ({
     };
     lastCompositionFrame = compositionFrame;
     lastProfile = profile;
+    lastPageFrameEditDraft = pageFrameEditDraft ?? null;
+    lastPageFrameDraft = pageFrameEditDraft?.frame ?? pageFrameDraft ?? null;
+    lastCommittedPageFrame = pageFrame ?? null;
+    lastPageFrameAspectConstraint = pageFrameAspectConstraint ?? null;
+    lastOnPageFrameDraftChange = onPageFrameDraftChange ?? null;
     lastToneSource = renderState?.source ?? null;
+    lastRenderScene = (renderState?.scene as Scene | undefined) ?? null;
+    lastOutlineFinalizationStrokePolicy = outlineFinalizationStrokePolicy;
     // Model the outline pass finishing: fire the "computed" signal after each
     // outline render so the owner's busy label clears (unless a test opts out to
     // observe the intermediate "Computing…" state itself).
     useEffect(() => {
       if (fillCaptureRequest !== null && fillCaptureRequest !== undefined) {
+        const sourceScene =
+          fakeFillCaptureScene ??
+          (renderState?.scene as Scene | undefined) ?? {
+            space: compositionFrame,
+            primitives: [],
+          };
         onFillCaptured?.({
           ...fillCaptureRequest,
-          scene:
-            fakeFillCaptureScene ??
-            (renderState?.scene as Scene | undefined) ?? {
-              space: compositionFrame,
-              primitives: [],
-            },
+          scene: sourceScene,
+          sourceScene,
           t: fakeCurrentT,
           sourceInputRevision:
             fillCaptureRequest.sourceInputRevision ??
@@ -549,6 +687,8 @@ vi.mock("./LiveCanvas", () => ({
       }
       const snapshot: DisplayedSceneSnapshot = {
         scene: renderState.scene as Scene,
+        sourceScene: renderState.scene as Scene,
+        displayedScene: renderState.scene as Scene,
         t: renderState.t ?? 0,
         renderMode: renderState.kind === "outline" ? "outline" : "fill",
         tolerance: tolerance ?? 0,
@@ -738,6 +878,7 @@ beforeEach(() => {
     id: "imported-image-bbbbbbbbbbbb",
     created: true,
   });
+  controlPanelCapture.recomposeHandlers = [];
   vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
   // Sensible defaults so a mount's list-on-mount effect resolves quietly; the
   // save/reload tests override loadPreset/savePreset per case.
@@ -749,15 +890,24 @@ beforeEach(() => {
   // cases. The blob is a real minimal PNG so the metadata byte-splice succeeds.
   fakeCurrentT = 0;
   fakeDisplayedScene = null;
+  fakeDisplayedFillScene = null;
   fakeFillCaptureScene = null;
   // #228: default to auto-firing the outline "computed" signal so the busy label
   // clears on its own; the label test opts out to observe "Computing…".
   lastOnOutlineComputed = null;
   lastCompositionFrame = null;
   lastProfile = null;
+  lastPageFrameDraft = null;
+  lastPageFrameEditDraft = null;
+  lastCommittedPageFrame = null;
+  lastPageFrameAspectConstraint = null;
+  lastOnPageFrameDraftChange = null;
   lastToneSource = null;
+  lastRenderScene = null;
+  lastOutlineFinalizationStrokePolicy = undefined;
   autoAcknowledgeDisplayedScene = true;
   acknowledgeDisplayedScene = null;
+  generateDuringLiveCanvasRender = false;
   autoFireOutlineComputed = true;
   window.localStorage.clear();
   fakeCanvasToBlob = ((cb: BlobCallback) => {
@@ -1522,7 +1672,7 @@ describe("SketchControls — central edit-history integration", () => {
     });
   });
 
-  it("shows live Fill for a changed transaction and reuses exact cache on cancel", () => {
+  it("defers a Paper transaction boundary until a geometry value changes", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -1536,8 +1686,9 @@ describe("SketchControls — central edit-history integration", () => {
     )!;
 
     act(() => width.focus());
-    expect(canvasRenderMode(el)).toBe("fill");
+    expect(canvasRenderMode(el)).toBe("outline");
     setInput(width, "300");
+    expect(canvasRenderMode(el)).toBe("fill");
     expect(toggle.textContent).toBe("Outline");
     expect(lastCompositionFrame).not.toBe(initialFrame);
     expect(outlineJob.starts).toBe(1);
@@ -1558,7 +1709,7 @@ describe("SketchControls — central edit-history integration", () => {
     expect(historyCapture.cancels[0]!.after.past).toHaveLength(0);
   });
 
-  it("shows live Fill during a same-identity edit and restores exact cache on cancel", () => {
+  it("keeps Outline through a placement-only edit and cancel", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -1578,7 +1729,7 @@ describe("SketchControls — central edit-history integration", () => {
     )!;
 
     act(() => margin.focus());
-    expect(canvasRenderMode(el)).toBe("fill");
+    expect(canvasRenderMode(el)).toBe("outline");
     setInput(margin, "20");
     expect(lastProfile?.insets).toEqual({
       top: 20,
@@ -1593,7 +1744,7 @@ describe("SketchControls — central edit-history integration", () => {
       el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
         "data-render-state",
       ),
-    ).toBe("fill-live");
+    ).toBe("outline");
 
     act(() =>
       margin.dispatchEvent(
@@ -1618,7 +1769,7 @@ describe("SketchControls — central edit-history integration", () => {
     expect(historyCapture.cancels).toHaveLength(1);
   });
 
-  it("shows live Fill for an invalid draft and restores exact cache on settle", () => {
+  it("keeps Outline through an invalid Paper draft", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", {})} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -1637,7 +1788,7 @@ describe("SketchControls — central edit-history integration", () => {
       el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
         "data-render-state",
       ),
-    ).toBe("fill-live");
+    ).toBe("outline");
 
     act(() =>
       width.dispatchEvent(
@@ -1650,6 +1801,1237 @@ describe("SketchControls — central edit-history integration", () => {
         "data-render-state",
       ),
     ).toBe("outline");
+  });
+});
+
+describe("SketchControls — Page Frame edit mode", () => {
+  const fixedPageProfile: PlotProfile = {
+    width: 240,
+    height: 140,
+    insets: { top: 20, right: 20, bottom: 20, left: 20 },
+    includeFrame: true,
+    toolWidthMillimeters: 0.31,
+  };
+
+  function fixedPageSketch(id: string) {
+    return {
+      ...sketchWith(id, {}),
+      defaultOutputProfile: fixedPageProfile,
+    } as Parameters<typeof SketchControls>[0]["sketch"];
+  }
+
+  function frameInput(el: HTMLElement, name: string): HTMLInputElement {
+    const found = el.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+    if (found === null) throw new Error(`no Page Frame ${name} input`);
+    return found;
+  }
+
+  function selectAspect(el: HTMLElement, value: string): void {
+    const select = el.querySelector<HTMLSelectElement>(
+      'select[name="aspectConstraint"]',
+    );
+    if (select === null) throw new Error("no Page Frame aspect selector");
+    act(() => {
+      select.value = value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  function publishPageFrameDraft(frame: PageFrame): void {
+    const publish = lastOnPageFrameDraftChange;
+    if (publish === null) throw new Error("LiveCanvas draft callback is absent");
+    act(() => publish(frame));
+  }
+
+  function beginGesture(
+    frame: PageFrame,
+    target: PageFrameManipulationTarget,
+    pointer: PageFramePointer,
+  ): PageFrameManipulationState {
+    if (
+      lastCompositionFrame === null ||
+      lastPageFrameAspectConstraint === null
+    ) {
+      throw new Error("LiveCanvas Page Frame props are absent");
+    }
+    return beginPageFrameManipulation({
+      frame,
+      target,
+      pointer,
+      constraint: lastPageFrameAspectConstraint,
+      compositionFrame: lastCompositionFrame,
+      shiftKey: false,
+    });
+  }
+
+  function moveGesture(
+    gesture: PageFrameManipulationState,
+    pointer: PageFramePointer,
+    shiftKey = false,
+  ): PageFrameManipulationState {
+    const next = updatePageFrameManipulation(gesture, pointer, shiftKey);
+    publishPageFrameDraft(finishPageFrameManipulation(next));
+    return next;
+  }
+
+  function toggleFixedPage(el: HTMLElement): void {
+    act(() => frameInput(el, "keepPageSizeFixed").click());
+  }
+
+  it("wires inert entry, freeform edge/corner edits, temporary Shift, numeric sync, and one atomic Apply", () => {
+    const el = mount(
+      <SketchControls sketch={sketchWith("frame-direct-wiring", {})} />,
+    );
+    const inputRevision = el
+      .querySelector('[data-testid="canvas-seed"]')
+      ?.getAttribute("data-input-revision");
+    const composition = structuredClone(lastCompositionFrame)!;
+
+    clickButton(el, "Crop");
+    const initial = structuredClone(lastPageFrameDraft)!;
+    expect(initial).toEqual({
+      x: 0,
+      y: 0,
+      width: composition.width,
+      height: composition.height,
+    });
+    expect(lastPageFrameAspectConstraint).toEqual({ kind: "free" });
+    expect(lastPageFrameEditDraft?.mode).toBe("scale-preserving");
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(outlineJob.starts).toBe(0);
+    expect(
+      el
+        .querySelector('[data-testid="canvas-seed"]')
+        ?.getAttribute("data-input-revision"),
+    ).toBe(inputRevision);
+
+    let gesture = beginGesture(
+      initial,
+      { kind: "resize", handle: "right" },
+      { x: initial.width, y: initial.height / 2 },
+    );
+    gesture = moveGesture(gesture, {
+      x: initial.width + composition.width * 0.1,
+      y: initial.height / 2,
+    });
+    expect(Number(frameInput(el, "width").value)).toBeCloseTo(110, 9);
+    expect(Number(frameInput(el, "height").value)).toBeCloseTo(100, 9);
+
+    const edgeFrame = finishPageFrameManipulation(gesture);
+    gesture = beginGesture(
+      edgeFrame,
+      { kind: "resize", handle: "bottom-right" },
+      { x: edgeFrame.width, y: edgeFrame.height },
+    );
+    gesture = moveGesture(gesture, {
+      x: edgeFrame.width + composition.width * 0.1,
+      y: edgeFrame.height + composition.height * 0.05,
+    });
+    expect(Number(frameInput(el, "width").value)).toBeCloseTo(120, 9);
+    expect(Number(frameInput(el, "height").value)).toBeCloseTo(105, 9);
+
+    const freeFrame = finishPageFrameManipulation(gesture);
+    const start = {
+      x: freeFrame.x + freeFrame.width,
+      y: freeFrame.y + freeFrame.height / 2,
+    };
+    gesture = beginGesture(
+      freeFrame,
+      { kind: "resize", handle: "right" },
+      start,
+    );
+    const lockAt = { x: start.x + composition.width * 0.05, y: start.y };
+    gesture = moveGesture(gesture, lockAt);
+    const beforeShift = finishPageFrameManipulation(gesture);
+    gesture = moveGesture(gesture, lockAt, true);
+    expect(finishPageFrameManipulation(gesture)).toEqual(beforeShift);
+    gesture = moveGesture(
+      gesture,
+      { x: lockAt.x + composition.width * 0.05, y: lockAt.y },
+      true,
+    );
+    const shifted = finishPageFrameManipulation(gesture);
+    expect(shifted.width / shifted.height).toBeCloseTo(
+      beforeShift.width / beforeShift.height,
+      12,
+    );
+    expect(Number(frameInput(el, "width").value)).toBeCloseTo(
+      (shifted.width / composition.width) * 100,
+      9,
+    );
+    expect(Number(frameInput(el, "height").value)).toBeCloseTo(
+      (shifted.height / composition.height) * 100,
+      9,
+    );
+    expect(lastPageFrameAspectConstraint).toEqual({ kind: "free" });
+    expect(historyCapture.atomic).toHaveLength(0);
+
+    clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(1);
+    const framing = historyCapture.atomic[0]!.after.present.framing;
+    if (framing.kind !== "framed") throw new Error("Apply did not frame");
+    expect(framing.pageFrame.x).toBeCloseTo(shifted.x, 9);
+    expect(framing.pageFrame.y).toBeCloseTo(shifted.y, 9);
+    expect(framing.pageFrame.width).toBeCloseTo(shifted.width, 9);
+    expect(framing.pageFrame.height).toBeCloseTo(shifted.height, 9);
+    expect(framing.aspectLocked).toBe(true);
+    expect(Object.keys(framing).sort()).toEqual([
+      "aspectLocked",
+      "generationAspect",
+      "kind",
+      "pageFrame",
+    ]);
+    expect(Object.keys(framing.pageFrame).sort()).toEqual([
+      "height",
+      "width",
+      "x",
+      "y",
+    ]);
+  });
+
+  it("carries exact physical W/H through ordinary → fixed → ordinary, then applies and settles as one complete history state", () => {
+    const el = mount(
+      <SketchControls sketch={fixedPageSketch("fixed-page-orchestration")} />,
+    );
+    const originalProfile = structuredClone(lastProfile)!;
+    const composition = lastCompositionFrame!;
+    const inputRevision = el
+      .querySelector("[data-testid='canvas-seed']")
+      ?.getAttribute("data-input-revision");
+
+    clickButton(el, "Crop");
+    selectAspect(el, "4:3");
+    setInput(frameInput(el, "physical-width"), "300");
+    setInput(frameInput(el, "physical-height"), "200");
+
+    const exactProfile = {
+      ...fixedPageProfile,
+      width: 300,
+      height: 200,
+      insets: { ...fixedPageProfile.insets },
+    };
+    const ordinary = lastPageFrameEditDraft;
+    if (ordinary?.mode !== "scale-preserving") {
+      throw new Error("physical Page resize did not remain ordinary framing");
+    }
+    expect(lastProfile).toEqual(exactProfile);
+    expect(ordinary.generationAspect).toBeCloseTo(
+      composition.width / composition.height,
+      14,
+    );
+    expect(lastCompositionFrame).toBe(composition);
+    expect(historyCapture.atomic).toHaveLength(0);
+
+    toggleFixedPage(el);
+    const fixed = lastPageFrameEditDraft;
+    if (fixed?.mode !== "fixed-page") {
+      throw new Error("fixed Page mode did not open");
+    }
+    expect(fixed.profile).toEqual(exactProfile);
+    expect(lastProfile).toBe(fixed.profile);
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("free");
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.disabled,
+    ).toBe(true);
+    expect(frameInput(el, "width").disabled).toBe(true);
+    expect(frameInput(el, "height").disabled).toBe(true);
+    expect(frameInput(el, "physical-width").readOnly).toBe(true);
+    expect(frameInput(el, "physical-height").readOnly).toBe(true);
+    for (const side of ["top", "right", "bottom", "left"] as const) {
+      expect(frameInput(el, `physical-inset-${side}`).value).toBe("20");
+      expect(frameInput(el, `physical-inset-${side}`).readOnly).toBe(true);
+    }
+
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "200",
+    );
+    setInput(frameInput(el, "x"), "12.5");
+    setInput(frameInput(el, "y"), "-10");
+    const positioned = lastPageFrameEditDraft;
+    if (positioned?.mode !== "fixed-page") {
+      throw new Error("fixed Page scale did not remain active");
+    }
+    expect(positioned.compositionScale).toBeCloseTo(2, 12);
+    expect(positioned.profile).toBe(fixed.profile);
+    expect(positioned.frame.width).toBeCloseTo(fixed.fitFrame.width / 2, 12);
+    expect(positioned.frame.height).toBeCloseTo(
+      fixed.fitFrame.height / 2,
+      12,
+    );
+    expect(positioned.frame.x).toBeCloseTo(composition.width * 0.125, 12);
+    expect(positioned.frame.y).toBeCloseTo(composition.height * -0.1, 12);
+    expect(lastCompositionFrame).toBe(composition);
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(outlineJob.starts).toBe(0);
+
+    toggleFixedPage(el);
+    const rebased = lastPageFrameEditDraft;
+    if (rebased?.mode !== "scale-preserving") {
+      throw new Error("fixed Page mode did not return to ordinary framing");
+    }
+    expect(rebased.profile).toBe(positioned.profile);
+    expect(rebased.representedFrame).toEqual(positioned.frame);
+    expect(rebased.frame).toEqual(positioned.frame);
+    expect(frameInput(el, "physical-width").value).toBe("300");
+    expect(frameInput(el, "physical-height").value).toBe("200");
+    expect(frameInput(el, "physical-width").readOnly).toBe(false);
+
+    toggleFixedPage(el);
+    const reentered = lastPageFrameEditDraft;
+    if (reentered?.mode !== "fixed-page") {
+      throw new Error("fixed Page mode did not reopen");
+    }
+    expect(reentered.profile).toBe(positioned.profile);
+    expect(reentered.frame).toEqual(positioned.frame);
+    expect(reentered.compositionScale).toBeCloseTo(2, 12);
+
+    clickButton(el, "Apply");
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const appliedHistory = historyCapture.atomic[0]!.after;
+    expect(appliedHistory.past).toHaveLength(1);
+    expect(appliedHistory.future).toEqual([]);
+    expect(appliedHistory.present.profile).toBe(reentered.profile);
+    expect(appliedHistory.present.profile).toEqual(exactProfile);
+    expect(appliedHistory.present.framing).toEqual({
+      kind: "framed",
+      pageFrame: reentered.frame,
+      generationAspect: reentered.generationAspect,
+      aspectLocked: true,
+    });
+    expect(lastCommittedPageFrame).toEqual(reentered.frame);
+    expect(lastCompositionFrame).toBe(composition);
+    expect(lastPageFrameEditDraft).toBeNull();
+    expect(outlineJob.starts).toBe(0);
+    expect(
+      el
+        .querySelector("[data-testid='canvas-seed']")
+        ?.getAttribute("data-input-revision"),
+    ).toBe(inputRevision);
+
+    clickButton(el, "Crop");
+    toggleFixedPage(el);
+    const scaleInput = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Composition scale percentage"]',
+    )!;
+    act(() => scaleInput.focus());
+    expect(
+      pressHistoryShortcut(scaleInput, { ctrlKey: true }).defaultPrevented,
+    ).toBe(false);
+    expect(lastCommittedPageFrame).toEqual(reentered.frame);
+    expect(historyCapture.atomic).toHaveLength(1);
+    clickButton(el, "Cancel");
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(lastProfile).toEqual(originalProfile);
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(lastCompositionFrame).toBe(composition);
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(lastProfile).toEqual(exactProfile);
+    expect(lastCommittedPageFrame).toEqual(reentered.frame);
+    expect(lastCompositionFrame).toBe(composition);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(outlineJob.starts).toBe(0);
+  });
+
+  it("discards a fixed-page draft on Cancel without committing its preview profile or frame", () => {
+    const el = mount(
+      <SketchControls sketch={fixedPageSketch("fixed-page-cancel")} />,
+    );
+    const originalProfile = structuredClone(lastProfile);
+    const composition = lastCompositionFrame;
+
+    clickButton(el, "Crop");
+    setInput(frameInput(el, "physical-width"), "300");
+    setInput(frameInput(el, "physical-height"), "200");
+    toggleFixedPage(el);
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "175",
+    );
+    setInput(frameInput(el, "x"), "-25");
+    expect(lastProfile).not.toEqual(originalProfile);
+    expect(lastPageFrameEditDraft?.mode).toBe("fixed-page");
+
+    clickButton(el, "Cancel");
+
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(lastProfile).toEqual(originalProfile);
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(lastPageFrameEditDraft).toBeNull();
+    expect(lastCompositionFrame).toBe(composition);
+    expect(outlineJob.starts).toBe(0);
+  });
+
+  it("resets fixed-page scale to centered fit while preserving the exact locked profile through Undo and Redo", () => {
+    const el = mount(
+      <SketchControls sketch={fixedPageSketch("fixed-page-reset")} />,
+    );
+    const originalProfile = structuredClone(lastProfile);
+    const composition = lastCompositionFrame;
+
+    clickButton(el, "Crop");
+    setInput(frameInput(el, "physical-width"), "300");
+    setInput(frameInput(el, "physical-height"), "200");
+    toggleFixedPage(el);
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "150",
+    );
+    const edited = lastPageFrameEditDraft;
+    if (edited?.mode !== "fixed-page") {
+      throw new Error("fixed Page draft was not active");
+    }
+
+    clickButton(el, "Reset Frame");
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const reset = historyCapture.atomic[0]!.after.present;
+    expect(reset.profile).toBe(edited.profile);
+    expect(reset.profile).toEqual({
+      ...fixedPageProfile,
+      width: 300,
+      height: 200,
+      insets: { ...fixedPageProfile.insets },
+    });
+    expect(reset.framing).toEqual({
+      kind: "framed",
+      pageFrame: edited.fitFrame,
+      generationAspect: edited.generationAspect,
+      aspectLocked: true,
+    });
+    expect(lastCommittedPageFrame).toEqual(edited.fitFrame);
+    expect(lastCompositionFrame).toBe(composition);
+    expect(outlineJob.starts).toBe(0);
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+    expect(lastProfile).toEqual(originalProfile);
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(lastCompositionFrame).toBe(composition);
+
+    pressHistoryShortcut(window, { key: "y", ctrlKey: true });
+    expect(lastProfile).toEqual(edited.profile);
+    expect(lastCommittedPageFrame).toEqual(edited.fitFrame);
+    expect(lastCompositionFrame).toBe(composition);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(outlineJob.starts).toBe(0);
+  });
+
+  it("keeps common/custom constraints through Apply, Cancel, and re-entry until Freeform without persisting them", async () => {
+    const el = mount(
+      <SketchControls sketch={sketchWith("frame-aspect-wiring", {})} />,
+    );
+    clickButton(el, "Crop");
+    selectAspect(el, "4:3");
+    expect(lastPageFrameAspectConstraint).toEqual({
+      kind: "ratio",
+      ratio: 4 / 3,
+    });
+
+    clickButton(el, "Apply");
+    clickButton(el, "Crop");
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("4:3");
+    clickButton(el, "Cancel");
+    clickButton(el, "Crop");
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("4:3");
+
+    selectAspect(el, "custom");
+    setInput(frameInput(el, "customAspectWidth"), "5");
+    setInput(frameInput(el, "customAspectHeight"), "4");
+    clickButton(el, "Use Custom Ratio");
+    expect(lastPageFrameAspectConstraint).toEqual({
+      kind: "ratio",
+      ratio: 1.25,
+    });
+    clickButton(el, "Cancel");
+
+    setInput(
+      el.querySelector<HTMLInputElement>('input[aria-label="preset name"]')!,
+      "transient-aspect",
+    );
+    clickButton(el, "Save");
+    await flush();
+    expect(savePreset).toHaveBeenCalledOnce();
+    expect(JSON.stringify(savePreset.mock.calls[0]![0])).not.toContain(
+      "aspectConstraint",
+    );
+
+    clickButton(el, "Crop");
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("custom");
+    expect(lastPageFrameAspectConstraint).toEqual({
+      kind: "ratio",
+      ratio: 1.25,
+    });
+    selectAspect(el, "free");
+    clickButton(el, "Cancel");
+    clickButton(el, "Crop");
+    expect(lastPageFrameAspectConstraint).toEqual({ kind: "free" });
+    expect(
+      el.querySelector<HTMLSelectElement>('select[name="aspectConstraint"]')
+        ?.value,
+    ).toBe("free");
+  });
+
+  it("routes interior pan inversely into the single Page Frame with a stationary composition basis", () => {
+    const el = mount(
+      <SketchControls sketch={sketchWith("frame-pan-wiring", {})} />,
+    );
+    const composition = structuredClone(lastCompositionFrame)!;
+    clickButton(el, "Crop");
+    const initial = structuredClone(lastPageFrameDraft)!;
+    const pointer = {
+      x: initial.width / 2,
+      y: initial.height / 2,
+    };
+    let gesture = beginGesture(initial, { kind: "pan" }, pointer);
+    gesture = moveGesture(gesture, {
+      x: pointer.x + composition.width * 0.15,
+      y: pointer.y - composition.height * 0.1,
+    });
+    const panned = finishPageFrameManipulation(gesture);
+
+    expect(panned.x).toBeCloseTo(-composition.width * 0.15, 12);
+    expect(panned.y).toBeCloseTo(composition.height * 0.1, 12);
+    expect(panned.width).toBe(initial.width);
+    expect(panned.height).toBe(initial.height);
+    expect(Number(frameInput(el, "x").value)).toBeCloseTo(-15, 9);
+    expect(Number(frameInput(el, "y").value)).toBeCloseTo(10, 9);
+    expect(lastCompositionFrame).toEqual(composition);
+
+    clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(1);
+    const framing = historyCapture.atomic[0]!.after.present.framing;
+    if (framing.kind !== "framed") throw new Error("Apply did not frame");
+    expect(framing.pageFrame).toEqual(panned);
+    expect(lastCompositionFrame).toEqual(composition);
+  });
+
+  it.each(["Apply", "Cancel", "Reset Frame"] as const)(
+    "focuses the first field on entry and restores Crop after %s",
+    (action) => {
+      const el = mount(
+        <SketchControls sketch={sketchWith("frame-focus-" + action, {})} />,
+      );
+
+      clickButton(el, "Crop");
+      const x = frameInput(el, "x");
+      const y = frameInput(el, "y");
+      expect(document.activeElement).toBe(x);
+
+      act(() => y.focus());
+      setInput(y, "12.5");
+      expect(document.activeElement).toBe(y);
+
+      clickButton(el, action);
+      const crop = [...el.querySelectorAll("button")].find(
+        (button) => button.textContent === "Crop",
+      );
+      expect(crop).toBeDefined();
+      expect(document.activeElement).toBe(crop);
+    },
+  );
+
+  it("applies, cancels, resets, and traverses framing as atomic history", () => {
+    const el = mount(<SketchControls sketch={sketchWith("frame", {})} />);
+    const originalProfile = structuredClone(lastProfile);
+    const originalComposition = structuredClone(lastCompositionFrame);
+
+    clickButton(el, "Crop");
+    expect(el.querySelector("h2")?.textContent).toBe("Edit Page Frame");
+    expect(frameInput(el, "x").value).toBe("0");
+    expect(frameInput(el, "y").value).toBe("0");
+    expect(frameInput(el, "width").value).toBe("100");
+    expect(frameInput(el, "height").value).toBe("100");
+    expect(lastPageFrameDraft).toEqual({
+      x: 0,
+      y: 0,
+      width: originalComposition!.width,
+      height: originalComposition!.height,
+    });
+    expect(
+      [...el.querySelectorAll("button")].map((button) => button.textContent),
+    ).not.toContain("New seed");
+
+    setInput(frameInput(el, "width"), "0");
+    clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+      "greater than 0%",
+    );
+
+    setInput(frameInput(el, "width"), "100");
+    clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.after.present.framing).toEqual({
+      kind: "framed",
+      pageFrame: {
+        x: 0,
+        y: 0,
+        width: originalComposition!.width,
+        height: originalComposition!.height,
+      },
+      generationAspect:
+        originalComposition!.width / originalComposition!.height,
+      aspectLocked: true,
+    });
+    expect(lastProfile).toEqual(originalProfile);
+    expect(lastCompositionFrame).toEqual(originalComposition);
+    expect(lastPageFrameDraft).toBeNull();
+    expect(lastCommittedPageFrame).toEqual({
+      x: 0,
+      y: 0,
+      width: originalComposition!.width,
+      height: originalComposition!.height,
+    });
+    expect(outlineJob.starts).toBe(0);
+    expect(
+      el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
+        "data-input-revision",
+      ),
+    ).toBe("0");
+
+    clickButton(el, "Crop");
+    setInput(frameInput(el, "x"), "10");
+    setInput(frameInput(el, "y"), "20");
+    setInput(frameInput(el, "width"), "60");
+    setInput(frameInput(el, "height"), "50");
+    clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(2);
+    const committed = historyCapture.atomic[1]!.after.present;
+    expect(committed.framing).toEqual({
+      kind: "framed",
+      pageFrame: {
+        x: originalComposition!.width * 0.1,
+        y: originalComposition!.height * 0.2,
+        width: originalComposition!.width * 0.6,
+        height: originalComposition!.height * 0.5,
+      },
+      generationAspect:
+        originalComposition!.width / originalComposition!.height,
+      aspectLocked: true,
+    });
+    expect(lastCommittedPageFrame).toEqual(
+      committed.framing.kind === "framed"
+        ? committed.framing.pageFrame
+        : null,
+    );
+    expect(outlineJob.starts).toBe(0);
+
+    clickButton(el, "Crop");
+    expect(frameInput(el, "x").value).toBe("10");
+    expect(frameInput(el, "width").value).toBe("60");
+    setInput(frameInput(el, "x"), "-25");
+    clickButton(el, "Cancel");
+    expect(historyCapture.atomic).toHaveLength(2);
+    expect(lastPageFrameDraft).toBeNull();
+    clickButton(el, "Crop");
+    expect(frameInput(el, "x").value).toBe("10");
+
+    clickButton(el, "Reset Frame");
+    expect(historyCapture.atomic).toHaveLength(3);
+    expect(historyCapture.atomic[2]!.after.present.framing).toEqual({
+      kind: "unframed",
+    });
+    expect(lastPageFrameDraft).toBeNull();
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(outlineJob.starts).toBe(0);
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    clickButton(el, "Crop");
+    expect(frameInput(el, "x").value).toBe("10");
+    clickButton(el, "Cancel");
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    clickButton(el, "Crop");
+    expect(frameInput(el, "x").value).toBe("0");
+    expect(frameInput(el, "width").value).toBe("100");
+  });
+
+  it("routes locked resize and confirm-gated recompose through exact framing history", () => {
+    const confirm = vi.spyOn(window, "confirm");
+    const el = mount(<SketchControls sketch={sketchWith("page-semantics", {})} />);
+
+    clickButton(el, "Crop");
+    setInput(frameInput(el, "x"), "10");
+    setInput(frameInput(el, "width"), "60");
+    setInput(frameInput(el, "height"), "50");
+    clickButton(el, "Apply");
+
+    const applied = historyCapture.atomic.at(-1)!.after.present;
+    if (applied.framing.kind !== "framed") {
+      throw new Error("Apply did not commit framing");
+    }
+    const frozenFraming = structuredClone(applied.framing);
+    const frozenComposition = structuredClone(lastCompositionFrame);
+    const lock = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Lock Page aspect"]',
+    )!;
+    expect(lock.checked).toBe(true);
+
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    act(() => width.focus());
+    setInput(width, String(applied.profile.width * 1.25));
+    act(() => width.blur());
+
+    const resized = historyCapture.transactionCommits.at(-1)!.after.present;
+    expect(resized.framing).toEqual(frozenFraming);
+    expect(lastCompositionFrame).toEqual(frozenComposition);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(
+      (resized.profile.width -
+        resized.profile.insets.left -
+        resized.profile.insets.right) /
+        (resized.profile.height -
+          resized.profile.insets.top -
+          resized.profile.insets.bottom),
+    ).toBeCloseTo(
+      frozenFraming.pageFrame.width / frozenFraming.pageFrame.height,
+      14,
+    );
+
+    act(() => lock.click());
+    const unlocked = historyCapture.atomic.at(-1)!.after.present;
+    expect(unlocked.framing).toEqual({ ...frozenFraming, aspectLocked: false });
+
+    confirm.mockReturnValueOnce(false);
+    const rejectedWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    const rejectedDraft = rejectedWidth.value;
+    const beforeDecline = historyCapture.atomic.at(-1)!.after;
+    act(() => rejectedWidth.focus());
+    setInput(rejectedWidth, String(unlocked.profile.width + 17));
+    act(() => rejectedWidth.blur());
+    expect(rejectedWidth.value).toBe(rejectedDraft);
+    expect(historyCapture.atomic.at(-1)!.after).toBe(beforeDecline);
+    expect(lastCompositionFrame).toEqual(frozenComposition);
+
+    confirm.mockReturnValueOnce(true);
+    act(() => rejectedWidth.focus());
+    setInput(rejectedWidth, String(unlocked.profile.width + 17));
+    act(() => rejectedWidth.blur());
+
+    const recomposed = historyCapture.atomic.at(-1)!.after;
+    expect(recomposed.present.framing).toEqual({ kind: "unframed" });
+    expect(recomposed.present.profile.width).toBe(unlocked.profile.width + 17);
+    expect(recomposed.past).toHaveLength(beforeDecline.past.length + 1);
+    expect(lastCompositionFrame).not.toEqual(frozenComposition);
+    expect(
+      el.querySelector('input[aria-label="Lock Page aspect"]'),
+    ).toBeNull();
+
+    pressHistoryShortcut(window, { ctrlKey: true });
+    expect(lastCommittedPageFrame).toEqual(frozenFraming.pageFrame);
+    expect(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Lock Page aspect"]',
+      )?.checked,
+    ).toBe(false);
+    pressHistoryShortcut(window, { key: "y", ctrlKey: true });
+    expect(lastCommittedPageFrame).toBeNull();
+  });
+
+  it("blocks Studio Undo and Redo until the Composition-relative draft settles", () => {
+    const sketch = {
+      ...sketchWith("frame-history", {}),
+      defaultOutputProfile: {
+        width: 210,
+        height: 297,
+        insets: { top: 10, right: 10, bottom: 10, left: 10 },
+        includeFrame: true,
+        toolWidthMillimeters: 0.3,
+      },
+    } as Parameters<typeof SketchControls>[0]["sketch"];
+    const el = mount(<SketchControls sketch={sketch} />);
+    const portraitComposition = structuredClone(lastCompositionFrame)!;
+
+    clickButton(el, "Swap to landscape");
+    const landscapeComposition = structuredClone(lastCompositionFrame)!;
+    expect(landscapeComposition.width / landscapeComposition.height).not.toBe(
+      portraitComposition.width / portraitComposition.height,
+    );
+
+    clickButton(el, "Crop");
+    const landscapeX = frameInput(el, "x");
+    setInput(landscapeX, "12.5");
+    act(() => landscapeX.focus());
+    expect(
+      pressHistoryShortcut(landscapeX, { ctrlKey: true }).defaultPrevented,
+    ).toBe(false);
+    expect(lastCompositionFrame).toEqual(landscapeComposition);
+    expect(landscapeX.value).toBe("12.5");
+
+    clickButton(el, "Apply");
+    const landscapeApply = historyCapture.atomic.at(-1)!.after.present;
+    if (landscapeApply.framing.kind !== "framed") {
+      throw new Error("landscape Apply did not commit framing");
+    }
+    expect(landscapeApply.framing.pageFrame.x).toBeCloseTo(
+      landscapeComposition.width * 0.125,
+      12,
+    );
+    expect(landscapeApply.framing.pageFrame.y).toBe(0);
+    expect(landscapeApply.framing.pageFrame.width).toBeCloseTo(
+      landscapeComposition.width,
+      12,
+    );
+    expect(landscapeApply.framing.pageFrame.height).toBeCloseTo(
+      landscapeComposition.height,
+      12,
+    );
+    expect(landscapeApply.framing.generationAspect).toBeCloseTo(
+      landscapeComposition.width / landscapeComposition.height,
+      14,
+    );
+
+    // Outside the mode, Undo traverses the frame commit and then the earlier
+    // aspect-changing Paper command, leaving a meaningful Redo available.
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(lastCompositionFrame).toEqual(portraitComposition);
+
+    clickButton(el, "Crop");
+    const portraitX = frameInput(el, "x");
+    setInput(portraitX, "-10");
+    act(() => portraitX.focus());
+    expect(
+      pressHistoryShortcut(portraitX, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(false);
+    expect(lastCompositionFrame).toEqual(portraitComposition);
+    expect(portraitX.value).toBe("-10");
+
+    clickButton(el, "Apply");
+    const portraitApply = historyCapture.atomic.at(-1)!.after.present;
+    if (portraitApply.framing.kind !== "framed") {
+      throw new Error("portrait Apply did not commit framing");
+    }
+    expect(portraitApply.framing.pageFrame.x).toBeCloseTo(
+      portraitComposition.width * -0.1,
+      12,
+    );
+    expect(portraitApply.framing.pageFrame.y).toBe(0);
+    expect(portraitApply.framing.pageFrame.width).toBeCloseTo(
+      portraitComposition.width,
+      12,
+    );
+    expect(portraitApply.framing.pageFrame.height).toBeCloseTo(
+      portraitComposition.height,
+      12,
+    );
+    expect(portraitApply.framing.generationAspect).toBeCloseTo(
+      portraitComposition.width / portraitComposition.height,
+      14,
+    );
+  });
+});
+
+describe("SketchControls — Image Asset aspect recomposition (#349)", () => {
+  const assetA = "aspect-alpha-000000000001";
+  const assetB = "aspect-beta-bbbbbbbbbbbb";
+
+  function frameInput(el: HTMLElement, name: string): HTMLInputElement {
+    const input = el.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+    if (input === null) throw new Error(`no Page Frame ${name} input`);
+    return input;
+  }
+
+  function aspectActions(el: HTMLElement): HTMLButtonElement[] {
+    return [...el.querySelectorAll<HTMLButtonElement>("button")].filter(
+      (button) => button.textContent === "Recompose to this image’s aspect",
+    );
+  }
+
+  function environmentWith(
+    dimensions: Readonly<Record<string, { width: number; height: number }>>,
+  ): SketchEnvironment {
+    const records = new Map(
+      Object.entries(dimensions).map(([id, { width, height }]) => [
+        id,
+        {
+          width,
+          height,
+          data: new Uint8ClampedArray(width * height * 4),
+        },
+      ]),
+    );
+    return { imageAssets: (id) => records.get(id) };
+  }
+
+  async function resolveCurrentEnvironment(
+    environment: SketchEnvironment,
+  ): Promise<void> {
+    await act(async () => {
+      sketchEnvironmentJob.starts.at(-1)!.resolve(environment);
+      await Promise.resolve();
+    });
+  }
+
+  function applyAsymmetricFrame(el: HTMLElement): void {
+    clickButton(el, "Crop");
+    setInput(frameInput(el, "x"), "10");
+    setInput(frameInput(el, "y"), "5");
+    setInput(frameInput(el, "width"), "70");
+    setInput(frameInput(el, "height"), "80");
+    clickButton(el, "Apply");
+  }
+
+  it("warns and leaves every authored and prepared state untouched when declined", async () => {
+    const schema = {
+      ...toneCalibration.schema,
+      image: { kind: "image-asset", default: assetA },
+    } satisfies ParamSchema;
+    const generate = vi.fn(toneCalibration.generate);
+    const sketch = {
+      ...toneCalibration,
+      id: "declined-image-aspect",
+      schema,
+      generate,
+    };
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const el = mount(<SketchControls sketch={sketch} />);
+    await resolveCurrentEnvironment(
+      environmentWith({ [assetA]: { width: 4, height: 3 } }),
+    );
+    applyAsymmetricFrame(el);
+
+    const beforeHistory = historyCapture.atomic.at(-1)!.after;
+    const beforeProfile = structuredClone(lastProfile);
+    const beforeFrame = structuredClone(lastCommittedPageFrame);
+    const beforeComposition = structuredClone(lastCompositionFrame);
+    const beforeGenerateCalls = generate.mock.calls.length;
+    const beforeOutlineStarts = outlineJob.starts;
+    const beforeScribbleStarts = scribbleJob.starts.length;
+    historyCapture.atomic.length = 0;
+
+    clickButton(el, "Recompose to this image’s aspect");
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(confirm).toHaveBeenCalledWith(
+      "Recomposing to this image’s aspect will recompose the Scene and reset the Page Frame. Continue?",
+    );
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(beforeHistory.present.framing).toEqual(
+      expect.objectContaining({ kind: "framed", aspectLocked: true }),
+    );
+    expect(lastProfile).toEqual(beforeProfile);
+    expect(lastCommittedPageFrame).toEqual(beforeFrame);
+    expect(lastCompositionFrame).toEqual(beforeComposition);
+    expect(generate).toHaveBeenCalledTimes(beforeGenerateCalls);
+    expect(outlineJob.starts).toBe(beforeOutlineStarts);
+    expect(scribbleJob.starts).toHaveLength(beforeScribbleStarts);
+  });
+
+  it("contains the decoded aspect in one atomic recompose and Undo/Redo restores full states", async () => {
+    const schema = {
+      image: { kind: "image-asset", default: assetA },
+    } satisfies ParamSchema;
+    const originalProfile: PlotProfile = {
+      width: 230,
+      height: 180,
+      insets: { top: 11, right: 17, bottom: 13, left: 19 },
+      includeFrame: true,
+      toolWidthMillimeters: 0.42,
+    };
+    const generate = vi.fn(
+      (
+        _params: Readonly<Record<string, unknown>>,
+        _seed: Seed,
+        _t: number,
+        frame: CoordinateSpace,
+      ): Scene => ({ space: frame, primitives: [] }),
+    );
+    const sketch = {
+      ...sketchWith("confirmed-image-aspect", schema),
+      defaultOutputProfile: originalProfile,
+      generate,
+    };
+    generateDuringLiveCanvasRender = true;
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const el = mount(<SketchControls sketch={sketch} />);
+    await resolveCurrentEnvironment(
+      environmentWith({ [assetA]: { width: 4, height: 2 } }),
+    );
+    applyAsymmetricFrame(el);
+
+    const before = historyCapture.atomic.at(-1)!.after;
+    const beforeProfile = before.present.profile;
+    const beforeFrame = structuredClone(lastCommittedPageFrame);
+    const beforeGenerateCalls = generate.mock.calls.length;
+    historyCapture.atomic.length = 0;
+
+    act(() =>
+      controlPanelCapture.recomposeHandlers.at(-1)!({
+        paramKey: "image",
+        imageAssetId: assetA,
+        dimensions: { width: 999, height: 1 },
+      }),
+    );
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const command = historyCapture.atomic[0]!;
+    const fitted = command.after.present.profile;
+    expect(command.before).toBe(before);
+    expect(command.after.present).toEqual({
+      ...before.present,
+      profile: {
+        ...beforeProfile,
+        height:
+          (beforeProfile.width -
+            beforeProfile.insets.left -
+            beforeProfile.insets.right) /
+            2 +
+          beforeProfile.insets.top +
+          beforeProfile.insets.bottom,
+        insets: { ...beforeProfile.insets },
+      },
+      framing: { kind: "unframed" },
+    });
+    expect(command.after.past).toEqual([...before.past, before.present]);
+    expect(command.after.future).toEqual([]);
+    expect(fitted.width).toBeLessThanOrEqual(beforeProfile.width);
+    expect(fitted.height).toBeLessThanOrEqual(beforeProfile.height);
+    expect(fitted.width).toBe(beforeProfile.width);
+    expect(fitted.insets).toEqual(beforeProfile.insets);
+    expect(
+      (fitted.width - fitted.insets.left - fitted.insets.right) /
+        (fitted.height - fitted.insets.top - fitted.insets.bottom),
+    ).toBe(2);
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(el.querySelector('input[aria-label="Lock Page aspect"]')).toBeNull();
+    expect(
+      el.querySelector('[aria-label="image image asset identity"]')
+        ?.textContent,
+    ).toBe(assetA);
+    expect(generate).toHaveBeenCalledTimes(beforeGenerateCalls + 1);
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(lastProfile).toEqual(beforeProfile);
+    expect(lastCommittedPageFrame).toEqual(beforeFrame);
+    expect(
+      el.querySelector<HTMLInputElement>('input[aria-label="Lock Page aspect"]')
+        ?.checked,
+    ).toBe(true);
+    expect(
+      el.querySelector('[aria-label="image image asset identity"]')
+        ?.textContent,
+    ).toBe(assetA);
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(lastProfile).toEqual(fitted);
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(el.querySelector('input[aria-label="Lock Page aspect"]')).toBeNull();
+    expect(
+      el.querySelector('[aria-label="image image asset identity"]')
+        ?.textContent,
+    ).toBe(assetA);
+  });
+
+  it("rejects a stored request after selection/resolution changes and keeps ordinary selection framing until an explicit action", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "aspect beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    const schema = {
+      image: { kind: "image-asset", default: assetA },
+    } satisfies ParamSchema;
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const el = mount(
+      <SketchControls sketch={sketchWith("stale-image-aspect", schema)} />,
+    );
+    await resolveCurrentEnvironment(
+      environmentWith({ [assetA]: { width: 2, height: 3 } }),
+    );
+    applyAsymmetricFrame(el);
+    const framed = historyCapture.atomic.at(-1)!.after.present;
+    const storedHandler = controlPanelCapture.recomposeHandlers.at(-1)!;
+
+    clickButton(el, "Choose image");
+    await flush();
+    const choice = [
+      ...el.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Image Assets"] button',
+      ),
+    ].find((button) => button.textContent?.includes("aspect beta"));
+    if (choice === undefined) throw new Error("no beta asset choice");
+    act(() => choice.click());
+
+    const selected = historyCapture.atomic.at(-1)!.after;
+    expect(selected.present.params.image).toBe(assetB);
+    expect(selected.present.framing).toEqual(framed.framing);
+    expect(selected.present.profile).toEqual(framed.profile);
+    expect(lastCommittedPageFrame).not.toBeNull();
+    const writesAfterSelection = historyCapture.atomic.length;
+
+    act(() =>
+      storedHandler({
+        paramKey: "image",
+        imageAssetId: assetA,
+        dimensions: { width: 999, height: 1 },
+      }),
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(historyCapture.atomic).toHaveLength(writesAfterSelection);
+
+    await resolveCurrentEnvironment(
+      environmentWith({ [assetB]: { width: 3, height: 1 } }),
+    );
+    act(() =>
+      storedHandler({
+        paramKey: "image",
+        imageAssetId: assetA,
+        dimensions: { width: 999, height: 1 },
+      }),
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(historyCapture.atomic).toHaveLength(writesAfterSelection);
+    expect(lastCommittedPageFrame).not.toBeNull();
+
+    clickButton(el, "Recompose to this image’s aspect");
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(historyCapture.atomic).toHaveLength(writesAfterSelection + 1);
+    expect(historyCapture.atomic.at(-1)!.after.present.params.image).toBe(
+      assetB,
+    );
+    expect(historyCapture.atomic.at(-1)!.after.present.framing).toEqual({
+      kind: "unframed",
+    });
+  });
+
+  it("fails closed when authored selection changes inside confirmation", async () => {
+    managedImageAssetJob.list.mockResolvedValue([
+      {
+        id: assetB,
+        name: "aspect beta",
+        url: `/image-assets/${assetB}.png`,
+      },
+    ]);
+    const schema = {
+      image: { kind: "image-asset", default: assetA },
+    } satisfies ParamSchema;
+    const el = mount(
+      <SketchControls
+        sketch={sketchWith("confirm-race-image-aspect", schema)}
+      />,
+    );
+    await resolveCurrentEnvironment(
+      environmentWith({ [assetA]: { width: 4, height: 3 } }),
+    );
+    applyAsymmetricFrame(el);
+    const framed = historyCapture.atomic.at(-1)!.after.present;
+    clickButton(el, "Choose image");
+    await flush();
+    const choice = [
+      ...el.querySelectorAll<HTMLButtonElement>(
+        '[aria-label="Image Assets"] button',
+      ),
+    ].find((button) => button.textContent?.includes("aspect beta"));
+    if (choice === undefined) throw new Error("no beta asset choice");
+    historyCapture.atomic.length = 0;
+    const confirm = vi.spyOn(window, "confirm").mockImplementation(() => {
+      choice.click();
+      return true;
+    });
+
+    clickButton(el, "Recompose to this image’s aspect");
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(historyCapture.atomic[0]!.after.present.params.image).toBe(assetB);
+    expect(historyCapture.atomic[0]!.after.present.profile).toEqual(
+      framed.profile,
+    );
+    expect(historyCapture.atomic[0]!.after.present.framing).toEqual(
+      framed.framing,
+    );
+    expect(lastCommittedPageFrame).not.toBeNull();
+    expect(sketchEnvironmentJob.starts.at(-1)!.params.image).toBe(assetB);
+  });
+
+  it("uses each row's own decoded record without selecting an image implicitly", async () => {
+    const schema = {
+      portrait: { kind: "image-asset", default: assetA },
+      landscape: { kind: "image-asset", default: assetB },
+    } satisfies ParamSchema;
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const el = mount(
+      <SketchControls sketch={sketchWith("multi-image-aspect", schema)} />,
+    );
+    await resolveCurrentEnvironment(
+      environmentWith({
+        [assetA]: { width: 1, height: 2 },
+        [assetB]: { width: 4, height: 2 },
+      }),
+    );
+    expect(aspectActions(el).map((button) => button.disabled)).toEqual([
+      false,
+      false,
+    ]);
+    historyCapture.atomic.length = 0;
+
+    act(() => aspectActions(el)[1]!.click());
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const present = historyCapture.atomic[0]!.after.present;
+    expect(present.params).toEqual({ portrait: assetA, landscape: assetB });
+    const { width, height, insets } = present.profile;
+    expect(
+      (width - insets.left - insets.right) /
+        (height - insets.top - insets.bottom),
+    ).toBe(2);
+    expect(
+      el.querySelector('[aria-label="portrait image asset identity"]')
+        ?.textContent,
+    ).toBe(assetA);
+    expect(
+      el.querySelector('[aria-label="landscape image asset identity"]')
+        ?.textContent,
+    ).toBe(assetB);
   });
 });
 
@@ -1998,6 +3380,180 @@ describe("SketchControls — preset save/reload wiring", () => {
     );
     expect(lastProfile).toEqual(loadedProfile);
   });
+
+  it("reloads v3 profile and framing together so generation and final Page use the stored snapshot", async () => {
+    const loadedProfile: PlotProfile = {
+      width: 360,
+      height: 240,
+      insets: { top: 7, right: 11, bottom: 13, left: 17 },
+      includeFrame: false,
+      toolWidthMillimeters: 0.45,
+    };
+    const loadedFraming = {
+      pageFrame: { x: -12.5, y: 8.25, width: 144.75, height: 92.5 },
+      generationAspect: 16 / 9,
+      aspectLocked: false,
+    };
+    loadPreset.mockResolvedValue({
+      version: 3,
+      sketch: "a",
+      name: "framed",
+      seed: 999,
+      params: { radius: 77, count: 88 },
+      locks: ["radius"],
+      profile: loadedProfile,
+      framing: loadedFraming,
+    });
+    listPresets.mockResolvedValue(["framed"]);
+
+    const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
+    await flush();
+    const initialComposition = structuredClone(lastCompositionFrame);
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(picker, "framed");
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(historyCapture.atomic).toHaveLength(1);
+    const reload = historyCapture.atomic[0]!.after;
+    expect(reload.past).toHaveLength(1);
+    expect(reload.present.profile).toEqual(loadedProfile);
+    expect(reload.present.framing).toEqual({
+      kind: "framed",
+      ...loadedFraming,
+    });
+    expect(lastProfile).toEqual(loadedProfile);
+    expect(lastCompositionFrame).toEqual(
+      resolveCompositionFrame(loadedFraming.generationAspect),
+    );
+    expect(lastCompositionFrame).not.toEqual(initialComposition);
+    expect(lastCommittedPageFrame).toEqual(loadedFraming.pageFrame);
+    expect(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Lock Page aspect"]',
+      )?.checked,
+    ).toBe(false);
+  });
+
+  it.each([
+    ["v1", 1],
+    ["v2", 2],
+  ] as const)(
+    "a legacy %s reload explicitly clears prior v3 framing while preserving profile precedence",
+    async (_label, version) => {
+      const framedProfile: PlotProfile = {
+        width: 360,
+        height: 240,
+        insets: { top: 7, right: 11, bottom: 13, left: 17 },
+        includeFrame: false,
+        toolWidthMillimeters: 0.45,
+      };
+      const sketchDefault: PlotProfile = {
+        width: 297,
+        height: 210,
+        insets: { top: 9, right: 10, bottom: 11, left: 12 },
+        includeFrame: true,
+        toolWidthMillimeters: 0.35,
+      };
+      const v2Profile: PlotProfile = {
+        width: 210,
+        height: 297,
+        insets: { top: 14, right: 15, bottom: 16, left: 17 },
+        includeFrame: false,
+        toolWidthMillimeters: 0.25,
+      };
+      const framed: Preset = {
+        version: 3,
+        sketch: "legacy-clear",
+        name: "framed",
+        seed: 8,
+        params: { radius: 22, count: 33 },
+        locks: [],
+        profile: framedProfile,
+        framing: {
+          pageFrame: { x: 12, y: -8, width: 140, height: 90 },
+          generationAspect: 3 / 2,
+          aspectLocked: true,
+        },
+      };
+      const legacy: Preset =
+        version === 1
+          ? {
+              version: 1,
+              sketch: "legacy-clear",
+              name: "legacy",
+              seed: 9,
+              params: { radius: 44, count: 55 },
+              locks: [],
+            }
+          : {
+              version: 2,
+              sketch: "legacy-clear",
+              name: "legacy",
+              seed: 9,
+              params: { radius: 44, count: 55 },
+              locks: [],
+              profile: v2Profile,
+            };
+      loadPreset.mockImplementation(async (_id, name) =>
+        name === "framed" ? framed : legacy,
+      );
+      listPresets.mockResolvedValue(["framed", "legacy"]);
+      const sketch = {
+        ...sketchWith("legacy-clear", schema),
+        defaultOutputProfile: sketchDefault,
+      } as Parameters<typeof SketchControls>[0]["sketch"];
+      const el = mount(<SketchControls sketch={sketch} />);
+      await flush();
+
+      const picker = el.querySelector<HTMLSelectElement>(
+        'select[aria-label="saved presets"]',
+      )!;
+      const selectAndReload = async (name: string) => {
+        act(() => {
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLSelectElement.prototype,
+            "value",
+          )!.set!;
+          setter.call(picker, name);
+          picker.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        clickButton(el, "Reload");
+        await flush();
+      };
+
+      await selectAndReload("framed");
+      expect(lastCommittedPageFrame).toEqual(framed.framing?.pageFrame);
+
+      await selectAndReload("legacy");
+
+      expect(historyCapture.atomic).toHaveLength(2);
+      const legacyReload = historyCapture.atomic[1]!.after;
+      expect(legacyReload.past).toHaveLength(2);
+      expect(legacyReload.present.framing).toEqual({ kind: "unframed" });
+      expect(legacyReload.present.profile).toEqual(
+        version === 1 ? sketchDefault : v2Profile,
+      );
+      expect(lastProfile).toEqual(version === 1 ? sketchDefault : v2Profile);
+      expect(lastCommittedPageFrame).toBeNull();
+      expect(
+        el.querySelector('input[aria-label="Lock Page aspect"]'),
+      ).toBeNull();
+      expect(lastCompositionFrame).toEqual(
+        resolvePlotCompositionFrame(version === 1 ? sketchDefault : v2Profile),
+      );
+    },
+  );
 
   it("reloads and re-saves the exact non-default Image Asset ID", async () => {
     const defaultAsset = "portrait-default-000000000001";
@@ -2533,7 +4089,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(toggle.disabled).toBe(false);
   });
 
-  it("recomputes a specialized Outline when physical drawable scale changes", () => {
+  it("reuses specialized Outline geometry when only its physical target changes", () => {
     autoFireOutlineComputed = false;
     const generateOutlineSource = vi.fn(() => ({
       space: { width: 1_000, height: 1_000 },
@@ -2570,16 +4126,9 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(outlineJob.starts).toBe(1);
     act(() => margin.blur());
 
-    expect(outlineJob.starts).toBe(2);
+    expect(outlineJob.starts).toBe(1);
     expect(lastCompositionFrame).toBe(initialFrame);
-    expect(outlineJob.lastIdentity?.sourceKind).toBe("specialized-sketch");
-    if (outlineJob.lastIdentity?.sourceKind !== "specialized-sketch") {
-      throw new Error("expected specialized identity");
-    }
-    expect(
-      outlineJob.lastIdentity.outlineTarget.millimetersPerSceneUnit,
-    ).toBe(0.16);
-    act(() => lastOnOutlineComputed?.());
+    expect(toggle.textContent).toBe("Outline");
 
     const toolWidth = el.querySelector<HTMLInputElement>(
       'input[aria-label="Tool width (mm)"]',
@@ -2588,19 +4137,122 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     setInput(toolWidth, "0.5");
     act(() => toolWidth.blur());
 
-    expect(outlineJob.starts).toBe(3);
-    expect(outlineJob.lastIdentity?.sourceKind).toBe("specialized-sketch");
-    if (outlineJob.lastIdentity?.sourceKind !== "specialized-sketch") {
-      throw new Error("expected specialized identity");
-    }
-    expect(outlineJob.lastIdentity.outlineTarget.toolWidthMillimeters).toBe(
-      0.5,
-    );
+    expect(outlineJob.starts).toBe(1);
+    expect(lastProfile?.toolWidthMillimeters).toBe(0.5);
+    expect(toggle.textContent).toBe("Outline");
     expect(lastCompositionFrame).toBe(initialFrame);
     expect(generateOutlineSource).not.toHaveBeenCalled();
   });
 
-  it("marks Outline recomputing when the composition-frame option changes", () => {
+  it("keeps legacy Outline identity and authored stroke widths exact across tool changes", () => {
+    autoFireOutlineComputed = false;
+    const source: Scene = {
+      space: { width: 1_000, height: 1_000 },
+      primitives: [
+        {
+          points: [[10, 10], [900, 900]],
+          stroke: { color: "purple", width: 4 },
+          hiddenLineRole: "source",
+        },
+      ],
+    };
+    const generate = vi.fn(() => source);
+    const el = mount(
+      <SketchControls
+        sketch={{ ...sketchWith("legacy-exact", schema), generate }}
+      />,
+    );
+    fakeFillCaptureScene = source;
+    clickButton(el, "Fill");
+    act(() => lastOnOutlineComputed?.());
+    const initialIdentity = outlineJob.lastIdentity;
+    expect(initialIdentity?.sourceKind).toBe("legacy-scene");
+    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(4);
+
+    generate.mockClear();
+    generateDuringLiveCanvasRender = true;
+    const toolWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Tool width (mm)"]',
+    )!;
+    act(() => toolWidth.focus());
+    setInput(toolWidth, "0.8");
+    act(() => toolWidth.blur());
+
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.lastIdentity).toBe(initialIdentity);
+    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(4);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.lastExportSnapshot?.identity).toEqual(initialIdentity);
+  });
+
+  it("recomputes opt-in Outline for every authored geometry axis", () => {
+    autoFireOutlineComputed = false;
+    const sketch = {
+      ...(sketchWith("geometry-axes", schema) as unknown as Record<
+        string,
+        unknown
+      >),
+      time: { duration: 10, mode: "loop" },
+      generateOutlineSource: vi.fn(() => ({
+        space: { width: 1_000, height: 1_000 },
+        primitives: [],
+      })),
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+    const el = mount(<SketchControls sketch={sketch} />);
+
+    clickButton(el, "Fill");
+    act(() => lastOnOutlineComputed?.());
+    expect(outlineJob.starts).toBe(1);
+
+    const radius = paramInput(el, "radius");
+    act(() => radius.focus());
+    setInput(radius, "11");
+    act(() => radius.blur());
+    expect(outlineJob.starts).toBe(2);
+    expect(outlineJob.lastIdentity?.params).toContainEqual({
+      key: "radius",
+      value: 11,
+    });
+    act(() => lastOnOutlineComputed?.());
+
+    const priorSeed = outlineJob.lastIdentity?.seed;
+    clickButton(el, "New seed");
+    expect(outlineJob.starts).toBe(3);
+    expect(outlineJob.lastIdentity?.seed).not.toBe(priorSeed);
+    act(() => lastOnOutlineComputed?.());
+
+    const tolerance = el.querySelector<HTMLInputElement>(
+      "#sketch-tolerance",
+    )!;
+    act(() => tolerance.focus());
+    setInput(tolerance, "1");
+    act(() => tolerance.blur());
+    expect(outlineJob.starts).toBe(4);
+    expect(outlineJob.lastIdentity?.tolerance).toBe(1);
+    act(() => lastOnOutlineComputed?.());
+
+    const priorFrame = outlineJob.lastIdentity?.compositionFrame;
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    act(() => width.focus());
+    setInput(width, "300");
+    act(() => width.blur());
+    expect(outlineJob.starts).toBe(5);
+    expect(outlineJob.lastIdentity?.compositionFrame).not.toEqual(priorFrame);
+    act(() => lastOnOutlineComputed?.());
+
+    clickButton(el, "Outline");
+    fakeCurrentT = 2.5;
+    clickButton(el, "Fill");
+    expect(outlineJob.starts).toBe(6);
+    expect(outlineJob.lastIdentity?.sampledT).toBe(2.5);
+  });
+
+  it("does not rederive Outline when the final Page rectangle option changes", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={sketchWith("a", schema)} />);
     const toggle = el.querySelector<HTMLButtonElement>(
@@ -2619,6 +4271,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
 
     expect(lastProfile?.includeFrame).toBe(false);
     expect(lastCompositionFrame).toBe(initialFrame);
+    expect(outlineJob.starts).toBe(1);
     expect(
       el.querySelector('[data-testid="canvas-seed"]')?.getAttribute(
         "data-include-frame",
@@ -2628,7 +4281,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(toggle.disabled).toBe(false);
   });
 
-  it("restores includeFrame from a Preset and recomputes the visible Outline", async () => {
+  it("restores includeFrame from a Preset without rederiving visible Outline", async () => {
     autoFireOutlineComputed = false;
     listPresets.mockResolvedValue(["without-frame"]);
     const profileWithoutFrame: PlotProfile = {
@@ -2662,6 +4315,7 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(el.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(
       false,
     );
+    expect(outlineJob.starts).toBe(1);
     expect(toggle.textContent).toBe("Outline");
     expect(toggle.disabled).toBe(false);
   });
@@ -2777,7 +4431,7 @@ describe("SketchControls — SVG export wiring", () => {
     // this Sketch declares no default, so it is the Harness fallback.
     const meta = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
     expect(meta).toBeDefined();
-    expect(JSON.parse(meta!)).toMatchObject({
+    expect(JSON.parse(meta!)).toEqual({
       version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
@@ -2806,6 +4460,97 @@ describe("SketchControls — SVG export wiring", () => {
     const [, filename] = downloadBlob.mock.calls[0]!;
     expect(filename).toBe(`waves-seed${seed}-t2.5.svg`);
   });
+
+  it.each([
+    ["crop", { x: 25, y: 20, width: 50, height: 60 }],
+    ["padding", { x: -25, y: -10, width: 150, height: 120 }],
+    ["mixed crop and padding", { x: 25, y: -10, width: 100, height: 80 }],
+  ])(
+    "frames retained animated Fill for %s without generating or resampling",
+    (_label, percentages) => {
+      const generate = vi.fn(() => {
+        throw new Error("framed SVG must not generate");
+      });
+      const sketch = {
+        ...(sketchWith("framed-svg", {
+          radius: numberSpec({ default: 10 }),
+        }) as unknown as Record<string, unknown>),
+        time: { duration: 4, mode: "loop" },
+        generate,
+      } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+      const el = mount(<SketchControls sketch={sketch} />);
+      const composition = lastCompositionFrame!;
+      const source: Scene = {
+        space: composition,
+        background: { color: "lavender" },
+        primitives: [
+          {
+            points: [
+              [-composition.width * 0.1, composition.height * 0.4],
+              [composition.width * 1.1, composition.height * 0.4],
+              [composition.width * 1.1, composition.height * 0.6],
+              [-composition.width * 0.1, composition.height * 0.6],
+            ],
+            closed: true,
+            fill: { color: "navy" },
+          },
+        ],
+      };
+      fakeDisplayedFillScene = {
+        scene: source,
+        sourceScene: source,
+        displayedScene: source,
+        t: 1.75,
+        renderMode: "fill",
+        tolerance: 0,
+        includeFrame: true,
+        inputRevision: 0,
+        sourceInputRevision: 0,
+      };
+      const outline: Scene = { space: composition, primitives: [] };
+      fakeDisplayedScene = {
+        scene: outline,
+        sourceScene: outline,
+        displayedScene: outline,
+        t: 1.75,
+        renderMode: "outline",
+        tolerance: 0,
+        includeFrame: true,
+        inputRevision: 0,
+        sourceInputRevision: 0,
+      };
+
+      clickButton(el, "Crop");
+      for (const [name, value] of Object.entries(percentages)) {
+        setInput(
+          el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+          String(value),
+        );
+      }
+      clickButton(el, "Apply");
+      expect(generate).not.toHaveBeenCalled();
+
+      const frame: PageFrame = {
+        x: (composition.width * percentages.x) / 100,
+        y: (composition.height * percentages.y) / 100,
+        width: (composition.width * percentages.width) / 100,
+        height: (composition.height * percentages.height) / 100,
+      };
+      clickButton(el, "Export SVG");
+
+      expect(generate).not.toHaveBeenCalled();
+      expect(exportSceneCapture.current).toEqual(frameScene(source, frame));
+      expect(exportSceneCapture.current).not.toBe(source);
+      expect(downloadBlob.mock.calls[0]![1]).toMatch(/-t1\.75\.svg$/);
+      const exported = exportSceneCapture.current as Scene;
+      expect(exported.space).toEqual({
+        width: frame.width,
+        height: frame.height,
+      });
+      expect(exported.background).toEqual({ color: "lavender" });
+      expect(outOfBoundsPoints(exported, frame.width, frame.height)).toEqual([]);
+    },
+  );
 
   // #237: a Scene whose single Primitive overflows the 100×100 canvas on BOTH
   // sides — a horizontal line from x=-50 to x=150 at y=50. The plain SVG export
@@ -2866,7 +4611,89 @@ describe("SketchControls — SVG export wiring", () => {
     expect(svg).not.toContain("-50");
     expect(svg).not.toContain("150");
   });
+
+  it("preserves the exact unframed cold-generation and clipping path", () => {
+    const retained: Scene = {
+      space: { width: 100, height: 100 },
+      primitives: [{ points: [[90, 90]], fill: { color: "retained" } }],
+    };
+    fakeDisplayedScene = {
+      scene: retained,
+      sourceScene: retained,
+      displayedScene: retained,
+      t: 3,
+      renderMode: "fill",
+      tolerance: 0,
+      includeFrame: true,
+      inputRevision: 0,
+      sourceInputRevision: 0,
+    };
+    fakeCurrentT = 2.5;
+    const generate = vi.fn(() => overflowScene as Scene);
+    const sketch = {
+      ...(sketchWith("unframed-regression", {
+        radius: numberSpec({ default: 10 }),
+      }) as unknown as Record<string, unknown>),
+      time: { duration: 4, mode: "loop" },
+      generate,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+    const el = mount(<SketchControls sketch={sketch} />);
+    const seed = Number(
+      el.querySelector<HTMLInputElement>("#sketch-seed")!.value,
+    );
+
+    clickButton(el, "Export SVG");
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(generate).toHaveBeenCalledWith(
+      { radius: 10 },
+      seed,
+      2.5,
+      lastCompositionFrame,
+    );
+    expect(exportSceneCapture.current).toEqual(
+      clipSceneToBounds(overflowScene as Scene),
+    );
+    expect(exportSceneCapture.current).not.toEqual(retained);
+    expect(downloadBlob.mock.calls[0]![1]).toBe(
+      `unframed-regression-seed${seed}-t2.5.svg`,
+    );
+  });
 });
+
+function finalizedPlotterScene(base: Scene): Scene {
+  const snapshot = outlineJob.lastExportSnapshot;
+  if (snapshot === null) throw new Error("expected hidden-line export snapshot");
+  const policy: OutlineFinalizationStrokePolicy =
+    snapshot.identity.sourceKind === "legacy-scene"
+      ? {
+          kind: "legacy-scene",
+          target: {
+            toolWidthMillimeters: snapshot.profile.toolWidthMillimeters,
+            millimetersPerSceneUnit: computePlotMapping(
+              snapshot.pageFrame === null
+                ? snapshot.identity.compositionFrame
+                : {
+                    width: snapshot.pageFrame.width,
+                    height: snapshot.pageFrame.height,
+                  },
+              snapshot.profile,
+            ).scale,
+          },
+        }
+      : {
+          kind: "physical-tool",
+          target: snapshot.identity.outlineTarget,
+        };
+  return clipSceneToBounds(
+    finalizeOutlineScene(
+      base,
+      snapshot.pageFrame,
+      snapshot.profile.includeFrame,
+      policy,
+    ),
+  );
+}
 
 describe("SketchControls — Hidden-line SVG export wiring", () => {
   // A Scene with TWO overlapping filled squares in painter's order: the nearer
@@ -3109,7 +4936,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
   it("atomically scales the physical sheet via Preset reload while reusing the cached Outline Scene", async () => {
     listPresets.mockResolvedValue(["double"]);
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
-    const processed = outlineScene(source, 0, true);
+    const processed = outlineScene(source, 0);
     const processedBefore = structuredClone(processed);
     const generate = vi.fn(() => source);
     const el = mount(
@@ -3173,7 +5000,19 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     expect(generate).not.toHaveBeenCalled();
     expect(fakeDisplayedScene?.scene).toEqual(processed);
     expect(processed).toEqual(processedBefore);
-    expect(firstScene).toEqual(secondScene);
+    const firstFinalized = firstScene as Scene;
+    const secondFinalized = secondScene as Scene;
+    expect(firstFinalized.primitives.slice(0, -1)).toEqual(
+      secondFinalized.primitives.slice(0, -1),
+    );
+    expect(firstFinalized.primitives.at(-1)?.points).toEqual(
+      secondFinalized.primitives.at(-1)?.points,
+    );
+    // The worker retargets the optional Page outline in Scene units for each
+    // profile; physical serialization keeps both at the configured 0.3 mm.
+    expect(firstFinalized.primitives.at(-1)?.stroke?.width).not.toBe(
+      secondFinalized.primitives.at(-1)?.stroke?.width,
+    );
     expect(plotterExportCapture.current?.profile).toEqual(doubledProfile);
     expect(firstSvg).toContain(
       'width="200mm" height="200mm" viewBox="0 0 200 200"',
@@ -3202,7 +5041,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
   it("reuses the exact displayed outline Scene without generating or reprocessing", () => {
     const source = hlScene as unknown as DisplayedSceneSnapshot["scene"];
-    const processed = outlineScene(source, 0, true);
+    const processed = outlineScene(source, 0);
     const base = hlStaticSketch("circles");
     const generate = vi.fn(() => source);
     const sketch = { ...base, generate };
@@ -3222,7 +5061,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).not.toHaveBeenCalled();
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(processed),
+      finalizedPlotterScene(processed),
     );
   });
 
@@ -3244,7 +5083,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).not.toHaveBeenCalled();
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(source, 0, true)),
+      finalizedPlotterScene(outlineScene(source, 0)),
     );
   });
 
@@ -3314,7 +5153,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).toHaveBeenCalledTimes(1);
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(source, 0, true)),
+      finalizedPlotterScene(outlineScene(source, 0)),
     );
   });
 
@@ -3336,7 +5175,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
 
     expect(generate).not.toHaveBeenCalled();
     expect(plotterExportCapture.current?.scene).toEqual(
-      clipSceneToBounds(outlineScene(fakeDisplayedScene.scene, 0, true)),
+      finalizedPlotterScene(outlineScene(fakeDisplayedScene.scene, 0)),
     );
   });
 
@@ -3367,7 +5206,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // the schema defaults ({ radius: 10 }); seed is the displayed seed. The
     // outline preview evaluates this SAME expression, so the two inputs match.
     expect(plotterExportCapture.current?.scene).toEqual(
-      outlineScene(
+      finalizedPlotterScene(outlineScene(
         sketch.generate(
           { radius: 10 },
           seed,
@@ -3375,8 +5214,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
         0,
-        true,
-      ),
+      )),
     );
   });
 
@@ -3449,7 +5287,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     clickButton(el, "Export Hidden-line SVG");
     const atZero = plotterExportCapture.current?.scene;
     expect(atZero).toEqual(
-      outlineScene(
+      finalizedPlotterScene(outlineScene(
         sketch.generate(
           { radius: 10 },
           seed,
@@ -3457,8 +5295,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
         0,
-        true,
-      ),
+      )),
     );
     const vertsAtZero = totalVerts(atZero);
 
@@ -3470,7 +5307,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     // preview == export: the export is the SAME seam expression at tolerance 1
     // (the value LiveCanvas's outline preview also receives — asserted below).
     expect(atOne).toEqual(
-      outlineScene(
+      finalizedPlotterScene(outlineScene(
         sketch.generate(
           { radius: 10 },
           seed,
@@ -3478,8 +5315,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
           resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
         ),
         1,
-        true,
-      ),
+      )),
     );
     // ...and simplification actually reduced the exported vertex count.
     expect(totalVerts(atOne)).toBeLessThan(vertsAtZero);
@@ -3546,7 +5382,6 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
         resolvePlotCompositionFrame(HARNESS_FALLBACK_PLOT_PROFILE),
       ),
       0,
-      true,
     );
     expect(outOfBoundsPoints(seam, 100, 100)).not.toEqual([]);
 
@@ -3558,7 +5393,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     const exported = plotterExportCapture.current?.scene;
     expect(exported).not.toBeNull();
     expect(outOfBoundsPoints(exported, 100, 100)).toEqual([]);
-    expect(exported).toEqual(clipSceneToBounds(seam));
+    expect(exported).toEqual(finalizedPlotterScene(seam));
 
     const svg = await blobText(downloadBlob.mock.calls[0]![0]);
     const coordinates = [
@@ -3662,7 +5497,7 @@ describe("SketchControls — Hidden-line SVG export wiring", () => {
     clickButton(el, "Fill");
     const startsBeforeExport = outlineJob.starts;
     fakeDisplayedScene = {
-      scene: outlineScene(source, 0, true),
+      scene: outlineScene(source, 0),
       t: 0,
       renderMode: "outline",
       tolerance: 0,
@@ -3997,7 +5832,7 @@ describe("SketchControls — PNG export wiring", () => {
     // envelope is now a v2 record (#266) carrying the active Plot Profile (#267),
     // the Harness fallback for this default-less Sketch.
     const json = JSON.parse(readITxtText(await blobBytes(blob)));
-    expect(json).toMatchObject({
+    expect(json).toEqual({
       version: 2,
       sketch: "circles",
       name: `circles-seed${seed}`,
@@ -4007,6 +5842,36 @@ describe("SketchControls — PNG export wiring", () => {
       profile: HARNESS_FALLBACK_PLOT_PROFILE,
     });
     expect("t" in json).toBe(false);
+  });
+
+  it("embeds the same framed v3 snapshot as Save in PNG iTXt", async () => {
+    const el = mount(<SketchControls sketch={staticSketch("framed-png")} />);
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    setInput(el.querySelector<HTMLInputElement>('input[name="y"]')!, "-5");
+    setInput(el.querySelector<HTMLInputElement>('input[name="width"]')!, "80");
+    setInput(el.querySelector<HTMLInputElement>('input[name="height"]')!, "110");
+    clickButton(el, "Apply");
+
+    setInput(
+      el.querySelector<HTMLInputElement>('input[aria-label="preset name"]')!,
+      "framed-authored",
+    );
+    clickButton(el, "Save");
+    await flush();
+    const saved = savePreset.mock.calls[0]![0];
+    expect(saved.version).toBe(3);
+
+    clickButton(el, "Export PNG");
+    await flush();
+
+    const [blob, filename] = downloadBlob.mock.calls[0]!;
+    const embedded = JSON.parse(readITxtText(await blobBytes(blob)));
+    expect(filename).toBe(`framed-png-seed${saved.seed}.png`);
+    expect(embedded).toEqual({
+      ...saved,
+      name: `framed-png-seed${saved.seed}`,
+    });
   });
 
   it("includes the captured -t{t} segment for a time-driven sketch", async () => {
@@ -4502,7 +6367,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     clickButton(el, "Export Hidden-line SVG");
     await flush();
     expect(outlineJob.exportStarts).toBe(1);
-    expect(outlineJob.lastExportSnapshot?.identity.includeFrame).toBe(false);
+    expect(outlineJob.lastExportSnapshot?.profile.includeFrame).toBe(false);
     const plotterScene = plotterExportCapture.current?.scene as Scene;
     expect(plotterScene.primitives.length).toBeGreaterThan(0);
     expect(plotterScene.primitives.map(({ points }) => points)).toEqual(
@@ -4601,6 +6466,604 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     if (match === undefined) throw new Error("no Shading");
     return match;
   }
+
+  it("scales, pans, applies, and resets a fixed Page without restarting Scribble or revising painted provenance", async () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await completeScribble(0, preparedScene(77));
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const sourceRevision = canvas.dataset.sourceInputRevision;
+    const contentRevision = canvas.dataset.contentRevision;
+    expect(scribbleJob.starts).toHaveLength(1);
+
+    clickButton(el, "Crop");
+    act(() =>
+      el
+        .querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!
+        .click(),
+    );
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "150",
+    );
+    const scaled = lastPageFrameEditDraft;
+    if (scaled?.mode !== "fixed-page") {
+      throw new Error("fixed Page draft was not active");
+    }
+    act(() =>
+      lastOnPageFrameDraftChange?.({
+        ...scaled.frame,
+        x: scaled.frame.x + scaled.compositionFrame.width * 0.1,
+        y: scaled.frame.y - scaled.compositionFrame.height * 0.05,
+      }),
+    );
+    expect(lastPageFrameEditDraft?.frame).not.toEqual(scaled.frame);
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(scribbleJob.starts).toHaveLength(1);
+    clickButton(el, "Apply");
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
+    expect(canvas.dataset.contentRevision).toBe(contentRevision);
+
+    clickButton(el, "Crop");
+    act(() =>
+      el
+        .querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!
+        .click(),
+    );
+    clickButton(el, "Reset Frame");
+    expect(historyCapture.atomic).toHaveLength(2);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
+    expect(canvas.dataset.contentRevision).toBe(contentRevision);
+  });
+
+  it("restyles retained Outline through fixed-page scale and pan without generation or preparation", async () => {
+    autoFireOutlineComputed = false;
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    const source = preparedScene(78);
+    source.primitives[0]!.stroke = { color: "navy", width: 7 };
+    await completeScribble(0, source);
+    clickButton(el, "Outline");
+    act(() => lastOnOutlineComputed?.());
+    expect(outlineJob.starts).toBe(1);
+    expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(7);
+    expect(lastOutlineFinalizationStrokePolicy).toMatchObject({
+      kind: "physical-tool",
+      target: {
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.18,
+      },
+    });
+    const cachedOutlineScene = lastRenderScene;
+
+    generate.mockClear();
+    generateDuringLiveCanvasRender = true;
+    clickButton(el, "Crop");
+    act(() =>
+      el
+        .querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!
+        .click(),
+    );
+    setInput(
+      el.querySelector<HTMLInputElement>(
+        'input[aria-label="Composition scale percentage"]',
+      )!,
+      "150",
+    );
+    const scaled = lastPageFrameEditDraft;
+    if (scaled?.mode !== "fixed-page" || lastProfile === null) {
+      throw new Error("fixed Page draft was not active");
+    }
+    const drawableWidth =
+      lastProfile.width - lastProfile.insets.left - lastProfile.insets.right;
+    const targetScale = drawableWidth / scaled.frame.width;
+    expect(lastRenderScene).toBe(cachedOutlineScene);
+    expect(lastOutlineFinalizationStrokePolicy?.target).toEqual({
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: targetScale,
+    });
+    expect(outlineJob.starts).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    const scaledStrokePolicy = lastOutlineFinalizationStrokePolicy;
+    act(() =>
+      lastOnPageFrameDraftChange?.({
+        ...scaled.frame,
+        x: scaled.frame.x + 40,
+        y: scaled.frame.y - 25,
+      }),
+    );
+    expect(lastRenderScene).toBe(cachedOutlineScene);
+    expect(lastOutlineFinalizationStrokePolicy).toBe(scaledStrokePolicy);
+    expect(outlineJob.starts).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Apply");
+    expect(outlineJob.starts).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Crop");
+    act(() =>
+      el
+        .querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!
+        .click(),
+    );
+    const panOnly = lastPageFrameEditDraft;
+    if (panOnly?.mode !== "fixed-page") {
+      throw new Error("fixed Page pan draft was not active");
+    }
+    act(() =>
+      lastOnPageFrameDraftChange?.({
+        ...panOnly.frame,
+        x: panOnly.frame.x - 15,
+      }),
+    );
+    clickButton(el, "Apply");
+    expect(lastRenderScene).toBe(cachedOutlineScene);
+    expect(lastOutlineFinalizationStrokePolicy).toBe(scaledStrokePolicy);
+    expect(outlineJob.starts).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(outlineJob.lastExportSnapshot?.identity).toMatchObject({
+      sourceKind: "completed-scene-sketch",
+      outlineTarget: {
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: targetScale,
+      },
+    });
+  });
+
+  it("emits one asymmetric fixed Page consistently through PNG, ordinary SVG, and plotter SVG", async () => {
+    const generate = vi.fn(toneCalibration.generate);
+    const sketch = {
+      ...toneCalibration,
+      id: "fixed-page-output-parity",
+      defaultOutputProfile: FIXED_PAGE_PARITY_PROFILE,
+      generate,
+    };
+    const source = fixedPageParityScene();
+    const toBlob = vi.fn((callback: BlobCallback) => {
+      callback(new Blob([MINIMAL_PNG], { type: "image/png" }));
+    });
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(<SketchControls sketch={sketch} />);
+    await flush();
+    expect(lastCompositionFrame).toEqual(FIXED_PAGE_PARITY_COMPOSITION);
+    await completeScribble(0, source);
+
+    // Drive the public editor: 2× absolute scale, then the asymmetric origin.
+    clickButton(el, "Crop");
+    act(() => el.querySelector<HTMLInputElement>('input[name="keepPageSizeFixed"]')!.click());
+    setInput(
+      el.querySelector<HTMLInputElement>('input[aria-label="Composition scale percentage"]')!,
+      "200",
+    );
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "-10");
+    setInput(el.querySelector<HTMLInputElement>('input[name="y"]')!, "25");
+    expect(lastPageFrameEditDraft?.mode).toBe("fixed-page");
+    expect(lastPageFrameEditDraft?.frame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(lastProfile).toBe(lastPageFrameEditDraft?.profile);
+    clickButton(el, "Apply");
+
+    expect(lastProfile).toEqual(FIXED_PAGE_PARITY_PROFILE);
+    expect(lastCommittedPageFrame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(historyCapture.atomic).toHaveLength(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    // Tone sees the same committed Page; placement bytes are asserted through
+    // the real LiveCanvas in its sibling parity test.
+    clickButton(el, "Tone");
+    expect(lastToneSource).not.toBeNull();
+    expect(lastCommittedPageFrame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(lastProfile).toEqual(FIXED_PAGE_PARITY_PROFILE);
+    clickButton(el, "Fill");
+
+    clickButton(el, "Export PNG");
+    await flush();
+    expect(toBlob).toHaveBeenCalledOnce();
+    const pngCall = downloadBlob.mock.calls.at(-1)!;
+    expect(pngCall[0].type).toBe("image/png");
+    const pngBytes = await new Promise<Uint8Array>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(pngCall[0]);
+    });
+    const pngText = new TextDecoder().decode(pngBytes);
+    expect(pngText).toContain('"version":3');
+    expect(pngText).toContain('"profile":{"width":323,"height":217');
+    expect(pngText).toContain(
+      `"pageFrame":{"x":${FIXED_PAGE_PARITY_FRAME.x},"y":${FIXED_PAGE_PARITY_FRAME.y},"width":${FIXED_PAGE_PARITY_FRAME.width},"height":${FIXED_PAGE_PARITY_FRAME.height}}`,
+    );
+
+    clickButton(el, "Export SVG");
+    const ordinaryBlob = downloadBlob.mock.calls.at(-1)![0];
+    const ordinarySvg = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(ordinaryBlob);
+    });
+    const expectedFramed = frameScene(source, FIXED_PAGE_PARITY_FRAME);
+    expect(exportSceneCapture.current).toEqual(expectedFramed);
+    const ordinaryDocument = new DOMParser().parseFromString(ordinarySvg, "image/svg+xml");
+    expect(ordinaryDocument.documentElement.getAttribute("viewBox")).toBe(
+      `0 0 ${FIXED_PAGE_PARITY_FRAME.width} ${FIXED_PAGE_PARITY_FRAME.height}`,
+    );
+    expect(ordinaryDocument.querySelector(":root > rect")?.getAttribute("fill")).toBe("#f4efe6");
+    expect(ordinaryDocument.querySelector(":root > path")?.getAttribute("d")).toBe(
+      "M129.0994 38.7298 L645.4972 348.5685",
+    );
+
+    clickButton(el, "Outline");
+    expect(lastCommittedPageFrame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(lastOutlineFinalizationStrokePolicy).toEqual({
+      kind: "physical-tool",
+      target: {
+        toolWidthMillimeters: 0.37,
+        millimetersPerSceneUnit: 265 / FIXED_PAGE_PARITY_FRAME.width,
+      },
+    });
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    const fixedPlotterBlob = downloadBlob.mock.calls.at(-1)![0];
+    const fixedPlotterSvg = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(fixedPlotterBlob);
+    });
+    const fixedPlotterDocument = new DOMParser().parseFromString(fixedPlotterSvg, "image/svg+xml");
+    const fixedRoot = fixedPlotterDocument.documentElement;
+    const fixedPaths = [...fixedRoot.querySelectorAll(":scope > path")];
+    expect(fixedRoot.getAttribute("width")).toBe("323mm");
+    expect(fixedRoot.getAttribute("height")).toBe("217mm");
+    expect(fixedRoot.getAttribute("viewBox")).toBe("0 0 323 217");
+    expect(fixedPaths.map((path) => path.getAttribute("d"))).toEqual([
+      "M70 34.9 L282 162.1",
+      "M17 19 L282 19 L282 178 L17 178 L17 19",
+    ]);
+    expect(fixedPaths.map((path) => path.getAttribute("stroke-width"))).toEqual(["0.37", "0.37"]);
+    expect(fixedPlotterSvg).not.toContain("#f4efe6");
+    expect(fixedPlotterSvg).not.toMatch(/<rect\b/);
+
+    // Undo the fixed operation and apply the identical frame through ordinary
+    // scale-preserving editing. Its physical scale stays unchanged, so only the
+    // paper extent/physical placement differs; the framed ordinary SVG remains
+    // the same local Page geometry.
+    expect(pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(lastCommittedPageFrame).toBeNull();
+    clickButton(el, "Fill");
+    clickButton(el, "Crop");
+    for (const [name, value] of Object.entries({
+      x: -10,
+      y: 25,
+      width: 50,
+      height: 50,
+    })) {
+      setInput(el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!, String(value));
+    }
+    expect(lastPageFrameEditDraft?.mode).toBe("scale-preserving");
+    clickButton(el, "Apply");
+    expect(lastCommittedPageFrame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(lastProfile).toEqual({
+      ...FIXED_PAGE_PARITY_PROFILE,
+      width: 190.5,
+      height: 137.5,
+    });
+    expect(
+      (lastProfile!.width - lastProfile!.insets.left - lastProfile!.insets.right) /
+        FIXED_PAGE_PARITY_FRAME.width,
+    ).toBeCloseTo(265 / FIXED_PAGE_PARITY_COMPOSITION.width, 12);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Export SVG");
+    const ordinaryScalePreservingSvg = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(downloadBlob.mock.calls.at(-1)![0]);
+    });
+    const ordinaryScalePreservingDocument = new DOMParser().parseFromString(
+      ordinaryScalePreservingSvg,
+      "image/svg+xml",
+    );
+    expect(ordinaryScalePreservingDocument.documentElement.getAttribute("viewBox")).toBe(
+      `0 0 ${FIXED_PAGE_PARITY_FRAME.width} ${FIXED_PAGE_PARITY_FRAME.height}`,
+    );
+    expect(ordinaryScalePreservingDocument.querySelector(":root > path")?.getAttribute("d")).toBe(
+      "M129.0994 38.7298 L645.4972 348.5685",
+    );
+
+    clickButton(el, "Outline");
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    const ordinaryPlotterSvg = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(downloadBlob.mock.calls.at(-1)![0]);
+    });
+    const ordinaryPlotterDocument = new DOMParser().parseFromString(
+      ordinaryPlotterSvg,
+      "image/svg+xml",
+    );
+    const ordinaryRoot = ordinaryPlotterDocument.documentElement;
+    const ordinaryPaths = [...ordinaryRoot.querySelectorAll(":scope > path")];
+    expect(ordinaryRoot.getAttribute("width")).toBe("190.5mm");
+    expect(ordinaryRoot.getAttribute("height")).toBe("137.5mm");
+    expect(ordinaryPaths.map((path) => path.getAttribute("d"))).toEqual([
+      "M43.5 26.95 L149.5 90.55",
+      "M17 19 L149.5 19 L149.5 98.5 L17 98.5 L17 19",
+    ]);
+    expect(ordinaryPaths.map((path) => path.getAttribute("stroke-width"))).toEqual([
+      "0.37",
+      "0.37",
+    ]);
+  });
+
+  it.each([
+    ["crop", { x: 25, y: 20, width: 50, height: 60 }],
+    ["padding", { x: -25, y: -10, width: 150, height: 120 }],
+    ["mixed crop and padding", { x: 25, y: -10, width: 100, height: 80 }],
+  ] as const)(
+    "frames the acknowledged Scribble Scene for %s ordinary SVG without recomputation",
+    async (_label, percentages) => {
+      const generate = vi.fn(toneCalibration.generate);
+      const el = mount(
+        <SketchControls sketch={{ ...toneCalibration, generate }} />,
+      );
+      await flush();
+      const composition = lastCompositionFrame!;
+      const source: Scene = {
+        space: { ...composition },
+        background: { color: "lavender" },
+        primitives: [
+          {
+            points: [
+              [0, composition.height / 2],
+              [composition.width, composition.height / 2],
+            ],
+            stroke: { color: "black", width: 1 },
+            hiddenLineRole: "source",
+          },
+        ],
+      };
+      await completeScribble(0, source);
+      const canvas = el.querySelector<HTMLElement>(
+        '[data-testid="canvas-seed"]',
+      )!;
+      const sourceRevision = canvas.dataset.sourceInputRevision;
+      const contentRevision = canvas.dataset.contentRevision;
+
+      clickButton(el, "Crop");
+      for (const [name, value] of Object.entries(percentages)) {
+        setInput(
+          el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+          String(value),
+        );
+      }
+      clickButton(el, "Apply");
+
+      const frame: PageFrame = {
+        x: (composition.width * percentages.x) / 100,
+        y: (composition.height * percentages.y) / 100,
+        width: (composition.width * percentages.width) / 100,
+        height: (composition.height * percentages.height) / 100,
+      };
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(generate).not.toHaveBeenCalled();
+      expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
+      expect(canvas.dataset.contentRevision).toBe(contentRevision);
+
+      clickButton(el, "Export SVG");
+
+      const expected = frameScene(source, frame);
+      expect(exportSceneCapture.current).toEqual(expected);
+      expect(exportSceneCapture.current).not.toBe(source);
+      expect((exportSceneCapture.current as Scene).space).toEqual({
+        width: frame.width,
+        height: frame.height,
+      });
+      expect((exportSceneCapture.current as Scene).background).toEqual({
+        color: "lavender",
+      });
+      expect(
+        (exportSceneCapture.current as Scene).primitives[0]?.points,
+      ).toEqual(expected.primitives[0]?.points);
+      const svg = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(downloadBlob.mock.calls.at(-1)![0]);
+      });
+      const document = new DOMParser().parseFromString(svg, "image/svg+xml");
+      const root = document.documentElement;
+      expect(root.getAttribute("viewBox")).toBe(
+        `0 0 ${frame.width} ${frame.height}`,
+      );
+      expect(root.querySelector(":scope > rect")?.getAttribute("x")).toBe("0");
+      expect(root.querySelector(":scope > rect")?.getAttribute("y")).toBe("0");
+      expect(root.querySelector(":scope > rect")?.getAttribute("fill")).toBe(
+        "lavender",
+      );
+
+      clickButton(el, "Export PNG");
+      await flush();
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(generate).not.toHaveBeenCalled();
+      expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
+      expect(canvas.dataset.contentRevision).toBe(contentRevision);
+    },
+  );
+
+  it("aborts framed Scribble SVG when the retained canvas provenance is stale", async () => {
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    await flush();
+    const source = preparedScene(78);
+    await completeScribble(0, source);
+
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    clickButton(el, "Apply");
+    fakeDisplayedScene = {
+      scene: source,
+      sourceScene: source,
+      displayedScene: source,
+      t: 0,
+      renderMode: "fill",
+      tolerance: 0,
+      includeFrame: true,
+      sourceInputRevision: 0,
+      contentRevision: 999,
+    };
+
+    clickButton(el, "Export SVG");
+
+    expect(exportSceneCapture.current).toBeNull();
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("reuses one Scribble and Outline base through repeated Page history, frame visibility, and exports", async () => {
+    autoFireOutlineComputed = false;
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    await flush();
+    const source = preparedScene(79);
+    await completeScribble(0, source);
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    act(() => lastOnOutlineComputed?.());
+
+    const composition = lastCompositionFrame!;
+    clickButton(el, "Crop");
+    for (const [name, value] of Object.entries({
+      x: 12.5,
+      y: -10,
+      width: 80,
+      height: 115,
+    })) {
+      setInput(
+        el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+        String(value),
+      );
+    }
+    clickButton(el, "Apply");
+    const expectedFrame: PageFrame = {
+      x: composition.width * 0.125,
+      y: composition.height * -0.1,
+      width: composition.width * 0.8,
+      height: composition.height * 1.15,
+    };
+
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+
+    const first = outlineJob.lastExportSnapshot!;
+    expect(first.pageFrame).toEqual(expectedFrame);
+    expect(first.pageFrame).not.toBe(lastCommittedPageFrame);
+    expect(Object.isFrozen(first.pageFrame)).toBe(true);
+    expect(first.identity).not.toHaveProperty("pageFrame");
+    expect(first.identity).not.toHaveProperty("includeFrame");
+    expect(first.reusableOutline).toBeDefined();
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.starts).toBe(1);
+
+    act(() => compositionFrameCheckbox(el).click());
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+
+    expect(outlineJob.lastExportSnapshot?.pageFrame).toEqual(expectedFrame);
+    expect(outlineJob.lastExportSnapshot?.profile.includeFrame).toBe(false);
+    expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.starts).toBe(1);
+    expect(scribbleJob.starts).toHaveLength(1);
+    expect(generate).not.toHaveBeenCalled();
+
+    const exportAndExpectFrame = async (pageFrame: PageFrame | null) => {
+      clickButton(el, "Export Hidden-line SVG");
+      await flush();
+      expect(outlineJob.lastExportSnapshot?.pageFrame).toEqual(pageFrame);
+      expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+      expect(outlineJob.exportDerivations).toBe(0);
+      expect(outlineJob.starts).toBe(1);
+      expect(scribbleJob.starts).toHaveLength(1);
+      expect(generate).not.toHaveBeenCalled();
+    };
+
+    // Reset, Undo, and Redo traverse only cheap finalization state. Export each
+    // settled state so reuse is proven at the actual worker boundary, not merely
+    // inferred from the preview job count.
+    clickButton(el, "Crop");
+    clickButton(el, "Reset Frame");
+    await exportAndExpectFrame(null);
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    await exportAndExpectFrame(expectedFrame);
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    await exportAndExpectFrame(null);
+
+    // Re-apply an asymmetric mixed crop/pad frame, export it repeatedly, then
+    // restore the Page boundary. None is a generation or derivation identity.
+    clickButton(el, "Crop");
+    for (const [name, value] of Object.entries({
+      x: -20,
+      y: 10,
+      width: 130,
+      height: 75,
+    })) {
+      setInput(
+        el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+        String(value),
+      );
+    }
+    clickButton(el, "Apply");
+    const asymmetricFrame: PageFrame = {
+      x: composition.width * -0.2,
+      y: composition.height * 0.1,
+      width: composition.width * 1.3,
+      height: composition.height * 0.75,
+    };
+    await exportAndExpectFrame(asymmetricFrame);
+    await exportAndExpectFrame(asymmetricFrame);
+
+    act(() => compositionFrameCheckbox(el).click());
+    expect(outlineJob.lastExportSnapshot?.profile.includeFrame).toBe(false);
+    await exportAndExpectFrame(asymmetricFrame);
+    expect(outlineJob.lastExportSnapshot?.profile.includeFrame).toBe(true);
+    expect(outlineJob.exportStarts).toBe(8);
+    expect(outlineJob.exportFinalizations).toBe(8);
+  });
 
   const assetA = "portrait-alpha-000000000001";
   const assetB = "portrait-beta-bbbbbbbbbbbb";
@@ -4808,6 +7271,15 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     });
     clickButton(el, "Tone");
 
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
+    setInput(el.querySelector<HTMLInputElement>('input[name="width"]')!, "80");
+    clickButton(el, "Apply");
+    const frozenFraming = structuredClone(
+      historyCapture.atomic[0]!.after.present.framing,
+    );
+    const frozenComposition = lastCompositionFrame;
+
     clickButton(el, "Choose image");
     await flush();
     clickButton(el, "Refresh");
@@ -4820,10 +7292,14 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     if (persistedB === undefined) throw new Error("no persisted B choice");
     act(() => persistedB.click());
 
-    expect(historyCapture.atomic).toHaveLength(1);
-    expect(historyCapture.atomic[0]!.after.present.params.imageAsset).toBe(
+    expect(historyCapture.atomic).toHaveLength(2);
+    expect(historyCapture.atomic[1]!.after.present.params.imageAsset).toBe(
       assetB,
     );
+    expect(historyCapture.atomic[1]!.after.present.framing).toEqual(
+      frozenFraming,
+    );
+    expect(lastCompositionFrame).toBe(frozenComposition);
     expect(sketchEnvironmentJob.starts).toHaveLength(2);
     expect(sketchEnvironmentJob.starts[0]!.signal.aborted).toBe(true);
     expect(lastToneSource).toBeNull();
@@ -4835,6 +7311,10 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       await Promise.resolve();
     });
     expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentB);
+    expect(historyCapture.atomic[1]!.after.present.framing).toEqual(
+      frozenFraming,
+    );
+    expect(lastCompositionFrame).toBe(frozenComposition);
     expect(scribbleJob.starts).toHaveLength(2);
     expect(scribbleJob.starts[1]!.identity.params).toContainEqual({
       key: "imageAsset",
@@ -5872,7 +8352,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     ["Tone Calibration", toneCalibration],
     ["Scribble Moon", scribbleMoon],
   ] as const)(
-    "keeps %s preparation stable across physical-only edits and replaces it at the frame-aspect boundary",
+    "repaints cached %s geometry for physical style and replaces it at the frame-aspect boundary",
     async (_name, sketch) => {
       autoFireOutlineComputed = false;
       const generate = vi.fn(sketch.generate);
@@ -5882,6 +8362,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         ...preparedScene(31),
         space: { ...firstFrame },
       };
+      firstScene.primitives[0]!.stroke = { color: "black", width: 9 };
       await completeScribble(0, firstScene);
 
       clickButton(el, "Outline");
@@ -5897,6 +8378,13 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         },
       });
       act(() => lastOnOutlineComputed?.());
+      await flush();
+      expect(lastRenderScene?.primitives[0]?.stroke?.width).toBe(9);
+      expect(lastOutlineFinalizationStrokePolicy?.target).toEqual({
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.18,
+      });
+      const cachedOutlineScene = lastRenderScene;
 
       const margin = el.querySelector<HTMLInputElement>(
         'input[aria-label="Linked paper margin (mm)"]',
@@ -5907,15 +8395,13 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
 
       expect(scribbleJob.starts).toHaveLength(1);
       expect(lastCompositionFrame).toBe(firstFrame);
-      expect(outlineJob.starts).toBe(2);
-      expect(outlineJob.lastIdentity).toEqual({
-        ...initialOutline,
-        outlineTarget: {
-          toolWidthMillimeters: 0.3,
-          millimetersPerSceneUnit: 0.16,
-        },
+      expect(outlineJob.starts).toBe(1);
+      expect(outlineJob.lastIdentity).toBe(initialOutline);
+      expect(lastRenderScene).toBe(cachedOutlineScene);
+      expect(lastOutlineFinalizationStrokePolicy?.target).toEqual({
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.16,
       });
-      act(() => lastOnOutlineComputed?.());
 
       const toolWidth = el.querySelector<HTMLInputElement>(
         'input[aria-label="Tool width (mm)"]',
@@ -5926,15 +8412,26 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
 
       expect(scribbleJob.starts).toHaveLength(1);
       expect(lastCompositionFrame).toBe(firstFrame);
-      expect(outlineJob.starts).toBe(3);
-      expect(outlineJob.lastIdentity).toEqual({
-        ...initialOutline,
+      expect(outlineJob.starts).toBe(1);
+      expect(outlineJob.lastIdentity).toBe(initialOutline);
+      expect(lastRenderScene).toBe(cachedOutlineScene);
+      expect(lastOutlineFinalizationStrokePolicy?.target).toEqual({
+        toolWidthMillimeters: 0.5,
+        millimetersPerSceneUnit: 0.16,
+      });
+
+      expect(exportButton(el, "Export Hidden-line SVG").disabled).toBe(false);
+      clickButton(el, "Export Hidden-line SVG");
+      expect(outlineJob.exportStarts).toBe(1);
+      expect(outlineJob.exportDerivations).toBe(0);
+      expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
+      expect(outlineJob.lastExportSnapshot?.identity).toMatchObject({
+        sourceKind: "completed-scene-sketch",
         outlineTarget: {
           toolWidthMillimeters: 0.5,
           millimetersPerSceneUnit: 0.16,
         },
       });
-      act(() => lastOnOutlineComputed?.());
 
       const width = el.querySelector<HTMLInputElement>(
         'input[aria-label="Paper width (mm)"]',
@@ -5948,7 +8445,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       expect(scribbleJob.starts[1]?.identity.compositionFrame).toEqual(
         lastCompositionFrame,
       );
-      expect(outlineJob.starts).toBe(3);
+      expect(outlineJob.starts).toBe(1);
 
       const replacementScene: Scene = {
         ...preparedScene(32),
@@ -5956,7 +8453,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       };
       await completeScribble(1, replacementScene);
       await flush();
-      expect(outlineJob.starts).toBe(4);
+      expect(outlineJob.starts).toBe(2);
       expect(outlineJob.lastIdentity).toMatchObject({
         sourceKind: "completed-scene-sketch",
         compositionFrame: lastCompositionFrame!,
@@ -6038,7 +8535,9 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     await flush();
     expect(outlineJob.exportStarts).toBe(1);
     expect(outlineJob.exportDerivations).toBe(0);
-    expect(plotterExportCapture.current?.scene).toEqual(currentOutline);
+    expect(plotterExportCapture.current?.scene).toEqual(
+      finalizedPlotterScene(currentOutline),
+    );
     expect(downloadBlob).toHaveBeenCalledTimes(1);
   });
 

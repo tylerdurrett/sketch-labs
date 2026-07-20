@@ -11,6 +11,7 @@ import {
   isOutlineComputeResponse,
   mutableScene,
   outlineComputeIdentitiesEqual,
+  outlineGeometryIdentitiesEqual,
   type CompletedSceneOutlineComputeIdentity,
   type LegacyOutlineComputeIdentity,
   type SpecializedOutlineComputeIdentity,
@@ -56,7 +57,6 @@ function identity(): LegacyOutlineComputeIdentity {
     sampledT: 1.5,
     compositionFrame: { width: 120, height: 90 },
     tolerance: 0.25,
-    includeFrame: true,
     sourceScene: scene,
   });
 }
@@ -70,7 +70,6 @@ function targetedIdentity(): SpecializedOutlineComputeIdentity {
     sampledT: 1.5,
     compositionFrame: { width: 120, height: 90 },
     tolerance: 0.25,
-    includeFrame: true,
     outlineTarget: {
       toolWidthMillimeters: 0.3,
       millimetersPerSceneUnit: 0.18,
@@ -87,7 +86,6 @@ function completedSceneIdentity(): CompletedSceneOutlineComputeIdentity {
     sampledT: 1.5,
     compositionFrame: { width: 120, height: 90 },
     tolerance: 0.25,
-    includeFrame: true,
     sourceScene: scene,
     outlineTarget: {
       toolWidthMillimeters: 0.3,
@@ -154,7 +152,6 @@ describe("outline compute identity", () => {
       (copy) => (copy.compositionFrame.width = 121),
       (copy) => (copy.compositionFrame.height = 91),
       (copy) => (copy.tolerance = 0.25000000000000006),
-      (copy) => (copy.includeFrame = false),
       (copy) => (copy.sourceScene.space.width = 101),
       (copy) => (copy.sourceScene.space.height = 81),
       (copy) => (copy.sourceScene.background.color = "white"),
@@ -193,6 +190,130 @@ describe("outline compute identity", () => {
     expect(outlineComputeIdentitiesEqual(original, identity())).toBe(true);
   });
 
+  it("keys reusable geometry by every normalized input and deep legacy Scene field", () => {
+    const original = identity();
+    const mutations: Array<(copy: Record<string, any>) => void> = [
+      (copy) => (copy.sketchId = "other"),
+      (copy) => (copy.params[0].key = "beta"),
+      (copy) => (copy.params[0].value = "#000000"),
+      (copy) => (copy.seed = "other"),
+      (copy) => (copy.sampledT = 1.5000000000000002),
+      (copy) => (copy.compositionFrame.width = 121),
+      (copy) => (copy.compositionFrame.height = 91),
+      (copy) => (copy.tolerance = 0.25000000000000006),
+      (copy) => (copy.sourceScene.space.width = 101),
+      (copy) => (copy.sourceScene.space.height = 81),
+      (copy) => (copy.sourceScene.background.color = "white"),
+      (copy) => delete copy.sourceScene.background,
+      (copy) => (copy.sourceScene.primitives[0].closed = false),
+      (copy) => delete copy.sourceScene.primitives[0].closed,
+      (copy) => (copy.sourceScene.primitives[0].fill.color = "green"),
+      (copy) => delete copy.sourceScene.primitives[0].fill,
+      (copy) => (copy.sourceScene.primitives[0].stroke.color = "black"),
+      (copy) => (copy.sourceScene.primitives[0].stroke.width = 3),
+      (copy) => delete copy.sourceScene.primitives[0].stroke,
+      (copy) => (copy.sourceScene.primitives[0].hiddenLineRole = "both"),
+      (copy) => delete copy.sourceScene.primitives[0].hiddenLineRole,
+      (copy) => (copy.sourceScene.primitives[0].points[0][0] += Number.EPSILON),
+      (copy) => (copy.sourceScene.primitives[0].points[0][1] = 3),
+      (copy) => copy.sourceScene.primitives[0].points.push([9, 9]),
+      (copy) => copy.sourceScene.primitives.push(
+        structuredClone(copy.sourceScene.primitives[0]),
+      ),
+      (copy) => copy.sourceScene.primitives.reverse(),
+    ];
+
+    expect(
+      outlineGeometryIdentitiesEqual(original, structuredClone(original)),
+    ).toBe(true);
+    for (const mutate of mutations) {
+      expect(outlineGeometryIdentitiesEqual(original, changed(mutate))).toBe(
+        false,
+      );
+    }
+  });
+
+  it("reuses both opt-in identity kinds across OutlineTarget-only changes", () => {
+    const specialized = targetedIdentity();
+    const specializedTargetChange = changedTargeted((copy) => {
+      copy.outlineTarget.toolWidthMillimeters = 0.31;
+      copy.outlineTarget.millimetersPerSceneUnit = 0.2;
+    });
+    const completed = completedSceneIdentity();
+    const completedTargetChange = changedCompleted((copy) => {
+      copy.outlineTarget.toolWidthMillimeters = 0.31;
+      copy.outlineTarget.millimetersPerSceneUnit = 0.2;
+    });
+
+    expect(
+      outlineGeometryIdentitiesEqual(specialized, specializedTargetChange),
+    ).toBe(true);
+    expect(
+      outlineComputeIdentitiesEqual(specialized, specializedTargetChange),
+    ).toBe(false);
+    expect(
+      outlineGeometryIdentitiesEqual(completed, completedTargetChange),
+    ).toBe(true);
+    expect(
+      outlineComputeIdentitiesEqual(completed, completedTargetChange),
+    ).toBe(false);
+  });
+
+  it("never reuses across source kinds or absent/present source Scenes", () => {
+    const identities = [identity(), targetedIdentity(), completedSceneIdentity()];
+    for (const left of identities) {
+      for (const right of identities) {
+        expect(outlineGeometryIdentitiesEqual(left, right)).toBe(left === right);
+      }
+    }
+  });
+
+  it("requires an exact completed source Scene while ignoring only its target", () => {
+    const original = completedSceneIdentity();
+    const mutations: Array<(copy: Record<string, any>) => void> = [
+      (copy) => (copy.sketchId = "other"),
+      (copy) => (copy.params[0].value = "#000000"),
+      (copy) => (copy.seed = "other"),
+      (copy) => (copy.sampledT = 1.5000000000000002),
+      (copy) => (copy.compositionFrame.width = 121),
+      (copy) => (copy.compositionFrame.height = 91),
+      (copy) => (copy.tolerance = 0.25000000000000006),
+      (copy) => (copy.sourceScene.space.width = 101),
+      (copy) => (copy.sourceScene.background.color = "white"),
+      (copy) => (copy.sourceScene.primitives[0].closed = false),
+      (copy) => (copy.sourceScene.primitives[0].fill.color = "green"),
+      (copy) => (copy.sourceScene.primitives[0].stroke.color = "black"),
+      (copy) => (copy.sourceScene.primitives[0].stroke.width = 3),
+      (copy) => (copy.sourceScene.primitives[0].hiddenLineRole = "both"),
+      (copy) => (copy.sourceScene.primitives[0].points[0][0] = 2),
+      (copy) => copy.sourceScene.primitives.reverse(),
+    ];
+
+    for (const mutate of mutations) {
+      expect(
+        outlineGeometryIdentitiesEqual(original, changedCompleted(mutate)),
+      ).toBe(false);
+    }
+  });
+
+  it("keeps Page Frame and includeFrame outside expensive identity", () => {
+    const original = identity();
+    expect(original).not.toHaveProperty("includeFrame");
+    expect(original).not.toHaveProperty("pageFrame");
+
+    const withFinalizationFields = {
+      ...structuredClone(original),
+      includeFrame: false,
+      pageFrame: { x: 10, y: 5, width: 80, height: 60 },
+    };
+    expect(
+      outlineComputeIdentitiesEqual(
+        original,
+        withFinalizationFields as LegacyOutlineComputeIdentity,
+      ),
+    ).toBe(true);
+  });
+
   it("keys specialized results by every frozen derivation input", () => {
     const target = targetedIdentity();
     const mutations: Array<(copy: Record<string, any>) => void> = [
@@ -206,7 +327,6 @@ describe("outline compute identity", () => {
       (copy) => (copy.outlineTarget.toolWidthMillimeters = 0.31),
       (copy) => (copy.outlineTarget.millimetersPerSceneUnit = 0.2),
       (copy) => (copy.tolerance = 0.25000000000000006),
-      (copy) => (copy.includeFrame = false),
     ];
 
     expect(Object.isFrozen(target.outlineTarget)).toBe(true);
@@ -332,7 +452,6 @@ describe("outline compute protocol guards", () => {
           sampledT: 0,
           compositionFrame: { width: 100, height: 80 },
           tolerance: 0,
-          includeFrame: false,
           outlineTarget,
         }),
       ).toThrow(/Outline compute identity contains an invalid value/);

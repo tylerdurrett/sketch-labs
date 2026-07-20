@@ -221,6 +221,92 @@ describe("ImageAssetControl", () => {
     expect(html).not.toContain("Retry exact asset");
   });
 
+  it("emits this row's selected ID and decoded dimensions without changing selection", () => {
+    const onChange = vi.fn();
+    const onRecomposeToImageAspect = vi.fn();
+    const el = mount(
+      <ImageAssetControl
+        paramKey="source"
+        value="pine-cone-0123456789ab"
+        onChange={onChange}
+        imageDimensions={{ width: 1600, height: 900 }}
+        onRecomposeToImageAspect={onRecomposeToImageAspect}
+      />,
+    );
+
+    const recompose = button(el, "Recompose to this image’s aspect");
+    expect(recompose.disabled).toBe(false);
+    expect(recompose.classList.contains("w-full")).toBe(true);
+    expect(recompose.hasAttribute("aria-describedby")).toBe(false);
+
+    act(() => recompose.click());
+
+    expect(onRecomposeToImageAspect).toHaveBeenCalledOnce();
+    expect(onRecomposeToImageAspect).toHaveBeenCalledWith({
+      paramKey: "source",
+      imageAssetId: "pine-cone-0123456789ab",
+      dimensions: { width: 1600, height: 900 },
+    });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(operations.list).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "loading",
+      { status: "loading", failedId: null, retry: vi.fn() },
+      { width: 1600, height: 900 },
+      "loading",
+    ],
+    [
+      "missing",
+      {
+        status: "missing",
+        failedId: "pine-cone-0123456789ab",
+        retry: vi.fn(),
+      },
+      { width: 1600, height: 900 },
+      "missing",
+    ],
+    [
+      "error",
+      {
+        status: "error",
+        failedId: "pine-cone-0123456789ab",
+        retry: vi.fn(),
+      },
+      { width: 1600, height: 900 },
+      "could not be resolved",
+    ],
+    ["resolved without dimensions", undefined, undefined, "unavailable"],
+  ] as const)(
+    "disables recomposition without emitting while the row is %s",
+    (_case, resolution, imageDimensions, reason) => {
+      const onRecomposeToImageAspect = vi.fn();
+      const el = mount(
+        <ImageAssetControl
+          paramKey="source"
+          value="pine-cone-0123456789ab"
+          onChange={() => {}}
+          resolution={resolution}
+          imageDimensions={imageDimensions}
+          onRecomposeToImageAspect={onRecomposeToImageAspect}
+        />,
+      );
+
+      const recompose = button(el, "Recompose to this image’s aspect");
+      const descriptionId = recompose.getAttribute("aria-describedby");
+      expect(recompose.disabled).toBe(true);
+      expect(descriptionId).not.toBeNull();
+      expect(document.getElementById(descriptionId!)?.textContent).toContain(
+        reason,
+      );
+
+      act(() => recompose.click());
+      expect(onRecomposeToImageAspect).not.toHaveBeenCalled();
+    },
+  );
+
   it("keeps resolution retry independent from an open managed library", async () => {
     const value = "missing-image-abcdef012345";
     const retry = vi.fn();

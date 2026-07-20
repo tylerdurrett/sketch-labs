@@ -1,7 +1,9 @@
 import {
   clipSceneToBounds,
+  computePlotMapping,
   registry,
   renderPlotterSVG,
+  type PageFrame,
   type Params,
   type PlotProfile,
   type Scene,
@@ -12,6 +14,7 @@ import {
   isHiddenLineWorkerRequest,
   isOutlineComputeRequest,
   mutableScene,
+  outlineGeometryIdentitiesEqual,
   type HiddenLineDerivationProgress,
   type HiddenLineFinalizing,
   type HiddenLineWorkerMessage,
@@ -20,7 +23,11 @@ import {
   type OutlineComputeResponse,
   type OutlineComputeIdentity,
 } from "./outlineComputeProtocol";
-import { outlineScene } from "./outlineScene";
+import {
+  finalizeOutlineScene,
+  outlineScene,
+  type OutlineFinalizationStrokePolicy,
+} from "./outlineScene";
 import {
   createWorkerProgressEmitter,
   type MonotonicClock,
@@ -72,6 +79,31 @@ function mutableProfile(profile: Readonly<PlotProfile>): PlotProfile {
     },
     includeFrame: profile.includeFrame,
     toolWidthMillimeters: profile.toolWidthMillimeters,
+  };
+}
+
+function finalizationStrokePolicy(
+  identity: OutlineComputeIdentity,
+  profile: Readonly<PlotProfile>,
+  pageFrame: Readonly<PageFrame> | null,
+): OutlineFinalizationStrokePolicy {
+  if (identity.sourceKind !== "legacy-scene") {
+    return { kind: "physical-tool", target: identity.outlineTarget };
+  }
+
+  const pageSpace =
+    pageFrame === null
+      ? identity.compositionFrame
+      : { width: pageFrame.width, height: pageFrame.height };
+  return {
+    kind: "legacy-scene",
+    target: {
+      toolWidthMillimeters: profile.toolWidthMillimeters,
+      millimetersPerSceneUnit: computePlotMapping(
+        pageSpace,
+        mutableProfile(profile),
+      ).scale,
+    },
   };
 }
 
@@ -162,7 +194,6 @@ export function handleHiddenLineWorkerMessage(
         scene: derive(
           sourceSceneForIdentity(identity),
           identity.tolerance,
-          identity.includeFrame,
           report,
         ),
       };
@@ -172,15 +203,16 @@ export function handleHiddenLineWorkerMessage(
       return complete;
     }
 
+    const reusable = value.snapshot.reusableOutline;
     const completedScene: Scene =
-      value.snapshot.reusableOutline === undefined
-        ? derive(
+      reusable !== undefined &&
+      outlineGeometryIdentitiesEqual(identity, reusable.identity)
+        ? mutableScene(reusable.scene)
+        : derive(
             sourceSceneForIdentity(identity),
             identity.tolerance,
-            identity.includeFrame,
             report,
-          )
-        : mutableScene(value.snapshot.reusableOutline.scene);
+          );
 
     emit?.({
       type: "finalizing",
@@ -190,8 +222,18 @@ export function handleHiddenLineWorkerMessage(
     });
     const clip = dependencies.clip ?? clipSceneToBounds;
     const render = dependencies.render ?? renderPlotterSVG;
+    const finalizedScene = finalizeOutlineScene(
+      completedScene,
+      value.snapshot.pageFrame,
+      value.snapshot.profile.includeFrame,
+      finalizationStrokePolicy(
+        identity,
+        value.snapshot.profile,
+        value.snapshot.pageFrame,
+      ),
+    );
     const svg = render(
-      clip(completedScene),
+      clip(finalizedScene),
       mutableProfile(value.snapshot.profile),
       value.snapshot.metadata,
       { includePaperMargins: value.snapshot.includePaperMargins },
@@ -246,7 +288,6 @@ export function handleOutlineWorkerMessage(
       scene: derive(
         sourceSceneForIdentity(value.identity),
         value.identity.tolerance,
-        value.identity.includeFrame,
         emitProgress === undefined
           ? undefined
           : createProgressReporter(value.jobId, emitProgress, now),

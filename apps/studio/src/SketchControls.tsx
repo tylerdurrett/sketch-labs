@@ -12,26 +12,28 @@ import {
   applyPreset,
   buildReproMetadata,
   clipSceneToBounds,
-  computePlotMapping,
   defaultParams,
   exportFilename,
+  fitPageFramePlotProfileToAspect,
+  frameScene,
   insertPngMetadata,
   newSeed,
   plotDrawableAspectsEquivalent,
   plotDrawableRectangle,
   randomize,
   renderToSVG,
+  resizePageFramePlotProfileProportionally,
   resolveOutputProfile,
-  resolvePlotCompositionFrame,
-  type Preset,
   type PlotProfile,
-  type CoordinateSpace,
+  type Preset,
+  type PresetFraming,
   type OutlineTarget,
   type Scene,
   type Sketch,
 } from "@harness/core";
 
 import { ControlPanel } from "./ControlPanel";
+import type { ImageAssetControlRecomposeRequest } from "./ImageAssetControl";
 import { Button } from "./components/ui/button";
 import { downloadBlob } from "./downloadBlob";
 import {
@@ -49,6 +51,24 @@ import {
   type EditHistory,
   type StudioEditState,
 } from "./editHistory";
+import {
+  applyPageFrameEditDraft,
+  initialPageFrameForEdit,
+  recomposePageToProfile,
+  resetPageFrameEditDraft,
+  resolveStudioCompositionFrame,
+  sameStudioPhysicalScale,
+  studioGenerationAspect,
+  studioMillimetersPerCompositionUnit,
+  setPageAspectLocked,
+} from "./pageFrameEditing";
+import {
+  openPageFrameEditDraft,
+  pageFrameEditDraftProfile,
+  panFixedPageFrame,
+  setScalePreservingPageFrame,
+  type PageFrameEditDraft,
+} from "./pageFrameEditDraft";
 import {
   detectHistoryShortcutPlatform,
   fieldOwnsHistoryShortcut,
@@ -70,14 +90,22 @@ import {
   createHiddenLineExportSnapshot,
   createOutlineComputeIdentity,
   mutableScene,
-  outlineComputeIdentitiesEqual,
+  outlineGeometryIdentitiesEqual,
 } from "./outlineComputeProtocol";
+import type { OutlineFinalizationStrokePolicy } from "./outlineScene";
 import {
   createOutlineSessionState,
   outlineSessionReducer,
   type OutlineSessionAction,
 } from "./outlineSession";
-import { PaperSection } from "./PaperSection";
+import {
+  PaperSection,
+  type PaperProfileCandidateDecision,
+  type PaperProfileCandidateSource,
+} from "./PaperSection";
+import { readPaperDisplayUnit } from "./paperDisplayUnit";
+import { PageFrameEditor } from "./PageFrameEditor";
+import type { PageFrameAspectConstraint } from "./pageFrameManipulation";
 import {
   readPlotterSvgIncludePaperMargins,
   writePlotterSvgIncludePaperMargins,
@@ -130,19 +158,28 @@ function sameParams(
   );
 }
 
+/** Convert committed Studio framing to the persistence/export envelope shape. */
+function persistedFramingFor(
+  edit: StudioEditState,
+): PresetFraming | undefined {
+  return edit.framing.kind === "unframed"
+    ? undefined
+    : {
+        pageFrame: { ...edit.framing.pageFrame },
+        generationAspect: edit.framing.generationAspect,
+        aspectLocked: edit.framing.aspectLocked,
+      };
+}
+
 function outlineIdentitySourceFor(
   sketch: Sketch,
-  profile: PlotProfile,
-  frame: CoordinateSpace,
+  edit: StudioEditState,
   sourceScene: Scene,
 ):
   | { sourceScene: Scene }
   | { outlineTarget: OutlineTarget }
   | { sourceScene: Scene; outlineTarget: OutlineTarget } {
-  const outlineTarget = {
-    toolWidthMillimeters: profile.toolWidthMillimeters,
-    millimetersPerSceneUnit: computePlotMapping(frame, profile).scale,
-  };
+  const outlineTarget = outlineTargetFor(edit);
   if (sketch.deriveOutlineSource !== undefined) {
     return { sourceScene, outlineTarget };
   }
@@ -150,38 +187,74 @@ function outlineIdentitySourceFor(
   return { sourceScene };
 }
 
-/** Whether moving between two authored states invalidates prepared Outline geometry. */
-function outlineInputsChanged(
+function outlineTargetFor(edit: StudioEditState): OutlineTarget {
+  return {
+    toolWidthMillimeters: edit.profile.toolWidthMillimeters,
+    millimetersPerSceneUnit: studioMillimetersPerCompositionUnit(edit),
+  };
+}
+
+/** Resolve the transient Page editor's physical target without committing it. */
+function outlineEditForPageDraft(
+  edit: StudioEditState,
+  draft: PageFrameEditDraft | null,
+): StudioEditState {
+  if (draft === null) return edit;
+  return {
+    ...edit,
+    profile: pageFrameEditDraftProfile(draft),
+    framing: {
+      kind: "framed",
+      pageFrame: draft.frame,
+      generationAspect: draft.generationAspect,
+      aspectLocked:
+        edit.framing.kind === "framed" && edit.framing.aspectLocked,
+    },
+  };
+}
+
+type OutlineEditChange =
+  | "geometry"
+  | "physical-style"
+  | "placement"
+  | "none";
+
+/** Classify authored edits by the cheapest work needed for current Outline. */
+function classifyOutlineEdit(
   previous: StudioEditState,
   next: StudioEditState,
   usesPhysicalTool: boolean,
-): boolean {
+): OutlineEditChange {
   if (
     !sameParams(previous.params, next.params) ||
     previous.seed !== next.seed ||
     previous.tolerance !== next.tolerance ||
-    previous.profile.includeFrame !== next.profile.includeFrame ||
-    !Object.is(
-      previous.profile.toolWidthMillimeters,
-      next.profile.toolWidthMillimeters,
+    !plotDrawableAspectsEquivalent(
+      studioGenerationAspect(previous),
+      studioGenerationAspect(next),
     )
   ) {
-    return true;
+    return "geometry";
   }
 
-  const previousDrawable = plotDrawableRectangle(previous.profile);
-  const nextDrawable = plotDrawableRectangle(next.profile);
   if (
     usesPhysicalTool &&
-    (!Object.is(previousDrawable.width, nextDrawable.width) ||
-      !Object.is(previousDrawable.height, nextDrawable.height))
+    (!Object.is(
+      previous.profile.toolWidthMillimeters,
+      next.profile.toolWidthMillimeters,
+    ) ||
+      !sameStudioPhysicalScale(previous, next))
   ) {
-    return true;
+    return "physical-style";
   }
-  return !plotDrawableAspectsEquivalent(
-    previousDrawable.width / previousDrawable.height,
-    nextDrawable.width / nextDrawable.height,
-  );
+
+  if (
+    previous.profile !== next.profile ||
+    previous.framing !== next.framing
+  ) {
+    return "placement";
+  }
+  return "none";
 }
 
 /** Whether an edit changes the time-invariant Scribble worker identity. */
@@ -192,11 +265,9 @@ function scribbleInputsChanged(
   if (!sameParams(previous.params, next.params) || previous.seed !== next.seed) {
     return true;
   }
-  const previousDrawable = plotDrawableRectangle(previous.profile);
-  const nextDrawable = plotDrawableRectangle(next.profile);
   return !plotDrawableAspectsEquivalent(
-    previousDrawable.width / previousDrawable.height,
-    nextDrawable.width / nextDrawable.height,
+    studioGenerationAspect(previous),
+    studioGenerationAspect(next),
   );
 }
 
@@ -266,10 +337,12 @@ export interface SketchControlsProps {
  * sketch default ?? Harness fallback), so a Sketch switch re-resolves from the
  * newly-mounted Sketch and NEVER reuses the previous Sketch's dimensions. It is
  * threaded through persistence and composition — captured into a saved Preset
- * (via `PresetControls` → `makePreset`), re-resolved on a Preset reload (a v2
+ * (via `PresetControls` → `makePreset`), re-resolved on a Preset reload (a v2/v3
  * Preset's stored profile wins; a v1 falls back to the Sketch default / Harness
- * fallback), and embedded into every export's reproduction metadata. Its drawable
- * aspect resolves the ONE Composition Frame shared by preview and vector exports.
+ * fallback), and embedded into every export's reproduction metadata. A v3 reload
+ * also restores the exact committed Page Frame and frozen generation aspect.
+ * The active drawable aspect resolves the ONE Composition Frame shared by
+ * preview and vector exports.
  */
 export function SketchControls({
   sketch,
@@ -285,6 +358,7 @@ export function SketchControls({
       seed: newSeed(Math.random),
       locks: new Set<string>(),
       profile: resolveOutputProfile(undefined, sketch.defaultOutputProfile),
+      framing: { kind: "unframed" },
       tolerance: 0,
     }),
   );
@@ -293,6 +367,20 @@ export function SketchControls({
   const historyRef = useRef(history);
   historyRef.current = history;
   const { params, seed, locks, profile, tolerance } = history.present;
+  const [pageFrameEditDraft, setPageFrameEditDraft] =
+    useState<PageFrameEditDraft | null>(null);
+  // Aspect is editing chrome, not authored state. It survives closing and
+  // reopening the editor within this keyed Sketch session, but never enters
+  // history, Presets, reproduction metadata, or the committed Page Frame.
+  const [pageFrameAspectConstraint, setPageFrameAspectConstraint] =
+    useState<PageFrameAspectConstraint>({ kind: "free" });
+  const cropButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreCropFocusRef = useRef(false);
+  // Page Frame percentages are relative to the Composition basis captured on
+  // mode entry. Keep history fixed until Apply, Cancel, or Reset closes the mode
+  // so a draft can never outlive the basis its strings describe.
+  const pageFrameEditDraftRef = useRef(pageFrameEditDraft);
+  pageFrameEditDraftRef.current = pageFrameEditDraft;
   // Tone reference is diagnostic Studio chrome, not authored state. Keeping it
   // beside (rather than inside) the edit-history model excludes it from Undo,
   // Presets, locks, profiles, and every reproduction envelope by construction.
@@ -315,28 +403,28 @@ export function SketchControls({
     writePlotterSvgIncludePaperMargins(next);
   };
 
-  // Physical magnitude belongs to later device mapping. Composition depends only
-  // on the drawable rectangle's aspect, so equivalent profiles share this cache
-  // boundary and do not rebuild prepared geometry.
-  const drawable = plotDrawableRectangle(profile);
-  const drawableAspect = drawable.width / drawable.height;
+  // Physical magnitude belongs to later device mapping. Before framing,
+  // Composition follows the profile's drawable aspect; after framing it follows
+  // the original frozen generation aspect instead. Equivalent generation bases
+  // share this cache boundary and do not rebuild prepared geometry.
+  const generationAspect = studioGenerationAspect(history.present);
   // Stabilize the memo key across machine-noise-only quotient differences (for
   // example a 1.2× proportional scale of non-binary A4 dimensions/insets). The
   // same core equivalence drives commit invalidation below, so frame identity and
   // the Computing affordance cannot disagree about whether geometry changed.
-  const drawableAspectIdentityRef = useRef(drawableAspect);
+  const generationAspectIdentityRef = useRef(generationAspect);
   if (
     !plotDrawableAspectsEquivalent(
-      drawableAspectIdentityRef.current,
-      drawableAspect,
+      generationAspectIdentityRef.current,
+      generationAspect,
     )
   ) {
-    drawableAspectIdentityRef.current = drawableAspect;
+    generationAspectIdentityRef.current = generationAspect;
   }
-  const drawableAspectIdentity = drawableAspectIdentityRef.current;
+  const generationAspectIdentity = generationAspectIdentityRef.current;
   const compositionFrame = useMemo(
-    () => resolvePlotCompositionFrame(profile),
-    [drawableAspectIdentity],
+    () => resolveStudioCompositionFrame(history.present),
+    [generationAspectIdentity],
   );
 
   const sketchEnvironment = useSketchEnvironment({
@@ -429,7 +517,7 @@ export function SketchControls({
   ): ScribbleAuthoredState => ({
     params: edit.params,
     seed: edit.seed,
-    compositionFrame: resolvePlotCompositionFrame(edit.profile),
+    compositionFrame: resolveStudioCompositionFrame(edit),
     inputRevision: scribbleInputRevisionRef.current,
   });
 
@@ -594,7 +682,14 @@ export function SketchControls({
     if (hasScribblePreparation && scribbleChanged) {
       scribbleInputRevisionRef.current += 1;
     }
-    if (hasScribblePreparation && scribbleAction === "preview") {
+    if (
+      hasScribblePreparation &&
+      scribbleAction === "preview" &&
+      scribbleChanged
+    ) {
+      if (!scribblePreparation.getSessionSnapshot().transactionOpen) {
+        scribblePreparation.beginTransaction();
+      }
       scribblePreparation.previewAuthoredState(
         authoredScribbleState(next.present),
       );
@@ -605,14 +700,22 @@ export function SketchControls({
     ) {
       scribblePreparation.requestAtomic(authoredScribbleState(next.present));
     }
-    const invalidated = outlineInputsChanged(
+    const outlineChange = classifyOutlineEdit(
       current.present,
       next.present,
       sketch.generateOutlineSource !== undefined ||
         sketch.deriveOutlineSource !== undefined,
     );
-    if (invalidated) {
+    if (outlineChange === "geometry") {
       cancelOutlineCoordinator();
+      // Paper transactions defer this boundary until their first geometry edit.
+      // Target/style-only previews can therefore keep painting retained Outline.
+      if (
+        hasActiveTransaction(next) &&
+        !outlineSessionRef.current.transactionOpen
+      ) {
+        dispatchOutline({ type: "transaction-began" });
+      }
       const retainsPaintedScribble =
         hasScribblePreparation && !scribbleChanged && scribblePaintIsCurrent;
       dispatchOutline({
@@ -633,6 +736,56 @@ export function SketchControls({
     setHistory(next);
   };
 
+  const currentImageAssetRecord = (
+    request: ImageAssetControlRecomposeRequest,
+  ) => {
+    const spec = sketch.schema[request.paramKey];
+    if (spec?.kind !== "image-asset") return undefined;
+
+    const currentParams = historyRef.current.present.params;
+    const currentImageAssetId =
+      typeof currentParams[request.paramKey] === "string"
+        ? currentParams[request.paramKey]
+        : spec.default;
+    if (
+      currentImageAssetId !== request.imageAssetId ||
+      !environmentReadyNow()
+    ) {
+      return undefined;
+    }
+    return sketchEnvironmentRef.current.environment?.imageAssets(
+      currentImageAssetId,
+    );
+  };
+
+  const recomposeToImageAspect = (
+    request: ImageAssetControlRecomposeRequest,
+  ): void => {
+    // The row's dimensions are presentation only. Re-prove its schema, authored
+    // ID, exact resolution, and decoded record at both sides of the warning so
+    // stale callbacks and synchronous state changes fail closed.
+    if (currentImageAssetRecord(request) === undefined) return;
+    if (
+      !window.confirm(
+        "Recomposing to this image’s aspect will recompose the Scene and reset the Page Frame. Continue?",
+      )
+    ) {
+      return;
+    }
+
+    const currentRecord = currentImageAssetRecord(request);
+    if (currentRecord === undefined) return;
+    const fitted = fitPageFramePlotProfileToAspect(
+      historyRef.current.present.profile,
+      currentRecord.width / currentRecord.height,
+    );
+    updateHistory(
+      (historyState) => recomposePageToProfile(historyState, fitted),
+      true,
+      "atomic",
+    );
+  };
+
   // History belongs to this keyed Sketch session, so its keyboard listener does
   // too. Text/numeric editors keep native Undo while a preview transaction is
   // active; once Enter/blur settles it, the same focused authored field may
@@ -643,6 +796,11 @@ export function SketchControls({
       if (event.defaultPrevented) return;
       const command = historyShortcutFor(event, shortcutPlatform);
       if (command === null) return;
+
+      // Page Frame edit mode owns a transient draft outside Studio history.
+      // Ignoring the shortcut (without preventing it) keeps global history and
+      // the Composition basis stable while preserving native input Undo/Redo.
+      if (pageFrameEditDraftRef.current !== null) return;
 
       const current = historyRef.current;
       if (
@@ -691,6 +849,68 @@ export function SketchControls({
     );
   };
 
+  const routePaperProfileCandidate = (
+    candidate: PlotProfile,
+    source: PaperProfileCandidateSource,
+  ): PaperProfileCandidateDecision => {
+    const current = historyRef.current.present;
+    if (current.framing.kind === "unframed") {
+      return { kind: "accept", profile: candidate };
+    }
+
+    const currentDrawable = plotDrawableRectangle(current.profile);
+    const candidateDrawable = plotDrawableRectangle(candidate);
+    const sameAspect = plotDrawableAspectsEquivalent(
+      currentDrawable.width / currentDrawable.height,
+      candidateDrawable.width / candidateDrawable.height,
+    );
+
+    if (current.framing.aspectLocked) {
+      if (source === "width" || source === "height") {
+        return {
+          kind: "accept",
+          profile: resizePageFramePlotProfileProportionally(
+            current.profile,
+            current.framing.pageFrame,
+            source,
+            candidate[source],
+          ),
+        };
+      }
+      return sameAspect
+        ? { kind: "accept", profile: candidate }
+        : {
+            kind: "reject",
+            message:
+              "Unlock Page aspect before changing the Page proportions.",
+          };
+    }
+
+    if (sameAspect) return { kind: "accept", profile: candidate };
+    if (
+      !window.confirm(
+        "Changing the Page aspect will recompose the Scene and reset the Page Frame. Continue?",
+      )
+    ) {
+      return { kind: "reject", message: "Page aspect change canceled." };
+    }
+
+    updateHistory(
+      (historyState) => recomposePageToProfile(historyState, candidate),
+      true,
+      "atomic",
+    );
+    return { kind: "handled", profile: candidate };
+  };
+
+  const commitPageAspectLocked = (locked: boolean): void => {
+    updateHistory(
+      (current) => setPageAspectLocked(current, locked),
+      true,
+      "atomic",
+    );
+  };
+
   const beginTransaction = (): void => {
     // Every authored transaction is a preview boundary even before its first
     // valid value: cancel stale work and paint live Fill while retaining intent
@@ -700,23 +920,100 @@ export function SketchControls({
     updateHistory(beginEditTransaction, false);
     if (hasScribblePreparation) scribblePreparation.beginTransaction();
   };
+  const beginProfileTransaction = (): void => {
+    // A profile gesture may prove to be physical style or Page placement only.
+    // Keep the current Outline until a preview actually crosses a geometry
+    // boundary; classification in updateHistory opens the session lazily then.
+    updateHistory(beginEditTransaction, false);
+  };
   const settleTransaction = (
     transition: (current: EditHistory) => EditHistory,
   ): void => {
+    const outlineTransactionOpen = outlineSessionRef.current.transactionOpen;
+    const scribbleTransactionOpen =
+      hasScribblePreparation &&
+      scribblePreparation.getSessionSnapshot().transactionOpen;
     updateHistory(transition, false);
-    if (hasScribblePreparation) {
+    if (scribbleTransactionOpen) {
       scribblePreparation.settleTransaction(authoredScribbleState());
     }
     // Settlement belongs to the session reducer: outside export it resamples the
     // final Fill exactly once; during export it retains only a deferred request,
     // which the export terminal action releases after relinquishing the slot.
-    dispatchOutline({
-      type: "transaction-settled",
-      launch: environmentReadyNow() && !hasScribblePreparation,
-    });
+    if (outlineTransactionOpen) {
+      dispatchOutline({
+        type: "transaction-settled",
+        launch: environmentReadyNow() && !hasScribblePreparation,
+      });
+    }
   };
   const commitTransaction = (): void => settleTransaction(commitEditTransaction);
   const cancelTransaction = (): void => settleTransaction(cancelEditTransaction);
+
+  const openPageFrameEditor = (): void => {
+    const current = historyRef.current.present;
+    const draft = openPageFrameEditDraft({
+      profile: current.profile,
+      representedFrame: initialPageFrameForEdit(current),
+      compositionFrame: resolveStudioCompositionFrame(current),
+      generationAspect: studioGenerationAspect(current),
+    });
+    pageFrameEditDraftRef.current = draft;
+    setPageFrameEditDraft(draft);
+  };
+
+  const closePageFrameEditor = (): void => {
+    restoreCropFocusRef.current = true;
+    pageFrameEditDraftRef.current = null;
+    setPageFrameEditDraft(null);
+  };
+
+  useLayoutEffect(() => {
+    if (pageFrameEditDraft !== null || !restoreCropFocusRef.current) return;
+    restoreCropFocusRef.current = false;
+    cropButtonRef.current?.focus();
+  }, [pageFrameEditDraft]);
+
+  const updatePageFrameEditDraft = (next: PageFrameEditDraft): void => {
+    const previous = pageFrameEditDraftRef.current;
+    if (previous?.mode === "scale-preserving" && next.mode === "fixed-page") {
+      setPageFrameAspectConstraint({ kind: "free" });
+    }
+    pageFrameEditDraftRef.current = next;
+    setPageFrameEditDraft(next);
+  };
+
+  const updatePageFrameFromCanvas = (
+    frame: PageFrameEditDraft["frame"],
+  ): void => {
+    const current = pageFrameEditDraftRef.current;
+    if (current === null) return;
+    updatePageFrameEditDraft(
+      current.mode === "fixed-page"
+        ? panFixedPageFrame(current, frame)
+        : setScalePreservingPageFrame(current, frame),
+    );
+  };
+
+  const applyPageFrame = (draft: PageFrameEditDraft): void => {
+    updateHistory(
+      (current) => applyPageFrameEditDraft(current, draft),
+      true,
+      "atomic",
+    );
+    closePageFrameEditor();
+  };
+
+  const resetFrame = (): void => {
+    const draft = pageFrameEditDraftRef.current;
+    if (draft === null) return;
+    updateHistory(
+      (current) => resetPageFrameEditDraft(current, draft),
+      true,
+      "atomic",
+    );
+    closePageFrameEditor();
+  };
 
   // The read-only window into LiveCanvas (the live <canvas> + current t) the PNG
   // export snapshots. It is a ref, not state — export reads it imperatively on a
@@ -800,12 +1097,10 @@ export function SketchControls({
       sampledT: capture.t,
       compositionFrame,
       tolerance: edit.tolerance,
-      includeFrame: edit.profile.includeFrame,
       ...outlineIdentitySourceFor(
         sketch,
-        edit.profile,
-        compositionFrame,
-        capture.scene,
+        edit,
+        capture.sourceScene,
       ),
     });
     const next = dispatchOutline({
@@ -813,7 +1108,7 @@ export function SketchControls({
       token: capture.token,
       inputRevision: capture.inputRevision,
       identity,
-      scene: capture.scene,
+      scene: capture.sourceScene,
       t: capture.t,
       sourceInputRevision: capture.sourceInputRevision,
       ...(capture.contentRevision === undefined
@@ -899,6 +1194,27 @@ export function SketchControls({
     dispatchOutline({ type: "source-ready", provenance });
   };
 
+  const outlineDisplayTarget = outlineTargetFor(
+    outlineEditForPageDraft(history.present, pageFrameEditDraft),
+  );
+  const outlineFinalizationStrokePolicy =
+    useMemo<OutlineFinalizationStrokePolicy>(
+      () => ({
+        kind:
+          sketch.generateOutlineSource === undefined &&
+          sketch.deriveOutlineSource === undefined
+            ? "legacy-scene"
+            : "physical-tool",
+        target: outlineDisplayTarget,
+      }),
+      [
+        sketch.generateOutlineSource,
+        sketch.deriveOutlineSource,
+        outlineDisplayTarget.toolWidthMillimeters,
+        outlineDisplayTarget.millimetersPerSceneUnit,
+      ],
+    );
+
   const renderState: LiveCanvasRenderState =
     unavailableEnvironmentStatus !== null
       ? {
@@ -957,8 +1273,8 @@ export function SketchControls({
   };
 
   // Reload a saved Preset: reconcile it against the CURRENT schema via core's
-  // `applyPreset` (the authority on which keys exist), then hydrate all three
-  // state axes TOGETHER. The array→Set conversion on `locks` is this owner's
+  // `applyPreset` (the authority on which keys exist), then hydrate every
+  // authored axis TOGETHER. The array→Set conversion on `locks` is this owner's
   // job — including preserved color keys, which remain inert rather than being
   // filtered or migrated just because ColorControl has no Lock affordance.
   const reloadPreset = (preset: Preset) => {
@@ -968,11 +1284,20 @@ export function SketchControls({
       state.profile,
       sketch.defaultOutputProfile,
     );
-    // Resolve the active profile through #265's precedence: a v2 Preset's stored
-    // profile (`state.profile`) wins; a v1 Preset (`state.profile === undefined`)
-    // falls back to this Sketch's default / the Harness fallback. `applyPreset`
-    // passes the stored profile through verbatim WITHOUT resolving the fallback —
-    // resolving it here at the session boundary is #267's job.
+    const framing =
+      state.framing === undefined
+        ? ({ kind: "unframed" } as const)
+        : ({
+            kind: "framed",
+            pageFrame: { ...state.framing.pageFrame },
+            generationAspect: state.framing.generationAspect,
+            aspectLocked: state.framing.aspectLocked,
+          } as const);
+    // Resolve the active profile through #265's precedence: a v2/v3 Preset's
+    // stored profile wins; a v1 Preset falls back to this Sketch's default / the
+    // Harness fallback. Framing absence on v1/v2 explicitly clears any prior
+    // framed state. `applyPreset` validates and copies the stored payloads but
+    // leaves Studio precedence and framing-state construction to this boundary.
     updateHistory(
       (historyState) =>
         commitEditState(historyState, {
@@ -983,6 +1308,7 @@ export function SketchControls({
           seed: state.seed,
           locks: new Set(state.locks),
           profile: resolvedProfile,
+          framing,
         }),
       true,
       "atomic",
@@ -1032,27 +1358,31 @@ export function SketchControls({
     if (handle == null || canvas == null) return;
     const scribbleExport = captureCurrentScribbleExport();
     if (hasScribblePreparation && scribbleExport === null) return;
+    const edit = historyRef.current.present;
     // Time-gate the `-t{t}` filename segment on `sketch.time`: a time-driven
     // Sketch carries its captured moment, a static one omits `t` entirely.
     const t = sketch.time === undefined ? undefined : handle.getCurrentT();
-    // The reproduction envelope embedded into BOTH exports (issue #76), built
-    // once from the same displayed `(params, seed, locks, t)` spine. The active
-    // Plot Profile (#247) rides along too, so the exported PNG's metadata is a v2
-    // Preset carrying the physical-plot output dimensions.
+    // Build from one whole authored-state snapshot. The active Plot Profile
+    // yields v2 metadata while committed framing promotes the same envelope to
+    // v3; an unframed session still omits framing exactly.
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
-      seed,
-      params,
-      locks,
+      seed: edit.seed,
+      params: edit.params,
+      locks: edit.locks,
       t,
-      profile,
+      profile: edit.profile,
+      framing: persistedFramingFor(edit),
     });
     // Re-read the synchronous session and the canvas at the pixel side effect.
     if (!sameScribbleExportRevision(scribbleExport)) return;
     canvas.toBlob((blob) => {
       if (blob === null) return;
       if (!sameScribbleExportRevision(scribbleExport)) return;
-      const filename = exportFilename({ sketchId: sketch.id, seed, t }, "png");
+      const filename = exportFilename(
+        { sketchId: sketch.id, seed: edit.seed, t },
+        "png",
+      );
       // Splice the iTXt reproduction chunk into the PNG bytes before saving, so
       // the downloaded file traces back to this exact frame. Byte work is core's
       // (`insertPngMetadata`); the Studio only does the Blob ⇄ ArrayBuffer dance.
@@ -1072,47 +1402,78 @@ export function SketchControls({
   // Export the CURRENTLY DISPLAYED frame as a vector SVG — the sibling export
   // path to {@link exportPng}, also a one-shot click OUTSIDE the per-frame loop.
   // Unlike PNG (which snapshots the live canvas's pixels), SVG serializes Scene
-  // geometry with core's `renderToSVG`. Ordinary Sketches retain their cold
-  // `generate` path. Scribble-capable Sketches serialize the exact acknowledged
-  // worker Scene and never regenerate expensive artwork on the main thread.
+  // geometry with core's `renderToSVG`. Unframed ordinary Sketches retain their
+  // cold `generate` path exactly. A committed Page Frame instead transforms the
+  // exact retained full-Composition Fill, without preparation, sampling, or
+  // generation. Scribble-capable Sketches use that same final framing pass on
+  // their acknowledged worker Scene and never regenerate expensive artwork on
+  // the main thread.
   //
-  // `t` is read from the handle and TIME-GATED on `sketch.time` exactly as the
-  // PNG path does, so the regenerated Scene and the `-t{t}` filename segment both
-  // reflect the same displayed moment (static Sketches pass `undefined`, not 0).
+  // `t` is TIME-GATED on `sketch.time` exactly as the PNG path does. Framed
+  // ordinary export takes it atomically from the retained Fill record; all
+  // existing paths keep reading the handle's current time. Static Sketches pass
+  // `undefined`, not 0.
   const exportSvg = () => {
     if (toneReferenceActiveRef.current || !environmentReadyNow()) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
     const scribbleExport = captureCurrentScribbleExport();
     if (hasScribblePreparation && scribbleExport === null) return;
-    const t = sketch.time === undefined ? undefined : handle.getCurrentT();
+    const edit = historyRef.current.present;
+    const pageFrame =
+      edit.framing.kind === "framed" ? edit.framing.pageFrame : null;
+    const framedExport = pageFrame !== null;
+    const retainedFill = framedExport && scribbleExport === null
+      ? handle.captureDisplayedFillFrame()
+      : null;
+    if (framedExport && scribbleExport === null && retainedFill === null) {
+      return;
+    }
+    const sampledT = retainedFill?.t ?? handle.getCurrentT();
+    const t = sketch.time === undefined ? undefined : sampledT;
     // `generate` takes a concrete `t` (static Sketches conventionally get 0 and
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
+    const sourceScene =
+      scribbleExport?.result.scene ?? retainedFill?.sourceScene ?? null;
     const scene =
-      scribbleExport?.result.scene ??
-      sketch.generate(params, seed, t ?? 0, compositionFrame);
+      pageFrame !== null && sourceScene !== null
+        ? frameScene(sourceScene, pageFrame)
+        : sourceScene ?? sketch.generate(params, seed, t ?? 0, compositionFrame);
     // Clip the generated geometry to the canvas rectangle so the exported plot
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
-    const exportScene = scribbleExport === null ? clipSceneToBounds(scene) : scene;
-    // Embed the same reproduction envelope as a <metadata> element (issue #76),
-    // built from the displayed `(params, seed, locks, t)` spine plus the active
-    // Plot Profile (#247) — core's `renderToSVG` does the injection (ADR-0004:
-    // serialization lives in core).
+    const exportScene =
+      scribbleExport === null && !framedExport
+        ? clipSceneToBounds(scene)
+        : scene;
+    // Embed the same whole authored-state snapshot as a <metadata> element.
+    // Core's `renderToSVG` does the injection (ADR-0004: serialization lives in
+    // core), including optional committed framing as a v3 envelope.
     const metadata = buildReproMetadata({
       sketchId: sketch.id,
-      seed,
-      params,
-      locks,
+      seed: edit.seed,
+      params: edit.params,
+      locks: edit.locks,
       t,
-      profile,
+      profile: edit.profile,
+      framing: persistedFramingFor(edit),
     });
     if (!sameScribbleExportRevision(scribbleExport)) return;
     const svg = renderToSVG(exportScene, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     if (!sameScribbleExportRevision(scribbleExport)) return;
-    downloadBlob(blob, exportFilename({ sketchId: sketch.id, seed, t }, "svg"));
+    downloadBlob(
+      blob,
+      exportFilename(
+        {
+          sketchId: sketch.id,
+          seed: edit.seed,
+          t,
+        },
+        "svg",
+      ),
+    );
   };
 
   // Capture exactly one retained displayed-frame record, then freeze the entire
@@ -1147,11 +1508,11 @@ export function SketchControls({
     const sourceScene =
       scribbleExport?.result.scene ??
       (displayed.renderMode !== "outline"
-        ? displayed.scene
+        ? displayed.sourceScene
         : cachedSourceScene ??
           (sketch.deriveOutlineSource === undefined &&
           sketch.generateOutlineSource !== undefined
-            ? displayed.scene
+            ? displayed.sourceScene
             : undefined));
     if (sourceScene === undefined) return;
     const identity = createOutlineComputeIdentity({
@@ -1162,11 +1523,9 @@ export function SketchControls({
       sampledT: displayed.t,
       compositionFrame,
       tolerance: displayed.tolerance,
-      includeFrame: displayed.includeFrame,
       ...outlineIdentitySourceFor(
         sketch,
-        edit.profile,
-        compositionFrame,
+        edit,
         sourceScene,
       ),
     });
@@ -1178,6 +1537,7 @@ export function SketchControls({
       locks: edit.locks,
       t,
       profile: edit.profile,
+      framing: persistedFramingFor(edit),
     });
     const filename = exportFilename(
       { sketchId: sketch.id, seed: edit.seed, t, variant: "hidden-line" },
@@ -1186,11 +1546,13 @@ export function SketchControls({
     const snapshot = createHiddenLineExportSnapshot({
       identity,
       profile: edit.profile,
+      pageFrame:
+        edit.framing.kind === "framed" ? edit.framing.pageFrame : null,
       metadata,
       includePaperMargins,
       filename,
       ...(cachedOutline !== null &&
-      outlineComputeIdentitiesEqual(identity, cachedOutline.identity)
+      outlineGeometryIdentitiesEqual(identity, cachedOutline.identity)
         ? {
             reusableOutline: {
               identity: cachedOutline.identity,
@@ -1346,13 +1708,28 @@ export function SketchControls({
             params={params}
             seed={seed}
             compositionFrame={compositionFrame}
-            profile={profile}
+            profile={
+              pageFrameEditDraft === null
+                ? profile
+                : pageFrameEditDraftProfile(pageFrameEditDraft)
+            }
             inputRevision={outlineSession.inputRevision}
             fillCaptureRequest={outlineSession.capture}
             onFillCaptured={onFillCaptured}
             onDisplayedSceneCommitted={onDisplayedSceneCommitted}
             renderState={renderState}
             tolerance={tolerance}
+            outlineFinalizationStrokePolicy={
+              outlineFinalizationStrokePolicy
+            }
+            pageFrameEditDraft={pageFrameEditDraft}
+            onPageFrameDraftChange={updatePageFrameFromCanvas}
+            pageFrameAspectConstraint={pageFrameAspectConstraint}
+            pageFrame={
+              history.present.framing.kind === "framed"
+                ? history.present.framing.pageFrame
+                : null
+            }
           />
         </div>
       </section>
@@ -1373,15 +1750,35 @@ export function SketchControls({
         hidden={collapsed}
       >
         {switcher}
+        {pageFrameEditDraft !== null ? (
+          <PageFrameEditor
+            editDraft={pageFrameEditDraft}
+            displayUnit={readPaperDisplayUnit()}
+            aspectConstraint={pageFrameAspectConstraint}
+            onAspectConstraintChange={setPageFrameAspectConstraint}
+            onEditDraftChange={updatePageFrameEditDraft}
+            onApply={applyPageFrame}
+            onCancel={closePageFrameEditor}
+            onReset={resetFrame}
+          />
+        ) : (
+          <>
         <PaperSection
           profile={profile}
           transaction={{
-            onBegin: beginTransaction,
+            onBegin: beginProfileTransaction,
             onPreview: (next) => previewLeaf("profile", next),
             onCommit: commitTransaction,
             onCancel: cancelTransaction,
           }}
           onAtomicChange={(next) => commitLeaf("profile", next)}
+          routeProfileCandidate={routePaperProfileCandidate}
+          {...(history.present.framing.kind === "framed"
+            ? {
+                aspectLocked: history.present.framing.aspectLocked,
+                onAspectLockedChange: commitPageAspectLocked,
+              }
+            : {})}
           includePaperMargins={includePaperMargins}
           onIncludePaperMarginsChange={commitIncludePaperMargins}
         />
@@ -1403,7 +1800,26 @@ export function SketchControls({
             failedId: sketchEnvironment.failedId,
             retry: sketchEnvironment.retry,
           }}
+          getImageAssetDimensions={(imageAssetId) => {
+            if (!environmentReadyNow()) return undefined;
+            const record = sketchEnvironmentRef.current.environment?.imageAssets(
+              imageAssetId,
+            );
+            return record === undefined
+              ? undefined
+              : { width: record.width, height: record.height };
+          }}
+          onRecomposeToImageAspect={recomposeToImageAspect}
         />
+        <Button
+          ref={cropButtonRef}
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={openPageFrameEditor}
+        >
+          Crop
+        </Button>
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
@@ -1427,6 +1843,9 @@ export function SketchControls({
             seed={seed}
             locks={locks}
             profile={profile}
+            {...(history.present.framing.kind === "framed"
+              ? { framing: persistedFramingFor(history.present)! }
+              : {})}
             onReload={reloadPreset}
           />
         </div>
@@ -1741,6 +2160,8 @@ export function SketchControls({
             ) : null}
           </div>
         </div>
+          </>
+        )}
       </aside>
     </div>
   );

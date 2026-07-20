@@ -3,6 +3,7 @@ import type {
   HiddenLineRole,
   HiddenLineProgress,
   OutlineTarget,
+  PageFrame,
   ParamSchema,
   Params,
   PlotProfile,
@@ -41,7 +42,6 @@ interface OutlineComputeIdentityBase {
   readonly sampledT: number;
   readonly compositionFrame: Readonly<CoordinateSpace>;
   readonly tolerance: number;
-  readonly includeFrame: boolean;
 }
 
 export interface LegacyOutlineComputeIdentity
@@ -112,7 +112,6 @@ interface CreateIdentityInputBase {
   sampledT: number;
   compositionFrame: CoordinateSpace;
   tolerance: number;
-  includeFrame: boolean;
 }
 
 type CreateLegacyIdentityInput = CreateIdentityInputBase & {
@@ -150,7 +149,8 @@ function copyParamValue(value: unknown, key: string): OutlineParamValue {
   throw new TypeError(`Outline parameter ${key} is not serializable`);
 }
 
-function copyScene(scene: Scene | ImmutableScene): ImmutableScene {
+/** Take a deeply immutable snapshot of completed Outline geometry. */
+export function immutableScene(scene: Scene | ImmutableScene): ImmutableScene {
   const primitives = scene.primitives.map((primitive) => {
     const copy: {
       points: ImmutablePoint[];
@@ -199,7 +199,10 @@ function copyScene(scene: Scene | ImmutableScene): ImmutableScene {
   return Object.freeze(copy);
 }
 
-function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity {
+/** Take a deeply immutable snapshot of a strict compute identity. */
+export function immutableOutlineComputeIdentity(
+  identity: OutlineComputeIdentity,
+): OutlineComputeIdentity {
   const common = {
     sketchId: identity.sketchId,
     params: Object.freeze(
@@ -214,14 +217,13 @@ function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity 
       height: identity.compositionFrame.height,
     }),
     tolerance: identity.tolerance,
-    includeFrame: identity.includeFrame,
   };
   switch (identity.sourceKind) {
     case "legacy-scene":
       return Object.freeze({
         ...common,
         sourceKind: "legacy-scene",
-        sourceScene: copyScene(identity.sourceScene),
+        sourceScene: immutableScene(identity.sourceScene),
       });
     case "specialized-sketch":
       return Object.freeze({
@@ -233,7 +235,7 @@ function copyIdentity(identity: OutlineComputeIdentity): OutlineComputeIdentity 
       return Object.freeze({
         ...common,
         sourceKind: "completed-scene-sketch",
-        sourceScene: copyScene(identity.sourceScene),
+        sourceScene: immutableScene(identity.sourceScene),
         outlineTarget: Object.freeze({ ...identity.outlineTarget }),
       });
   }
@@ -269,14 +271,13 @@ export function createOutlineComputeIdentity(
       height: input.compositionFrame.height,
     }),
     tolerance: input.tolerance,
-    includeFrame: input.includeFrame,
   };
   let identity: OutlineComputeIdentity;
   if (input.outlineTarget === undefined) {
     identity = Object.freeze({
       ...common,
       sourceKind: "legacy-scene",
-      sourceScene: copyScene(input.sourceScene),
+      sourceScene: immutableScene(input.sourceScene),
     });
   } else if (input.sourceScene === undefined) {
     identity = Object.freeze({
@@ -288,7 +289,7 @@ export function createOutlineComputeIdentity(
     identity = Object.freeze({
       ...common,
       sourceKind: "completed-scene-sketch",
-      sourceScene: copyScene(input.sourceScene),
+      sourceScene: immutableScene(input.sourceScene),
       outlineTarget: Object.freeze({ ...input.outlineTarget }),
     });
   }
@@ -372,8 +373,7 @@ export function isOutlineComputeIdentity(
     !isRecord(value.compositionFrame) ||
     !isFiniteNumber(value.compositionFrame.width) ||
     !isFiniteNumber(value.compositionFrame.height) ||
-    !isFiniteNumber(value.tolerance) ||
-    typeof value.includeFrame !== "boolean"
+    !isFiniteNumber(value.tolerance)
   ) {
     return false;
   }
@@ -547,7 +547,7 @@ function sceneEqual(left: ImmutableScene, right: ImmutableScene): boolean {
   });
 }
 
-export function outlineComputeIdentitiesEqual(
+function commonIdentityFieldsEqual(
   left: OutlineComputeIdentity,
   right: OutlineComputeIdentity,
 ): boolean {
@@ -558,7 +558,6 @@ export function outlineComputeIdentitiesEqual(
     Object.is(left.compositionFrame.width, right.compositionFrame.width) &&
     Object.is(left.compositionFrame.height, right.compositionFrame.height) &&
     Object.is(left.tolerance, right.tolerance) &&
-    Object.is(left.includeFrame, right.includeFrame) &&
     left.params.length === right.params.length &&
     left.params.every((entry, index) => {
       const other = right.params[index];
@@ -567,7 +566,16 @@ export function outlineComputeIdentitiesEqual(
         Object.is(entry.key, other.key) &&
         Object.is(entry.value, other.value)
       );
-    }) &&
+    })
+  );
+}
+
+export function outlineComputeIdentitiesEqual(
+  left: OutlineComputeIdentity,
+  right: OutlineComputeIdentity,
+): boolean {
+  return (
+    commonIdentityFieldsEqual(left, right) &&
     left.sourceKind === right.sourceKind &&
     (left.sourceKind === "legacy-scene"
       ? right.sourceKind === "legacy-scene" &&
@@ -579,6 +587,39 @@ export function outlineComputeIdentitiesEqual(
           sceneEqual(left.sourceScene, right.sourceScene) &&
           targetEqual(left.outlineTarget, right.outlineTarget))
   );
+}
+
+/**
+ * Compare only fields that can affect completed Hidden-line geometry.
+ *
+ * Opted-in sketch contracts keep geometry invariant across physical targets,
+ * so their completed geometry may be reused under a newer target. Legacy
+ * Scenes make no such promise and retain their exact identity semantics.
+ */
+export function outlineGeometryIdentitiesEqual(
+  left: OutlineComputeIdentity,
+  right: OutlineComputeIdentity,
+): boolean {
+  if (
+    !commonIdentityFieldsEqual(left, right) ||
+    left.sourceKind !== right.sourceKind
+  ) {
+    return false;
+  }
+  switch (left.sourceKind) {
+    case "legacy-scene":
+      return (
+        right.sourceKind === "legacy-scene" &&
+        sceneEqual(left.sourceScene, right.sourceScene)
+      );
+    case "specialized-sketch":
+      return right.sourceKind === "specialized-sketch";
+    case "completed-scene-sketch":
+      return (
+        right.sourceKind === "completed-scene-sketch" &&
+        sceneEqual(left.sourceScene, right.sourceScene)
+      );
+  }
 }
 
 function targetEqual(
@@ -642,6 +683,7 @@ export interface CompletedOutline {
 export interface HiddenLineExportSnapshot {
   readonly identity: OutlineComputeIdentity;
   readonly profile: ImmutablePlotProfile;
+  readonly pageFrame: Readonly<PageFrame> | null;
   readonly metadata: string;
   readonly includePaperMargins: boolean;
   readonly filename: string;
@@ -651,6 +693,7 @@ export interface HiddenLineExportSnapshot {
 export interface CreateHiddenLineExportSnapshotInput {
   identity: OutlineComputeIdentity;
   profile: PlotProfile;
+  pageFrame?: PageFrame | null;
   metadata: string;
   includePaperMargins: boolean;
   filename: string;
@@ -675,20 +718,38 @@ function copyProfile(profile: PlotProfile): ImmutablePlotProfile {
   });
 }
 
+function copyPageFrame(
+  pageFrame: PageFrame | null | undefined,
+): Readonly<PageFrame> | null {
+  if (pageFrame == null) return null;
+  const copy = {
+    x: pageFrame.x,
+    y: pageFrame.y,
+    width: pageFrame.width,
+    height: pageFrame.height,
+  };
+  if (!isPageFrame(copy)) {
+    throw new TypeError("Hidden-line export Page Frame is invalid");
+  }
+  return Object.freeze(copy);
+}
+
 function copyCompletedOutline(
   candidate: CreateHiddenLineExportSnapshotInput["reusableOutline"],
 ): CompletedOutline | undefined {
   if (candidate === undefined) return undefined;
   return Object.freeze({
-    identity: copyIdentity(candidate.identity),
-    scene: copyScene(candidate.scene),
+    identity: immutableOutlineComputeIdentity(candidate.identity),
+    scene: immutableScene(candidate.scene),
   });
 }
 
 /**
  * Capture an export job without retaining references to live state. A supplied
- * completed Outline is copied only when every geometry identity field matches;
- * callers cannot accidentally reuse a merely similar Scene.
+ * completed Outline is copied only when every geometry identity field matches.
+ * Opted-in sources may differ only in their physical target because cheap
+ * finalization reapplies the current target; strict compute identity still
+ * distinguishes those requests and their terminal completions.
  */
 export function createHiddenLineExportSnapshot(
   input: CreateHiddenLineExportSnapshotInput,
@@ -696,16 +757,17 @@ export function createHiddenLineExportSnapshot(
   if (!isOutlineComputeIdentity(input.identity)) {
     throw new TypeError("Hidden-line export identity is invalid");
   }
-  const identity = copyIdentity(input.identity);
+  const identity = immutableOutlineComputeIdentity(input.identity);
   const matchingCandidate =
     input.reusableOutline !== undefined &&
     isOutlineComputeIdentity(input.reusableOutline.identity) &&
-    outlineComputeIdentitiesEqual(identity, input.reusableOutline.identity)
+    outlineGeometryIdentitiesEqual(identity, input.reusableOutline.identity)
       ? copyCompletedOutline(input.reusableOutline)
       : undefined;
   const snapshot: HiddenLineExportSnapshot = Object.freeze({
     identity,
     profile: copyProfile(input.profile),
+    pageFrame: copyPageFrame(input.pageFrame),
     metadata: input.metadata,
     includePaperMargins: input.includePaperMargins,
     filename: input.filename,
@@ -717,6 +779,23 @@ export function createHiddenLineExportSnapshot(
     throw new TypeError("Hidden-line export snapshot contains an invalid value");
   }
   return snapshot;
+}
+
+function isPageFrame(value: unknown): value is Readonly<PageFrame> {
+  if (!isRecord(value)) return false;
+  const { x, y, width, height } = value;
+  return (
+    isFiniteNumber(x) &&
+    isFiniteNumber(y) &&
+    isFiniteNumber(width) &&
+    width > 0 &&
+    isFiniteNumber(height) &&
+    height > 0 &&
+    Number.isFinite(x + width) &&
+    x + width > x &&
+    Number.isFinite(y + height) &&
+    y + height > y
+  );
 }
 
 function isPlotProfile(value: unknown): value is ImmutablePlotProfile {
@@ -763,6 +842,7 @@ export function isHiddenLineExportSnapshot(
     !isRecord(value) ||
     !isOutlineComputeIdentity(value.identity) ||
     !isPlotProfile(value.profile) ||
+    !(value.pageFrame === null || isPageFrame(value.pageFrame)) ||
     typeof value.metadata !== "string" ||
     typeof value.includePaperMargins !== "boolean" ||
     typeof value.filename !== "string" ||
@@ -773,7 +853,7 @@ export function isHiddenLineExportSnapshot(
   if (!hasOwn(value, "reusableOutline")) return true;
   return (
     isCompletedOutline(value.reusableOutline) &&
-    outlineComputeIdentitiesEqual(
+    outlineGeometryIdentitiesEqual(
       value.identity,
       value.reusableOutline.identity,
     )

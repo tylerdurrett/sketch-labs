@@ -1,12 +1,40 @@
 // @vitest-environment jsdom
-import { act, createRef } from "react";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { act, createRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const outlineFinalizationCalls = vi.hoisted(() => ({
+  style: 0,
+  placement: 0,
+}));
+
+vi.mock("./outlineScene", async (importActual) => {
+  const actual = await importActual<typeof import("./outlineScene")>();
+  return {
+    ...actual,
+    applyOutlineArtworkStrokePolicy: (
+      ...args: Parameters<typeof actual.applyOutlineArtworkStrokePolicy>
+    ) => {
+      outlineFinalizationCalls.style += 1;
+      return actual.applyOutlineArtworkStrokePolicy(...args);
+    },
+    finalizeStyledOutlineScene: (
+      ...args: Parameters<typeof actual.finalizeStyledOutlineScene>
+    ) => {
+      outlineFinalizationCalls.placement += 1;
+      return actual.finalizeStyledOutlineScene(...args);
+    },
+  };
+});
 
 import {
   createShadingMask,
   createToneField,
   DEFAULT_COMPOSITION_FRAME,
+  frameScene,
   HARNESS_FALLBACK_PLOT_PROFILE,
   resolveCompositionFrame,
   resolvePlotCompositionFrame,
@@ -22,19 +50,36 @@ import {
   type LiveCanvasHandle,
   type LiveCanvasProps,
 } from "./LiveCanvas";
+import {
+  finalizeOutlineScene,
+  type OutlineFinalizationStrokePolicy,
+} from "./outlineScene";
+import {
+  openPageFrameEditDraft,
+  panFixedPageFrame,
+  setFixedPageCompositionScale,
+  setPageFrameEditMode,
+  type FixedPageFrameEditDraft,
+} from "./pageFrameEditDraft";
+import {
+  FIXED_PAGE_PARITY_COMPOSITION,
+  FIXED_PAGE_PARITY_FRAME,
+  FIXED_PAGE_PARITY_PROFILE,
+  fixedPageParityScene,
+  fixedPageParityToneSource,
+} from "./fixedPageOutputParity.test-support";
 
 /** Keep legacy tests terse while the production component requires an explicit frame. */
 function LiveCanvas(
   props: Omit<LiveCanvasProps, "compositionFrame" | "profile"> &
     Partial<Pick<LiveCanvasProps, "compositionFrame" | "profile">>,
 ) {
-  return (
-    <RawLiveCanvas
-      {...props}
-      compositionFrame={props.compositionFrame ?? DEFAULT_COMPOSITION_FRAME}
-      profile={props.profile ?? HARNESS_FALLBACK_PLOT_PROFILE}
-    />
-  );
+  const normalized = {
+    ...props,
+    compositionFrame: props.compositionFrame ?? DEFAULT_COMPOSITION_FRAME,
+    profile: props.profile ?? HARNESS_FALLBACK_PLOT_PROFILE,
+  } as LiveCanvasProps;
+  return <RawLiveCanvas {...normalized} />;
 }
 
 /**
@@ -61,7 +106,12 @@ function LiveCanvas(
   true;
 
 const SCENE: Scene = { space: { width: 100, height: 100 }, primitives: [] };
-
+const APP_CSS_PATH = [
+  resolve(process.cwd(), "src/App.css"),
+  resolve(process.cwd(), "apps/studio/src/App.css"),
+].find(existsSync);
+if (APP_CSS_PATH === undefined) throw new Error("could not locate App.css");
+const APP_CSS = readFileSync(APP_CSS_PATH, "utf8");
 /** Build a Sketch with the given time metadata and a `generate` spy recording `t`. */
 function animatedSketch(time: TimeMetadata | undefined) {
   const generate = vi.fn((_p: unknown, _s: unknown, _t: number): Scene => SCENE);
@@ -156,12 +206,20 @@ function lastDrawnT(generate: { mock: { calls: unknown[][] } }): number {
 function recordingContext(): {
   ctx: CanvasRenderingContext2D;
   counts: Record<string, number>;
+  fillRectStyles: unknown[];
   reset: () => void;
 } {
   const counts: Record<string, number> = {};
+  const fillRectStyles: unknown[] = [];
   const ctx = new Proxy({} as Record<string, unknown>, {
     get: (target, prop) => {
       if (prop in target) return target[prop as string];
+      if (prop === "fillRect") {
+        return (..._args: unknown[]) => {
+          counts.fillRect = (counts.fillRect ?? 0) + 1;
+          fillRectStyles.push(target.fillStyle);
+        };
+      }
       return (..._args: unknown[]) => {
         counts[prop as string] = (counts[prop as string] ?? 0) + 1;
       };
@@ -173,8 +231,14 @@ function recordingContext(): {
   });
   const reset = () => {
     for (const key of Object.keys(counts)) delete counts[key];
+    fillRectStyles.length = 0;
   };
-  return { ctx: ctx as unknown as CanvasRenderingContext2D, counts, reset };
+  return {
+    ctx: ctx as unknown as CanvasRenderingContext2D,
+    counts,
+    fillRectStyles,
+    reset,
+  };
 }
 
 /** Point `getContext('2d')` at the given recording context for this test. */
@@ -187,9 +251,13 @@ function pixelRecordingContext(): {
   ctx: CanvasRenderingContext2D;
   counts: Record<string, number>;
   images: Uint8ClampedArray[];
+  calls: Array<{ method: string; args: unknown[] }>;
+  fillRectStyles: unknown[];
 } {
   const counts: Record<string, number> = {};
   const images: Uint8ClampedArray[] = [];
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const fillRectStyles: unknown[] = [];
   const ctx = new Proxy({} as Record<string, unknown>, {
     get: (target, prop) => {
       if (prop in target) return target[prop as string];
@@ -203,11 +271,20 @@ function pixelRecordingContext(): {
       if (prop === "putImageData") {
         return (imageData: ImageData) => {
           counts.putImageData = (counts.putImageData ?? 0) + 1;
+          calls.push({ method: "putImageData", args: [imageData] });
           images.push(new Uint8ClampedArray(imageData.data));
         };
       }
-      return (..._args: unknown[]) => {
+      if (prop === "fillRect") {
+        return (...args: unknown[]) => {
+          counts.fillRect = (counts.fillRect ?? 0) + 1;
+          calls.push({ method: "fillRect", args });
+          fillRectStyles.push(target.fillStyle);
+        };
+      }
+      return (...args: unknown[]) => {
         counts[prop as string] = (counts[prop as string] ?? 0) + 1;
+        calls.push({ method: prop as string, args });
       };
     },
     set: (target, prop, value) => {
@@ -219,6 +296,8 @@ function pixelRecordingContext(): {
     ctx: ctx as unknown as CanvasRenderingContext2D,
     counts,
     images,
+    calls,
+    fillRectStyles,
   };
 }
 
@@ -234,6 +313,7 @@ let now = 0;
 let rafCallbacks: Array<(t: number) => void> = [];
 let nextRafId = 1;
 let fireResizeObserver: (() => void) | null = null;
+let fireDprChange: (() => void) | null = null;
 
 /** Advance the fake wall clock to `ms` and flush exactly one rAF generation. */
 function tick(ms: number): void {
@@ -287,11 +367,74 @@ function clickButton(el: HTMLElement, text: string): void {
   });
 }
 
+interface PointerInit {
+  readonly x: number;
+  readonly y: number;
+  readonly pointerId?: number;
+  readonly isPrimary?: boolean;
+  readonly button?: number;
+  readonly shiftKey?: boolean;
+}
+
+/** Dispatch a pointer-shaped MouseEvent (jsdom does not construct PointerEvent). */
+function dispatchPointer(
+  target: Element,
+  type: string,
+  {
+    x,
+    y,
+    pointerId = 1,
+    isPrimary = true,
+    button = 0,
+    shiftKey = false,
+  }: PointerInit,
+): void {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: y,
+    button,
+    shiftKey,
+  });
+  Object.defineProperties(event, {
+    pointerId: { value: pointerId },
+    isPrimary: { value: isPrimary },
+  });
+  act(() => target.dispatchEvent(event));
+}
+
+function installPointerCapture(element: HTMLElement) {
+  const captured = new Set<number>();
+  const set = vi.fn((pointerId: number) => {
+    captured.add(pointerId);
+  });
+  const release = vi.fn((pointerId: number) => {
+    captured.delete(pointerId);
+  });
+  Object.defineProperties(element, {
+    setPointerCapture: { configurable: true, value: set },
+    hasPointerCapture: {
+      configurable: true,
+      value: (pointerId: number) => captured.has(pointerId),
+    },
+    releasePointerCapture: { configurable: true, value: release },
+  });
+  return {
+    set,
+    release,
+    lose: (pointerId: number) => captured.delete(pointerId),
+  };
+}
+
 beforeEach(() => {
+  outlineFinalizationCalls.style = 0;
+  outlineFinalizationCalls.placement = 0;
   now = 0;
   rafCallbacks = [];
   nextRafId = 1;
   fireResizeObserver = null;
+  fireDprChange = null;
 
   vi.spyOn(performance, "now").mockImplementation(() => now);
   vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void): number => {
@@ -320,15 +463,28 @@ beforeEach(() => {
       disconnect(): void {}
     },
   );
-  vi.spyOn(window, "matchMedia").mockImplementation(
-    (query: string) =>
-      ({
+  vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+    const listeners = new Set<EventListener>();
+    fireDprChange = () => {
+      for (const listener of listeners) listener(new Event("change"));
+    };
+    return {
         matches: false,
         media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      }) as unknown as MediaQueryList,
-  );
+      addEventListener: (
+        _type: string,
+        listener: EventListenerOrEventListenerObject,
+      ) => {
+        if (typeof listener === "function") listeners.add(listener);
+      },
+      removeEventListener: (
+        _type: string,
+        listener: EventListenerOrEventListenerObject,
+      ) => {
+        if (typeof listener === "function") listeners.delete(listener);
+      },
+    } as unknown as MediaQueryList;
+  });
   // jsdom returns `null` from getContext('2d'). Return an inert context instead:
   // a Proxy whose every method is a no-op and whose fill/strokeStyle accept
   // writes. Most tests observe generated time/geometry rather than pixels; the
@@ -708,6 +864,1768 @@ describe("LiveCanvas full-sheet preview chrome (#248)", () => {
   });
 });
 
+describe("LiveCanvas Page Frame edit view", () => {
+  const compositionFrame = { width: 200, height: 100 };
+
+  it("contains the whole Composition and an outward draft in one padded extent", () => {
+    const el = mount(
+      <LiveCanvas
+        sketch={spacedSketch(200, 100)}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrameDraft={{ x: -50, y: -10, width: 300, height: 130 }}
+      />,
+    );
+    const view = el.querySelector<HTMLElement>(".page-frame-edit-view")!;
+    const composition = el.querySelector<HTMLElement>(
+      ".page-frame-edit-composition",
+    )!;
+    const boundary = el.querySelector("[data-testid='page-frame-boundary']")!;
+
+    expect(el.querySelector(".plot-sheet")).toBeNull();
+    expect(view.getAttribute("aria-label")).toBe("Page Frame edit preview");
+    expect(view.style.getPropertyValue("--page-frame-edit-aspect")).toBe(
+      String(300 / 130),
+    );
+    expect(view.style.getPropertyValue("--page-frame-composition-left")).toBe(
+      `${(50 / 300) * 100}%`,
+    );
+    expect(view.style.getPropertyValue("--page-frame-composition-top")).toBe(
+      `${(10 / 130) * 100}%`,
+    );
+    expect(composition.querySelector("canvas")).toBe(canvasEl(el));
+    expect(boundary.getAttribute("x")).toBe("-50");
+    expect(boundary.getAttribute("y")).toBe("-10");
+    expect(boundary.getAttribute("width")).toBe("300");
+    expect(boundary.getAttribute("height")).toBe("130");
+  });
+
+  it("dims only discarded Composition content for crop and mixed drafts", () => {
+    const sketch = spacedSketch(200, 100);
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrameDraft={{ x: 20, y: 10, width: 100, height: 50 }}
+      />,
+    );
+    const cropPath = el
+      .querySelector("[data-testid='page-frame-discarded']")!
+      .getAttribute("d");
+    expect(cropPath).toContain("M 0 0 H 200 V 100 H 0 Z");
+    expect(cropPath).toContain("M 20 10 H 120 V 60 H 20 Z");
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={{}}
+          seed={1}
+          compositionFrame={compositionFrame}
+          pageFrameDraft={{ x: 40, y: -20, width: 220, height: 80 }}
+        />,
+      );
+    });
+    const mixedPath = el
+      .querySelector("[data-testid='page-frame-discarded']")!
+      .getAttribute("d");
+    expect(mixedPath).toContain("M 40 0 H 200 V 60 H 40 Z");
+  });
+
+  it("preserves the ordinary full-sheet path when no edit draft is present", () => {
+    const el = mount(
+      <LiveCanvas
+        sketch={spacedSketch(200, 100)}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+      />,
+    );
+
+    expect(el.querySelector(".plot-sheet")).not.toBeNull();
+    expect(el.querySelector(".page-frame-edit-view")).toBeNull();
+  });
+});
+
+describe("LiveCanvas Page Frame direct manipulation (#346)", () => {
+  const compositionFrame = { width: 200, height: 100 };
+  const initialFrame = { x: 20, y: 10, width: 100, height: 50 };
+  const manipulationParams = {};
+  const defaultManipulationSketch = spacedSketch(200, 100);
+
+  function ControlledManipulationCanvas({
+    constraint = { kind: "free" },
+    initial = initialFrame,
+    onChange = () => {},
+    sketch = defaultManipulationSketch,
+  }: {
+    constraint?: LiveCanvasProps["pageFrameAspectConstraint"];
+    initial?: typeof initialFrame;
+    onChange?: (frame: typeof initialFrame) => void;
+    sketch?: Sketch;
+  }) {
+    const [frame, setFrame] = useState(initial);
+    return (
+      <LiveCanvas
+        sketch={sketch}
+        params={manipulationParams}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrameDraft={frame}
+        pageFrameAspectConstraint={constraint}
+        onPageFrameDraftChange={(next) => {
+          setFrame(next);
+          onChange(next);
+        }}
+      />
+    );
+  }
+
+  function interaction(el: HTMLElement) {
+    const view = el.querySelector<HTMLElement>(".page-frame-edit-view")!;
+    vi.spyOn(view, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 100,
+      toJSON: () => ({}),
+    });
+    const layer = el.querySelector<HTMLElement>(".page-frame-interaction")!;
+    return { view, layer, capture: installPointerCapture(layer) };
+  }
+
+  function handle(el: HTMLElement, name: string): HTMLElement {
+    const target = el.querySelector<HTMLElement>(
+      `[data-page-frame-handle="${name}"]`,
+    );
+    if (target === null) throw new Error(`missing ${name} handle`);
+    return target;
+  }
+
+  function pageBoundaryClientRect(el: HTMLElement) {
+    const view = el.querySelector<HTMLElement>(".page-frame-edit-view")!;
+    const overlay = el.querySelector<SVGSVGElement>(
+      ".page-frame-edit-overlay",
+    )!;
+    const boundary = el.querySelector<SVGRectElement>(
+      "[data-testid='page-frame-boundary']",
+    )!;
+    const [minX, minY, width, height] = overlay
+      .getAttribute("viewBox")!
+      .split(" ")
+      .map(Number);
+    const client = view.getBoundingClientRect();
+    const x = Number(boundary.getAttribute("x"));
+    const y = Number(boundary.getAttribute("y"));
+    const boundaryWidth = Number(boundary.getAttribute("width"));
+    const boundaryHeight = Number(boundary.getAttribute("height"));
+    return {
+      left: client.left + ((x - minX!) / width!) * client.width,
+      top: client.top + ((y - minY!) / height!) * client.height,
+      width: (boundaryWidth / width!) * client.width,
+      height: (boundaryHeight / height!) * client.height,
+    };
+  }
+
+  it("renders one interior pan target and all eight edge/corner handle hooks", () => {
+    const el = mount(<ControlledManipulationCanvas />);
+
+    expect(el.querySelectorAll(".page-frame-pan-target")).toHaveLength(1);
+    expect(el.querySelectorAll(".page-frame-resize-handle")).toHaveLength(8);
+    expect(
+      [...el.querySelectorAll<HTMLElement>(".page-frame-resize-handle")].map(
+        (node) => node.dataset.pageFrameHandle,
+      ),
+    ).toEqual([
+      "top-left",
+      "top",
+      "top-right",
+      "right",
+      "bottom-right",
+      "bottom",
+      "bottom-left",
+      "left",
+    ]);
+    const interactionLayer = el.querySelector(".page-frame-interaction")!;
+    const targets = interactionLayer.querySelectorAll<HTMLElement>(
+      ".page-frame-pan-target, .page-frame-resize-handle",
+    );
+    expect(interactionLayer.getAttribute("aria-hidden")).toBe("true");
+    expect(interactionLayer.querySelectorAll("button")).toHaveLength(0);
+    expect([...targets].every((target) => target.tabIndex === -1)).toBe(true);
+    expect(
+      [...targets].every(
+        (target) =>
+          target.getAttribute("role") === "presentation" &&
+          target.getAttribute("aria-label") === null,
+      ),
+    ).toBe(true);
+  });
+
+  it("gives the interaction targets pointer hit testing, capture-safe touch behavior, and resize cursors", () => {
+    expect(APP_CSS).toMatch(
+      /\.page-frame-pan-target\s*\{[^}]*pointer-events:\s*auto[^}]*touch-action:\s*none/s,
+    );
+    expect(APP_CSS).toMatch(
+      /\.page-frame-resize-handle\s*\{[^}]*pointer-events:\s*auto[^}]*touch-action:\s*none/s,
+    );
+    expect(APP_CSS).toMatch(
+      /data-page-frame-handle="top-left"[^}]*cursor:\s*nwse-resize/s,
+    );
+    expect(APP_CSS).toMatch(
+      /data-page-frame-handle="right"[^}]*cursor:\s*ew-resize/s,
+    );
+  });
+
+  it("freezes pointer scale and viewBox while resizing beyond the starting extent", () => {
+    const changes = vi.fn();
+    const el = mount(<ControlledManipulationCanvas onChange={changes} />);
+    const { view, layer, capture } = interaction(el);
+    const right = handle(el, "right");
+
+    dispatchPointer(right, "pointerdown", { x: 120, y: 35 });
+    expect(capture.set).toHaveBeenCalledWith(1);
+    expect(
+      el.querySelector(".page-frame-edit-overlay")?.getAttribute("viewBox"),
+    ).toBe("0 0 200 100");
+
+    // Layout changes after pointerdown do not change the captured 1px:1-unit
+    // mapping: x=140 remains +20, not +10 under this wider live rectangle.
+    vi.mocked(view.getBoundingClientRect).mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 400,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 100,
+      toJSON: () => ({}),
+    });
+    dispatchPointer(layer, "pointermove", { x: 140, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 10,
+      width: 120,
+      height: 50,
+    });
+
+    dispatchPointer(layer, "pointermove", { x: 300, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 10,
+      width: 280,
+      height: 50,
+    });
+    expect(
+      el.querySelector(".page-frame-edit-overlay")?.getAttribute("viewBox"),
+    ).toBe("0 0 200 100");
+
+    dispatchPointer(layer, "pointerup", { x: 300, y: 35 });
+    expect(capture.release).toHaveBeenCalledWith(1);
+    expect(
+      el.querySelector(".page-frame-edit-overlay")?.getAttribute("viewBox"),
+    ).toBe("0 0 300 100");
+  });
+
+  it("clamps an edge crossing without flipping and recovers outward from the immutable start", () => {
+    const changes = vi.fn();
+    const el = mount(<ControlledManipulationCanvas onChange={changes} />);
+    const { layer } = interaction(el);
+
+    dispatchPointer(handle(el, "left"), "pointerdown", { x: 20, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 200, y: 35 });
+    const crossed = changes.mock.lastCall?.[0] as typeof initialFrame;
+    expect(crossed.x).toBeLessThan(120);
+    expect(crossed.width).toBeGreaterThan(0);
+    expect(crossed.x + crossed.width).toBeCloseTo(120);
+
+    dispatchPointer(layer, "pointermove", { x: -40, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: -40,
+      y: 10,
+      width: 160,
+      height: 50,
+    });
+  });
+
+  it("pans Composition behind a stationary Page boundary and never resamples", () => {
+    const changes = vi.fn();
+    const sketch = spacedSketch(200, 100);
+    const generate = vi.mocked(sketch.generate);
+    const el = mount(
+      <ControlledManipulationCanvas onChange={changes} sketch={sketch} />,
+    );
+    const { layer } = interaction(el);
+    const drawsBefore = generate.mock.calls.length;
+
+    dispatchPointer(el.querySelector(".page-frame-pan-target")!, "pointerdown", {
+      x: 60,
+      y: 30,
+    });
+    dispatchPointer(layer, "pointermove", { x: 90, y: 50 });
+
+    expect(changes).toHaveBeenLastCalledWith({
+      x: -10,
+      y: -10,
+      width: 100,
+      height: 50,
+    });
+    const boundary = el.querySelector("[data-testid='page-frame-boundary']")!;
+    expect(boundary.getAttribute("x")).toBe("20");
+    expect(boundary.getAttribute("y")).toBe("10");
+    expect(
+      el
+        .querySelector<HTMLElement>(".page-frame-edit-view")!
+        .style.getPropertyValue("--page-frame-composition-left"),
+    ).toBe("15%");
+    expect(generate).toHaveBeenCalledTimes(drawsBefore);
+  });
+
+  it.each([
+    ["full-frame", { x: 0, y: 0, width: 200, height: 100 }, 30, 20],
+    ["inward", initialFrame, 30, 20],
+    ["outward", { x: -20, y: -10, width: 240, height: 120 }, 36, 24],
+  ])(
+    "keeps the %s Page boundary stationary after pan settlement",
+    (_label, initial, draftDx, draftDy) => {
+      const changes = vi.fn();
+      const el = mount(
+        <ControlledManipulationCanvas initial={initial} onChange={changes} />,
+      );
+      const { layer } = interaction(el);
+      const panTarget = el.querySelector(".page-frame-pan-target")!;
+      const before = pageBoundaryClientRect(el);
+
+      dispatchPointer(panTarget, "pointerdown", { x: 60, y: 30 });
+      dispatchPointer(layer, "pointermove", { x: 90, y: 50 });
+      const during = pageBoundaryClientRect(el);
+      dispatchPointer(layer, "pointerup", { x: 90, y: 50 });
+
+      expect(pageBoundaryClientRect(el)).toEqual(during);
+      expect(during).toEqual(before);
+      expect(changes).toHaveBeenLastCalledWith({
+        ...initial,
+        x: initial.x - draftDx,
+        y: initial.y - draftDy,
+      });
+    },
+  );
+
+  it("reconciles a settled pan across cancel, external drafts, and edit re-entry", () => {
+    let replaceDraft = (_frame: typeof initialFrame) => {};
+    let setEditing = (_editing: boolean) => {};
+    const changes = vi.fn();
+
+    function TransitionCanvas() {
+      const [draft, setDraft] = useState(initialFrame);
+      const [editing, updateEditing] = useState(true);
+      replaceDraft = setDraft;
+      setEditing = updateEditing;
+      return (
+        <LiveCanvas
+          sketch={defaultManipulationSketch}
+          params={manipulationParams}
+          seed={1}
+          compositionFrame={compositionFrame}
+          pageFrameDraft={editing ? draft : null}
+          onPageFrameDraftChange={(next) => {
+            setDraft(next);
+            changes(next);
+          }}
+        />
+      );
+    }
+
+    const el = mount(<TransitionCanvas />);
+    let { layer } = interaction(el);
+    dispatchPointer(el.querySelector(".page-frame-pan-target")!, "pointerdown", {
+      x: 60,
+      y: 30,
+    });
+    dispatchPointer(layer, "pointermove", { x: 90, y: 50 });
+    dispatchPointer(layer, "pointerup", { x: 90, y: 50 });
+    const settledRect = pageBoundaryClientRect(el);
+    const settledDraft = changes.mock.lastCall?.[0] as typeof initialFrame;
+
+    dispatchPointer(el.querySelector(".page-frame-pan-target")!, "pointerdown", {
+      x: 60,
+      y: 30,
+    });
+    expect(pageBoundaryClientRect(el)).toEqual(settledRect);
+    dispatchPointer(layer, "pointermove", { x: 70, y: 35 });
+    dispatchPointer(layer, "pointercancel", { x: 70, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith(settledDraft);
+    expect(pageBoundaryClientRect(el)).toEqual(settledRect);
+
+    const externalDraft = { x: 40, y: 5, width: 80, height: 40 };
+    act(() => replaceDraft(externalDraft));
+    expect(
+      el
+        .querySelector("[data-testid='page-frame-boundary']")
+        ?.getAttribute("x"),
+    ).toBe("40");
+
+    ({ layer } = interaction(el));
+    dispatchPointer(el.querySelector(".page-frame-pan-target")!, "pointerdown", {
+      x: 60,
+      y: 30,
+    });
+    dispatchPointer(layer, "pointermove", { x: 70, y: 35 });
+    dispatchPointer(layer, "pointerup", { x: 70, y: 35 });
+    const latestDraft = changes.mock.lastCall?.[0] as typeof initialFrame;
+    act(() => setEditing(false));
+    expect(el.querySelector(".page-frame-edit-view")).toBeNull();
+    act(() => setEditing(true));
+    expect(
+      el
+        .querySelector("[data-testid='page-frame-boundary']")
+        ?.getAttribute("x"),
+    ).toBe(String(latestDraft.x));
+  });
+
+  it("rebases temporary Shift transitions without jumps during a freeform drag", () => {
+    const changes = vi.fn();
+    const el = mount(<ControlledManipulationCanvas onChange={changes} />);
+    const { layer } = interaction(el);
+
+    dispatchPointer(handle(el, "right"), "pointerdown", { x: 120, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 140, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 10,
+      width: 120,
+      height: 50,
+    });
+
+    dispatchPointer(layer, "pointermove", {
+      x: 140,
+      y: 35,
+      shiftKey: true,
+    });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 10,
+      width: 120,
+      height: 50,
+    });
+    dispatchPointer(layer, "pointermove", {
+      x: 164,
+      y: 35,
+      shiftKey: true,
+    });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 5,
+      width: 144,
+      height: 60,
+    });
+
+    dispatchPointer(layer, "pointermove", { x: 164, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 174, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 5,
+      width: 154,
+      height: 60,
+    });
+  });
+
+  it("keeps a persistent ratio authoritative across Shift transitions", () => {
+    const changes = vi.fn();
+    const el = mount(
+      <ControlledManipulationCanvas
+        constraint={{ kind: "ratio", ratio: 1 }}
+        onChange={changes}
+      />,
+    );
+    const { layer } = interaction(el);
+
+    dispatchPointer(handle(el, "right"), "pointerdown", { x: 120, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 150, y: 35 });
+    const withoutShift = changes.mock.lastCall?.[0];
+    dispatchPointer(layer, "pointermove", {
+      x: 150,
+      y: 35,
+      shiftKey: true,
+    });
+    expect(changes.mock.lastCall?.[0]).toEqual(withoutShift);
+    expect(withoutShift).toEqual({ x: 20, y: -30, width: 130, height: 130 });
+  });
+
+  it("filters non-primary/concurrent pointers and restores the start on cancel or lost capture", () => {
+    const changes = vi.fn();
+    const el = mount(<ControlledManipulationCanvas onChange={changes} />);
+    const { layer, capture } = interaction(el);
+    const right = handle(el, "right");
+
+    dispatchPointer(right, "pointerdown", {
+      x: 120,
+      y: 35,
+      pointerId: 2,
+      isPrimary: false,
+    });
+    dispatchPointer(right, "pointerdown", { x: 120, y: 35, button: 2 });
+    expect(capture.set).not.toHaveBeenCalled();
+
+    dispatchPointer(right, "pointerdown", { x: 120, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 180, y: 35, pointerId: 2 });
+    expect(changes).not.toHaveBeenCalled();
+    dispatchPointer(layer, "pointermove", { x: 150, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith({
+      x: 20,
+      y: 10,
+      width: 130,
+      height: 50,
+    });
+    dispatchPointer(layer, "pointercancel", { x: 150, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith(initialFrame);
+
+    dispatchPointer(right, "pointerdown", { x: 120, y: 35 });
+    dispatchPointer(layer, "pointermove", { x: 160, y: 35 });
+    capture.lose(1);
+    dispatchPointer(layer, "lostpointercapture", { x: 160, y: 35 });
+    expect(changes).toHaveBeenLastCalledWith(initialFrame);
+    expect(capture.set).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("LiveCanvas fixed-page draft presentation (#362)", () => {
+  const compositionFrame = resolveCompositionFrame(2);
+  const representedFrame = {
+    x: 0,
+    y: 0,
+    width: compositionFrame.width,
+    height: compositionFrame.height,
+  };
+  const lockedProfile: PlotProfile = {
+    width: 240,
+    height: 140,
+    insets: { top: 20, right: 20, bottom: 20, left: 20 },
+    includeFrame: true,
+    toolWidthMillimeters: 0.31,
+  };
+
+  function fixedDraft(): FixedPageFrameEditDraft {
+    return setPageFrameEditMode(
+      openPageFrameEditDraft({
+        profile: lockedProfile,
+        representedFrame,
+        compositionFrame,
+        generationAspect: 2,
+      }),
+      "fixed-page",
+    ) as FixedPageFrameEditDraft;
+  }
+
+  function retainedSceneFixture() {
+    const source: Scene = {
+      space: compositionFrame,
+      primitives: [
+        {
+          points: [[10, 10], [40, 10], [40, 30], [10, 30]],
+          closed: true,
+          fill: { color: "tomato" },
+        },
+      ],
+    };
+    const generate = vi.fn(() => source);
+    return {
+      source,
+      generate,
+      sketch: {
+        id: "fixed-page-presentation",
+        name: "Fixed Page Presentation",
+        schema: {},
+        generate,
+      } as unknown as Sketch,
+    };
+  }
+
+  it("keeps the exact locked sheet, insets, and drawable boundary stationary while scale reframes the retained Fill", () => {
+    const fixture = retainedSceneFixture();
+    const handle = createRef<LiveCanvasHandle>();
+    const initial = fixedDraft();
+    const scaled = setFixedPageCompositionScale(initial, 2);
+    const params = {};
+    const render = (draft: FixedPageFrameEditDraft) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={HARNESS_FALLBACK_PLOT_PROFILE}
+        pageFrameEditDraft={draft}
+        onPageFrameDraftChange={() => {}}
+      />
+    );
+    const el = mount(render(initial));
+    const canvas = canvasEl(el);
+    const boundary = el.querySelector("[data-testid='page-frame-boundary']")!;
+    const boundaryAttributes = ["x", "y", "width", "height"].map((name) =>
+      boundary.getAttribute(name),
+    );
+    const first = handle.current!.captureDisplayedFrame()!;
+
+    expect(first.displayedScene).toEqual(frameScene(fixture.source, initial.frame));
+    expect(el.querySelectorAll(".page-frame-resize-handle")).toHaveLength(0);
+    expect(el.querySelector("[data-testid='page-frame-discarded']")).toBeNull();
+    const sheet = el.querySelector<HTMLElement>(".plot-sheet")!;
+    expect(sheet.getAttribute("aria-label")).toBe("Page Frame edit preview");
+    expect(sheet.style.getPropertyValue("--sheet-aspect")).toBe(String(240 / 140));
+    expect(sheet.style.getPropertyValue("--plot-inset-top")).toBe(`${(20 / 140) * 100}%`);
+    expect(sheet.style.getPropertyValue("--plot-inset-right")).toBe(`${(20 / 240) * 100}%`);
+    expect(boundaryAttributes).toEqual(["20", "20", "200", "100"]);
+
+    act(() => root!.render(render(scaled)));
+
+    const next = handle.current!.captureDisplayedFrame()!;
+    expect(canvasEl(el)).toBe(canvas);
+    expect(fixture.generate).toHaveBeenCalledOnce();
+    expect(next.sourceScene).toBe(first.sourceScene);
+    expect(next.displayedScene).toEqual(frameScene(fixture.source, scaled.frame));
+    expect(["x", "y", "width", "height"].map((name) =>
+      el.querySelector("[data-testid='page-frame-boundary']")!.getAttribute(name),
+    )).toEqual(boundaryAttributes);
+  });
+
+  it("pans the retained composition through the stationary drawable viewport using inverse frame origins", () => {
+    const fixture = retainedSceneFixture();
+    const changes = vi.fn();
+    const handle = createRef<LiveCanvasHandle>();
+    const params = {};
+
+    function ControlledFixedCanvas() {
+      const [draft, setDraft] = useState(fixedDraft);
+      return (
+        <LiveCanvas
+          handleRef={handle}
+          sketch={fixture.sketch}
+          params={params}
+          seed={1}
+          compositionFrame={compositionFrame}
+          pageFrameEditDraft={draft}
+          onPageFrameDraftChange={(frame) => {
+            const next = panFixedPageFrame(draft, frame);
+            setDraft(next);
+            changes(next);
+          }}
+        />
+      );
+    }
+
+    const el = mount(<ControlledFixedCanvas />);
+    const viewport = el.querySelector<HTMLElement>(".plot-drawable")!;
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 100,
+      toJSON: () => ({}),
+    });
+    const layer = el.querySelector<HTMLElement>(".page-frame-interaction")!;
+    installPointerCapture(layer);
+    const boundary = el.querySelector("[data-testid='page-frame-boundary']")!;
+    const before = ["x", "y", "width", "height"].map((name) =>
+      boundary.getAttribute(name),
+    );
+
+    dispatchPointer(el.querySelector(".page-frame-pan-target")!, "pointerdown", {
+      x: 50,
+      y: 25,
+    });
+    dispatchPointer(layer, "pointermove", { x: 70, y: 35 });
+
+    const movedFrame = changes.mock.lastCall?.[0].frame;
+    expect(movedFrame).toMatchObject({
+      width: compositionFrame.width,
+      height: compositionFrame.height,
+    });
+    expect(movedFrame.x).toBeCloseTo(-compositionFrame.width / 10);
+    expect(movedFrame.y).toBeCloseTo(-compositionFrame.height / 10);
+    expect(["x", "y", "width", "height"].map((name) =>
+      boundary.getAttribute(name),
+    )).toEqual(before);
+    expect(handle.current!.captureDisplayedFrame()!.displayedScene).toEqual(
+      frameScene(fixture.source, movedFrame),
+    );
+    expect(fixture.generate).toHaveBeenCalledOnce();
+  });
+
+  it("changes only cheap framing while preserving live preparation and the sampled Scene identity", () => {
+    const fixture = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    const handle = createRef<LiveCanvasHandle>();
+    const initial = fixedDraft();
+    const scaled = setFixedPageCompositionScale(initial, 1.25);
+    const params = { value: 4 };
+    const render = (draft: FixedPageFrameEditDraft) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={params}
+        seed={2}
+        compositionFrame={compositionFrame}
+        pageFrameEditDraft={draft}
+      />
+    );
+    mount(render(initial));
+    tick(750);
+    const before = handle.current!.captureDisplayedFrame()!;
+    expect(fixture.prepare).toHaveBeenCalledOnce();
+    expect(fixture.samplers[0]).toHaveBeenCalledOnce();
+
+    act(() => root!.render(render(scaled)));
+
+    const after = handle.current!.captureDisplayedFrame()!;
+    expect(fixture.prepare).toHaveBeenCalledOnce();
+    expect(fixture.samplers[0]).toHaveBeenCalledOnce();
+    expect(after.t).toBe(before.t);
+    expect(after.sourceScene).toBe(before.sourceScene);
+    expect(after.displayedScene).toEqual(
+      frameScene(before.sourceScene, scaled.frame),
+    );
+  });
+
+  it("cheaply reframes caller-owned Outline geometry and honors the draft include-frame value", () => {
+    const fixture = retainedSceneFixture();
+    const handle = createRef<LiveCanvasHandle>();
+    const initial = fixedDraft();
+    const scaled = setFixedPageCompositionScale(initial, 1.5);
+    const render = (draft: FixedPageFrameEditDraft) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={{ ...lockedProfile, includeFrame: false }}
+        pageFrameEditDraft={draft}
+        renderState={{
+          kind: "outline",
+          scene: fixture.source,
+          t: 3,
+          contentRevision: 44,
+        }}
+      />
+    );
+    mount(render(initial));
+    act(() => root!.render(render(scaled)));
+
+    expect(fixture.generate).not.toHaveBeenCalled();
+    expect(handle.current!.captureDisplayedFrame()).toMatchObject({
+      sourceScene: fixture.source,
+      displayedScene: finalizeOutlineScene(fixture.source, scaled.frame, true),
+      t: 3,
+      renderMode: "outline",
+      includeFrame: true,
+      contentRevision: 44,
+    });
+  });
+
+  it("gives fixed Tone the same pixels as the identical committed frame without preparing or generating", () => {
+    const { ctx, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 4, height: 2 } as DOMRect,
+    );
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const draft = setFixedPageCompositionScale(fixedDraft(), 2);
+    const source: ToneSource = {
+      toneField: createToneField(([x, y]) => (x + y) / 300),
+      shadingMask: createShadingMask(() => 1),
+    };
+    const params = {};
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={lockedProfile}
+        pageFrame={draft.frame}
+        renderState={{ kind: "tone-reference", source }}
+      />,
+    );
+    const committed = images.at(-1)!;
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          sketch={sketch}
+          params={params}
+          seed={1}
+          compositionFrame={compositionFrame}
+          pageFrameEditDraft={draft}
+          renderState={{ kind: "tone-reference", source }}
+        />,
+      );
+    });
+
+    expect(images.at(-1)).toEqual(committed);
+    expect(canvasEl(el).style.getPropertyValue("--paper-aspect")).toBe("2");
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("keeps one asymmetric fixed Page identical across draft and committed Fill, Tone, and Outline output", () => {
+    const { ctx, images, calls, fillRectStyles } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 265,
+      height: 159,
+    } as DOMRect);
+    const source = fixedPageParityScene();
+    const generate = vi.fn(() => source);
+    const sketch = {
+      id: "fixed-page-output-parity",
+      name: "Fixed Page Output Parity",
+      schema: {},
+      generate,
+    } as unknown as Sketch;
+    const representedFrame = {
+      x: 0,
+      y: 0,
+      ...FIXED_PAGE_PARITY_COMPOSITION,
+    };
+    const initial = setPageFrameEditMode(
+      openPageFrameEditDraft({
+        profile: FIXED_PAGE_PARITY_PROFILE,
+        representedFrame,
+        compositionFrame: FIXED_PAGE_PARITY_COMPOSITION,
+        generationAspect:
+          FIXED_PAGE_PARITY_COMPOSITION.width / FIXED_PAGE_PARITY_COMPOSITION.height,
+      }),
+      "fixed-page",
+    ) as FixedPageFrameEditDraft;
+    const draft = panFixedPageFrame(
+      setFixedPageCompositionScale(initial, 2),
+      FIXED_PAGE_PARITY_FRAME,
+    );
+    const handle = createRef<LiveCanvasHandle>();
+    const params = {};
+    const fillState = {
+      kind: "fill-held" as const,
+      scene: source,
+      t: 4,
+      sourceInputRevision: 2,
+      contentRevision: 3,
+    };
+    const renderCommitted = (renderState: NonNullable<LiveCanvasProps["renderState"]>) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={FIXED_PAGE_PARITY_COMPOSITION}
+        profile={FIXED_PAGE_PARITY_PROFILE}
+        pageFrame={FIXED_PAGE_PARITY_FRAME}
+        renderState={renderState}
+      />
+    );
+    const renderDraft = (renderState: NonNullable<LiveCanvasProps["renderState"]>) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={FIXED_PAGE_PARITY_COMPOSITION}
+        profile={FIXED_PAGE_PARITY_PROFILE}
+        pageFrameEditDraft={draft}
+        renderState={renderState}
+      />
+    );
+
+    const el = mount(renderCommitted(fillState));
+    const expectedFill = frameScene(source, FIXED_PAGE_PARITY_FRAME);
+    const committedFill = handle.current!.captureDisplayedFrame()!;
+    const callsBeforeDraft = calls.length;
+    act(() => root!.render(renderDraft(fillState)));
+    const draftFill = handle.current!.captureDisplayedFrame()!;
+
+    expect(draft.profile).toBe(initial.profile);
+    expect(draft.frame).toEqual(FIXED_PAGE_PARITY_FRAME);
+    expect(draftFill.sourceScene).toBe(committedFill.sourceScene);
+    expect(draftFill.displayedScene).toEqual(committedFill.displayedScene);
+    expect(draftFill.displayedScene).toEqual(expectedFill);
+    expect(draftFill.displayedScene).toMatchObject({
+      space: {
+        width: FIXED_PAGE_PARITY_FRAME.width,
+        height: FIXED_PAGE_PARITY_FRAME.height,
+      },
+      background: source.background,
+    });
+    expect(draftFill.displayedScene.primitives[0]!.points).toEqual([
+      [FIXED_PAGE_PARITY_COMPOSITION.width * 0.1, FIXED_PAGE_PARITY_COMPOSITION.height * 0.05],
+      [FIXED_PAGE_PARITY_COMPOSITION.width * 0.5, FIXED_PAGE_PARITY_COMPOSITION.height * 0.45],
+    ]);
+    const draftTransforms = calls
+      .slice(callsBeforeDraft)
+      .filter(({ method }) => method === "setTransform");
+    const paintTransform = draftTransforms.at(-1)!.args;
+    expect(paintTransform[0]).toBeCloseTo(paintTransform[3] as number, 12);
+    expect(paintTransform.slice(1, 3)).toEqual([0, 0]);
+    expect(paintTransform.slice(4)).toEqual([0, 0]);
+    expect(fillRectStyles.at(-1)).toBe("#f4efe6");
+    expect(canvasEl(el)).toMatchObject({ width: 265, height: 159 });
+    expect(canvasEl(el).style.getPropertyValue("--paper-aspect")).toBe(String(5 / 3));
+    const sheet = el.querySelector<HTMLElement>(".plot-sheet")!;
+    expect(sheet.style.getPropertyValue("--sheet-aspect")).toBe(String(323 / 217));
+    expect(sheet.style.getPropertyValue("--plot-inset-left")).toBe(`${(17 / 323) * 100}%`);
+    expect(sheet.style.getPropertyValue("--plot-inset-bottom")).toBe(`${(39 / 217) * 100}%`);
+
+    const toneState = {
+      kind: "tone-reference" as const,
+      source: fixedPageParityToneSource(),
+    };
+    act(() => root!.render(renderCommitted(toneState)));
+    const committedTone = images.at(-1)!;
+    act(() => root!.render(renderDraft(toneState)));
+    const draftTone = images.at(-1)!;
+
+    expect(draftTone).toEqual(committedTone);
+    expect(draftTone).toHaveLength(265 * 159 * 4);
+    // The negative Page x origin makes the first fifth geometry-free paper.
+    expect([...draftTone.slice(0, 4)]).toEqual([255, 255, 255, 255]);
+    expect(draftTone[60 * 4]).toBeLessThan(255);
+
+    const millimetersPerSceneUnit = 265 / FIXED_PAGE_PARITY_FRAME.width;
+    const outlinePolicy: OutlineFinalizationStrokePolicy = {
+      kind: "physical-tool",
+      target: {
+        toolWidthMillimeters: FIXED_PAGE_PARITY_PROFILE.toolWidthMillimeters,
+        millimetersPerSceneUnit,
+      },
+    };
+    const outlineState = {
+      kind: "outline" as const,
+      scene: source,
+      t: 4,
+      sourceInputRevision: 2,
+      contentRevision: 3,
+    };
+    act(() =>
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={1}
+          compositionFrame={FIXED_PAGE_PARITY_COMPOSITION}
+          profile={FIXED_PAGE_PARITY_PROFILE}
+          pageFrame={FIXED_PAGE_PARITY_FRAME}
+          renderState={outlineState}
+          outlineFinalizationStrokePolicy={outlinePolicy}
+        />,
+      ),
+    );
+    const committedOutline = handle.current!.captureDisplayedFrame()!;
+    act(() =>
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={params}
+          seed={1}
+          compositionFrame={FIXED_PAGE_PARITY_COMPOSITION}
+          profile={FIXED_PAGE_PARITY_PROFILE}
+          pageFrameEditDraft={draft}
+          renderState={outlineState}
+          outlineFinalizationStrokePolicy={outlinePolicy}
+        />,
+      ),
+    );
+    const draftOutline = handle.current!.captureDisplayedFrame()!;
+
+    expect(draftOutline.sourceScene).toBe(committedOutline.sourceScene);
+    expect(draftOutline.displayedScene).toEqual(committedOutline.displayedScene);
+    expect(draftOutline.displayedScene).toEqual(
+      finalizeOutlineScene(source, FIXED_PAGE_PARITY_FRAME, true, outlinePolicy),
+    );
+    expect(draftOutline.displayedScene.primitives).toHaveLength(2);
+    expect(
+      draftOutline.displayedScene.primitives.map((primitive) => primitive.stroke?.width),
+    ).toEqual([
+      FIXED_PAGE_PARITY_PROFILE.toolWidthMillimeters / millimetersPerSceneUnit,
+      FIXED_PAGE_PARITY_PROFILE.toolWidthMillimeters / millimetersPerSceneUnit,
+    ]);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the new scale-preserving draft prop equivalent to the legacy overlay path", () => {
+    const fixture = retainedSceneFixture();
+    const ordinary = openPageFrameEditDraft({
+      profile: lockedProfile,
+      representedFrame,
+      compositionFrame,
+      generationAspect: 2,
+    });
+    const handle = createRef<LiveCanvasHandle>();
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrameEditDraft={ordinary}
+        onPageFrameDraftChange={() => {}}
+      />,
+    );
+
+    expect(el.querySelector(".page-frame-edit-view")).not.toBeNull();
+    expect(el.querySelectorAll(".page-frame-resize-handle")).toHaveLength(8);
+    expect(handle.current!.captureDisplayedFrame()!.displayedScene).toBe(
+      fixture.source,
+    );
+    expect(fixture.generate).toHaveBeenCalledOnce();
+  });
+
+  it("rejects simultaneous active legacy and mode-bearing drafts at runtime", () => {
+    const fixture = retainedSceneFixture();
+    expect(() =>
+      mount(
+        <RawLiveCanvas
+          {...({
+            sketch: fixture.sketch,
+            params: {},
+            seed: 1,
+            compositionFrame,
+            profile: lockedProfile,
+            pageFrameDraft: representedFrame,
+            pageFrameEditDraft: fixedDraft(),
+          } as unknown as LiveCanvasProps)}
+        />,
+      ),
+    ).toThrow(/mutually exclusive/);
+  });
+});
+
+describe("LiveCanvas retained Page Frame derivation (#344 PF-06)", () => {
+  const compositionFrame = { width: 200, height: 100 };
+  const crop = { x: 20, y: 10, width: 100, height: 50 };
+  const padding = { x: -20, y: -10, width: 240, height: 120 };
+  const mixed = { x: 40, y: -20, width: 200, height: 90 };
+
+  function retainedStaticScene(background?: Scene["background"]) {
+    const source: Scene = {
+      space: compositionFrame,
+      primitives: [
+        {
+          points: [[0, 0], [200, 0], [200, 100], [0, 100]],
+          closed: true,
+          fill: { color: "tomato" },
+        },
+      ],
+      ...(background === undefined ? {} : { background }),
+    };
+    const generate = vi.fn(() => source);
+    return {
+      source,
+      generate,
+      sketch: {
+        id: "retained-page-frame",
+        name: "Retained Page Frame",
+        schema: {},
+        generate,
+      } as unknown as Sketch,
+    };
+  }
+
+  function usePerCanvasContexts() {
+    const contexts = new WeakMap<
+      HTMLCanvasElement,
+      ReturnType<typeof recordingContext>
+    >();
+    const canvases: HTMLCanvasElement[] = [];
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      function (this: HTMLCanvasElement) {
+        let context = contexts.get(this);
+        if (context === undefined) {
+          context = recordingContext();
+          contexts.set(this, context);
+          canvases.push(this);
+        }
+        return context.ctx;
+      },
+    );
+    return { contexts, canvases };
+  }
+
+  it("keeps one static canvas live through Crop entry, Cancel, Apply, Reset, resize, and DPR changes", () => {
+    let boxWidth = 100;
+    let dpr = 1;
+    vi.spyOn(
+      HTMLCanvasElement.prototype,
+      "getBoundingClientRect",
+    ).mockImplementation(
+      () => ({ width: boxWidth, height: boxWidth / 2 }) as DOMRect,
+    );
+    vi.spyOn(window, "devicePixelRatio", "get").mockImplementation(() => dpr);
+    const { contexts, canvases } = usePerCanvasContexts();
+    const handle = createRef<LiveCanvasHandle>();
+    const fixture = retainedStaticScene();
+    const params = {};
+    const render = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+    ) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrame={pageFrame}
+        pageFrameDraft={pageFrameDraft}
+      />
+    );
+    const el = mount(render(null, null));
+    const canvas = canvasEl(el);
+    const context = contexts.get(canvas)!;
+
+    const transition = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+    ) => {
+      act(() => root!.render(render(pageFrame, pageFrameDraft)));
+      expect(canvasEl(el)).toBe(canvas);
+      expect(handle.current!.getCanvas()).toBe(canvas);
+      expect(contexts.get(canvasEl(el))).toBe(context);
+    };
+
+    transition(null, crop);
+    transition(null, null);
+    transition(null, crop);
+    transition(crop, null);
+    transition(crop, crop);
+    transition(null, null);
+
+    boxWidth = 160;
+    act(() => fireResizeObserver?.());
+    expect(canvasEl(el)).toBe(canvas);
+    expect(canvas.width).toBe(160);
+
+    dpr = 2;
+    act(() => fireDprChange?.());
+    expect(canvasEl(el)).toBe(canvas);
+    expect(canvas.width).toBe(320);
+    expect(context.counts.fillRect).toBeGreaterThan(0);
+    expect(canvases).toEqual([canvas]);
+    expect(fixture.generate).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the visible animated canvas advancing across Cancel, Apply, and Reset without resetting time", () => {
+    const { contexts, canvases } = usePerCanvasContexts();
+    const handle = createRef<LiveCanvasHandle>();
+    const { sketch, generate } = animatedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const params = {};
+    const render = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+    ) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrame={pageFrame}
+        pageFrameDraft={pageFrameDraft}
+      />
+    );
+    const el = mount(render(null, null));
+    const canvas = canvasEl(el);
+    tick(0);
+    const context = contexts.get(canvas)!;
+
+    const transitionAndAdvance = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+      milliseconds: number,
+    ) => {
+      act(() => root!.render(render(pageFrame, pageFrameDraft)));
+      const paintsBeforeTick = context.counts.fillRect ?? 0;
+      tick(milliseconds);
+      expect(canvasEl(el)).toBe(canvas);
+      expect(handle.current!.getCanvas()).toBe(canvas);
+      expect(context.counts.fillRect).toBeGreaterThan(paintsBeforeTick);
+      expect(lastDrawnT(generate)).toBe(milliseconds / 1000);
+    };
+
+    transitionAndAdvance(null, crop, 500);
+    transitionAndAdvance(null, null, 1000);
+    transitionAndAdvance(null, crop, 1500);
+    transitionAndAdvance(crop, null, 2000);
+    transitionAndAdvance(crop, crop, 2500);
+    transitionAndAdvance(null, null, 3000);
+
+    expect(canvases).toEqual([canvas]);
+    expect(handle.current!.getCurrentT()).toBe(3);
+  });
+
+  it.each([
+    ["crop", crop],
+    ["padding", padding],
+    ["mixed crop and padding", mixed],
+  ] as const)("reframes retained static Fill for %s without sampling again", (_label, frame) => {
+    const handle = createRef<LiveCanvasHandle>();
+    const fixture = retainedStaticScene();
+    const params = {};
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        inputRevision={12}
+      />,
+    );
+    const sourceSnapshot = handle.current!.captureDisplayedFrame()!;
+    expect(sourceSnapshot.scene).toBe(fixture.source);
+    expect(sourceSnapshot.sourceScene).toBe(fixture.source);
+    expect(sourceSnapshot.displayedScene).toBe(fixture.source);
+    expect(fixture.generate).toHaveBeenCalledOnce();
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={fixture.sketch}
+          params={params}
+          seed={1}
+          compositionFrame={compositionFrame}
+          inputRevision={12}
+          pageFrame={frame}
+        />,
+      );
+    });
+
+    const framed = handle.current!.captureDisplayedFrame()!;
+    expect(fixture.generate).toHaveBeenCalledOnce();
+    expect(framed.t).toBe(sourceSnapshot.t);
+    expect(framed.sourceInputRevision).toBe(12);
+    expect(framed.sourceScene).toBe(fixture.source);
+    expect(framed.scene).toBe(framed.displayedScene);
+    expect(framed.displayedScene).toEqual(frameScene(fixture.source, frame));
+    expect(framed.displayedScene.space).toEqual({
+      width: frame.width,
+      height: frame.height,
+    });
+    expect(
+      Number(canvasEl(container!).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(frame.width / frame.height);
+  });
+
+  it("reframes an animated prepared Fill at the same sampled t without resetting its clock", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const fixture = explicitlyPreparedSketch({ duration: 10, mode: "loop" });
+    const params = { value: 3 };
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={params}
+        seed={2}
+        compositionFrame={compositionFrame}
+      />,
+    );
+    tick(1750);
+    const before = handle.current!.captureDisplayedFrame()!;
+    expect(fixture.prepare).toHaveBeenCalledOnce();
+    expect(fixture.samplers[0]).toHaveBeenCalledOnce();
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={fixture.sketch}
+          params={params}
+          seed={2}
+          compositionFrame={compositionFrame}
+          pageFrame={crop}
+        />,
+      );
+    });
+
+    const after = handle.current!.captureDisplayedFrame()!;
+    expect(fixture.prepare).toHaveBeenCalledOnce();
+    expect(fixture.samplers[0]).toHaveBeenCalledOnce();
+    expect(after.t).toBe(1.75);
+    expect(after.sourceScene).toBe(before.sourceScene);
+    expect(after.displayedScene).toEqual(frameScene(before.sourceScene, crop));
+
+    tick(2250);
+    expect(fixture.samplers[0]).toHaveBeenLastCalledWith(2.25);
+  });
+
+  it("enters edit mode by repainting the retained full Composition, then applies and resets paint-only", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const fixture = retainedStaticScene();
+    const params = {};
+    const render = (pageFrame: typeof crop | null, pageFrameDraft: typeof crop | null) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrame={pageFrame}
+        pageFrameDraft={pageFrameDraft}
+      />
+    );
+    mount(render(crop, null));
+    expect(handle.current!.captureDisplayedFrame()!.displayedScene).not.toBe(
+      fixture.source,
+    );
+
+    act(() => root!.render(render(crop, crop)));
+    expect(handle.current!.captureDisplayedFrame()!.displayedScene).toBe(
+      fixture.source,
+    );
+    act(() => root!.render(render(mixed, null)));
+    expect(handle.current!.captureDisplayedFrame()!.displayedScene).toEqual(
+      frameScene(fixture.source, mixed),
+    );
+    act(() => root!.render(render(null, null)));
+    expect(handle.current!.captureDisplayedFrame()!.displayedScene).toBe(
+      fixture.source,
+    );
+    expect(fixture.generate).toHaveBeenCalledOnce();
+  });
+
+  it("repaints a framed snapshot on resize without replacing its retained Scenes", () => {
+    let boxSize = 100;
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => ({ width: boxSize, height: boxSize / 2 }) as DOMRect,
+    );
+    const handle = createRef<LiveCanvasHandle>();
+    const fixture = retainedStaticScene();
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={fixture.sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrame={crop}
+      />,
+    );
+    const retained = handle.current!.captureDisplayedFrame()!;
+    boxSize = 200;
+    act(() => fireResizeObserver?.());
+
+    expect(canvasEl(container!).width).toBe(200);
+    expect(fixture.generate).toHaveBeenCalledOnce();
+    expect(handle.current!.captureDisplayedFrame()).toBe(retained);
+  });
+
+  it("uses ADR-0009 background precedence for padded Page and edit padding", () => {
+    const { ctx, fillRectStyles } = recordingContext();
+    useRecordingContext(ctx);
+    const authored = retainedStaticScene({ color: "mintcream" });
+    const params = {};
+    const handle = createRef<LiveCanvasHandle>();
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={authored.sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        pageFrame={padding}
+      />,
+    );
+    expect(handle.current!.captureDisplayedFrame()!.displayedScene.background)
+      .toEqual({ color: "mintcream" });
+    expect(fillRectStyles).toContain("mintcream");
+
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={authored.sketch}
+          params={params}
+          seed={1}
+          compositionFrame={compositionFrame}
+          pageFrame={padding}
+          pageFrameDraft={padding}
+        />,
+      );
+    });
+    expect(
+      container!.querySelector<HTMLElement>(".page-frame-edit-page-ground")!
+        .style.backgroundColor,
+    ).toBe("mintcream");
+
+    const ordinary = retainedStaticScene();
+    act(() => {
+      root!.render(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={ordinary.sketch}
+          params={params}
+          seed={1}
+          compositionFrame={compositionFrame}
+          pageFrame={padding}
+          pageFrameDraft={padding}
+        />,
+      );
+    });
+    expect(
+      container!.querySelector<HTMLElement>(".page-frame-edit-page-ground")!
+        .style.backgroundColor,
+    ).toBe("white");
+  });
+});
+
+describe("LiveCanvas cached Outline Page finalization (#345 PF03)", () => {
+  const compositionFrame = { width: 200, height: 100 };
+  const crop = { x: 20, y: 10, width: 100, height: 50 };
+  const padding = { x: -20, y: -10, width: 240, height: 120 };
+  const mixed = { x: 40, y: -20, width: 200, height: 90 };
+  const source: Scene = {
+    space: compositionFrame,
+    primitives: [
+      {
+        points: [[0, 30], [200, 30]],
+        stroke: { color: "black", width: 1 },
+      },
+    ],
+    background: { color: "ivory" },
+  };
+  const outlineState = {
+    kind: "outline" as const,
+    scene: source,
+    t: 7,
+    sourceInputRevision: 23,
+    contentRevision: 41,
+  };
+  const profile = (includeFrame: boolean): PlotProfile => ({
+    ...HARNESS_FALLBACK_PLOT_PROFILE,
+    includeFrame,
+  });
+
+  it.each([
+    ["crop", crop],
+    ["padding", padding],
+    ["mixed crop and padding", mixed],
+  ] as const)(
+    "finalizes a cached Outline through %s and draws the optional boundary around the final Page",
+    (_label, frame) => {
+      const handle = createRef<LiveCanvasHandle>();
+      const { sketch, prepare, generate } = explicitlyPreparedSketch({
+        duration: 10,
+        mode: "loop",
+      });
+      const el = mount(
+        <LiveCanvas
+          handleRef={handle}
+          sketch={sketch}
+          params={{ value: 1 }}
+          seed={1}
+          compositionFrame={compositionFrame}
+          profile={profile(true)}
+          pageFrame={frame}
+          renderState={outlineState}
+        />,
+      );
+
+      const snapshot = handle.current!.captureDisplayedFrame()!;
+      expect(snapshot.sourceScene).toBe(source);
+      expect(snapshot.displayedScene).toEqual(
+        finalizeOutlineScene(source, frame, true),
+      );
+      expect(snapshot.scene).toBe(snapshot.displayedScene);
+      expect(snapshot.displayedScene.space).toEqual({
+        width: frame.width,
+        height: frame.height,
+      });
+      expect(snapshot.displayedScene.primitives.at(-1)?.points).toEqual([
+        [0, 0],
+        [frame.width, 0],
+        [frame.width, frame.height],
+        [0, frame.height],
+        [0, 0],
+      ]);
+      expect(snapshot).toMatchObject({
+        t: 7,
+        renderMode: "outline",
+        sourceInputRevision: 23,
+        contentRevision: 41,
+      });
+      expect(
+        Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+      ).toBeCloseTo(frame.width / frame.height);
+      expect(prepare).not.toHaveBeenCalled();
+      expect(generate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("styles target-dependent artwork once, then gives pan one placement finalization and paint", () => {
+    const { ctx } = recordingContext();
+    useRecordingContext(ctx);
+    const handle = createRef<LiveCanvasHandle>();
+    const onDisplayedSceneCommitted = vi.fn();
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const params = { value: 1 };
+    const physicalPolicy = {
+      kind: "physical-tool" as const,
+      target: {
+        toolWidthMillimeters: 0.6,
+        millimetersPerSceneUnit: 0.2,
+      },
+    };
+    const render = (
+      frame: typeof crop,
+      policy: typeof physicalPolicy,
+    ) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={profile(true)}
+        pageFrame={frame}
+        renderState={outlineState}
+        outlineFinalizationStrokePolicy={policy}
+        onDisplayedSceneCommitted={onDisplayedSceneCommitted}
+      />
+    );
+
+    mount(render(crop, physicalPolicy));
+    const initiallyDisplayed = handle.current!.captureDisplayedFrame()!;
+    expect(initiallyDisplayed.sourceScene).toBe(source);
+    expect(
+      initiallyDisplayed.displayedScene.primitives[0]?.stroke?.width,
+    ).toBeCloseTo(3, 12);
+    expect(
+      initiallyDisplayed.displayedScene.primitives.at(-1)?.stroke?.width,
+    ).toBeCloseTo(3, 12);
+    expect(outlineFinalizationCalls).toEqual({ style: 1, placement: 1 });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+
+    outlineFinalizationCalls.style = 0;
+    outlineFinalizationCalls.placement = 0;
+    onDisplayedSceneCommitted.mockClear();
+    const panned = { ...crop, x: crop.x + 5, y: crop.y - 3 };
+    act(() => root!.render(render(panned, physicalPolicy)));
+
+    expect(outlineFinalizationCalls).toEqual({ style: 0, placement: 1 });
+    expect(onDisplayedSceneCommitted).toHaveBeenCalledOnce();
+    expect(handle.current!.captureDisplayedFrame()!.sourceScene).toBe(source);
+
+    const assertTargetRepaint = (policy: typeof physicalPolicy) => {
+      outlineFinalizationCalls.style = 0;
+      outlineFinalizationCalls.placement = 0;
+      onDisplayedSceneCommitted.mockClear();
+      act(() => root!.render(render(panned, policy)));
+      expect(outlineFinalizationCalls).toEqual({ style: 1, placement: 1 });
+      expect(onDisplayedSceneCommitted).toHaveBeenCalledOnce();
+    };
+
+    assertTargetRepaint({
+      ...physicalPolicy,
+      target: { ...physicalPolicy.target, toolWidthMillimeters: 0.5 },
+    });
+    assertTargetRepaint({
+      ...physicalPolicy,
+      target: {
+        toolWidthMillimeters: 0.5,
+        millimetersPerSceneUnit: 0.1,
+      },
+    });
+  });
+
+  it("keeps legacy artwork authored while painting the Page boundary at the current physical width", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const { sketch } = animatedSketch(undefined);
+    mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={profile(true)}
+        pageFrame={crop}
+        renderState={outlineState}
+        outlineFinalizationStrokePolicy={{
+          kind: "legacy-scene",
+          target: {
+            toolWidthMillimeters: 0.6,
+            millimetersPerSceneUnit: 0.2,
+          },
+        }}
+      />,
+    );
+
+    const displayed = handle.current!.captureDisplayedFrame()!.displayedScene;
+    expect(displayed.primitives[0]?.stroke?.width).toBe(1);
+    expect(displayed.primitives.at(-1)?.stroke?.width).toBeCloseTo(3, 12);
+  });
+
+  it("re-finalizes one exact cached source across frame, edit, Apply, Reset, and includeFrame changes", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const onDisplayedSceneCommitted = vi.fn();
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const params = { value: 1 };
+    const sourceBefore = structuredClone(source);
+    const render = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+      includeFrame: boolean,
+    ) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={profile(includeFrame)}
+        pageFrame={pageFrame}
+        pageFrameDraft={pageFrameDraft}
+        renderState={outlineState}
+        onDisplayedSceneCommitted={onDisplayedSceneCommitted}
+      />
+    );
+    const el = mount(render(null, null, false));
+    const snapshots = [handle.current!.captureDisplayedFrame()!];
+    expect(snapshots[0]!.displayedScene).toBe(source);
+    expect(snapshots[0]!.includeFrame).toBe(false);
+
+    const transition = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+      includeFrame: boolean,
+    ) => {
+      act(() => root!.render(render(pageFrame, pageFrameDraft, includeFrame)));
+      const snapshot = handle.current!.captureDisplayedFrame()!;
+      snapshots.push(snapshot);
+      expect(snapshot.includeFrame).toBe(includeFrame);
+      return snapshot;
+    };
+
+    expect(transition(crop, null, false).displayedScene).toEqual(
+      finalizeOutlineScene(source, crop, false),
+    );
+    expect(transition(padding, null, false).displayedScene).toEqual(
+      finalizeOutlineScene(source, padding, false),
+    );
+
+    const editing = transition(padding, padding, false);
+    expect(editing.displayedScene).toBe(source);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(compositionFrame.width / compositionFrame.height);
+    expect(
+      el.querySelector("[data-testid='page-frame-boundary']"),
+    ).not.toBeNull();
+
+    const applied = transition(mixed, null, false);
+    expect(applied.displayedScene).toEqual(
+      finalizeOutlineScene(source, mixed, false),
+    );
+
+    const boundaryVisible = transition(mixed, null, true);
+    expect(boundaryVisible.displayedScene).toEqual(
+      finalizeOutlineScene(source, mixed, true),
+    );
+    const boundaryHiddenAgain = transition(mixed, null, false);
+    expect(boundaryHiddenAgain.displayedScene).toEqual(applied.displayedScene);
+
+    const reset = transition(null, null, false);
+    expect(reset.displayedScene).toBe(source);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(compositionFrame.width / compositionFrame.height);
+
+    for (const snapshot of snapshots) {
+      expect(snapshot.sourceScene).toBe(source);
+      expect(snapshot).toMatchObject({
+        t: 7,
+        renderMode: "outline",
+        sourceInputRevision: 23,
+        contentRevision: 41,
+      });
+    }
+    expect(outlineState.scene).toBe(source);
+    expect(source).toEqual(sourceBefore);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("shows the full Composition and its optional boundary while Page Frame editing", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const el = mount(
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={{ value: 1 }}
+        seed={1}
+        compositionFrame={compositionFrame}
+        profile={profile(true)}
+        pageFrame={crop}
+        pageFrameDraft={mixed}
+        renderState={outlineState}
+      />,
+    );
+
+    const displayed = handle.current!.captureDisplayedFrame()!;
+    expect(displayed.sourceScene).toBe(source);
+    expect(displayed.displayedScene).toEqual(
+      finalizeOutlineScene(source, null, true),
+    );
+    expect(displayed.displayedScene.space).toEqual(compositionFrame);
+    expect(displayed.displayedScene.primitives.at(-1)?.points).toEqual([
+      [0, 0],
+      [compositionFrame.width, 0],
+      [compositionFrame.width, compositionFrame.height],
+      [0, compositionFrame.height],
+      [0, 0],
+    ]);
+    const editBoundary = el.querySelector<SVGRectElement>(
+      "[data-testid='page-frame-boundary']",
+    )!;
+    expect(editBoundary.getAttribute("x")).toBe(String(mixed.x));
+    expect(editBoundary.getAttribute("y")).toBe(String(mixed.y));
+    expect(editBoundary.getAttribute("width")).toBe(String(mixed.width));
+    expect(editBoundary.getAttribute("height")).toBe(String(mixed.height));
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+});
+
 describe("LiveCanvas transport — one-shot range/clamp via synthetic fixture (AC4)", () => {
   it("a one-shot Sketch's scrubber clamps its range at duration", () => {
     // No real one-shot Sketch exists yet — construct the fixture to exercise the
@@ -970,6 +2888,7 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
       token: 50,
       inputRevision: 6,
       scene: held,
+      sourceScene: held,
       t: 2.25,
       sourceInputRevision: 6,
       contentRevision: 14,
@@ -1095,11 +3014,15 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
 
     expect(generate).not.toHaveBeenCalled();
     expect(counts.stroke ?? 0).toBeGreaterThan(0);
-    expect(handle.current?.getDisplayedScene()).toMatchObject({
-      scene: outline,
+    const displayed = handle.current?.getDisplayedScene();
+    expect(displayed).toMatchObject({
       t: 4,
       renderMode: "outline",
     });
+    expect(displayed?.sourceScene).toBe(outline);
+    expect(displayed?.scene).toEqual(
+      finalizeOutlineScene(outline, null, true),
+    );
   });
 
   it("never prepares or generates the Sketch for supplied Fill, Outline, or Tone", () => {
@@ -1195,7 +3118,10 @@ describe("LiveCanvas worker handoff contract (#289)", () => {
       );
     });
     expect(handle.current?.getDisplayedScene()).not.toBeNull();
-    expect(handle.current?.getDisplayedScene()?.scene).toBe(outline);
+    expect(handle.current?.getDisplayedScene()?.sourceScene).toBe(outline);
+    expect(handle.current?.getDisplayedScene()?.scene).toEqual(
+      finalizeOutlineScene(outline, null, true),
+    );
   });
 
   it("repaints supplied geometry on resize without deriving or replacing it", () => {
@@ -1560,6 +3486,149 @@ describe("LiveCanvas Tone reference pixels (#316)", () => {
     expect(canvasEl(el).width).toBe(4);
     expect(sample).toHaveBeenCalledTimes(6);
     expect(images.at(-1)).toHaveLength(16);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("rasterizes the committed Page extent at its aspect with white padding outside Composition", () => {
+    const { ctx, counts, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 5, height: 1 } as DOMRect,
+    );
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const sample = vi.fn(() => 1);
+    const source: ToneSource = {
+      toneField: createToneField(sample),
+      shadingMask: createShadingMask(() => 1),
+    };
+    const frame = { x: -5, y: 2, width: 20, height: 4 };
+    const el = mount(
+      <LiveCanvas
+        sketch={sketch}
+        params={{}}
+        seed={1}
+        compositionFrame={{ width: 10, height: 10 }}
+        pageFrame={frame}
+        renderState={{ kind: "tone-reference", source }}
+      />,
+    );
+
+    expect(canvasEl(el)).toMatchObject({ width: 5, height: 1 });
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBe(5);
+    expect(
+      Array.from({ length: 5 }, (_, index) => images[0]![index * 4]),
+    ).toEqual([255, 0, 0, 0, 255]);
+    expect(sample).toHaveBeenCalledTimes(3);
+    expect(counts.putImageData).toBe(1);
+    expect(counts.setTransform ?? 0).toBe(0);
+    expect(counts.fillRect ?? 0).toBe(0);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("re-rasterizes only on committed framing settlement while draft motion stays overlay-only", () => {
+    const { ctx, counts, images } = pixelRecordingContext();
+    useRecordingContext(ctx);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue(
+      { width: 2, height: 2 } as DOMRect,
+    );
+    const { sketch, prepare, generate } = explicitlyPreparedSketch({
+      duration: 10,
+      mode: "loop",
+    });
+    const sampled: Array<readonly [number, number]> = [];
+    const source: ToneSource = {
+      toneField: createToneField((point) => {
+        sampled.push(point);
+        return 0.5;
+      }),
+      shadingMask: createShadingMask(() => 1),
+    };
+    const params = {};
+    const crop = { x: 10, y: 20, width: 40, height: 20 };
+    const movedDraft = { x: -30, y: -40, width: 160, height: 180 };
+    const applied = { x: 50, y: 5, width: 20, height: 60 };
+    const render = (
+      pageFrame: typeof crop | null,
+      pageFrameDraft: typeof crop | null,
+    ) => (
+      <LiveCanvas
+        sketch={sketch}
+        params={params}
+        seed={1}
+        compositionFrame={{ width: 100, height: 100 }}
+        pageFrame={pageFrame}
+        pageFrameDraft={pageFrameDraft}
+        renderState={{ kind: "tone-reference", source }}
+      />
+    );
+    const el = mount(render(null, null));
+    expect(sampled).toEqual([
+      [25, 25],
+      [75, 25],
+      [25, 75],
+      [75, 75],
+    ]);
+
+    act(() => root!.render(render(crop, null)));
+    expect(sampled.slice(-4)).toEqual([
+      [20, 25],
+      [40, 25],
+      [20, 35],
+      [40, 35],
+    ]);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBe(2);
+
+    act(() => root!.render(render(crop, crop)));
+    expect(sampled.slice(-4)).toEqual([
+      [25, 25],
+      [75, 25],
+      [25, 75],
+      [75, 75],
+    ]);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBe(1);
+
+    const paintsBeforeDraftMotion = counts.putImageData;
+    const samplesBeforeDraftMotion = sampled.length;
+    act(() => root!.render(render(crop, movedDraft)));
+    expect(counts.putImageData).toBe(paintsBeforeDraftMotion);
+    expect(sampled).toHaveLength(samplesBeforeDraftMotion);
+    expect(
+      el.querySelector("[data-testid='page-frame-boundary']")?.getAttribute("x"),
+    ).toBe(String(movedDraft.x));
+
+    act(() => root!.render(render(applied, null)));
+    expect(sampled.slice(-4)).toEqual([
+      [55, 20],
+      [65, 20],
+      [55, 50],
+      [65, 50],
+    ]);
+    expect(
+      Number(canvasEl(el).style.getPropertyValue("--paper-aspect")),
+    ).toBeCloseTo(1 / 3);
+
+    act(() => root!.render(render(null, null)));
+    expect(sampled.slice(-4)).toEqual([
+      [25, 25],
+      [75, 25],
+      [25, 75],
+      [75, 75],
+    ]);
+    expect(counts.putImageData).toBe(5);
+    expect(images).toHaveLength(5);
+    expect(counts.setTransform ?? 0).toBe(0);
+    expect(counts.fillRect ?? 0).toBe(0);
+    expect(prepare).not.toHaveBeenCalled();
     expect(generate).not.toHaveBeenCalled();
   });
 

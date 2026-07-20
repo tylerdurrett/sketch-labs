@@ -8,9 +8,10 @@
  * indexed Hidden-line pass reproduces painter visibility without any
  * Grass-specific reconstruction or density reduction.
  *
- * The physical target affects only the stroke style of the processed output.
- * It never selects roots or changes geometry. Dense source generation remains
- * behind the optional `generateOutlineSource` worker hook used by Studio.
+ * The physical target affects only the uniform stroke width of the processed
+ * output. Stroke color, roots, and geometry remain invariant. Dense source
+ * generation stays behind the optional `generateOutlineSource` worker hook used
+ * by Studio.
  */
 
 import type { OutlineTarget } from '../../sketch'
