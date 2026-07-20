@@ -12,6 +12,7 @@
 
 import { createRandom } from '../random'
 import type {
+  ShadingObserver,
   ShadingResult,
   ShadingStrategyInput,
 } from '../shadingStrategy'
@@ -21,7 +22,6 @@ import { createStipplingModel } from './model'
 import {
   runStipplingOrchestrator,
   type StipplingExecutionLimits,
-  type StipplingObserver,
   type StipplingOrchestratorInput,
   type StipplingOrchestratorOutcome,
 } from './orchestrator'
@@ -42,13 +42,11 @@ export {
   type StipplingControls,
 } from './types'
 
-export type { StipplingObserver, StipplingProgress } from './orchestrator'
-
 /** Stippling's authored specialization of the shared strategy input. */
 export interface StipplingStrategyInput
   extends ShadingStrategyInput<StipplingControls> {
   /** Receives immutable solver progress without affecting deterministic output. */
-  readonly observer?: StipplingObserver
+  readonly observer?: ShadingObserver
 }
 
 /** Stipple geometry, truthful termination, and typed distribution diagnostic. */

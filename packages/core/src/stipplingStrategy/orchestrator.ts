@@ -1,3 +1,4 @@
+import type { ShadingObserver, ShadingProgress } from '../shadingStrategy'
 import type { Random } from '../types'
 import { placeInitialStipples } from './placement'
 import {
@@ -19,28 +20,13 @@ export interface StipplingExecutionLimits {
   readonly maxRefinementAttempts: number
 }
 
-/** Immutable, serialization-friendly progress from one Stippling pass. */
-export interface StipplingProgress {
-  /** Actual placement and refinement attempts consumed so far. */
-  readonly completedWorkUnits: number
-  /** Stable upper bound from both independent attempt ceilings. */
-  readonly totalWorkUnits: number
-  /** Progress through requested mark selection and authored refinement work. */
-  readonly convergence: number
-  /** True only after the orchestrator has stopped. */
-  readonly terminal: boolean
-}
-
-/** Optional diagnostic observation hook; it cannot affect solver state. */
-export type StipplingObserver = (progress: StipplingProgress) => void
-
 /** Policy-neutral input for one deterministic Stippling solver pass. */
 export interface StipplingOrchestratorInput {
   readonly model: Readonly<StipplingModel>
   /** One caller-owned stream shared by placement and refinement in order. */
   readonly rng: Random
   readonly limits: Readonly<StipplingExecutionLimits>
-  readonly observer?: StipplingObserver
+  readonly observer?: ShadingObserver
 }
 
 export type StipplingOrchestratorStopCause =
@@ -148,7 +134,7 @@ export function runStipplingOrchestrator({
     if (observer === undefined) return
 
     const emptyDemand = requestedTargetCount === 0
-    const snapshot = Object.freeze({
+    const snapshot: ShadingProgress = Object.freeze({
       completedWorkUnits: placementAttemptsUsed + refinementAttemptsUsed,
       totalWorkUnits: emptyDemand ? 0 : configuredWorkUnits,
       convergence: convergence(markCount, refinementAttemptsUsed),

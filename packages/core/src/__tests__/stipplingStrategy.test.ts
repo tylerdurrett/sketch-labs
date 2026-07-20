@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest'
 
 import * as core from '../index'
 import type { CoordinateSpace } from '../scene'
+import type { ShadingObserver, ShadingProgress } from '../shadingStrategy'
 import {
   createShadingMask,
   type ShadingMask,
@@ -15,8 +16,6 @@ import {
   runStipplingStrategyForTesting,
   stipplingControlSchema,
   stipplingStrategy,
-  type StipplingObserver,
-  type StipplingProgress,
   type StipplingResult,
   type StipplingStrategyInput,
 } from '../stipplingStrategy/index'
@@ -130,8 +129,10 @@ describe('public Stippling strategy boundary', () => {
     expectTypeOf<StipplingStrategyInput>().toMatchTypeOf<
       core.ShadingStrategyInput<StipplingControls>
     >()
-    expectTypeOf<core.StipplingObserver>().toEqualTypeOf<StipplingObserver>()
-    expectTypeOf<core.StipplingProgress>().toEqualTypeOf<StipplingProgress>()
+    expectTypeOf<StipplingStrategyInput['observer']>().toEqualTypeOf<
+      ShadingObserver | undefined
+    >()
+    expectTypeOf<core.ShadingProgress>().toEqualTypeOf<ShadingProgress>()
     expectTypeOf<StipplingResult>().toMatchTypeOf<core.ShadingResult>()
     expect(Object.keys(stipplingControlSchema)).toEqual([
       'stippleDensity',
@@ -215,7 +216,7 @@ describe('public Stippling strategy boundary', () => {
 describe('Stippling deterministic execution and progress', () => {
   it('reproduces termination, geometry, order, progress, and diagnostics exactly', () => {
     function execute() {
-      const progress: StipplingProgress[] = []
+      const progress: ShadingProgress[] = []
       const result = stipplingStrategy({
         ...input(source(horizontalGradientTone(FRAME)), 'repeatable', {
           distributionFidelity: 0.1,
@@ -420,7 +421,7 @@ describe('Stippling authored controls and frame scaling', () => {
 
 describe('Stippling completion and safety ceilings', () => {
   it('reports empty demand as one immutable terminal zero-of-zero snapshot', () => {
-    const progress: StipplingProgress[] = []
+    const progress: ShadingProgress[] = []
     const result = stipplingStrategy({
       ...input(source(constantTone(0)), 'empty-progress'),
       observer: (snapshot) => progress.push(snapshot),

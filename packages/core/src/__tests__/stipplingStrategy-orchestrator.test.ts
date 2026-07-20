@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import { createRandom } from '../random'
 import { createShadingMask, createToneField } from '../shadingFields'
+import type { ShadingProgress } from '../shadingStrategy'
 import { createStipplingModel } from '../stipplingStrategy/model'
 import {
   runStipplingOrchestrator,
   type StipplingExecutionLimits,
-  type StipplingProgress,
 } from '../stipplingStrategy/orchestrator'
 import { placeInitialStipples } from '../stipplingStrategy/placement'
 import {
@@ -72,7 +72,7 @@ describe('Stippling orchestration', () => {
 
   it('repeats exact termination, marks, work, error, and progress', () => {
     function execute() {
-      const snapshots: StipplingProgress[] = []
+      const snapshots: ShadingProgress[] = []
       const outcome = runStipplingOrchestrator({
         model: model(),
         rng: createRandom('orchestrator-repeat'),
@@ -243,7 +243,7 @@ describe('Stippling orchestration', () => {
 
 describe('Stippling progress observation', () => {
   it('reports frozen monotonic snapshots against one stable work upper bound', () => {
-    const snapshots: StipplingProgress[] = []
+    const snapshots: ShadingProgress[] = []
     const outcome = runStipplingOrchestrator({
       model: model(),
       rng: createRandom('monotonic-progress'),
@@ -275,7 +275,7 @@ describe('Stippling progress observation', () => {
   })
 
   it('isolates observer exceptions and attempted mutation from exact output', () => {
-    const execute = (observer?: (progress: StipplingProgress) => void) =>
+    const execute = (observer?: (progress: ShadingProgress) => void) =>
       runStipplingOrchestrator({
         model: model(),
         rng: createRandom('observer-isolation'),
@@ -296,7 +296,7 @@ describe('Stippling progress observation', () => {
   })
 
   it('reports empty demand as one terminal frozen zero-of-zero snapshot', () => {
-    const snapshots: StipplingProgress[] = []
+    const snapshots: ShadingProgress[] = []
     const target = model(() => 0)
     const outcome = runStipplingOrchestrator({
       model: target,
@@ -325,7 +325,7 @@ describe('Stippling progress observation', () => {
   })
 
   it('keeps terminal convergence below one at a geometry ceiling', () => {
-    const snapshots: StipplingProgress[] = []
+    const snapshots: ShadingProgress[] = []
     const outcome = runStipplingOrchestrator({
       model: model(),
       rng: createRandom('partial-convergence'),
