@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { DecodedPixels } from '../imageAssets'
 import { createRasterToneSource } from '../rasterToneSource'
+import { srgbByteToLinear } from '../rasterSampling'
 import type { CoordinateSpace } from '../scene'
 
 const SQUARE: CoordinateSpace = { width: 100, height: 100 }
@@ -100,6 +101,28 @@ describe('createRasterToneSource', () => {
       SQUARE,
     )
     expect(source.toneField.sample([50, 50])).toBeCloseTo(1 - linear, 12)
+  })
+
+  it('exactly preserves sRGB conversion for every byte value', () => {
+    const bytes = Array.from({ length: 256 }, (_, byte) => [
+      byte,
+      byte,
+      byte,
+      255,
+    ]).flat()
+    const source = createRasterToneSource(
+      pixels(256, 1, bytes),
+      { width: 256, height: 1 },
+    )
+
+    for (let byte = 0; byte <= 255; byte++) {
+      const linear = srgbByteToLinear(byte)
+      const luminance =
+        linear * 0.2126 + linear * 0.7152 + linear * 0.0722
+      expect(source.toneField.sample([byte + 0.5, 0.5])).toBe(
+        luminance >= 1 ? 0 : 1 - luminance,
+      )
+    }
   })
 
   it('keeps straight alpha independent from unassociated RGB', () => {

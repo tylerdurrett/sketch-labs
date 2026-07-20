@@ -34,6 +34,10 @@ const GREEN_LUMINANCE = 0.7152
 const BLUE_LUMINANCE = 0.0722
 const CHANNELS_PER_PIXEL = 4
 const BYTE_MAX = 255
+const SRGB_BYTE_TO_LINEAR = Float64Array.from(
+  { length: BYTE_MAX + 1 },
+  (_, byte) => srgbByteToLinear(byte),
+)
 
 const ZERO_RASTER_SOURCE: ToneSource = Object.freeze({
   toneField: createToneField(() => 0),
@@ -46,10 +50,18 @@ function sampleLinearChannel(
   channel: 0 | 1 | 2,
 ): number {
   return bilinearSample(
-    srgbByteToLinear(data[sample.topLeft * CHANNELS_PER_PIXEL + channel]!),
-    srgbByteToLinear(data[sample.topRight * CHANNELS_PER_PIXEL + channel]!),
-    srgbByteToLinear(data[sample.bottomLeft * CHANNELS_PER_PIXEL + channel]!),
-    srgbByteToLinear(data[sample.bottomRight * CHANNELS_PER_PIXEL + channel]!),
+    SRGB_BYTE_TO_LINEAR[
+      data[sample.topLeft * CHANNELS_PER_PIXEL + channel]!
+    ]!,
+    SRGB_BYTE_TO_LINEAR[
+      data[sample.topRight * CHANNELS_PER_PIXEL + channel]!
+    ]!,
+    SRGB_BYTE_TO_LINEAR[
+      data[sample.bottomLeft * CHANNELS_PER_PIXEL + channel]!
+    ]!,
+    SRGB_BYTE_TO_LINEAR[
+      data[sample.bottomRight * CHANNELS_PER_PIXEL + channel]!
+    ]!,
     sample.horizontal,
     sample.vertical,
   )
