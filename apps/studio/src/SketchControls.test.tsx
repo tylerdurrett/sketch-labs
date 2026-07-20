@@ -24,6 +24,7 @@ import {
   hiddenLinePass,
   IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
   leafField,
+  newSeed,
   photoScribble,
   prepareImageDetailAnalysis,
   renderPlotterSVG,
@@ -6802,6 +6803,132 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     if (match === undefined) throw new Error("no Shading");
     return match;
   }
+
+  const shadingParamEntries = (params: Params) =>
+    Object.entries(activeParams(toneCalibration.schema, params)).map(
+      ([key, value]) => ({ key, value }),
+    );
+
+  it("ignores an actual Tone inactive-branch-only Preset edit without disturbing current Shading", async () => {
+    const initialParams = defaultParams(toneCalibration.schema);
+    const initialSeed = newSeed(() => 0.125);
+    vi.spyOn(Math, "random").mockReturnValue(0.125);
+    listPresets.mockResolvedValue(["inactive-stippling"]);
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: toneCalibration.id,
+      name: "inactive-stippling",
+      seed: initialSeed,
+      params: {
+        ...initialParams,
+        stippleDensity: 1.75,
+        distributionFidelity: 0.8,
+      },
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+    expect(shadingJob.starts[0]!.identity.params).toEqual(
+      shadingParamEntries(initialParams),
+    );
+    await completeShading(0, preparedScene(70));
+
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const presentation = {
+      sourceInputRevision: canvas.dataset.sourceInputRevision,
+      contentRevision: canvas.dataset.contentRevision,
+      diagnostics: shadingDisclosure(el).textContent,
+      cancelCount: shadingJob.cancelCount,
+    };
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    selectValue(picker, "inactive-stippling");
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toMatchObject({
+      strategy: "scribble",
+      stippleDensity: 1.75,
+      distributionFidelity: 0.8,
+    });
+    expect(shadingJob.starts).toHaveLength(1);
+    expect(shadingJob.cancelCount).toBe(presentation.cancelCount);
+    expect(canvas.dataset.sourceInputRevision).toBe(
+      presentation.sourceInputRevision,
+    );
+    expect(canvas.dataset.contentRevision).toBe(presentation.contentRevision);
+    expect(shadingDisclosure(el).textContent).toBe(presentation.diagnostics);
+  });
+
+  it("settles actual Tone previews once and switches strategies with only the restored active branch", async () => {
+    const authored = defaultParams(toneCalibration.schema);
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    expect(shadingJob.starts[0]!.identity.params).toEqual(
+      shadingParamEntries(authored),
+    );
+    await completeShading(0, preparedScene(71));
+
+    const pathDensity = paramInput(el, "pathDensity");
+    act(() => pathDensity.focus());
+    setInput(pathDensity, "1.5");
+    setInput(pathDensity, "2");
+    setInput(pathDensity, "2.5");
+    expect(shadingJob.starts).toHaveLength(1);
+    act(() => pathDensity.blur());
+
+    authored.pathDensity = 2.5;
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(shadingJob.starts[1]!.identity.params).toEqual(
+      shadingParamEntries(authored),
+    );
+    await completeShading(1, preparedScene(72));
+
+    const commitsBeforeStippling = historyCapture.transactionCommits.length;
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    authored.strategy = "stippling";
+    expect(historyCapture.transactionCommits).toHaveLength(
+      commitsBeforeStippling + 1,
+    );
+    expect(shadingJob.starts).toHaveLength(3);
+    expect(shadingJob.starts[2]!.identity.params).toEqual(
+      shadingParamEntries(authored),
+    );
+    expect(shadingJob.starts[2]!.identity.params).not.toContainEqual({
+      key: "pathDensity",
+      value: 2.5,
+    });
+    await completeShading(2, preparedScene(73));
+
+    const stippleDensity = paramInput(el, "stippleDensity");
+    act(() => stippleDensity.focus());
+    setInput(stippleDensity, "1.5");
+    act(() => stippleDensity.blur());
+    authored.stippleDensity = 1.5;
+    expect(shadingJob.starts).toHaveLength(4);
+    expect(shadingJob.starts[3]!.identity.params).toEqual(
+      shadingParamEntries(authored),
+    );
+    await completeShading(3, preparedScene(74));
+
+    const commitsBeforeScribble = historyCapture.transactionCommits.length;
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    authored.strategy = "scribble";
+    expect(historyCapture.transactionCommits).toHaveLength(
+      commitsBeforeScribble + 1,
+    );
+    expect(shadingJob.starts).toHaveLength(5);
+    expect(shadingJob.starts[4]!.identity.params).toEqual(
+      shadingParamEntries(authored),
+    );
+    expect(paramInput(el, "pathDensity").value).toBe("2.5");
+    expect(shadingJob.starts[4]!.identity.params).not.toContainEqual({
+      key: "stippleDensity",
+      value: 1.5,
+    });
+  });
 
   it("scales, pans, applies, and resets a fixed Page without restarting Shading or revising painted provenance", async () => {
     const el = mount(<SketchControls sketch={toneCalibration} />);

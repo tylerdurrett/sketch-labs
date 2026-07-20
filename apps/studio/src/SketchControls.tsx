@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import {
+  activeParams,
   applyPreset,
   buildReproMetadata,
   clipSceneToBounds,
@@ -220,6 +221,28 @@ function artworkGenerationParamsEqual(
   );
 }
 
+/** Keep only the normalized controls that affect the active Shading strategy. */
+function shadingArtworkParams(
+  sketch: Pick<Sketch, "schema" | "generateDetailField">,
+  params: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  return activeParams(
+    sketch.schema,
+    artworkGenerationParams(sketch, params),
+  );
+}
+
+function shadingArtworkParamsEqual(
+  sketch: Pick<Sketch, "schema" | "generateDetailField">,
+  left: Readonly<Record<string, unknown>>,
+  right: Readonly<Record<string, unknown>>,
+): boolean {
+  return sameParams(
+    shadingArtworkParams(sketch, left),
+    shadingArtworkParams(sketch, right),
+  );
+}
+
 function isDetailReferenceOnlyParam(sketch: Sketch, key: string): boolean {
   return (
     key === DETAIL_REFERENCE_ONLY_PARAM &&
@@ -335,7 +358,7 @@ function shadingInputsChanged(
   next: StudioEditState,
 ): boolean {
   if (
-    !artworkGenerationParamsEqual(sketch, previous.params, next.params) ||
+    !shadingArtworkParamsEqual(sketch, previous.params, next.params) ||
     previous.seed !== next.seed
   ) {
     return true;
@@ -569,7 +592,7 @@ export function SketchControls({
     sketch,
     enabled: hasShadingPreparation && environmentReady,
     initial: {
-      params: history.present.params,
+      params: shadingArtworkParams(sketch, history.present.params),
       seed: history.present.seed,
       compositionFrame,
       inputRevision: shadingInputRevisionRef.current,
@@ -629,7 +652,7 @@ export function SketchControls({
   const authoredShadingState = (
     edit: StudioEditState = historyRef.current.present,
   ): ShadingAuthoredState => ({
-    params: artworkGenerationParams(sketch, edit.params),
+    params: shadingArtworkParams(sketch, edit.params),
     seed: edit.seed,
     compositionFrame: resolveStudioCompositionFrame(edit),
     inputRevision: shadingInputRevisionRef.current,
