@@ -91,6 +91,7 @@ describe('Photo Scribble headless composition', () => {
       'tonePivot',
       'toneGamma',
       'detailSensitivity',
+      'detailInfluence',
       'pathDensity',
       'scribbleScale',
       'momentum',
@@ -112,12 +113,20 @@ describe('Photo Scribble headless composition', () => {
     expect(schema.toneGamma).toEqual(schema.toneContrast)
     expect(schema.tonePivot).toEqual(schema.toneContrast)
     expect(schema.detailSensitivity).toEqual(schema.toneContrast)
+    expect(schema.detailInfluence).toEqual({
+      kind: 'number',
+      min: 0,
+      max: 1,
+      default: 0,
+      step: 0.01,
+    })
     expect(defaultParams(schema)).toEqual({
       imageAsset: HEADLESS_FIXTURE_LOOKUP_KEY,
       toneContrast: 0.5,
       tonePivot: 0.5,
       toneGamma: 0.5,
       detailSensitivity: 0.5,
+      detailInfluence: 0,
       pathDensity: 1,
       scribbleScale: 1,
       momentum: 0.75,
@@ -172,10 +181,11 @@ describe('Photo Scribble headless composition', () => {
     expect(restored.params.tonePivot).toBe(0.5)
   })
 
-  it('reconciles legacy Detail sensitivity and randomizes or locks it through the ordinary schema spine', () => {
+  it('reconciles, randomizes, and locks both Detail controls through the ordinary schema spine', () => {
     const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
     const legacyParams = defaultParams(schema)
     delete legacyParams.detailSensitivity
+    delete legacyParams.detailInfluence
 
     const restored = applyPreset(schema, {
       version: 1,
@@ -188,7 +198,11 @@ describe('Photo Scribble headless composition', () => {
     const randomized = randomize(
       schema,
       restored.params,
-      new Set(Object.keys(schema).filter((key) => key !== 'detailSensitivity')),
+      new Set(
+        Object.keys(schema).filter(
+          (key) => key !== 'detailSensitivity' && key !== 'detailInfluence',
+        ),
+      ),
       () => 0.25,
     )
     const locked = randomize(
@@ -201,8 +215,11 @@ describe('Photo Scribble headless composition', () => {
     )
 
     expect(restored.params.detailSensitivity).toBe(0.5)
+    expect(restored.params.detailInfluence).toBe(0)
     expect(randomized.detailSensitivity).toBe(0.25)
+    expect(randomized.detailInfluence).toBe(0.25)
     expect(locked.detailSensitivity).toBe(0.5)
+    expect(locked.detailInfluence).toBe(0)
   })
 
   it('resolves prepared detail by exact asset and definition identity and ignores tone controls', () => {
@@ -404,6 +421,97 @@ describe('Photo Scribble headless composition', () => {
         },
       }),
     )
+  })
+
+  it('omits local scale and prepared analysis lookup at exact zero influence', () => {
+    const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const preparedLookup = vi.fn(() => {
+      throw new Error('zero influence must not request prepared analysis')
+    })
+
+    generatePhotoScribble(
+      params({ detailInfluence: 0 }),
+      'uniform-seed',
+      FRAME,
+      schema,
+      undefined,
+      {
+        imageAssets: () => FIXTURE_PIXELS,
+        getPreparedImageDetailAnalysis: preparedLookup,
+      },
+    )
+
+    expect(scribbleStrategyMock.mock.calls[0]![0]).not.toHaveProperty(
+      'scaleField',
+    )
+    expect(preparedLookup).not.toHaveBeenCalled()
+  })
+
+  it('requires exact prepared analysis before positive-influence generation', () => {
+    const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const imageAssets = vi.fn(() => FIXTURE_PIXELS)
+    const preparedLookup = vi.fn(() => undefined)
+
+    expect(() =>
+      generatePhotoScribble(
+        params({ detailInfluence: 0.5 }),
+        'missing-detail',
+        FRAME,
+        schema,
+        undefined,
+        {
+          imageAssets,
+          getPreparedImageDetailAnalysis: preparedLookup,
+        },
+      ),
+    ).toThrowError(
+      'Photo Scribble requires prepared image-detail analysis when Detail influence is positive',
+    )
+    expect(preparedLookup).toHaveBeenCalledWith(
+      HEADLESS_FIXTURE_LOOKUP_KEY,
+      IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+    )
+    expect(imageAssets).not.toHaveBeenCalled()
+    expect(scribbleStrategyMock).not.toHaveBeenCalled()
+  })
+
+  it('routes sensitivity-adjusted local scale independently of tone controls', () => {
+    const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const prepared: PreparedImageDetailAnalysis = {
+      definitionId: IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+      sourceWidth: 1,
+      sourceHeight: 1,
+      gridWidth: 1,
+      gridHeight: 1,
+      data: Float64Array.of(0.5),
+    }
+    const env: SketchEnvironment = {
+      imageAssets: () => FIXTURE_PIXELS,
+      getPreparedImageDetailAnalysis: () => prepared,
+    }
+    const base = params({
+      detailInfluence: 1,
+      detailSensitivity: 0.5,
+      scribbleScale: 2,
+      toneGamma: 0,
+      toneContrast: 1,
+      tonePivot: 0,
+    })
+
+    generatePhotoScribble(base, 'detail-scale', FRAME, schema, undefined, env)
+    generatePhotoScribble(
+      { ...base, toneGamma: 1, toneContrast: 0, tonePivot: 1 },
+      'detail-scale',
+      FRAME,
+      schema,
+      undefined,
+      env,
+    )
+
+    const firstScale = scribbleStrategyMock.mock.calls[0]![0].scaleField
+    const secondScale = scribbleStrategyMock.mock.calls[1]![0].scaleField
+    expect(firstScale?.sample([10, 5])).toBe(4)
+    expect(secondScale?.sample([10, 5])).toBe(4)
   })
 
   it('emits only open black generated source paths and scalar diagnostics', () => {

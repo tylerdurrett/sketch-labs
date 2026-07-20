@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import {
   applyPhotoDetailSensitivity,
+  createPhotoScribbleScaleField,
+  photoDetailBroadeningFactor,
   photoDetailSensitivityExponent,
 } from '../sketches/photo-scribble/detail'
+import { createDetailField } from '../detailFields'
 
 describe('Photo Scribble Detail sensitivity', () => {
   it('uses exact endpoints and exact centered identity', () => {
@@ -40,5 +43,22 @@ describe('Photo Scribble Detail sensitivity', () => {
     expect(applyPhotoDetailSensitivity(0.25, Number.NaN)).toBe(0.25)
     expect(applyPhotoDetailSensitivity(-1, 0.5)).toBe(0)
     expect(applyPhotoDetailSensitivity(2, 0.5)).toBe(1)
+  })
+})
+
+describe('Photo Scribble Detail influence', () => {
+  it('maps the authored range to exact broadening factors', () => {
+    expect(photoDetailBroadeningFactor(0)).toBe(1)
+    expect(photoDetailBroadeningFactor(0.5)).toBe(2)
+    expect(photoDetailBroadeningFactor(1)).toBe(4)
+  })
+
+  it('broadens smooth regions while keeping strongest detail at the exact authored anchor', () => {
+    const detail = createDetailField(([x]) => x)
+    const scale = createPhotoScribbleScaleField(detail, 1.5, 1)
+
+    expect(scale.sample([0, 0])).toBe(6)
+    expect(scale.sample([0.5, 0])).toBe(3)
+    expect(scale.sample([1, 0])).toBe(1.5)
   })
 })

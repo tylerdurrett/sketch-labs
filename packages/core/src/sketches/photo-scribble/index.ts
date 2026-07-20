@@ -23,6 +23,7 @@ import {
   type ScribbleObserver,
   type ScribbleResult,
 } from '../../scribbleStrategy'
+import { normalizeScribbleControls } from '../../scribbleStrategy/model'
 import { createScene } from '../../scene'
 import type { CoordinateSpace, Scene } from '../../scene'
 import {
@@ -37,6 +38,11 @@ import type { SketchEnvironment } from '../../imageAssets'
 import { imageAssetParam, numberParam } from '../sketch-util'
 import {
   applyPhotoDetailSensitivity,
+  createPhotoScribbleScaleField,
+  photoDetailBroadeningFactor,
+  PHOTO_DETAIL_INFLUENCE_DEFAULT,
+  PHOTO_DETAIL_INFLUENCE_MAX,
+  PHOTO_DETAIL_INFLUENCE_MIN,
   PHOTO_DETAIL_SENSITIVITY_DEFAULT,
   PHOTO_DETAIL_SENSITIVITY_MAX,
   PHOTO_DETAIL_SENSITIVITY_MIN,
@@ -55,6 +61,7 @@ export * from './tone'
 
 const PHOTO_TONE_CONTROL_STEP = 0.01
 const PHOTO_DETAIL_SENSITIVITY_STEP = 0.01
+const PHOTO_DETAIL_INFLUENCE_STEP = 0.01
 const PREVIEW_STROKE = Object.freeze({ color: 'black', width: 1 })
 const ZERO_PHOTO_DETAIL_FIELD = createDetailField(() => 0)
 
@@ -93,6 +100,13 @@ export function createPhotoScribbleSchema(defaultImageAssetId: string) {
       max: PHOTO_DETAIL_SENSITIVITY_MAX,
       default: PHOTO_DETAIL_SENSITIVITY_DEFAULT,
       step: PHOTO_DETAIL_SENSITIVITY_STEP,
+    },
+    detailInfluence: {
+      kind: 'number',
+      min: PHOTO_DETAIL_INFLUENCE_MIN,
+      max: PHOTO_DETAIL_INFLUENCE_MAX,
+      default: PHOTO_DETAIL_INFLUENCE_DEFAULT,
+      step: PHOTO_DETAIL_INFLUENCE_STEP,
     },
     ...scribbleControlSchema,
   } satisfies Record<string, ParamSpec>)
@@ -158,10 +172,55 @@ export function createPhotoScribbleDetailField(
   )
   if (prepared === undefined) return ZERO_PHOTO_DETAIL_FIELD
 
+  return bindPhotoScribbleDetailField(
+    prepared,
+    frame,
+    numberParam(params, schema, 'detailSensitivity'),
+  )
+}
+
+function bindPhotoScribbleDetailField(
+  prepared: Parameters<typeof createImageDetailField>[0],
+  frame: CoordinateSpace,
+  sensitivity: number,
+): DetailField {
   const base = createImageDetailField(prepared, frame)
-  const sensitivity = numberParam(params, schema, 'detailSensitivity')
   return createDetailField((point) =>
     applyPhotoDetailSensitivity(sampleDetailField(base, point), sensitivity),
+  )
+}
+
+function scaleFieldForGeneration(
+  params: Params,
+  frame: CoordinateSpace,
+  schema: PhotoScribbleSchema,
+  controls: Readonly<ScribbleControls>,
+  environment?: SketchEnvironment,
+) {
+  const influence = numberParam(params, schema, 'detailInfluence')
+  if (photoDetailBroadeningFactor(influence) === 1) return undefined
+
+  const imageAssetId = imageAssetParam(params, schema, 'imageAsset')
+  const prepared = environment?.getPreparedImageDetailAnalysis?.(
+    imageAssetId,
+    IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+  )
+  if (prepared === undefined) {
+    throw new Error(
+      'Photo Scribble requires prepared image-detail analysis when Detail influence is positive',
+    )
+  }
+
+  const detailField = bindPhotoScribbleDetailField(
+    prepared,
+    frame,
+    numberParam(params, schema, 'detailSensitivity'),
+  )
+  const authoredScale = normalizeScribbleControls(controls).scribbleScale
+  return createPhotoScribbleScaleField(
+    detailField,
+    authoredScale,
+    influence,
   )
 }
 
@@ -174,11 +233,20 @@ export function generatePhotoScribble(
   observer?: ScribbleObserver,
   environment?: SketchEnvironment,
 ): ScribbleResult {
+  const controls = scribbleControls(params, schema)
+  const scaleField = scaleFieldForGeneration(
+    params,
+    frame,
+    schema,
+    controls,
+    environment,
+  )
   return scribbleStrategy({
     source: createPhotoScribbleSource(params, frame, schema, environment),
     frame,
-    controls: scribbleControls(params, schema),
+    controls,
     seed,
+    ...(scaleField === undefined ? {} : { scaleField }),
     ...(observer === undefined ? {} : { observer }),
   })
 }

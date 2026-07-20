@@ -11,6 +11,10 @@ vi.mock('../scribbleStrategy/index', async (importOriginal) => {
 })
 
 import type { DecodedPixels, SketchEnvironment } from '../imageAssets'
+import {
+  IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+  prepareImageDetailAnalysis,
+} from '../imageDetailAnalysis'
 import type { PlotProfile } from '../plotProfile'
 import { applyPreset, deserialize, makePreset, serialize } from '../preset'
 import { defaultParams, type Params } from '../sketch'
@@ -155,6 +159,46 @@ beforeEach(() => {
 })
 
 describe('Photo Scribble black-box contract', () => {
+  it('reconciles legacy params to zero influence with exactly equivalent geometry', () => {
+    const sketch = createPhotoScribble(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const legacyParams = fastParams()
+    delete legacyParams.detailInfluence
+    const environment = environmentFor(FIXTURE_PIXELS)
+
+    const before = sketch.generateScribbleArtwork!(
+      legacyParams,
+      'legacy-detail-influence',
+      FRAME,
+      undefined,
+      environment,
+    )
+    const beforeInput = capturedInput(0)
+    const beforeResult = capturedResult(0)
+    const restored = applyPreset(sketch.schema, {
+      version: 1,
+      sketch: sketch.id,
+      name: 'legacy-detail-influence',
+      seed: 'legacy-detail-influence',
+      params: legacyParams,
+      locks: [],
+    })
+    const after = sketch.generateScribbleArtwork!(
+      restored.params,
+      restored.seed,
+      FRAME,
+      undefined,
+      environment,
+    )
+    const afterInput = capturedInput(1)
+    const afterResult = capturedResult(1)
+
+    expect(restored.params.detailInfluence).toBe(0)
+    expect(beforeInput).not.toHaveProperty('scaleField')
+    expect(afterInput).not.toHaveProperty('scaleField')
+    expect(afterResult).toEqual(beforeResult)
+    expect(after).toEqual(before)
+  })
+
   it('reconciles legacy params to identity sensitivity without changing geometry', () => {
     const sketch = createPhotoScribble(HEADLESS_FIXTURE_LOOKUP_KEY)
     const legacyParams = fastParams()
@@ -224,6 +268,51 @@ describe('Photo Scribble black-box contract', () => {
       firstResult.polylines,
     )
     expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+  })
+
+  it('repeats positive-influence scale samples and generated artwork exactly', () => {
+    const sketch = createPhotoScribble(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const params = fastParams({
+      detailInfluence: 0.5,
+      detailSensitivity: 0.75,
+    })
+    const prepared = prepareImageDetailAnalysis(FIXTURE_PIXELS)
+    const environment: SketchEnvironment = {
+      imageAssets: (id) =>
+        id === HEADLESS_FIXTURE_LOOKUP_KEY ? FIXTURE_PIXELS : undefined,
+      getPreparedImageDetailAnalysis: (id, definitionId) =>
+        id === HEADLESS_FIXTURE_LOOKUP_KEY &&
+        definitionId === IMAGE_DETAIL_ANALYSIS_DEFINITION_ID
+          ? prepared
+          : undefined,
+    }
+
+    const first = sketch.generateScribbleArtwork!(
+      params,
+      'repeatable-detail-photo',
+      FRAME,
+      undefined,
+      environment,
+    )
+    const firstInput = capturedInput(0)
+    const firstResult = capturedResult(0)
+    const second = sketch.generateScribbleArtwork!(
+      params,
+      'repeatable-detail-photo',
+      FRAME,
+      undefined,
+      environment,
+    )
+    const secondInput = capturedInput(1)
+    const secondResult = capturedResult(1)
+
+    expect(
+      SOURCE_SAMPLE_POINTS.map((point) => firstInput.scaleField?.sample(point)),
+    ).toEqual(
+      SOURCE_SAMPLE_POINTS.map((point) => secondInput.scaleField?.sample(point)),
+    )
+    expect(secondResult).toEqual(firstResult)
+    expect(second).toEqual(first)
   })
 
   it('reproduces Tone, Shading, termination, and geometry after a v2 Preset round-trip', () => {
