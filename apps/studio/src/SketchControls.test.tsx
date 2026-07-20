@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   activeParams,
+  applyPreset,
   clipSceneToBounds,
   computePlotMapping,
   createShadingMask,
@@ -6525,6 +6526,19 @@ describe("SketchControls — Tone reference mode (#316)", () => {
 });
 
 describe("SketchControls — Tone Calibration target (#324)", () => {
+  const scribbleControlKeys = [
+    "pathDensity",
+    "scribbleScale",
+    "momentum",
+    "chaos",
+    "toneFidelity",
+    "stopPoint",
+  ] as const;
+  const stipplingControlKeys = [
+    "stippleDensity",
+    "distributionFidelity",
+  ] as const;
+
   function button(el: HTMLElement, label: string): HTMLButtonElement {
     const match = [...el.querySelectorAll<HTMLButtonElement>("button")].find(
       (candidate) => candidate.textContent === label,
@@ -6533,21 +6547,56 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     return match;
   }
 
-  it("shows exactly the six Scribble controls while keeping the source fixed", () => {
-    const el = mount(<SketchControls sketch={toneCalibration} />);
+  function visibleNumberKeys(el: HTMLElement): string[] {
+    return [...el.querySelectorAll<HTMLInputElement>(
+      '#inspector input[id^="control-"]',
+    )].map((input) => input.id.slice("control-".length));
+  }
 
-    expect(
-      [...el.querySelectorAll('#inspector input[id^="control-"]')].map(
-        (input) => input.id,
-      ),
-    ).toEqual([
-      "control-pathDensity",
-      "control-scribbleScale",
-      "control-momentum",
-      "control-chaos",
-      "control-toneFidelity",
-      "control-stopPoint",
+  function commitToneNumber(
+    el: HTMLElement,
+    key: string,
+    value: number,
+  ): void {
+    const input = paramInput(el, key);
+    act(() => input.focus());
+    setInput(input, String(value));
+    act(() => input.blur());
+  }
+
+  function toneSamples(source: ToneSource): number[] {
+    const frame = lastCompositionFrame!;
+    const points: [number, number][] = [
+      [0, frame.height * 0.25],
+      [frame.width / 2, frame.height * 0.25],
+      [frame.width / 2, frame.height * 0.75],
+    ];
+    return points.flatMap((point) => [
+      source.toneField.sample(point),
+      source.shadingMask.sample(point),
     ]);
+  }
+
+  function blobText(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+  }
+
+  it("defaults to Scribble, exposes only its six controls, and keeps the Tone target fixed across strategies", async () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+    const strategy = choiceParamSelect(el, "strategy");
+
+    expect(strategy.value).toBe("scribble");
+    expect([...strategy.options].map(({ value, text }) => [value, text])).toEqual([
+      ["scribble", "Scribble"],
+      ["stippling", "Stippling"],
+    ]);
+    expect(visibleNumberKeys(el)).toEqual(scribbleControlKeys);
     expect(paramInput(el, "pathDensity").value).toBe("1");
     expect(paramInput(el, "pathDensity").max).toBe("20");
     expect(paramInput(el, "scribbleScale").value).toBe("1");
@@ -6578,6 +6627,325 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     ];
     expect(points.map((point) => lastToneSource!.toneField.sample(point))).toEqual(
       points.map((point) => expected.toneField.sample(point)),
+    );
+
+    const scribbleTarget = toneSamples(lastToneSource!);
+    selectValue(strategy, "stippling");
+    expect(visibleNumberKeys(el)).toEqual(stipplingControlKeys);
+    expect(paramInput(el, "stippleDensity").value).toBe("1");
+    expect(paramInput(el, "distributionFidelity").value).toBe("0.5");
+    expect(lastToneSource).not.toBeNull();
+    expect(toneSamples(lastToneSource!)).toEqual(scribbleTarget);
+  });
+
+  it("retains both real strategy branches through atomic Choice Undo and Redo", async () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+
+    commitToneNumber(el, "pathDensity", 2.5);
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    commitToneNumber(el, "stippleDensity", 1.75);
+    commitToneNumber(el, "distributionFidelity", 0.8);
+
+    const commitsBeforeReturn = historyCapture.transactionCommits.length;
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    expect(historyCapture.transactionCommits).toHaveLength(
+      commitsBeforeReturn + 1,
+    );
+    const strategyCommit = historyCapture.transactionCommits.at(-1)!;
+    expect(strategyCommit.before.transactionStart?.params.strategy).toBe(
+      "stippling",
+    );
+    expect(strategyCommit.after.past).toHaveLength(
+      strategyCommit.before.past.length + 1,
+    );
+    expect(strategyCommit.after.present.params).toMatchObject({
+      strategy: "scribble",
+      pathDensity: 2.5,
+      stippleDensity: 1.75,
+      distributionFidelity: 0.8,
+    });
+    expect(paramInput(el, "pathDensity").value).toBe("2.5");
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(choiceParamSelect(el, "strategy").value).toBe("stippling");
+    expect(paramInput(el, "stippleDensity").value).toBe("1.75");
+    expect(paramInput(el, "distributionFidelity").value).toBe("0.8");
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(choiceParamSelect(el, "strategy").value).toBe("scribble");
+    expect(paramInput(el, "pathDensity").value).toBe("2.5");
+  });
+
+  it("randomizes only active unlocked Tone numbers with exact branch-local random consumption", async () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    commitToneNumber(el, "stippleDensity", 2);
+    commitToneNumber(el, "distributionFidelity", 0.8);
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    act(() => {
+      el.querySelector<HTMLButtonElement>(
+        'button[aria-label="scribbleScale lock"]',
+      )!.click();
+    });
+
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    clickButton(el, "Randomize");
+    expect(random).toHaveBeenCalledTimes(5);
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual({
+      strategy: "scribble",
+      pathDensity: 10.25,
+      scribbleScale: 1,
+      momentum: 0.5,
+      chaos: 0.5,
+      toneFidelity: 0.5,
+      stopPoint: 50,
+      stippleDensity: 2,
+      distributionFidelity: 0.8,
+    });
+
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    expect(paramInput(el, "stippleDensity").value).toBe("2");
+    expect(paramInput(el, "distributionFidelity").value).toBe("0.8");
+    act(() => {
+      el.querySelector<HTMLButtonElement>(
+        'button[aria-label="distributionFidelity lock"]',
+      )!.click();
+    });
+    random.mockClear().mockReturnValue(0.25);
+    clickButton(el, "Randomize");
+    expect(random).toHaveBeenCalledTimes(1);
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual({
+      strategy: "stippling",
+      pathDensity: 10.25,
+      scribbleScale: 1,
+      momentum: 0.5,
+      chaos: 0.5,
+      toneFidelity: 0.5,
+      stopPoint: 50,
+      stippleDensity: 1.1875,
+      distributionFidelity: 0.8,
+    });
+  });
+
+  it("saves and reloads all nine authored Tone fields across both strategies", async () => {
+    const reloadedParams: Params = {
+      strategy: "stippling",
+      pathDensity: 4.5,
+      scribbleScale: 1.4,
+      momentum: 0.65,
+      chaos: 0.35,
+      toneFidelity: 0.85,
+      stopPoint: 90,
+      stippleDensity: 1.8,
+      distributionFidelity: 0.7,
+    };
+    listPresets.mockResolvedValue(["authored"]);
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: toneCalibration.id,
+      name: "authored",
+      seed: 777,
+      params: reloadedParams,
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+
+    const savedParams: Params = {
+      strategy: "stippling",
+      pathDensity: 2.5,
+      scribbleScale: 1.3,
+      momentum: 0.6,
+      chaos: 0.4,
+      toneFidelity: 0.8,
+      stopPoint: 80,
+      stippleDensity: 2,
+      distributionFidelity: 0.75,
+    };
+    for (const key of scribbleControlKeys) {
+      commitToneNumber(el, key, Number(savedParams[key]));
+    }
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    for (const key of stipplingControlKeys) {
+      commitToneNumber(el, key, Number(savedParams[key]));
+    }
+    setInput(
+      el.querySelector<HTMLInputElement>('input[aria-label="preset name"]')!,
+      "complete-tone",
+    );
+    clickButton(el, "Save");
+    await flush();
+    expect(savePreset.mock.calls.at(-1)?.[0]).toMatchObject({
+      sketch: toneCalibration.id,
+      name: "complete-tone",
+      params: savedParams,
+    });
+    expect(Object.keys(savePreset.mock.calls.at(-1)![0].params)).toHaveLength(9);
+
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    selectValue(picker, "authored");
+    clickButton(el, "Reload");
+    await flush();
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual(
+      reloadedParams,
+    );
+    expect(choiceParamSelect(el, "strategy").value).toBe("stippling");
+    expect(stipplingControlKeys.map((key) => paramInput(el, key).value)).toEqual([
+      "1.8",
+      "0.7",
+    ]);
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    expect(scribbleControlKeys.map((key) => paramInput(el, key).value)).toEqual([
+      "4.5",
+      "1.4",
+      "0.65",
+      "0.35",
+      "0.85",
+      "90",
+    ]);
+  });
+
+  it("reconciles the existing neat Preset to Scribble and live Stippling defaults", async () => {
+    listPresets.mockResolvedValue(["neat"]);
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: toneCalibration.id,
+      name: "neat",
+      seed: 6329797832350081,
+      params: {
+        pathDensity: 19.7,
+        scribbleScale: 1,
+        momentum: 0.75,
+        chaos: 0.25,
+        toneFidelity: 0.9,
+        stopPoint: 100,
+      },
+      locks: [],
+      profile: {
+        width: 200,
+        height: 200,
+        insets: { top: 10, right: 10, bottom: 10, left: 10 },
+        includeFrame: true,
+      },
+    } as unknown as Preset);
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+
+    selectValue(
+      el.querySelector<HTMLSelectElement>(
+        'select[aria-label="saved presets"]',
+      )!,
+      "neat",
+    );
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(choiceParamSelect(el, "strategy").value).toBe("scribble");
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual({
+      strategy: "scribble",
+      pathDensity: 19.7,
+      scribbleScale: 1,
+      momentum: 0.75,
+      chaos: 0.25,
+      toneFidelity: 0.9,
+      stopPoint: 100,
+      stippleDensity: 1,
+      distributionFidelity: 0.5,
+    });
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    expect(visibleNumberKeys(el)).toEqual(stipplingControlKeys);
+    expect(paramInput(el, "stippleDensity").value).toBe("1");
+    expect(paramInput(el, "distributionFidelity").value).toBe("0.5");
+  });
+
+  it("embeds all authored Tone fields in SVG metadata while worker identity stays active-only", async () => {
+    const authoredParams: Params = {
+      strategy: "stippling",
+      pathDensity: 4.5,
+      scribbleScale: 1.4,
+      momentum: 0.65,
+      chaos: 0.35,
+      toneFidelity: 0.85,
+      stopPoint: 90,
+      stippleDensity: 1.8,
+      distributionFidelity: 0.7,
+    };
+    listPresets.mockResolvedValue(["metadata"]);
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: toneCalibration.id,
+      name: "metadata",
+      seed: 999,
+      params: authoredParams,
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+    selectValue(
+      el.querySelector<HTMLSelectElement>(
+        'select[aria-label="saved presets"]',
+      )!,
+      "metadata",
+    );
+    clickButton(el, "Reload");
+    await flush();
+
+    const jobIndex = shadingJob.starts.length - 1;
+    const job = shadingJob.starts[jobIndex]!;
+    expect(job.identity.params).toEqual([
+      { key: "strategy", value: "stippling" },
+      { key: "stippleDensity", value: 1.8 },
+      { key: "distributionFidelity", value: 0.7 },
+    ]);
+    await act(async () => {
+      job.resolve({
+        status: "success",
+        jobId: jobIndex + 1,
+        identity: job.identity,
+        scene: {
+          space: lastCompositionFrame!,
+          primitives: [
+            {
+              points: [[1, 1], [1.1, 1.1]],
+              closed: false,
+              stroke: { color: "black", width: 1 },
+              hiddenLineRole: "source",
+            },
+          ],
+        },
+        diagnostics: {
+          termination: "completed",
+          pathLength: 0.14,
+          polylineCount: 1,
+          penLiftCount: 0,
+          fidelity: { kind: "stippling", distributionError: 0.02 },
+        },
+        computeTimeMs: 5,
+      });
+      await Promise.resolve();
+    });
+
+    clickButton(el, "Export SVG");
+    const svg = await blobText(downloadBlob.mock.calls.at(-1)![0]);
+    const encoded = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
+    expect(encoded).toBeDefined();
+    const metadata = JSON.parse(encoded!) as Preset;
+    expect(metadata.params).toEqual(authoredParams);
+    expect(Object.keys(metadata.params)).toHaveLength(9);
+    expect(applyPreset(toneCalibration.schema, metadata).params).toEqual(
+      authoredParams,
     );
   });
 
