@@ -397,9 +397,9 @@ export function applyPreset(schema: ParamSchema, preset: Preset): PresetState {
   validateParamSchema(schema)
   const params: Params = {}
   for (const [key, spec] of Object.entries(schema)) {
-    // Prefer the stored value (loaded AS-IS, unclamped); else fall back to the
-    // spec default. Iterating the schema is what drops preset-only keys.
-    if (!(key in preset.params)) {
+    // Prefer an own stored value (loaded AS-IS, unclamped); else fall back to
+    // the spec default. Iterating the schema is what drops preset-only keys.
+    if (!Object.prototype.hasOwnProperty.call(preset.params, key)) {
       params[key] = spec.default
       continue
     }

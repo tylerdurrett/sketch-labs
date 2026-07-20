@@ -604,6 +604,31 @@ describe('applyPreset', () => {
     )
   })
 
+  it.each(['stipple', 'unknown'])(
+    'treats inherited Choice value %j as absent and uses the live default',
+    (inheritedStrategy) => {
+      const inheritedParams = Object.create({
+        strategy: inheritedStrategy,
+      }) as Params
+      const preset = {
+        ...makePreset(
+          'tone-calibration',
+          'inherited-choice',
+          {},
+          1,
+          new Set(),
+        ),
+        params: inheritedParams,
+      }
+
+      expect(applyPreset(conditionalSchema, preset).params).toEqual({
+        strategy: 'scribble',
+        pathDensity: 0.4,
+        stippleDensity: 0.6,
+      })
+    },
+  )
+
   it('validates Choice and applicability declarations at the apply boundary', () => {
     const malformedSchema = {
       ...conditionalSchema,
