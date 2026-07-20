@@ -37,6 +37,10 @@ The Studio preview state that atomically replaces the live painter's-order Fill 
 A non-persistent Studio diagnostic view that replaces the canvas with a visualization of a tone-aware **Sketch**'s effective mask-weighted target (`Tone Field × Shading Mask`) without changing its artwork, **Preset**, or exports.
 _Avoid_: source output, tone export, reference parameter
 
+**Detail reference mode**:
+A non-persistent Studio diagnostic view that replaces the canvas with a grayscale visualization of a detail-aware **Sketch**'s normalized, sensitivity-adjusted **Detail Field** without changing its artwork, **Preset**, or exports.
+_Avoid_: scale output, edge preview, detail export, reference parameter
+
 **Parameter Schema**:
 The single declaration a **Sketch** makes of its tweakable knobs. It is the *spine* of the Harness: the control panel, **Lock** toggles, **Randomize**, and **Preset** shape are all derived views over this one schema.
 _Avoid_: config, settings
@@ -56,6 +60,14 @@ _Avoid_: crop preview (names only the subtractive case), crop parameter
 **Tone Field**:
 A deterministic, resolution-independent sampler over a **Composition Frame** that gives the desired relative ink darkness at any point as a finite value from `0` for paper to `1` for maximum darkness.
 _Avoid_: grayscale image (only one possible source), shade map, darkness map
+
+**Detail Field**:
+A deterministic, resolution-independent scalar sampler over a **Composition Frame** that gives local visual complexity from `0` for smooth areas to `1` for the strongest detail, independently of tone and edge direction.
+_Avoid_: Tone Field, edge map (only one possible input), Direction Field
+
+**Scribble Scale Field**:
+A deterministic, resolution-independent sampler over a **Composition Frame** that gives the local characteristic scale the **Scribble Strategy** must use while preserving its coupled geometric ratios.
+_Avoid_: Detail Field (only one possible source), generic parameter field, resolution map
 
 **Shading Mask**:
 A deterministic, resolution-independent sampler over a **Composition Frame** that gives how strongly ink is permitted at any point as a finite value from `1` for fully permitted through a soft range that may be crossed to `0` for strictly forbidden.
@@ -84,6 +96,12 @@ _Avoid_: performance budget, density, convergence threshold
 **Scribble scale**:
 An authored **Scribble Strategy** control that changes its characteristic spatial detail while keeping segment length, virtual-coverage radius, residual sampling, and mask validation at coherent internal ratios.
 _Avoid_: resolution, stroke width, Tool width
+
+**Detail influence**:
+An authored Photo Scribble control that sets how strongly its **Detail Field** broadens the resulting **Scribble Scale Field** away from the fine-detail **Scribble scale** anchor, with `0` preserving uniform scale exactly.
+
+**Detail sensitivity**:
+An authored Photo Scribble control that sets how readily subtle local complexity in its normalized **Detail Field** retains fine-scale geometry without changing tone.
 
 **Momentum**:
 An authored **Scribble Strategy** control that sets how strongly a growing path prefers directional continuity over turning toward a better local residual.
@@ -199,6 +217,11 @@ _Avoid_: config, params, options, export options
 - A plotter-ready SVG maps artwork into the profile's physical paper and margins but emits only plot paths; paper edges, margin guides, and backgrounds are preview chrome rather than drawable geometry, while the Output Profile remains available as metadata.
 - Every generated Scene uses the Composition Frame's exact normalized coordinate space; the Harness therefore knows layout before generation and does not need Sketch-authored fixed-space metadata or a throwaway Scene probe.
 - Photographs, analytic gradients, and procedural shapes can each produce a **Tone Field**; a **Shading Strategy** consumes that field and produces a **Shading Result** without knowing its source, while the consuming **Sketch** styles and draws the result's polylines as **Primitives**.
+- Image analysis may derive a **Detail Field** from an image's original linear-luminance signal, independently of later Tone contrast or gamma adjustments, desired darkness, and any future directional edge signal.
+- An image-derived **Detail Field** normalizes robustly within that image's fitted content after suppressing a fixed noise floor, so subtle photographs retain relative structure while nearly flat images do not amplify numerical or compression noise.
+- Its initial multiscale analysis emphasizes fixed fine-to-medium spatial bands and excludes gradual low-frequency lighting changes; band radii remain internal until hands-on evidence justifies another authored control.
+- Its initial image signal is linear luminance plus alpha-boundary structure; chromatic-only detail remains deferred behind the same field contracts.
+- An alpha-bearing image's **Detail Field** ignores color hidden by zero alpha, treats alpha transitions as structural detail, and remains zero outside the fitted image extent.
 - Procedural field producers evaluate arbitrary Composition Frame coordinates directly; raster producers own coordinate mapping and interpolation so **Shading Strategies** never depend on a source pixel grid or resolution.
 - A **Shading Mask** constrains a **Shading Strategy** independently of desired tone: intermediate permission lets a strategy deliberately color outside the lines, while exact zero remains a hard prohibition.
 - A **Shading Strategy** enforces zero permission at an explicit working resolution by subdividing candidate segments and validating finished paths; sources with exact boundary geometry may additionally request exact clipping without changing the sampler contract.
@@ -212,6 +235,16 @@ _Avoid_: config, params, options, export options
 - A **Scribble Strategy** deposits additive virtual coverage with a compact smooth falloff around each segment; explicit Scene-space influence radius and per-pass strength control spacing and repetition without representing physical **Tool width**.
 - Increasing **Path density** reduces the virtual coverage satisfied by each pass, producing more path length for the same **Tone Field** while preserving its relative light-dark relationships.
 - Decreasing **Scribble scale** produces finer paths and tighter field sampling, while increasing it produces broader, looser paths; low-level sampling and coverage ratios remain internal until hands-on iteration proves a need to expose them separately.
+- When a **Detail Field** modulates local Scribble scale, the authored **Scribble scale** remains the fine-detail anchor and only smoother regions broaden; zero modulation preserves uniform-scale behavior exactly.
+- Detail-driven local scale varies segment length, virtual-coverage radius, and mask-check spacing at coherent ratios, while the global residual lattice stays fixed at the authored fine-detail scale and safely oversamples broader regions.
+- Detail-driven scale changes remain spatially continuous and never force a pen lift; candidate segments sample ahead at fine-safe intervals and shorten conservatively rather than crossing a region that requires finer geometry at a coarse scale.
+- Local scale interpolates multiplicatively as `Scribble scale × broadening^(1 − detail)`: strongest detail stays at the authored anchor, smoothest content reaches the **Detail influence** broadening factor, and the initial maximum factor is `4×` pending browser tuning.
+- **Detail sensitivity** applies an identity-centered power curve to normalized detail: center is exact identity, higher settings retain subtler structure as fine detail, lower settings reserve fine scale for stronger structure, and the initial reciprocal exponent range is `4` through `1/4` pending browser tuning.
+- The **Scribble Strategy** accepts an optional **Scribble Scale Field** separately from its Tone Source; Photo Scribble derives the first one from its **Detail Field**, while an absent field or zero **Detail influence** preserves every existing consumer's uniform-scale output.
+- Photo Scribble's **Detail reference mode** shows the sensitivity-adjusted **Detail Field** from paper through strongest detail, updates without Scribble generation, and is neither persisted nor exportable.
+- Image-derived **Detail Field** analysis is cancellable background preparation keyed to the exact Image Asset and analysis definition; Detail reference mode shows an honest loading state rather than a stale field from another asset, while sensitivity remapping stays cheap after preparation.
+- When **Detail influence** is enabled, failed Detail Field preparation retains only visibly stale prior artwork and disables export rather than silently substituting uniform scale; when influence is `0`, ordinary Photo Scribble generation does not depend on detail preparation.
+- **Detail influence** defaults to `0` so schema reconciliation preserves existing Photo Scribble Presets exactly; an enabled bundled Preset demonstrates the capability instead of changing prior artwork by default.
 - A **Scribble Strategy** selects starts and restarts through Seeded weighting among high-residual areas, so dark regions tend to appear early without forcing every Seed to begin at the same global maximum.
 - A safety-budget-exhausted **Shading Result** remains valid, exportable creative geometry but Studio must identify it truthfully rather than calling it converged; generic path length and pen-lift counts are derived from its polylines, while strategy-specific diagnostics do not widen the shared result.
 - Plot dimensions and insets are canonical millimeters; the Paper UI accepts and displays both millimeters and inches by converting at its boundary, while the display-unit choice is a Studio local-storage preference rather than Preset or Sketch state.
