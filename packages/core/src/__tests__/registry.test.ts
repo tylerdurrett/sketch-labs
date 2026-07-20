@@ -146,18 +146,28 @@ describe('the default registry', () => {
         }
         return sketch.deriveOutlineSource!(completed, target)
       }
-      const withoutStroke = (scene: Scene) => ({
+      const withoutTargetWidth = (scene: Scene) => ({
         ...scene,
-        primitives: scene.primitives.map(
-          ({ stroke: _targetDependentStroke, ...primitive }) => primitive,
+        primitives: scene.primitives.map(({ stroke, ...primitive }) =>
+          stroke === undefined
+            ? primitive
+            : { ...primitive, stroke: { color: stroke.color } },
         ),
       })
       const [first, second] = targets.map(sourceFor)
 
-      expect(withoutStroke(second)).toEqual(withoutStroke(first))
-      expect(second.primitives.map(({ stroke }) => stroke)).not.toEqual(
-        first.primitives.map(({ stroke }) => stroke),
-      )
+      expect(withoutTargetWidth(second)).toEqual(withoutTargetWidth(first))
+      for (const [index, scene] of [first, second].entries()) {
+        const expectedWidth =
+          targets[index]!.toolWidthMillimeters /
+          targets[index]!.millimetersPerSceneUnit
+        const strokes = scene.primitives.flatMap(({ stroke }) =>
+          stroke === undefined ? [] : [stroke],
+        )
+
+        expect(strokes.length).toBeGreaterThan(0)
+        expect(strokes.every(({ width }) => width === expectedWidth)).toBe(true)
+      }
     }
   })
 })
