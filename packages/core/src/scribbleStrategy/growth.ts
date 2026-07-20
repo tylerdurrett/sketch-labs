@@ -8,6 +8,7 @@ const MAX_FAN_HALF_ANGLE = Math.PI
 const LOOK_AHEAD_WEIGHT = 0.45
 const MIN_CONTINUITY_WEIGHT = 0.08
 const MIN_SCORE = 1e-12
+const MAX_SCALE_REFINEMENTS = 16
 
 export interface ScribbleGrowthInput {
   readonly model: ScribbleModel
@@ -51,13 +52,51 @@ function pointAtLength(
   ]
 }
 
+function maximumInFrameRayLength(
+  model: ScribbleModel,
+  start: Readonly<Point>,
+  angle: number,
+): number | undefined {
+  const { width, height } = model.lattice.frame
+  if (
+    start[0] < 0 ||
+    start[0] > width ||
+    start[1] < 0 ||
+    start[1] > height
+  ) {
+    return undefined
+  }
+
+  const directionX = Math.cos(angle)
+  const directionY = Math.sin(angle)
+  let maximumLength = Number.POSITIVE_INFINITY
+
+  if (directionX > 0) {
+    maximumLength = Math.min(maximumLength, (width - start[0]) / directionX)
+  } else if (directionX < 0) {
+    maximumLength = Math.min(maximumLength, -start[0] / directionX)
+  }
+  if (directionY > 0) {
+    maximumLength = Math.min(maximumLength, (height - start[1]) / directionY)
+  } else if (directionY < 0) {
+    maximumLength = Math.min(maximumLength, -start[1] / directionY)
+  }
+
+  if (!Number.isFinite(maximumLength) || maximumLength <= 0) return undefined
+
+  // Stay a few ulps inside the inclusive frame so reconstructing the endpoint
+  // with sin/cos cannot round it just beyond the boundary.
+  return maximumLength * (1 - Number.EPSILON * 8)
+}
+
 /**
  * Resolve one field-aware ray without consuming the run's random stream.
  *
- * The first profile sees fine regions between two broad endpoints. Reprofiling
- * after shortening catches a still more restrictive station introduced by the
- * new interval boundaries; the shared model predicate makes the final scale,
- * frame, and mask decision at that profile's minimum spacing.
+ * Every shortened segment is reprofiled because its changed sampling grid can
+ * reveal a still finer station. Refinement is monotone; pathological fields
+ * that keep revealing smaller values reach the authored fine fallback after a
+ * fixed bound. The shared model predicate makes the final scale, frame, and
+ * mask decision at that profile's minimum spacing.
  */
 function scaleFieldEndpoint(
   model: ScribbleModel,
@@ -65,26 +104,38 @@ function scaleFieldEndpoint(
   angle: number,
   proposedLength?: number,
 ): Point | undefined {
-  const rayLength =
-    proposedLength ?? model.localScalesAt(start).segmentLength
-  const proposed = pointAtLength(start, angle, rayLength)
-  const proposedProfile = model.profileSegment(start, proposed)
-  if (proposedProfile === undefined) return undefined
+  const maximumLength = maximumInFrameRayLength(model, start, angle)
+  if (maximumLength === undefined) return undefined
 
-  let permittedLength = Math.min(
-    rayLength,
-    proposedProfile.minimumSegmentLength,
+  const rayLength = Math.min(
+    proposedLength ?? model.localScalesAt(start).segmentLength,
+    maximumLength,
   )
-  let endpoint = pointAtLength(start, angle, permittedLength)
-  const shortenedProfile = model.profileSegment(start, endpoint)
-  if (shortenedProfile === undefined) return undefined
+  let permittedLength = rayLength
 
-  if (shortenedProfile.minimumSegmentLength < permittedLength) {
-    permittedLength = shortenedProfile.minimumSegmentLength
-    endpoint = pointAtLength(start, angle, permittedLength)
+  for (let refinement = 0; refinement < MAX_SCALE_REFINEMENTS; refinement++) {
+    const endpoint = pointAtLength(start, angle, permittedLength)
+    const profile = model.profileSegment(start, endpoint)
+    if (profile === undefined) break
+
+    const shortenedLength = Math.min(
+      permittedLength,
+      profile.minimumSegmentLength,
+    )
+    if (shortenedLength < permittedLength) {
+      permittedLength = shortenedLength
+      continue
+    }
+
+    return model.isSegmentSafe(start, endpoint) ? endpoint : undefined
   }
 
-  return model.isSegmentSafe(start, endpoint) ? endpoint : undefined
+  const fineEndpoint = pointAtLength(
+    start,
+    angle,
+    Math.min(model.scales.segmentLength, maximumLength),
+  )
+  return model.isSegmentSafe(start, fineEndpoint) ? fineEndpoint : undefined
 }
 
 function normalizeAngle(angle: number): number {

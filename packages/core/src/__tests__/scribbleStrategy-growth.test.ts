@@ -307,6 +307,100 @@ describe('Scribble candidate growth', () => {
     }
   })
 
+  it('keeps refining when shortened grids reveal nested finer bands', () => {
+    const current: Point = [50, 50]
+    const residual = fieldModel((point) => {
+      const radius = Math.hypot(point[0] - current[0], point[1] - current[1])
+      if (Math.abs(radius - 4 / 7) < 1e-4) return 1
+      if (Math.abs(radius - 0.87) < 1e-4) return 5 / 3
+      if (Math.abs(radius - 3.3) < 1e-4) return 29 / 12
+      return 3
+    })
+    const next = chooseScribbleGrowthStep({
+      model: residual,
+      rng: createRandom('nested-fine-bands'),
+      current,
+      heading: 0,
+    })
+
+    expect(next.kind).toBe('advanced')
+    if (next.kind === 'advanced') {
+      expect(segmentLength(current, next)).toBeCloseTo(
+        residual.scales.segmentLength,
+        12,
+      )
+      expect(residual.isSegmentSafe(current, next.point)).toBe(true)
+    }
+  })
+
+  it('continues one polyline through broad, fine, and broad regions', () => {
+    const residual = fieldModel(([x]) => {
+      if (x < 52) return 2
+      if (x < 54) return 1
+      return 2
+    })
+    const source = createRandom('broad-fine-broad')
+    const rng = {
+      ...source,
+      range(min: number, max: number): number {
+        return (min + max) / 2
+      },
+      value(): number {
+        return 0.5
+      },
+    }
+    let current: Point = [50, 50]
+    let heading: number | undefined = 0
+    const lengths: number[] = []
+
+    for (let index = 0; index < 5; index++) {
+      const next = chooseScribbleGrowthStep({
+        model: residual,
+        rng,
+        current,
+        heading,
+      })
+      expect(next.kind).toBe('advanced')
+      if (next.kind !== 'advanced') break
+
+      lengths.push(segmentLength(current, next))
+      expect(residual.isSegmentSafe(current, next.point)).toBe(true)
+      residual.depositSegment(current, next.point)
+      current = next.point
+      heading = next.heading
+    }
+
+    expect(lengths).toEqual([
+      expect.closeTo(1.2, 12),
+      expect.closeTo(1.2, 12),
+      expect.closeTo(1.2, 12),
+      expect.closeTo(1.2, 12),
+      expect.closeTo(2.4, 12),
+    ])
+  })
+
+  it('bounds profiling for huge finite field values to the visible frame', () => {
+    let fieldSamples = 0
+    const residual = fieldModel(() => {
+      fieldSamples++
+      return 1e9
+    })
+    const current: Point = [50, 50]
+    const next = chooseScribbleGrowthStep({
+      model: residual,
+      rng: createRandom('huge-finite-field'),
+      current,
+      heading: 0,
+    })
+
+    expect(next.kind).toBe('advanced')
+    expect(fieldSamples).toBeGreaterThan(0)
+    expect(fieldSamples).toBeLessThan(100_000)
+    if (next.kind === 'advanced') {
+      expect(residual.isSegmentSafe(current, next.point)).toBe(true)
+    }
+  })
+
   it('does not consume shared RNG draws while profiling a field', () => {
     function callsFor(residual: ReturnType<typeof model>) {
       const source = createRandom('profile-rng-count')
