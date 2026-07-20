@@ -8,9 +8,9 @@ export const COMPOSITION_SCALE_RANGE_MAX_PERCENT = 400;
 
 export interface CompositionScaleControlProps {
   /**
-   * Controlled scale percentage. `100` is the centered, full-Composition fit.
-   * The owner must supply a finite positive value, which may sit outside the
-   * direct range's presentation bounds.
+   * Controlled scale percentage. `100` is the full-Composition fit size;
+   * position is controlled by the owner. The owner must supply a finite positive
+   * value, which may sit outside the direct range's presentation bounds.
    */
   scalePercent: number;
   /** Lift a finite positive percentage to the Page Frame draft owner. */
