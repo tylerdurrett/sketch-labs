@@ -492,6 +492,31 @@ describe('applyPreset', () => {
     radius: { kind: 'number', min: 2, max: 100, default: 12 },
   }
 
+  const conditionalSchema: ParamSchema = {
+    strategy: {
+      kind: 'choice',
+      default: 'scribble',
+      options: [
+        { value: 'scribble', label: 'Scribble' },
+        { value: 'stipple', label: 'Stippling' },
+      ],
+    },
+    pathDensity: {
+      kind: 'number',
+      min: 0,
+      max: 1,
+      default: 0.4,
+      activeWhen: { key: 'strategy', equals: 'scribble' },
+    },
+    stippleDensity: {
+      kind: 'number',
+      min: 0,
+      max: 1,
+      default: 0.6,
+      activeWhen: { key: 'strategy', equals: 'stipple' },
+    },
+  }
+
   it('drops a key present in the preset but absent from the schema', () => {
     const preset = makePreset(
       'circles',
@@ -509,6 +534,109 @@ describe('applyPreset', () => {
     const preset = makePreset('circles', 'p', { count: 30 }, 1, new Set())
     const state = applyPreset(schema, preset)
     expect(state.params).toEqual({ count: 30, radius: 12 })
+  })
+
+  it('defaults missing Choice and dependent fields from the complete live schema', () => {
+    const preset = makePreset('tone-calibration', 'legacy', {}, 1, new Set())
+
+    expect(applyPreset(conditionalSchema, preset).params).toEqual({
+      strategy: 'scribble',
+      pathDensity: 0.4,
+      stippleDensity: 0.6,
+    })
+  })
+
+  it('preserves stored active and inactive authored values through reconciliation', () => {
+    const preset = makePreset(
+      'tone-calibration',
+      'stippled',
+      {
+        strategy: 'stipple',
+        pathDensity: 0.17,
+        stippleDensity: 0.83,
+        removed: 'drop-me',
+      },
+      'choice-seed',
+      new Set(['strategy', 'pathDensity']),
+    )
+
+    const state = applyPreset(conditionalSchema, preset)
+
+    expect(state.params).toEqual({
+      strategy: 'stipple',
+      pathDensity: 0.17,
+      stippleDensity: 0.83,
+    })
+    expect(state.seed).toBe('choice-seed')
+    expect(state.locks).toEqual(['pathDensity', 'strategy'])
+  })
+
+  it('keeps a stored dependent value while defaulting its missing Choice controller', () => {
+    const preset = makePreset(
+      'tone-calibration',
+      'missing-controller',
+      { stippleDensity: 0.91 },
+      1,
+      new Set(),
+    )
+
+    expect(applyPreset(conditionalSchema, preset).params).toEqual({
+      strategy: 'scribble',
+      pathDensity: 0.4,
+      stippleDensity: 0.91,
+    })
+  })
+
+  it.each([
+    ['an undeclared string', 'unknown'],
+    ['a non-string value', 7],
+  ])('rejects %s for a stored Choice', (_description, strategy) => {
+    const preset = makePreset(
+      'tone-calibration',
+      'malformed-choice',
+      { strategy },
+      1,
+      new Set(),
+    )
+
+    expect(() => applyPreset(conditionalSchema, preset)).toThrow(
+      /Choice param `strategy` value must be one of its declared option values/,
+    )
+  })
+
+  it('validates Choice and applicability declarations at the apply boundary', () => {
+    const malformedSchema = {
+      ...conditionalSchema,
+      stippleDensity: {
+        ...conditionalSchema.stippleDensity!,
+        activeWhen: { key: 'strategy', equals: 'missing-option' },
+      },
+    } as ParamSchema
+    const preset = makePreset('tone-calibration', 'p', {}, 1, new Set())
+
+    expect(() => applyPreset(malformedSchema, preset)).toThrow(
+      /activeWhen equals must be a declared option/,
+    )
+  })
+
+  it('preserves unclamped numeric values even when their controls are inactive', () => {
+    const preset = makePreset(
+      'tone-calibration',
+      'unclamped-inactive',
+      {
+        strategy: 'stipple',
+        pathDensity: 9999,
+        stippleDensity: -50,
+      },
+      1,
+      new Set(),
+    )
+
+    expect(applyPreset(conditionalSchema, preset).params).toEqual({
+      strategy: 'stipple',
+      pathDensity: 9999,
+      stippleDensity: -50,
+    })
   })
 
   it('preserves a stored Image Asset ID and defaults only an absent one', () => {
@@ -647,6 +775,67 @@ describe('applyPreset', () => {
 })
 
 describe('round-trip fidelity (no-drift case)', () => {
+  it('round-trips Choice and inactive values without changing the Preset envelope', () => {
+    const schema: ParamSchema = {
+      strategy: {
+        kind: 'choice',
+        default: 'scribble',
+        options: [
+          { value: 'scribble', label: 'Scribble' },
+          { value: 'stipple', label: 'Stippling' },
+        ],
+      },
+      pathDensity: {
+        kind: 'number',
+        min: 0,
+        max: 1,
+        default: 0.4,
+        activeWhen: { key: 'strategy', equals: 'scribble' },
+      },
+      stippleDensity: {
+        kind: 'number',
+        min: 0,
+        max: 1,
+        default: 0.6,
+        activeWhen: { key: 'strategy', equals: 'stipple' },
+      },
+    }
+    const params = {
+      strategy: 'stipple',
+      pathDensity: 0.19,
+      stippleDensity: 0.81,
+    }
+    const wireValue = JSON.parse(
+      JSON.stringify(
+        serialize(
+          makePreset(
+            'tone-calibration',
+            'choice-round-trip',
+            params,
+            9,
+            new Set(['strategy']),
+          ),
+        ),
+      ),
+    )
+
+    expect(wireValue.version).toBe(1)
+    expect(Object.keys(wireValue).sort()).toEqual([
+      'locks',
+      'name',
+      'params',
+      'seed',
+      'sketch',
+      'version',
+    ])
+    expect(applyPreset(schema, deserialize(wireValue))).toEqual({
+      params,
+      seed: 9,
+      locks: ['strategy'],
+      profile: undefined,
+    })
+  })
+
   it('round-trips a fixed-page result exactly in v3 without persisting transient edit state', () => {
     const schema: ParamSchema = {
       count: { kind: 'number', min: 1, max: 80, default: 24 },
