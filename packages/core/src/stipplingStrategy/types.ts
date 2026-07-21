@@ -3,12 +3,14 @@ import type { ToneSource } from '../shadingFields'
 import type { NumberParamSpec } from '../sketch'
 import type { Point } from '../types'
 
-/** The two artist-facing controls owned by the Stippling Strategy. */
+/** The three artist-facing controls owned by the Stippling Strategy. */
 export interface StipplingControls {
   /** Relative mark abundance; 1 is baseline and higher values tighten spacing. */
   readonly stippleDensity: number
   /** Bounded effort spent improving the selected marks' distribution. */
   readonly distributionFidelity: number
+  /** Bounded effort spent spatially settling the retained Stipples. */
+  readonly voronoiRelaxation: number
 }
 export type StipplingControlName = keyof StipplingControls
 
@@ -29,6 +31,14 @@ export const stipplingControlSchema = Object.freeze({
     default: 0.5,
     step: 0.01,
   }),
+  voronoiRelaxation: Object.freeze({
+    kind: 'number',
+    min: 0,
+    max: 1,
+    default: 0,
+    step: 0.01,
+    identityDefault: 'implicit',
+  }),
 } satisfies Record<StipplingControlName, NumberParamSpec>)
 
 /** Frozen defaults derived from the same declarations presented to artists. */
@@ -37,6 +47,8 @@ export const defaultStipplingControls: Readonly<StipplingControls> =
     stippleDensity: stipplingControlSchema.stippleDensity.default,
     distributionFidelity:
       stipplingControlSchema.distributionFidelity.default,
+    voronoiRelaxation:
+      stipplingControlSchema.voronoiRelaxation.default,
   })
 
 /** Run-relative geometry, spacing, and permission-weighted mark abundance. */

@@ -68,6 +68,11 @@ export function normalizeStipplingControls(
       controls.distributionFidelity ??
         defaultStipplingControls.distributionFidelity,
     ),
+    voronoiRelaxation: boundedControl(
+      'voronoiRelaxation',
+      controls.voronoiRelaxation ??
+        defaultStipplingControls.voronoiRelaxation,
+    ),
   })
 }
 

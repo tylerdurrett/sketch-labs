@@ -35,6 +35,7 @@ const FULL_MASK = createShadingMask(() => 1)
 const FAST_CONTROLS: Readonly<StipplingControls> = Object.freeze({
   stippleDensity: 0.25,
   distributionFidelity: 0,
+  voronoiRelaxation: 0,
 })
 const PARTIAL_LIMITS: StipplingExecutionLimits = Object.freeze({
   maxStipples: 5,
@@ -137,6 +138,7 @@ describe('public Stippling strategy boundary', () => {
     expect(Object.keys(stipplingControlSchema)).toEqual([
       'stippleDensity',
       'distributionFidelity',
+      'voronoiRelaxation',
     ])
     expect(Object.keys(defaultStipplingControls)).toEqual(
       Object.keys(stipplingControlSchema),
@@ -157,7 +159,11 @@ describe('public Stippling strategy boundary', () => {
     })
     expect(
       resolveProductionStipplingExecutionLimits({
-        controls: { stippleDensity: 400, distributionFidelity: 1 },
+        controls: {
+          stippleDensity: 400,
+          distributionFidelity: 1,
+          voronoiRelaxation: 0,
+        },
         lattice: { ...ordinary.lattice, averageDemand: 0.001 },
         scales: { ...ordinary.scales, targetCount: 20_000 },
       }),
@@ -168,7 +174,11 @@ describe('public Stippling strategy boundary', () => {
     })
     expect(
       resolveProductionStipplingExecutionLimits({
-        controls: { stippleDensity: 400, distributionFidelity: 0 },
+        controls: {
+          stippleDensity: 400,
+          distributionFidelity: 0,
+          voronoiRelaxation: 0,
+        },
         lattice: { ...ordinary.lattice, averageDemand: 0.5 },
         scales: { ...ordinary.scales, targetCount: 160_000 },
       }),
@@ -454,6 +464,7 @@ describe('Stippling completion and safety ceilings', () => {
     const malformed = {
       stippleDensity: Number.NaN,
       distributionFidelity: Number.POSITIVE_INFINITY,
+      voronoiRelaxation: Number.NaN,
     } as StipplingControls
     const malformedResult = runStipplingStrategyForTesting(
       { ...input(source(constantTone(1)), 'malformed-controls'), controls: malformed },
@@ -478,6 +489,29 @@ describe('Stippling completion and safety ceilings', () => {
         /Stippling frame/,
       )
     }
+  })
+
+  it('keeps missing and explicit-zero Voronoi relaxation bit-for-bit compatible', () => {
+    const legacyControls = {
+      stippleDensity: FAST_CONTROLS.stippleDensity,
+      distributionFidelity: FAST_CONTROLS.distributionFidelity,
+    } as StipplingControls
+    const explicitZero = {
+      ...legacyControls,
+      voronoiRelaxation: 0,
+    }
+
+    expect(
+      runStipplingStrategyForTesting(
+        input(source(constantTone(1)), 'zero-relaxation', legacyControls),
+        PARTIAL_LIMITS,
+      ),
+    ).toEqual(
+      runStipplingStrategyForTesting(
+        input(source(constantTone(1)), 'zero-relaxation', explicitZero),
+        PARTIAL_LIMITS,
+      ),
+    )
   })
 
   it.each([

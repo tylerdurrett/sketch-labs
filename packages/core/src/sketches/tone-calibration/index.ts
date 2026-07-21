@@ -92,6 +92,10 @@ export const toneCalibrationSchema = Object.freeze({
     ...stipplingControlSchema.distributionFidelity,
     activeWhen: STIPPLING_ONLY,
   }),
+  voronoiRelaxation: Object.freeze({
+    ...stipplingControlSchema.voronoiRelaxation,
+    activeWhen: STIPPLING_ONLY,
+  }),
 } satisfies ParamSchema)
 
 const SCRIBBLE_PREVIEW_STROKE = Object.freeze({ color: 'black', width: 1 })
@@ -128,6 +132,11 @@ function stipplingControls(params: Params): StipplingControls {
       params,
       toneCalibrationSchema,
       'distributionFidelity',
+    ),
+    voronoiRelaxation: numberParam(
+      params,
+      toneCalibrationSchema,
+      'voronoiRelaxation',
     ),
   }
 }

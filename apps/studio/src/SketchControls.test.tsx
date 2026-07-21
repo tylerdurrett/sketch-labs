@@ -68,7 +68,10 @@ import {
   type PageFramePointer,
 } from "./pageFrameManipulation";
 import type { PageFrameEditDraft } from "./pageFrameEditDraft";
-import { isShadingComputeIdentity } from "./shadingComputeProtocol";
+import {
+  createShadingComputeIdentity,
+  isShadingComputeIdentity,
+} from "./shadingComputeProtocol";
 import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
 import {
@@ -6537,6 +6540,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
   const stipplingControlKeys = [
     "stippleDensity",
     "distributionFidelity",
+    "voronoiRelaxation",
   ] as const;
 
   function button(el: HTMLElement, label: string): HTMLButtonElement {
@@ -6634,6 +6638,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(visibleNumberKeys(el)).toEqual(stipplingControlKeys);
     expect(paramInput(el, "stippleDensity").value).toBe("1");
     expect(paramInput(el, "distributionFidelity").value).toBe("0.5");
+    expect(paramInput(el, "voronoiRelaxation").value).toBe("0");
     expect(lastToneSource).not.toBeNull();
     expect(toneSamples(lastToneSource!)).toEqual(scribbleTarget);
   });
@@ -6646,6 +6651,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     selectValue(choiceParamSelect(el, "strategy"), "stippling");
     commitToneNumber(el, "stippleDensity", 1.75);
     commitToneNumber(el, "distributionFidelity", 0.8);
+    commitToneNumber(el, "voronoiRelaxation", 0.6);
 
     const commitsBeforeReturn = historyCapture.transactionCommits.length;
     selectValue(choiceParamSelect(el, "strategy"), "scribble");
@@ -6664,6 +6670,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       pathDensity: 2.5,
       stippleDensity: 1.75,
       distributionFidelity: 0.8,
+      voronoiRelaxation: 0.6,
     });
     expect(paramInput(el, "pathDensity").value).toBe("2.5");
 
@@ -6673,6 +6680,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(choiceParamSelect(el, "strategy").value).toBe("stippling");
     expect(paramInput(el, "stippleDensity").value).toBe("1.75");
     expect(paramInput(el, "distributionFidelity").value).toBe("0.8");
+    expect(paramInput(el, "voronoiRelaxation").value).toBe("0.6");
 
     expect(
       pressHistoryShortcut(window, { key: "y", ctrlKey: true })
@@ -6689,6 +6697,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     selectValue(choiceParamSelect(el, "strategy"), "stippling");
     commitToneNumber(el, "stippleDensity", 2);
     commitToneNumber(el, "distributionFidelity", 0.8);
+    commitToneNumber(el, "voronoiRelaxation", 0.6);
     selectValue(choiceParamSelect(el, "strategy"), "scribble");
     act(() => {
       el.querySelector<HTMLButtonElement>(
@@ -6709,6 +6718,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       stopPoint: 50,
       stippleDensity: 2,
       distributionFidelity: 0.8,
+      voronoiRelaxation: 0.6,
     });
 
     selectValue(choiceParamSelect(el, "strategy"), "stippling");
@@ -6717,6 +6727,9 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     act(() => {
       el.querySelector<HTMLButtonElement>(
         'button[aria-label="distributionFidelity lock"]',
+      )!.click();
+      el.querySelector<HTMLButtonElement>(
+        'button[aria-label="voronoiRelaxation lock"]',
       )!.click();
     });
     random.mockClear().mockReturnValue(0.25);
@@ -6732,10 +6745,11 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       stopPoint: 50,
       stippleDensity: 0.25 * (400 / 0.25) ** 0.25,
       distributionFidelity: 0.8,
+      voronoiRelaxation: 0.6,
     });
   });
 
-  it("saves and reloads all nine authored Tone fields across both strategies", async () => {
+  it("saves and reloads all ten authored Tone fields across both strategies", async () => {
     const reloadedParams: Params = {
       strategy: "stippling",
       pathDensity: 4.5,
@@ -6746,6 +6760,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       stopPoint: 90,
       stippleDensity: 1.8,
       distributionFidelity: 0.7,
+      voronoiRelaxation: 0.65,
     };
     listPresets.mockResolvedValue(["authored"]);
     loadPreset.mockResolvedValue({
@@ -6770,6 +6785,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       stopPoint: 80,
       stippleDensity: 2,
       distributionFidelity: 0.75,
+      voronoiRelaxation: 0.55,
     };
     for (const key of scribbleControlKeys) {
       commitToneNumber(el, key, Number(savedParams[key]));
@@ -6789,7 +6805,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       name: "complete-tone",
       params: savedParams,
     });
-    expect(Object.keys(savePreset.mock.calls.at(-1)![0].params)).toHaveLength(9);
+    expect(Object.keys(savePreset.mock.calls.at(-1)![0].params)).toHaveLength(10);
 
     const picker = el.querySelector<HTMLSelectElement>(
       'select[aria-label="saved presets"]',
@@ -6804,6 +6820,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(stipplingControlKeys.map((key) => paramInput(el, key).value)).toEqual([
       "1.8",
       "0.7",
+      "0.65",
     ]);
     selectValue(choiceParamSelect(el, "strategy"), "scribble");
     expect(scribbleControlKeys.map((key) => paramInput(el, key).value)).toEqual([
@@ -6862,11 +6879,13 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       stopPoint: 100,
       stippleDensity: 1,
       distributionFidelity: 0.5,
+      voronoiRelaxation: 0,
     });
     selectValue(choiceParamSelect(el, "strategy"), "stippling");
     expect(visibleNumberKeys(el)).toEqual(stipplingControlKeys);
     expect(paramInput(el, "stippleDensity").value).toBe("1");
     expect(paramInput(el, "distributionFidelity").value).toBe("0.5");
+    expect(paramInput(el, "voronoiRelaxation").value).toBe("0");
   });
 
   it("embeds all authored Tone fields in SVG metadata while worker identity stays active-only", async () => {
@@ -6880,6 +6899,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       stopPoint: 90,
       stippleDensity: 1.8,
       distributionFidelity: 0.7,
+      voronoiRelaxation: 0.6,
     };
     listPresets.mockResolvedValue(["metadata"]);
     loadPreset.mockResolvedValue({
@@ -6908,6 +6928,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       { key: "strategy", value: "stippling" },
       { key: "stippleDensity", value: 1.8 },
       { key: "distributionFidelity", value: 0.7 },
+      { key: "voronoiRelaxation", value: 0.6 },
     ]);
     await act(async () => {
       job.resolve({
@@ -6943,7 +6964,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(encoded).toBeDefined();
     const metadata = JSON.parse(encoded!) as Preset;
     expect(metadata.params).toEqual(authoredParams);
-    expect(Object.keys(metadata.params)).toHaveLength(9);
+    expect(Object.keys(metadata.params)).toHaveLength(10);
     expect(applyPreset(toneCalibration.schema, metadata).params).toEqual(
       authoredParams,
     );
@@ -7190,9 +7211,13 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
   }
 
   const shadingParamEntries = (params: Params) =>
-    Object.entries(activeParams(toneCalibration.schema, params)).map(
-      ([key, value]) => ({ key, value }),
-    );
+    createShadingComputeIdentity({
+      sketchId: toneCalibration.id,
+      schema: toneCalibration.schema,
+      params,
+      seed: 0,
+      compositionFrame: DEFAULT_COMPOSITION_FRAME,
+    }).params;
 
   it("ignores an actual Tone inactive-branch-only Preset edit without disturbing current Shading", async () => {
     const initialParams = defaultParams(toneCalibration.schema);

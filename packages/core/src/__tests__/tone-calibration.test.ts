@@ -58,6 +58,7 @@ const SCRIBBLE_CONTROL_KEYS = [
 const STIPPLING_CONTROL_KEYS = [
   'stippleDensity',
   'distributionFidelity',
+  'voronoiRelaxation',
 ] as const
 const CONTROL_KEYS = [
   'strategy',
@@ -232,6 +233,7 @@ describe('Tone Calibration Shading integration', () => {
       stopPoint: 100,
       stippleDensity: 1,
       distributionFidelity: 0.5,
+      voronoiRelaxation: 0,
     })
     expect(() => validateParamSchema(toneCalibrationSchema)).not.toThrow()
     expect(toneCalibration.schema).not.toHaveProperty('limits')
@@ -265,6 +267,7 @@ describe('Tone Calibration Shading integration', () => {
       ...preset.params,
       stippleDensity: 1,
       distributionFidelity: 0.5,
+      voronoiRelaxation: 0,
     })
     expect(current.primitives.map(({ points }) => points)).toEqual(
       legacy.polylines,
@@ -277,6 +280,7 @@ describe('Tone Calibration Shading integration', () => {
       strategy: 'stippling',
       stippleDensity: 0.25,
       distributionFidelity: 0,
+      voronoiRelaxation: 0.5,
       // Inactive Scribble state must not leak into Stippling controls or source.
       pathDensity: 19.7,
       chaos: 1,
@@ -301,6 +305,7 @@ describe('Tone Calibration Shading integration', () => {
     expect(input.controls).toEqual({
       stippleDensity: 0.25,
       distributionFidelity: 0,
+      voronoiRelaxation: 0.5,
     })
     expect(input.source).not.toBe(scribbleSource)
     expect(stipplingSource.layout).toEqual(scribbleSource.layout)

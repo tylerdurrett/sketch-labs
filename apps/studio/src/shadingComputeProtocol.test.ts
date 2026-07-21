@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { ParamSchema, Scene } from "@harness/core";
+import {
+  defaultParams,
+  toneCalibration,
+  type ParamSchema,
+  type Params,
+  type Scene,
+} from "@harness/core";
 
 import {
   copyShadingComputeIdentity,
@@ -260,6 +266,66 @@ describe("Shading compute identity", () => {
       { key: "scribbleDensity", value: 4 },
       { key: "scribbleFidelity", value: 5 },
     ]);
+  });
+
+  it("widens the actual Stippling identity compatibly and keys positive relaxation only while active", () => {
+    const {
+      voronoiRelaxation: _removed,
+      ...preSliceSchema
+    } = toneCalibration.schema;
+    const shared = {
+      sketchId: toneCalibration.id,
+      seed: "compatibility-seed",
+      compositionFrame: { width: 120, height: 90 },
+    } as const;
+    const defaults: Params = {
+      ...defaultParams(toneCalibration.schema),
+      strategy: "stippling",
+    };
+    const {
+      voronoiRelaxation: _defaultRelaxation,
+      ...paramsWithoutRelaxation
+    } = defaults;
+    const preSlice = createShadingComputeIdentity({
+      ...shared,
+      schema: preSliceSchema,
+      params: defaults,
+    });
+    const missing = createShadingComputeIdentity({
+      ...shared,
+      schema: toneCalibration.schema,
+      params: paramsWithoutRelaxation,
+    });
+    const explicitZero = createShadingComputeIdentity({
+      ...shared,
+      schema: toneCalibration.schema,
+      params: { ...defaults, voronoiRelaxation: 0 },
+    });
+    const positive = createShadingComputeIdentity({
+      ...shared,
+      schema: toneCalibration.schema,
+      params: { ...defaults, voronoiRelaxation: 0.5 },
+    });
+    const inactiveRetained = createShadingComputeIdentity({
+      ...shared,
+      schema: toneCalibration.schema,
+      params: {
+        ...defaults,
+        strategy: "scribble",
+        voronoiRelaxation: 0.5,
+      },
+    });
+
+    expect(missing).toEqual(preSlice);
+    expect(explicitZero).toEqual(preSlice);
+    expect(positive.params).toEqual([
+      ...preSlice.params,
+      { key: "voronoiRelaxation", value: 0.5 },
+    ]);
+    expect(inactiveRetained.params).not.toContainEqual({
+      key: "voronoiRelaxation",
+      value: 0.5,
+    });
   });
 
   it("ignores inactive edits but distinguishes active edits and restored branch values", () => {

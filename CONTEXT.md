@@ -137,6 +137,10 @@ _Avoid_: Path density, resolution
 A Stippling-specific control that sets how carefully an initial tone-weighted blue-noise placement is refined toward lower local distribution error without changing Stipple abundance or length.
 _Avoid_: Tone fidelity, Stipple density, regularity
 
+**Voronoi relaxation**:
+A Stippling-specific control that sets how strongly the retained Stipples spatially settle toward their effective-demand-weighted Voronoi centroids after Distribution fidelity refinement, without changing their abundance, ordered identity, orientation, or fixed length. Zero preserves the pre-relaxation placement exactly.
+_Avoid_: Distribution fidelity, Lloyd's algorithm (implementation, not artist language), regularity
+
 **Output Profile**:
 The one target-specific artifact description active in a Sketch session and captured by its **Preset**—plot dimensions and margins for paper, or resolution and frame settings for video. Before reframing, its aspect determines the **Composition Frame** and its magnitude controls output mapping. Ordinary Page framing derives a new final profile at the preserved Scene-to-physical scale; fixed-page framing instead locks the exact profile and varies only the existing Page Frame. In both cases the original Composition Frame remains independently reproducible. A Sketch may declare its default, otherwise the Harness initially supplies a square `200 × 200 mm` plot profile with linked `10 mm` insets.
 _Avoid_: render target (the target is only one field), export options, last-used settings
@@ -268,6 +272,7 @@ _Avoid_: config, params, options, export options
 - A **Scribble Strategy** deposits additive virtual coverage with a compact smooth falloff around each segment; explicit Scene-space influence radius and per-pass strength control spacing and repetition without representing physical **Tool width**.
 - Increasing **Path density** reduces the virtual coverage satisfied by each pass, producing more path length for the same **Tone Field** while preserving its relative light-dark relationships.
 - A **Stippling Strategy** uses **Stipple density** to determine mark abundance, then uses **Distribution fidelity** to refine an initially tone-weighted blue-noise distribution toward lower local distribution error without changing micro-stroke length or permitting pathological clumps.
+- **Voronoi relaxation** is a separate final Stippling placement stage: it spatially settles the retained ordered Stipples against effective demand without replacing Distribution fidelity or changing Stipple abundance, orientation, or fixed length; its zero default preserves prior geometry and preparation identity exactly.
 - Scribble and Stippling share no authored sliders: similarly directed controls retain independent values, ranges, defaults, diagnostics, and names rather than implying cross-strategy numerical equivalence.
 - A **Stippling Strategy** preserves deterministic mark order but does not promise pen-travel optimization; downstream plotter software owns that optimization until the Harness gains a general export-stage solution.
 - Decreasing **Scribble scale** produces finer paths and tighter field sampling, while increasing it produces broader, looser paths; low-level sampling and coverage ratios remain internal until hands-on iteration proves a need to expose them separately.

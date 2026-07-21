@@ -38,10 +38,11 @@ function mark(
 }
 
 describe('Stippling authored controls', () => {
-  it('declares exactly two independent bounded controls and derives defaults', () => {
+  it('declares exactly three independent bounded controls and derives defaults', () => {
     expect(Object.keys(stipplingControlSchema)).toEqual([
       'stippleDensity',
       'distributionFidelity',
+      'voronoiRelaxation',
     ])
 
     for (const [name, spec] of Object.entries(stipplingControlSchema)) {
@@ -61,11 +62,13 @@ describe('Stippling authored controls', () => {
     const normalized = normalizeStipplingControls({
       stippleDensity: Number.NaN,
       distributionFidelity: 20,
+      voronoiRelaxation: -20,
     })
 
     expect(normalized).toEqual({
       stippleDensity: defaultStipplingControls.stippleDensity,
       distributionFidelity: stipplingControlSchema.distributionFidelity.max,
+      voronoiRelaxation: stipplingControlSchema.voronoiRelaxation.min,
     })
     expect(
       normalizeStipplingControls({ stippleDensity: -20 }).stippleDensity,
@@ -75,6 +78,16 @@ describe('Stippling authored controls', () => {
         distributionFidelity: Number.NEGATIVE_INFINITY,
       }).distributionFidelity,
     ).toBe(defaultStipplingControls.distributionFidelity)
+    expect(
+      normalizeStipplingControls({
+        voronoiRelaxation: Number.POSITIVE_INFINITY,
+      }).voronoiRelaxation,
+    ).toBe(defaultStipplingControls.voronoiRelaxation)
+    expect(
+      normalizeStipplingControls({
+        voronoiRelaxation: 20,
+      }).voronoiRelaxation,
+    ).toBe(stipplingControlSchema.voronoiRelaxation.max)
     expect(Object.isFrozen(normalized)).toBe(true)
     expect(Object.isFrozen(defaultStipplingControls)).toBe(true)
     expect(Object.isFrozen(stipplingControlSchema)).toBe(true)
@@ -88,6 +101,25 @@ describe('Stippling authored controls', () => {
       default: 1,
       sliderScale: 'logarithmic',
     })
+  })
+
+  it('declares Voronoi relaxation as a zero-default unit interval', () => {
+    expect(stipplingControlSchema.voronoiRelaxation).toEqual({
+      kind: 'number',
+      min: 0,
+      max: 1,
+      default: 0,
+      step: 0.01,
+      identityDefault: 'implicit',
+    })
+    expect(defaultStipplingControls.voronoiRelaxation).toBe(0)
+    expect(
+      [0, 0.5, 1].map(
+        (value) =>
+          normalizeStipplingControls({ voronoiRelaxation: value })
+            .voronoiRelaxation,
+      ),
+    ).toEqual([0, 0.5, 1])
   })
 })
 

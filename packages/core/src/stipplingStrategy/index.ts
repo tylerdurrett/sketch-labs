@@ -3,11 +3,12 @@
  *
  * Strategy-local rationale: a Stipple is one fixed-length open two-point
  * micro-stroke so it remains ordinary plotter path geometry while reading as a
- * dot. Density owns abundance and spacing; fidelity owns only bounded relocation
- * effort. The length stays frame-relative and independent of paper, tool width,
- * rendering, and either authored control. These are local artistic choices, not
- * system architecture decisions, so they live with the strategy rather than in
- * an ADR.
+ * dot. Density owns abundance and spacing; distribution fidelity owns the
+ * existing tone-allocation refinement; Voronoi relaxation independently owns
+ * later spatial settling. The length stays frame-relative and independent of
+ * paper, tool width, rendering, and every authored control. These are local
+ * artistic choices, not system architecture decisions, so they live with the
+ * strategy rather than in an ADR.
  */
 
 import { createRandom } from '../random'
