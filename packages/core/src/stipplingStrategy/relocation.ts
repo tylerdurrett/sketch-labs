@@ -98,17 +98,13 @@ function isCandidatePermitted(
   )
 }
 
-function cellKey(x: number, y: number): string {
-  return `${x},${y}`
-}
-
 /** Flag both sides of every too-close pair without ordered acceptance bias. */
 function spacingConflicts(
   centers: readonly Readonly<Point>[],
   minimumSpacing: number,
 ): Uint8Array {
   const conflicts = new Uint8Array(centers.length)
-  const cells = new Map<string, number[]>()
+  const rows = new Map<number, Map<number, number[]>>()
   const minimumSpacingSquared = minimumSpacing * minimumSpacing
 
   for (let index = 0; index < centers.length; index++) {
@@ -117,8 +113,10 @@ function spacingConflicts(
     const cellX = Math.floor(center[0] / minimumSpacing)
     const cellY = Math.floor(center[1] / minimumSpacing)
     for (let y = cellY - 1; y <= cellY + 1; y++) {
+      const row = rows.get(y)
+      if (row === undefined) continue
       for (let x = cellX - 1; x <= cellX + 1; x++) {
-        for (const otherIndex of cells.get(cellKey(x, y)) ?? []) {
+        for (const otherIndex of row.get(x) ?? []) {
           const other = centers[otherIndex]!
           const deltaX = center[0] - other[0]
           const deltaY = center[1] - other[1]
@@ -129,13 +127,25 @@ function spacingConflicts(
         }
       }
     }
-    const key = cellKey(cellX, cellY)
-    const bucket = cells.get(key)
-    if (bucket === undefined) cells.set(key, [index])
+    let row = rows.get(cellY)
+    if (row === undefined) {
+      row = new Map<number, number[]>()
+      rows.set(cellY, row)
+    }
+    const bucket = row.get(cellX)
+    if (bucket === undefined) row.set(cellX, [index])
     else bucket.push(index)
   }
 
   return conflicts
+}
+
+/** @internal Direct-module seam for exact spatial-index equivalence tests. */
+export function findStipplingSpacingConflictsForTesting(
+  centers: readonly Readonly<Point>[],
+  minimumSpacing: number,
+): Uint8Array {
+  return spacingConflicts(centers, minimumSpacing)
 }
 
 function settleCandidates(

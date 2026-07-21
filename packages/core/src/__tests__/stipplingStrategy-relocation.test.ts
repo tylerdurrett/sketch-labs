@@ -9,6 +9,7 @@ import {
 import { isMaskPermittedStipple } from '../stipplingStrategy/mask'
 import { createStipplingModel } from '../stipplingStrategy/model'
 import {
+  findStipplingSpacingConflictsForTesting,
   relocateStipplesToVoronoiCentroids,
 } from '../stipplingStrategy/relocation'
 import type {
@@ -113,7 +114,71 @@ function solve(
   return assignStipplingVoronoi(target, initial)
 }
 
+function stringKeyedSpacingConflicts(
+  centers: readonly Readonly<Point>[],
+  minimumSpacing: number,
+): Uint8Array {
+  const conflicts = new Uint8Array(centers.length)
+  const cells = new Map<string, number[]>()
+  const minimumSpacingSquared = minimumSpacing * minimumSpacing
+
+  for (let index = 0; index < centers.length; index++) {
+    const center = centers[index]!
+    if (!Number.isFinite(center[0]) || !Number.isFinite(center[1])) continue
+    const cellX = Math.floor(center[0] / minimumSpacing)
+    const cellY = Math.floor(center[1] / minimumSpacing)
+    for (let y = cellY - 1; y <= cellY + 1; y++) {
+      for (let x = cellX - 1; x <= cellX + 1; x++) {
+        for (const otherIndex of cells.get(`${x},${y}`) ?? []) {
+          const other = centers[otherIndex]!
+          const deltaX = center[0] - other[0]
+          const deltaY = center[1] - other[1]
+          if (deltaX * deltaX + deltaY * deltaY < minimumSpacingSquared) {
+            conflicts[index] = 1
+            conflicts[otherIndex] = 1
+          }
+        }
+      }
+    }
+    const key = `${cellX},${cellY}`
+    const bucket = cells.get(key)
+    if (bucket === undefined) cells.set(key, [index])
+    else bucket.push(index)
+  }
+
+  return conflicts
+}
+
 describe('one-pass Stipple centroid relocation', () => {
+  it('matches string-keyed conflicts across boundaries and numeric extremes', () => {
+    const points: readonly Readonly<Point>[] = [
+      [0, 0],
+      [0.249999999999, 0],
+      [0.25, 0],
+      [-0.000000000001, 0],
+      [-0.25, 0],
+      [4.9, 5],
+      [5.1, 5],
+      [9.75, 10],
+      [10, 10],
+      [1_000_000_000_000, -1_000_000_000_000],
+      [Number.NaN, 5],
+    ]
+
+    for (const minimumSpacing of [0.25, 0.5, 2]) {
+      for (const first of points) {
+        for (const second of points) {
+          for (const third of points) {
+            const centers = [first, second, third]
+            expect(
+              findStipplingSpacingConflictsForTesting(centers, minimumSpacing),
+            ).toEqual(stringKeyedSpacingConflicts(centers, minimumSpacing))
+          }
+        }
+      }
+    }
+  })
+
   it('simultaneously improves fixed cells without changing identity or geometry', () => {
     const target = model([
       demandSample([3, 2]),
