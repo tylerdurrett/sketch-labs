@@ -44,6 +44,7 @@ import {
   totalPathLength,
 } from './shadingStrategy'
 import type { ToneSource } from './shadingFields'
+import type { StipplingRelaxationDiagnostics } from './stipplingStrategy/relaxation'
 
 /**
  * The single value feeding all of a Sketch's internal randomness.
@@ -663,6 +664,8 @@ export interface StipplingShadingFidelity {
   readonly kind: 'stippling'
   /** Normalized distribution error after bounded placement and refinement. */
   readonly distributionError: number
+  /** Exact retained metrics, present only for positive authored relaxation. */
+  readonly relaxation?: Readonly<StipplingRelaxationDiagnostics>
 }
 
 /** Exhaustive strategy-specific fidelity diagnostics carried by artwork. */
@@ -695,12 +698,20 @@ export function createShadingDiagnostics(
   result: Readonly<ShadingResult>,
   fidelity: ShadingFidelity,
 ): ShadingDiagnostics {
+  const frozenFidelity: ShadingFidelity =
+    fidelity.kind === 'stippling' && fidelity.relaxation !== undefined
+      ? Object.freeze({
+          ...fidelity,
+          relaxation: Object.freeze({ ...fidelity.relaxation }),
+        })
+      : Object.freeze({ ...fidelity })
+
   return Object.freeze({
     termination: result.termination,
     pathLength: totalPathLength(result.polylines),
     polylineCount: polylineCount(result.polylines),
     penLiftCount: penLiftCount(result.polylines),
-    fidelity: Object.freeze({ ...fidelity }),
+    fidelity: frozenFidelity,
   })
 }
 

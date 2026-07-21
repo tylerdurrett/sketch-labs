@@ -318,6 +318,30 @@ describe('Stippling orchestration', () => {
       termination: 'completed',
       stopCause: 'completed',
     })
+    const requestedWorkUnits = resolveStipplingRelaxationWorkUnits(
+      relaxedModel,
+      relaxedModel.scales.targetCount,
+      resolveStipplingRelaxationPasses(0.25),
+    )
+    expect(relaxed.relaxation).toEqual({
+      objective: expect.any(Number),
+      requestedWorkUnits,
+      completedWorkUnits: requestedWorkUnits,
+      iterationsCompleted: 2,
+      relocationsAccepted: expect.any(Number),
+    })
+    expect(Object.keys(relaxed.relaxation!)).toEqual([
+      'objective',
+      'requestedWorkUnits',
+      'completedWorkUnits',
+      'iterationsCompleted',
+      'relocationsAccepted',
+    ])
+    expect(Object.isFrozen(relaxed.relaxation)).toBe(true)
+    expect(relaxed.relaxation!.objective).toBeGreaterThanOrEqual(0)
+    expect(Number.isSafeInteger(relaxed.relaxation!.relocationsAccepted)).toBe(
+      true,
+    )
     expect(relaxed.marks).toHaveLength(unrelaxed.marks.length)
     expect(relaxed.marks).not.toEqual(unrelaxed.marks)
     expect(relaxed.marks.map(({ orientation }) => orientation)).toEqual(
@@ -357,9 +381,15 @@ describe('Stippling orchestration', () => {
       ...GENEROUS_LIMITS,
       maxRelaxationWorkUnits: passWork,
     })
-    const noCompletePass = execute({
-      ...GENEROUS_LIMITS,
-      maxRelaxationWorkUnits: passWork - 1,
+    const noCompletePassProgress: ShadingProgress[] = []
+    const noCompletePass = runStipplingOrchestrator({
+      model: target,
+      rng: createRandom('relaxation-ceilings'),
+      limits: {
+        ...GENEROUS_LIMITS,
+        maxRelaxationWorkUnits: passWork - 1,
+      },
+      observer: (snapshot) => noCompletePassProgress.push(snapshot),
     })
     const postRefinement = runStipplingOrchestrator({
       model: model(
@@ -385,6 +415,26 @@ describe('Stippling orchestration', () => {
       termination: 'budget-exhausted',
       stopCause: 'relaxation-ceiling-reached',
     })
+    expect(noCompletePass.relaxation).toEqual({
+      objective: 0,
+      requestedWorkUnits: passWork * resolveStipplingRelaxationPasses(0.5),
+      completedWorkUnits: 0,
+      iterationsCompleted: 0,
+      relocationsAccepted: 0,
+    })
+    expect(noCompletePassProgress.at(-1)).toMatchObject({
+      completedWorkUnits:
+        noCompletePass.placementAttemptsUsed +
+        noCompletePass.refinementAttemptsUsed,
+      terminal: true,
+    })
+    expect(passLimited.relaxation).toEqual({
+      objective: expect.any(Number),
+      requestedWorkUnits: passWork * resolveStipplingRelaxationPasses(0.5),
+      completedWorkUnits: passWork,
+      iterationsCompleted: 1,
+      relocationsAccepted: expect.any(Number),
+    })
   })
 
   it('gives refinement exhaustion precedence over relaxation ceilings', () => {
@@ -408,6 +458,14 @@ describe('Stippling orchestration', () => {
 
     expect(outcome.stopCause).toBe('refinement-ceiling-reached')
     expect(outcome.refinementAttemptsUsed).toBe(1)
+    expect(outcome.relaxation).toEqual({
+      objective: 0,
+      requestedWorkUnits: expect.any(Number),
+      completedWorkUnits: 0,
+      iterationsCompleted: 0,
+      relocationsAccepted: 0,
+    })
+    expect(outcome.relaxation!.requestedWorkUnits).toBeGreaterThan(0)
   })
 
   it('validates every non-negative integer execution limit and attempt cap', () => {

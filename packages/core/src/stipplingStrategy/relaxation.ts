@@ -39,15 +39,20 @@ export type StipplingRelaxationStopCause =
   | 'no-improvement'
   | 'pass-ceiling-reached'
 
-/** Truthful last-valid state from a sequence of complete Lloyd passes. */
-export interface StipplingRelaxationOutcome {
-  readonly marks: readonly Readonly<StippleMark>[]
-  readonly distributionError: number
+/** Exact retained metrics for one positive authored relaxation request. */
+export interface StipplingRelaxationDiagnostics {
+  readonly objective: number
   readonly requestedWorkUnits: number
   readonly completedWorkUnits: number
   readonly iterationsCompleted: number
   readonly relocationsAccepted: number
-  readonly objective: number
+}
+
+/** Truthful last-valid state from a sequence of complete Lloyd passes. */
+export interface StipplingRelaxationOutcome
+  extends StipplingRelaxationDiagnostics {
+  readonly marks: readonly Readonly<StippleMark>[]
+  readonly distributionError: number
   readonly termination: 'completed' | 'budget-exhausted'
   readonly stopCause: StipplingRelaxationStopCause
 }
@@ -259,7 +264,7 @@ export function runStipplingRelaxation({
       )
     }
 
-    if (!Number.isFinite(objective)) {
+    if (!Number.isFinite(objective) || objective < 0) {
       throw new Error('Stippling relaxation produced a non-finite objective')
     }
 

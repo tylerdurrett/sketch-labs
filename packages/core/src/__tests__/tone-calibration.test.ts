@@ -336,6 +336,13 @@ describe('Tone Calibration Shading integration', () => {
       fidelity: {
         kind: 'stippling',
         distributionError: expect.any(Number),
+        relaxation: {
+          objective: expect.any(Number),
+          requestedWorkUnits: expect.any(Number),
+          completedWorkUnits: expect.any(Number),
+          iterationsCompleted: expect.any(Number),
+          relocationsAccepted: expect.any(Number),
+        },
       },
     })
     expect(
@@ -770,6 +777,13 @@ describe('Tone Calibration Shading integration', () => {
   })
 
   it('keeps bounded partial Stippling as valid visible artwork with typed diagnostics', () => {
+    const relaxation = Object.freeze({
+      objective: 0.0125,
+      requestedWorkUnits: 80,
+      completedWorkUnits: 40,
+      iterationsCompleted: 1,
+      relocationsAccepted: 7,
+    })
     stipplingStrategyMock.mockReturnValueOnce({
       polylines: [
         [
@@ -783,6 +797,7 @@ describe('Tone Calibration Shading integration', () => {
       ],
       termination: 'budget-exhausted',
       distributionError: 0.4,
+      relaxation,
     })
 
     const artwork = toneCalibration.generateShadingArtwork!(
@@ -796,8 +811,13 @@ describe('Tone Calibration Shading integration', () => {
       pathLength: 0.5,
       polylineCount: 2,
       penLiftCount: 1,
-      fidelity: { kind: 'stippling', distributionError: 0.4 },
+      fidelity: { kind: 'stippling', distributionError: 0.4, relaxation },
     })
+    if (artwork.diagnostics.fidelity.kind !== 'stippling') {
+      throw new Error('expected Stippling fidelity')
+    }
+    expect(artwork.diagnostics.fidelity.relaxation).not.toBe(relaxation)
+    expect(Object.isFrozen(artwork.diagnostics.fidelity.relaxation)).toBe(true)
     expect(artwork.scene.primitives).toEqual([
       {
         points: [

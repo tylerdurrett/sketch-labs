@@ -165,6 +165,14 @@ function successWithFidelity(fidelity: unknown) {
   return candidate;
 }
 
+const relaxation = Object.freeze({
+  objective: 0.0125,
+  requestedWorkUnits: 80,
+  completedWorkUnits: 40,
+  iterationsCompleted: 1,
+  relocationsAccepted: 7,
+});
+
 function changed(
   mutate: (copy: Record<string, any>) => void,
 ): ShadingComputeIdentity {
@@ -530,6 +538,16 @@ describe("Shading compute protocol guards", () => {
         ),
       ).toBe(true);
     }
+
+    expect(
+      isShadingComputeSuccess(
+        successWithFidelity({
+          kind: "stippling",
+          distributionError: 0.25,
+          relaxation,
+        }),
+      ),
+    ).toBe(true);
   });
 
   it("accepts strict request, progress, success, and failure messages", () => {
@@ -738,9 +756,60 @@ describe("Shading compute protocol guards", () => {
     ];
 
     for (const fidelity of malformedFidelity) {
-      expect(
-        isShadingComputeSuccess(successWithFidelity(fidelity)),
-      ).toBe(false);
+      expect(isShadingComputeSuccess(successWithFidelity(fidelity))).toBe(
+        false,
+      );
+    }
+  });
+
+  it("strictly validates every positive-relaxation diagnostic field", () => {
+    const valid = {
+      kind: "stippling",
+      distributionError: 0.25,
+      relaxation,
+    };
+    const malformed: unknown[] = [
+      { ...valid, relaxation: undefined },
+      { ...valid, relaxation: null },
+      { ...valid, relaxation: { ...relaxation, extra: true } },
+      ...Object.keys(relaxation).map((missing) => ({
+        ...valid,
+        relaxation: Object.fromEntries(
+          Object.entries(relaxation).filter(([key]) => key !== missing),
+        ),
+      })),
+      { ...valid, relaxation: { ...relaxation, objective: -0.1 } },
+      { ...valid, relaxation: { ...relaxation, objective: NaN } },
+      { ...valid, relaxation: { ...relaxation, objective: Infinity } },
+      { ...valid, relaxation: { ...relaxation, requestedWorkUnits: -1 } },
+      { ...valid, relaxation: { ...relaxation, requestedWorkUnits: 1.5 } },
+      {
+        ...valid,
+        relaxation: { ...relaxation, requestedWorkUnits: Infinity },
+      },
+      { ...valid, relaxation: { ...relaxation, completedWorkUnits: -1 } },
+      { ...valid, relaxation: { ...relaxation, completedWorkUnits: 1.5 } },
+      {
+        ...valid,
+        relaxation: {
+          ...relaxation,
+          completedWorkUnits: relaxation.requestedWorkUnits + 1,
+        },
+      },
+      { ...valid, relaxation: { ...relaxation, iterationsCompleted: -1 } },
+      { ...valid, relaxation: { ...relaxation, iterationsCompleted: 1.5 } },
+      { ...valid, relaxation: { ...relaxation, relocationsAccepted: -1 } },
+      { ...valid, relaxation: { ...relaxation, relocationsAccepted: 1.5 } },
+      {
+        ...valid,
+        relaxation: { ...relaxation, relocationsAccepted: Infinity },
+      },
+    ];
+
+    for (const fidelity of malformed) {
+      expect(isShadingComputeSuccess(successWithFidelity(fidelity))).toBe(
+        false,
+      );
     }
   });
 

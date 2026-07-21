@@ -39,7 +39,32 @@ const stoppedEarly: CoreShadingDiagnostics = {
 const stipplingExhausted: CoreShadingDiagnostics = {
   ...converged,
   termination: "budget-exhausted",
-  fidelity: { kind: "stippling", distributionError: 1.25 },
+  fidelity: {
+    kind: "stippling",
+    distributionError: 1.25,
+    relaxation: {
+      objective: 0.0125,
+      requestedWorkUnits: 80,
+      completedWorkUnits: 40,
+      iterationsCompleted: 1,
+      relocationsAccepted: 7,
+    },
+  },
+};
+
+const stipplingUnevaluated: CoreShadingDiagnostics = {
+  ...stipplingExhausted,
+  fidelity: {
+    kind: "stippling",
+    distributionError: 0.75,
+    relaxation: {
+      objective: 0,
+      requestedWorkUnits: 80,
+      completedWorkUnits: 0,
+      iterationsCompleted: 0,
+      relocationsAccepted: 0,
+    },
+  },
 };
 
 let container: HTMLDivElement | null = null;
@@ -241,6 +266,10 @@ describe("ShadingDiagnostics", () => {
 
     const retained = lane(el, "Displayed result (stale)");
     expect(retained.textContent).toContain("Distribution error125.00%");
+    expect(retained.textContent).toContain("Relaxation objective0.0125");
+    expect(retained.textContent).toContain(
+      "Relaxation work40 of 80 work units",
+    );
     expect(retained.textContent).not.toContain("Residual error");
     expect(retained.textContent).toContain("bounded partial result");
     expect(retained.querySelector('[role="alert"]')).toBeNull();
@@ -248,6 +277,33 @@ describe("ShadingDiagnostics", () => {
     const replacement = lane(el, "Preparing replacement");
     expect(replacement.textContent).not.toContain("Distribution error");
     expect(replacement.textContent).not.toContain("Residual error");
+    expect(replacement.textContent).not.toContain("Relaxation objective");
+    expect(replacement.textContent).not.toContain("Relaxation work");
+  });
+
+  it("renders a retained unstarted request as not evaluated", () => {
+    const el = mount({
+      displayed: {
+        freshness: "stale",
+        diagnostics: stipplingUnevaluated,
+        computeTimeMs: 842,
+      },
+      preparation: {
+        kind: "preparing",
+        progress: {
+          completedWorkUnits: 79,
+          totalWorkUnits: 80,
+          terminal: false,
+        },
+        eta: { kind: "remaining", revision: 1, remainingMs: 200 },
+      },
+    });
+    expand(el);
+
+    const retained = lane(el, "Displayed result (stale)");
+    expect(retained.textContent).toContain("Relaxation objectiveNot evaluated");
+    expect(retained.textContent).toContain("Relaxation work0 of 80 work units");
+    expect(retained.textContent).not.toContain("79 of 80");
   });
 
   it("presents an authored early stop as a neutral finished result", () => {

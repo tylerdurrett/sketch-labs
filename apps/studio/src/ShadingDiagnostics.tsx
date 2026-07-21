@@ -160,10 +160,30 @@ function FidelityMetric({
       );
     case "stippling":
       return (
-        <Metric
-          label="Distribution error"
-          value={formatPercent(fidelity.distributionError)}
-        />
+        <>
+          <Metric
+            label="Distribution error"
+            value={formatPercent(fidelity.distributionError)}
+          />
+          {fidelity.relaxation === undefined ? null : (
+            <>
+              <Metric
+                label="Relaxation objective"
+                value={
+                  fidelity.relaxation.completedWorkUnits === 0
+                    ? "Not evaluated"
+                    : fidelity.relaxation.objective.toLocaleString(undefined, {
+                        maximumSignificantDigits: 6,
+                      })
+                }
+              />
+              <Metric
+                label="Relaxation work"
+                value={`${fidelity.relaxation.completedWorkUnits.toLocaleString()} of ${fidelity.relaxation.requestedWorkUnits.toLocaleString()} work units`}
+              />
+            </>
+          )}
+        </>
       );
   }
 

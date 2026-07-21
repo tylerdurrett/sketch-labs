@@ -531,17 +531,23 @@ describe('Stippling completion and safety ceilings', () => {
       voronoiRelaxation: 0,
     }
 
-    expect(
-      runStipplingStrategyForTesting(
-        input(source(constantTone(1)), 'zero-relaxation', legacyControls),
-        PARTIAL_LIMITS,
-      ),
-    ).toEqual(
-      runStipplingStrategyForTesting(
-        input(source(constantTone(1)), 'zero-relaxation', explicitZero),
-        PARTIAL_LIMITS,
-      ),
+    const legacy = runStipplingStrategyForTesting(
+      input(source(constantTone(1)), 'zero-relaxation', legacyControls),
+      PARTIAL_LIMITS,
     )
+    const explicit = runStipplingStrategyForTesting(
+      input(source(constantTone(1)), 'zero-relaxation', explicitZero),
+      PARTIAL_LIMITS,
+    )
+
+    expect(explicit).toEqual(legacy)
+    expect(Object.hasOwn(legacy, 'relaxation')).toBe(false)
+    expect(Object.hasOwn(explicit, 'relaxation')).toBe(false)
+    expect(Object.keys(explicit)).toEqual([
+      'polylines',
+      'termination',
+      'distributionError',
+    ])
   })
 
   it.each([
@@ -572,6 +578,7 @@ describe('Stippling completion and safety ceilings', () => {
     expect(first.polylines).toHaveLength(PARTIAL_LIMITS.maxStipples)
     expectValidResult(first)
     expectMaskSafe(first, FULL_MASK)
+    expect(Object.hasOwn(first, 'relaxation')).toBe(false)
   })
 
   it('exports the last complete relaxed geometry when the relaxation budget exhausts', () => {
@@ -598,6 +605,16 @@ describe('Stippling completion and safety ceilings', () => {
     expect(first.polylines).toHaveLength(200)
     expectValidResult(first)
     expectMaskSafe(first, FULL_MASK)
+    expect(first.relaxation).toEqual({
+      objective: expect.any(Number),
+      requestedWorkUnits: expect.any(Number),
+      completedWorkUnits: expect.any(Number),
+      iterationsCompleted: 1,
+      relocationsAccepted: expect.any(Number),
+    })
+    expect(first.relaxation!.completedWorkUnits).toBeLessThan(
+      first.relaxation!.requestedWorkUnits,
+    )
   })
 
   it('revalidates final materialized segments without regenerating', () => {

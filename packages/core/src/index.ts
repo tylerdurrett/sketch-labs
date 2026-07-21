@@ -41,6 +41,7 @@ export {
   stipplingStrategy,
   type StipplingControlName,
   type StipplingControls,
+  type StipplingRelaxationDiagnostics,
   type StipplingResult,
   type StipplingStrategyInput,
 } from './stipplingStrategy/index'

@@ -230,6 +230,9 @@ export function generateToneCalibrationShadingArtwork(
     diagnostics: createShadingDiagnostics(result, {
       kind: 'stippling',
       distributionError: result.distributionError,
+      ...(result.relaxation === undefined
+        ? {}
+        : { relaxation: Object.freeze({ ...result.relaxation }) }),
     }),
   }
 }

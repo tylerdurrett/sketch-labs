@@ -49,4 +49,30 @@ describe('createShadingDiagnostics', () => {
     expect(Object.isFrozen(diagnostics)).toBe(true)
     expect(Object.isFrozen(diagnostics.fidelity)).toBe(true)
   })
+
+  it('deep-copies and freezes exact positive-relaxation diagnostics', () => {
+    const relaxation = {
+      objective: 0.012345,
+      requestedWorkUnits: 120,
+      completedWorkUnits: 80,
+      iterationsCompleted: 2,
+      relocationsAccepted: 17,
+    }
+    const diagnostics = createShadingDiagnostics(result, {
+      kind: 'stippling',
+      distributionError: 0.5,
+      relaxation,
+    })
+
+    expect(diagnostics.fidelity).toEqual({
+      kind: 'stippling',
+      distributionError: 0.5,
+      relaxation,
+    })
+    if (diagnostics.fidelity.kind !== 'stippling') {
+      throw new Error('expected Stippling fidelity')
+    }
+    expect(diagnostics.fidelity.relaxation).not.toBe(relaxation)
+    expect(Object.isFrozen(diagnostics.fidelity.relaxation)).toBe(true)
+  })
 })

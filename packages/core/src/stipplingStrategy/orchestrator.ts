@@ -13,6 +13,7 @@ import {
   runStipplingRelaxation,
 } from './relaxation'
 import type {
+  StipplingRelaxationDiagnostics,
   StipplingRelaxationInput,
   StipplingRelaxationOutcome,
 } from './relaxation'
@@ -64,6 +65,8 @@ export interface StipplingOrchestratorOutcome {
   readonly refinementAttemptsUsed: number
   readonly termination: 'completed' | 'budget-exhausted'
   readonly stopCause: StipplingOrchestratorStopCause
+  /** Present exactly when authored Voronoi relaxation is positive. */
+  readonly relaxation?: Readonly<StipplingRelaxationDiagnostics>
 }
 
 function assertExecutionLimits(limits: StipplingExecutionLimits): void {
@@ -230,6 +233,9 @@ export function runStipplingOrchestrator(
     placementAttemptsUsed: number,
     refinementAttemptsUsed: number,
     relaxationWorkUnitsCompleted = 0,
+    relaxationIterationsCompleted = 0,
+    relocationsAccepted = 0,
+    relaxationObjective = 0,
   ): Readonly<StipplingOrchestratorOutcome> => {
     reportProgress(
       marks.length,
@@ -239,14 +245,24 @@ export function runStipplingOrchestrator(
       true,
       stopCause === 'completed',
     )
-    return Object.freeze({
+    const retained = {
       marks,
       distributionError: computeStipplingDistributionError(model, marks),
       placementAttemptsUsed,
       refinementAttemptsUsed,
       termination: stopCause === 'completed' ? 'completed' : 'budget-exhausted',
       stopCause,
+    } as const
+    if (!relaxationEnabled) return Object.freeze(retained)
+
+    const relaxation: Readonly<StipplingRelaxationDiagnostics> = Object.freeze({
+      objective: relaxationObjective,
+      requestedWorkUnits: requestedRelaxationWorkUnits,
+      completedWorkUnits: relaxationWorkUnitsCompleted,
+      iterationsCompleted: relaxationIterationsCompleted,
+      relocationsAccepted,
     })
+    return Object.freeze({ ...retained, relaxation })
   }
 
   if (requestedTargetCount === 0) {
@@ -374,5 +390,8 @@ export function runStipplingOrchestrator(
     placement.attemptsUsed,
     refinementAttemptsUsed,
     relaxation.completedWorkUnits,
+    relaxation.iterationsCompleted,
+    relaxation.relocationsAccepted,
+    relaxation.objective,
   )
 }

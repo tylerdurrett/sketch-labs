@@ -104,6 +104,10 @@ function isNonNegativeFiniteNumber(value: unknown): value is number {
   return isFiniteNumber(value) && value >= 0;
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
 function isPositiveJobId(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) > 0;
 }
@@ -392,14 +396,36 @@ function isShadingFidelity(
       );
     case "stippling":
       return (
-        hasExactKeys(value, ["kind", "distributionError"]) &&
+        hasExactKeys(value, ["kind", "distributionError"], ["relaxation"]) &&
         isFiniteNumber(value.distributionError) &&
         value.distributionError >= 0 &&
-        value.distributionError <= 2
+        value.distributionError <= 2 &&
+        (!hasOwn(value, "relaxation") ||
+          isStipplingRelaxationDiagnostics(value.relaxation))
       );
     default:
       return false;
   }
+}
+
+function isStipplingRelaxationDiagnostics(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "objective",
+      "requestedWorkUnits",
+      "completedWorkUnits",
+      "iterationsCompleted",
+      "relocationsAccepted",
+    ]) &&
+    isNonNegativeFiniteNumber(value.objective) &&
+    isNonNegativeSafeInteger(value.requestedWorkUnits) &&
+    isNonNegativeSafeInteger(value.completedWorkUnits) &&
+    (value.completedWorkUnits as number) <=
+      (value.requestedWorkUnits as number) &&
+    isNonNegativeSafeInteger(value.iterationsCompleted) &&
+    isNonNegativeSafeInteger(value.relocationsAccepted)
+  );
 }
 
 function isShadingDiagnostics(value: unknown): value is ShadingDiagnostics {

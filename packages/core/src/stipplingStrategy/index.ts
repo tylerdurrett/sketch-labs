@@ -35,6 +35,7 @@ import {
   resolveStipplingRelaxationPasses,
   resolveStipplingRelaxationWorkUnits,
 } from './relaxation'
+import type { StipplingRelaxationDiagnostics } from './relaxation'
 import type { StippleMark, StipplingControls, StipplingModel } from './types'
 
 export {
@@ -54,7 +55,11 @@ export interface StipplingStrategyInput extends ShadingStrategyInput<StipplingCo
 export interface StipplingResult extends ShadingResult {
   readonly termination: 'completed' | 'budget-exhausted'
   readonly distributionError: number
+  /** Exact retained metrics, present only for positive authored relaxation. */
+  readonly relaxation?: Readonly<StipplingRelaxationDiagnostics>
 }
+
+export type { StipplingRelaxationDiagnostics } from './relaxation'
 
 type StipplingOrchestrator = (
   input: StipplingOrchestratorInput,
@@ -192,6 +197,9 @@ function executeStipplingStrategy(
     polylines,
     termination: outcome.termination,
     distributionError,
+    ...(outcome.relaxation === undefined
+      ? {}
+      : { relaxation: Object.freeze({ ...outcome.relaxation }) }),
   }
 }
 
