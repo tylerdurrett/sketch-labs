@@ -334,6 +334,13 @@ describe('quantitative Stippling relaxation integration', () => {
       polylines: [],
       termination: 'completed',
       distributionError: 0,
+      relaxation: {
+        objective: 0,
+        requestedWorkUnits: 32_768,
+        completedWorkUnits: 0,
+        iterationsCompleted: 0,
+        relocationsAccepted: 0,
+      },
     })
     expect(half.polylines).toHaveLength(full.polylines.length / 2)
     expect(quarter.polylines).toHaveLength(full.polylines.length / 4)

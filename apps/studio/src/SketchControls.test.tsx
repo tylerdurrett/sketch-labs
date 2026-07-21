@@ -6612,6 +6612,9 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(paramInput(el, "stopPoint").min).toBe("0");
     expect(paramInput(el, "stopPoint").max).toBe("100");
     expect(
+      el.querySelector('button[aria-label="voronoiRelaxation lock"]'),
+    ).toBeNull();
+    expect(
       [...el.querySelectorAll('[role="group"][aria-label="Render mode"] button')].map(
         (candidate) => candidate.textContent,
       ),
@@ -6639,6 +6642,9 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(paramInput(el, "stippleDensity").value).toBe("1");
     expect(paramInput(el, "distributionFidelity").value).toBe("0.5");
     expect(paramInput(el, "voronoiRelaxation").value).toBe("0");
+    expect(
+      el.querySelector('button[aria-label="voronoiRelaxation lock"]'),
+    ).not.toBeNull();
     expect(lastToneSource).not.toBeNull();
     expect(toneSamples(lastToneSource!)).toEqual(scribbleTarget);
   });
@@ -6651,7 +6657,32 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     selectValue(choiceParamSelect(el, "strategy"), "stippling");
     commitToneNumber(el, "stippleDensity", 1.75);
     commitToneNumber(el, "distributionFidelity", 0.8);
+    const commitsBeforeRelaxation =
+      historyCapture.transactionCommits.length;
     commitToneNumber(el, "voronoiRelaxation", 0.6);
+    expect(historyCapture.transactionCommits).toHaveLength(
+      commitsBeforeRelaxation + 1,
+    );
+    const relaxationCommit = historyCapture.transactionCommits.at(-1)!;
+    expect(
+      relaxationCommit.before.transactionStart?.params.voronoiRelaxation,
+    ).toBe(0);
+    expect(relaxationCommit.after.present.params.voronoiRelaxation).toBe(0.6);
+    expect(relaxationCommit.after.past).toHaveLength(
+      relaxationCommit.before.past.length + 1,
+    );
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(choiceParamSelect(el, "strategy").value).toBe("stippling");
+    expect(paramInput(el, "voronoiRelaxation").value).toBe("0");
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(choiceParamSelect(el, "strategy").value).toBe("stippling");
+    expect(paramInput(el, "voronoiRelaxation").value).toBe("0.6");
 
     const commitsBeforeReturn = historyCapture.transactionCommits.length;
     selectValue(choiceParamSelect(el, "strategy"), "scribble");
@@ -6728,13 +6759,10 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       el.querySelector<HTMLButtonElement>(
         'button[aria-label="distributionFidelity lock"]',
       )!.click();
-      el.querySelector<HTMLButtonElement>(
-        'button[aria-label="voronoiRelaxation lock"]',
-      )!.click();
     });
     random.mockClear().mockReturnValue(0.25);
     clickButton(el, "Randomize");
-    expect(random).toHaveBeenCalledTimes(1);
+    expect(random).toHaveBeenCalledTimes(2);
     expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual({
       strategy: "stippling",
       pathDensity: 10.25,
@@ -6745,7 +6773,20 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       stopPoint: 50,
       stippleDensity: 0.25 * (400 / 0.25) ** 0.25,
       distributionFidelity: 0.8,
-      voronoiRelaxation: 0.6,
+      voronoiRelaxation: 0.25,
+    });
+
+    act(() => {
+      el.querySelector<HTMLButtonElement>(
+        'button[aria-label="voronoiRelaxation lock"]',
+      )!.click();
+    });
+    random.mockClear().mockReturnValue(0.75);
+    clickButton(el, "Randomize");
+    expect(random).toHaveBeenCalledTimes(1);
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toMatchObject({
+      distributionFidelity: 0.8,
+      voronoiRelaxation: 0.25,
     });
   });
 
@@ -6888,9 +6929,9 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     expect(paramInput(el, "voronoiRelaxation").value).toBe("0");
   });
 
-  it("embeds all authored Tone fields in SVG metadata while worker identity stays active-only", async () => {
+  it("retains inactive relaxation through reload and SVG metadata while worker identity stays active-only", async () => {
     const authoredParams: Params = {
-      strategy: "stippling",
+      strategy: "scribble",
       pathDensity: 4.5,
       scribbleScale: 1.4,
       momentum: 0.65,
@@ -6925,11 +6966,18 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     const jobIndex = shadingJob.starts.length - 1;
     const job = shadingJob.starts[jobIndex]!;
     expect(job.identity.params).toEqual([
-      { key: "strategy", value: "stippling" },
-      { key: "stippleDensity", value: 1.8 },
-      { key: "distributionFidelity", value: 0.7 },
-      { key: "voronoiRelaxation", value: 0.6 },
+      { key: "strategy", value: "scribble" },
+      { key: "pathDensity", value: 4.5 },
+      { key: "scribbleScale", value: 1.4 },
+      { key: "momentum", value: 0.65 },
+      { key: "chaos", value: 0.35 },
+      { key: "toneFidelity", value: 0.85 },
+      { key: "stopPoint", value: 90 },
     ]);
+    expect(job.identity.params).not.toContainEqual({
+      key: "voronoiRelaxation",
+      value: 0.6,
+    });
     await act(async () => {
       job.resolve({
         status: "success",
@@ -6951,7 +6999,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
           pathLength: 0.14,
           polylineCount: 1,
           penLiftCount: 0,
-          fidelity: { kind: "stippling", distributionError: 0.02 },
+          fidelity: { kind: "scribble", residualError: 0.02 },
         },
         computeTimeMs: 5,
       });
@@ -7139,6 +7187,7 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
       kind: "estimating",
       revision: 1,
     },
+    terminal = completedWorkUnits === totalWorkUnits,
   ): void {
     const observe = shadingJob.starts[index]?.observeProgress;
     if (observe === undefined) throw new Error(`no Shading observer ${index}`);
@@ -7147,7 +7196,7 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
         snapshot: {
           completedWorkUnits,
           totalWorkUnits,
-          terminal: completedWorkUnits === totalWorkUnits,
+          terminal,
         },
         eta,
       });
@@ -7233,6 +7282,7 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
         ...initialParams,
         stippleDensity: 1.75,
         distributionFidelity: 0.8,
+        voronoiRelaxation: 0.65,
       },
       locks: [],
       profile: HARNESS_FALLBACK_PLOT_PROFILE,
@@ -7263,6 +7313,7 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
       strategy: "scribble",
       stippleDensity: 1.75,
       distributionFidelity: 0.8,
+      voronoiRelaxation: 0.65,
     });
     expect(shadingJob.starts).toHaveLength(1);
     expect(shadingJob.cancelCount).toBe(presentation.cancelCount);
@@ -7271,6 +7322,59 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     );
     expect(canvas.dataset.contentRevision).toBe(presentation.contentRevision);
     expect(shadingDisclosure(el).textContent).toBe(presentation.diagnostics);
+  });
+
+  it("treats missing and explicit-zero relaxation as the same current Stippling identity", async () => {
+    const initialParams: Params = {
+      ...defaultParams(toneCalibration.schema),
+      strategy: "stippling",
+    };
+    const {
+      voronoiRelaxation: _omitted,
+      ...paramsWithoutRelaxation
+    } = initialParams;
+    const initialSeed = newSeed(() => 0.125);
+    vi.spyOn(Math, "random").mockReturnValue(0.125);
+    listPresets.mockResolvedValue(["missing-zero", "explicit-zero"]);
+    loadPreset.mockImplementation(async (_sketchId, name) => ({
+      version: 2,
+      sketch: toneCalibration.id,
+      name,
+      seed: initialSeed,
+      params:
+        name === "missing-zero"
+          ? paramsWithoutRelaxation
+          : { ...initialParams, voronoiRelaxation: 0 },
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    }));
+
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+    await completeShading(0, preparedScene(75));
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    await completeShading(1, preparedScene(76), {
+      ...diagnostics,
+      fidelity: { kind: "stippling", distributionError: 0.02 },
+    });
+    expect(shadingJob.starts[1]!.identity.params).not.toContainEqual({
+      key: "voronoiRelaxation",
+      value: 0,
+    });
+
+    const starts = shadingJob.starts.length;
+    const cancels = shadingJob.cancelCount;
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    for (const name of ["missing-zero", "explicit-zero"]) {
+      selectValue(picker, name);
+      clickButton(el, "Reload");
+      await flush();
+      expect(paramInput(el, "voronoiRelaxation").value).toBe("0");
+      expect(shadingJob.starts).toHaveLength(starts);
+      expect(shadingJob.cancelCount).toBe(cancels);
+    }
   });
 
   it("settles actual Tone previews once and switches strategies with only the restored active branch", async () => {
@@ -10009,19 +10113,24 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     expect(shadingJob.starts[3]!.identity).toEqual(failedIdentity);
     expect(historyWriteCount()).toBe(writesAfterStrategy);
 
-    // An active Stippling edit supersedes that exact retry. Its late failure is
-    // ignored, while only the newly-authored identity owns current progress.
-    const stippleDensity = paramInput(el, "stippleDensity");
-    act(() => stippleDensity.focus());
-    setInput(stippleDensity, "1.4");
+    // An active relaxation edit supersedes that exact retry. Its late failure
+    // is ignored, while only the newly-authored identity owns current progress.
+    const cancelsBeforeRelaxation = shadingJob.cancelCount;
+    const relaxation = paramInput(el, "voronoiRelaxation");
+    act(() => relaxation.focus());
+    setInput(relaxation, "0.6");
+    expect(shadingJob.cancelCount).toBe(cancelsBeforeRelaxation + 1);
     expect([png.disabled, svg.disabled]).toEqual([true, true]);
     expect(lastRenderScene).toBe(scribbleScene);
-    act(() => stippleDensity.blur());
+    act(() => relaxation.blur());
     expect(shadingJob.starts).toHaveLength(5);
     expect(shadingJob.starts[4]!.identity.params).toContainEqual({
-      key: "stippleDensity",
-      value: 1.4,
+      key: "voronoiRelaxation",
+      value: 0.6,
     });
+    expect(JSON.stringify(shadingJob.starts[4]!.identity)).not.toMatch(
+      /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+    );
     reportShadingProgress(4, 20, 100, {
       kind: "remaining",
       revision: 2,
@@ -10038,7 +10147,17 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     const stipplingScene = preparedScene(122);
     await completeShading(4, stipplingScene, {
       ...diagnostics,
-      fidelity: { kind: "stippling", distributionError: 0.08 },
+      fidelity: {
+        kind: "stippling",
+        distributionError: 0.08,
+        relaxation: {
+          objective: 0.012,
+          requestedWorkUnits: 100,
+          completedWorkUnits: 100,
+          iterationsCompleted: 4,
+          relocationsAccepted: 12,
+        },
+      },
     });
     expect(lastRenderScene).toBe(stipplingScene);
     expect(diagnosticsPanel.textContent).toContain("Distribution error8.00%");
@@ -10059,6 +10178,13 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
       revision: 2,
       remainingMs: 3_000,
     });
+    expect(diagnosticsPanel.textContent).toContain("3.0 s");
+    reportShadingProgress(5, 80, 100, {
+      kind: "remaining",
+      revision: 3,
+      remainingMs: 1_000,
+    });
+    expect(diagnosticsPanel.textContent).toContain("1.0 s");
     const authoredWrites = historyWriteCount();
     expect(JSON.stringify(historyCapture)).not.toMatch(
       /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
@@ -10070,15 +10196,44 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     clickButton(el, "Save");
     await flush();
     expect(historyWriteCount()).toBe(authoredWrites);
-    expect(JSON.stringify(savePreset.mock.calls.at(-1)![0])).not.toMatch(
+    const savedPreset = savePreset.mock.calls.at(-1)![0];
+    expect(savedPreset.params.voronoiRelaxation).toBe(0.6);
+    expect(JSON.stringify(savedPreset)).not.toMatch(
       /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+    );
+
+    // A truthful ceiling terminal can complete below the configured work cap.
+    // The completed lane keeps the work usage but no longer shows an ETA.
+    reportShadingProgress(
+      5,
+      80,
+      100,
+      { kind: "remaining", revision: 4, remainingMs: 0 },
+      true,
+    );
+    expect(diagnosticsPanel.textContent).toContain("Preparation complete");
+    expect(diagnosticsPanel.textContent).toContain(
+      "80% (80 of 100 work units)",
+    );
+    expect(diagnosticsPanel.textContent).not.toContain(
+      "Estimated time remaining",
     );
 
     const boundedScene = preparedScene(123);
     await completeShading(5, boundedScene, {
       ...diagnostics,
       termination: "budget-exhausted",
-      fidelity: { kind: "stippling", distributionError: 1.25 },
+      fidelity: {
+        kind: "stippling",
+        distributionError: 1.25,
+        relaxation: {
+          objective: 0.02,
+          requestedWorkUnits: 100,
+          completedWorkUnits: 80,
+          iterationsCompleted: 3,
+          relocationsAccepted: 9,
+        },
+      },
     });
     expect(lastRenderScene).toBe(boundedScene);
     expect(diagnosticsPanel.textContent).toContain("Budget exhausted");
@@ -10087,6 +10242,9 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     );
     expect(diagnosticsPanel.textContent).toContain(
       "Distribution error125.00%",
+    );
+    expect(diagnosticsPanel.textContent).toContain(
+      "Relaxation work80 of 100 work units",
     );
     expect([png.disabled, svg.disabled]).toEqual([true, true]);
     act(() => acknowledgeDisplayedScene?.());
@@ -10103,6 +10261,7 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     const svgText = await readBlobText(downloadBlob.mock.calls[0]![0]);
     const pngText = await readBlobText(downloadBlob.mock.calls[1]![0]);
     for (const reproduction of [svgText, pngText]) {
+      expect(reproduction).toContain('"voronoiRelaxation":0.6');
       expect(reproduction).not.toMatch(
         /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
       );

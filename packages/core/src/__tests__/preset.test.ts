@@ -824,11 +824,20 @@ describe('round-trip fidelity (no-drift case)', () => {
         default: 0.6,
         activeWhen: { key: 'strategy', equals: 'stipple' },
       },
+      voronoiRelaxation: {
+        kind: 'number',
+        min: 0,
+        max: 1,
+        default: 0,
+        identityDefault: 'implicit',
+        activeWhen: { key: 'strategy', equals: 'stipple' },
+      },
     }
     const params = {
-      strategy: 'stipple',
+      strategy: 'scribble',
       pathDensity: 0.19,
       stippleDensity: 0.81,
+      voronoiRelaxation: 0.65,
     }
     const wireValue = JSON.parse(
       JSON.stringify(
@@ -838,7 +847,7 @@ describe('round-trip fidelity (no-drift case)', () => {
             'choice-round-trip',
             params,
             9,
-            new Set(['strategy']),
+            new Set(['strategy', 'voronoiRelaxation']),
           ),
         ),
       ),
@@ -856,7 +865,7 @@ describe('round-trip fidelity (no-drift case)', () => {
     expect(applyPreset(schema, deserialize(wireValue))).toEqual({
       params,
       seed: 9,
-      locks: ['strategy'],
+      locks: ['strategy', 'voronoiRelaxation'],
       profile: undefined,
     })
   })
