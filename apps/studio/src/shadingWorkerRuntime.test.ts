@@ -4,6 +4,7 @@ import {
   defaultParams,
   photoScribble,
   PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+  registry,
   scribbleMoon,
   toneCalibration,
   type DecodedPixels,
@@ -12,6 +13,7 @@ import {
   type ShadingArtwork,
   type ShadingProgress,
   type SketchEnvironment,
+  type StatelessSketch,
 } from "@harness/core";
 
 import {
@@ -88,6 +90,9 @@ describe("Shading worker runtime", () => {
 
     expect(execute).toHaveBeenCalledWith(
       toneCalibration.generateShadingArtwork,
+      Object.fromEntries(
+        input.identity.params.map(({ key, value }) => [key, value]),
+      ),
       input.identity,
       expect.objectContaining({ imageAssets: expect.any(Function) }),
       undefined,
@@ -122,6 +127,7 @@ describe("Shading worker runtime", () => {
     const clock = [1_000, 1_000, 1_025, 1_099, 1_100, 1_150, 1_200];
     const execute: ShadingArtworkExecutor = (
       _generate,
+      _params,
       _identity,
       _environment,
       observer,
@@ -178,6 +184,7 @@ describe("Shading worker runtime", () => {
     const progress: ShadingProgress[] = [];
     const execute: ShadingArtworkExecutor = (
       _generate,
+      _params,
       _identity,
       _environment,
       observer,
@@ -219,12 +226,170 @@ describe("Shading worker runtime", () => {
     },
   );
 
+  it("reconstructs a newly implicit active default before generic execution", async () => {
+    const legacySchema: ParamSchema = {
+      strategy: {
+        kind: "choice",
+        options: [
+          { value: "first", label: "First" },
+          { value: "second", label: "Second" },
+        ],
+        default: "first",
+      },
+      required: { kind: "number", min: 0, max: 10, default: 2 },
+      firstOnly: {
+        kind: "number",
+        min: 0,
+        max: 10,
+        default: 4,
+        activeWhen: { key: "strategy", equals: "first" },
+      },
+      secondOnly: {
+        kind: "number",
+        min: 0,
+        max: 10,
+        default: 6,
+        activeWhen: { key: "strategy", equals: "second" },
+      },
+    };
+    const widenedSchema: ParamSchema = {
+      ...legacySchema,
+      newControl: {
+        kind: "number",
+        min: 0,
+        max: 10,
+        default: 0,
+        identityDefault: "implicit",
+        activeWhen: { key: "strategy", equals: "first" },
+      },
+    };
+    const legacyIdentity = createShadingComputeIdentity({
+      sketchId: "synthetic-identity-default",
+      schema: legacySchema,
+      params: { strategy: "first", required: 3, firstOnly: 5 },
+      seed: "seed",
+      compositionFrame: scene.space,
+    });
+    const generateShadingArtwork = vi.fn(
+      (
+        ..._args: Parameters<
+          NonNullable<StatelessSketch["generateShadingArtwork"]>
+        >
+      ) => artwork,
+    );
+    const syntheticSketch: StatelessSketch = {
+      id: "synthetic-identity-default",
+      name: "Synthetic identity default",
+      schema: widenedSchema,
+      generateShadingArtwork,
+      generate: () => scene,
+    };
+    const get = vi.spyOn(registry, "get").mockReturnValue(syntheticSketch);
+    const execute = vi.fn(
+      (...args: Parameters<ShadingArtworkExecutor>) =>
+        args[0](args[1], args[2].seed, args[2].compositionFrame),
+    );
+
+    try {
+      const response = await handleShadingWorkerMessage(
+        { type: "compute", jobId: 9, identity: legacyIdentity },
+        execute,
+        undefined,
+        () => 0,
+      );
+
+      expect(response).toMatchObject({ type: "success" });
+      expect(execute).toHaveBeenCalledWith(
+        generateShadingArtwork,
+        {
+          strategy: "first",
+          required: 3,
+          firstOnly: 5,
+          newControl: 0,
+        },
+        legacyIdentity,
+        expect.objectContaining({ imageAssets: expect.any(Function) }),
+        undefined,
+      );
+      expect(generateShadingArtwork).toHaveBeenCalledWith(
+        {
+          strategy: "first",
+          required: 3,
+          firstOnly: 5,
+          newControl: 0,
+        },
+        "seed",
+        scene.space,
+      );
+      expect(generateShadingArtwork.mock.calls[0]![0]).not.toHaveProperty(
+        "secondOnly",
+      );
+
+      const nondefaultIdentity = createShadingComputeIdentity({
+        sketchId: syntheticSketch.id,
+        schema: widenedSchema,
+        params: {
+          strategy: "first",
+          required: 3,
+          firstOnly: 5,
+          newControl: 7,
+        },
+        seed: "seed",
+        compositionFrame: scene.space,
+      });
+      expect(
+        await handleShadingWorkerMessage(
+          { type: "compute", jobId: 10, identity: nondefaultIdentity },
+          execute,
+          undefined,
+          () => 0,
+        ),
+      ).toMatchObject({ type: "success" });
+      expect(execute.mock.calls[1]![1]).toEqual({
+        strategy: "first",
+        required: 3,
+        firstOnly: 5,
+        newControl: 7,
+      });
+
+      const inactiveSupplied = structuredClone(
+        createShadingComputeIdentity({
+          sketchId: syntheticSketch.id,
+          schema: legacySchema,
+          params: { strategy: "second", required: 3, secondOnly: 8 },
+          seed: "seed",
+          compositionFrame: scene.space,
+        }),
+      ) as any;
+      inactiveSupplied.params.push({ key: "newControl", value: 7 });
+      expect(
+        await handleShadingWorkerMessage(
+          { type: "compute", jobId: 11, identity: inactiveSupplied },
+          execute,
+          undefined,
+          () => 0,
+        ),
+      ).toMatchObject({
+        type: "failure",
+        error:
+          "Shading request parameters do not match synthetic-identity-default schema",
+      });
+      expect(execute).toHaveBeenCalledTimes(2);
+    } finally {
+      get.mockRestore();
+    }
+  });
+
   it.each([
     ["missing active", (params: any[]) => params.pop()],
     [
       "extra inactive",
       (params: any[]) =>
         params.push({ key: "stippleDensity", value: 1 }),
+    ],
+    [
+      "unknown",
+      (params: any[]) => params.push({ key: "notInSchema", value: 1 }),
     ],
     [
       "wrong order",
@@ -279,10 +444,22 @@ describe("Shading worker runtime", () => {
     },
   );
 
+  it("rejects duplicate entries as malformed protocol input", async () => {
+    const input = structuredClone(request()) as Record<string, any>;
+    input.identity.params.push({ ...input.identity.params[0] });
+    const execute = vi.fn(
+      (..._args: Parameters<ShadingArtworkExecutor>) => artwork,
+    );
+
+    expect(await handleShadingWorkerMessage(input, execute)).toBeNull();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("blocks malformed progress before posting a bounded safe failure", async () => {
     const emitted = vi.fn();
     const execute: ShadingArtworkExecutor = (
       _generate,
+      _params,
       _identity,
       _environment,
       observer,
@@ -514,13 +691,11 @@ describe("Shading worker runtime", () => {
       const execute = vi.fn(
         (...args: Parameters<ShadingArtworkExecutor>) =>
           args[0](
-            Object.fromEntries(
-              args[1].params.map(({ key, value }) => [key, value]),
-            ),
-            args[1].seed,
-            args[1].compositionFrame,
+            args[1],
+            args[2].seed,
+            args[2].compositionFrame,
+            args[4],
             args[3],
-            args[2],
           ),
       );
 
@@ -547,6 +722,9 @@ describe("Shading worker runtime", () => {
 
       expect(execute).toHaveBeenCalledWith(
         photoScribble.generateShadingArtwork,
+        Object.fromEntries(
+          input.identity.params.map(({ key, value }) => [key, value]),
+        ),
         input.identity,
         expect.objectContaining({
           imageAssets: environment.imageAssets,
@@ -597,6 +775,9 @@ describe("Shading worker runtime", () => {
     expect(response).toMatchObject({ type: "success" });
     expect(execute).toHaveBeenCalledWith(
       photoScribble.generateShadingArtwork,
+      Object.fromEntries(
+        input.identity.params.map(({ key, value }) => [key, value]),
+      ),
       input.identity,
       environment,
       undefined,
@@ -639,6 +820,7 @@ describe("Shading worker runtime", () => {
     const received: SketchEnvironment[] = [];
     const execute: ShadingArtworkExecutor = (
       _generate,
+      _params,
       _identity,
       environment,
     ) => {

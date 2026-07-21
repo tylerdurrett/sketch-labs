@@ -446,6 +446,27 @@ describe('activeParams', () => {
     })
   })
 
+  it('keeps active implicit identity defaults in the complete projection', () => {
+    const widened = {
+      ...schema,
+      relaxation: {
+        kind: 'number',
+        min: 0,
+        max: 10,
+        default: 0,
+        identityDefault: 'implicit',
+        activeWhen: { key: 'strategy', equals: 'stippling' },
+      },
+    } as const satisfies ParamSchema
+
+    expect(activeParams(widened, { strategy: 'stippling' })).toEqual({
+      strategy: 'stippling',
+      always: '#1a2b3c',
+      stippleSource: 'portrait-default',
+      relaxation: 0,
+    })
+  })
+
   it('preserves schema order and excludes extras and inherited schema keys', () => {
     const withInherited = Object.assign(
       Object.create({ inherited: { kind: 'color', default: '#000000' } }),

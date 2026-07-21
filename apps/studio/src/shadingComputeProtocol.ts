@@ -125,21 +125,34 @@ function copyParamValue(
 }
 
 /**
- * Snapshot active authored inputs in the Parameter Schema's declaration order.
+ * Snapshot preparation identity in the Parameter Schema's declaration order.
  * Core owns applicability, Choice validation, and absent-value defaults;
  * incidental insertion order, inactive values, and Params-only extras do not
- * participate in cache identity.
+ * participate. Active values are explicit unless their generic schema metadata
+ * marks the exact declared default as implicit. Workers reconstruct those
+ * sparse defaults against their current schema before execution.
  */
 export function createShadingComputeIdentity(
   input: CreateShadingComputeIdentityInput,
 ): ShadingComputeIdentity {
   const projectedParams = activeParams(input.schema, input.params);
-  const params = Object.keys(projectedParams).map((key) =>
-    Object.freeze({
-      key,
-      value: copyParamValue(projectedParams[key], key, input.schema[key]!),
-    }),
-  );
+  const params = Object.keys(projectedParams).flatMap((key) => {
+    const spec = input.schema[key]!;
+    const value = projectedParams[key];
+    const copiedValue = copyParamValue(value, key, spec);
+    if (
+      spec.identityDefault === "implicit" &&
+      Object.is(value, spec.default)
+    ) {
+      return [];
+    }
+    return [
+      Object.freeze({
+        key,
+        value: copiedValue,
+      }),
+    ];
+  });
   const identity = Object.freeze({
     sketchId: input.sketchId,
     params: Object.freeze(params),

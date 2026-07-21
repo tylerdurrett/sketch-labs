@@ -58,6 +58,18 @@ const conditionalSchema: ParamSchema = {
   },
 };
 
+const widenedConditionalSchema: ParamSchema = {
+  ...conditionalSchema,
+  stippleRelaxation: {
+    kind: "number",
+    min: 0,
+    max: 10,
+    default: 0,
+    identityDefault: "implicit",
+    activeWhen: { key: "strategy", equals: "stippling" },
+  },
+};
+
 const scene: Scene = {
   space: { width: 120, height: 90 },
   background: { color: "ivory" },
@@ -196,6 +208,58 @@ describe("Shading compute identity", () => {
     expect(Object.isFrozen(stippling)).toBe(true);
     expect(Object.isFrozen(stippling.params)).toBe(true);
     expect(stippling.params.every(Object.isFrozen)).toBe(true);
+  });
+
+  it("omits only active implicit defaults from a synthetically widened schema", () => {
+    const defaultRelaxation = createShadingComputeIdentity({
+      sketchId: "conditional",
+      schema: widenedConditionalSchema,
+      params: {
+        strategy: "stippling",
+        stippleDensity: 7,
+        stippleRelaxation: 0,
+      },
+      seed: "seed",
+      compositionFrame: { width: 120, height: 90 },
+    });
+    const relaxed = createShadingComputeIdentity({
+      sketchId: "conditional",
+      schema: widenedConditionalSchema,
+      params: {
+        strategy: "stippling",
+        stippleDensity: 7,
+        stippleRelaxation: 3,
+      },
+      seed: "seed",
+      compositionFrame: { width: 120, height: 90 },
+    });
+    const inactiveRetained = createShadingComputeIdentity({
+      sketchId: "conditional",
+      schema: widenedConditionalSchema,
+      params: {
+        strategy: "scribble",
+        scribbleDensity: 4,
+        scribbleFidelity: 5,
+        stippleRelaxation: 3,
+      },
+      seed: "seed",
+      compositionFrame: { width: 120, height: 90 },
+    });
+
+    expect(defaultRelaxation.params).toEqual([
+      { key: "strategy", value: "stippling" },
+      { key: "stippleDensity", value: 7 },
+    ]);
+    expect(relaxed.params).toEqual([
+      { key: "strategy", value: "stippling" },
+      { key: "stippleDensity", value: 7 },
+      { key: "stippleRelaxation", value: 3 },
+    ]);
+    expect(inactiveRetained.params).toEqual([
+      { key: "strategy", value: "scribble" },
+      { key: "scribbleDensity", value: 4 },
+      { key: "scribbleFidelity", value: 5 },
+    ]);
   });
 
   it("ignores inactive edits but distinguishes active edits and restored branch values", () => {

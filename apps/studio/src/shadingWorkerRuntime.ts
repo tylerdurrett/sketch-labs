@@ -1,5 +1,6 @@
 import {
   IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
+  isParamActive,
   photoScribble,
   prepareImageDetailAnalysis,
   registry,
@@ -9,6 +10,7 @@ import {
   type ShadingObserver,
   type SketchEnvironment,
   type StatelessSketch,
+  validateParamSchema,
 } from "@harness/core";
 
 import {
@@ -34,6 +36,7 @@ type ShadingArtworkGenerator = NonNullable<
 
 export type ShadingArtworkExecutor = (
   generate: ShadingArtworkGenerator,
+  params: Params,
   identity: ShadingComputeIdentity,
   environment: SketchEnvironment,
   observer?: ShadingObserver,
@@ -48,7 +51,7 @@ function systemMonotonicClock(): number {
   return performance.now();
 }
 
-function paramsFromIdentity(identity: ShadingComputeIdentity): Params {
+function suppliedParamsFromIdentity(identity: ShadingComputeIdentity): Params {
   const params = Object.create(null) as Params;
   for (const entry of identity.params) params[entry.key] = entry.value;
   return params;
@@ -109,9 +112,34 @@ function resolveShadingRequest(
     );
   }
 
-  const params = paramsFromIdentity(identity);
+  const suppliedParams = suppliedParamsFromIdentity(identity);
+  const params = Object.create(null) as Params;
   let canonicalIdentity: ShadingComputeIdentity;
   try {
+    validateParamSchema(sketch.schema);
+
+    // Sparse identities may omit only exact defaults explicitly declared
+    // implicit by the CURRENT active schema. Never fill a missing ordinary
+    // active value, and never admit an unknown or currently inactive entry.
+    for (const [key, spec] of Object.entries(sketch.schema)) {
+      if (!isParamActive(sketch.schema, suppliedParams, key)) continue;
+      if (Object.prototype.hasOwnProperty.call(suppliedParams, key)) {
+        params[key] = suppliedParams[key];
+      } else if (spec.identityDefault === "implicit") {
+        params[key] = spec.default;
+      } else {
+        throw schemaMismatch(sketch.id);
+      }
+    }
+    for (const { key } of identity.params) {
+      if (
+        !Object.prototype.hasOwnProperty.call(sketch.schema, key) ||
+        !Object.prototype.hasOwnProperty.call(params, key)
+      ) {
+        throw schemaMismatch(sketch.id);
+      }
+    }
+
     canonicalIdentity = createShadingComputeIdentity({
       sketchId: sketch.id,
       schema: sketch.schema,
@@ -135,12 +163,13 @@ function resolveShadingRequest(
 /** Execute the already-resolved Sketch-owned Shading preparation hook. */
 export const executeShadingArtwork: ShadingArtworkExecutor = (
   generate,
+  params,
   identity,
   environment,
   observer,
 ) =>
   generate(
-    paramsFromIdentity(identity),
+    params,
     identity.seed,
     {
       width: identity.compositionFrame.width,
@@ -210,6 +239,7 @@ export async function handleShadingWorkerMessage(
     const startedAt = now();
     const artwork = execute(
       generate,
+      params,
       value.identity,
       environment,
       emitProgress === undefined

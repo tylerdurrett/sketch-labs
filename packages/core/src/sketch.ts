@@ -73,6 +73,17 @@ export interface ParamActiveWhen {
 }
 
 /**
+ * Generic metadata controlling how a parameter participates in preparation
+ * identity. By default every active value is explicit. An `implicit` default
+ * may be omitted from a sparse identity only while the parameter is active and
+ * its value is exactly the declared default; consumers must reconstruct it
+ * before execution.
+ */
+export interface ParamIdentitySpec {
+  readonly identityDefault?: 'implicit'
+}
+
+/**
  * A numeric knob's declaration — a continuous (or whole-number) range with a
  * default. The founding {@link ParamSpec} member (issue #47), joined by
  * {@link ColorParamSpec}, {@link ImageAssetParamSpec}, and
@@ -91,7 +102,7 @@ export interface ParamActiveWhen {
  * Because they are orthogonal, neither implies the other: an `integer` param may
  * omit `step`, and a `step` does not make a param integer.
  */
-export interface NumberParamSpec {
+export interface NumberParamSpec extends ParamIdentitySpec {
   /** Discriminant. The open {@link ParamSpec} union is keyed on this. */
   kind: 'number'
   /** Inclusive lower bound of the legal range. */
@@ -135,7 +146,7 @@ export interface NumberParamSpec {
  * aesthetic choice, not a bounded numeric range to explore, so it passes through
  * every roll unchanged — locked or not (ADR-0010).
  */
-export interface ColorParamSpec {
+export interface ColorParamSpec extends ParamIdentitySpec {
   /** Discriminant. The open {@link ParamSpec} union is keyed on this. */
   kind: 'color'
   /**
@@ -159,7 +170,7 @@ export interface ColorParamSpec {
  * a color, it has no numeric range to sample; its current string passes through
  * every roll unchanged, whether or not a generic persisted Lock names it.
  */
-export interface ImageAssetParamSpec {
+export interface ImageAssetParamSpec extends ParamIdentitySpec {
   /** Discriminant. The open {@link ParamSpec} union is keyed on this. */
   kind: 'image-asset'
   /** The stable logical Image Asset ID seeded by {@link defaultParams}. */
@@ -191,7 +202,7 @@ export interface ChoiceOption {
  * {@link validateChoiceParamSpec} at runtime boundaries before consuming a
  * declaration that did not originate in type-checked source.
  */
-export interface ChoiceParamSpec {
+export interface ChoiceParamSpec extends ParamIdentitySpec {
   /** Discriminant. The open {@link ParamSpec} union is keyed on this. */
   kind: 'choice'
   /** Nonempty, ordered set of labelled stable values. */
@@ -323,19 +334,29 @@ export function validateChoiceParamValue<Spec extends ChoiceParamSpec>(
 }
 
 /**
- * Validate the Choice and applicability invariants of a Parameter Schema.
+ * Validate the Choice, identity, and applicability invariants of a Parameter
+ * Schema.
  *
- * This is intentionally a narrow boundary: it validates Choice declarations
- * and `activeWhen` relationships only. It does not add runtime validation for
- * the established Number, Color, or Image Asset value domains.
+ * This is intentionally a narrow boundary: it validates Choice declarations,
+ * generic identity metadata, and `activeWhen` relationships only. It does not
+ * add runtime validation for the established Number, Color, or Image Asset
+ * value domains.
  *
  * @param schema - The complete Parameter Schema whose relationships to check.
- * @throws If a Choice declaration is malformed, or an `activeWhen` controller
- *   is missing, is not a Choice, names the dependent itself, or compares to an
- *   undeclared stable option value.
+ * @throws If identity metadata or a Choice declaration is malformed, or an
+ *   `activeWhen` controller is missing, is not a Choice, names the dependent
+ *   itself, or compares to an undeclared stable option value.
  */
 export function validateParamSchema(schema: ParamSchema): void {
   for (const [key, spec] of Object.entries(schema)) {
+    if (
+      spec.identityDefault !== undefined &&
+      spec.identityDefault !== 'implicit'
+    ) {
+      throw new Error(
+        `Param \`${key}\` identityDefault must be \`implicit\` when present`,
+      )
+    }
     if (spec.kind === 'choice') validateChoiceParamSpec(spec, key)
     validateParamApplicability(schema, key, spec)
   }
