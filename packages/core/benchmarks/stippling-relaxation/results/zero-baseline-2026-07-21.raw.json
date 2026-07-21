@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "environment": {
+    "node": "v23.9.0",
+    "nodeExecutable": "/Users/tylerdurrett/.nvm/versions/node/v23.9.0/bin/node",
+    "platform": "darwin",
+    "release": "24.6.0",
+    "arch": "arm64",
+    "cpu": "Apple M2 Max",
+    "cpuCount": 12,
+    "benchmarkCommit": "ea3327222d380deb62af29dff17855938cac6061"
+  },
+  "config": {
+    "order": [
+      "pre-slice-base",
+      "candidate-zero"
+    ],
+    "target": "analytic-ramp",
+    "frame": {
+      "width": 100,
+      "height": 100
+    },
+    "seed": "stippling-relaxation-benchmark-v1",
+    "controls": {
+      "stippleDensity": 100,
+      "distributionFidelity": 0.5,
+      "voronoiRelaxation": 0
+    },
+    "warmups": 2,
+    "samples": 9
+  },
+  "runs": {
+    "base": {
+      "label": "pre-slice-base",
+      "root": "/private/tmp/sketch-labs-389-baseline",
+      "commit": "21d195439f4ee48fa5bb0c8c3bdda01186c97610",
+      "dirty": false,
+      "warmupCount": 2,
+      "sampleCount": 9,
+      "elapsedMs": [
+        486.1240829999999,
+        477.2381660000001,
+        432.42416699999967,
+        397.1445829999998,
+        417.43195799999967,
+        412.55004099999996,
+        411.1249160000002,
+        405.7004159999997,
+        429.00816600000053
+      ],
+      "medianMs": 417.43195799999967,
+      "p95Ms": 486.1240829999999,
+      "orderedGeometryChecksum": "50c10c112f222db0ec473d5ef3b0a64bb77b53fcacf4c47edbf797ad400326bd",
+      "diagnostics": {
+        "termination": "completed",
+        "distributionError": 0.38171899999998793
+      }
+    },
+    "candidate": {
+      "label": "candidate-zero",
+      "root": "/private/tmp/sketch-labs-389-n",
+      "commit": "ea3327222d380deb62af29dff17855938cac6061",
+      "dirty": false,
+      "warmupCount": 2,
+      "sampleCount": 9,
+      "elapsedMs": [
+        402.9557079999995,
+        410.47862499999974,
+        424.80662500000017,
+        474.1910829999997,
+        471.6140830000004,
+        402.22529100000065,
+        454.5090419999997,
+        461.4842090000002,
+        413.2133329999997
+      ],
+      "medianMs": 424.80662500000017,
+      "p95Ms": 474.1910829999997,
+      "orderedGeometryChecksum": "50c10c112f222db0ec473d5ef3b0a64bb77b53fcacf4c47edbf797ad400326bd",
+      "diagnostics": {
+        "termination": "completed",
+        "distributionError": 0.38171899999998793
+      }
+    }
+  },
+  "comparison": {
+    "exactOrderedGeometry": true,
+    "exactDiagnosticsJson": true,
+    "medianRatio": 1.0176667522902032,
+    "p95Ratio": 0.9754527693292656,
+    "medianWithinFivePercent": true,
+    "p95WithinFivePercent": true
+  }
+}

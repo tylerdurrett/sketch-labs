@@ -14,7 +14,6 @@ export const PREREGISTERED_PINS = Object.freeze({
     diagnostics: Object.freeze({
       termination: 'completed',
       distributionError: 1.7460937499999913,
-      relaxation: null,
     }),
   }),
   'ramp:density=100:relaxation=0.5': Object.freeze({

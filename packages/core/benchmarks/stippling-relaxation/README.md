@@ -11,9 +11,34 @@ campaign is the explicit 27-case product of targets `flat`, `ramp`, and
 and `1` (two warmups, nine samples). Overrides are capped at 10 warmups and 25
 samples.
 
+Before trying an optimization, use the practical analytic-ramp screen at
+`density=100`, `relaxation=0.5`, the fixed Frame/Seed and Distribution fidelity
+in `harness.js`, two warmups, and nine samples. A retained candidate must keep
+the practical ordered checksum, diagnostics, deterministic sequence, and
+termination exact; improve practical end-to-end p95 by at least 5%; avoid a
+practical median regression; and introduce no end-to-end p95 regression in any
+of the 27 full-matrix cases. These are retention gates, not timing assertions in
+the normal test suite. The dated baseline record under `results/` supplies the
+absolute practical p95 target for the current campaign.
+
 ```sh
 pnpm --filter @harness/core benchmark:stippling-relaxation
 pnpm --filter @harness/core benchmark:stippling-relaxation:full
+```
+
+Compare the pinned pre-slice implementation with candidate zero by checking out
+the base at `21d195439f4ee48fa5bb0c8c3bdda01186c97610` in a second worktree,
+installing its locked dependencies, then running the following from this
+worktree with absolute paths. The probe deliberately runs base first and
+candidate second in one Node process and rejects geometry, diagnostics, median,
+or p95 compatibility failures.
+
+```sh
+STIPPLING_RELAXATION_BASE_ROOT=/absolute/path/to/base \
+STIPPLING_RELAXATION_CANDIDATE_ROOT="$PWD" \
+STIPPLING_RELAXATION_ZERO_OUTPUT="$PWD/packages/core/benchmarks/stippling-relaxation/results/zero-baseline.raw.json" \
+packages/core/node_modules/.bin/vitest run \
+  --config packages/core/vitest.stippling-zero-baseline-benchmark.config.ts
 ```
 
 `run` accepts `--target`, `--density`, `--relaxation`, `--phase`, `--case-id`,

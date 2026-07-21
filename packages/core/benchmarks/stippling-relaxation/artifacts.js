@@ -44,6 +44,8 @@ export function diagnosticsSnapshot(result) {
   return Object.freeze({
     termination: result.termination,
     distributionError: result.distributionError,
-    relaxation: result.relaxation ?? null,
+    ...(result.relaxation === undefined
+      ? {}
+      : { relaxation: result.relaxation }),
   })
 }

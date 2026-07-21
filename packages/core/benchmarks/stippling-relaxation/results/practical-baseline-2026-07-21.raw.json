@@ -1,0 +1,558 @@
+{
+  "schemaVersion": 1,
+  "environment": {
+    "node": "v23.9.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M2 Max",
+    "cpuCount": 12,
+    "sourceCommit": "2b44adf1af55aebd7a0b8a5225f242f2b0e04481",
+    "benchmarkCommit": "2b44adf1af55aebd7a0b8a5225f242f2b0e04481",
+    "dirty": false
+  },
+  "config": {
+    "matrixVersion": 1,
+    "seed": "stippling-relaxation-benchmark-v1",
+    "frame": {
+      "width": 100,
+      "height": 100
+    },
+    "matrix": {
+      "targets": [
+        "flat",
+        "ramp",
+        "exact-zero-barrier"
+      ],
+      "densities": [
+        1,
+        100,
+        400
+      ],
+      "relaxations": [
+        0,
+        0.5,
+        1
+      ],
+      "phases": [
+        "placement",
+        "distribution-refinement",
+        "voronoi-assignment-centroid",
+        "safe-relocation",
+        "geometry-materialization",
+        "end-to-end-preparation"
+      ]
+    },
+    "mode": "smoke",
+    "warmups": 2,
+    "samples": 9,
+    "shardIndex": 0,
+    "shardCount": 1,
+    "cases": [
+      {
+        "id": "ramp:density=100:relaxation=0.5",
+        "target": "ramp",
+        "density": 100,
+        "relaxation": 0.5
+      }
+    ],
+    "phases": [
+      "end-to-end-preparation"
+    ],
+    "campaign": {
+      "matrixVersion": 1,
+      "seed": "stippling-relaxation-benchmark-v1",
+      "frame": {
+        "width": 100,
+        "height": 100
+      },
+      "matrix": {
+        "targets": [
+          "flat",
+          "ramp",
+          "exact-zero-barrier"
+        ],
+        "densities": [
+          1,
+          100,
+          400
+        ],
+        "relaxations": [
+          0,
+          0.5,
+          1
+        ],
+        "phases": [
+          "placement",
+          "distribution-refinement",
+          "voronoi-assignment-centroid",
+          "safe-relocation",
+          "geometry-materialization",
+          "end-to-end-preparation"
+        ]
+      },
+      "mode": "smoke",
+      "warmups": 2,
+      "samples": 9,
+      "shardCount": 1,
+      "caseIds": [
+        "flat:density=1:relaxation=0",
+        "ramp:density=100:relaxation=0.5"
+      ],
+      "phases": [
+        "placement",
+        "distribution-refinement",
+        "voronoi-assignment-centroid",
+        "safe-relocation",
+        "geometry-materialization",
+        "end-to-end-preparation"
+      ]
+    },
+    "selection": {
+      "shardIndex": 0,
+      "caseIds": [
+        "ramp:density=100:relaxation=0.5"
+      ],
+      "phases": [
+        "end-to-end-preparation"
+      ]
+    },
+    "selectedExpectedSampleIds": [
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/0",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/1",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/2",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/3",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/4",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/5",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/6",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/7",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/8"
+    ],
+    "campaignExpectedSampleIds": [
+      "flat:density=1:relaxation=0/placement/0",
+      "flat:density=1:relaxation=0/placement/1",
+      "flat:density=1:relaxation=0/placement/2",
+      "flat:density=1:relaxation=0/placement/3",
+      "flat:density=1:relaxation=0/placement/4",
+      "flat:density=1:relaxation=0/placement/5",
+      "flat:density=1:relaxation=0/placement/6",
+      "flat:density=1:relaxation=0/placement/7",
+      "flat:density=1:relaxation=0/placement/8",
+      "flat:density=1:relaxation=0/distribution-refinement/0",
+      "flat:density=1:relaxation=0/distribution-refinement/1",
+      "flat:density=1:relaxation=0/distribution-refinement/2",
+      "flat:density=1:relaxation=0/distribution-refinement/3",
+      "flat:density=1:relaxation=0/distribution-refinement/4",
+      "flat:density=1:relaxation=0/distribution-refinement/5",
+      "flat:density=1:relaxation=0/distribution-refinement/6",
+      "flat:density=1:relaxation=0/distribution-refinement/7",
+      "flat:density=1:relaxation=0/distribution-refinement/8",
+      "flat:density=1:relaxation=0/voronoi-assignment-centroid/0",
+      "flat:density=1:relaxation=0/voronoi-assignment-centroid/1",
+      "flat:density=1:relaxation=0/voronoi-assignment-centroid/2",
+      "flat:density=1:relaxation=0/voronoi-assignment-centroid/3",
+      "flat:density=1:relaxation=0/voronoi-assignment-centroid/4",
+      "flat:density=1:relaxation=0/voronoi-assignment-centroid/5",
+      "flat:density=1:relaxation=0/voronoi-assignment-centroid/6",
+      "flat:density=1:relaxation=0/voronoi-assignment-centroid/7",
+      "flat:density=1:relaxation=0/voronoi-assignment-centroid/8",
+      "flat:density=1:relaxation=0/safe-relocation/0",
+      "flat:density=1:relaxation=0/safe-relocation/1",
+      "flat:density=1:relaxation=0/safe-relocation/2",
+      "flat:density=1:relaxation=0/safe-relocation/3",
+      "flat:density=1:relaxation=0/safe-relocation/4",
+      "flat:density=1:relaxation=0/safe-relocation/5",
+      "flat:density=1:relaxation=0/safe-relocation/6",
+      "flat:density=1:relaxation=0/safe-relocation/7",
+      "flat:density=1:relaxation=0/safe-relocation/8",
+      "flat:density=1:relaxation=0/geometry-materialization/0",
+      "flat:density=1:relaxation=0/geometry-materialization/1",
+      "flat:density=1:relaxation=0/geometry-materialization/2",
+      "flat:density=1:relaxation=0/geometry-materialization/3",
+      "flat:density=1:relaxation=0/geometry-materialization/4",
+      "flat:density=1:relaxation=0/geometry-materialization/5",
+      "flat:density=1:relaxation=0/geometry-materialization/6",
+      "flat:density=1:relaxation=0/geometry-materialization/7",
+      "flat:density=1:relaxation=0/geometry-materialization/8",
+      "flat:density=1:relaxation=0/end-to-end-preparation/0",
+      "flat:density=1:relaxation=0/end-to-end-preparation/1",
+      "flat:density=1:relaxation=0/end-to-end-preparation/2",
+      "flat:density=1:relaxation=0/end-to-end-preparation/3",
+      "flat:density=1:relaxation=0/end-to-end-preparation/4",
+      "flat:density=1:relaxation=0/end-to-end-preparation/5",
+      "flat:density=1:relaxation=0/end-to-end-preparation/6",
+      "flat:density=1:relaxation=0/end-to-end-preparation/7",
+      "flat:density=1:relaxation=0/end-to-end-preparation/8",
+      "ramp:density=100:relaxation=0.5/placement/0",
+      "ramp:density=100:relaxation=0.5/placement/1",
+      "ramp:density=100:relaxation=0.5/placement/2",
+      "ramp:density=100:relaxation=0.5/placement/3",
+      "ramp:density=100:relaxation=0.5/placement/4",
+      "ramp:density=100:relaxation=0.5/placement/5",
+      "ramp:density=100:relaxation=0.5/placement/6",
+      "ramp:density=100:relaxation=0.5/placement/7",
+      "ramp:density=100:relaxation=0.5/placement/8",
+      "ramp:density=100:relaxation=0.5/distribution-refinement/0",
+      "ramp:density=100:relaxation=0.5/distribution-refinement/1",
+      "ramp:density=100:relaxation=0.5/distribution-refinement/2",
+      "ramp:density=100:relaxation=0.5/distribution-refinement/3",
+      "ramp:density=100:relaxation=0.5/distribution-refinement/4",
+      "ramp:density=100:relaxation=0.5/distribution-refinement/5",
+      "ramp:density=100:relaxation=0.5/distribution-refinement/6",
+      "ramp:density=100:relaxation=0.5/distribution-refinement/7",
+      "ramp:density=100:relaxation=0.5/distribution-refinement/8",
+      "ramp:density=100:relaxation=0.5/voronoi-assignment-centroid/0",
+      "ramp:density=100:relaxation=0.5/voronoi-assignment-centroid/1",
+      "ramp:density=100:relaxation=0.5/voronoi-assignment-centroid/2",
+      "ramp:density=100:relaxation=0.5/voronoi-assignment-centroid/3",
+      "ramp:density=100:relaxation=0.5/voronoi-assignment-centroid/4",
+      "ramp:density=100:relaxation=0.5/voronoi-assignment-centroid/5",
+      "ramp:density=100:relaxation=0.5/voronoi-assignment-centroid/6",
+      "ramp:density=100:relaxation=0.5/voronoi-assignment-centroid/7",
+      "ramp:density=100:relaxation=0.5/voronoi-assignment-centroid/8",
+      "ramp:density=100:relaxation=0.5/safe-relocation/0",
+      "ramp:density=100:relaxation=0.5/safe-relocation/1",
+      "ramp:density=100:relaxation=0.5/safe-relocation/2",
+      "ramp:density=100:relaxation=0.5/safe-relocation/3",
+      "ramp:density=100:relaxation=0.5/safe-relocation/4",
+      "ramp:density=100:relaxation=0.5/safe-relocation/5",
+      "ramp:density=100:relaxation=0.5/safe-relocation/6",
+      "ramp:density=100:relaxation=0.5/safe-relocation/7",
+      "ramp:density=100:relaxation=0.5/safe-relocation/8",
+      "ramp:density=100:relaxation=0.5/geometry-materialization/0",
+      "ramp:density=100:relaxation=0.5/geometry-materialization/1",
+      "ramp:density=100:relaxation=0.5/geometry-materialization/2",
+      "ramp:density=100:relaxation=0.5/geometry-materialization/3",
+      "ramp:density=100:relaxation=0.5/geometry-materialization/4",
+      "ramp:density=100:relaxation=0.5/geometry-materialization/5",
+      "ramp:density=100:relaxation=0.5/geometry-materialization/6",
+      "ramp:density=100:relaxation=0.5/geometry-materialization/7",
+      "ramp:density=100:relaxation=0.5/geometry-materialization/8",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/0",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/1",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/2",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/3",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/4",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/5",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/6",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/7",
+      "ramp:density=100:relaxation=0.5/end-to-end-preparation/8"
+    ]
+  },
+  "samples": [
+    {
+      "id": "ramp:density=100:relaxation=0.5/end-to-end-preparation/0",
+      "caseId": "ramp:density=100:relaxation=0.5",
+      "phase": "end-to-end-preparation",
+      "sampleIndex": 0,
+      "elapsedMs": 3932.045459000001,
+      "status": "ok",
+      "pin": {
+        "orderedChecksum": "b0a34300c7f7e945eb317594ab8c0a47da32caf06d21cac74645a45eed54b31d",
+        "termination": "completed",
+        "work": {
+          "placementAttempts": 159490,
+          "refinementAttempts": 400000,
+          "voronoi": {
+            "sampleCount": 40000,
+            "assignedSampleCount": 40000,
+            "distanceEvaluationCount": 403463,
+            "seedLookupCount": 616177,
+            "indexBuildOperationCount": 3932254
+          },
+          "relocationAccepted": 31116
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "distributionError": 0.3751682499999885,
+          "relaxation": {
+            "objective": 7.280224586497679e-7,
+            "requestedWorkUnits": 480000,
+            "completedWorkUnits": 360000,
+            "iterationsCompleted": 3,
+            "relocationsAccepted": 36871
+          }
+        }
+      }
+    },
+    {
+      "id": "ramp:density=100:relaxation=0.5/end-to-end-preparation/1",
+      "caseId": "ramp:density=100:relaxation=0.5",
+      "phase": "end-to-end-preparation",
+      "sampleIndex": 1,
+      "elapsedMs": 3807.3109589999985,
+      "status": "ok",
+      "pin": {
+        "orderedChecksum": "b0a34300c7f7e945eb317594ab8c0a47da32caf06d21cac74645a45eed54b31d",
+        "termination": "completed",
+        "work": {
+          "placementAttempts": 159490,
+          "refinementAttempts": 400000,
+          "voronoi": {
+            "sampleCount": 40000,
+            "assignedSampleCount": 40000,
+            "distanceEvaluationCount": 403463,
+            "seedLookupCount": 616177,
+            "indexBuildOperationCount": 3932254
+          },
+          "relocationAccepted": 31116
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "distributionError": 0.3751682499999885,
+          "relaxation": {
+            "objective": 7.280224586497679e-7,
+            "requestedWorkUnits": 480000,
+            "completedWorkUnits": 360000,
+            "iterationsCompleted": 3,
+            "relocationsAccepted": 36871
+          }
+        }
+      }
+    },
+    {
+      "id": "ramp:density=100:relaxation=0.5/end-to-end-preparation/2",
+      "caseId": "ramp:density=100:relaxation=0.5",
+      "phase": "end-to-end-preparation",
+      "sampleIndex": 2,
+      "elapsedMs": 3828.0314169999983,
+      "status": "ok",
+      "pin": {
+        "orderedChecksum": "b0a34300c7f7e945eb317594ab8c0a47da32caf06d21cac74645a45eed54b31d",
+        "termination": "completed",
+        "work": {
+          "placementAttempts": 159490,
+          "refinementAttempts": 400000,
+          "voronoi": {
+            "sampleCount": 40000,
+            "assignedSampleCount": 40000,
+            "distanceEvaluationCount": 403463,
+            "seedLookupCount": 616177,
+            "indexBuildOperationCount": 3932254
+          },
+          "relocationAccepted": 31116
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "distributionError": 0.3751682499999885,
+          "relaxation": {
+            "objective": 7.280224586497679e-7,
+            "requestedWorkUnits": 480000,
+            "completedWorkUnits": 360000,
+            "iterationsCompleted": 3,
+            "relocationsAccepted": 36871
+          }
+        }
+      }
+    },
+    {
+      "id": "ramp:density=100:relaxation=0.5/end-to-end-preparation/3",
+      "caseId": "ramp:density=100:relaxation=0.5",
+      "phase": "end-to-end-preparation",
+      "sampleIndex": 3,
+      "elapsedMs": 4000.3166249999995,
+      "status": "ok",
+      "pin": {
+        "orderedChecksum": "b0a34300c7f7e945eb317594ab8c0a47da32caf06d21cac74645a45eed54b31d",
+        "termination": "completed",
+        "work": {
+          "placementAttempts": 159490,
+          "refinementAttempts": 400000,
+          "voronoi": {
+            "sampleCount": 40000,
+            "assignedSampleCount": 40000,
+            "distanceEvaluationCount": 403463,
+            "seedLookupCount": 616177,
+            "indexBuildOperationCount": 3932254
+          },
+          "relocationAccepted": 31116
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "distributionError": 0.3751682499999885,
+          "relaxation": {
+            "objective": 7.280224586497679e-7,
+            "requestedWorkUnits": 480000,
+            "completedWorkUnits": 360000,
+            "iterationsCompleted": 3,
+            "relocationsAccepted": 36871
+          }
+        }
+      }
+    },
+    {
+      "id": "ramp:density=100:relaxation=0.5/end-to-end-preparation/4",
+      "caseId": "ramp:density=100:relaxation=0.5",
+      "phase": "end-to-end-preparation",
+      "sampleIndex": 4,
+      "elapsedMs": 3813.167042000001,
+      "status": "ok",
+      "pin": {
+        "orderedChecksum": "b0a34300c7f7e945eb317594ab8c0a47da32caf06d21cac74645a45eed54b31d",
+        "termination": "completed",
+        "work": {
+          "placementAttempts": 159490,
+          "refinementAttempts": 400000,
+          "voronoi": {
+            "sampleCount": 40000,
+            "assignedSampleCount": 40000,
+            "distanceEvaluationCount": 403463,
+            "seedLookupCount": 616177,
+            "indexBuildOperationCount": 3932254
+          },
+          "relocationAccepted": 31116
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "distributionError": 0.3751682499999885,
+          "relaxation": {
+            "objective": 7.280224586497679e-7,
+            "requestedWorkUnits": 480000,
+            "completedWorkUnits": 360000,
+            "iterationsCompleted": 3,
+            "relocationsAccepted": 36871
+          }
+        }
+      }
+    },
+    {
+      "id": "ramp:density=100:relaxation=0.5/end-to-end-preparation/5",
+      "caseId": "ramp:density=100:relaxation=0.5",
+      "phase": "end-to-end-preparation",
+      "sampleIndex": 5,
+      "elapsedMs": 4026.946916000001,
+      "status": "ok",
+      "pin": {
+        "orderedChecksum": "b0a34300c7f7e945eb317594ab8c0a47da32caf06d21cac74645a45eed54b31d",
+        "termination": "completed",
+        "work": {
+          "placementAttempts": 159490,
+          "refinementAttempts": 400000,
+          "voronoi": {
+            "sampleCount": 40000,
+            "assignedSampleCount": 40000,
+            "distanceEvaluationCount": 403463,
+            "seedLookupCount": 616177,
+            "indexBuildOperationCount": 3932254
+          },
+          "relocationAccepted": 31116
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "distributionError": 0.3751682499999885,
+          "relaxation": {
+            "objective": 7.280224586497679e-7,
+            "requestedWorkUnits": 480000,
+            "completedWorkUnits": 360000,
+            "iterationsCompleted": 3,
+            "relocationsAccepted": 36871
+          }
+        }
+      }
+    },
+    {
+      "id": "ramp:density=100:relaxation=0.5/end-to-end-preparation/6",
+      "caseId": "ramp:density=100:relaxation=0.5",
+      "phase": "end-to-end-preparation",
+      "sampleIndex": 6,
+      "elapsedMs": 3798.4586249999993,
+      "status": "ok",
+      "pin": {
+        "orderedChecksum": "b0a34300c7f7e945eb317594ab8c0a47da32caf06d21cac74645a45eed54b31d",
+        "termination": "completed",
+        "work": {
+          "placementAttempts": 159490,
+          "refinementAttempts": 400000,
+          "voronoi": {
+            "sampleCount": 40000,
+            "assignedSampleCount": 40000,
+            "distanceEvaluationCount": 403463,
+            "seedLookupCount": 616177,
+            "indexBuildOperationCount": 3932254
+          },
+          "relocationAccepted": 31116
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "distributionError": 0.3751682499999885,
+          "relaxation": {
+            "objective": 7.280224586497679e-7,
+            "requestedWorkUnits": 480000,
+            "completedWorkUnits": 360000,
+            "iterationsCompleted": 3,
+            "relocationsAccepted": 36871
+          }
+        }
+      }
+    },
+    {
+      "id": "ramp:density=100:relaxation=0.5/end-to-end-preparation/7",
+      "caseId": "ramp:density=100:relaxation=0.5",
+      "phase": "end-to-end-preparation",
+      "sampleIndex": 7,
+      "elapsedMs": 3846.303249999997,
+      "status": "ok",
+      "pin": {
+        "orderedChecksum": "b0a34300c7f7e945eb317594ab8c0a47da32caf06d21cac74645a45eed54b31d",
+        "termination": "completed",
+        "work": {
+          "placementAttempts": 159490,
+          "refinementAttempts": 400000,
+          "voronoi": {
+            "sampleCount": 40000,
+            "assignedSampleCount": 40000,
+            "distanceEvaluationCount": 403463,
+            "seedLookupCount": 616177,
+            "indexBuildOperationCount": 3932254
+          },
+          "relocationAccepted": 31116
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "distributionError": 0.3751682499999885,
+          "relaxation": {
+            "objective": 7.280224586497679e-7,
+            "requestedWorkUnits": 480000,
+            "completedWorkUnits": 360000,
+            "iterationsCompleted": 3,
+            "relocationsAccepted": 36871
+          }
+        }
+      }
+    },
+    {
+      "id": "ramp:density=100:relaxation=0.5/end-to-end-preparation/8",
+      "caseId": "ramp:density=100:relaxation=0.5",
+      "phase": "end-to-end-preparation",
+      "sampleIndex": 8,
+      "elapsedMs": 3915.6194170000017,
+      "status": "ok",
+      "pin": {
+        "orderedChecksum": "b0a34300c7f7e945eb317594ab8c0a47da32caf06d21cac74645a45eed54b31d",
+        "termination": "completed",
+        "work": {
+          "placementAttempts": 159490,
+          "refinementAttempts": 400000,
+          "voronoi": {
+            "sampleCount": 40000,
+            "assignedSampleCount": 40000,
+            "distanceEvaluationCount": 403463,
+            "seedLookupCount": 616177,
+            "indexBuildOperationCount": 3932254
+          },
+          "relocationAccepted": 31116
+        },
+        "diagnostics": {
+          "termination": "completed",
+          "distributionError": 0.3751682499999885,
+          "relaxation": {
+            "objective": 7.280224586497679e-7,
+            "requestedWorkUnits": 480000,
+            "completedWorkUnits": 360000,
+            "iterationsCompleted": 3,
+            "relocationsAccepted": 36871
+          }
+        }
+      }
+    }
+  ]
+}
