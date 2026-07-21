@@ -140,12 +140,127 @@ function spacingConflicts(
   return conflicts
 }
 
+class IncrementalSpacingConflicts {
+  readonly degrees: Uint32Array
+
+  private readonly rows = new Map<number, Map<number, number[]>>()
+  private readonly minimumSpacingSquared: number
+
+  constructor(
+    private readonly centers: Readonly<Point>[],
+    private readonly minimumSpacing: number,
+  ) {
+    this.degrees = new Uint32Array(centers.length)
+    this.minimumSpacingSquared = minimumSpacing * minimumSpacing
+    for (let index = 0; index < centers.length; index++) this.insert(index)
+  }
+
+  replaceCenters(
+    replacements: readonly (readonly [number, Readonly<Point>])[],
+  ): void {
+    const ordered = [...replacements].sort(
+      ([firstIndex], [secondIndex]) => firstIndex - secondIndex,
+    )
+    for (
+      let replacementIndex = 1;
+      replacementIndex < ordered.length;
+      replacementIndex++
+    ) {
+      if (ordered[replacementIndex - 1]![0] === ordered[replacementIndex]![0]) {
+        throw new RangeError('Spacing-conflict replacements must be unique')
+      }
+    }
+    for (const [index] of ordered) this.remove(index)
+    for (const [index, center] of ordered) this.centers[index] = center
+    for (const [index] of ordered) this.insert(index)
+  }
+
+  private forEachNeighbor(
+    index: number,
+    visit: (otherIndex: number) => void,
+  ): void {
+    const center = this.centers[index]!
+    if (!Number.isFinite(center[0]) || !Number.isFinite(center[1])) return
+    const cellX = Math.floor(center[0] / this.minimumSpacing)
+    const cellY = Math.floor(center[1] / this.minimumSpacing)
+    for (let y = cellY - 1; y <= cellY + 1; y++) {
+      const row = this.rows.get(y)
+      if (row === undefined) continue
+      for (let x = cellX - 1; x <= cellX + 1; x++) {
+        for (const otherIndex of row.get(x) ?? []) {
+          if (otherIndex === index) continue
+          const other = this.centers[otherIndex]!
+          const deltaX = center[0] - other[0]
+          const deltaY = center[1] - other[1]
+          if (
+            deltaX * deltaX + deltaY * deltaY <
+            this.minimumSpacingSquared
+          ) {
+            visit(otherIndex)
+          }
+        }
+      }
+    }
+  }
+
+  private insert(index: number): void {
+    const center = this.centers[index]!
+    if (!Number.isFinite(center[0]) || !Number.isFinite(center[1])) return
+    this.forEachNeighbor(index, (otherIndex) => {
+      this.degrees[index] = this.degrees[index]! + 1
+      this.degrees[otherIndex] = this.degrees[otherIndex]! + 1
+    })
+    const cellX = Math.floor(center[0] / this.minimumSpacing)
+    const cellY = Math.floor(center[1] / this.minimumSpacing)
+    let row = this.rows.get(cellY)
+    if (row === undefined) {
+      row = new Map<number, number[]>()
+      this.rows.set(cellY, row)
+    }
+    const bucket = row.get(cellX)
+    if (bucket === undefined) row.set(cellX, [index])
+    else bucket.push(index)
+  }
+
+  private remove(index: number): void {
+    const center = this.centers[index]!
+    if (!Number.isFinite(center[0]) || !Number.isFinite(center[1])) return
+    this.forEachNeighbor(index, (otherIndex) => {
+      this.degrees[index] = this.degrees[index]! - 1
+      this.degrees[otherIndex] = this.degrees[otherIndex]! - 1
+    })
+    const cellX = Math.floor(center[0] / this.minimumSpacing)
+    const cellY = Math.floor(center[1] / this.minimumSpacing)
+    const row = this.rows.get(cellY)!
+    const bucket = row.get(cellX)!
+    bucket.splice(bucket.indexOf(index), 1)
+    if (bucket.length === 0) row.delete(cellX)
+    if (row.size === 0) this.rows.delete(cellY)
+  }
+}
+
 /** @internal Direct-module seam for exact spatial-index equivalence tests. */
 export function findStipplingSpacingConflictsForTesting(
   centers: readonly Readonly<Point>[],
   minimumSpacing: number,
 ): Uint8Array {
   return spacingConflicts(centers, minimumSpacing)
+}
+
+/** @internal Trace incremental conflict degrees after simultaneous move batches. */
+export function traceStipplingSpacingConflictDegreesForTesting(
+  initialCenters: readonly Readonly<Point>[],
+  minimumSpacing: number,
+  batches: readonly (readonly (readonly [number, Readonly<Point>])[])[],
+): readonly Uint32Array[] {
+  const centers = [...initialCenters]
+  const conflicts = new IncrementalSpacingConflicts(centers, minimumSpacing)
+  const snapshots = [conflicts.degrees.slice()]
+  for (const batch of batches) {
+    conflicts.replaceCenters(batch)
+    snapshots.push(conflicts.degrees.slice())
+  }
+  return snapshots
 }
 
 function settleCandidates(
@@ -160,13 +275,13 @@ function settleCandidates(
       ? mark.center
       : backtrackedCenter(mark.center, centroid, 0)
   })
+  const conflicts = new IncrementalSpacingConflicts(
+    centers,
+    model.scales.minimumSpacing,
+  )
 
   while (true) {
-    const conflicts = spacingConflicts(
-      centers,
-      model.scales.minimumSpacing,
-    )
-    let changed = false
+    const replacements: (readonly [number, Readonly<Point>])[] = []
 
     for (let siteIndex = 0; siteIndex < marks.length; siteIndex++) {
       const mark = marks[siteIndex]!
@@ -175,22 +290,21 @@ function settleCandidates(
       if (
         centroid === null ||
         samePoint(center, mark.center) ||
-        (conflicts[siteIndex] === 0 &&
+        (conflicts.degrees[siteIndex] === 0 &&
           isCandidatePermitted(model, center, mark.orientation))
       ) {
         continue
       }
 
       steps[siteIndex] = steps[siteIndex]! + 1
-      centers[siteIndex] = backtrackedCenter(
-        mark.center,
-        centroid,
-        steps[siteIndex]!,
-      )
-      changed = true
+      replacements.push([
+        siteIndex,
+        backtrackedCenter(mark.center, centroid, steps[siteIndex]!),
+      ])
     }
 
-    if (!changed) return centers
+    if (replacements.length === 0) return centers
+    conflicts.replaceCenters(replacements)
   }
 }
 

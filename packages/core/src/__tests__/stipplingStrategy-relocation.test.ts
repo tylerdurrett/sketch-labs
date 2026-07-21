@@ -11,6 +11,7 @@ import { createStipplingModel } from '../stipplingStrategy/model'
 import {
   findStipplingSpacingConflictsForTesting,
   relocateStipplesToVoronoiCentroids,
+  traceStipplingSpacingConflictDegreesForTesting,
 } from '../stipplingStrategy/relocation'
 import type {
   StippleMark,
@@ -149,6 +150,43 @@ function stringKeyedSpacingConflicts(
   return conflicts
 }
 
+function quadraticSpacingConflictDegrees(
+  centers: readonly Readonly<Point>[],
+  minimumSpacing: number,
+): Uint32Array {
+  const degrees = new Uint32Array(centers.length)
+  const minimumSpacingSquared = minimumSpacing * minimumSpacing
+  for (let index = 0; index < centers.length; index++) {
+    const center = centers[index]!
+    if (!Number.isFinite(center[0]) || !Number.isFinite(center[1])) continue
+    for (let otherIndex = 0; otherIndex < index; otherIndex++) {
+      const other = centers[otherIndex]!
+      if (!Number.isFinite(other[0]) || !Number.isFinite(other[1])) continue
+      const deltaX = center[0] - other[0]
+      const deltaY = center[1] - other[1]
+      if (deltaX * deltaX + deltaY * deltaY < minimumSpacingSquared) {
+        degrees[index] = degrees[index]! + 1
+        degrees[otherIndex] = degrees[otherIndex]! + 1
+      }
+    }
+  }
+  return degrees
+}
+
+function expectedConflictTrace(
+  initialCenters: readonly Readonly<Point>[],
+  minimumSpacing: number,
+  batches: readonly (readonly (readonly [number, Readonly<Point>])[])[],
+): readonly Uint32Array[] {
+  const centers = [...initialCenters]
+  const snapshots = [quadraticSpacingConflictDegrees(centers, minimumSpacing)]
+  for (const batch of batches) {
+    for (const [index, center] of batch) centers[index] = center
+    snapshots.push(quadraticSpacingConflictDegrees(centers, minimumSpacing))
+  }
+  return snapshots
+}
+
 describe('one-pass Stipple centroid relocation', () => {
   it('matches string-keyed conflicts across boundaries and numeric extremes', () => {
     const points: readonly Readonly<Point>[] = [
@@ -176,6 +214,85 @@ describe('one-pass Stipple centroid relocation', () => {
           }
         }
       }
+    }
+  })
+
+  it('maintains exact conflict degrees across simultaneous move batches', () => {
+    const initial: readonly Readonly<Point>[] = [
+      [0, 0],
+      [0.249999999999, 0],
+      [0.25, 0],
+      [-0.000000000001, 0],
+      [-0.25, 0],
+      [4.9, 5],
+      [5.1, 5],
+      [1_000_000_000_000, -1_000_000_000_000],
+      [Number.NaN, 5],
+    ]
+    const batches: readonly (readonly (readonly [number, Readonly<Point>])[])[] = [
+      [[6, [8, 8]], [1, [5, 5]], [3, [5.2, 5]]],
+      [[8, [5.1, 5]], [7, [5.15, 5]], [0, [Number.POSITIVE_INFINITY, 0]]],
+      [[0, [-0.5, -0.5]], [2, [-0.250000000001, -0.5]], [5, [1e12, -1e12]]],
+    ]
+
+    for (const minimumSpacing of [0.25, 0.5, 2]) {
+      const actual = traceStipplingSpacingConflictDegreesForTesting(
+        initial,
+        minimumSpacing,
+        batches,
+      )
+      const expected = expectedConflictTrace(initial, minimumSpacing, batches)
+      expect(actual).toEqual(expected)
+      expect(
+        actual.map((degrees) => [...degrees].map((degree) => degree > 0)),
+      ).toEqual(
+        expected.map((degrees) => [...degrees].map((degree) => degree > 0)),
+      )
+    }
+  })
+
+  it('matches a quadratic oracle through deterministic randomized move sequences', () => {
+    let state = 0x3890_4001
+    const random = () => {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0
+      return state / 0x1_0000_0000
+    }
+    const initial = Array.from({ length: 48 }, (): Readonly<Point> =>
+      Object.freeze([(random() - 0.25) * 24, (random() - 0.25) * 24]),
+    )
+    const batches = Array.from({ length: 120 }, (_, batchIndex) => {
+      const count = 1 + Math.floor(random() * 12)
+      const indices = new Set<number>()
+      while (indices.size < count) indices.add(Math.floor(random() * initial.length))
+      return Object.freeze(
+        [...indices].reverse().map((index, moveIndex) => {
+          const special = (batchIndex * 13 + moveIndex) % 37
+          const center: Readonly<Point> =
+            special === 0
+              ? [Number.NaN, random() * 10]
+              : special === 1
+                ? [1e12, -1e12]
+                : special === 2
+                  ? [-0.5, 0.5]
+                  : [(random() - 0.25) * 24, (random() - 0.25) * 24]
+          return Object.freeze([index, Object.freeze(center)] as const)
+        }),
+      )
+    })
+
+    for (const minimumSpacing of [0.125, 0.5, 3]) {
+      const actual = traceStipplingSpacingConflictDegreesForTesting(
+        initial,
+        minimumSpacing,
+        batches,
+      )
+      const expected = expectedConflictTrace(initial, minimumSpacing, batches)
+      expect(actual).toEqual(expected)
+      expect(
+        actual.map((degrees) => [...degrees].map((degree) => degree > 0)),
+      ).toEqual(
+        expected.map((degrees) => [...degrees].map((degree) => degree > 0)),
+      )
     }
   })
 
