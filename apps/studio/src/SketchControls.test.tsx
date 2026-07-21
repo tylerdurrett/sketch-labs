@@ -10727,19 +10727,170 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     expect(downloadBlob).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a current budget-exhausted Shading result exportable", async () => {
-    const el = mount(<SketchControls sketch={toneCalibration} />);
-    await completeShading(0, preparedScene(7), {
+  it("keeps an acknowledged budget-exhausted Stippling result current across Fill and every export", async () => {
+    autoFireOutlineComputed = false;
+    const toBlob = vi.fn((callback: BlobCallback) => {
+      callback(new Blob([MINIMAL_PNG], { type: "image/png" }));
+    });
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    expect(shadingJob.starts).toHaveLength(2);
+
+    const stipples: Scene = {
+      space: { ...lastCompositionFrame! },
+      primitives: [
+        {
+          points: [[150, 250], [150.5, 250]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[400, 300], [400, 300.5]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[800, 700], [799.5, 700]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+      ],
+    };
+    const sourcePoints = stipples.primitives.map(({ points }) => points);
+    autoAcknowledgeDisplayedScene = false;
+    await completeShading(1, stipples, {
       ...diagnostics,
       termination: "budget-exhausted",
-      fidelity: { kind: "scribble", residualError: 0.3 },
+      fidelity: { kind: "stippling", distributionError: 0.3 },
     });
 
-    expect(exportButton(el, "Export PNG").disabled).toBe(false);
-    expect(exportButton(el, "Export SVG").disabled).toBe(false);
-    expect(exportButton(el, "Export Hidden-line SVG").disabled).toBe(false);
+    const diagnosticsPanel = shadingDisclosure(el);
+    expect(diagnosticsPanel.textContent).toContain("Budget exhausted");
+    expect(diagnosticsPanel.textContent).toContain(
+      "bounded partial result, not a computation error",
+    );
+    expect(diagnosticsPanel.textContent).toContain("Distribution error30.00%");
+    expect(diagnosticsPanel.textContent).not.toContain("Residual error");
+
+    const png = exportButton(el, "Export PNG");
+    const svg = exportButton(el, "Export SVG");
+    const hidden = exportButton(el, "Export Hidden-line SVG");
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    act(() => {
+      for (const candidate of [png, svg, hidden]) {
+        candidate.disabled = false;
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+
+    act(() => acknowledgeDisplayedScene?.());
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect(diagnosticsPanel.textContent).toContain("Budget exhausted");
+    clickButton(el, "Fill");
+    expect(lastRenderScene).toBe(stipples);
+
     clickButton(el, "Export SVG");
-    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    expect(exportSceneCapture.current).toBe(stipples);
+    expect(
+      (exportSceneCapture.current as Scene).primitives.map(
+        ({ points }) => points,
+      ),
+    ).toEqual(sourcePoints);
+    clickButton(el, "Export PNG");
+    await flush();
+    expect(toBlob).toHaveBeenCalledOnce();
+
+    const includeFrame = compositionFrameCheckbox(el);
+    expect(includeFrame.checked).toBe(true);
+    act(() => includeFrame.click());
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    const identity = outlineJob.lastIdentity;
+    expect(identity).toMatchObject({
+      sourceKind: "completed-scene-sketch",
+      sourceScene: stipples,
+    });
+    if (identity?.sourceKind !== "completed-scene-sketch") {
+      throw new Error("expected completed-Scene Stippling identity");
+    }
+    expect(identity.sourceScene).not.toBe(stipples);
+    expect(identity.sourceScene.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+    act(() => lastOnOutlineComputed?.());
+    await flush();
+    const cachedOutline = outlineJob.lastCompletedScene!;
+    expect(cachedOutline.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.lastExportSnapshot).toMatchObject({
+      identity: { sourceKind: "completed-scene-sketch" },
+      reusableOutline: { scene: cachedOutline },
+    });
+    const plotterScene = plotterExportCapture.current?.scene as Scene;
+    expect(plotterScene.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+    expect(
+      plotterScene.primitives.every(
+        ({ points, closed }) => points.length === 2 && closed !== true,
+      ),
+    ).toBe(true);
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(generate).not.toHaveBeenCalled();
+    expect(downloadBlob).toHaveBeenCalledTimes(3);
+
+    toBlob.mockClear();
+    downloadBlob.mockClear();
+    exportSceneCapture.current = null;
+    outlineJob.exportStarts = 0;
+    const density = paramInput(el, "stippleDensity");
+    act(() => density.focus());
+    setInput(density, "1.4");
+    act(() => density.blur());
+    expect(shadingJob.starts).toHaveLength(3);
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    act(() => {
+      for (const candidate of [png, svg, hidden]) {
+        candidate.disabled = false;
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
   });
 
   it("holds empty/current/stale artwork and settles one latest edit without main-thread generation", async () => {

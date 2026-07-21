@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const scribbleStrategyMock = vi.hoisted(() => vi.fn())
 const stipplingStrategyMock = vi.hoisted(() => vi.fn())
@@ -156,6 +156,11 @@ function insidePage(point: Readonly<Point>, frame: PageFrame): boolean {
     point[1] <= frame.y + frame.height
   )
 }
+
+beforeEach(() => {
+  scribbleStrategyMock.mockClear()
+  stipplingStrategyMock.mockClear()
+})
 
 describe('Tone Calibration Stippling output parity', () => {
   it('carries one completed deterministic artwork through every generic output surface', () => {
@@ -570,6 +575,176 @@ describe('Tone Calibration Stippling output parity', () => {
     for (const frozen of [
       retainedSnapshot,
       sourceProfileSnapshot,
+      outlineSourceSnapshot,
+      hiddenLineSnapshot,
+      framedSnapshot,
+      clippedSnapshot,
+      pageProfileSnapshot,
+    ]) {
+      expectUnchanged(frozen)
+    }
+  })
+
+  it('keeps a budget-exhausted prepared result intact across retained and transformed output stages', () => {
+    const partialPoints: Point[][] = [
+      [
+        [19.9, 25],
+        [20.1, 25],
+      ],
+      [
+        [30, 20],
+        [30.2, 20],
+      ],
+      [
+        [79.9, 35],
+        [80.1, 35],
+      ],
+      [
+        [90, 70],
+        [90.2, 70],
+      ],
+    ]
+    stipplingStrategyMock.mockReturnValueOnce({
+      polylines: partialPoints,
+      termination: 'budget-exhausted',
+      distributionError: 0.4,
+    })
+
+    const prepared = toneCalibration.generateShadingArtwork!(
+      stipplingParams(),
+      'forced-stipple-output-budget',
+      { width: 100, height: 80 },
+    )
+    expect(prepared.diagnostics).toEqual({
+      termination: 'budget-exhausted',
+      pathLength: expect.closeTo(0.8),
+      polylineCount: 4,
+      penLiftCount: 3,
+      fidelity: { kind: 'stippling', distributionError: 0.4 },
+    })
+
+    const retainedSnapshot = snapshot(prepared.scene)
+    const retained = retainedSnapshot.value
+    expectOpenTwoPointStipples(retained, partialPoints, 1, 'source')
+    const strategyCountsAfterPreparation = strategyCallCounts()
+
+    const ordinarySVG = renderToSVG(retained)
+    expect(svgPathElements(ordinarySVG)).toEqual(
+      partialPoints.map((points) => ordinaryPath(points, 1)),
+    )
+    expectStrategyCallCounts(strategyCountsAfterPreparation)
+
+    const outlineSourceSnapshot = snapshot(
+      toneCalibration.deriveOutlineSource!(retained, {
+        toolWidthMillimeters: 0.4,
+        millimetersPerSceneUnit: 2,
+      }),
+    )
+    const outlineSource = outlineSourceSnapshot.value
+    expectOpenTwoPointStipples(outlineSource, partialPoints, 0.2, 'source')
+    expect(
+      outlineSource.primitives.map(({ stroke: _stroke, ...primitive }) =>
+        primitive,
+      ),
+    ).toEqual(
+      retained.primitives.map(({ stroke: _stroke, ...primitive }) =>
+        primitive,
+      ),
+    )
+
+    const hiddenLineSnapshot = snapshot(hiddenLinePass(outlineSource))
+    const hiddenLine = hiddenLineSnapshot.value
+    expectOpenTwoPointStipples(hiddenLine, partialPoints, 0.2, undefined)
+    expectStrategyCallCounts(strategyCountsAfterPreparation)
+
+    const page: PageFrame = deepFreeze({
+      x: 20,
+      y: 15,
+      width: 60,
+      height: 40,
+    })
+    const framedSnapshot = snapshot(frameScene(hiddenLine, page))
+    const framedPoints: Point[][] = [
+      [
+        [19.9 - page.x, 25 - page.y],
+        [20.1 - page.x, 25 - page.y],
+      ],
+      [
+        [30 - page.x, 20 - page.y],
+        [30.2 - page.x, 20 - page.y],
+      ],
+      [
+        [79.9 - page.x, 35 - page.y],
+        [80.1 - page.x, 35 - page.y],
+      ],
+    ]
+    expectOpenTwoPointStipples(
+      framedSnapshot.value,
+      framedPoints,
+      0.2,
+      undefined,
+    )
+
+    const clippedSnapshot = snapshot(
+      clipSceneToBounds(framedSnapshot.value),
+    )
+    const clippedPoints: Point[][] = [
+      [
+        [0, 10],
+        [20.1 - page.x, 10],
+      ],
+      [
+        [10, 5],
+        [30.2 - page.x, 5],
+      ],
+      [
+        [79.9 - page.x, 20],
+        [60, 20],
+      ],
+    ]
+    expectOpenTwoPointStipples(
+      clippedSnapshot.value,
+      clippedPoints,
+      0.2,
+      undefined,
+    )
+    expectStrategyCallCounts(strategyCountsAfterPreparation)
+
+    const pageProfileSnapshot = snapshot(
+      derivePageFramePlotProfile(
+        {
+          width: 220,
+          height: 188,
+          insets: { top: 11, right: 13, bottom: 17, left: 7 },
+          includeFrame: false,
+          toolWidthMillimeters: 0.4,
+        },
+        { x: 0, y: 0, width: 100, height: 80 },
+        page,
+      ),
+    )
+    const plotterSVG = renderPlotterSVG(
+      clippedSnapshot.value,
+      pageProfileSnapshot.value,
+    )
+    expect(svgPathElements(plotterSVG)).toEqual([
+      '<path d="M7 31 L7.2 31" fill="none" stroke="black" stroke-width="0.4" />',
+      '<path d="M27 21 L27.4 21" fill="none" stroke="black" stroke-width="0.4" />',
+      '<path d="M126.8 51 L127 51" fill="none" stroke="black" stroke-width="0.4" />',
+    ])
+    expect(plotterSVG).not.toMatch(
+      /<(?:rect|g|polyline|circle|clipPath)\b|\b(?:transform|clip-path)=|\sZ(?:"|\s)/,
+    )
+    expectStrategyCallCounts(strategyCountsAfterPreparation)
+
+    // Output stages may clone, restyle, rebase, clip, map, and round their own
+    // values, but the retained partial artwork remains the frozen source.
+    expect(outlineSource).not.toBe(retained)
+    expect(hiddenLine).not.toBe(outlineSource)
+    expect(framedSnapshot.value).not.toBe(hiddenLine)
+    expect(clippedSnapshot.value).not.toBe(framedSnapshot.value)
+    for (const frozen of [
+      retainedSnapshot,
       outlineSourceSnapshot,
       hiddenLineSnapshot,
       framedSnapshot,
