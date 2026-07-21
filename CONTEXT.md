@@ -81,13 +81,33 @@ _Avoid_: shader, fill renderer, shading mode
 The minimal outcome of a **Shading Strategy**: generated polylines plus a truthful termination reason distinguishing normal completion, an authored early stop, and safety-budget exhaustion.
 _Avoid_: bare polyline array, generic metrics bag
 
+**Shading preparation**:
+Harness-owned cancellable background work that prepares an expensive tone-aware Sketch's complete artwork, progress, and typed diagnostics without selecting or executing strategy-specific policy itself.
+_Avoid_: Scribble worker, strategy selector
+
+**Shading diagnostics**:
+Observations carried by completed prepared artwork as shared lifecycle and geometry metrics plus one exhaustive strategy-specific fidelity variant, never as an untyped metrics bag or cross-strategy score.
+_Avoid_: generic metrics bag, universal error score
+
 **Scribble Strategy**:
 A **Shading Strategy** that preferentially grows long, chaotic continuous polylines through residual under-shaded areas until their weighted tone error is acceptable, lifting and restarting only when progress, coverage, or a zero-permission barrier requires it.
 _Avoid_: single-line strategy (continuity is preferred, not absolute), random walk
 
+**Stipple**:
+A very short two-point micro-stroke that reads visually as a dot while remaining reliable plotter path geometry.
+_Avoid_: point (not reliably drawable), pen tap, traced circle
+
+**Stippling Strategy**:
+A **Shading Strategy** that constructs relative darkness through a deterministic tone-weighted blue-noise distribution of fixed near-dot **Stipples** whose placement and unbiased orientation vary only with Seed.
+_Avoid_: dot renderer, point cloud
+
 **Path density**:
-An authored **Scribble Strategy** control that changes how many drawn passes are required to satisfy a given tone without changing relative Tone Field values or consulting physical output dimensions.
+A Scribble-specific control that changes how many drawn passes are required to satisfy a given tone without changing relative Tone Field values or consulting physical output dimensions.
 _Avoid_: physical ink density, resolution, Tool width
+
+**Stipple density**:
+A Stippling-specific control that changes the abundance and spacing of fixed near-dot Stipples without changing their length, the relative Tone Field, or any physical output value.
+_Avoid_: Path density, physical ink density, Tool width
 
 **Stop point**:
 An authored **Scribble Strategy** control for the artistic look of an unfinished piece. It approximately limits accepted segments to a percentage of the ordinary work allowance without changing path density, tone fidelity, or the Tone Field; `100%` preserves ordinary behavior.
@@ -110,8 +130,12 @@ An authored **Scribble Strategy** control that sets how strongly a growing path 
 An authored **Scribble Strategy** control that sets how broadly Seeded steering may vary among viable candidate directions without changing the underlying target or permission fields.
 
 **Tone fidelity**:
-An authored **Scribble Strategy** control that sets how little permission-weighted residual error may remain before generation is considered converged, independently of path abundance and spatial detail.
+A Scribble-specific control that sets how little permission-weighted residual error may remain before generation is considered converged, independently of path abundance and spatial detail.
 _Avoid_: Path density, resolution
+
+**Distribution fidelity**:
+A Stippling-specific control that sets how carefully an initial tone-weighted blue-noise placement is refined toward lower local distribution error without changing Stipple abundance or length.
+_Avoid_: Tone fidelity, Stipple density, regularity
 
 **Output Profile**:
 The one target-specific artifact description active in a Sketch session and captured by its **Preset**—plot dimensions and margins for paper, or resolution and frame settings for video. Before reframing, its aspect determines the **Composition Frame** and its magnitude controls output mapping. Ordinary Page framing derives a new final profile at the preserved Scene-to-physical scale; fixed-page framing instead locks the exact profile and varies only the existing Page Frame. In both cases the original Composition Frame remains independently reproducible. A Sketch may declare its default, otherwise the Harness initially supplies a square `200 × 200 mm` plot profile with linked `10 mm` insets.
@@ -161,6 +185,10 @@ _Avoid_: browser File, absolute path, uploaded image (does not state persistence
 **Image Asset parameter**:
 A **Parameter Schema** member whose value is a stable **Image Asset** ID and whose derived Studio control imports or selects managed raster sources without participating in **Randomize**.
 _Avoid_: file parameter, path parameter, upload state
+
+**Choice parameter**:
+A **Parameter Schema** member whose value is one stable ID from a declared option set and whose deliberate selection is retained by **Randomize** while governing which dependent controls are active.
+_Avoid_: enum slider, randomized mode
 
 **Render Settings**:
 The resolved per-render execution values a consumer uses when turning a **Sketch** into an artifact, derived from an **Output Profile** or supplied directly by a caller such as Remotion. Their output dimensions' aspect supplies the **Composition Frame** and can therefore regenerate the Scene; their magnitude, frame rate, format, and frame range affect only sampling and output mapping. Frame rate remains outside the Sketch contract because a Sketch is continuous in `t` (ADR-0002). Unlike the persisted authoring intent of an Output Profile, direct Remotion Render Settings arrive as composition input props and are not themselves Preset state.
@@ -217,6 +245,11 @@ _Avoid_: config, params, options, export options
 - A plotter-ready SVG maps artwork into the profile's physical paper and margins but emits only plot paths; paper edges, margin guides, and backgrounds are preview chrome rather than drawable geometry, while the Output Profile remains available as metadata.
 - Every generated Scene uses the Composition Frame's exact normalized coordinate space; the Harness therefore knows layout before generation and does not need Sketch-authored fixed-space metadata or a throwaway Scene probe.
 - Photographs, analytic gradients, and procedural shapes can each produce a **Tone Field**; a **Shading Strategy** consumes that field and produces a **Shading Result** without knowing its source, while the consuming **Sketch** styles and draws the result's polylines as **Primitives**.
+- A **Sketch**, not the **Harness**, chooses which **Shading Strategies** it supports and exposes any authored selection; the Harness prepares and presents expensive shading artwork without owning that artistic choice.
+- **Shading preparation** is shared Harness infrastructure, while strategy execution and controls remain typed core and Sketch concerns and **Shading diagnostics** preserve strategy-specific meaning at the presentation boundary.
+- When a **Sketch** offers multiple **Shading Strategies**, the Studio shows only the selected strategy's controls while retaining inactive strategies' authored values for later restoration.
+- **Randomize** preserves a selected strategy and every inactive strategy-specific value, changing only active numeric controls while honoring their ordinary **Locks**.
+- Tone Calibration is the first shared comparison surface for selecting Scribble or Stippling against one fixed tonal target, while strategy-specific Sketches may remain intentionally specialized.
 - Image analysis may derive a **Detail Field** from an image's original linear-luminance signal, independently of later Tone contrast or gamma adjustments, desired darkness, and any future directional edge signal.
 - An image-derived **Detail Field** normalizes robustly within that image's fitted content after suppressing a fixed noise floor, so subtle photographs retain relative structure while nearly flat images do not amplify numerical or compression noise.
 - Its initial multiscale analysis emphasizes fixed fine-to-medium spatial bands and excludes gradual low-frequency lighting changes; band radii remain internal until hands-on evidence justifies another authored control.
@@ -230,10 +263,13 @@ _Avoid_: config, params, options, export options
 - A **Sketch** draws shading polylines as Hidden-line sources in painter's order; the existing **Hidden-line pass**, not the **Shading Strategy**, clips them behind nearer filled occluders alongside the Sketch's other visible contours.
 - A **Scribble Strategy** minimizes pen lifts but may return multiple polylines so disconnected or exhausted regions can be shaded without crossing a zero-permission **Shading Mask**.
 - A **Scribble Strategy** tracks the virtual coverage deposited by its paths and stops when remaining weighted tone error falls below an explicit tolerance; a maximum path budget is a deterministic safety cap, not the definition of completion.
-- **Stop point** is an authored early-stop cap for deliberate unfinishedness; it is distinct from convergence and safety-budget exhaustion, and its partial geometry remains valid artwork.
+- **Stop point** remains a Scribble-specific authored early-stop cap for deliberate unfinishedness; it is distinct from convergence and safety-budget exhaustion, and its partial geometry remains valid artwork.
 - A **Scribble Strategy** weights remaining tone error linearly by **Shading Mask** permission for both steering and completion, so low-permission areas exert proportionally less demand while zero-permission areas exert none and remain impassable.
 - A **Scribble Strategy** deposits additive virtual coverage with a compact smooth falloff around each segment; explicit Scene-space influence radius and per-pass strength control spacing and repetition without representing physical **Tool width**.
 - Increasing **Path density** reduces the virtual coverage satisfied by each pass, producing more path length for the same **Tone Field** while preserving its relative light-dark relationships.
+- A **Stippling Strategy** uses **Stipple density** to determine mark abundance, then uses **Distribution fidelity** to refine an initially tone-weighted blue-noise distribution toward lower local distribution error without changing micro-stroke length or permitting pathological clumps.
+- Scribble and Stippling share no authored sliders: similarly directed controls retain independent values, ranges, defaults, diagnostics, and names rather than implying cross-strategy numerical equivalence.
+- A **Stippling Strategy** preserves deterministic mark order but does not promise pen-travel optimization; downstream plotter software owns that optimization until the Harness gains a general export-stage solution.
 - Decreasing **Scribble scale** produces finer paths and tighter field sampling, while increasing it produces broader, looser paths; low-level sampling and coverage ratios remain internal until hands-on iteration proves a need to expose them separately.
 - When a **Detail Field** modulates local Scribble scale, the authored **Scribble scale** remains the fine-detail anchor and only smoother regions broaden; zero modulation preserves uniform-scale behavior exactly.
 - Detail-driven local scale varies segment length, virtual-coverage radius, and mask-check spacing at coherent ratios, while the global residual lattice stays fixed at the authored fine-detail scale and safely oversamples broader regions.
@@ -247,6 +283,7 @@ _Avoid_: config, params, options, export options
 - **Detail influence** defaults to `0` so schema reconciliation preserves existing Photo Scribble Presets exactly; an enabled bundled Preset demonstrates the capability instead of changing prior artwork by default.
 - A **Scribble Strategy** selects starts and restarts through Seeded weighting among high-residual areas, so dark regions tend to appear early without forcing every Seed to begin at the same global maximum.
 - A safety-budget-exhausted **Shading Result** remains valid, exportable creative geometry but Studio must identify it truthfully rather than calling it converged; generic path length and pen-lift counts are derived from its polylines, while strategy-specific diagnostics do not widen the shared result.
+- **Shading diagnostics** share termination, progress and ETA, compute time, generated-path count, total path length, and pen lifts; Scribble adds residual error while Stippling adds distribution error, and the Studio labels each variant without inferring it from current controls.
 - Plot dimensions and insets are canonical millimeters; the Paper UI accepts and displays both millimeters and inches by converting at its boundary, while the display-unit choice is a Studio local-storage preference rather than Preset or Sketch state.
 - The first Output Profile implementation is plot-focused in Studio; Remotion derives the same fixed-area Composition Frame from its existing pixel width and height while retaining its current resolution/fps inputs, and a Studio Video profile/target switch waits until video authoring moves there.
 
@@ -275,10 +312,12 @@ These are intentionally **not** pinned here — they are implementation specific
 
 - Further **Primitive** layering or domain/source metadata beyond its current SVG-path-style geometry, optional fill/stroke, and generic `hiddenLineRole`. The role controls only Hidden-line source/occluder participation; it is not a general tagging system.
 - The exact shape of the **Scene** container beyond "coordinate space + draw-ordered Primitives."
-- The concrete field format of the **Parameter Schema**'s remaining _non-numeric_ specs (boolean / enum / … members of the open `ParamSpec` union). The numeric spec is frozen: `NumberParamSpec = { kind: 'number'; min; max; default; step?; integer? }` (issue #47). The color spec is now frozen too: `ColorParamSpec = { kind: 'color'; default }` with a hex-string value domain, never rolled by **Randomize** (ADR-0010). The serialized **Preset** object is no longer deferred — its shape and read-reconciliation policy are pinned in the **Preset** glossary entry above (issue #8).
+- The concrete field format of the **Parameter Schema**'s remaining uninhabited specs (boolean and later members of the open `ParamSpec` union). The current members are frozen as `NumberParamSpec = { kind: 'number'; min; max; default; step?; integer? }`, `ColorParamSpec = { kind: 'color'; default }`, `ImageAssetParamSpec = { kind: 'image-asset'; default }`, and `ChoiceParamSpec = { kind: 'choice'; default; options: readonly { value; label }[] }`; any member may carry the narrow `activeWhen?: { key; equals }` applicability rule. The serialized **Preset** shape and read-reconciliation policy are pinned in the **Preset** glossary entry above.
 - Any GPU / instance-model data structures (the realtime GPU path is deferred entirely).
-- A **cross-param constraint** model — inter-param relationships the single-param **Parameter Schema** cannot express (e.g. `minRadius ≤ maxRadius`, params that only apply when another is enabled, sum-to-one groups). v1 **Randomize** rolls each unlocked numeric param independently within *its own* bounds, so it can hand a Sketch any in-bounds combination; a Sketch owns its own inter-param coherence inside `generate` (e.g. circles taking `Math.min`/`Math.max` of its two radii). A real constraint language is future work and deserves its own grilling before it is built.
-- A cross-strategy registry, runtime selector, and normalized control model. The first scribble implementation establishes only the minimal **Shading Strategy** boundary with its own typed controls. The second strategy is the explicit trigger to compare both real configurations, promote only proven shared controls, retain genuinely strategy-specific controls, and add runtime selection without changing Tone Field or Shading Mask producers.
+- A general **cross-param constraint** model remains deferred for relationships such as `minRadius ≤ maxRadius` and sum-to-one groups. Strategy-dependent control visibility is the narrow established exception: inactive controls remain valid persisted values but are hidden from the active editing surface; broader validation and inter-param coherence stay owned by the Sketch.
+- A global cross-strategy registry remains deferred until a second real Sketch repeats Tone Calibration's explicit strategy-dispatch wiring; this second strategy establishes runtime selection while recording that Scribble and Stippling share no authored sliders, without prematurely standardizing execution metadata or diagnostics.
+- Collapsible Parameter groups remain a separate Studio-layout feature; strategy-dependent applicability lands independently so later grouping does not redefine parameter values, Presets, or Randomize behavior.
+- Removing the Scribble-specific **Stop point** control remains separate follow-up work; adding Stippling neither reuses nor removes it.
 - Raster photograph ingestion as a **Tone Field** producer. The first scribble Sketch uses a procedural tone test composition so the field and strategy contracts can be tuned independently of asset handling. The next source milestone adds managed import of arbitrary local images into a configured project asset root, assigns each **Image Asset** a stable logical ID captured by Presets, and resolves identical bytes across Studio, workers, and video before decoding and sampling them behind the existing Tone Field contract; it must not expose machine-local paths or change Shading Strategy consumers.
 - The Node/Remotion **Image Asset** loader. Core's decoded-pixels record (ADR-0014) is the seam; a pure-JS decoder joins when video first consumes a photo-backed Sketch, honoring the glossary's cross-consumer resolution promise as direction rather than as the first photographic feature's obligation.
 - Alternate raster-to-field interpretations beyond the default luminance-plus-alpha adapter: channel selection, independent mask assets, color-aware tone models, thresholding, inversion, edge-aware preprocessing, and fit/crop policy remain source-side concerns to refine with real photograph experiments; none may leak into **Shading Strategy** consumers. Tone contrast and Tone gamma graduated out of this deferral into the first photo Sketch's source controls — applied on the tone domain, exact-zero-preserving, composed inside the source adapter.
