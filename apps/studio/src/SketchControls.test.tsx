@@ -10165,6 +10165,320 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     expect(downloadBlob).not.toHaveBeenCalled();
   });
 
+  it("keeps one acknowledged ordered Stippling Scene through SVG, cached physical Outline, and proportional Page output", async () => {
+    autoFireOutlineComputed = false;
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(shadingJob.starts[1]!.identity.params).toEqual([
+      { key: "strategy", value: "stippling" },
+      { key: "stippleDensity", value: 1 },
+      { key: "distributionFidelity", value: 0.5 },
+    ]);
+
+    const composition = lastCompositionFrame!;
+    const stipples: Scene = {
+      space: { ...composition },
+      primitives: [
+        {
+          points: [[150, 250], [150.5, 250]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[400, 300], [400, 300.5]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[800, 700], [799.5, 700]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+      ],
+    };
+    const sourcePoints = stipples.primitives.map(({ points }) => points);
+    autoAcknowledgeDisplayedScene = false;
+    await completeShading(1, stipples, {
+      ...diagnostics,
+      fidelity: { kind: "stippling", distributionError: 0.02 },
+    });
+
+    const ordinary = exportButton(el, "Export SVG");
+    const plotter = exportButton(el, "Export Hidden-line SVG");
+    expect([ordinary.disabled, plotter.disabled]).toEqual([true, true]);
+    act(() => {
+      for (const candidate of [ordinary, plotter]) {
+        candidate.disabled = false;
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+
+    act(() => acknowledgeDisplayedScene?.());
+    expect([ordinary.disabled, plotter.disabled]).toEqual([false, false]);
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).toBe(stipples);
+    expect(
+      (exportSceneCapture.current as Scene).primitives.map(
+        ({ points }) => points,
+      ),
+    ).toEqual(sourcePoints);
+    expect(
+      (exportSceneCapture.current as Scene).primitives.every(
+        ({ points, closed }) => points.length === 2 && closed === false,
+      ),
+    ).toBe(true);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    const preparedIdentity = outlineJob.lastIdentity;
+    expect(preparedIdentity).toMatchObject({
+      sourceKind: "completed-scene-sketch",
+      compositionFrame: composition,
+      sourceScene: stipples,
+      outlineTarget: {
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.18,
+      },
+    });
+    if (preparedIdentity?.sourceKind !== "completed-scene-sketch") {
+      throw new Error("expected completed-Scene Stippling identity");
+    }
+    expect(preparedIdentity.sourceScene).not.toBe(stipples);
+    expect(
+      preparedIdentity.sourceScene.primitives.map(({ points }) => points),
+    ).toEqual(sourcePoints);
+    act(() => lastOnOutlineComputed?.());
+    await flush();
+    const cachedOutline = outlineJob.lastCompletedScene!;
+    expect(cachedOutline.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+    expect(
+      cachedOutline.primitives.every(
+        ({ points, closed }) => points.length === 2 && closed !== true,
+      ),
+    ).toBe(true);
+
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+    act(() => margin.focus());
+    setInput(margin, "20");
+    act(() => margin.blur());
+    const toolWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Tool width (mm)"]',
+    )!;
+    act(() => toolWidth.focus());
+    setInput(toolWidth, "0.5");
+    act(() => toolWidth.blur());
+
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.lastIdentity).toBe(preparedIdentity);
+    expect(outlineJob.lastCompletedScene).toBe(cachedOutline);
+    expect(cachedOutline.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+    expect(lastCompositionFrame).toBe(composition);
+    expect(lastOutlineFinalizationStrokePolicy).toEqual({
+      kind: "physical-tool",
+      target: {
+        toolWidthMillimeters: 0.5,
+        millimetersPerSceneUnit: 0.16,
+      },
+    });
+
+    clickButton(el, "Fill");
+    clickButton(el, "Crop");
+    for (const [name, value] of Object.entries({
+      x: 10,
+      y: 20,
+      width: 80,
+      height: 60,
+    })) {
+      setInput(
+        el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+        String(value),
+      );
+    }
+    clickButton(el, "Apply");
+    const pageFrame: PageFrame = {
+      x: 100,
+      y: 200,
+      width: 800,
+      height: 600,
+    };
+    expect(lastCommittedPageFrame).toEqual(pageFrame);
+    expect(lastProfile).toEqual({
+      width: 168,
+      height: 136,
+      insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: true,
+      toolWidthMillimeters: 0.5,
+    });
+    expect(lastCompositionFrame).toBe(composition);
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.lastCompletedScene).toBe(cachedOutline);
+
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).toEqual({
+      space: { width: 800, height: 600 },
+      primitives: [
+        {
+          points: [[50, 50], [50.5, 50]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[300, 100], [300, 100.5]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[700, 500], [699.5, 500]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+      ],
+    });
+    const ordinarySvg = await readBlobText(downloadBlob.mock.calls.at(-1)![0]);
+    const ordinaryDocument = new DOMParser().parseFromString(
+      ordinarySvg,
+      "image/svg+xml",
+    );
+    expect(ordinaryDocument.documentElement.getAttribute("viewBox")).toBe(
+      "0 0 800 600",
+    );
+    expect(
+      [...ordinaryDocument.querySelectorAll(":root > path")].map((path) =>
+        path.getAttribute("d"),
+      ),
+    ).toEqual([
+      "M50 50 L50.5 50",
+      "M300 100 L300 100.5",
+      "M700 500 L699.5 500",
+    ]);
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.lastExportSnapshot).toMatchObject({
+      pageFrame,
+      identity: {
+        sourceKind: "completed-scene-sketch",
+        compositionFrame: composition,
+        sourceScene: stipples,
+        outlineTarget: {
+          toolWidthMillimeters: 0.5,
+          millimetersPerSceneUnit: 0.16,
+        },
+      },
+      reusableOutline: { scene: cachedOutline },
+    });
+    expect(plotterExportCapture.current?.scene).toEqual({
+      space: { width: 800, height: 600 },
+      primitives: [
+        {
+          points: [[50, 50], [50.5, 50]],
+          stroke: { color: "black", width: 3.125 },
+        },
+        {
+          points: [[300, 100], [300, 100.5]],
+          stroke: { color: "black", width: 3.125 },
+        },
+        {
+          points: [[700, 500], [699.5, 500]],
+          stroke: { color: "black", width: 3.125 },
+        },
+        {
+          points: [[0, 0], [800, 0], [800, 600], [0, 600], [0, 0]],
+          stroke: { color: "black", width: 3.125 },
+        },
+      ],
+    });
+    const plotterSvg = await readBlobText(downloadBlob.mock.calls.at(-1)![0]);
+    const plotterDocument = new DOMParser().parseFromString(
+      plotterSvg,
+      "image/svg+xml",
+    );
+    const paths = [...plotterDocument.querySelectorAll(":root > path")];
+    expect(paths.map((path) => path.getAttribute("d"))).toEqual([
+      "M28 28 L28.08 28",
+      "M68 36 L68 36.08",
+      "M132 100 L131.92 100",
+      "M20 20 L148 20 L148 116 L20 116 L20 20",
+    ]);
+    expect(paths.map((path) => path.getAttribute("stroke-width"))).toEqual([
+      "0.5",
+      "0.5",
+      "0.5",
+      "0.5",
+    ]);
+    expect(plotterSvg).not.toMatch(/<rect\b|fill="(?!none)/);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Crop");
+    clickButton(el, "Reset Frame");
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(lastCompositionFrame).toBe(composition);
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(outlineJob.starts).toBe(1);
+
+    downloadBlob.mockClear();
+    exportSceneCapture.current = null;
+    outlineJob.exportStarts = 0;
+    const paperWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    act(() => paperWidth.focus());
+    setInput(paperWidth, "300");
+    act(() => paperWidth.blur());
+
+    expect(lastCompositionFrame).not.toBe(composition);
+    expect(shadingJob.starts).toHaveLength(3);
+    expect(shadingJob.starts[2]!.identity.compositionFrame).toEqual(
+      lastCompositionFrame,
+    );
+    expect(outlineJob.starts).toBe(1);
+    const staleOrdinary = exportButton(el, "Export SVG");
+    const stalePlotter = exportButton(el, "Export Hidden-line SVG");
+    expect([staleOrdinary.disabled, stalePlotter.disabled]).toEqual([
+      true,
+      true,
+    ]);
+    act(() => {
+      for (const candidate of [staleOrdinary, stalePlotter]) {
+        candidate.disabled = false;
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it("carries the exact painted Shading Scene through completed-Scene Outline identity and reuse", async () => {
     autoFireOutlineComputed = false;
     const generate = vi.fn(toneCalibration.generate);
@@ -10413,19 +10727,170 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     expect(downloadBlob).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a current budget-exhausted Shading result exportable", async () => {
-    const el = mount(<SketchControls sketch={toneCalibration} />);
-    await completeShading(0, preparedScene(7), {
+  it("keeps an acknowledged budget-exhausted Stippling result current across Fill and every export", async () => {
+    autoFireOutlineComputed = false;
+    const toBlob = vi.fn((callback: BlobCallback) => {
+      callback(new Blob([MINIMAL_PNG], { type: "image/png" }));
+    });
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    expect(shadingJob.starts).toHaveLength(2);
+
+    const stipples: Scene = {
+      space: { ...lastCompositionFrame! },
+      primitives: [
+        {
+          points: [[150, 250], [150.5, 250]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[400, 300], [400, 300.5]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[800, 700], [799.5, 700]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+      ],
+    };
+    const sourcePoints = stipples.primitives.map(({ points }) => points);
+    autoAcknowledgeDisplayedScene = false;
+    await completeShading(1, stipples, {
       ...diagnostics,
       termination: "budget-exhausted",
-      fidelity: { kind: "scribble", residualError: 0.3 },
+      fidelity: { kind: "stippling", distributionError: 0.3 },
     });
 
-    expect(exportButton(el, "Export PNG").disabled).toBe(false);
-    expect(exportButton(el, "Export SVG").disabled).toBe(false);
-    expect(exportButton(el, "Export Hidden-line SVG").disabled).toBe(false);
+    const diagnosticsPanel = shadingDisclosure(el);
+    expect(diagnosticsPanel.textContent).toContain("Budget exhausted");
+    expect(diagnosticsPanel.textContent).toContain(
+      "bounded partial result, not a computation error",
+    );
+    expect(diagnosticsPanel.textContent).toContain("Distribution error30.00%");
+    expect(diagnosticsPanel.textContent).not.toContain("Residual error");
+
+    const png = exportButton(el, "Export PNG");
+    const svg = exportButton(el, "Export SVG");
+    const hidden = exportButton(el, "Export Hidden-line SVG");
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    act(() => {
+      for (const candidate of [png, svg, hidden]) {
+        candidate.disabled = false;
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+
+    act(() => acknowledgeDisplayedScene?.());
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect(diagnosticsPanel.textContent).toContain("Budget exhausted");
+    clickButton(el, "Fill");
+    expect(lastRenderScene).toBe(stipples);
+
     clickButton(el, "Export SVG");
-    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    expect(exportSceneCapture.current).toBe(stipples);
+    expect(
+      (exportSceneCapture.current as Scene).primitives.map(
+        ({ points }) => points,
+      ),
+    ).toEqual(sourcePoints);
+    clickButton(el, "Export PNG");
+    await flush();
+    expect(toBlob).toHaveBeenCalledOnce();
+
+    const includeFrame = compositionFrameCheckbox(el);
+    expect(includeFrame.checked).toBe(true);
+    act(() => includeFrame.click());
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    const identity = outlineJob.lastIdentity;
+    expect(identity).toMatchObject({
+      sourceKind: "completed-scene-sketch",
+      sourceScene: stipples,
+    });
+    if (identity?.sourceKind !== "completed-scene-sketch") {
+      throw new Error("expected completed-Scene Stippling identity");
+    }
+    expect(identity.sourceScene).not.toBe(stipples);
+    expect(identity.sourceScene.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+    act(() => lastOnOutlineComputed?.());
+    await flush();
+    const cachedOutline = outlineJob.lastCompletedScene!;
+    expect(cachedOutline.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.lastExportSnapshot).toMatchObject({
+      identity: { sourceKind: "completed-scene-sketch" },
+      reusableOutline: { scene: cachedOutline },
+    });
+    const plotterScene = plotterExportCapture.current?.scene as Scene;
+    expect(plotterScene.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+    expect(
+      plotterScene.primitives.every(
+        ({ points, closed }) => points.length === 2 && closed !== true,
+      ),
+    ).toBe(true);
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(generate).not.toHaveBeenCalled();
+    expect(downloadBlob).toHaveBeenCalledTimes(3);
+
+    toBlob.mockClear();
+    downloadBlob.mockClear();
+    exportSceneCapture.current = null;
+    outlineJob.exportStarts = 0;
+    const density = paramInput(el, "stippleDensity");
+    act(() => density.focus());
+    setInput(density, "1.4");
+    act(() => density.blur());
+    expect(shadingJob.starts).toHaveLength(3);
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    act(() => {
+      for (const candidate of [png, svg, hidden]) {
+        candidate.disabled = false;
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
   });
 
   it("holds empty/current/stale artwork and settles one latest edit without main-thread generation", async () => {
