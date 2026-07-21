@@ -605,7 +605,7 @@ describe('Tone Calibration Shading integration', () => {
     for (const primitive of scene.primitives) {
       expect(primitive).toMatchObject({
         closed: false,
-        stroke: { color: 'black', width: 1 },
+        stroke: { color: 'black', width: 0.2, lineCap: 'round' },
         hiddenLineRole: 'source',
       })
       expect(primitive.fill).toBeUndefined()
@@ -800,7 +800,7 @@ describe('Tone Calibration Shading integration', () => {
           [10.25, 20],
         ],
         closed: false,
-        stroke: { color: 'black', width: 1 },
+        stroke: { color: 'black', width: 0.2, lineCap: 'round' },
         hiddenLineRole: 'source',
       },
       {
@@ -809,7 +809,7 @@ describe('Tone Calibration Shading integration', () => {
           [30, 40.25],
         ],
         closed: false,
-        stroke: { color: 'black', width: 1 },
+        stroke: { color: 'black', width: 0.2, lineCap: 'round' },
         hiddenLineRole: 'source',
       },
     ])

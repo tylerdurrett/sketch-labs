@@ -12,6 +12,7 @@ import type { Scene } from '../scene'
 type Event =
   | { method: string; args: number[] }
   | { prop: 'fillStyle' | 'strokeStyle'; value: string }
+  | { prop: 'lineCap'; value: 'butt' | 'round' | 'square' }
   | { prop: 'lineWidth'; value: number }
 
 /**
@@ -23,8 +24,14 @@ function createRecordingContext(): Canvas2DContext & { events: Event[] } {
   const events: Event[] = []
   let fillStyle = ''
   let strokeStyle = ''
+  let lineCap: 'butt' | 'round' | 'square' = 'butt'
   let lineWidth = 0
-  const stack: Array<{ fillStyle: string; strokeStyle: string; lineWidth: number }> = []
+  const stack: Array<{
+    fillStyle: string
+    strokeStyle: string
+    lineCap: 'butt' | 'round' | 'square'
+    lineWidth: number
+  }> = []
 
   const record =
     (method: string) =>
@@ -36,7 +43,7 @@ function createRecordingContext(): Canvas2DContext & { events: Event[] } {
     events,
     save() {
       events.push({ method: 'save', args: [] })
-      stack.push({ fillStyle, strokeStyle, lineWidth })
+      stack.push({ fillStyle, strokeStyle, lineCap, lineWidth })
     },
     restore() {
       events.push({ method: 'restore', args: [] })
@@ -44,6 +51,7 @@ function createRecordingContext(): Canvas2DContext & { events: Event[] } {
       if (state !== undefined) {
         fillStyle = state.fillStyle
         strokeStyle = state.strokeStyle
+        lineCap = state.lineCap
         lineWidth = state.lineWidth
       }
     },
@@ -69,6 +77,13 @@ function createRecordingContext(): Canvas2DContext & { events: Event[] } {
     set strokeStyle(value: string) {
       strokeStyle = value
       events.push({ prop: 'strokeStyle', value })
+    },
+    get lineCap() {
+      return lineCap
+    },
+    set lineCap(value: 'butt' | 'round' | 'square') {
+      lineCap = value
+      events.push({ prop: 'lineCap', value })
     },
     get lineWidth() {
       return lineWidth
@@ -219,6 +234,37 @@ describe('renderToCanvas', () => {
     expect(methodNames(ctx.events)).not.toContain('fill')
     expect(ctx.events).toContainEqual({ prop: 'strokeStyle', value: 'blue' })
     expect(ctx.events).toContainEqual({ prop: 'lineWidth', value: 2 })
+  })
+
+  it('applies an authored round cap and resets an omitted cap to butt', () => {
+    const ctx = createRecordingContext()
+    const scene: Scene = {
+      space,
+      primitives: [
+        {
+          points: [
+            [0, 0],
+            [0.1, 0],
+          ],
+          stroke: { color: 'black', width: 2, lineCap: 'round' },
+        },
+        {
+          points: [
+            [1, 0],
+            [2, 0],
+          ],
+          stroke: { color: 'black', width: 1 },
+        },
+      ],
+    }
+
+    renderToCanvas(ctx, scene)
+
+    expect(
+      ctx.events.flatMap((event) =>
+        'prop' in event && event.prop === 'lineCap' ? [event.value] : [],
+      ),
+    ).toEqual(['round', 'butt'])
   })
 
   it('applies both fill and stroke when both are present', () => {

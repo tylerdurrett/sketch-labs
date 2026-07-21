@@ -618,7 +618,7 @@ export interface TimeMetadata {
  * An Outline source hook may use this target to change stroke width only. Every
  * emitted stroked Primitive must use exactly
  * `toolWidthMillimeters / millimetersPerSceneUnit`; stroke presence and color,
- * coordinate space, geometry, primitive order, closure, fills, background, and
+ * line cap, coordinate space, geometry, primitive order, closure, fills, background, and
  * `hiddenLineRole` values must be invariant across valid targets. This makes the
  * hook an explicit physical-tool opt-in: completed Hidden-line geometry and its
  * invariant styling can be retained while finalization applies a newer width.
@@ -826,8 +826,8 @@ export interface StatelessSketch extends SketchBase {
    * values describe sources and occluders, and the Harness's ordinary
    * Hidden-line pass produces the completed stroke-only Scene. The
    * {@link OutlineTarget} may affect stroke width only. Every emitted stroke
-   * must use its exact physical-width quotient; stroke presence and color,
-   * geometry, primitive order, closure, fills, background, and Hidden-line roles
+   * must use its exact physical-width quotient; stroke presence, color, and line
+   * cap, geometry, primitive order, closure, fills, background, and Hidden-line roles
    * must be invariant across valid targets. This hook never runs in the live Fill
    * loop. Sketches that omit both Outline source hooks retain the non-opt-in
    * legacy behavior of processing their sampled Fill Scene directly.
@@ -851,8 +851,8 @@ export interface StatelessSketch extends SketchBase {
    * is the authoritative artwork and must not be rerun or substituted while
    * applying physical-tool styling. As with {@link generateOutlineSource}, the
    * target may affect stroke width only: every emitted stroke uses the exact
-   * physical-width quotient, while stroke presence and color, geometry, and
-   * Hidden-line semantics remain invariant across valid targets. The returned
+   * physical-width quotient, while stroke presence, color, line cap, geometry,
+   * and Hidden-line semantics remain invariant across valid targets. The returned
    * Scene still enters the same generic Hidden-line pass as every other Outline
    * source.
    */

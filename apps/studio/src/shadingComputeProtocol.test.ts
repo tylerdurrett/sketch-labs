@@ -70,7 +70,7 @@ const scene: Scene = {
       ],
       closed: true,
       fill: { color: "red" },
-      stroke: { color: "blue", width: 2 },
+      stroke: { color: "blue", width: 2, lineCap: "round" },
       hiddenLineRole: "both",
     },
   ],
@@ -559,6 +559,7 @@ describe("Shading compute protocol guards", () => {
       (copy) => (copy.scene.primitives[0].fill.extra = true),
       (copy) => (copy.scene.primitives[0].stroke.extra = true),
       (copy) => (copy.scene.primitives[0].stroke.width = Infinity),
+      (copy) => (copy.scene.primitives[0].stroke.lineCap = "triangle"),
       (copy) => (copy.scene.primitives[0].hiddenLineRole = "unknown"),
     ];
     for (const mutate of mutations) {

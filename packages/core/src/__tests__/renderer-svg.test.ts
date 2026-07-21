@@ -57,6 +57,33 @@ describe('renderToSVG', () => {
     expect(svg).toMatch(/<path\b[^>]*\bstroke-width="2.5"/)
   })
 
+  it('emits an authored round cap without changing the default cap', () => {
+    const scene: Scene = {
+      space,
+      primitives: [
+        {
+          points: [
+            [0, 0],
+            [0.1, 0],
+          ],
+          stroke: { color: 'black', width: 2, lineCap: 'round' },
+        },
+        {
+          points: [
+            [1, 0],
+            [2, 0],
+          ],
+          stroke: { color: 'black', width: 1 },
+        },
+      ],
+    }
+
+    const [round, unchanged] = paths(renderToSVG(scene))
+
+    expect(round).toMatch(/\bstroke-linecap="round"/)
+    expect(unchanged).not.toMatch(/\bstroke-linecap=/)
+  })
+
   it('writes stroke-width in unscaled Scene-space units', () => {
     const scene: Scene = {
       space,

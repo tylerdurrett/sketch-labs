@@ -287,6 +287,12 @@ function isHiddenLineRole(value: unknown): value is HiddenLineRole {
   return value === "source" || value === "occluder" || value === "both";
 }
 
+function isStrokeLineCap(
+  value: unknown,
+): value is "butt" | "round" | "square" {
+  return value === "butt" || value === "round" || value === "square";
+}
+
 function isScene(value: unknown): value is Scene {
   if (
     !isRecord(value) ||
@@ -343,9 +349,11 @@ function isScene(value: unknown): value is Scene {
     if (
       hasOwn(candidate, "stroke") &&
       (!isRecord(candidate.stroke) ||
-        !hasExactKeys(candidate.stroke, ["color", "width"]) ||
+        !hasExactKeys(candidate.stroke, ["color", "width"], ["lineCap"]) ||
         typeof candidate.stroke.color !== "string" ||
-        !isNonNegativeFiniteNumber(candidate.stroke.width))
+        !isNonNegativeFiniteNumber(candidate.stroke.width) ||
+        (hasOwn(candidate.stroke, "lineCap") &&
+          !isStrokeLineCap(candidate.stroke.lineCap)))
     ) {
       return false;
     }

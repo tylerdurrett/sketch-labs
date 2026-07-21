@@ -428,6 +428,14 @@ describe("Shading worker runtime", () => {
         "kind",
         metric,
       ]);
+      if (strategy === "stippling") {
+        expect(response.scene.primitives.length).toBeGreaterThan(0);
+        expect(
+          response.scene.primitives.every(
+            ({ stroke }) => stroke?.lineCap === "round",
+          ),
+        ).toBe(true);
+      }
     },
   );
 

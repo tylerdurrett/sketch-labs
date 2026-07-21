@@ -100,19 +100,19 @@ const completedStippling: Scene = {
     {
       points: [[150, 250], [150.5, 250]],
       closed: false,
-      stroke: { color: "black", width: 1 },
+      stroke: { color: "black", width: 1, lineCap: "round" },
       hiddenLineRole: "source",
     },
     {
       points: [[400, 300], [400, 300.5]],
       closed: false,
-      stroke: { color: "black", width: 1 },
+      stroke: { color: "black", width: 1, lineCap: "round" },
       hiddenLineRole: "source",
     },
     {
       points: [[800, 700], [799.5, 700]],
       closed: false,
-      stroke: { color: "black", width: 1 },
+      stroke: { color: "black", width: 1, lineCap: "round" },
       hiddenLineRole: "source",
     },
   ],
@@ -732,6 +732,16 @@ describe("hidden-line export worker runtime", () => {
       outlineScene(...args),
     );
 
+    expect(previewIdentity).toMatchObject({
+      sourceScene: {
+        primitives: [
+          { stroke: { lineCap: "round" } },
+          { stroke: { lineCap: "round" } },
+          { stroke: { lineCap: "round" } },
+        ],
+      },
+    });
+
     try {
       const preview = handleHiddenLineWorkerMessage(
         {
@@ -761,6 +771,7 @@ describe("hidden-line export worker runtime", () => {
       ).toEqual(["black", "black", "black"]);
       for (const primitive of preview.scene.primitives) {
         expect(primitive.stroke?.width).toBeCloseTo(1.5, 12);
+        expect(primitive.stroke?.lineCap).toBe("round");
         expect(primitive.closed).not.toBe(true);
       }
       expect(
@@ -797,6 +808,15 @@ describe("hidden-line export worker runtime", () => {
         toolWidthMillimeters: 0.5,
       };
       const clip = vi.fn((scene: Scene) => scene);
+      expect(exportIdentity).toMatchObject({
+        sourceScene: {
+          primitives: [
+            { stroke: { lineCap: "round" } },
+            { stroke: { lineCap: "round" } },
+            { stroke: { lineCap: "round" } },
+          ],
+        },
+      });
       const exported = handleHiddenLineWorkerMessage(
         exportRequest({
           identity: exportIdentity,
@@ -827,15 +847,15 @@ describe("hidden-line export worker runtime", () => {
         primitives: [
           {
             points: [[50, 50], [50.5, 50]],
-            stroke: { color: "black", width: 2 },
+            stroke: { color: "black", width: 2, lineCap: "round" },
           },
           {
             points: [[300, 100], [300, 100.5]],
-            stroke: { color: "black", width: 2 },
+            stroke: { color: "black", width: 2, lineCap: "round" },
           },
           {
             points: [[700, 500], [699.5, 500]],
-            stroke: { color: "black", width: 2 },
+            stroke: { color: "black", width: 2, lineCap: "round" },
           },
           {
             points: [[0, 0], [800, 0], [800, 600], [0, 600], [0, 0]],
@@ -856,6 +876,16 @@ describe("hidden-line export worker runtime", () => {
       expect(
         paths.map((path) => path.match(/stroke-width="([^"]+)"/)?.[1]),
       ).toEqual(["0.5", "0.5", "0.5", "0.5"]);
+      expect(paths.every((path) => path.includes('stroke-linecap="round"'))).toBe(
+        true,
+      );
+      expect(
+        exported?.type === "complete" && exported.jobKind === "export"
+          ? exported.completedOutline.scene.primitives.every(
+              ({ stroke }) => stroke?.lineCap === "round",
+            )
+          : false,
+      ).toBe(true);
       expect(
         exported?.type === "complete" && exported.jobKind === "export"
           ? exported.svg

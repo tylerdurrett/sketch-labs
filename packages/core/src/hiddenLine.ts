@@ -449,7 +449,7 @@ export function analyzeHiddenLinePlan(scene: Scene): HiddenLinePlanAnalysis {
  * @returns A NEW background-free, stroke-only Scene sharing `scene.space`: the
  *   occlusion-clipped outlines of legacy filled and explicitly tagged source
  *   Primitives, emitted as black, fill-free OPEN Primitives, each preserving
- *   its source width and simplified at `opts.tolerance`. Occluder-only
+ *   its source width and line cap and simplified at `opts.tolerance`. Occluder-only
  *   Primitives are never emitted.
  */
 export function hiddenLinePass(
@@ -528,7 +528,13 @@ export function hiddenLinePass(
       self.occluders,
     )
     const stroke: Stroke = self.primitive.stroke
-      ? { color: 'black', width: self.primitive.stroke.width }
+      ? {
+          color: 'black',
+          width: self.primitive.stroke.width,
+          ...(self.primitive.stroke.lineCap === undefined
+            ? {}
+            : { lineCap: self.primitive.stroke.lineCap }),
+        }
       : DEFAULT_STROKE
     for (const survivor of survivors) {
       // FINAL stage: Douglas–Peucker simplification at the requested tolerance.

@@ -40,6 +40,7 @@ const COMPOSITION = Object.freeze({ width: 100, height: 100 })
 const PAGE = Object.freeze({ x: 20, y: 20, width: 60, height: 60 })
 const FINE_TOOL_MM = 0.3
 const BROAD_TOOL_MM = 0.8
+const STIPPLE_PREVIEW_WIDTH_TO_FRAME = 0.002
 const FULL_PROFILE: PlotProfile = deepFreeze({
   width: 120,
   height: 120,
@@ -59,6 +60,10 @@ function stipplingParams() {
 
 function round(value: number): number {
   return Math.round(value * 10_000) / 10_000
+}
+
+function stipplePreviewWidth(frame: Readonly<{ width: number; height: number }>) {
+  return Math.sqrt(frame.width * frame.height) * STIPPLE_PREVIEW_WIDTH_TO_FRAME
 }
 
 function deepFreeze<T>(value: T): T {
@@ -103,6 +108,7 @@ function expectOpenTwoPointStipples(
   expectedPoints: readonly (readonly Point[])[],
   expectedWidth: number,
   expectedRole: 'source' | undefined,
+  expectedLineCap?: 'round',
 ): void {
   expect(scene.primitives).toHaveLength(expectedPoints.length)
   expect(scene.primitives.length).toBeGreaterThan(0)
@@ -112,7 +118,11 @@ function expectOpenTwoPointStipples(
     expect(primitive.points[0]).not.toEqual(primitive.points[1])
     expect(primitive.closed).toBe(expectedRole === 'source' ? false : undefined)
     expect(primitive.fill).toBeUndefined()
-    expect(primitive.stroke).toEqual({ color: 'black', width: expectedWidth })
+    expect(primitive.stroke).toEqual({
+      color: 'black',
+      width: expectedWidth,
+      ...(expectedLineCap === undefined ? {} : { lineCap: expectedLineCap }),
+    })
     expect(primitive.hiddenLineRole).toBe(expectedRole)
   })
 }
@@ -133,14 +143,18 @@ function expectSerializedStipplesRemainOpen(svg: string): void {
   }
 }
 
-function ordinaryPath(points: readonly Point[], width: number): string {
+function ordinaryPath(
+  points: readonly Point[],
+  width: number,
+  lineCap?: 'round',
+): string {
   const d = points
     .map(
       ([x, y], index) =>
         `${index === 0 ? 'M' : 'L'}${round(x)} ${round(y)}`,
     )
     .join(' ')
-  return `<path d="${d}" fill="none" stroke="black" stroke-width="${round(width)}" />`
+  return `<path d="${d}" fill="none" stroke="black" stroke-width="${round(width)}"${lineCap === undefined ? '' : ` stroke-linecap="${lineCap}"`} />`
 }
 
 function plotterPath(
@@ -194,7 +208,14 @@ describe('Tone Calibration Stippling output parity', () => {
     const retainedSnapshot = snapshot(prepared.scene)
     const retained = retainedSnapshot.value
     const retainedPoints = orderedPoints(retained)
-    expectOpenTwoPointStipples(retained, retainedPoints, 1, 'source')
+    const previewWidth = stipplePreviewWidth(COMPOSITION)
+    expectOpenTwoPointStipples(
+      retained,
+      retainedPoints,
+      previewWidth,
+      'source',
+      'round',
+    )
 
     const strategyCountsAfterPreparation = strategyCallCounts()
     const fineSourceSnapshot = snapshot(
@@ -218,12 +239,14 @@ describe('Tone Calibration Stippling output parity', () => {
       retainedPoints,
       FINE_TOOL_MM,
       'source',
+      'round',
     )
     expectOpenTwoPointStipples(
       broadSource,
       retainedPoints,
       BROAD_TOOL_MM,
       'source',
+      'round',
     )
     expect(fineSource.space).toEqual(COMPOSITION)
     expect(fineSource.space).not.toBe(retained.space)
@@ -250,12 +273,14 @@ describe('Tone Calibration Stippling output parity', () => {
       retainedPoints,
       FINE_TOOL_MM,
       undefined,
+      'round',
     )
     expectOpenTwoPointStipples(
       broadOutline,
       retainedPoints,
       BROAD_TOOL_MM,
       undefined,
+      'round',
     )
     expect(fineOutline).not.toHaveProperty('background')
 
@@ -267,7 +292,9 @@ describe('Tone Calibration Stippling output parity', () => {
       '<rect x="0" y="0" width="100" height="100" fill="white" />',
     )
     expect(svgPathElements(ordinarySVG)).toEqual(
-      retainedPoints.map((points) => ordinaryPath(points, 1)),
+      retainedPoints.map((points) =>
+        ordinaryPath(points, previewWidth, 'round'),
+      ),
     )
     expectSerializedStipplesRemainOpen(ordinarySVG)
     expectStrategyCallCounts(strategyCountsAfterPreparation)
@@ -308,6 +335,7 @@ describe('Tone Calibration Stippling output parity', () => {
       expectedPagePoints,
       FINE_TOOL_MM,
       undefined,
+      'round',
     )
     expect(framed.primitives.length).toBeLessThan(retained.primitives.length)
 
@@ -365,6 +393,7 @@ describe('Tone Calibration Stippling output parity', () => {
       retainedPoints,
       FINE_TOOL_MM / 2,
       undefined,
+      'round',
     )
     const doubledSVG = renderPlotterSVG(doubledOutline, doubledProfile)
     expect(svgPathElements(doubledSVG)).toEqual(
@@ -642,12 +671,21 @@ describe('Tone Calibration Stippling output parity', () => {
 
     const retainedSnapshot = snapshot(prepared.scene)
     const retained = retainedSnapshot.value
-    expectOpenTwoPointStipples(retained, partialPoints, 1, 'source')
+    const previewWidth = stipplePreviewWidth({ width: 100, height: 80 })
+    expectOpenTwoPointStipples(
+      retained,
+      partialPoints,
+      previewWidth,
+      'source',
+      'round',
+    )
     const strategyCountsAfterPreparation = strategyCallCounts()
 
     const ordinarySVG = renderToSVG(retained)
     expect(svgPathElements(ordinarySVG)).toEqual(
-      partialPoints.map((points) => ordinaryPath(points, 1)),
+      partialPoints.map((points) =>
+        ordinaryPath(points, previewWidth, 'round'),
+      ),
     )
     expectStrategyCallCounts(strategyCountsAfterPreparation)
 
@@ -658,7 +696,13 @@ describe('Tone Calibration Stippling output parity', () => {
       }),
     )
     const outlineSource = outlineSourceSnapshot.value
-    expectOpenTwoPointStipples(outlineSource, partialPoints, 0.2, 'source')
+    expectOpenTwoPointStipples(
+      outlineSource,
+      partialPoints,
+      0.2,
+      'source',
+      'round',
+    )
     expect(
       outlineSource.primitives.map(({ stroke: _stroke, ...primitive }) =>
         primitive,
@@ -671,7 +715,13 @@ describe('Tone Calibration Stippling output parity', () => {
 
     const hiddenLineSnapshot = snapshot(hiddenLinePass(outlineSource))
     const hiddenLine = hiddenLineSnapshot.value
-    expectOpenTwoPointStipples(hiddenLine, partialPoints, 0.2, undefined)
+    expectOpenTwoPointStipples(
+      hiddenLine,
+      partialPoints,
+      0.2,
+      undefined,
+      'round',
+    )
     expectStrategyCallCounts(strategyCountsAfterPreparation)
 
     const page: PageFrame = deepFreeze({
@@ -700,6 +750,7 @@ describe('Tone Calibration Stippling output parity', () => {
       framedPoints,
       0.2,
       undefined,
+      'round',
     )
 
     const clippedSnapshot = snapshot(
@@ -724,6 +775,7 @@ describe('Tone Calibration Stippling output parity', () => {
       clippedPoints,
       0.2,
       undefined,
+      'round',
     )
     expectStrategyCallCounts(strategyCountsAfterPreparation)
 

@@ -31,7 +31,13 @@ export function toneCalibrationOutlineSource(
         ...(primitive.closed === undefined
           ? {}
           : { closed: primitive.closed }),
-        stroke: { color: OUTLINE_COLOR, width: strokeWidth },
+        stroke: {
+          color: OUTLINE_COLOR,
+          width: strokeWidth,
+          ...(primitive.stroke?.lineCap === undefined
+            ? {}
+            : { lineCap: primitive.stroke.lineCap }),
+        },
         hiddenLineRole: 'source',
       }),
     ),

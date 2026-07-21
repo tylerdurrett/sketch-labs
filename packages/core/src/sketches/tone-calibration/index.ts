@@ -9,7 +9,7 @@
  */
 
 import { createScene } from '../../scene'
-import type { CoordinateSpace, Scene } from '../../scene'
+import type { CoordinateSpace, Scene, Stroke } from '../../scene'
 import {
   scribbleStrategy,
   type ScribbleResult,
@@ -94,7 +94,17 @@ export const toneCalibrationSchema = Object.freeze({
   }),
 } satisfies ParamSchema)
 
-const PREVIEW_STROKE = Object.freeze({ color: 'black', width: 1 })
+const SCRIBBLE_PREVIEW_STROKE = Object.freeze({ color: 'black', width: 1 })
+const STIPPLE_PREVIEW_WIDTH_TO_FRAME = 0.002
+
+function stipplePreviewStroke(frame: CoordinateSpace): Readonly<Stroke> {
+  return Object.freeze({
+    color: 'black',
+    width:
+      Math.sqrt(frame.width * frame.height) * STIPPLE_PREVIEW_WIDTH_TO_FRAME,
+    lineCap: 'round',
+  })
+}
 
 function scribbleControls(params: Params): ScribbleControls {
   return {
@@ -156,13 +166,14 @@ function generateToneCalibrationStippling(
 function sceneFromShadingResult(
   frame: CoordinateSpace,
   result: Readonly<ShadingResult>,
+  stroke: Readonly<Stroke>,
 ): Scene {
   const builder = createScene(frame)
 
   for (const polyline of result.polylines) {
     builder.addPath(polyline, {
       closed: false,
-      stroke: PREVIEW_STROKE,
+      stroke,
       hiddenLineRole: 'source',
     })
   }
@@ -191,7 +202,7 @@ export function generateToneCalibrationShadingArtwork(
       observer,
     )
     return {
-      scene: sceneFromShadingResult(frame, result),
+      scene: sceneFromShadingResult(frame, result, SCRIBBLE_PREVIEW_STROKE),
       diagnostics: createShadingDiagnostics(result, {
         kind: 'scribble',
         residualError: result.residualError,
@@ -206,7 +217,7 @@ export function generateToneCalibrationShadingArtwork(
     observer,
   )
   return {
-    scene: sceneFromShadingResult(frame, result),
+    scene: sceneFromShadingResult(frame, result, stipplePreviewStroke(frame)),
     diagnostics: createShadingDiagnostics(result, {
       kind: 'stippling',
       distributionError: result.distributionError,

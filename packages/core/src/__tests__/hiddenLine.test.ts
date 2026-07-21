@@ -479,15 +479,23 @@ describe('hiddenLinePass — output is stroke-only, fill-free, open polylines', 
     }
   })
 
-  it('emits black strokes while preserving authored widths and the default width', () => {
-    const authored: Stroke = { color: '#ff0044', width: 3 }
+  it('emits black strokes while preserving authored widths, caps, and the default width', () => {
+    const authored: Stroke = {
+      color: '#ff0044',
+      width: 3,
+      lineCap: 'round',
+    }
     const withStroke = filledSquare(0, 0, 20, 20, authored)
     const noStroke = filledSquare(60, 60, 80, 80, undefined)
     const scene: Scene = { space, primitives: [withStroke, noStroke] }
 
     const out = hiddenLinePass(scene)
 
-    expect(out.primitives[0]!.stroke).toEqual({ color: 'black', width: 3 })
+    expect(out.primitives[0]!.stroke).toEqual({
+      color: 'black',
+      width: 3,
+      lineCap: 'round',
+    })
     expect(out.primitives[1]!.stroke).toEqual(DEFAULT_STROKE)
   })
 })
@@ -806,6 +814,7 @@ function createRecordingContext(): Canvas2DContext & { calls: string[] } {
     clearRect: record('clearRect'),
     fillStyle: '',
     strokeStyle: '',
+    lineCap: 'butt',
     lineWidth: 0,
   }
 }
