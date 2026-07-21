@@ -79,9 +79,34 @@ describe('Stippling authored controls', () => {
     expect(Object.isFrozen(stipplingControlSchema)).toBe(true)
     expect(Object.isFrozen(stipplingControlSchema.stippleDensity)).toBe(true)
   })
+
+  it('declares a usable logarithmic density range up to measured capacity', () => {
+    expect(stipplingControlSchema.stippleDensity).toMatchObject({
+      min: 0.25,
+      max: 400,
+      default: 1,
+      sliderScale: 'logarithmic',
+    })
+  })
 })
 
 describe('Stippling scale model', () => {
+  it('preserves default abundance and caps every demand profile at 160k marks', () => {
+    expect(resolveStipplingScales(FRAME).targetCount).toBe(800)
+    expect(
+      resolveStipplingScales(
+        FRAME,
+        { stippleDensity: stipplingControlSchema.stippleDensity.max },
+        0.5,
+      ).targetCount,
+    ).toBe(160_000)
+    expect(
+      resolveStipplingScales(FRAME, {
+        stippleDensity: stipplingControlSchema.stippleDensity.max,
+      }).targetCount,
+    ).toBe(160_000)
+  })
+
   it.each([
     { width: 0, height: 100 },
     { width: -1, height: 100 },

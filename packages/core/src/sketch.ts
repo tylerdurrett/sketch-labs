@@ -106,6 +106,13 @@ export interface NumberParamSpec {
    */
   step?: number
   /**
+   * Optional logarithmic slider presentation for positive numeric domains.
+   * The stored, typed, randomized, and serialized value remains the declared
+   * number; only slider position is mapped through base-10 space. When present,
+   * `step` is the drag granularity in decades.
+   */
+  sliderScale?: 'logarithmic'
+  /**
    * VALUE-DOMAIN constraint: when `true`, only whole-number values are legal.
    * Orthogonal to {@link NumberParamSpec.step} (see the type doc). Optional;
    * absent ⇒ any real in `[min, max]` is legal.
@@ -494,11 +501,13 @@ export function defaultParams(schema: ParamSchema): Params {
  *
  * For each schema key whose spec is a numeric param (`kind === 'number'`), is
  * active according to {@link isParamActive}, AND is NOT locked, a new value is
- * rolled uniformly across the spec's `[min, max]` via
- * `min + rand() * (max - min)`, then `Math.round`ed iff the spec's `integer` is
- * `true`. Inactive numeric values consume no randomness and pass through
- * unchanged. The spec's `step` is IGNORED — `step` is a UI drag-granularity
- * hint, not a value-domain constraint (see {@link NumberParamSpec}).
+ * rolled uniformly across the spec's slider axis, then `Math.round`ed iff the
+ * spec's `integer` is `true`. The ordinary axis uses
+ * `min + rand() * (max - min)`; `sliderScale: 'logarithmic'` uses equal base-10
+ * travel so every decade has equal probability. Inactive numeric values consume
+ * no randomness and pass through unchanged. The spec's `step` is IGNORED —
+ * `step` is a UI drag-granularity hint, not a value-domain constraint (see
+ * {@link NumberParamSpec}).
  *
  * Everything else passes through from `params` UNCHANGED: locked params (Lock is
  * Randomize-exclusion only), and any non-numeric spec the `kind` check doesn't
@@ -545,7 +554,19 @@ export function randomize(
   for (const [key, spec] of Object.entries(schema)) {
     if (locks.has(key)) continue
     if (spec.kind === 'number' && isParamActive(schema, params, key)) {
-      const rolled = spec.min + rand() * (spec.max - spec.min)
+      if (
+        spec.sliderScale === 'logarithmic' &&
+        (spec.min <= 0 || spec.max <= 0)
+      ) {
+        throw new RangeError(
+          `Number param \`${key}\` logarithmic slider requires positive bounds`,
+        )
+      }
+      const draw = rand()
+      const rolled =
+        spec.sliderScale === 'logarithmic'
+          ? spec.min * (spec.max / spec.min) ** draw
+          : spec.min + draw * (spec.max - spec.min)
       next[key] = spec.integer ? Math.round(rolled) : rolled
     }
   }

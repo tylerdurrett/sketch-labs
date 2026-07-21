@@ -6730,7 +6730,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       chaos: 0.5,
       toneFidelity: 0.5,
       stopPoint: 50,
-      stippleDensity: 1.1875,
+      stippleDensity: 0.25 * (400 / 0.25) ** 0.25,
       distributionFidelity: 0.8,
     });
   });

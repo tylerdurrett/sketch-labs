@@ -6,7 +6,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { NumberParamSpec } from "@harness/core";
 
-import { coerceToDomain, NumberControl } from "./NumberControl";
+import {
+  coerceToDomain,
+  NumberControl,
+  sliderPositionForValue,
+  valueForSliderPosition,
+} from "./NumberControl";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -72,6 +77,23 @@ describe("coerceToDomain", () => {
     expect(
       coerceToDomain(100.6, numberSpec({ max: 100, integer: true })),
     ).toBe(100);
+  });
+});
+
+describe("logarithmic slider mapping", () => {
+  it("gives each density decade equal slider travel without changing values", () => {
+    const spec = numberSpec({
+      min: 0.25,
+      max: 400,
+      default: 1,
+      sliderScale: "logarithmic",
+    });
+
+    expect(sliderPositionForValue(0.25, spec)).toBeCloseTo(Math.log10(0.25), 12);
+    expect(sliderPositionForValue(1, spec)).toBe(0);
+    expect(sliderPositionForValue(10, spec)).toBe(1);
+    expect(sliderPositionForValue(100, spec)).toBe(2);
+    expect(valueForSliderPosition(Math.log10(400), spec)).toBeCloseTo(400, 12);
   });
 });
 

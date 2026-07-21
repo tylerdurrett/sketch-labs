@@ -5,7 +5,7 @@ import type { Point } from '../types'
 
 /** The two artist-facing controls owned by the Stippling Strategy. */
 export interface StipplingControls {
-  /** Relative mark abundance; higher values also permit tighter spacing. */
+  /** Relative mark abundance; 1 is baseline and higher values tighten spacing. */
   readonly stippleDensity: number
   /** Bounded effort spent improving the selected marks' distribution. */
   readonly distributionFidelity: number
@@ -17,9 +17,10 @@ export const stipplingControlSchema = Object.freeze({
   stippleDensity: Object.freeze({
     kind: 'number',
     min: 0.25,
-    max: 4,
+    max: 400,
     default: 1,
     step: 0.05,
+    sliderScale: 'logarithmic',
   }),
   distributionFidelity: Object.freeze({
     kind: 'number',

@@ -24,6 +24,8 @@ const STIPPLE_LENGTH_TO_FRAME = 0.0003
 const MASK_CHECK_TO_STIPPLE = 0.25
 const MINIMUM_SPACING_TO_FRAME = 0.025
 const FULL_DEMAND_TARGET_COUNT = 800
+/** Largest retained set demonstrated to complete inside the 1m-dart guard. */
+const MAXIMUM_SUPPORTED_TARGET_COUNT = 160_000
 const DEMAND_LATTICE_SAMPLE_COUNT = 4096
 
 function validatedFrame(frame: CoordinateSpace): Readonly<CoordinateSpace> {
@@ -95,10 +97,13 @@ export function resolveStipplingScales(
     minimumSpacing:
       (frameScale * MINIMUM_SPACING_TO_FRAME) /
       Math.sqrt(normalizedControls.stippleDensity),
-    targetCount: Math.round(
-      FULL_DEMAND_TARGET_COUNT *
-        normalizedControls.stippleDensity *
-        normalizedDemand(averageDemand),
+    targetCount: Math.min(
+      MAXIMUM_SUPPORTED_TARGET_COUNT,
+      Math.round(
+        FULL_DEMAND_TARGET_COUNT *
+          normalizedControls.stippleDensity *
+          normalizedDemand(averageDemand),
+      ),
     ),
   })
 }
@@ -197,6 +202,117 @@ function markCellIndex(
   return row * lattice.columns + column
 }
 
+/** Mutable exact error accumulator for one fixed-count relocation pass. */
+export interface StipplingDistributionState {
+  readonly error: number
+  replacementError(
+    previous: Readonly<StippleMark>,
+    replacement: Readonly<StippleMark>,
+  ): number
+  commitReplacement(
+    previous: Readonly<StippleMark>,
+    replacement: Readonly<StippleMark>,
+  ): void
+}
+
+function distributionErrorFromAbsolute(
+  absoluteError: number,
+  targetCount: number,
+  markCount: number,
+): number {
+  if (markCount === 0) return targetCount === 0 ? 0 : 1
+  return Math.min(
+    2,
+    absoluteError / Math.max(1, targetCount, markCount),
+  )
+}
+
+/** Build the exact lattice-count state used by production refinement. */
+export function createStipplingDistributionState(
+  model: Readonly<Pick<StipplingModel, 'lattice' | 'scales'>>,
+  marks: readonly StippleMark[],
+): StipplingDistributionState {
+  const { lattice, scales } = model
+  const actualCounts = new Uint32Array(lattice.sampleCount)
+  let unmatchedCount = 0
+  for (const mark of marks) {
+    const index = markCellIndex(mark, lattice)
+    if (index === undefined) unmatchedCount++
+    else actualCounts[index] = actualCounts[index]! + 1
+  }
+
+  const expectedCount = (index: number): number =>
+    lattice.demandSum === 0
+      ? 0
+      : (scales.targetCount * lattice.samples[index]!.demand) /
+        lattice.demandSum
+  let absoluteError = unmatchedCount
+  for (let index = 0; index < lattice.sampleCount; index++) {
+    absoluteError += Math.abs(actualCounts[index]! - expectedCount(index))
+  }
+
+  const countAdjustment = (index: number, delta: -1 | 1): number => {
+    const before = actualCounts[index]!
+    const expected = expectedCount(index)
+    return Math.abs(before + delta - expected) - Math.abs(before - expected)
+  }
+  const replacementAbsoluteError = (
+    previous: Readonly<StippleMark>,
+    replacement: Readonly<StippleMark>,
+  ): number => {
+    const previousIndex = markCellIndex(previous, lattice)
+    const replacementIndex = markCellIndex(replacement, lattice)
+    if (previousIndex === replacementIndex) return absoluteError
+
+    return (
+      absoluteError +
+      (previousIndex === undefined ? -1 : countAdjustment(previousIndex, -1)) +
+      (replacementIndex === undefined
+        ? 1
+        : countAdjustment(replacementIndex, 1))
+    )
+  }
+
+  return {
+    get error() {
+      return distributionErrorFromAbsolute(
+        absoluteError,
+        scales.targetCount,
+        marks.length,
+      )
+    },
+    replacementError(previous, replacement) {
+      return distributionErrorFromAbsolute(
+        replacementAbsoluteError(previous, replacement),
+        scales.targetCount,
+        marks.length,
+      )
+    },
+    commitReplacement(previous, replacement) {
+      const previousIndex = markCellIndex(previous, lattice)
+      const replacementIndex = markCellIndex(replacement, lattice)
+      if (previousIndex === replacementIndex) return
+
+      absoluteError = replacementAbsoluteError(previous, replacement)
+      if (previousIndex !== undefined) {
+        actualCounts[previousIndex] = actualCounts[previousIndex]! - 1
+      }
+      if (replacementIndex !== undefined) {
+        actualCounts[replacementIndex] = actualCounts[replacementIndex]! + 1
+      }
+    },
+  }
+}
+
+const nativeDistributionErrors = new WeakSet<StipplingModel['distributionError']>()
+
+/** Whether a model still carries the core's canonical lattice metric. */
+export function hasNativeStipplingDistributionError(
+  model: Readonly<Pick<StipplingModel, 'distributionError'>>,
+): boolean {
+  return nativeDistributionErrors.has(model.distributionError)
+}
+
 /** Build the immutable effective-demand target used by placement and refinement. */
 export function createStipplingModel(
   source: ToneSource,
@@ -213,29 +329,9 @@ export function createStipplingModel(
   )
 
   function distributionError(marks: readonly StippleMark[]): number {
-    const actualCounts = new Uint32Array(lattice.sampleCount)
-    let unmatchedCount = 0
-    for (const mark of marks) {
-      const index = markCellIndex(mark, lattice)
-      if (index === undefined) unmatchedCount++
-      else actualCounts[index] = actualCounts[index]! + 1
-    }
-
-    if (marks.length === 0) return scales.targetCount === 0 ? 0 : 1
-
-    let absoluteError = unmatchedCount
-    for (let index = 0; index < lattice.sampleCount; index++) {
-      const expected =
-        lattice.demandSum === 0
-          ? 0
-          : (scales.targetCount * lattice.samples[index]!.demand) /
-            lattice.demandSum
-      absoluteError += Math.abs(actualCounts[index]! - expected)
-    }
-
-    const denominator = Math.max(1, scales.targetCount, marks.length)
-    return Math.min(2, absoluteError / denominator)
+    return createStipplingDistributionState({ lattice, scales }, marks).error
   }
+  nativeDistributionErrors.add(distributionError)
 
   return Object.freeze({
     source,

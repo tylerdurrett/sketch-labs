@@ -157,14 +157,25 @@ describe('public Stippling strategy boundary', () => {
     })
     expect(
       resolveProductionStipplingExecutionLimits({
-        controls: { stippleDensity: 4, distributionFidelity: 1 },
+        controls: { stippleDensity: 400, distributionFidelity: 1 },
         lattice: { ...ordinary.lattice, averageDemand: 0.001 },
         scales: { ...ordinary.scales, targetCount: 20_000 },
       }),
     ).toEqual({
-      maxStipples: 16_000,
+      maxStipples: 20_000,
       maxPlacementAttempts: 1_000_000,
-      maxRefinementAttempts: 320_000,
+      maxRefinementAttempts: 400_000,
+    })
+    expect(
+      resolveProductionStipplingExecutionLimits({
+        controls: { stippleDensity: 400, distributionFidelity: 0 },
+        lattice: { ...ordinary.lattice, averageDemand: 0.5 },
+        scales: { ...ordinary.scales, targetCount: 160_000 },
+      }),
+    ).toEqual({
+      maxStipples: 160_000,
+      maxPlacementAttempts: 1_000_000,
+      maxRefinementAttempts: 0,
     })
   })
 

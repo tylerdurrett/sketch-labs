@@ -108,6 +108,8 @@ describe('bounded Stipple refinement', () => {
     expect(resolveStipplingRefinementAttempts(6, 0)).toBe(0)
     expect(resolveStipplingRefinementAttempts(6, 0.5)).toBe(60)
     expect(resolveStipplingRefinementAttempts(6, 1)).toBe(120)
+    expect(resolveStipplingRefinementAttempts(160_000, 0.5)).toBe(500_000)
+    expect(resolveStipplingRefinementAttempts(160_000, 1)).toBe(1_000_000)
     expect(
       resolveStipplingRefinementAttempts(Number.MAX_SAFE_INTEGER, 1),
     ).toBe(1_000_000)
@@ -365,6 +367,20 @@ describe('bounded Stipple refinement', () => {
       expect(outcomes[index]!.error).toBeLessThanOrEqual(
         outcomes[index - 1]!.error,
       )
+    }
+  })
+
+  it('reports the exact full-model error after every deterministic prefix', () => {
+    const target = model(source(([x]) => (x < 50 ? 1 : 0)))
+
+    for (let maxAttempts = 0; maxAttempts <= 40; maxAttempts++) {
+      const outcome = refineStipples(
+        target,
+        createRandom('incremental-error-parity'),
+        RIGHT_HEAVY_MARKS,
+        { maxAttempts },
+      )
+      expect(outcome.error).toBe(target.distributionError(outcome.marks))
     }
   })
 

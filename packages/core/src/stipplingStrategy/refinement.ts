@@ -1,6 +1,10 @@
 import { sampleEffectiveTone } from '../shadingFields'
 import type { Point, Random } from '../types'
 import { isMaskPermittedStipple } from './mask'
+import {
+  createStipplingDistributionState,
+  hasNativeStipplingDistributionError,
+} from './model'
 import type { StippleMark, StipplingModel } from './types'
 
 const DEFAULT_ATTEMPTS_PER_MARK = 20
@@ -22,11 +26,11 @@ export function resolveStipplingRefinementAttempts(
     throw new RangeError('distributionFidelity must be finite and within [0, 1]')
   }
 
-  return Math.min(
-    MAXIMUM_REFINEMENT_ATTEMPTS,
-    Math.round(
-      markCount * DEFAULT_ATTEMPTS_PER_MARK * distributionFidelity,
-    ),
+  return Math.round(
+    Math.min(
+      MAXIMUM_REFINEMENT_ATTEMPTS,
+      markCount * DEFAULT_ATTEMPTS_PER_MARK,
+    ) * distributionFidelity,
   )
 }
 
@@ -220,10 +224,13 @@ export function refineStipples(
   const originalMarks: readonly Readonly<StippleMark>[] = Object.isFrozen(marks)
     ? marks
     : Object.freeze([...marks])
-  let currentMarks = originalMarks
-  let currentError = computeStipplingDistributionError(model, currentMarks)
+  let workingMarks: Readonly<StippleMark>[] | undefined
+  let currentError = computeStipplingDistributionError(model, originalMarks)
+  const distributionState = hasNativeStipplingDistributionError(model)
+    ? createStipplingDistributionState(model, originalMarks)
+    : undefined
   const centerIndex = new RefinementCenterIndex(
-    currentMarks,
+    originalMarks,
     model.scales.minimumSpacing,
   )
 
@@ -234,12 +241,12 @@ export function refineStipples(
     const yDraw = rng.value()
     const acceptanceDraw = rng.value()
 
-    if (currentMarks.length === 0) continue
+    if (originalMarks.length === 0) continue
     const markIndex = Math.min(
-      currentMarks.length - 1,
-      Math.floor(markDraw * currentMarks.length),
+      originalMarks.length - 1,
+      Math.floor(markDraw * originalMarks.length),
     )
-    const previous = currentMarks[markIndex]!
+    const previous = (workingMarks ?? originalMarks)[markIndex]!
     const center = candidateCenter(
       model,
       cellDraw,
@@ -271,20 +278,33 @@ export function refineStipples(
       center: Object.freeze(center),
       orientation: previous.orientation,
     })
-    const candidateMarks = [...currentMarks]
-    candidateMarks[markIndex] = replacement
-    const candidateError = model.distributionError(candidateMarks)
+    let candidateError: number
+    if (distributionState !== undefined) {
+      candidateError = distributionState.replacementError(
+        previous,
+        replacement,
+      )
+    } else {
+      const candidateMarks = [...(workingMarks ?? originalMarks)]
+      candidateMarks[markIndex] = replacement
+      candidateError = model.distributionError(candidateMarks)
+    }
     if (!Number.isFinite(candidateError) || candidateError >= currentError) {
       continue
     }
 
-    currentMarks = Object.freeze(candidateMarks)
+    if (workingMarks === undefined) workingMarks = [...originalMarks]
+    workingMarks[markIndex] = replacement
+    distributionState?.commitReplacement(previous, replacement)
     currentError = candidateError
     centerIndex.replace(markIndex, previous.center, replacement.center)
   }
 
+  const finalMarks =
+    workingMarks === undefined ? originalMarks : Object.freeze(workingMarks)
+
   return Object.freeze({
-    marks: currentMarks,
+    marks: finalMarks,
     error: currentError,
     attemptsUsed: attemptLimit,
     requestedRefinementReached: true,

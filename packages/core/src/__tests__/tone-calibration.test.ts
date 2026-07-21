@@ -342,6 +342,22 @@ describe('Tone Calibration Shading integration', () => {
     ).toEqual(artwork.scene)
   })
 
+  it('completes all 160k retained marks at maximum Stipple density', () => {
+    const artwork = toneCalibration.generateShadingArtwork!(
+      params({
+        strategy: 'stippling',
+        stippleDensity: stipplingControlSchema.stippleDensity.max,
+        distributionFidelity: 0,
+      }),
+      'maximum-stipple-density',
+      FRAME,
+    )
+
+    expect(artwork.diagnostics.termination).toBe('completed')
+    expect(artwork.scene.primitives).toHaveLength(160_000)
+    expect(artwork.diagnostics.polylineCount).toBe(160_000)
+  })
+
   it('changes routes by Seed alone while every consumed source stays invariant', () => {
     const sharedControls = params({
       momentum: 0,

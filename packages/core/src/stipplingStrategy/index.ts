@@ -59,7 +59,8 @@ type StipplingOrchestrator = (
   input: StipplingOrchestratorInput,
 ) => Readonly<StipplingOrchestratorOutcome>
 
-const HARD_MAX_STIPPLES = 16_000
+/** Measured retained-geometry ceiling; 160k completes inside the dart guard. */
+const HARD_MAX_STIPPLES = 160_000
 const HARD_MAX_ATTEMPTS = 1_000_000
 const MINIMUM_PLACEMENT_ATTEMPTS = 256
 const PLACEMENT_ATTEMPTS_PER_TARGET = 80

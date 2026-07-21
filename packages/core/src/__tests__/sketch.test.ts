@@ -680,6 +680,29 @@ describe('randomize', () => {
     expect(next).toEqual({ count: 40.5, radius: 51 })
   })
 
+  it('rolls logarithmic sliders uniformly across their declared decades', () => {
+    const schema: ParamSchema = {
+      density: {
+        kind: 'number',
+        min: 0.25,
+        max: 400,
+        default: 1,
+        sliderScale: 'logarithmic',
+      },
+    }
+
+    const next = randomize(
+      schema,
+      { density: 1 },
+      new Set(),
+      scriptedRand([0.25]),
+    )
+    expect(next.density).toBeCloseTo(
+      0.25 * (400 / 0.25) ** 0.25,
+      12,
+    )
+  })
+
   it('rounds an integer-marked param to a whole number, ignoring step', () => {
     const schema: ParamSchema = {
       sides: { kind: 'number', min: 3, max: 12, default: 6, integer: true, step: 5 },
