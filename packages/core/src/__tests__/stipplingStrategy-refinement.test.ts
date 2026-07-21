@@ -13,6 +13,7 @@ import { createStipplingModel } from '../stipplingStrategy/model'
 import { placeInitialStipples } from '../stipplingStrategy/placement'
 import {
   computeStipplingDistributionError,
+  RefinementCenterIndex,
   refineStipples,
   resolveStipplingRefinementAttempts,
 } from '../stipplingStrategy/refinement'
@@ -74,6 +75,95 @@ const RIGHT_HEAVY_MARKS = frozenMarks([
   [[80, 75], 1.3],
   [[90, 90], 1.6],
 ])
+
+function bruteForceSeparation(
+  centers: readonly Readonly<Point>[],
+  candidate: Readonly<Point>,
+  excludedIndex: number,
+  minimumDistance: number,
+): boolean {
+  const minimumDistanceSquared = minimumDistance * minimumDistance
+  return centers.every((existing, index) => {
+    if (index === excludedIndex) return true
+    const deltaX = candidate[0] - existing[0]
+    const deltaY = candidate[1] - existing[1]
+    return !(deltaX * deltaX + deltaY * deltaY < minimumDistanceSquared)
+  })
+}
+
+const INDEX_POINTS: readonly Readonly<Point>[] = [
+  [0, 0],
+  [0.249999999999, 0],
+  [0.25, 0],
+  [-0.000000000001, 0],
+  [-0.25, -0.25],
+  [4.9, 5],
+  [5.1, 5],
+  [10, -10],
+  [1_000_000_000_000, -1_000_000_000_000],
+  [Number.NaN, 5],
+  [5, Number.NaN],
+]
+
+describe('refinement center index', () => {
+  it('matches brute force for every three-point numeric-extreme combination', () => {
+    for (const minimumDistance of [0.25, 0.5, 2]) {
+      for (const first of INDEX_POINTS) {
+        for (const second of INDEX_POINTS) {
+          for (const third of INDEX_POINTS) {
+            const centers = [first, second, third]
+            const marks = centers.map((center) => ({ center, orientation: 0 }))
+            const index = new RefinementCenterIndex(marks, minimumDistance)
+
+            for (const candidate of INDEX_POINTS) {
+              expect(index.isSeparated(candidate, -1)).toBe(
+                bruteForceSeparation(
+                  centers,
+                  candidate,
+                  -1,
+                  minimumDistance,
+                ),
+              )
+            }
+          }
+        }
+      }
+    }
+  })
+
+  it('matches brute force through mutable removals, additions, and moves', () => {
+    for (const minimumDistance of [0.25, 0.5, 2]) {
+      const centers = [INDEX_POINTS[0]!, INDEX_POINTS[4]!, INDEX_POINTS[8]!]
+      const marks = centers.map((center) => ({ center, orientation: 0 }))
+      const index = new RefinementCenterIndex(marks, minimumDistance)
+
+      const expectParity = () => {
+        for (const candidate of INDEX_POINTS) {
+          for (const excludedIndex of [-1, 0, 1, 2]) {
+            expect(index.isSeparated(candidate, excludedIndex)).toBe(
+              bruteForceSeparation(
+                centers,
+                candidate,
+                excludedIndex,
+                minimumDistance,
+              ),
+            )
+          }
+        }
+      }
+
+      expectParity()
+      for (let move = 0; move < INDEX_POINTS.length; move++) {
+        const movedIndex = move % centers.length
+        const previous = centers[movedIndex]!
+        const replacement = INDEX_POINTS[move]!
+        index.replace(movedIndex, previous, replacement)
+        centers[movedIndex] = replacement
+        expectParity()
+      }
+    }
+  })
+})
 
 describe('Stipple distribution error', () => {
   it('delegates to the model distribution metric without mutating marks', () => {

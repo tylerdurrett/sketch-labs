@@ -89,13 +89,9 @@ function resolveAttemptLimit(
   )
 }
 
-function cellKey(x: number, y: number): string {
-  return `${x},${y}`
-}
-
-/** Mutable fixed-radius index supporting one-for-one center relocation. */
-class RefinementCenterIndex {
-  private readonly cells = new Map<string, Set<number>>()
+/** @internal Mutable fixed-radius index exported only for exact equivalence tests. */
+export class RefinementCenterIndex {
+  private readonly rows = new Map<number, Map<number, Set<number>>>()
   private readonly centers: Readonly<Point>[]
   private readonly minimumDistanceSquared: number
 
@@ -119,26 +115,33 @@ class RefinementCenterIndex {
 
   private add(index: number, center: Readonly<Point>): void {
     const [cellX, cellY] = this.coordinates(center)
-    const key = cellKey(cellX, cellY)
-    const bucket = this.cells.get(key)
-    if (bucket === undefined) this.cells.set(key, new Set([index]))
+    let row = this.rows.get(cellY)
+    if (row === undefined) {
+      row = new Map<number, Set<number>>()
+      this.rows.set(cellY, row)
+    }
+    const bucket = row.get(cellX)
+    if (bucket === undefined) row.set(cellX, new Set([index]))
     else bucket.add(index)
   }
 
   private remove(index: number, center: Readonly<Point>): void {
     const [cellX, cellY] = this.coordinates(center)
-    const key = cellKey(cellX, cellY)
-    const bucket = this.cells.get(key)
+    const row = this.rows.get(cellY)
+    const bucket = row?.get(cellX)
     bucket?.delete(index)
-    if (bucket?.size === 0) this.cells.delete(key)
+    if (bucket?.size === 0) row?.delete(cellX)
+    if (row?.size === 0) this.rows.delete(cellY)
   }
 
   isSeparated(center: Readonly<Point>, excludedIndex: number): boolean {
     const [cellX, cellY] = this.coordinates(center)
 
     for (let y = cellY - 1; y <= cellY + 1; y++) {
+      const row = this.rows.get(y)
+      if (row === undefined) continue
       for (let x = cellX - 1; x <= cellX + 1; x++) {
-        const bucket = this.cells.get(cellKey(x, y))
+        const bucket = row.get(x)
         if (bucket === undefined) continue
         for (const index of bucket) {
           if (index === excludedIndex) continue
