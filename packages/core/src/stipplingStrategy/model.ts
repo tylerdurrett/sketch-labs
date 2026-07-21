@@ -26,7 +26,9 @@ const MINIMUM_SPACING_TO_FRAME = 0.025
 const FULL_DEMAND_TARGET_COUNT = 800
 /** Largest retained set demonstrated to complete inside the 1m-dart guard. */
 const MAXIMUM_SUPPORTED_TARGET_COUNT = 160_000
-const DEMAND_LATTICE_SAMPLE_COUNT = 4096
+const MINIMUM_DEMAND_LATTICE_SAMPLE_COUNT = 4_096
+const MAXIMUM_DEMAND_LATTICE_SAMPLE_COUNT = 65_536
+const DEMAND_QUADRATURE_OFFSETS = [0.25, 0.75] as const
 
 function validatedFrame(frame: CoordinateSpace): Readonly<CoordinateSpace> {
   const area = frame.width * frame.height
@@ -108,7 +110,24 @@ export function resolveStipplingScales(
   })
 }
 
-function latticeDimensions(frame: Readonly<CoordinateSpace>): {
+function demandLatticeSampleBudget(stippleDensity: number): number {
+  const fullDemandTargetCount = Math.min(
+    MAXIMUM_SUPPORTED_TARGET_COUNT,
+    Math.round(FULL_DEMAND_TARGET_COUNT * stippleDensity),
+  )
+  return Math.min(
+    MAXIMUM_DEMAND_LATTICE_SAMPLE_COUNT,
+    Math.max(
+      MINIMUM_DEMAND_LATTICE_SAMPLE_COUNT,
+      Math.ceil(fullDemandTargetCount / 2),
+    ),
+  )
+}
+
+function latticeDimensions(
+  frame: Readonly<CoordinateSpace>,
+  sampleBudget: number,
+): {
   readonly columns: number
   readonly rows: number
 } {
@@ -122,11 +141,11 @@ function latticeDimensions(frame: Readonly<CoordinateSpace>): {
 
   const shortCount = Math.max(
     1,
-    Math.round(Math.sqrt(DEMAND_LATTICE_SAMPLE_COUNT / aspect)),
+    Math.round(Math.sqrt(sampleBudget / aspect)),
   )
   const longCount = Math.max(
     1,
-    Math.round(DEMAND_LATTICE_SAMPLE_COUNT / shortCount),
+    Math.floor(sampleBudget / shortCount),
   )
 
   return landscape
@@ -137,8 +156,12 @@ function latticeDimensions(frame: Readonly<CoordinateSpace>): {
 function createDemandLattice(
   source: ToneSource,
   frame: Readonly<CoordinateSpace>,
+  stippleDensity: number,
 ): Readonly<StipplingDemandLattice> {
-  const { columns, rows } = latticeDimensions(frame)
+  const { columns, rows } = latticeDimensions(
+    frame,
+    demandLatticeSampleBudget(stippleDensity),
+  )
   const cellWidth = frame.width / columns
   const cellHeight = frame.height / rows
   const cellArea = cellWidth * cellHeight
@@ -152,10 +175,30 @@ function createDemandLattice(
         (column + 0.5) * cellWidth,
         (row + 0.5) * cellHeight,
       ] as Point)
-      const permission = sampleShadingMask(source.shadingMask, point)
-      const tone =
-        permission === 0 ? 0 : sampleToneField(source.toneField, point)
-      const demand = tone * permission
+      let toneSum = 0
+      let permissionSum = 0
+      let demand = 0
+      for (const yOffset of DEMAND_QUADRATURE_OFFSETS) {
+        for (const xOffset of DEMAND_QUADRATURE_OFFSETS) {
+          const probe: Point = [
+            (column + xOffset) * cellWidth,
+            (row + yOffset) * cellHeight,
+          ]
+          const probePermission = sampleShadingMask(
+            source.shadingMask,
+            probe,
+          )
+          permissionSum += probePermission
+          if (probePermission === 0) continue
+
+          const probeTone = sampleToneField(source.toneField, probe)
+          toneSum += probeTone
+          demand += probeTone * probePermission
+        }
+      }
+      const tone = toneSum / 4
+      const permission = permissionSum / 4
+      demand /= 4
       demandSum += demand
       samples[row * columns + column] = Object.freeze({
         point,
@@ -321,7 +364,11 @@ export function createStipplingModel(
 ): StipplingModel {
   const normalizedFrame = validatedFrame(frame)
   const normalizedControls = normalizeStipplingControls(controls)
-  const lattice = createDemandLattice(source, normalizedFrame)
+  const lattice = createDemandLattice(
+    source,
+    normalizedFrame,
+    normalizedControls.stippleDensity,
+  )
   const scales = resolveStipplingScales(
     normalizedFrame,
     normalizedControls,

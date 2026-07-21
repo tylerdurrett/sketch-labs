@@ -222,9 +222,15 @@ describe('initial Stipple placement', () => {
     const impossibleSource = source(
       () => 1,
       ([x, y]) => {
-        const offsetX = Math.abs(x / cell - (Math.floor(x / cell) + 0.5))
-        const offsetY = Math.abs(y / cell - (Math.floor(y / cell) + 0.5))
-        return offsetX < 0.0001 && offsetY < 0.0001 ? 1 : 0
+        const fractionX = x / cell - Math.floor(x / cell)
+        const fractionY = y / cell - Math.floor(y / cell)
+        const onProbeX =
+          Math.abs(fractionX - 0.25) < 0.0001 ||
+          Math.abs(fractionX - 0.75) < 0.0001
+        const onProbeY =
+          Math.abs(fractionY - 0.25) < 0.0001 ||
+          Math.abs(fractionY - 0.75) < 0.0001
+        return onProbeX && onProbeY ? 1 : 0
       },
     )
     const target = model(impossibleSource)

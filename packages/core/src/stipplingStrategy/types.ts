@@ -58,18 +58,19 @@ export interface StippleMark {
   readonly orientation: number
 }
 
-/** One immutable center sample from the equal-area demand lattice. */
+/** One immutable quadrature summary from an equal-area demand cell. */
 export interface StipplingDemandSample {
+  /** Stable cell center used to locate the cell in the Composition Frame. */
   readonly point: Readonly<Point>
-  /** Desired darkness, independent of permission. */
+  /** Mean observed darkness; exact-zero-permission probes contribute zero. */
   readonly tone: number
-  /** Ink permission, independent of desired darkness. */
+  /** Mean ink permission across the cell's probes. */
   readonly permission: number
-  /** Effective demand: `tone * permission`. */
+  /** Mean effective demand, integrating `tone * permission` per probe. */
   readonly demand: number
 }
 
-/** Fixed equal-area center-sampled representation of effective demand. */
+/** Density-adaptive equal-area representation of effective demand. */
 export interface StipplingDemandLattice {
   readonly frame: Readonly<CoordinateSpace>
   readonly columns: number

@@ -16,6 +16,7 @@ import {
   stipplingControlSchema,
   type StippleMark,
 } from '../stipplingStrategy/types'
+import { createToneCalibrationSource } from '../sketches/tone-calibration/source'
 
 const FRAME = Object.freeze({ width: 1000, height: 1000 })
 
@@ -162,7 +163,86 @@ describe('Stippling scale model', () => {
 })
 
 describe('Stippling effective-demand model', () => {
-  it('samples tone times permission on equal-area center cells', () => {
+  it('increases demand resolution with density and caps the retained lattice', () => {
+    const sparse = createStipplingModel(source(), FRAME, {
+      stippleDensity: stipplingControlSchema.stippleDensity.min,
+    })
+    const dense = createStipplingModel(source(), FRAME, {
+      stippleDensity: 100,
+    })
+    const maximum = createStipplingModel(source(), FRAME, {
+      stippleDensity: stipplingControlSchema.stippleDensity.max,
+    })
+
+    expect(sparse.lattice.sampleCount).toBe(4_096)
+    expect(dense.lattice).toMatchObject({
+      columns: 200,
+      rows: 200,
+      sampleCount: 40_000,
+    })
+    expect(maximum.lattice.sampleCount).toBe(65_536)
+    expect(dense.lattice.sampleCount).toBeLessThanOrEqual(65_536)
+    expect(maximum.lattice.sampleCount).toBeLessThanOrEqual(65_536)
+  })
+
+  it('transposes adaptive lattice dimensions with frame orientation', () => {
+    const controls = { stippleDensity: 100 }
+    const landscape = createStipplingModel(
+      source(),
+      { width: 200, height: 100 },
+      controls,
+    )
+    const portrait = createStipplingModel(
+      source(),
+      { width: 100, height: 200 },
+      controls,
+    )
+
+    expect(landscape.lattice.columns).toBe(portrait.lattice.rows)
+    expect(landscape.lattice.rows).toBe(portrait.lattice.columns)
+    expect(landscape.lattice.sampleCount).toBe(
+      portrait.lattice.sampleCount,
+    )
+    expect(landscape.lattice.sampleCount).toBeLessThanOrEqual(40_000)
+  })
+
+  it('integrates an unaligned tone boundary within each equal-area cell', () => {
+    const baselineCellWidth = FRAME.width / 64
+    const model = createStipplingModel(
+      {
+        toneField: createToneField(([x]) =>
+          x < baselineCellWidth * 0.4 ? 1 : 0,
+        ),
+        shadingMask: createShadingMask(() => 1),
+      },
+      FRAME,
+    )
+
+    expect(model.lattice.samples[0]).toMatchObject({
+      point: [baselineCellWidth / 2, baselineCellWidth / 2],
+      tone: 0.5,
+      permission: 1,
+      demand: 0.5,
+    })
+  })
+
+  it('resolves Tone Calibration curvature at maximum Stipple density', () => {
+    const toneSource = createToneCalibrationSource(FRAME)
+    const model = createStipplingModel(toneSource, FRAME, {
+      stippleDensity: stipplingControlSchema.stippleDensity.max,
+    })
+    const integratedBoundaryCells = model.lattice.samples.filter((sample) => {
+      const centerTone = toneSource.toneField.sample(sample.point)
+      return Math.abs(sample.demand - centerTone) > 0.4
+    })
+
+    expect(model.lattice.columns).toBe(256)
+    expect(model.lattice.rows).toBe(256)
+    expect(integratedBoundaryCells.length).toBeGreaterThan(0)
+    expect(model.scales.targetCount).toBe(160_000)
+  })
+
+  it('samples tone times permission on equal-area cells', () => {
     const model = createStipplingModel(source(0.8, 0.5), {
       width: 120,
       height: 80,
@@ -200,14 +280,16 @@ describe('Stippling effective-demand model', () => {
 
   it('keeps empty demand bounded and skips forbidden tone sampling', () => {
     const toneProducer = vi.fn(() => 1)
+    const maskProducer = vi.fn(() => 0)
     const model = createStipplingModel(
       {
         toneField: createToneField(toneProducer),
-        shadingMask: createShadingMask(() => 0),
+        shadingMask: createShadingMask(maskProducer),
       },
       FRAME,
     )
 
+    expect(maskProducer).toHaveBeenCalledTimes(model.lattice.sampleCount * 4)
     expect(toneProducer).not.toHaveBeenCalled()
     expect(model.lattice.demandSum).toBe(0)
     expect(model.scales.targetCount).toBe(0)
