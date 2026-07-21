@@ -107,8 +107,8 @@ describe('Stippling scale model', () => {
       distributionFidelity: stipplingControlSchema.distributionFidelity.max,
     })
 
-    expect(looseSparse.stippleLength).toBe(3)
-    expect(looseSparse.maskCheckSpacing).toBe(0.75)
+    expect(looseSparse.stippleLength).toBeCloseTo(0.3, 12)
+    expect(looseSparse.maskCheckSpacing).toBeCloseTo(0.075, 12)
     expect(faithfulDense.stippleLength).toBe(looseSparse.stippleLength)
     expect(faithfulDense.maskCheckSpacing).toBe(
       looseSparse.maskCheckSpacing,

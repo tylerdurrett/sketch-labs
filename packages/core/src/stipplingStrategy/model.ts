@@ -20,7 +20,7 @@ import {
 // Strategy-local ratios deliberately stay out of the artist-facing controls.
 // Composition Frames are normalized by geometric-mean extent, so the same
 // authored inputs produce the same count and normalized geometry at any scale.
-const STIPPLE_LENGTH_TO_FRAME = 0.003
+const STIPPLE_LENGTH_TO_FRAME = 0.0003
 const MASK_CHECK_TO_STIPPLE = 0.25
 const MINIMUM_SPACING_TO_FRAME = 0.025
 const FULL_DEMAND_TARGET_COUNT = 800

@@ -109,6 +109,7 @@ function expectOpenTwoPointStipples(
   scene.primitives.forEach((primitive, index) => {
     expect(primitive.points).toEqual(expectedPoints[index])
     expect(primitive.points).toHaveLength(2)
+    expect(primitive.points[0]).not.toEqual(primitive.points[1])
     expect(primitive.closed).toBe(expectedRole === 'source' ? false : undefined)
     expect(primitive.fill).toBeUndefined()
     expect(primitive.stroke).toEqual({ color: 'black', width: expectedWidth })
@@ -118,6 +119,18 @@ function expectOpenTwoPointStipples(
 
 function svgPathElements(svg: string): string[] {
   return svg.match(/<path\b[^>]*\/>/g) ?? []
+}
+
+function expectSerializedStipplesRemainOpen(svg: string): void {
+  for (const path of svgPathElements(svg)) {
+    const coordinates = path.match(
+      /\bd="M(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?) L(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)"/,
+    )
+    expect(coordinates, path).not.toBeNull()
+    expect(coordinates!.slice(1, 3), path).not.toEqual(
+      coordinates!.slice(3, 5),
+    )
+  }
 }
 
 function ordinaryPath(points: readonly Point[], width: number): string {
@@ -256,6 +269,7 @@ describe('Tone Calibration Stippling output parity', () => {
     expect(svgPathElements(ordinarySVG)).toEqual(
       retainedPoints.map((points) => ordinaryPath(points, 1)),
     )
+    expectSerializedStipplesRemainOpen(ordinarySVG)
     expectStrategyCallCounts(strategyCountsAfterPreparation)
 
     const plotterSVG = renderPlotterSVG(fineOutline, FULL_PROFILE)
@@ -267,6 +281,7 @@ describe('Tone Calibration Stippling output parity', () => {
         plotterPath(points, 1, 10, 10, FINE_TOOL_MM),
       ),
     )
+    expectSerializedStipplesRemainOpen(plotterSVG)
     expect(plotterSVG).not.toMatch(
       /<(?:rect|g|polyline|circle|clipPath)\b|\b(?:transform|clip-path)=|\sZ(?:"|\s)/,
     )
@@ -316,6 +331,7 @@ describe('Tone Calibration Stippling output parity', () => {
         plotterPath(points, 1, 10, 10, FINE_TOOL_MM),
       ),
     )
+    expectSerializedStipplesRemainOpen(framedPlotterSVG)
     expectStrategyCallCounts(strategyCountsAfterPreparation)
 
     const doubledProfileSnapshot = snapshot(
@@ -356,6 +372,7 @@ describe('Tone Calibration Stippling output parity', () => {
         plotterPath(points, 2, 10, 10, FINE_TOOL_MM / 2),
       ),
     )
+    expectSerializedStipplesRemainOpen(doubledSVG)
 
     expectStrategyCallCounts(strategyCountsAfterPreparation)
     for (const frozen of [
