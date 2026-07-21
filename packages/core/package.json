@@ -13,6 +13,9 @@
     "benchmark:hidden-line": "vitest run --config vitest.hidden-line-benchmark.config.ts",
     "benchmark:leaf-field": "vitest run --config vitest.leaf-field-benchmark.config.ts",
     "benchmark:photo-scribble": "vitest run --config vitest.photo-scribble-benchmark.config.ts",
+    "benchmark:stippling-relaxation": "node benchmarks/stippling-relaxation/cli.js run --mode=smoke",
+    "benchmark:stippling-relaxation:full": "node benchmarks/stippling-relaxation/cli.js run --mode=full --confirm-full",
+    "benchmark:stippling-relaxation:aggregate": "node benchmarks/stippling-relaxation/cli.js aggregate",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },

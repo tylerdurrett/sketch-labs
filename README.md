@@ -74,6 +74,20 @@ The Canvas number measures traversal and submission through the injected
 `Canvas2DContext` port using a counting context. It does not include a browser's
 rasterization, compositor, or GPU flush; use a browser profile for those costs.
 
+## Stippling relaxation performance benchmark
+
+The opt-in smoke campaign measures placement, Distribution refinement, Voronoi
+assignment/centroids, safe relocation, geometry materialization, and end-to-end
+Shading preparation:
+
+```sh
+pnpm --filter @harness/core benchmark:stippling-relaxation
+```
+
+The explicit 27-case campaign, filtering/sharding flags, raw evidence format,
+and resumable aggregator are documented in
+[`packages/core/benchmarks/stippling-relaxation/README.md`](packages/core/benchmarks/stippling-relaxation/README.md).
+
 ## Grass Hills density baseline
 
 Run the opt-in smoke benchmark for the historical maximum-density Grass Hills

@@ -117,7 +117,8 @@ export function resolveProductionStipplingExecutionLimits(
   })
 }
 
-function materializeStipple(
+/** @internal Direct-module seam for allocation-only benchmark coverage. */
+export function materializeStipple(
   mark: Readonly<StippleMark>,
   length: number,
 ): Polyline {
