@@ -30,11 +30,12 @@ import {
   computeStipplingDistributionError,
   resolveStipplingRefinementAttempts,
 } from './refinement'
-import type {
-  StippleMark,
-  StipplingControls,
-  StipplingModel,
-} from './types'
+import {
+  MAXIMUM_STIPPLING_RELAXATION_PASSES,
+  resolveStipplingRelaxationPasses,
+  resolveStipplingRelaxationWorkUnits,
+} from './relaxation'
+import type { StippleMark, StipplingControls, StipplingModel } from './types'
 
 export {
   defaultStipplingControls,
@@ -44,8 +45,7 @@ export {
 } from './types'
 
 /** Stippling's authored specialization of the shared strategy input. */
-export interface StipplingStrategyInput
-  extends ShadingStrategyInput<StipplingControls> {
+export interface StipplingStrategyInput extends ShadingStrategyInput<StipplingControls> {
   /** Receives immutable solver progress without affecting deterministic output. */
   readonly observer?: ShadingObserver
 }
@@ -68,11 +68,13 @@ const PLACEMENT_ATTEMPTS_PER_TARGET = 80
 
 /** @internal Direct-module seam for the production budget policy. */
 export function resolveProductionStipplingExecutionLimits(
-  model: Readonly<
-    Pick<StipplingModel, 'controls' | 'lattice' | 'scales'>
-  >,
+  model: Readonly<Pick<StipplingModel, 'controls' | 'lattice' | 'scales'>>,
 ): Readonly<StipplingExecutionLimits> {
   const maxStipples = Math.min(HARD_MAX_STIPPLES, model.scales.targetCount)
+  const relaxationEnabled = model.controls.voronoiRelaxation > 0
+  const relaxationPasses = relaxationEnabled
+    ? resolveStipplingRelaxationPasses(model.controls.voronoiRelaxation)
+    : 0
   const demandAdjustedPlacementAttempts =
     maxStipples === 0
       ? 0
@@ -99,6 +101,14 @@ export function resolveProductionStipplingExecutionLimits(
       maxStipples,
       model.controls.distributionFidelity,
     ),
+    maxRelaxationPasses: MAXIMUM_STIPPLING_RELAXATION_PASSES,
+    maxRelaxationWorkUnits: relaxationEnabled
+      ? resolveStipplingRelaxationWorkUnits(
+          model,
+          maxStipples,
+          relaxationPasses,
+        )
+      : 0,
   })
 }
 
@@ -154,11 +164,7 @@ function executeStipplingStrategy(
   orchestrate: StipplingOrchestrator,
   injectedLimits?: Readonly<StipplingExecutionLimits>,
 ): StipplingResult {
-  const model = createStipplingModel(
-    input.source,
-    input.frame,
-    input.controls,
-  )
+  const model = createStipplingModel(input.source, input.frame, input.controls)
   const limits =
     injectedLimits ?? resolveProductionStipplingExecutionLimits(model)
   const outcome = orchestrate({

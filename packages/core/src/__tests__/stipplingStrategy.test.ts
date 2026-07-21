@@ -41,6 +41,8 @@ const PARTIAL_LIMITS: StipplingExecutionLimits = Object.freeze({
   maxStipples: 5,
   maxPlacementAttempts: 1_000,
   maxRefinementAttempts: 0,
+  maxRelaxationPasses: 8,
+  maxRelaxationWorkUnits: Number.MAX_SAFE_INTEGER,
 })
 
 function source(
@@ -99,10 +101,8 @@ function expectMaskSafe(
     for (let step = 0; step <= intervals; step++) {
       const progress = step / intervals
       const point: Point = [
-        polyline[0]![0] +
-          (polyline[1]![0] - polyline[0]![0]) * progress,
-        polyline[0]![1] +
-          (polyline[1]![1] - polyline[0]![1]) * progress,
+        polyline[0]![0] + (polyline[1]![0] - polyline[0]![0]) * progress,
+        polyline[0]![1] + (polyline[1]![1] - polyline[0]![1]) * progress,
       ]
       expect(mask.sample(point)).toBeGreaterThan(0)
     }
@@ -156,6 +156,8 @@ describe('public Stippling strategy boundary', () => {
       maxStipples: 200,
       maxPlacementAttempts: 16_000,
       maxRefinementAttempts: 0,
+      maxRelaxationPasses: 8,
+      maxRelaxationWorkUnits: 0,
     })
     expect(
       resolveProductionStipplingExecutionLimits({
@@ -171,7 +173,17 @@ describe('public Stippling strategy boundary', () => {
       maxStipples: 20_000,
       maxPlacementAttempts: 1_000_000,
       maxRefinementAttempts: 400_000,
+      maxRelaxationPasses: 8,
+      maxRelaxationWorkUnits: 0,
     })
+
+    const relaxedLimits = resolveProductionStipplingExecutionLimits({
+      controls: { ...ordinary.controls, voronoiRelaxation: 0.25 },
+      lattice: ordinary.lattice,
+      scales: ordinary.scales,
+    })
+    expect(relaxedLimits.maxRelaxationPasses).toBe(8)
+    expect(relaxedLimits.maxRelaxationWorkUnits).toBeGreaterThan(0)
     expect(
       resolveProductionStipplingExecutionLimits({
         controls: {
@@ -186,6 +198,8 @@ describe('public Stippling strategy boundary', () => {
       maxStipples: 160_000,
       maxPlacementAttempts: 1_000_000,
       maxRefinementAttempts: 0,
+      maxRelaxationPasses: 8,
+      maxRelaxationWorkUnits: 0,
     })
   })
 
@@ -317,13 +331,14 @@ describe('Stippling analytic demand and permission conformance', () => {
   })
 
   it('returns no marks for exact-zero tone and scales soft permission linearly', () => {
-    const empty = stipplingStrategy(
-      input(source(constantTone(0)), 'zero-tone'),
-    )
+    const empty = stipplingStrategy(input(source(constantTone(0)), 'zero-tone'))
     const withPermission = (permission: number) =>
       stipplingStrategy(
         input(
-          source(constantTone(1), createShadingMask(() => permission)),
+          source(
+            constantTone(1),
+            createShadingMask(() => permission),
+          ),
           'soft-permission',
         ),
       )
@@ -338,9 +353,11 @@ describe('Stippling analytic demand and permission conformance', () => {
     })
     expect(half.polylines).toHaveLength(full.polylines.length / 2)
     expect(quarter.polylines).toHaveLength(full.polylines.length / 4)
-    expect([full, half, quarter].every(({ termination }) => termination === 'completed')).toBe(
-      true,
-    )
+    expect(
+      [full, half, quarter].every(
+        ({ termination }) => termination === 'completed',
+      ),
+    ).toBe(true)
   })
 
   it.each([
@@ -358,12 +375,12 @@ describe('Stippling analytic demand and permission conformance', () => {
     expect(result.polylines.length).toBeGreaterThan(0)
     expectMaskSafe(result, mask)
     if (_name === 'disconnected islands') {
-      expect(result.polylines.some((polyline) => center(polyline)[0] < 40)).toBe(
-        true,
-      )
-      expect(result.polylines.some((polyline) => center(polyline)[0] > 60)).toBe(
-        true,
-      )
+      expect(
+        result.polylines.some((polyline) => center(polyline)[0] < 40),
+      ).toBe(true)
+      expect(
+        result.polylines.some((polyline) => center(polyline)[0] > 60),
+      ).toBe(true)
     }
   })
 })
@@ -409,10 +426,20 @@ describe('Stippling authored controls and frame scaling', () => {
     const largeFrame = { width: 300, height: 150 }
     const controls = { distributionFidelity: 0.2 }
     const small = stipplingStrategy(
-      input(source(constantTone(0.8)), 'proportional-frame', controls, smallFrame),
+      input(
+        source(constantTone(0.8)),
+        'proportional-frame',
+        controls,
+        smallFrame,
+      ),
     )
     const large = stipplingStrategy(
-      input(source(constantTone(0.8)), 'proportional-frame', controls, largeFrame),
+      input(
+        source(constantTone(0.8)),
+        'proportional-frame',
+        controls,
+        largeFrame,
+      ),
     )
     const smallNormalized = normalizedGeometry(small.polylines, smallFrame)
     const largeNormalized = normalizedGeometry(large.polylines, largeFrame)
@@ -467,7 +494,10 @@ describe('Stippling completion and safety ceilings', () => {
       voronoiRelaxation: Number.NaN,
     } as StipplingControls
     const malformedResult = runStipplingStrategyForTesting(
-      { ...input(source(constantTone(1)), 'malformed-controls'), controls: malformed },
+      {
+        ...input(source(constantTone(1)), 'malformed-controls'),
+        controls: malformed,
+      },
       PARTIAL_LIMITS,
     )
     const defaultResult = runStipplingStrategyForTesting(
@@ -485,9 +515,9 @@ describe('Stippling completion and safety ceilings', () => {
       { width: Number.NaN, height: 100 },
       { width: Number.POSITIVE_INFINITY, height: 100 },
     ]) {
-      expect(() => stipplingStrategy(input(source(), 'bad-frame', {}, frame))).toThrow(
-        /Stippling frame/,
-      )
+      expect(() =>
+        stipplingStrategy(input(source(), 'bad-frame', {}, frame)),
+      ).toThrow(/Stippling frame/)
     }
   })
 
@@ -518,6 +548,8 @@ describe('Stippling completion and safety ceilings', () => {
     { ...PARTIAL_LIMITS, maxStipples: -1 },
     { ...PARTIAL_LIMITS, maxPlacementAttempts: 1.5 },
     { ...PARTIAL_LIMITS, maxRefinementAttempts: 1_000_001 },
+    { ...PARTIAL_LIMITS, maxRelaxationPasses: 9 },
+    { ...PARTIAL_LIMITS, maxRelaxationWorkUnits: -1 },
   ])('rejects malformed injected execution limits', (limits) => {
     expect(() =>
       runStipplingStrategyForTesting(
@@ -538,6 +570,32 @@ describe('Stippling completion and safety ceilings', () => {
     expect(execute()).toEqual(first)
     expect(first.termination).toBe('budget-exhausted')
     expect(first.polylines).toHaveLength(PARTIAL_LIMITS.maxStipples)
+    expectValidResult(first)
+    expectMaskSafe(first, FULL_MASK)
+  })
+
+  it('exports the last complete relaxed geometry when the relaxation budget exhausts', () => {
+    const limits = {
+      ...resolveProductionStipplingExecutionLimits(
+        createStipplingModel(source(constantTone(1)), FRAME, {
+          ...FAST_CONTROLS,
+          voronoiRelaxation: 0.5,
+        }),
+      ),
+      maxRelaxationPasses: 1,
+    }
+    const execute = () =>
+      runStipplingStrategyForTesting(
+        input(source(constantTone(1)), 'partial-relaxation', {
+          voronoiRelaxation: 0.5,
+        }),
+        limits,
+      )
+    const first = execute()
+
+    expect(execute()).toEqual(first)
+    expect(first.termination).toBe('budget-exhausted')
+    expect(first.polylines).toHaveLength(200)
     expectValidResult(first)
     expectMaskSafe(first, FULL_MASK)
   })

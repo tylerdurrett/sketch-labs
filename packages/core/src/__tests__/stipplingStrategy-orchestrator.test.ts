@@ -13,6 +13,10 @@ import {
   refineStipples,
   resolveStipplingRefinementAttempts,
 } from '../stipplingStrategy/refinement'
+import {
+  resolveStipplingRelaxationPasses,
+  resolveStipplingRelaxationWorkUnits,
+} from '../stipplingStrategy/relaxation'
 import type { StipplingControls } from '../stipplingStrategy/types'
 
 const FRAME = Object.freeze({ width: 100, height: 100 })
@@ -20,6 +24,8 @@ const GENEROUS_LIMITS: StipplingExecutionLimits = Object.freeze({
   maxStipples: 1_000,
   maxPlacementAttempts: 100_000,
   maxRefinementAttempts: 10_000,
+  maxRelaxationPasses: 8,
+  maxRelaxationWorkUnits: Number.MAX_SAFE_INTEGER,
 })
 
 function model(
@@ -38,6 +44,52 @@ function model(
 }
 
 describe('Stippling orchestration', () => {
+  it('keeps zero relaxation outside the relaxation factory and byte-identical to the composed path', () => {
+    const target = model(
+      ([x]) => (x < 60 ? 0.9 : 0.2),
+      () => 1,
+      { distributionFidelity: 0.05, voronoiRelaxation: 0 },
+    )
+    const directRng = createRandom('zero-factory-bypass')
+    const placed = placeInitialStipples(target, directRng, {
+      maxAttempts: GENEROUS_LIMITS.maxPlacementAttempts,
+    })
+    const refined = refineStipples(target, directRng, placed.marks, {
+      maxAttempts: resolveStipplingRefinementAttempts(
+        placed.marks.length,
+        target.controls.distributionFidelity,
+      ),
+    })
+    let factoryCalls = 0
+    const outcome = runStipplingOrchestrator(
+      {
+        model: target,
+        rng: createRandom('zero-factory-bypass'),
+        limits: GENEROUS_LIMITS,
+      },
+      () => {
+        factoryCalls++
+        throw new Error('zero must not construct relaxation')
+      },
+    )
+    const expected = {
+      marks: refined.marks,
+      distributionError: target.distributionError(refined.marks),
+      placementAttemptsUsed: placed.attemptsUsed,
+      refinementAttemptsUsed: refined.attemptsUsed,
+      termination: 'completed',
+      stopCause: 'completed',
+    }
+
+    expect(factoryCalls).toBe(0)
+    expect(JSON.stringify(outcome)).toBe(JSON.stringify(expected))
+    expect(outcome.marks).toEqual(refined.marks)
+    expect(outcome.distributionError).toBe(expected.distributionError)
+    expect(outcome.placementAttemptsUsed).toBe(expected.placementAttemptsUsed)
+    expect(outcome.refinementAttemptsUsed).toBe(expected.refinementAttemptsUsed)
+    expect(outcome.termination).toBe(expected.termination)
+  })
+
   it('composes placement then authored refinement on one deterministic stream', () => {
     const target = model(([x]) => (x < 60 ? 0.9 : 0.2))
     const directRng = createRandom('composed-stream')
@@ -112,11 +164,16 @@ describe('Stippling orchestration', () => {
   })
 
   it('stops at the retained-geometry ceiling before refinement', () => {
-    const target = model(() => 1, () => 1, { distributionFidelity: 1 })
+    const target = model(
+      () => 1,
+      () => 1,
+      { distributionFidelity: 1 },
+    )
     const outcome = runStipplingOrchestrator({
       model: target,
       rng: createRandom('geometry-ceiling'),
       limits: {
+        ...GENEROUS_LIMITS,
         maxStipples: 3,
         maxPlacementAttempts: 100,
         maxRefinementAttempts: 0,
@@ -135,7 +192,11 @@ describe('Stippling orchestration', () => {
   })
 
   it('retains selected count and exact partial error at refinement exhaustion', () => {
-    const target = model(() => 1, () => 1, { distributionFidelity: 0.1 })
+    const target = model(
+      () => 1,
+      () => 1,
+      { distributionFidelity: 0.1 },
+    )
     const outcome = runStipplingOrchestrator({
       model: target,
       rng: createRandom('refinement-ceiling'),
@@ -158,6 +219,7 @@ describe('Stippling orchestration', () => {
       model: model(),
       rng: createRandom('placement-before-geometry'),
       limits: {
+        ...GENEROUS_LIMITS,
         maxStipples: 3,
         maxPlacementAttempts: 0,
         maxRefinementAttempts: 0,
@@ -170,9 +232,14 @@ describe('Stippling orchestration', () => {
 
   it('gives a filled geometry ceiling precedence over refinement exhaustion', () => {
     const outcome = runStipplingOrchestrator({
-      model: model(() => 1, () => 1, { distributionFidelity: 1 }),
+      model: model(
+        () => 1,
+        () => 1,
+        { distributionFidelity: 1 },
+      ),
       rng: createRandom('geometry-before-refinement'),
       limits: {
+        ...GENEROUS_LIMITS,
         maxStipples: 1,
         maxPlacementAttempts: 100,
         maxRefinementAttempts: 0,
@@ -186,12 +253,20 @@ describe('Stippling orchestration', () => {
 
   it('keeps placement work, count, order, and orientations independent of fidelity', () => {
     const loose = runStipplingOrchestrator({
-      model: model(() => 1, () => 1, { distributionFidelity: 0 }),
+      model: model(
+        () => 1,
+        () => 1,
+        { distributionFidelity: 0 },
+      ),
       rng: createRandom('fidelity-independent-placement'),
       limits: GENEROUS_LIMITS,
     })
     const faithful = runStipplingOrchestrator({
-      model: model(() => 1, () => 1, { distributionFidelity: 0.1 }),
+      model: model(
+        () => 1,
+        () => 1,
+        { distributionFidelity: 0.1 },
+      ),
       rng: createRandom('fidelity-independent-placement'),
       limits: GENEROUS_LIMITS,
     })
@@ -203,6 +278,136 @@ describe('Stippling orchestration', () => {
     )
     expect(loose.termination).toBe('completed')
     expect(faithful.termination).toBe('completed')
+  })
+
+  it('applies positive multi-pass relaxation after placement and refinement without consuming RNG', () => {
+    const controls = { distributionFidelity: 0.05 }
+    const unrelaxedModel = model(
+      () => 1,
+      () => 1,
+      {
+        ...controls,
+        voronoiRelaxation: 0,
+      },
+    )
+    const relaxedModel = model(
+      () => 1,
+      () => 1,
+      {
+        ...controls,
+        voronoiRelaxation: 0.25,
+      },
+    )
+    const unrelaxedRng = createRandom('positive-relaxation')
+    const relaxedRng = createRandom('positive-relaxation')
+    const unrelaxed = runStipplingOrchestrator({
+      model: unrelaxedModel,
+      rng: unrelaxedRng,
+      limits: GENEROUS_LIMITS,
+    })
+    const relaxed = runStipplingOrchestrator({
+      model: relaxedModel,
+      rng: relaxedRng,
+      limits: GENEROUS_LIMITS,
+    })
+
+    expect(resolveStipplingRelaxationPasses(0.25)).toBe(2)
+    expect(relaxed).toMatchObject({
+      placementAttemptsUsed: unrelaxed.placementAttemptsUsed,
+      refinementAttemptsUsed: unrelaxed.refinementAttemptsUsed,
+      termination: 'completed',
+      stopCause: 'completed',
+    })
+    expect(relaxed.marks).toHaveLength(unrelaxed.marks.length)
+    expect(relaxed.marks).not.toEqual(unrelaxed.marks)
+    expect(relaxed.marks.map(({ orientation }) => orientation)).toEqual(
+      unrelaxed.marks.map(({ orientation }) => orientation),
+    )
+    expect(relaxed.distributionError).toBeLessThanOrEqual(
+      unrelaxed.distributionError,
+    )
+    expect(relaxedRng.value()).toBe(unrelaxedRng.value())
+  })
+
+  it('checks pass and complete-work ceilings between passes and retains the last valid prefix', () => {
+    const target = model(
+      () => 1,
+      () => 1,
+      {
+        distributionFidelity: 0.05,
+        voronoiRelaxation: 0.5,
+      },
+    )
+    const passWork = resolveStipplingRelaxationWorkUnits(
+      target,
+      target.scales.targetCount,
+      1,
+    )
+    const execute = (limits: StipplingExecutionLimits) =>
+      runStipplingOrchestrator({
+        model: target,
+        rng: createRandom('relaxation-ceilings'),
+        limits,
+      })
+    const passLimited = execute({
+      ...GENEROUS_LIMITS,
+      maxRelaxationPasses: 1,
+    })
+    const workLimited = execute({
+      ...GENEROUS_LIMITS,
+      maxRelaxationWorkUnits: passWork,
+    })
+    const noCompletePass = execute({
+      ...GENEROUS_LIMITS,
+      maxRelaxationWorkUnits: passWork - 1,
+    })
+    const postRefinement = runStipplingOrchestrator({
+      model: model(
+        () => 1,
+        () => 1,
+        {
+          distributionFidelity: 0.05,
+          voronoiRelaxation: 0,
+        },
+      ),
+      rng: createRandom('relaxation-ceilings'),
+      limits: GENEROUS_LIMITS,
+    })
+
+    expect(passLimited).toEqual(workLimited)
+    expect(passLimited).toMatchObject({
+      termination: 'budget-exhausted',
+      stopCause: 'relaxation-ceiling-reached',
+    })
+    expect(noCompletePass).toMatchObject({
+      marks: postRefinement.marks,
+      distributionError: postRefinement.distributionError,
+      termination: 'budget-exhausted',
+      stopCause: 'relaxation-ceiling-reached',
+    })
+  })
+
+  it('gives refinement exhaustion precedence over relaxation ceilings', () => {
+    const outcome = runStipplingOrchestrator({
+      model: model(
+        () => 1,
+        () => 1,
+        {
+          distributionFidelity: 0.1,
+          voronoiRelaxation: 1,
+        },
+      ),
+      rng: createRandom('refinement-before-relaxation'),
+      limits: {
+        ...GENEROUS_LIMITS,
+        maxRefinementAttempts: 1,
+        maxRelaxationPasses: 0,
+        maxRelaxationWorkUnits: 0,
+      },
+    })
+
+    expect(outcome.stopCause).toBe('refinement-ceiling-reached')
+    expect(outcome.refinementAttemptsUsed).toBe(1)
   })
 
   it('validates every non-negative integer execution limit and attempt cap', () => {
@@ -223,21 +428,27 @@ describe('Stippling orchestration', () => {
     expect(
       execute({ ...GENEROUS_LIMITS, maxStipples: Number.POSITIVE_INFINITY }),
     ).toThrow(/maxStipples/)
-    expect(
-      execute({ ...GENEROUS_LIMITS, maxPlacementAttempts: -1 }),
-    ).toThrow(/maxPlacementAttempts/)
+    expect(execute({ ...GENEROUS_LIMITS, maxPlacementAttempts: -1 })).toThrow(
+      /maxPlacementAttempts/,
+    )
     expect(
       execute({ ...GENEROUS_LIMITS, maxPlacementAttempts: 1_000_001 }),
     ).toThrow(/maxPlacementAttempts/)
-    expect(
-      execute({ ...GENEROUS_LIMITS, maxRefinementAttempts: 1.5 }),
-    ).toThrow(/maxRefinementAttempts/)
+    expect(execute({ ...GENEROUS_LIMITS, maxRefinementAttempts: 1.5 })).toThrow(
+      /maxRefinementAttempts/,
+    )
     expect(
       execute({
         ...GENEROUS_LIMITS,
         maxRefinementAttempts: Number.NaN,
       }),
     ).toThrow(/maxRefinementAttempts/)
+    expect(execute({ ...GENEROUS_LIMITS, maxRelaxationPasses: 9 })).toThrow(
+      /maxRelaxationPasses/,
+    )
+    expect(execute({ ...GENEROUS_LIMITS, maxRelaxationWorkUnits: -1 })).toThrow(
+      /maxRelaxationWorkUnits/,
+    )
   })
 })
 
@@ -254,7 +465,9 @@ describe('Stippling progress observation', () => {
     expect(outcome.termination).toBe('completed')
     expect(snapshots).toHaveLength(3)
     expect(snapshots.every(Object.isFrozen)).toBe(true)
-    expect(new Set(snapshots.map(({ totalWorkUnits }) => totalWorkUnits))).toEqual(
+    expect(
+      new Set(snapshots.map(({ totalWorkUnits }) => totalWorkUnits)),
+    ).toEqual(
       new Set([
         GENEROUS_LIMITS.maxPlacementAttempts +
           GENEROUS_LIMITS.maxRefinementAttempts,
@@ -330,6 +543,7 @@ describe('Stippling progress observation', () => {
       model: model(),
       rng: createRandom('partial-convergence'),
       limits: {
+        ...GENEROUS_LIMITS,
         maxStipples: 2,
         maxPlacementAttempts: 100,
         maxRefinementAttempts: 100,
@@ -343,5 +557,96 @@ describe('Stippling progress observation', () => {
     expect(snapshots.at(-1)!.completedWorkUnits).toBe(
       outcome.placementAttemptsUsed,
     )
+  })
+
+  it('translates every complete relaxation pass into exact frozen public progress', () => {
+    const target = model(
+      () => 1,
+      () => 1,
+      {
+        distributionFidelity: 0.05,
+        voronoiRelaxation: 0.5,
+      },
+    )
+    const requestedPasses = resolveStipplingRelaxationPasses(0.5)
+    const passWork = resolveStipplingRelaxationWorkUnits(
+      target,
+      target.scales.targetCount,
+      1,
+    )
+    const execute = (maxRelaxationPasses: number) => {
+      const snapshots: ShadingProgress[] = []
+      const outcome = runStipplingOrchestrator({
+        model: target,
+        rng: createRandom('relaxation-progress'),
+        limits: { ...GENEROUS_LIMITS, maxRelaxationPasses },
+        observer: (snapshot) => snapshots.push(snapshot),
+      })
+      return { outcome, snapshots }
+    }
+    const limited = execute(2)
+    const complete = execute(requestedPasses)
+    const limitedPassSnapshots = limited.snapshots.slice(-3, -1)
+    const completePassSnapshots = complete.snapshots.slice(
+      -(requestedPasses + 1),
+      -1,
+    )
+
+    expect(limited.outcome).toMatchObject({
+      termination: 'budget-exhausted',
+      stopCause: 'relaxation-ceiling-reached',
+    })
+    expect(complete.outcome.termination).toBe('completed')
+    expect(completePassSnapshots.slice(0, 2)).toEqual(limitedPassSnapshots)
+    expect(complete.snapshots.every(Object.isFrozen)).toBe(true)
+    expect(
+      new Set(complete.snapshots.map(({ totalWorkUnits }) => totalWorkUnits)),
+    ).toEqual(
+      new Set([
+        GENEROUS_LIMITS.maxPlacementAttempts +
+          GENEROUS_LIMITS.maxRefinementAttempts +
+          passWork * requestedPasses,
+      ]),
+    )
+    for (let index = 1; index < completePassSnapshots.length; index++) {
+      expect(
+        completePassSnapshots[index]!.completedWorkUnits -
+          completePassSnapshots[index - 1]!.completedWorkUnits,
+      ).toBe(passWork)
+    }
+    expect(complete.snapshots.at(-1)).toMatchObject({
+      convergence: 1,
+      terminal: true,
+    })
+    expect(limited.snapshots.at(-1)).toMatchObject({ terminal: true })
+    expect(limited.snapshots.at(-1)!.convergence).toBeLessThan(1)
+  })
+
+  it('isolates observer mutation and exceptions during positive relaxation', () => {
+    const target = model(
+      () => 1,
+      () => 1,
+      {
+        distributionFidelity: 0.05,
+        voronoiRelaxation: 0.25,
+      },
+    )
+    const execute = (observer?: (progress: ShadingProgress) => void) =>
+      runStipplingOrchestrator({
+        model: target,
+        rng: createRandom('positive-observer-isolation'),
+        limits: GENEROUS_LIMITS,
+        ...(observer === undefined ? {} : { observer }),
+      })
+    const baseline = execute()
+    let calls = 0
+    const observed = execute((progress) => {
+      calls++
+      Reflect.set(progress, 'terminal', true)
+      throw new Error('observer failure')
+    })
+
+    expect(calls).toBeGreaterThanOrEqual(4)
+    expect(observed).toEqual(baseline)
   })
 })
