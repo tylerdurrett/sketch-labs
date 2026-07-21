@@ -158,7 +158,7 @@ function plotterPath(
         )}`,
     )
     .join(' ')
-  return `<path d="${d}" fill="none" stroke="black" stroke-width="${round(sceneWidth * scale)}" />`
+  return `<path d="${d}" fill="none" stroke="black" stroke-width="${round(sceneWidth * scale)}" stroke-linecap="round" />`
 }
 
 function insidePage(point: Readonly<Point>, frame: PageFrame): boolean {
@@ -578,11 +578,11 @@ describe('Tone Calibration Stippling output parity', () => {
       pageProfileSnapshot.value,
     )
     expect(svgPathElements(plotterSVG)).toEqual([
-      '<path d="M7 31 L7.1 31" fill="none" stroke="black" stroke-width="0.4" />',
-      '<path d="M57 11 L57 11.1" fill="none" stroke="black" stroke-width="0.4" />',
-      '<path d="M126.9 51 L127 51" fill="none" stroke="black" stroke-width="0.4" />',
-      '<path d="M97 90.9 L97 91" fill="none" stroke="black" stroke-width="0.4" />',
-      '<path d="M27 21 L27.4 21.2" fill="none" stroke="black" stroke-width="0.4" />',
+      '<path d="M7 31 L7.1 31" fill="none" stroke="black" stroke-width="0.4" stroke-linecap="round" />',
+      '<path d="M57 11 L57 11.1" fill="none" stroke="black" stroke-width="0.4" stroke-linecap="round" />',
+      '<path d="M126.9 51 L127 51" fill="none" stroke="black" stroke-width="0.4" stroke-linecap="round" />',
+      '<path d="M97 90.9 L97 91" fill="none" stroke="black" stroke-width="0.4" stroke-linecap="round" />',
+      '<path d="M27 21 L27.4 21.2" fill="none" stroke="black" stroke-width="0.4" stroke-linecap="round" />',
     ])
     expect(plotterSVG).toMatch(
       /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="140mm" height="108mm" viewBox="0 0 140 108" data-paper-extent="paper">/,
@@ -745,9 +745,9 @@ describe('Tone Calibration Stippling output parity', () => {
       pageProfileSnapshot.value,
     )
     expect(svgPathElements(plotterSVG)).toEqual([
-      '<path d="M7 31 L7.2 31" fill="none" stroke="black" stroke-width="0.4" />',
-      '<path d="M27 21 L27.4 21" fill="none" stroke="black" stroke-width="0.4" />',
-      '<path d="M126.8 51 L127 51" fill="none" stroke="black" stroke-width="0.4" />',
+      '<path d="M7 31 L7.2 31" fill="none" stroke="black" stroke-width="0.4" stroke-linecap="round" />',
+      '<path d="M27 21 L27.4 21" fill="none" stroke="black" stroke-width="0.4" stroke-linecap="round" />',
+      '<path d="M126.8 51 L127 51" fill="none" stroke="black" stroke-width="0.4" stroke-linecap="round" />',
     ])
     expect(plotterSVG).not.toMatch(
       /<(?:rect|g|polyline|circle|clipPath)\b|\b(?:transform|clip-path)=|\sZ(?:"|\s)/,
