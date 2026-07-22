@@ -3,7 +3,10 @@ import { act, useImperativeHandle, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID } from "@harness/core";
+import {
+  PENCIL_CONTOUR_DEFAULT_IMAGE_ASSET_ID,
+  PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+} from "@harness/core";
 
 import { App } from "./App";
 import type { LiveCanvasHandle } from "./LiveCanvas";
@@ -28,7 +31,10 @@ import type { LiveCanvasHandle } from "./LiveCanvas";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
-const appImageResolution = vi.hoisted(() => ({ ids: [] as string[] }));
+const appImageResolution = vi.hoisted(() => ({
+  ids: [] as string[],
+  failure: null as null | "missing",
+}));
 const appNormalization = vi.hoisted(() => ({ caps: [] as number[] }));
 
 vi.mock("./imageAssetNormalization", async (importActual) => {
@@ -60,6 +66,12 @@ vi.mock("./imageAssetResolver", async (importActual) => {
     ) => {
       const id = String(params.imageAsset);
       appImageResolution.ids.push(id);
+      if (appImageResolution.failure !== null) {
+        throw new actual.ImageAssetResolutionError(
+          appImageResolution.failure,
+          id,
+        );
+      }
       const pixels = {
         width: 1,
         height: 1,
@@ -80,7 +92,11 @@ vi.mock("./LiveCanvas", () => ({
     handleRef,
   }: {
     params: Readonly<Record<string, unknown>>;
-    renderState?: { kind: string };
+    renderState?: {
+      kind: string;
+      status?: string;
+      unresolvedAssetIds?: readonly string[];
+    };
     handleRef?: Ref<LiveCanvasHandle>;
   }) => {
     useImperativeHandle(handleRef, () => ({
@@ -107,6 +123,10 @@ vi.mock("./LiveCanvas", () => ({
         data-testid="canvas"
         data-params={JSON.stringify(params)}
         data-render-state={renderState?.kind ?? "fill-live"}
+        data-unavailable-status={renderState?.status ?? ""}
+        data-unresolved-asset-ids={
+          renderState?.unresolvedAssetIds?.join(",") ?? ""
+        }
       />
     );
   },
@@ -159,6 +179,7 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   appImageResolution.ids = [];
+  appImageResolution.failure = null;
   appNormalization.caps = [];
   exportJob.resolve = null;
 });
@@ -309,6 +330,9 @@ describe("App — Photo Scribble integration (#333)", () => {
   it("opens on the bundled source and resets all authored controls after switching", async () => {
     mountApp();
     await act(async () => Promise.resolve());
+    appImageResolution.ids = [];
+    selectOption("Photo Scribble");
+    await act(async () => Promise.resolve());
 
     expect(trigger().textContent).toBe("Photo Scribble");
     expect(appImageResolution.ids).toEqual([
@@ -429,6 +453,7 @@ describe("App — Photo Scribble integration (#333)", () => {
       } as Response),
     );
     mountApp();
+    selectOption("Photo Scribble");
     const choose = [
       ...document.querySelectorAll<HTMLButtonElement>("button"),
     ].find((candidate) => candidate.textContent === "Choose image")!;
@@ -461,6 +486,95 @@ describe("App — Photo Scribble integration (#333)", () => {
         '[aria-label="imageAsset image asset identity"]',
       )?.textContent,
     ).toBe("app-import-bbbbbbbbbbbb");
+  });
+});
+
+describe("App — Pencil Contour integration (#396)", () => {
+  it("opens the newest Sketch on its bundled source with reusable controls and an ordinary preview", async () => {
+    mountApp();
+    await act(async () => Promise.resolve());
+
+    expect(trigger().textContent).toBe("Pencil Contour");
+    expect(appImageResolution.ids).toEqual([
+      PENCIL_CONTOUR_DEFAULT_IMAGE_ASSET_ID,
+    ]);
+    expect(
+      document.querySelector(
+        '[aria-label="imageAsset image asset identity"]',
+      )?.textContent,
+    ).toBe(PENCIL_CONTOUR_DEFAULT_IMAGE_ASSET_ID);
+    expect(
+      [...document.querySelectorAll('#inspector input[id^="control-"]')].map(
+        (input) => input.id,
+      ),
+    ).toEqual([
+      "control-gamma",
+      "control-contrast",
+      "control-pivot",
+      "control-contourDetail",
+      "control-contourSmoothing",
+    ]);
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-params"),
+    ).toBe(
+      JSON.stringify({
+        imageAsset: PENCIL_CONTOUR_DEFAULT_IMAGE_ASSET_ID,
+        gamma: 0.5,
+        contrast: 0.5,
+        pivot: 0.5,
+        contourDetail: 0.5,
+        contourSmoothing: 0.5,
+      }),
+    );
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-render-state"),
+    ).toBe("fill-live");
+
+    const buttonLabels = [...document.querySelectorAll("button")].map(
+      (button) => button.textContent,
+    );
+    expect(buttonLabels).toEqual(
+      expect.arrayContaining([
+        "Export PNG",
+        "Export SVG",
+        "Export Hidden-line SVG",
+      ]),
+    );
+  });
+
+  it("uses the generic managed-asset unavailable state and disables every output action", async () => {
+    appImageResolution.failure = "missing";
+    mountApp();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const canvas = document.querySelector<HTMLElement>(
+      '[data-testid="canvas"]',
+    )!;
+    expect(trigger().textContent).toBe("Pencil Contour");
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("missing");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(
+      PENCIL_CONTOUR_DEFAULT_IMAGE_ASSET_ID,
+    );
+    expect(document.body.textContent).toContain("Image Asset is missing");
+    for (const label of [
+      "Export PNG",
+      "Export SVG",
+      "Export Hidden-line SVG",
+    ]) {
+      expect(
+        [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+          (button) => button.textContent === label,
+        )?.disabled,
+      ).toBe(true);
+    }
   });
 });
 
