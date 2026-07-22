@@ -194,6 +194,30 @@ describe('Pencil Contour path cleanup', () => {
     expect(pathLength(result[1]!.points, true)).toBeGreaterThan(2.5)
   })
 
+  it('admits split branches by total component inventory while removing isolated noise', () => {
+    const base = graph(6, 6)
+    const componentGraph: Readonly<LocalizedEdgeGraph> = Object.freeze({
+      ...base,
+      edges: Object.freeze([
+        { start: [0, 0], end: [1, 0], provenance: LUMINANCE },
+        { start: [1, 0], end: [2, 0], provenance: LUMINANCE },
+        { start: [1, 0], end: [1, 1], provenance: LUMINANCE },
+        { start: [4, 4], end: [5, 4], provenance: LUMINANCE },
+      ]),
+    })
+    const branches = [
+      path([[0, 0], [1, 0]]),
+      path([[1, 0], [2, 0]]),
+      path([[1, 0], [1, 1]]),
+      path([[4, 4], [5, 4]]),
+    ]
+
+    const result = clean(branches, componentGraph, 0, 0)
+
+    expect(result).toHaveLength(3)
+    expect(result.map(({ points }) => points)).not.toContainEqual(branches[3]!.points)
+  })
+
   it('keeps open endpoints fixed while simplifying interior vertices', () => {
     const source = path([
       [1, 1],

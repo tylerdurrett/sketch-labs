@@ -47,6 +47,12 @@ interface RemovalCandidate {
   readonly priority: number
 }
 
+interface ComponentEdge {
+  readonly startKey: string
+  readonly endKey: string
+  readonly length: number
+}
+
 function finitePoint(value: unknown): value is Readonly<Point> {
   return (
     Array.isArray(value) &&
@@ -68,6 +74,13 @@ function canonicalProvenance(
   return value.kind === 'luminance'
     ? LUMINANCE_PROVENANCE
     : ALPHA_BOUNDARY_PROVENANCE
+}
+
+function componentPointKey(
+  point: Readonly<Point>,
+  edgeProvenance: Readonly<EdgeProvenance>,
+): string {
+  return `${edgeProvenance.kind}:${point[0]},${point[1]}`
 }
 
 function validGraph(graph: Readonly<LocalizedEdgeGraph>): boolean {
@@ -625,6 +638,75 @@ function nestedSimplification(
 }
 
 /**
+ * Total geometric edge inventory for each provenance-partitioned component.
+ * Newly admitted detail edges can only grow a component or merge components,
+ * so this admission basis cannot shrink when tracing splits at a new junction.
+ */
+function fragmentComponentLengths(
+  graph: Readonly<LocalizedEdgeGraph>,
+): ReadonlyMap<string, number> {
+  if (!Array.isArray(graph.edges) || graph.edges.length === 0) return new Map()
+  const ids = new Map<string, number>()
+  const parent: number[] = []
+  const edges: ComponentEdge[] = []
+  const idFor = (key: string) => {
+    const existing = ids.get(key)
+    if (existing !== undefined) return existing
+    const id = parent.length
+    ids.set(key, id)
+    parent.push(id)
+    return id
+  }
+  const rootOf = (start: number): number => {
+    let root = start
+    while (parent[root] !== root) root = parent[root]!
+    let current = start
+    while (parent[current] !== current) {
+      const next = parent[current]!
+      parent[current] = root
+      current = next
+    }
+    return root
+  }
+  const unite = (first: number, second: number) => {
+    const firstRoot = rootOf(first)
+    const secondRoot = rootOf(second)
+    if (firstRoot === secondRoot) return
+    const root = Math.min(firstRoot, secondRoot)
+    parent[firstRoot] = root
+    parent[secondRoot] = root
+  }
+
+  for (const candidate of graph.edges) {
+    if (candidate === null || typeof candidate !== 'object') continue
+    if (
+      !finitePoint(candidate.start) ||
+      !finitePoint(candidate.end) ||
+      !provenance(candidate.provenance) ||
+      !inBounds(candidate.start, graph) ||
+      !inBounds(candidate.end, graph)
+    ) {
+      continue
+    }
+    const length = Math.sqrt(squaredDistance(candidate.start, candidate.end))
+    if (length <= Math.sqrt(POINT_EPSILON_SQUARED)) continue
+    const startKey = componentPointKey(candidate.start, candidate.provenance)
+    const endKey = componentPointKey(candidate.end, candidate.provenance)
+    unite(idFor(startKey), idFor(endKey))
+    edges.push({ startKey, endKey, length })
+  }
+
+  const totals = new Map<number, number>()
+  for (const edge of edges) {
+    const root = rootOf(ids.get(edge.startKey)!)
+    totals.set(root, (totals.get(root) ?? 0) + edge.length)
+  }
+  const lengths = new Map<string, number>()
+  for (const [key, id] of ids) lengths.set(key, totals.get(rootOf(id)) ?? 0)
+  return lengths
+}
+
+/**
  * Remove short fragments, simplify permission-valid shortcuts, and smooth the
  * survivors without changing topology, provenance, or source inputs.
  */
@@ -655,15 +737,20 @@ export function cleanupPencilContourPaths(
   const fullySupported = input.graph.positiveSupport.every(
     (supported, index) => supported && input.graph.alpha[index]! > 0,
   )
+  const componentLengths = fragmentComponentLengths(input.graph)
   const result: Readonly<TracedContourPath>[] = []
 
   for (const path of input.paths) {
     if (!validPath(path, input.graph)) continue
     const source = deduplicate(path.points, path.closed)
     const minimumPointCount = path.closed ? 3 : 2
+    if (source.length < minimumPointCount) continue
+    const tracedLength = pathLength(source, path.closed)
+    const fragmentLength =
+      componentLengths.get(componentPointKey(source[0]!, path.provenance)) ??
+      tracedLength
     if (
-      source.length < minimumPointCount ||
-      pathLength(source, path.closed) < minimumLength ||
+      fragmentLength < minimumLength ||
       !nondegenerateSegments(source, path.closed) ||
       !emittedSegmentsAreSupported(source, path.closed, input.graph) ||
       !alphaBoundaryPointsStayOnIsovalue(

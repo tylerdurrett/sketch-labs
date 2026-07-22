@@ -92,6 +92,25 @@ function segmentSamples(primitive: Readonly<Primitive>): readonly Point[] {
   return samples
 }
 
+function segmentInventory(scene: Readonly<Scene>): ReadonlySet<string> {
+  const inventory = new Set<string>()
+  const pointKey = ([x, y]: Readonly<Point>) =>
+    `${x.toFixed(12)},${y.toFixed(12)}`
+  for (const primitive of scene.primitives) {
+    const segmentCount = primitive.closed
+      ? primitive.points.length
+      : primitive.points.length - 1
+    for (let index = 0; index < segmentCount; index += 1) {
+      const start = pointKey(primitive.points[index]!)
+      const end = pointKey(
+        primitive.points[(index + 1) % primitive.points.length]!,
+      )
+      inventory.add(start < end ? `${start}:${end}` : `${end}:${start}`)
+    }
+  }
+  return inventory
+}
+
 function alphaAtFramePoint(
   source: Readonly<DecodedPixels>,
   frame: Readonly<CoordinateSpace>,
@@ -261,6 +280,33 @@ describe('generatePencilContour', () => {
     expect(smoothed.primitives[0]!.points.length).toBeLessThan(
       unsmoothed.primitives[0]!.points.length,
     )
+  })
+
+  it('keeps lower-detail segment inventory when new edges create junctions', () => {
+    const source: DecodedPixels = {
+      width: 3,
+      height: 3,
+      data: Uint8Array.from([
+        134, 45, 168, 231, 26, 177, 92, 11, 238, 117, 80, 111, 2, 121,
+        132, 19, 86, 189, 248, 247, 234, 65, 172, 27, 190, 5, 160, 127,
+        210, 9, 212, 35, 38, 77, 72, 7,
+      ]),
+    }
+    let previous = new Set<string>()
+    const counts: number[] = []
+
+    for (const contourDetail of [0, 0.25, 0.5, 0.75, 1]) {
+      const inventory = segmentInventory(
+        generate(source, { contourDetail, contourSmoothing: 0 }),
+      )
+      for (const segment of previous) expect(inventory.has(segment)).toBe(true)
+      counts.push(inventory.size)
+      previous = new Set(inventory)
+    }
+
+    expect(counts).toEqual([...counts].sort((first, second) => first - second))
+    expect(counts[2]).toBe(8)
+    expect(counts[3]).toBeGreaterThanOrEqual(counts[2]!)
   })
 
   it.each([
