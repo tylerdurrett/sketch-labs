@@ -7,6 +7,7 @@ import {
   type ToneSource,
 } from '../shadingFields'
 import {
+  computeStipplingDistributionErrorForCenters,
   createStipplingModel,
   normalizeStipplingControls,
   resolveStipplingScales,
@@ -350,6 +351,24 @@ describe('Stippling effective-demand model', () => {
     expect(Object.isFrozen(model.lattice.samples[0]!.point)).toBe(true)
     expect(Object.isFrozen(marks[0])).toBe(true)
     expect(Object.isFrozen(marks[0]!.center)).toBe(true)
+  })
+
+  it('evaluates center-only distribution error identically to marks', () => {
+    const model = createStipplingModel(source(0.75), FRAME)
+    const marks = [
+      mark([0, 0]),
+      mark([500, 500], 0.4),
+      mark([1000, 1000], 0.8),
+      mark([-1, 500], 1.2),
+      mark([Number.NaN, 500], 1.6),
+    ]
+
+    expect(
+      computeStipplingDistributionErrorForCenters(
+        model,
+        marks.map(({ center }) => center),
+      ),
+    ).toBe(model.distributionError(marks))
   })
 
   it('reports finite partial error invariant under proportional scaling', () => {

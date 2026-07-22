@@ -532,4 +532,30 @@ describe('one-pass Stipple centroid relocation', () => {
     })
     expect(outcome.marks).toBe(initial)
   })
+
+  it('backtracks a spatially better pass until distribution is preserved', () => {
+    const initial = Object.freeze([mark([2, 5])])
+    const target = model([demandSample([6, 5])], {
+      distributionError: ([candidate]) =>
+        candidate!.center[0] <= 3 ? 0.25 : 0.5,
+    })
+    const assignment = solve(target, initial)
+    const outcome = relocateStipplesToVoronoiCentroids(
+      target,
+      initial,
+      assignment,
+      0.25,
+    )
+
+    expect(outcome).toMatchObject({
+      acceptedRelocationCount: 1,
+      distributionError: 0.25,
+      passAccepted: true,
+      reason: 'accepted',
+    })
+    expect(outcome.normalizedObjective).toBeLessThan(
+      assignment.normalizedObjective,
+    )
+    expect(outcome.marks[0]!.center).toEqual([3, 5])
+  })
 })

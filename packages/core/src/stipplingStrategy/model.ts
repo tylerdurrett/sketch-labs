@@ -228,15 +228,14 @@ function createDemandLattice(
   })
 }
 
-function markCellIndex(
-  mark: Readonly<StippleMark>,
+function centerCellIndex(
+  center: Readonly<Point>,
   lattice: Readonly<StipplingDemandLattice>,
 ): number | undefined {
-  const [x, y] = mark.center
+  const [x, y] = center
   if (
     !Number.isFinite(x) ||
     !Number.isFinite(y) ||
-    !Number.isFinite(mark.orientation) ||
     x < 0 ||
     y < 0 ||
     x > lattice.frame.width ||
@@ -248,6 +247,15 @@ function markCellIndex(
   const column = Math.min(lattice.columns - 1, Math.floor(x / lattice.cellWidth))
   const row = Math.min(lattice.rows - 1, Math.floor(y / lattice.cellHeight))
   return row * lattice.columns + column
+}
+
+function markCellIndex(
+  mark: Readonly<StippleMark>,
+  lattice: Readonly<StipplingDemandLattice>,
+): number | undefined {
+  return Number.isFinite(mark.orientation)
+    ? centerCellIndex(mark.center, lattice)
+    : undefined
 }
 
 /** Mutable exact error accumulator for one fixed-count relocation pass. */
@@ -272,6 +280,36 @@ function distributionErrorFromAbsolute(
   return Math.min(
     2,
     absoluteError / Math.max(1, targetCount, markCount),
+  )
+}
+
+/** Evaluate the canonical lattice-count metric without materializing marks. */
+export function computeStipplingDistributionErrorForCenters(
+  model: Readonly<Pick<StipplingModel, 'lattice' | 'scales'>>,
+  centers: readonly Readonly<Point>[],
+): number {
+  const { lattice, scales } = model
+  const actualCounts = new Uint32Array(lattice.sampleCount)
+  let unmatchedCount = 0
+  for (const center of centers) {
+    const index = centerCellIndex(center, lattice)
+    if (index === undefined) unmatchedCount++
+    else actualCounts[index] = actualCounts[index]! + 1
+  }
+
+  let absoluteError = unmatchedCount
+  for (let index = 0; index < lattice.sampleCount; index++) {
+    const expectedCount =
+      lattice.demandSum === 0
+        ? 0
+        : (scales.targetCount * lattice.samples[index]!.demand) /
+          lattice.demandSum
+    absoluteError += Math.abs(actualCounts[index]! - expectedCount)
+  }
+  return distributionErrorFromAbsolute(
+    absoluteError,
+    scales.targetCount,
+    centers.length,
   )
 }
 

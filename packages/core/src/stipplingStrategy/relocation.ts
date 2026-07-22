@@ -1,6 +1,10 @@
 import { sampleEffectiveTone } from '../shadingFields'
 import type { Point } from '../types'
 import { isMaskPermittedStipple } from './mask'
+import {
+  computeStipplingDistributionErrorForCenters,
+  hasNativeStipplingDistributionError,
+} from './model'
 import type { StippleMark, StipplingModel } from './types'
 import type { StipplingVoronoiAssignment } from './voronoi'
 
@@ -380,14 +384,67 @@ function rejectedOutcome(
   })
 }
 
+function materializeRelocatedMarks(
+  marks: readonly Readonly<StippleMark>[],
+  candidates: readonly Readonly<Point>[],
+): readonly Readonly<StippleMark>[] {
+  return Object.freeze(
+    marks.map((mark, siteIndex) =>
+      samePoint(mark.center, candidates[siteIndex]!)
+        ? mark
+        : Object.freeze({
+            center: Object.freeze([
+              candidates[siteIndex]![0],
+              candidates[siteIndex]![1],
+            ] as Point),
+            orientation: mark.orientation,
+          }),
+    ),
+  )
+}
+
+function candidateDistributionError(
+  model: Readonly<StipplingModel>,
+  marks: readonly Readonly<StippleMark>[],
+  candidates: readonly Readonly<Point>[],
+): number {
+  return hasNativeStipplingDistributionError(model)
+    ? computeStipplingDistributionErrorForCenters(model, candidates)
+    : model.distributionError(materializeRelocatedMarks(marks, candidates))
+}
+
+function candidateSetIsSafe(
+  model: Readonly<StipplingModel>,
+  marks: readonly Readonly<StippleMark>[],
+  candidates: readonly Readonly<Point>[],
+): boolean {
+  if (
+    spacingConflicts(candidates, model.scales.minimumSpacing).some(
+      (conflict) => conflict !== 0,
+    )
+  ) {
+    return false
+  }
+  return candidates.every(
+    (center, siteIndex) =>
+      samePoint(center, marks[siteIndex]!.center) ||
+      isCandidatePermitted(
+        model,
+        center,
+        marks[siteIndex]!.orientation,
+      ),
+  )
+}
+
 /**
  * Propose one simultaneous weighted-centroid move from a completed assignment.
  *
  * Every site uses the same frozen assignment. Invalid proposals deterministically
  * halve their displacement until safe, or return exactly to their old center.
- * The pass preserves ordered identity and orientation, commits only strict
- * fixed-cell spatial improvements, and rolls back atomically if it worsens the
- * distribution metric established before relaxation.
+ * The pass preserves ordered identity and orientation and commits only strict
+ * fixed-cell spatial improvements. If the full safe proposal worsens the
+ * Distribution metric, the simultaneous displacement is deterministically
+ * halved until both metrics are preserved, or rolled back if none survives.
  */
 export function relocateStipplesToVoronoiCentroids(
   model: Readonly<StipplingModel>,
@@ -441,31 +498,83 @@ export function relocateStipplesToVoronoiCentroids(
     )
   }
 
-  const relocated = Object.freeze(
-    marks.map((mark, siteIndex) =>
-      samePoint(mark.center, candidates[siteIndex]!)
-        ? mark
-        : Object.freeze({
-            center: Object.freeze([
-              candidates[siteIndex]![0],
-              candidates[siteIndex]![1],
-            ] as Point),
-            orientation: mark.orientation,
-          }),
-    ),
+  let retainedCandidates = candidates
+  let distributionError = candidateDistributionError(
+    model,
+    marks,
+    retainedCandidates,
   )
-  const distributionError = model.distributionError(relocated)
-  if (
+  let backtracked: Point[] | undefined
+  for (
+    let step = 1;
     !Number.isFinite(distributionError) ||
-    distributionError > preRelaxationDistributionError
+    distributionError > preRelaxationDistributionError;
+    step++
   ) {
+    if (step > MAXIMUM_BACKTRACK_STEPS) {
+      return rejectedOutcome(
+        marks,
+        assignment,
+        preRelaxationDistributionError,
+        'distribution-error-worsened',
+      )
+    }
+
+    backtracked ??= candidates.map(([x, y]) => [x, y])
+    const progress = 2 ** -step
+    for (let siteIndex = 0; siteIndex < backtracked.length; siteIndex++) {
+      const origin = marks[siteIndex]!.center
+      const candidate = candidates[siteIndex]!
+      backtracked[siteIndex]![0] =
+        origin[0] + (candidate[0] - origin[0]) * progress
+      backtracked[siteIndex]![1] =
+        origin[1] + (candidate[1] - origin[1]) * progress
+    }
+    const backtrackedDistributionError = candidateDistributionError(
+      model,
+      marks,
+      backtracked,
+    )
+    if (
+      !Number.isFinite(backtrackedDistributionError) ||
+      backtrackedDistributionError > preRelaxationDistributionError
+    ) {
+      continue
+    }
+    if (!candidateSetIsSafe(model, marks, backtracked)) continue
+
+    const backtrackedObjective = summarizeObjective(
+      model,
+      marks,
+      backtracked,
+      assignment,
+    )
+    if (
+      !(backtrackedObjective.normalizedObjective <
+        assignment.normalizedObjective)
+    ) {
+      continue
+    }
+
+    retainedCandidates = backtracked
+    objective = backtrackedObjective
+    distributionError = backtrackedDistributionError
+  }
+
+  acceptedRelocationCount = retainedCandidates.reduce(
+    (count, candidate, siteIndex) =>
+      count + (samePoint(candidate, marks[siteIndex]!.center) ? 0 : 1),
+    0,
+  )
+  if (acceptedRelocationCount === 0) {
     return rejectedOutcome(
       marks,
       assignment,
       preRelaxationDistributionError,
-      'distribution-error-worsened',
+      'no-spatial-improvement',
     )
   }
+  const relocated = materializeRelocatedMarks(marks, retainedCandidates)
 
   return Object.freeze({
     marks: relocated,

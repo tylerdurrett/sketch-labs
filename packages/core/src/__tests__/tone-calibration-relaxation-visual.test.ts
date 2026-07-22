@@ -81,7 +81,7 @@ const VISUAL_CASES: readonly VisualCase[] = Object.freeze([
     checksums: Object.freeze({
       // Relaxation zero is the pre-slice ordinary-SVG checksum.
       before: '3a371a78f0fb748d5db8a48f459a0364636ec2ed17d1429182d373fcf2e68cc2',
-      after: '216ca53878e058fbcc119af23ccca420a0e6e5012aeeb7d463ea1501a089120b',
+      after: '07771fa520701c10a02ddcb2ad98f4674b8f27b32eeebb1fb202c4b13b27c202',
     }),
   }),
 ])

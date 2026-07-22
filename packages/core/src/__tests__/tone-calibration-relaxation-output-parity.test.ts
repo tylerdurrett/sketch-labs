@@ -141,6 +141,41 @@ beforeEach(() => {
 })
 
 describe('Tone Calibration positive-relaxation output parity', () => {
+  it('produces distinct progressive geometry on the actual Tone Calibration target', () => {
+    const frame = Object.freeze({ width: 1000, height: 1000 })
+    const levels = [0, 0.13, 0.5, 1] as const
+    const results = levels.map((voronoiRelaxation) =>
+      toneCalibration.generateShadingArtwork!(
+        {
+          ...defaultParams(toneCalibrationSchema),
+          strategy: 'stippling',
+          stippleDensity: 1,
+          distributionFidelity: 0.5,
+          voronoiRelaxation,
+        },
+        12345,
+        frame,
+      ),
+    )
+    const geometries = results.map(({ scene }) => orderedPoints(scene))
+
+    expect(
+      new Set(geometries.map((geometry) => JSON.stringify(geometry))).size,
+    ).toBe(levels.length)
+    for (let index = 1; index < results.length; index++) {
+      const fidelity = results[index]!.diagnostics.fidelity
+      expect(fidelity.kind).toBe('stippling')
+      if (fidelity.kind !== 'stippling') continue
+      expect(fidelity.relaxation?.iterationsCompleted).toBeGreaterThan(0)
+      expect(fidelity.relaxation?.relocationsAccepted).toBeGreaterThan(0)
+      expect(fidelity.distributionError).toBeLessThanOrEqual(
+        results[0]!.diagnostics.fidelity.kind === 'stippling'
+          ? results[0]!.diagnostics.fidelity.distributionError
+          : Number.NEGATIVE_INFINITY,
+      )
+    }
+  })
+
   it('preserves one completed ordered relaxed Scene across Fill, Outline, framing, clipping, and SVG output', () => {
     const prepared = toneCalibration.generateShadingArtwork!(
       relaxedParams(),
