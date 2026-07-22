@@ -56,6 +56,10 @@ export interface LocalizedEdge {
 export interface LocalizedEdgeGraph {
   readonly width: number
   readonly height: number
+  /** Continuous source alpha retained for later permission-aware stages. */
+  readonly alpha: readonly number[]
+  /** Exact source permission retained independently from alpha interpolation. */
+  readonly positiveSupport: readonly boolean[]
   readonly edges: readonly Readonly<LocalizedEdge>[]
 }
 
