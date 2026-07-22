@@ -8,7 +8,10 @@
  */
 
 import type { NumberParamSpec } from '../../sketch'
-import { applyPhotoToneControls } from '../photo-scribble/tone'
+import {
+  applyPhotoToneControls,
+  type PhotoToneControls,
+} from '../photo-scribble/tone'
 
 /** The five artist-facing controls consumed by the headless contour pipeline. */
 export interface PencilContourControls {
@@ -115,20 +118,25 @@ export function normalizePencilContourControls(
   })
 }
 
+/** Prepared per-sample tone transform for one normalized control snapshot. */
+export type PencilContourToneTransform = (luminance: number) => number
+
 /**
- * Apply Pencil Contour's gamma-then-contrast luminance transform.
+ * Prepare Pencil Contour's gamma-then-contrast luminance transform.
  *
- * Photo Scribble owns the curve math; this adapter owns only the independently
- * named Pencil Contour values. Detail and smoothing never enter tone shaping.
+ * Normalization, freezing, and adaptation to Photo Scribble's pure tone
+ * contract happen once here, outside the raster loop. The returned hot-path
+ * function only applies the already-prepared values to each luminance sample.
+ * Detail and smoothing never enter tone shaping.
  */
-export function applyPencilContourToneControls(
-  luminance: number,
+export function createPencilContourToneTransform(
   controls: Partial<PencilContourControls> = defaultPencilContourControls,
-): number {
+): PencilContourToneTransform {
   const normalized = normalizePencilContourControls(controls)
-  return applyPhotoToneControls(luminance, {
+  const photoToneControls: Readonly<PhotoToneControls> = Object.freeze({
     toneGamma: normalized.gamma,
     toneContrast: normalized.contrast,
     tonePivot: normalized.pivot,
   })
+  return (luminance) => applyPhotoToneControls(luminance, photoToneControls)
 }

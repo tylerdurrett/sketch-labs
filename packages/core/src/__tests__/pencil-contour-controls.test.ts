@@ -6,7 +6,7 @@ import {
   applyToneGamma,
 } from '../sketches/photo-scribble/tone'
 import {
-  applyPencilContourToneControls,
+  createPencilContourToneTransform,
   defaultPencilContourControls,
   normalizePencilContourControls,
   pencilContourControlSchema,
@@ -89,17 +89,37 @@ describe('Pencil Contour authored controls', () => {
       toneContrast: pencilControls.contrast,
       tonePivot: pencilControls.pivot,
     }
+    const applyTone = createPencilContourToneTransform(pencilControls)
+    const applyToneWithDifferentGeometry = createPencilContourToneTransform({
+      ...pencilControls,
+      contourDetail: 0.99,
+      contourSmoothing: 0.01,
+    })
 
-    expect(applyPencilContourToneControls(0.63, pencilControls)).toBe(
+    expect(applyTone(0.63)).toBe(
       applyPhotoToneControls(0.63, photoControls),
     )
-    expect(
-      applyPencilContourToneControls(0.63, {
-        ...pencilControls,
-        contourDetail: 0.99,
-        contourSmoothing: 0.01,
-      }),
-    ).toBe(applyPhotoToneControls(0.63, photoControls))
+    expect(applyToneWithDifferentGeometry(0.63)).toBe(
+      applyPhotoToneControls(0.63, photoControls),
+    )
+  })
+
+  it('captures normalized tone values once before raster sampling', () => {
+    const controls = {
+      gamma: 0.27,
+      contrast: 0.81,
+      pivot: 0.36,
+      contourDetail: 0.12,
+      contourSmoothing: 0.94,
+    }
+    const applyTone = createPencilContourToneTransform(controls)
+    const beforeMutation = applyTone(0.63)
+
+    controls.gamma = Number.NaN
+    controls.contrast = 0
+    controls.pivot = 1
+
+    expect(applyTone(0.63)).toBe(beforeMutation)
   })
 })
 
