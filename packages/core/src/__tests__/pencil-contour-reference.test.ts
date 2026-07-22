@@ -382,7 +382,10 @@ describe('Pencil Contour flower downstream reference', () => {
       replay.unmatchedAddedLength / replay.recoveredLength,
     )
     expect(replay.hysteresisAuthorized).toBe(
-      replay.recoveryRatio >= 0.3 && replay.usedEligibleEdgeCount > 0,
+      replay.recoveryRatio >= 0.3 &&
+        replay.usedEligibleEdgeCount > 0 &&
+        Number.isFinite(replay.unmatchedFraction) &&
+        replay.unmatchedFraction <= 0.1,
     )
   }, 120_000)
 })

@@ -385,7 +385,11 @@ export function pencilContourHysteresisReplayDiagnostics(
     recoveryRatio,
     unmatchedAddedLength,
     unmatchedFraction,
-    hysteresisAuthorized: recoveryRatio >= 0.3 && usedEligibleEdgeCount > 0,
+    hysteresisAuthorized:
+      recoveryRatio >= 0.3 &&
+      usedEligibleEdgeCount > 0 &&
+      Number.isFinite(unmatchedFraction) &&
+      unmatchedFraction <= 0.1,
     recoveries: Object.freeze(recoveries),
   })
 }
