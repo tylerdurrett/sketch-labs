@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -26,6 +27,11 @@ const fixtureDirectory = fileURLToPath(
 )
 const fixtureBinary = `${fixtureDirectory}flower-analysis.f64le`
 const fixtureMetadata = `${fixtureDirectory}flower-analysis.json`
+const browserToolsDirectory = `${workspaceRoot}/.agents/skills/chrome-devtools/scripts`
+const browserToolsBootstrap =
+  'npm --prefix .agents/skills/chrome-devtools/scripts ci --ignore-scripts'
+const chromeBootstrap =
+  'npm --prefix .agents/skills/chrome-devtools/scripts exec -- puppeteer browsers install chrome'
 
 function argumentsFrom(commandLine) {
   const args = { port: 4397, write: false }
@@ -44,6 +50,60 @@ function argumentsFrom(commandLine) {
     }
   }
   return args
+}
+
+function requireStudioVite() {
+  const binary = `${studioRoot}node_modules/.bin/vite${
+    process.platform === 'win32' ? '.cmd' : ''
+  }`
+  if (!existsSync(binary)) {
+    throw new Error(
+      [
+        'Studio dependencies are not installed in this worktree.',
+        'Run from the repository root:',
+        '  pnpm install',
+        'The documented ERR_PNPM_IGNORED_BUILDS exit is benign for this repo.',
+      ].join('\n'),
+    )
+  }
+  return binary
+}
+
+function requireBrowserTools() {
+  const skillRequire = createRequire(`${browserToolsDirectory}/package.json`)
+  let puppeteer
+  try {
+    skillRequire.resolve('puppeteer')
+    puppeteer = skillRequire('puppeteer')
+  } catch {
+    throw new Error(
+      [
+        'Pencil Contour capture browser tools are not installed.',
+        'Bootstrap the pinned, skill-local dependencies from the repository root:',
+        `  ${browserToolsBootstrap}`,
+        `  ${chromeBootstrap}`,
+        'Then rerun this command. This does not change workspace dependencies.',
+      ].join('\n'),
+    )
+  }
+
+  let executablePath
+  try {
+    executablePath = puppeteer.executablePath()
+  } catch {
+    executablePath = undefined
+  }
+  if (executablePath === undefined || !existsSync(executablePath)) {
+    throw new Error(
+      [
+        'Puppeteer is installed, but its pinned Chrome binary is unavailable.',
+        'Install that browser from the repository root:',
+        `  ${chromeBootstrap}`,
+        'Then rerun this command.',
+      ].join('\n'),
+    )
+  }
+  return puppeteer
 }
 
 async function waitForVite(url, process) {
@@ -176,9 +236,10 @@ async function assertExisting(path, expected) {
 
 async function main() {
   const options = argumentsFrom(process.argv.slice(2))
-  const viteBinary = `${studioRoot}node_modules/.bin/vite${
-    process.platform === 'win32' ? '.cmd' : ''
-  }`
+  // Check every non-workspace prerequisite before starting a child process so
+  // a fresh worktree fails immediately with one reproducible bootstrap path.
+  const viteBinary = requireStudioVite()
+  const puppeteer = requireBrowserTools()
   const vite = spawn(
     viteBinary,
     ['--host', '127.0.0.1', '--port', String(options.port), '--strictPort'],
@@ -188,12 +249,6 @@ async function main() {
 
   try {
     await waitForVite(url, vite)
-    // Browser capture intentionally reuses the Puppeteer installation owned by
-    // the repository's chrome-devtools skill rather than adding it to Studio.
-    const skillRequire = createRequire(
-      `${workspaceRoot}/.agents/skills/chrome-devtools/scripts/package.json`,
-    )
-    const puppeteer = skillRequire('puppeteer')
     const browser = await puppeteer.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
