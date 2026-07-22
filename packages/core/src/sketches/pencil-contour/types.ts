@@ -23,6 +23,8 @@ export interface AnalyzedRaster {
   readonly luminance: readonly number[]
   /** Independently analyzed alpha coverage in `[0, 1]`. */
   readonly alpha: readonly number[]
+  /** Exact-zero permission derived from the sampled straight-alpha field. */
+  readonly positiveSupport: readonly boolean[]
 }
 
 /** A structural edge derived from visible luminance variation. */
