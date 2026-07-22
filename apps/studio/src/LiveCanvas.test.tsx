@@ -42,6 +42,7 @@ import {
   type PlotProfile,
   type Scene,
   type Sketch,
+  type SketchEnvironment,
   type TimeMetadata,
   type ToneSource,
 } from "@harness/core";
@@ -575,6 +576,91 @@ describe("LiveCanvas transport — scrubbing pauses & sets t (AC2)", () => {
 });
 
 describe("LiveCanvas caller-owned frame preparation", () => {
+  it("rebuilds a static Fill only when its exact environment identity changes", () => {
+    const handle = createRef<LiveCanvasHandle>();
+    const params = { image: "asset" };
+    const emptyScene: Scene = {
+      space: DEFAULT_COMPOSITION_FRAME,
+      primitives: [],
+    };
+    const populatedScene: Scene = {
+      space: DEFAULT_COMPOSITION_FRAME,
+      primitives: [
+        {
+          points: [
+            [10, 10],
+            [20, 20],
+          ],
+          stroke: { color: "black", width: 1 },
+        },
+      ],
+    };
+    const environmentA: SketchEnvironment = {
+      imageAssets: () => ({
+        width: 1,
+        height: 1,
+        data: new Uint8ClampedArray([0, 0, 0, 255]),
+      }),
+    };
+    const environmentB: SketchEnvironment = {
+      imageAssets: () => ({
+        width: 1,
+        height: 1,
+        data: new Uint8ClampedArray([255, 255, 255, 255]),
+      }),
+    };
+    const generate = vi.fn(
+      (
+        _params: Readonly<Record<string, unknown>>,
+        _seed: string | number,
+        _t: number,
+        _frame: typeof DEFAULT_COMPOSITION_FRAME,
+        environment?: SketchEnvironment,
+      ): Scene => (environment === environmentB ? populatedScene : emptyScene),
+    );
+    const sketch = {
+      id: "asset-backed-static",
+      name: "Asset-backed static",
+      schema: {},
+      generate,
+    } as unknown as Sketch;
+    const render = (environment: SketchEnvironment) => (
+      <LiveCanvas
+        handleRef={handle}
+        sketch={sketch}
+        params={params}
+        seed={2}
+        environment={environment}
+      />
+    );
+
+    mount(render(environmentA));
+    expect(generate).toHaveBeenCalledOnce();
+    expect(generate).toHaveBeenLastCalledWith(
+      params,
+      2,
+      0,
+      DEFAULT_COMPOSITION_FRAME,
+      environmentA,
+    );
+
+    act(() => root!.render(render(environmentA)));
+    expect(generate).toHaveBeenCalledOnce();
+
+    act(() => root!.render(render(environmentB)));
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate).toHaveBeenLastCalledWith(
+      params,
+      2,
+      0,
+      DEFAULT_COMPOSITION_FRAME,
+      environmentB,
+    );
+    const captured = handle.current!.captureDisplayedFillFrame();
+    expect(captured?.sourceScene).toBe(populatedScene);
+    expect(captured?.sourceScene.primitives).toHaveLength(1);
+  });
+
   it("prepares once per sketch/params/seed and continues the same clock after invalidation", () => {
     const firstParams = { value: 1 };
     const secondParams = { value: 4 };
