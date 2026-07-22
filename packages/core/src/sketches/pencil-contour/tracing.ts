@@ -77,6 +77,33 @@ function provenanceFor(value: unknown): Readonly<EdgeProvenance> | undefined {
   return undefined;
 }
 
+function validSampleFields(
+  alpha: readonly number[],
+  positiveSupport: readonly boolean[],
+  sampleCount: number,
+): boolean {
+  for (let index = 0; index < sampleCount; index += 1) {
+    if (
+      !Object.prototype.hasOwnProperty.call(alpha, index) ||
+      !Object.prototype.hasOwnProperty.call(positiveSupport, index)
+    ) {
+      return false;
+    }
+
+    const alphaValue = alpha[index];
+    if (
+      typeof alphaValue !== "number" ||
+      !Number.isFinite(alphaValue) ||
+      alphaValue < 0 ||
+      alphaValue > 1 ||
+      typeof positiveSupport[index] !== "boolean"
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function validGraphMetadata(graph: Readonly<LocalizedEdgeGraph>): boolean {
   if (
     !Number.isSafeInteger(graph.width) ||
@@ -95,10 +122,7 @@ function validGraphMetadata(graph: Readonly<LocalizedEdgeGraph>): boolean {
     Array.isArray(graph.edges) &&
     graph.alpha.length === sampleCount &&
     graph.positiveSupport.length === sampleCount &&
-    graph.alpha.every(
-      (value) => Number.isFinite(value) && value >= 0 && value <= 1,
-    ) &&
-    graph.positiveSupport.every((value) => typeof value === "boolean")
+    validSampleFields(graph.alpha, graph.positiveSupport, sampleCount)
   );
 }
 

@@ -229,6 +229,8 @@ describe("Pencil Contour graph tracing", () => {
 
   it("fails closed for invalid graph metadata", () => {
     const valid = graph([edge([0, 0], [1, 0])], 2, 2);
+    const sparseAlpha = Array<number>(4);
+    const sparsePositiveSupport = Array<boolean>(4);
 
     expect(tracePencilContourEdges({ ...valid, width: Number.NaN })).toEqual(
       [],
@@ -238,6 +240,15 @@ describe("Pencil Contour graph tracing", () => {
       tracePencilContourEdges({
         ...valid,
         positiveSupport: [true, true, true],
+      }),
+    ).toEqual([]);
+    expect(tracePencilContourEdges({ ...valid, alpha: sparseAlpha })).toEqual(
+      [],
+    );
+    expect(
+      tracePencilContourEdges({
+        ...valid,
+        positiveSupport: sparsePositiveSupport,
       }),
     ).toEqual([]);
   });
