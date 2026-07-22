@@ -121,6 +121,18 @@ export function normalizePencilContourControls(
 /** Prepared per-sample tone transform for one normalized control snapshot. */
 export type PencilContourToneTransform = (luminance: number) => number
 
+/** @internal Prepare a tone transform from an already-normalized snapshot. */
+export function createNormalizedPencilContourToneTransform(
+  controls: Readonly<PencilContourControls>,
+): PencilContourToneTransform {
+  const photoToneControls: Readonly<PhotoToneControls> = Object.freeze({
+    toneGamma: controls.gamma,
+    toneContrast: controls.contrast,
+    tonePivot: controls.pivot,
+  })
+  return (luminance) => applyPhotoToneControls(luminance, photoToneControls)
+}
+
 /**
  * Prepare Pencil Contour's gamma-then-contrast luminance transform.
  *
@@ -133,10 +145,5 @@ export function createPencilContourToneTransform(
   controls: Partial<PencilContourControls> = defaultPencilContourControls,
 ): PencilContourToneTransform {
   const normalized = normalizePencilContourControls(controls)
-  const photoToneControls: Readonly<PhotoToneControls> = Object.freeze({
-    toneGamma: normalized.gamma,
-    toneContrast: normalized.contrast,
-    tonePivot: normalized.pivot,
-  })
-  return (luminance) => applyPhotoToneControls(luminance, photoToneControls)
+  return createNormalizedPencilContourToneTransform(normalized)
 }

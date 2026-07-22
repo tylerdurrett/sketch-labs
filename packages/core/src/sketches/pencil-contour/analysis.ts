@@ -19,7 +19,7 @@ import {
 } from '../../rasterSampling'
 import type { CoordinateSpace } from '../../scene'
 import {
-  createPencilContourToneTransform,
+  createNormalizedPencilContourToneTransform,
   type PencilContourControls,
 } from './controls'
 import type { AnalyzedRaster } from './types'
@@ -146,7 +146,7 @@ export function analyzePencilContourRaster(
   const luminance = new Array<number>(length)
   const alpha = new Array<number>(length)
   const positiveSupport = new Array<boolean>(length)
-  const applyTone = createPencilContourToneTransform(controls)
+  const applyTone = createNormalizedPencilContourToneTransform(controls)
 
   for (let row = 0; row < height; row += 1) {
     const v = (row + 0.5) / height
