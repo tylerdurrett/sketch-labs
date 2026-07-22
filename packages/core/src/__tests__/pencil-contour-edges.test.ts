@@ -178,6 +178,32 @@ describe('Pencil Contour edge localization', () => {
     ])
   })
 
+  it('gives adjacent cells single stable ownership of shared isovalue edges', () => {
+    const raster = analyzedRaster(
+      3,
+      3,
+      Array<number>(9).fill(0),
+      [0, 0, 0, 0.5, 0.5, 0.5, 0, 0, 0],
+    )
+
+    const first = localizePencilContourEdges(raster, 0.5)
+    const second = localizePencilContourEdges(raster, 0.5)
+
+    expect(first).toEqual(second)
+    expect(first.edges).toEqual([
+      {
+        start: [0, 1],
+        end: [1, 1],
+        provenance: { kind: 'alpha-boundary' },
+      },
+      {
+        start: [1, 1],
+        end: [2, 1],
+        provenance: { kind: 'alpha-boundary' },
+      },
+    ])
+  })
+
   it('does not emit collapsed luminance edges from one-dimensional lattices', () => {
     const horizontal = analyzedRaster(4, 1, [0, 0, 1, 1])
     const vertical = analyzedRaster(1, 4, [0, 0, 1, 1])

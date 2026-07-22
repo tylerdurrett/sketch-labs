@@ -68,6 +68,24 @@ function createEdge(
   return Object.freeze({ start, end, provenance })
 }
 
+function quantizedPoint(point: Readonly<Point>): readonly [number, number] {
+  return [
+    Math.round(point[0] / MIN_EDGE_LENGTH),
+    Math.round(point[1] / MIN_EDGE_LENGTH),
+  ]
+}
+
+/** Orientation-independent identity under the same epsilon as edge validity. */
+function canonicalEdgeKey(edge: Readonly<LocalizedEdge>): string {
+  const start = quantizedPoint(edge.start)
+  const end = quantizedPoint(edge.end)
+  const startsFirst =
+    start[0] < end[0] || (start[0] === end[0] && start[1] <= end[1])
+  const first = startsFirst ? start : end
+  const second = startsFirst ? end : start
+  return `${first[0]},${first[1]}:${second[0]},${second[1]}`
+}
+
 function supportedDifference(
   raster: Readonly<AnalyzedRaster>,
   firstIndex: number,
@@ -309,6 +327,7 @@ function alphaBoundaryEdges(
   raster: Readonly<AnalyzedRaster>,
 ): readonly Readonly<LocalizedEdge>[] {
   const edges: Readonly<LocalizedEdge>[] = []
+  const edgeKeys = new Set<string>()
 
   for (let y = 0; y + 1 < raster.height; y += 1) {
     for (let x = 0; x + 1 < raster.width; x += 1) {
@@ -336,7 +355,13 @@ function alphaBoundaryEdges(
         const end = crossings[endSide]
         if (start !== undefined && end !== undefined) {
           const edge = createEdge(start, end, ALPHA_BOUNDARY_PROVENANCE)
-          if (edge !== undefined) edges.push(edge)
+          if (edge !== undefined) {
+            const key = canonicalEdgeKey(edge)
+            if (!edgeKeys.has(key)) {
+              edgeKeys.add(key)
+              edges.push(edge)
+            }
+          }
         }
       }
     }
