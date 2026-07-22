@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const scribbleStrategyMock = vi.hoisted(() => vi.fn())
+const stipplingStrategyMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../scribbleStrategy/index', async (importOriginal) => {
   const actual = await importOriginal<
@@ -10,45 +11,76 @@ vi.mock('../scribbleStrategy/index', async (importOriginal) => {
   return { ...actual, scribbleStrategy: scribbleStrategyMock }
 })
 
+vi.mock('../stipplingStrategy/index', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../stipplingStrategy/index')
+  >()
+  stipplingStrategyMock.mockImplementation(actual.stipplingStrategy)
+  return { ...actual, stipplingStrategy: stipplingStrategyMock }
+})
+
 import {
+  applyPreset,
   defaultParams,
+  deserialize,
   generateToneCalibrationScribble as publicGenerateToneCalibrationScribble,
   hiddenLinePass,
   renderPlotterSVG,
   renderToSVG,
   scribbleControlSchema,
+  stipplingControlSchema,
   toneCalibration as publicToneCalibration,
   toneCalibrationSchema as publicToneCalibrationSchema,
+  validateParamSchema,
 } from '../index'
-import type {
-  ScribbleProgress,
-  ScribbleStrategyInput,
-} from '../scribbleStrategy/index'
+import type { ShadingProgress } from '../shadingStrategy'
+import type { ScribbleStrategyInput } from '../scribbleStrategy/index'
 import { createScribbleModel } from '../scribbleStrategy/model'
+import type { StipplingStrategyInput } from '../stipplingStrategy/index'
 import {
   generateToneCalibrationScribble,
   toneCalibration,
   toneCalibrationSchema,
 } from '../sketches/tone-calibration'
+import neatPreset from '../sketches/tone-calibration/presets/neat.json'
 import type { ToneCalibrationSource } from '../sketches/tone-calibration/source'
 import type { Point, Polyline } from '../types'
 
 const FRAME = { width: 100, height: 100 }
-const CONTROL_KEYS = [
+const SCRIBBLE_CONTROL_KEYS = [
   'pathDensity',
   'scribbleScale',
   'momentum',
   'chaos',
   'toneFidelity',
   'stopPoint',
-]
+] as const
+const STIPPLING_CONTROL_KEYS = [
+  'stippleDensity',
+  'distributionFidelity',
+] as const
+const CONTROL_KEYS = [
+  'strategy',
+  ...SCRIBBLE_CONTROL_KEYS,
+  ...STIPPLING_CONTROL_KEYS,
+] as const
 
-function params(overrides: Record<string, number> = {}) {
+function params(overrides: Record<string, unknown> = {}) {
   return { ...defaultParams(toneCalibrationSchema), ...overrides }
 }
 
-function capturedInput(call: number): ScribbleStrategyInput {
+function scribbleControlValues(values: Record<string, unknown>) {
+  return Object.fromEntries(
+    SCRIBBLE_CONTROL_KEYS.map((key) => [key, values[key]]),
+  )
+}
+
+function capturedScribbleInput(call: number): ScribbleStrategyInput {
   return scribbleStrategyMock.mock.calls[call]![0] as ScribbleStrategyInput
+}
+
+function capturedStipplingInput(call: number): StipplingStrategyInput {
+  return stipplingStrategyMock.mock.calls[call]![0] as StipplingStrategyInput
 }
 
 function squaredDistanceToSegment(
@@ -157,23 +189,51 @@ function inkRatio(
 
 afterEach(() => {
   scribbleStrategyMock.mockClear()
+  stipplingStrategyMock.mockClear()
 })
 
-describe('Tone Calibration Scribble integration', () => {
-  it('publishes exactly the six shared strategy controls and no source controls', () => {
+describe('Tone Calibration Shading integration', () => {
+  it('publishes Strategy first and exact strategy controls with conditional applicability', () => {
     expect(toneCalibration.id).toBe('tone-calibration')
     expect(toneCalibration.name).toBe('Tone Calibration')
     expect(toneCalibration.schema).toBe(toneCalibrationSchema)
-    expect(toneCalibrationSchema).toBe(scribbleControlSchema)
     expect(Object.keys(toneCalibration.schema)).toEqual(CONTROL_KEYS)
+    expect(toneCalibrationSchema.strategy).toEqual({
+      kind: 'choice',
+      options: [
+        { value: 'scribble', label: 'Scribble' },
+        { value: 'stippling', label: 'Stippling' },
+      ],
+      default: 'scribble',
+    })
+    for (const key of SCRIBBLE_CONTROL_KEYS) {
+      expect(toneCalibrationSchema[key]).toEqual({
+        ...scribbleControlSchema[key],
+        activeWhen: { key: 'strategy', equals: 'scribble' },
+      })
+      expect(toneCalibrationSchema[key]).not.toBe(scribbleControlSchema[key])
+    }
+    for (const key of STIPPLING_CONTROL_KEYS) {
+      expect(toneCalibrationSchema[key]).toEqual({
+        ...stipplingControlSchema[key],
+        activeWhen: { key: 'strategy', equals: 'stippling' },
+      })
+      expect(toneCalibrationSchema[key]).not.toBe(
+        stipplingControlSchema[key],
+      )
+    }
     expect(defaultParams(toneCalibration.schema)).toEqual({
+      strategy: 'scribble',
       pathDensity: 1,
       scribbleScale: 1,
       momentum: 0.75,
       chaos: 0.25,
       toneFidelity: 0.9,
       stopPoint: 100,
+      stippleDensity: 1,
+      distributionFidelity: 0.5,
     })
+    expect(() => validateParamSchema(toneCalibrationSchema)).not.toThrow()
     expect(toneCalibration.schema).not.toHaveProperty('limits')
   })
 
@@ -183,6 +243,119 @@ describe('Tone Calibration Scribble integration', () => {
     expect(publicGenerateToneCalibrationScribble).toBe(
       generateToneCalibrationScribble,
     )
+  })
+
+  it('reconciles the existing neat Preset to Scribble defaults without changing its prior geometry', () => {
+    const preset = deserialize(neatPreset)
+    const reconciled = applyPreset(toneCalibrationSchema, preset)
+    const legacy = generateToneCalibrationScribble(
+      preset.params,
+      preset.seed,
+      FRAME,
+    )
+    const current = toneCalibration.generate(
+      reconciled.params,
+      reconciled.seed,
+      0,
+      FRAME,
+    )
+
+    expect(reconciled.params).toEqual({
+      strategy: 'scribble',
+      ...preset.params,
+      stippleDensity: 1,
+      distributionFidelity: 0.5,
+    })
+    expect(current.primitives.map(({ points }) => points)).toEqual(
+      legacy.polylines,
+    )
+    expect(stipplingStrategyMock).not.toHaveBeenCalled()
+  })
+
+  it('dispatches Stippling explicitly with the unchanged source and exact cold/prepared parity', () => {
+    const controls = params({
+      strategy: 'stippling',
+      stippleDensity: 0.25,
+      distributionFidelity: 0,
+      // Inactive Scribble state must not leak into Stippling controls or source.
+      pathDensity: 19.7,
+      chaos: 1,
+    })
+    const progress: ShadingProgress[] = []
+    const artwork = toneCalibration.generateShadingArtwork!(
+      controls,
+      'stipple-dispatch',
+      FRAME,
+      (snapshot) => progress.push(snapshot),
+    )
+    const input = capturedStipplingInput(0)
+    const scribbleSource = toneCalibration.generateToneSource!(
+      params({ strategy: 'scribble' }),
+      FRAME,
+    ) as ToneCalibrationSource
+    const stipplingSource = input.source as ToneCalibrationSource
+
+    expect(scribbleStrategyMock).not.toHaveBeenCalled()
+    expect(input.frame).toBe(FRAME)
+    expect(input.seed).toBe('stipple-dispatch')
+    expect(input.controls).toEqual({
+      stippleDensity: 0.25,
+      distributionFidelity: 0,
+    })
+    expect(input.source).not.toBe(scribbleSource)
+    expect(stipplingSource.layout).toEqual(scribbleSource.layout)
+    for (const point of [
+      [0, 0],
+      [0, 25],
+      [50, 10],
+      [50, 30],
+      [50, 50],
+      [50, 70],
+      [50, 90],
+      [0, 100],
+    ] as const) {
+      expect(stipplingSource.toneField.sample(point)).toBe(
+        scribbleSource.toneField.sample(point),
+      )
+      expect(stipplingSource.shadingMask.sample(point)).toBe(
+        scribbleSource.shadingMask.sample(point),
+      )
+    }
+    expect(progress.length).toBeGreaterThan(0)
+    expect(progress.at(-1)?.terminal).toBe(true)
+    expect(artwork.diagnostics).toEqual({
+      termination: expect.stringMatching(/^(completed|budget-exhausted)$/),
+      pathLength: expect.any(Number),
+      polylineCount: artwork.scene.primitives.length,
+      penLiftCount: Math.max(0, artwork.scene.primitives.length - 1),
+      fidelity: {
+        kind: 'stippling',
+        distributionError: expect.any(Number),
+      },
+    })
+    expect(
+      artwork.diagnostics.fidelity.kind === 'stippling' &&
+        Number.isFinite(artwork.diagnostics.fidelity.distributionError),
+    ).toBe(true)
+    expect(
+      toneCalibration.generate(controls, 'stipple-dispatch', 999, FRAME),
+    ).toEqual(artwork.scene)
+  })
+
+  it('completes all 160k retained marks at maximum Stipple density', () => {
+    const artwork = toneCalibration.generateShadingArtwork!(
+      params({
+        strategy: 'stippling',
+        stippleDensity: stipplingControlSchema.stippleDensity.max,
+        distributionFidelity: 0,
+      }),
+      'maximum-stipple-density',
+      FRAME,
+    )
+
+    expect(artwork.diagnostics.termination).toBe('completed')
+    expect(artwork.scene.primitives).toHaveLength(160_000)
+    expect(artwork.diagnostics.polylineCount).toBe(160_000)
   })
 
   it('changes routes by Seed alone while every consumed source stays invariant', () => {
@@ -207,9 +380,9 @@ describe('Tone Calibration Scribble integration', () => {
       FRAME,
     )
     generateToneCalibrationScribble(changedControls, 'a', FRAME)
-    const firstInput = capturedInput(0)
-    const differentSeedInput = capturedInput(1)
-    const changedControlsInput = capturedInput(2)
+    const firstInput = capturedScribbleInput(0)
+    const differentSeedInput = capturedScribbleInput(1)
+    const changedControlsInput = capturedScribbleInput(2)
     const firstSource = firstInput.source as ToneCalibrationSource
     const differentSeedSource =
       differentSeedInput.source as ToneCalibrationSource
@@ -223,9 +396,13 @@ describe('Tone Calibration Scribble integration', () => {
     expect(firstInput.seed).toBe('a')
     expect(differentSeedInput.seed).toBe('b')
     expect(changedControlsInput.seed).toBe('a')
-    expect(firstInput.controls).toEqual(sharedControls)
-    expect(differentSeedInput.controls).toEqual(sharedControls)
-    expect(changedControlsInput.controls).toEqual(changedControls)
+    expect(firstInput.controls).toEqual(scribbleControlValues(sharedControls))
+    expect(differentSeedInput.controls).toEqual(
+      scribbleControlValues(sharedControls),
+    )
+    expect(changedControlsInput.controls).toEqual(
+      scribbleControlValues(changedControls),
+    )
     expect(firstSource).not.toBe(differentSeedSource)
     expect(firstSource).not.toBe(changedControlsSource)
     expect(firstSource.layout).toEqual({
@@ -270,8 +447,8 @@ describe('Tone Calibration Scribble integration', () => {
 
   it('prepares exactly the cold Scene with public progress and scalar-only diagnostics', () => {
     const controls = params({ toneFidelity: 0 })
-    const progress: ScribbleProgress[] = []
-    const artwork = toneCalibration.generateScribbleArtwork!(
+    const progress: ShadingProgress[] = []
+    const artwork = toneCalibration.generateShadingArtwork!(
       controls,
       'capability',
       FRAME,
@@ -283,10 +460,10 @@ describe('Tone Calibration Scribble integration', () => {
     )
     expect(artwork.diagnostics).toEqual({
       termination: 'completed',
-      residualError: expect.any(Number),
       pathLength: expect.any(Number),
       polylineCount: artwork.scene.primitives.length,
       penLiftCount: Math.max(0, artwork.scene.primitives.length - 1),
+      fidelity: { kind: 'scribble', residualError: expect.any(Number) },
     })
     expect(artwork.diagnostics.pathLength).toBeGreaterThan(0)
     expect(progress.length).toBeGreaterThan(0)
@@ -321,7 +498,7 @@ describe('Tone Calibration Scribble integration', () => {
 
   it('produces nonempty Scribble-only default artwork with a readable inversion', () => {
     const scene = toneCalibration.generate(params(), 'default', 0, FRAME)
-    const strategyInput = capturedInput(0)
+    const strategyInput = capturedScribbleInput(0)
     const source = strategyInput.source as ToneCalibrationSource
     const insideCircle = (x: number, y: number) =>
       (x - 50) ** 2 + (y - 50) ** 2 <= 40 ** 2
@@ -402,6 +579,101 @@ describe('Tone Calibration Scribble integration', () => {
     )
   })
 
+  it('produces deterministic, legible Stippling using only finite open two-point micro-strokes', () => {
+    const controls = params({
+      strategy: 'stippling',
+      distributionFidelity: 0.2,
+    })
+    const first = toneCalibration.generateShadingArtwork!(
+      controls,
+      'stipple-legibility',
+      FRAME,
+    )
+    const second = toneCalibration.generateShadingArtwork!(
+      controls,
+      'stipple-legibility',
+      FRAME,
+    )
+    const { scene } = first
+    const insideCircle = (x: number, y: number) =>
+      (x - 50) ** 2 + (y - 50) ** 2 <= 40 ** 2
+
+    expect(second).toEqual(first)
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+    expect(scene.primitives.length).toBeGreaterThan(0)
+    expect(scene.background).toBeUndefined()
+    for (const primitive of scene.primitives) {
+      expect(primitive).toMatchObject({
+        closed: false,
+        stroke: { color: 'black', width: 0.2, lineCap: 'round' },
+        hiddenLineRole: 'source',
+      })
+      expect(primitive.fill).toBeUndefined()
+      expect(primitive.points).toHaveLength(2)
+      expect(
+        primitive.points.every(([x, y]) =>
+          Number.isFinite(x) && Number.isFinite(y),
+        ),
+      ).toBe(true)
+    }
+
+    const ink = rasterizeInk(
+      scene.primitives.map(({ points }) => points),
+      FRAME,
+      1,
+    )
+    const exteriorInk = [
+      inkRatio(ink, FRAME, (x, y) => !insideCircle(x, y) && y < 25),
+      inkRatio(
+        ink,
+        FRAME,
+        (x, y) => !insideCircle(x, y) && y >= 37.5 && y < 62.5,
+      ),
+      inkRatio(ink, FRAME, (x, y) => !insideCircle(x, y) && y >= 75),
+    ]
+    const circleInk = [
+      inkRatio(ink, FRAME, (x, y) => insideCircle(x, y) && y < 25),
+      inkRatio(
+        ink,
+        FRAME,
+        (x, y) => insideCircle(x, y) && y >= 37.5 && y < 62.5,
+      ),
+      inkRatio(ink, FRAME, (x, y) => insideCircle(x, y) && y >= 75),
+    ]
+
+    expect(exteriorInk[0]).toBeLessThan(exteriorInk[1]!)
+    expect(exteriorInk[1]).toBeLessThan(exteriorInk[2]!)
+    expect(circleInk[0]).toBeGreaterThan(circleInk[1]!)
+    expect(circleInk[1]).toBeGreaterThan(circleInk[2]!)
+
+    const radius = (x: number, y: number) => Math.hypot(x - 50, y - 50)
+    const upperInside = inkRatio(
+      ink,
+      FRAME,
+      (x, y) => insideCircle(x, y) && y < 25 && radius(x, y) > 32,
+    )
+    const upperOutside = inkRatio(
+      ink,
+      FRAME,
+      (x, y) => !insideCircle(x, y) && y < 25 && radius(x, y) < 48,
+    )
+    const lowerInside = inkRatio(
+      ink,
+      FRAME,
+      (x, y) => insideCircle(x, y) && y >= 75 && radius(x, y) > 32,
+    )
+    const lowerOutside = inkRatio(
+      ink,
+      FRAME,
+      (x, y) => !insideCircle(x, y) && y >= 75 && radius(x, y) < 48,
+    )
+    expect(upperInside).toBeGreaterThan(upperOutside)
+    expect(lowerOutside).toBeGreaterThan(lowerInside)
+    expect(JSON.stringify(scene)).not.toMatch(
+      /background|fill|gray|toneField|shadingMask|circle|guide/i,
+    )
+  })
+
   it('renders materially dense, opposing tones at the calibrated dense fine scale', () => {
     const renderFrame = { width: 1000, height: 1000 }
     const fineDense = generateToneCalibrationScribble(
@@ -460,7 +732,7 @@ describe('Tone Calibration Scribble integration', () => {
       residualError: 0.4,
     })
 
-    const artwork = toneCalibration.generateScribbleArtwork!(
+    const artwork = toneCalibration.generateShadingArtwork!(
       params(),
       'forced-budget',
       FRAME,
@@ -468,10 +740,10 @@ describe('Tone Calibration Scribble integration', () => {
     const { scene } = artwork
     expect(artwork.diagnostics).toEqual({
       termination: 'budget-exhausted',
-      residualError: 0.4,
       pathLength: Math.hypot(20, 20) + Math.hypot(20, 5),
       polylineCount: 1,
       penLiftCount: 0,
+      fidelity: { kind: 'scribble', residualError: 0.4 },
     })
     expect(scene.primitives).toEqual([
       {
@@ -492,6 +764,57 @@ describe('Tone Calibration Scribble integration', () => {
     expect(svg).not.toMatch(/<circle|<rect/)
   })
 
+  it('keeps bounded partial Stippling as valid visible artwork with typed diagnostics', () => {
+    stipplingStrategyMock.mockReturnValueOnce({
+      polylines: [
+        [
+          [10, 20],
+          [10.25, 20],
+        ],
+        [
+          [30, 40],
+          [30, 40.25],
+        ],
+      ],
+      termination: 'budget-exhausted',
+      distributionError: 0.4,
+    })
+
+    const artwork = toneCalibration.generateShadingArtwork!(
+      params({ strategy: 'stippling' }),
+      'forced-stipple-budget',
+      FRAME,
+    )
+
+    expect(artwork.diagnostics).toEqual({
+      termination: 'budget-exhausted',
+      pathLength: 0.5,
+      polylineCount: 2,
+      penLiftCount: 1,
+      fidelity: { kind: 'stippling', distributionError: 0.4 },
+    })
+    expect(artwork.scene.primitives).toEqual([
+      {
+        points: [
+          [10, 20],
+          [10.25, 20],
+        ],
+        closed: false,
+        stroke: { color: 'black', width: 0.2, lineCap: 'round' },
+        hiddenLineRole: 'source',
+      },
+      {
+        points: [
+          [30, 40],
+          [30, 40.25],
+        ],
+        closed: false,
+        stroke: { color: 'black', width: 0.2, lineCap: 'round' },
+        hiddenLineRole: 'source',
+      },
+    ])
+  })
+
   it('derives both physical widths by restyling the exact completed Scribble paths only', () => {
     scribbleStrategyMock.mockReturnValueOnce({
       polylines: [
@@ -508,7 +831,7 @@ describe('Tone Calibration Scribble integration', () => {
       termination: 'completed',
       residualError: 0.01,
     })
-    const completed = toneCalibration.generateScribbleArtwork!(
+    const completed = toneCalibration.generateShadingArtwork!(
       params(),
       'exact-prepared-result',
       FRAME,

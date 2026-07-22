@@ -27,7 +27,13 @@ import {
   type PlotProfile,
 } from './plotProfile'
 import { validatePageFrame, type PageFrame } from './pageFrame'
-import type { Params, ParamSchema, Seed } from './sketch'
+import {
+  validateChoiceParamValue,
+  validateParamSchema,
+  type Params,
+  type ParamSchema,
+  type Seed,
+} from './sketch'
 
 /**
  * The current (and maximum) Preset schema version — the framed shape.
@@ -347,6 +353,9 @@ export interface PresetState {
  *   discarded. It falls out naturally — iterating schema keys never visits it.
  * - DEFAULT missing keys: a schema key ABSENT from the Preset is filled from its
  *   spec `default` (the same pattern as `defaultParams` in `sketch.ts`).
+ * - VALIDATE Choice values: a present Choice must be one of its declaration's
+ *   stable option values. Missing Choice values still follow the ordinary
+ *   default rule, and inactive values remain complete authored Preset state.
  * - LOAD out-of-bounds AS-IS, UNCLAMPED: a stored value outside the spec's
  *   `[min, max]` is taken verbatim. Clamping would silently reproduce a
  *   DIFFERENT frame than the Preset was saved from — exact-image fidelity beats
@@ -365,7 +374,9 @@ export interface PresetState {
  * @param schema - The Sketch's CURRENT Parameter Schema — the authority.
  * @param preset - The Preset record to load.
  * @returns The reconciled {@link PresetState}.
- * @throws If the version or its profile/framing field combination is invalid.
+ * @throws If the version or its profile/framing field combination is invalid,
+ *   or if the schema's Choice/applicability declarations or a stored Choice
+ *   value are malformed.
  */
 export function applyPreset(schema: ParamSchema, preset: Preset): PresetState {
   if (
@@ -383,11 +394,20 @@ export function applyPreset(schema: ParamSchema, preset: Preset): PresetState {
     preset.version === PRESET_VERSION,
     'applyPreset',
   )
+  validateParamSchema(schema)
   const params: Params = {}
   for (const [key, spec] of Object.entries(schema)) {
-    // Prefer the stored value (loaded AS-IS, unclamped); else fall back to the
-    // spec default. Iterating the schema is what drops preset-only keys.
-    params[key] = key in preset.params ? preset.params[key] : spec.default
+    // Prefer an own stored value (loaded AS-IS, unclamped); else fall back to
+    // the spec default. Iterating the schema is what drops preset-only keys.
+    if (!Object.prototype.hasOwnProperty.call(preset.params, key)) {
+      params[key] = spec.default
+      continue
+    }
+    const storedValue = preset.params[key]
+    params[key] =
+      spec.kind === 'choice'
+        ? validateChoiceParamValue(spec, storedValue, key)
+        : storedValue
   }
   const state: PresetState = {
     params,

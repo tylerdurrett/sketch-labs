@@ -1,11 +1,11 @@
 /// <reference lib="webworker" />
 
-import { handleScribbleWorkerMessage } from "./scribbleWorkerRuntime";
+import { handleShadingWorkerMessage } from "./shadingWorkerRuntime";
 
 declare const self: DedicatedWorkerGlobalScope;
 
 self.addEventListener("message", (event: MessageEvent<unknown>) => {
-  void handleScribbleWorkerMessage(
+  void handleShadingWorkerMessage(
     event.data,
     undefined,
     (progress) => self.postMessage(progress),

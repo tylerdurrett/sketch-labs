@@ -9,7 +9,7 @@ import type { Canvas2DContext } from '@harness/core'
  *
  * The log captures ORDER, not just presence: path ops (`moveTo`, `lineTo`, …),
  * paint ops (`fill`, `stroke`), state ops (`save`, `restore`), the style-property
- * writes (`fillStyle=`, `strokeStyle=`, `lineWidth=`), `setTransform` — the
+ * writes (`fillStyle=`, `strokeStyle=`, `lineCap=`, `lineWidth=`), `setTransform` — the
  * contain-fit transform `drawSceneFitted` establishes before it delegates to
  * `renderToCanvas` — AND the background paint ops (`fillRect`/`clearRect`) that
  * open every draw (issue #92: the opaque backdrop over the full surface).
@@ -27,6 +27,7 @@ export class RecordingContext implements Canvas2DContext {
 
   #fillStyle = ''
   #strokeStyle = ''
+  #lineCap: 'butt' | 'round' | 'square' = 'butt'
   #lineWidth = 1
 
   save(): void {
@@ -89,6 +90,15 @@ export class RecordingContext implements Canvas2DContext {
   set strokeStyle(value: string) {
     this.#strokeStyle = value
     this.log.push(`strokeStyle=${value}`)
+  }
+
+  get lineCap(): 'butt' | 'round' | 'square' {
+    return this.#lineCap
+  }
+
+  set lineCap(value: 'butt' | 'round' | 'square') {
+    this.#lineCap = value
+    this.log.push(`lineCap=${value}`)
   }
 
   get lineWidth(): number {

@@ -94,6 +94,30 @@ const completedToneCalibration: Scene = {
   ],
 };
 
+const completedStippling: Scene = {
+  space: { width: 1_000, height: 1_000 },
+  primitives: [
+    {
+      points: [[150, 250], [150.5, 250]],
+      closed: false,
+      stroke: { color: "black", width: 1, lineCap: "round" },
+      hiddenLineRole: "source",
+    },
+    {
+      points: [[400, 300], [400, 300.5]],
+      closed: false,
+      stroke: { color: "black", width: 1, lineCap: "round" },
+      hiddenLineRole: "source",
+    },
+    {
+      points: [[800, 700], [799.5, 700]],
+      closed: false,
+      stroke: { color: "black", width: 1, lineCap: "round" },
+      hiddenLineRole: "source",
+    },
+  ],
+};
+
 const completedScribbleMoon: Scene = (() => {
   const structural = createScribbleMoonStructuralScene(
     DEFAULT_COMPOSITION_FRAME,
@@ -680,6 +704,198 @@ const reusableIdentityMismatches: ReadonlyArray<
 ];
 
 describe("hidden-line export worker runtime", () => {
+  it("retains ordered completed Stipples while Page finalization restyles, rebases, and maps them", () => {
+    const params = {
+      ...defaultParams(toneCalibration.schema),
+      strategy: "stippling",
+    };
+    const previewTarget = {
+      toolWidthMillimeters: 0.3,
+      millimetersPerSceneUnit: 0.2,
+    };
+    const previewIdentity = createOutlineComputeIdentity({
+      sketchId: toneCalibration.id,
+      schema: toneCalibration.schema,
+      params,
+      seed: "ordered-stipples",
+      sampledT: 0,
+      compositionFrame: completedStippling.space,
+      tolerance: 0,
+      sourceScene: completedStippling,
+      outlineTarget: previewTarget,
+    });
+    const generate = vi.fn(toneCalibration.generate);
+    const registryGet = vi
+      .spyOn(registry, "get")
+      .mockReturnValue({ ...toneCalibration, generate });
+    const derive = vi.fn((...args: Parameters<typeof outlineScene>) =>
+      outlineScene(...args),
+    );
+
+    expect(previewIdentity).toMatchObject({
+      sourceScene: {
+        primitives: [
+          { stroke: { lineCap: "round" } },
+          { stroke: { lineCap: "round" } },
+          { stroke: { lineCap: "round" } },
+        ],
+      },
+    });
+
+    try {
+      const preview = handleHiddenLineWorkerMessage(
+        {
+          type: "preview",
+          jobKind: "preview",
+          owner: "outline-preview",
+          jobId: 40,
+          identity: previewIdentity,
+        },
+        { derive },
+      );
+      expect(preview).toMatchObject({
+        type: "complete",
+        jobKind: "preview",
+        identity: previewIdentity,
+      });
+      if (preview?.type !== "complete" || preview.jobKind !== "preview") {
+        throw new Error("expected preview completion");
+      }
+      expect(preview.scene.primitives.map(({ points }) => points)).toEqual([
+        [[150, 250], [150.5, 250]],
+        [[400, 300], [400, 300.5]],
+        [[800, 700], [799.5, 700]],
+      ]);
+      expect(
+        preview.scene.primitives.map(({ stroke }) => stroke?.color),
+      ).toEqual(["black", "black", "black"]);
+      for (const primitive of preview.scene.primitives) {
+        expect(primitive.stroke?.width).toBeCloseTo(1.5, 12);
+        expect(primitive.stroke?.lineCap).toBe("round");
+        expect(primitive.closed).not.toBe(true);
+      }
+      expect(
+        preview.scene.primitives.every(({ points }) => points.length === 2),
+      ).toBe(true);
+      expect(derive).toHaveBeenCalledOnce();
+      expect(generate).not.toHaveBeenCalled();
+
+      const exportIdentity = createOutlineComputeIdentity({
+        sketchId: toneCalibration.id,
+        schema: toneCalibration.schema,
+        params,
+        seed: "ordered-stipples",
+        sampledT: 0,
+        compositionFrame: completedStippling.space,
+        tolerance: 0,
+        sourceScene: completedStippling,
+        outlineTarget: {
+          toolWidthMillimeters: 0.5,
+          millimetersPerSceneUnit: 0.25,
+        },
+      });
+      const pageFrame: PageFrame = {
+        x: 100,
+        y: 200,
+        width: 800,
+        height: 600,
+      };
+      const profile: PlotProfile = {
+        width: 220,
+        height: 170,
+        insets: { top: 10, right: 10, bottom: 10, left: 10 },
+        includeFrame: true,
+        toolWidthMillimeters: 0.5,
+      };
+      const clip = vi.fn((scene: Scene) => scene);
+      expect(exportIdentity).toMatchObject({
+        sourceScene: {
+          primitives: [
+            { stroke: { lineCap: "round" } },
+            { stroke: { lineCap: "round" } },
+            { stroke: { lineCap: "round" } },
+          ],
+        },
+      });
+      const exported = handleHiddenLineWorkerMessage(
+        exportRequest({
+          identity: exportIdentity,
+          profile,
+          pageFrame,
+          reusableOutline: {
+            identity: previewIdentity,
+            scene: preview.scene,
+          },
+        }),
+        { derive, clip },
+      );
+
+      expect(exported).toMatchObject({
+        type: "complete",
+        jobKind: "export",
+        identity: exportIdentity,
+        completedOutline: {
+          identity: exportIdentity,
+          scene: preview.scene,
+        },
+      });
+      expect(derive).toHaveBeenCalledOnce();
+      expect(generate).not.toHaveBeenCalled();
+      expect(clip).toHaveBeenCalledOnce();
+      expect(clip.mock.calls[0]![0]).toEqual({
+        space: { width: 800, height: 600 },
+        primitives: [
+          {
+            points: [[50, 50], [50.5, 50]],
+            stroke: { color: "black", width: 2, lineCap: "round" },
+          },
+          {
+            points: [[300, 100], [300, 100.5]],
+            stroke: { color: "black", width: 2, lineCap: "round" },
+          },
+          {
+            points: [[700, 500], [699.5, 500]],
+            stroke: { color: "black", width: 2, lineCap: "round" },
+          },
+          {
+            points: [[0, 0], [800, 0], [800, 600], [0, 600], [0, 0]],
+            stroke: { color: "black", width: 2 },
+          },
+        ],
+      });
+      const paths =
+        exported?.type === "complete" && exported.jobKind === "export"
+          ? exported.svg.match(/<path\b[^>]*>/g) ?? []
+          : [];
+      expect(paths.map((path) => path.match(/d="([^"]+)"/)?.[1])).toEqual([
+        "M22.5 22.5 L22.625 22.5",
+        "M85 35 L85 35.125",
+        "M185 135 L184.875 135",
+        "M10 10 L210 10 L210 160 L10 160 L10 10",
+      ]);
+      expect(
+        paths.map((path) => path.match(/stroke-width="([^"]+)"/)?.[1]),
+      ).toEqual(["0.5", "0.5", "0.5", "0.5"]);
+      expect(paths.every((path) => path.includes('stroke-linecap="round"'))).toBe(
+        true,
+      );
+      expect(
+        exported?.type === "complete" && exported.jobKind === "export"
+          ? exported.completedOutline.scene.primitives.every(
+              ({ stroke }) => stroke?.lineCap === "round",
+            )
+          : false,
+      ).toBe(true);
+      expect(
+        exported?.type === "complete" && exported.jobKind === "export"
+          ? exported.svg
+          : "",
+      ).not.toMatch(/<rect\b|fill="(?!none)/);
+    } finally {
+      registryGet.mockRestore();
+    }
+  });
+
   it("derives the shared asymmetric fixed Page through Tone Calibration's registered completed-Scene source", () => {
     const millimetersPerSceneUnit =
       265 / FIXED_PAGE_PARITY_FRAME.width;

@@ -51,6 +51,8 @@ export interface Stroke {
   color: string
   /** Stroke width, in the Scene's coordinate-space units. */
   width: number
+  /** Optional endpoint shape; omitted strokes retain the renderer's butt-cap default. */
+  lineCap?: 'butt' | 'round' | 'square'
 }
 
 /**

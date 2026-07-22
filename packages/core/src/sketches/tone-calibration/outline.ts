@@ -1,7 +1,7 @@
 /**
  * Tone Calibration's completed-artwork Outline source.
  *
- * Scribble preparation is authoritative: Outline only clones the exact paths
+ * Shading preparation is authoritative: Outline only clones the exact paths
  * that preparation completed and applies the active physical tool width. It
  * never samples the analytic Tone reference or generates replacement geometry.
  */
@@ -31,7 +31,13 @@ export function toneCalibrationOutlineSource(
         ...(primitive.closed === undefined
           ? {}
           : { closed: primitive.closed }),
-        stroke: { color: OUTLINE_COLOR, width: strokeWidth },
+        stroke: {
+          color: OUTLINE_COLOR,
+          width: strokeWidth,
+          ...(primitive.stroke?.lineCap === undefined
+            ? {}
+            : { lineCap: primitive.stroke.lineCap }),
+        },
         hiddenLineRole: 'source',
       }),
     ),

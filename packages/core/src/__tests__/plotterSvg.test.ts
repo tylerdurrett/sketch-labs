@@ -26,6 +26,16 @@ const scene: Scene = {
 
 const paths = (svg: string): string[] => svg.match(/<path\b[^>]*>/g) ?? []
 
+function capsuleAspect(path: string): number {
+  const values = path.match(
+    /d="M(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?) L(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)"[^>]*stroke-width="(\d+(?:\.\d+)?)"/,
+  )
+  if (values === null) throw new Error(`Expected one two-point path: ${path}`)
+  const [, x1, y1, x2, y2, width] = values.map(Number)
+  const centerlineLength = Math.hypot(x2! - x1!, y2! - y1!)
+  return (centerlineLength + width!) / width!
+}
+
 describe('renderPlotterSVG', () => {
   it('declares the exact non-square paper size in millimeters and as its viewBox', () => {
     const svg = renderPlotterSVG(scene, profile)
@@ -190,6 +200,53 @@ describe('renderPlotterSVG', () => {
 
     expect(path).toContain('d="M10 20 L210 120"')
     expect(path).toContain('stroke-width="1"')
+  })
+
+  it('uses tool width as thickness without lengthening near-dot micro-strokes', () => {
+    const stipple: Scene = {
+      space: scene.space,
+      primitives: [
+        {
+          points: [
+            [100, 100],
+            [100.2, 100],
+          ],
+          stroke: { color: 'black', width: 0.6 },
+        },
+      ],
+    }
+    const broadStipple: Scene = {
+      ...stipple,
+      primitives: [
+        {
+          ...stipple.primitives[0]!,
+          stroke: { color: 'black', width: 1.6 },
+        },
+      ],
+    }
+
+    const [finePath] = paths(renderPlotterSVG(stipple, profile))
+    const [broadPath] = paths(
+      renderPlotterSVG(broadStipple, {
+        ...profile,
+        toolWidthMillimeters: 0.8,
+      }),
+    )
+
+    expect(finePath).toContain('stroke-linecap="round"')
+    expect(broadPath).toContain('stroke-linecap="round"')
+    expect(finePath).toContain('d="M60 70 L60.1 70"')
+    expect(broadPath).toContain('d="M60 70 L60.1 70"')
+    expect(finePath).toContain('stroke-width="0.3"')
+    expect(broadPath).toContain('stroke-width="0.8"')
+    expect(broadPath!.replace('stroke-width="0.8"', 'stroke-width="0.3"')).toBe(
+      finePath,
+    )
+
+    // Round caps produce a capsule whose major dimension is centerline length
+    // plus tool width. Both profiles therefore remain visibly near-dot marks.
+    expect(capsuleAspect(finePath!)).toBeLessThan(1.34)
+    expect(capsuleAspect(broadPath!)).toBeLessThan(1.34)
   })
 
   it('leaves clipping to the caller', () => {

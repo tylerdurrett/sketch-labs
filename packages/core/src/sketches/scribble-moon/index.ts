@@ -15,16 +15,16 @@ import {
   scribbleControlSchema,
   scribbleStrategy,
   type ScribbleControls,
-  type ScribbleObserver,
   type ScribbleResult,
 } from '../../scribbleStrategy'
+import type { ShadingObserver } from '../../shadingStrategy'
 import {
-  createScribbleDiagnostics,
+  createShadingDiagnostics,
   type NumberParamSpec,
   type OutlineTarget,
   type Params,
-  type ScribbleArtwork,
   type Seed,
+  type ShadingArtwork,
   type StatelessSketch,
 } from '../../sketch'
 import type { Point, Polyline } from '../../types'
@@ -225,7 +225,7 @@ export function generateScribbleMoonScribble(
   params: Params,
   seed: Seed,
   frame: CoordinateSpace,
-  observer?: ScribbleObserver,
+  observer?: ShadingObserver,
 ): ScribbleResult {
   return scribbleStrategy({
     source: createScribbleMoonSource(sourceControls(params), frame),
@@ -355,20 +355,23 @@ export function deriveScribbleMoonOutlineSource(
   }
 }
 
-/** Prepare Moon's complete structural-plus-Scribble Scene and Scribble metrics. */
-export function generateScribbleMoonArtwork(
+/** Prepare Moon's complete Shading artwork and typed Scribble fidelity. */
+export function generateScribbleMoonShadingArtwork(
   params: Params,
   seed: Seed,
   frame: CoordinateSpace,
-  observer?: ScribbleObserver,
-): ScribbleArtwork {
+  observer?: ShadingObserver,
+): ShadingArtwork {
   const structural = createScribbleMoonStructuralScene(frame)
   const scribble = generateScribbleMoonScribble(params, seed, frame, observer)
 
   return {
     scene: completeScene(frame, structural, scribble),
     // Structural contours identify the authored Moon but are not Scribble work.
-    diagnostics: createScribbleDiagnostics(scribble),
+    diagnostics: createShadingDiagnostics(scribble, {
+      kind: 'scribble',
+      residualError: scribble.residualError,
+    }),
   }
 }
 
@@ -380,7 +383,7 @@ export const scribbleMoon: StatelessSketch = {
   generateToneSource(params: Params, frame: CoordinateSpace) {
     return createScribbleMoonSource(sourceControls(params), frame)
   },
-  generateScribbleArtwork: generateScribbleMoonArtwork,
+  generateShadingArtwork: generateScribbleMoonShadingArtwork,
   deriveOutlineSource: deriveScribbleMoonOutlineSource,
   generate(
     params: Params,
@@ -388,6 +391,6 @@ export const scribbleMoon: StatelessSketch = {
     _t: number,
     frame: CoordinateSpace,
   ): Scene {
-    return generateScribbleMoonArtwork(params, seed, frame).scene
+    return generateScribbleMoonShadingArtwork(params, seed, frame).scene
   },
 }

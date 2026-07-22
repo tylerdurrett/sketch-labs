@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { build } from "vite";
 
-import { createScribbleWorker } from "./createScribbleWorker";
+import { createShadingWorker } from "./createShadingWorker";
 
-describe("createScribbleWorker", () => {
+describe("createShadingWorker", () => {
   const originalWorker = globalThis.Worker;
 
   afterEach(() => {
@@ -18,11 +18,11 @@ describe("createScribbleWorker", () => {
     >(() => instance);
     globalThis.Worker = WorkerMock as unknown as typeof Worker;
 
-    expect(createScribbleWorker()).toBe(instance);
+    expect(createShadingWorker()).toBe(instance);
     expect(WorkerMock).toHaveBeenCalledOnce();
     const [url, options] = WorkerMock.mock.calls[0]!;
     expect(url).toBeInstanceOf(URL);
-    expect((url as URL).pathname).toMatch(/scribbleWorker\.ts$/);
+    expect((url as URL).pathname).toMatch(/shadingWorker\.ts$/);
     expect(options).toEqual({ type: "module" });
   });
 
@@ -33,7 +33,7 @@ describe("createScribbleWorker", () => {
       build: {
         write: false,
         lib: {
-          entry: new URL("./createScribbleWorker.ts", import.meta.url).pathname,
+          entry: new URL("./createShadingWorker.ts", import.meta.url).pathname,
           formats: ["es"],
         },
       },
@@ -45,7 +45,7 @@ describe("createScribbleWorker", () => {
 
     expect(outputs.map(({ fileName }) => fileName)).toEqual(
       expect.arrayContaining([
-        expect.stringMatching(/^assets\/scribbleWorker-[\w-]+\.js$/),
+        expect.stringMatching(/^assets\/shadingWorker-[\w-]+\.js$/),
       ]),
     );
   });

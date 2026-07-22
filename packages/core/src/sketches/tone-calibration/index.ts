@@ -2,41 +2,109 @@
  * Tone Calibration's Sketch contract.
  *
  * The analytic target in `source.ts` is fixed reference data. Normal Fill output
- * contains only black open polylines produced by the reusable Scribble Strategy:
- * the circle boundary, background, and grayscale ramps never become authored
- * guide geometry. Seed and the six strategy controls affect routes, while the
- * target and its frame-relative layout remain independent of both.
+ * contains only black open polylines produced by the selected reusable Shading
+ * Strategy: the circle boundary, background, and grayscale ramps never become
+ * authored guide geometry. Seed and the active strategy controls affect marks,
+ * while the target and its frame-relative layout remain independent of both.
  */
 
 import { createScene } from '../../scene'
-import type { CoordinateSpace, Scene } from '../../scene'
+import type { CoordinateSpace, Scene, Stroke } from '../../scene'
 import {
   scribbleStrategy,
-  type ScribbleObserver,
   type ScribbleResult,
 } from '../../scribbleStrategy/index'
+import type { ShadingObserver, ShadingResult } from '../../shadingStrategy'
 import {
   scribbleControlSchema,
   type ScribbleControls,
 } from '../../scribbleStrategy/types'
 import {
-  createScribbleDiagnostics,
+  stipplingControlSchema,
+  stipplingStrategy,
+  type StipplingControls,
+  type StipplingResult,
+} from '../../stipplingStrategy/index'
+import {
+  createShadingDiagnostics,
+  type ParamSchema,
   type Params,
-  type ScribbleArtwork,
   type Seed,
+  type ShadingArtwork,
   type StatelessSketch,
 } from '../../sketch'
-import { numberParam } from '../sketch-util'
+import { choiceParam, numberParam } from '../sketch-util'
 import { toneCalibrationOutlineSource } from './outline'
 import { createToneCalibrationSource } from './source'
 
 export * from './outline'
 export * from './source'
 
-/** Exactly the six shared Scribble controls; the fixed source has no controls. */
-export const toneCalibrationSchema = scribbleControlSchema
+const STRATEGY_OPTIONS = Object.freeze([
+  Object.freeze({ value: 'scribble', label: 'Scribble' }),
+  Object.freeze({ value: 'stippling', label: 'Stippling' }),
+] as const)
+const SCRIBBLE_ONLY = Object.freeze({
+  key: 'strategy',
+  equals: 'scribble',
+})
+const STIPPLING_ONLY = Object.freeze({
+  key: 'strategy',
+  equals: 'stippling',
+})
 
-const PREVIEW_STROKE = Object.freeze({ color: 'black', width: 1 })
+/** Strategy first, followed by the selected strategy's unchanged controls. */
+export const toneCalibrationSchema = Object.freeze({
+  strategy: Object.freeze({
+    kind: 'choice',
+    options: STRATEGY_OPTIONS,
+    default: 'scribble',
+  }),
+  pathDensity: Object.freeze({
+    ...scribbleControlSchema.pathDensity,
+    activeWhen: SCRIBBLE_ONLY,
+  }),
+  scribbleScale: Object.freeze({
+    ...scribbleControlSchema.scribbleScale,
+    activeWhen: SCRIBBLE_ONLY,
+  }),
+  momentum: Object.freeze({
+    ...scribbleControlSchema.momentum,
+    activeWhen: SCRIBBLE_ONLY,
+  }),
+  chaos: Object.freeze({
+    ...scribbleControlSchema.chaos,
+    activeWhen: SCRIBBLE_ONLY,
+  }),
+  toneFidelity: Object.freeze({
+    ...scribbleControlSchema.toneFidelity,
+    activeWhen: SCRIBBLE_ONLY,
+  }),
+  stopPoint: Object.freeze({
+    ...scribbleControlSchema.stopPoint,
+    activeWhen: SCRIBBLE_ONLY,
+  }),
+  stippleDensity: Object.freeze({
+    ...stipplingControlSchema.stippleDensity,
+    activeWhen: STIPPLING_ONLY,
+  }),
+  distributionFidelity: Object.freeze({
+    ...stipplingControlSchema.distributionFidelity,
+    activeWhen: STIPPLING_ONLY,
+  }),
+} satisfies ParamSchema)
+
+const SCRIBBLE_PREVIEW_STROKE = Object.freeze({ color: 'black', width: 1 })
+const STIPPLE_PREVIEW_WIDTH_TO_FRAME = 0.002
+
+function stipplePreviewStroke(frame: CoordinateSpace): Readonly<Stroke> {
+  return Object.freeze({
+    color: 'black',
+    width:
+      Math.sqrt(frame.width * frame.height) * STIPPLE_PREVIEW_WIDTH_TO_FRAME,
+    lineCap: 'round',
+  })
+}
 
 function scribbleControls(params: Params): ScribbleControls {
   return {
@@ -49,12 +117,27 @@ function scribbleControls(params: Params): ScribbleControls {
   }
 }
 
+function stipplingControls(params: Params): StipplingControls {
+  return {
+    stippleDensity: numberParam(
+      params,
+      toneCalibrationSchema,
+      'stippleDensity',
+    ),
+    distributionFidelity: numberParam(
+      params,
+      toneCalibrationSchema,
+      'distributionFidelity',
+    ),
+  }
+}
+
 /** Headless generated geometry, kept separate from preview styling for reuse. */
 export function generateToneCalibrationScribble(
   params: Params,
   seed: Seed,
   frame: CoordinateSpace,
-  observer?: ScribbleObserver,
+  observer?: ShadingObserver,
 ): ScribbleResult {
   return scribbleStrategy({
     source: createToneCalibrationSource(frame),
@@ -65,16 +148,32 @@ export function generateToneCalibrationScribble(
   })
 }
 
-function sceneFromScribble(
+function generateToneCalibrationStippling(
+  params: Params,
+  seed: Seed,
   frame: CoordinateSpace,
-  result: Readonly<ScribbleResult>,
+  observer?: ShadingObserver,
+): StipplingResult {
+  return stipplingStrategy({
+    source: createToneCalibrationSource(frame),
+    frame,
+    controls: stipplingControls(params),
+    seed,
+    ...(observer === undefined ? {} : { observer }),
+  })
+}
+
+function sceneFromShadingResult(
+  frame: CoordinateSpace,
+  result: Readonly<ShadingResult>,
+  stroke: Readonly<Stroke>,
 ): Scene {
   const builder = createScene(frame)
 
   for (const polyline of result.polylines) {
     builder.addPath(polyline, {
       closed: false,
-      stroke: PREVIEW_STROKE,
+      stroke,
       hiddenLineRole: 'source',
     })
   }
@@ -82,21 +181,51 @@ function sceneFromScribble(
   return builder.build()
 }
 
-/** Prepare Tone Calibration's complete Scene and compact Scribble diagnostics. */
-export function generateToneCalibrationScribbleArtwork(
+/** Prepare Tone Calibration's selected complete Shading artwork and fidelity. */
+export function generateToneCalibrationShadingArtwork(
   params: Params,
   seed: Seed,
   frame: CoordinateSpace,
-  observer?: ScribbleObserver,
-): ScribbleArtwork {
-  const result = generateToneCalibrationScribble(params, seed, frame, observer)
+  observer?: ShadingObserver,
+): ShadingArtwork {
+  const strategy = choiceParam(
+    params,
+    toneCalibrationSchema,
+    'strategy',
+  )
+
+  if (strategy === 'scribble') {
+    const result = generateToneCalibrationScribble(
+      params,
+      seed,
+      frame,
+      observer,
+    )
+    return {
+      scene: sceneFromShadingResult(frame, result, SCRIBBLE_PREVIEW_STROKE),
+      diagnostics: createShadingDiagnostics(result, {
+        kind: 'scribble',
+        residualError: result.residualError,
+      }),
+    }
+  }
+
+  const result = generateToneCalibrationStippling(
+    params,
+    seed,
+    frame,
+    observer,
+  )
   return {
-    scene: sceneFromScribble(frame, result),
-    diagnostics: createScribbleDiagnostics(result),
+    scene: sceneFromShadingResult(frame, result, stipplePreviewStroke(frame)),
+    diagnostics: createShadingDiagnostics(result, {
+      kind: 'stippling',
+      distributionError: result.distributionError,
+    }),
   }
 }
 
-/** A fixed analytic target rendered solely as generated Scribble polylines. */
+/** A fixed analytic target rendered solely as selected Shading polylines. */
 export const toneCalibration: StatelessSketch = {
   id: 'tone-calibration',
   name: 'Tone Calibration',
@@ -107,13 +236,13 @@ export const toneCalibration: StatelessSketch = {
   deriveOutlineSource(completedScene, target) {
     return toneCalibrationOutlineSource(completedScene, target)
   },
-  generateScribbleArtwork: generateToneCalibrationScribbleArtwork,
+  generateShadingArtwork: generateToneCalibrationShadingArtwork,
   generate(
     params: Params,
     seed: Seed,
     _t: number,
     frame: CoordinateSpace,
   ): Scene {
-    return generateToneCalibrationScribbleArtwork(params, seed, frame).scene
+    return generateToneCalibrationShadingArtwork(params, seed, frame).scene
   },
 }

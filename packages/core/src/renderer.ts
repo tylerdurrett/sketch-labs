@@ -61,6 +61,8 @@ export interface Canvas2DContext {
   fillStyle: string
   /** The CSS color used by {@link Canvas2DContext.stroke}. */
   strokeStyle: string
+  /** The shape painted at the endpoints of open stroked subpaths. */
+  lineCap: 'butt' | 'round' | 'square'
   /** The stroke width, in the Scene's coordinate-space units. */
   lineWidth: number
   /** Replace the current transform with `[a b c d e f]` (a→scaleX, d→scaleY, e/f→translate). */
@@ -81,8 +83,9 @@ export interface Canvas2DContext {
  * point, `lineTo` the rest); if `closed` is true the path is closed
  * (`closePath`). A Primitive's `fill` is applied only when present
  * (`fillStyle` ← `fill.color`, then `fill()`), and its `stroke` only when
- * present (`strokeStyle` ← `stroke.color`, `lineWidth` ← `stroke.width`, then
- * `stroke()`); both are applied when both are present. The complete draw is
+ * present (`strokeStyle` ← `stroke.color`, `lineCap` ←
+ * `stroke.lineCap ?? 'butt'`, `lineWidth` ← `stroke.width`, then `stroke()`);
+ * both are applied when both are present. The complete draw is
  * bracketed by one `save()`/`restore()` pair so style state does not leak back
  * to the caller. Primitives do not need individual state frames: every style
  * that can affect one of their paint operations is assigned immediately before
@@ -125,6 +128,7 @@ export function renderToCanvas(ctx: Canvas2DContext, scene: Scene): void {
     }
     if (stroke) {
       ctx.strokeStyle = stroke.color
+      ctx.lineCap = stroke.lineCap ?? 'butt'
       ctx.lineWidth = stroke.width
       ctx.stroke()
     }
@@ -231,8 +235,9 @@ export function drawSceneFitted(
  * (an open polyline omits it, staying open). Style is emitted PER ELEMENT, never
  * via a global `<g>` wrapper: `fill="<fill.color>"` when a fill is present and
  * `fill="none"` when absent; `stroke="<stroke.color>"` plus
- * `stroke-width="<stroke.width>"` when a stroke is present and no stroke attrs at
- * all when absent. `stroke.width` is written in Scene-space units, unscaled —
+ * `stroke-width="<stroke.width>"` plus an authored `stroke-linecap` when present,
+ * and no stroke attrs at all when absent. `stroke.width` is written in
+ * Scene-space units, unscaled —
  * the `viewBox` puts user space in the Scene's own coordinate space, so the width
  * renders at the right size with no conversion (contrast `polylinesToSVG`, the
  * plotter serializer in `svg.ts`, which is cm-space and single-pen — deliberately
@@ -294,7 +299,7 @@ export function renderToSVG(scene: Scene, metadata?: string, background = 'white
 
       const fillAttr = `fill="${fill ? escapeAttr(fill.color) : 'none'}"`
       const strokeAttr = stroke
-        ? ` stroke="${escapeAttr(stroke.color)}" stroke-width="${round(stroke.width)}"`
+        ? ` stroke="${escapeAttr(stroke.color)}" stroke-width="${round(stroke.width)}"${stroke.lineCap === undefined ? '' : ` stroke-linecap="${stroke.lineCap}"`}`
         : ''
 
       return `  <path d="${d}" ${fillAttr}${strokeAttr} />`

@@ -26,8 +26,6 @@ export * from './shadingStrategy'
 export * from './scribbleScaleField'
 export {
   scribbleStrategy,
-  type ScribbleObserver,
-  type ScribbleProgress,
   type ScribbleResult,
   type ScribbleStrategyInput,
 } from './scribbleStrategy/index'
@@ -37,6 +35,15 @@ export {
   type ScribbleControlName,
   type ScribbleControls,
 } from './scribbleStrategy/types'
+export {
+  defaultStipplingControls,
+  stipplingControlSchema,
+  stipplingStrategy,
+  type StipplingControlName,
+  type StipplingControls,
+  type StipplingResult,
+  type StipplingStrategyInput,
+} from './stipplingStrategy/index'
 export * from './plotProfile'
 export * from './plotMapping'
 export * from './plotterSvg'

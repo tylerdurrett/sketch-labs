@@ -2,11 +2,11 @@
  * Physical, path-only SVG serialization for plot output.
  *
  * Unlike the ordinary Scene SVG renderer, this serializer describes the whole
- * physical sheet in millimeters and emits only stroked Scene geometry. The
- * uniform Composition Frame → drawable-paper transform is baked into every
- * coordinate and stroke width so plotter consumers need no SVG transform or
- * styling wrapper. Paper edges, margins, Scene backgrounds, and fills are not
- * plot geometry and are deliberately absent.
+ * physical sheet in millimeters and emits only round-capped stroked Scene
+ * geometry. The uniform Composition Frame → drawable-paper transform is baked
+ * into every coordinate and stroke width so plotter consumers need no SVG
+ * transform or styling wrapper. Paper edges, margins, Scene backgrounds, and
+ * fills are not plot geometry and are deliberately absent.
  *
  * Closed primitives return to their mapped first point with an explicit line
  * segment. Plotter output never relies on SVG's `Z` close-path command.
@@ -87,7 +87,7 @@ export function renderPlotterSVG(
       .join(' ')
 
     return [
-      `  <path d="${d}" fill="none" stroke="${escapeAttr(stroke.color)}" stroke-width="${round(stroke.width * scale)}" />`,
+      `  <path d="${d}" fill="none" stroke="${escapeAttr(stroke.color)}" stroke-width="${round(stroke.width * scale)}" stroke-linecap="round" />`,
     ]
   })
 

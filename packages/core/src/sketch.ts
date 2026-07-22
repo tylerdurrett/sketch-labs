@@ -33,17 +33,17 @@ import type { SketchEnvironment } from './imageAssets'
 import type { DetailField } from './detailFields'
 import type { PlotProfile } from './plotProfile'
 import type { CoordinateSpace, Scene } from './scene'
-import type { ShadingTermination } from './shadingStrategy'
+import type {
+  ShadingObserver,
+  ShadingResult,
+  ShadingTermination,
+} from './shadingStrategy'
 import {
   penLiftCount,
   polylineCount,
   totalPathLength,
 } from './shadingStrategy'
 import type { ToneSource } from './shadingFields'
-import type {
-  ScribbleObserver,
-  ScribbleResult,
-} from './scribbleStrategy/index'
 
 /**
  * The single value feeding all of a Sketch's internal randomness.
@@ -57,9 +57,26 @@ import type {
 export type Seed = string | number
 
 /**
+ * One narrow applicability dependency between parameters.
+ *
+ * The named controller must be a Choice parameter in the same schema and
+ * `equals` must be one of that Choice's declared stable option values. The rule
+ * is deliberately direct and nonrecursive: a dependent's activity is decided
+ * only by the controller's current value, even when that controller has an
+ * applicability rule of its own.
+ */
+export interface ParamActiveWhen {
+  /** Schema key of the Choice parameter that controls applicability. */
+  key: string
+  /** Stable Choice option value for which this parameter is active. */
+  equals: string
+}
+
+/**
  * A numeric knob's declaration — a continuous (or whole-number) range with a
  * default. The founding {@link ParamSpec} member (issue #47), joined by
- * {@link ColorParamSpec} and {@link ImageAssetParamSpec}.
+ * {@link ColorParamSpec}, {@link ImageAssetParamSpec}, and
+ * {@link ChoiceParamSpec}.
  *
  * `integer` and `step` are ORTHOGONAL and answer different questions:
  *
@@ -89,11 +106,20 @@ export interface NumberParamSpec {
    */
   step?: number
   /**
+   * Optional logarithmic slider presentation for positive numeric domains.
+   * The stored, typed, randomized, and serialized value remains the declared
+   * number; only slider position is mapped through base-10 space. When present,
+   * `step` is the drag granularity in decades.
+   */
+  sliderScale?: 'logarithmic'
+  /**
    * VALUE-DOMAIN constraint: when `true`, only whole-number values are legal.
    * Orthogonal to {@link NumberParamSpec.step} (see the type doc). Optional;
    * absent ⇒ any real in `[min, max]` is legal.
    */
   integer?: boolean
+  /** Optional direct Choice dependency controlling this parameter's activity. */
+  activeWhen?: ParamActiveWhen
 }
 
 /**
@@ -117,6 +143,8 @@ export interface ColorParamSpec {
    * `'#1a2b3c'` (see the type doc for why the domain is hex).
    */
   default: string
+  /** Optional direct Choice dependency controlling this parameter's activity. */
+  activeWhen?: ParamActiveWhen
 }
 
 /**
@@ -136,6 +164,42 @@ export interface ImageAssetParamSpec {
   kind: 'image-asset'
   /** The stable logical Image Asset ID seeded by {@link defaultParams}. */
   default: string
+  /** Optional direct Choice dependency controlling this parameter's activity. */
+  activeWhen?: ParamActiveWhen
+}
+
+/**
+ * One stable, user-facing option in a {@link ChoiceParamSpec}.
+ *
+ * `value` is the deterministic value stored in Params and Presets. `label` is
+ * presentation only: changing a label must not migrate persisted state, while a
+ * value must remain stable once published.
+ */
+export interface ChoiceOption {
+  /** Stable string identity stored as the inhabited parameter value. */
+  value: string
+  /** Human-readable text exposed by schema-derived controls. */
+  label: string
+}
+
+/**
+ * A lock-free selection from a finite set of stable, labelled string values.
+ *
+ * Choice options are authored in display order. Their values are unique stable
+ * identities; labels are presentation text and therefore need not be unique.
+ * The default must name one declared option. Call
+ * {@link validateChoiceParamSpec} at runtime boundaries before consuming a
+ * declaration that did not originate in type-checked source.
+ */
+export interface ChoiceParamSpec {
+  /** Discriminant. The open {@link ParamSpec} union is keyed on this. */
+  kind: 'choice'
+  /** Nonempty, ordered set of labelled stable values. */
+  options: readonly ChoiceOption[]
+  /** The declared option value seeded by {@link defaultParams}. */
+  default: string
+  /** Optional direct Choice dependency controlling this parameter's activity. */
+  activeWhen?: ParamActiveWhen
 }
 
 /**
@@ -144,9 +208,10 @@ export interface ImageAssetParamSpec {
  * An OPEN union discriminated on `kind`, mirroring the open {@link Sketch} union
  * in this same file: {@link NumberParamSpec} (`kind: 'number'`, the founding
  * member, issue #47), {@link ColorParamSpec} (`kind: 'color'`, the first
- * non-numeric widening, ADR-0010), and {@link ImageAssetParamSpec}
- * (`kind: 'image-asset'`) are the inhabited members today. Future control kinds
- * (boolean, enum, …) join as new `kind`-tagged members WITHOUT reworking these —
+ * non-numeric widening, ADR-0010), {@link ImageAssetParamSpec}
+ * (`kind: 'image-asset'`), and {@link ChoiceParamSpec} (`kind: 'choice'`) are the
+ * inhabited members today. Future control kinds join as new `kind`-tagged
+ * members WITHOUT reworking these —
  * purely additive. The control panel, Randomize, and Preset shape are derived
  * views that widen alongside the union; affordances such as numeric-only Lock
  * remain meaningful only for the kinds they affect.
@@ -155,6 +220,7 @@ export type ParamSpec =
   | NumberParamSpec
   | ColorParamSpec
   | ImageAssetParamSpec
+  | ChoiceParamSpec
 
 /**
  * The single declaration a Sketch makes of its tweakable knobs — the spine of
@@ -174,6 +240,240 @@ export type ParamSchema = Record<string, ParamSpec>
 export type Params = Record<string, unknown>
 
 /**
+ * Validate the Choice-specific declaration invariants at a runtime boundary.
+ *
+ * This deliberately does not validate Number, Color, or Image Asset specs: it
+ * is the narrow loud boundary needed by Choice consumers, not a retrofit of new
+ * semantics onto the existing parameter kinds.
+ *
+ * @param spec - The Choice declaration to validate.
+ * @param key - Optional schema key included in diagnostics.
+ * @throws If options are empty or malformed, option values repeat, or the
+ *   default is not one of the declared values.
+ */
+export function validateChoiceParamSpec(
+  spec: ChoiceParamSpec,
+  key = '<choice>',
+): void {
+  if (!Array.isArray(spec.options) || spec.options.length === 0) {
+    throw new Error(`Choice param \`${key}\` must declare at least one option`)
+  }
+
+  const values = new Set<string>()
+  for (const [index, option] of spec.options.entries()) {
+    if (
+      typeof option !== 'object' ||
+      option === null ||
+      typeof option.value !== 'string' ||
+      option.value.trim().length === 0
+    ) {
+      throw new Error(
+        `Choice param \`${key}\` option ${index} must have a nonempty string value`,
+      )
+    }
+    if (typeof option.label !== 'string' || option.label.trim().length === 0) {
+      throw new Error(
+        `Choice param \`${key}\` option ${index} must have a nonempty string label`,
+      )
+    }
+    if (values.has(option.value)) {
+      throw new Error(
+        `Choice param \`${key}\` has duplicate option value \`${option.value}\``,
+      )
+    }
+    values.add(option.value)
+  }
+
+  if (typeof spec.default !== 'string' || !values.has(spec.default)) {
+    throw new Error(
+      `Choice param \`${key}\` default must be one of its declared option values`,
+    )
+  }
+}
+
+/**
+ * Validate and return one present runtime value for a Choice declaration.
+ *
+ * The declaration is checked first via {@link validateChoiceParamSpec}; the
+ * value must then be a string identity from its option set. Missing-value
+ * fallback is intentionally not handled here because only a Params-aware caller
+ * can distinguish an absent key from an explicitly present invalid value.
+ *
+ * @param spec - The Choice declaration whose option set defines the domain.
+ * @param value - The explicitly present runtime value to validate.
+ * @param key - Optional schema key included in diagnostics.
+ * @returns The validated value, narrowed to the declaration's option values.
+ * @throws If the declaration is malformed or the value is not declared.
+ */
+export function validateChoiceParamValue<Spec extends ChoiceParamSpec>(
+  spec: Spec,
+  value: unknown,
+  key = '<choice>',
+): Spec['options'][number]['value'] {
+  validateChoiceParamSpec(spec, key)
+  if (
+    typeof value !== 'string' ||
+    !spec.options.some((option) => option.value === value)
+  ) {
+    throw new Error(
+      `Choice param \`${key}\` value must be one of its declared option values`,
+    )
+  }
+  return value as Spec['options'][number]['value']
+}
+
+/**
+ * Validate the Choice and applicability invariants of a Parameter Schema.
+ *
+ * This is intentionally a narrow boundary: it validates Choice declarations
+ * and `activeWhen` relationships only. It does not add runtime validation for
+ * the established Number, Color, or Image Asset value domains.
+ *
+ * @param schema - The complete Parameter Schema whose relationships to check.
+ * @throws If a Choice declaration is malformed, or an `activeWhen` controller
+ *   is missing, is not a Choice, names the dependent itself, or compares to an
+ *   undeclared stable option value.
+ */
+export function validateParamSchema(schema: ParamSchema): void {
+  for (const [key, spec] of Object.entries(schema)) {
+    if (spec.kind === 'choice') validateChoiceParamSpec(spec, key)
+    validateParamApplicability(schema, key, spec)
+  }
+}
+
+/** Validate one spec's direct applicability relationship. */
+function validateParamApplicability(
+  schema: ParamSchema,
+  key: string,
+  spec: ParamSpec,
+): void {
+  const dependency = spec.activeWhen
+  if (dependency === undefined) return
+
+  if (typeof dependency !== 'object' || dependency === null) {
+    throw new Error(`Param \`${key}\` activeWhen must be an object`)
+  }
+  if (typeof dependency.key !== 'string' || dependency.key.length === 0) {
+    throw new Error(`Param \`${key}\` activeWhen key must name a parameter`)
+  }
+  if (dependency.key === key) {
+    throw new Error(`Param \`${key}\` activeWhen cannot reference itself`)
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(schema, dependency.key)) {
+    throw new Error(
+      `Param \`${key}\` activeWhen references missing controller \`${dependency.key}\``,
+    )
+  }
+  const controller = schema[dependency.key]!
+  if (controller.kind !== 'choice') {
+    throw new Error(
+      `Param \`${key}\` activeWhen controller \`${dependency.key}\` must be a Choice param`,
+    )
+  }
+
+  validateChoiceParamSpec(controller, dependency.key)
+  if (
+    typeof dependency.equals !== 'string' ||
+    !controller.options.some((option) => option.value === dependency.equals)
+  ) {
+    throw new Error(
+      `Param \`${key}\` activeWhen equals must be a declared option of Choice param \`${dependency.key}\``,
+    )
+  }
+}
+
+/**
+ * Report whether one parameter is applicable for the current complete Params.
+ *
+ * Parameters without `activeWhen` are always active. A dependent uses exact
+ * equality against its direct Choice controller's validated current value. If
+ * that controller key is absent from Params, its validated schema default is
+ * used. The controller's own applicability is never traversed.
+ *
+ * @param schema - The complete Parameter Schema.
+ * @param params - Current values; read only and never completed or mutated.
+ * @param key - Schema key whose activity to evaluate.
+ * @returns Whether the parameter is active.
+ * @throws If `key`, its applicability relationship, the Choice declaration, or
+ *   a present Choice value is malformed.
+ */
+export function isParamActive(
+  schema: ParamSchema,
+  params: Params,
+  key: string,
+): boolean {
+  if (!Object.prototype.hasOwnProperty.call(schema, key)) {
+    throw new Error(`Unknown param \`${key}\``)
+  }
+  const spec = schema[key]!
+
+  validateParamApplicability(schema, key, spec)
+  const dependency = spec.activeWhen
+  if (dependency === undefined) return true
+
+  const controller = schema[dependency.key] as ChoiceParamSpec
+  let controllerValue: string
+  if (Object.prototype.hasOwnProperty.call(params, dependency.key)) {
+    controllerValue = validateChoiceParamValue(
+      controller,
+      params[dependency.key],
+      dependency.key,
+    )
+  } else {
+    validateChoiceParamSpec(controller, dependency.key)
+    controllerValue = controller.default
+  }
+
+  return controllerValue === dependency.equals
+}
+
+/**
+ * Project the current Params down to the schema keys that are active.
+ *
+ * The projection iterates the schema's own enumerable keys, preserving schema
+ * order and excluding Params-only extras. Present non-Choice values are copied
+ * exactly; an absent value falls back to its spec default. Present Choice values
+ * pass through the same loud declared-option validation as other Choice
+ * consumers. The schema and input Params are only read, and the result is a new
+ * object.
+ *
+ * @param schema - The complete Parameter Schema and ordering authority.
+ * @param params - Current parameter values; never mutated.
+ * @returns A fresh Params object containing only active schema keys.
+ * @throws If a Choice declaration/value or applicability relationship is
+ *   malformed.
+ */
+export function activeParams(schema: ParamSchema, params: Params): Params {
+  validateParamSchema(schema)
+  const choiceValues = new Map<string, string>()
+  for (const [key, spec] of Object.entries(schema)) {
+    if (
+      spec.kind === 'choice' &&
+      Object.prototype.hasOwnProperty.call(params, key)
+    ) {
+      choiceValues.set(key, validateChoiceParamValue(spec, params[key], key))
+    }
+  }
+
+  const entries: [string, unknown][] = []
+
+  for (const [key, spec] of Object.entries(schema)) {
+    if (!isParamActive(schema, params, key)) continue
+
+    let value: unknown
+    if (Object.prototype.hasOwnProperty.call(params, key)) {
+      value = spec.kind === 'choice' ? choiceValues.get(key)! : params[key]
+    } else {
+      value = spec.default
+    }
+    entries.push([key, value])
+  }
+
+  return Object.fromEntries(entries)
+}
+
+/**
  * Derive the inhabited default params from a schema: every key set to its spec's
  * `default`. Pure and headless — the first of the core engine functions
  * (randomize / newSeed are siblings), and the value the Harness starts a Sketch
@@ -183,6 +483,7 @@ export type Params = Record<string, unknown>
  * @returns A {@link Params} with one entry per schema key, each its spec default.
  */
 export function defaultParams(schema: ParamSchema): Params {
+  validateParamSchema(schema)
   const params: Params = {}
   for (const [key, spec] of Object.entries(schema)) {
     params[key] = spec.default
@@ -198,30 +499,37 @@ export function defaultParams(schema: ParamSchema): Params {
  * later passes a `Math.random`-backed one — same shape as `value()` in
  * `random.ts`).
  *
- * For each schema key whose spec is a numeric param (`kind === 'number'`) AND is
- * NOT locked, a new value is rolled uniformly across the spec's `[min, max]` via
- * `min + rand() * (max - min)`, then `Math.round`ed iff the spec's `integer` is
- * `true`. The spec's `step` is IGNORED — `step` is a UI drag-granularity hint, not
- * a value-domain constraint (see {@link NumberParamSpec}).
+ * For each schema key whose spec is a numeric param (`kind === 'number'`), is
+ * active according to {@link isParamActive}, AND is NOT locked, a new value is
+ * rolled uniformly across the spec's slider axis, then `Math.round`ed iff the
+ * spec's `integer` is `true`. The ordinary axis uses
+ * `min + rand() * (max - min)`; `sliderScale: 'logarithmic'` uses equal base-10
+ * travel so every decade has equal probability. Inactive numeric values consume
+ * no randomness and pass through unchanged. The spec's `step` is IGNORED —
+ * `step` is a UI drag-granularity hint, not a value-domain constraint (see
+ * {@link NumberParamSpec}).
  *
  * Everything else passes through from `params` UNCHANGED: locked params (Lock is
  * Randomize-exclusion only), and any non-numeric spec the `kind` check doesn't
  * roll. For `kind: 'color'` this pass-through is a STATED CONTRACT, not an
  * accident of the implementation (ADR-0010): a color is a deliberate aesthetic
  * choice, not a numeric range. The same is true for `kind: 'image-asset'`: its
- * string is a stable asset selection, so Randomize must never replace it. Thus
- * Randomize is numeric-only for now and both string-valued kinds survive every
- * roll untouched, locked or not. (A future palette or asset-selection mechanism
- * would be its own decision.) This is PER-PARAM only — there are deliberately NO
- * cross-param constraints (CONTEXT.md "Deliberately deferred"); a Sketch owns
- * its own inter-param coherence inside `generate`.
+ * string is a stable asset selection, so Randomize must never replace it. A
+ * `kind: 'choice'` value likewise represents an explicit selection and never
+ * rolls. Thus Randomize is numeric-only for now and all three string-valued
+ * kinds survive every roll untouched, locked or not. (A future palette or
+ * asset-selection mechanism would be its own decision.) The narrow
+ * `activeWhen` rule controls only numeric Randomize eligibility; there are no
+ * broader cross-param constraints (CONTEXT.md "Deliberately deferred"), and a
+ * Sketch still owns its own inter-param coherence inside `generate`.
  *
  * @param schema - The Sketch's Parameter Schema.
  * @param params - The current inhabited param values; NOT mutated.
  * @param locks - The generic set of locked param keys; only READ (the Studio
  *   owns the lock state). A locked numeric key keeps its current value. A
- *   persisted color or Image Asset key is harmless and inert because both kinds
- *   already pass through every roll; callers need not filter or migrate it.
+ *   persisted color, Image Asset, or Choice key is harmless and inert because
+ *   all three kinds already pass through every roll; callers need not filter or
+ *   migrate it. Choice controls themselves expose no Lock affordance.
  * @param rand - Injected uniform `[0, 1)` source (matches `value()` in
  *   `random.ts`).
  * @returns A NEW {@link Params}; unlocked numeric keys re-rolled, the rest as-is.
@@ -232,11 +540,33 @@ export function randomize(
   locks: ReadonlySet<string>,
   rand: () => number,
 ): Params {
+  validateParamSchema(schema)
+  for (const [key, spec] of Object.entries(schema)) {
+    if (
+      spec.kind === 'choice' &&
+      Object.prototype.hasOwnProperty.call(params, key)
+    ) {
+      validateChoiceParamValue(spec, params[key], key)
+    }
+  }
+
   const next: Params = { ...params }
   for (const [key, spec] of Object.entries(schema)) {
     if (locks.has(key)) continue
-    if (spec.kind === 'number') {
-      const rolled = spec.min + rand() * (spec.max - spec.min)
+    if (spec.kind === 'number' && isParamActive(schema, params, key)) {
+      if (
+        spec.sliderScale === 'logarithmic' &&
+        (spec.min <= 0 || spec.max <= 0)
+      ) {
+        throw new RangeError(
+          `Number param \`${key}\` logarithmic slider requires positive bounds`,
+        )
+      }
+      const draw = rand()
+      const rolled =
+        spec.sliderScale === 'logarithmic'
+          ? spec.min * (spec.max / spec.min) ** draw
+          : spec.min + draw * (spec.max - spec.min)
       next[key] = spec.integer ? Math.round(rolled) : rolled
     }
   }
@@ -288,7 +618,7 @@ export interface TimeMetadata {
  * An Outline source hook may use this target to change stroke width only. Every
  * emitted stroked Primitive must use exactly
  * `toolWidthMillimeters / millimetersPerSceneUnit`; stroke presence and color,
- * coordinate space, geometry, primitive order, closure, fills, background, and
+ * line cap, coordinate space, geometry, primitive order, closure, fills, background, and
  * `hiddenLineRole` values must be invariant across valid targets. This makes the
  * hook an explicit physical-tool opt-in: completed Hidden-line geometry and its
  * invariant styling can be retained while finalization applies a newer width.
@@ -300,36 +630,56 @@ export interface OutlineTarget {
   readonly millimetersPerSceneUnit: number
 }
 
-/** Scalar diagnostics for one complete Scribble artwork preparation. */
-export interface ScribbleDiagnostics {
-  /** Truthful convergence or deterministic safety-budget stop condition. */
-  readonly termination: ShadingTermination
+/** Scribble's strategy-specific fidelity diagnostic. */
+export interface ScribbleShadingFidelity {
+  readonly kind: 'scribble'
   /** Remaining normalized source error after the last accepted segment. */
   readonly residualError: number
-  /** Sum of Scribble segment lengths in Composition Frame units. */
+}
+
+/** Stippling's strategy-specific fidelity diagnostic. */
+export interface StipplingShadingFidelity {
+  readonly kind: 'stippling'
+  /** Normalized distribution error after bounded placement and refinement. */
+  readonly distributionError: number
+}
+
+/** Exhaustive strategy-specific fidelity diagnostics carried by artwork. */
+export type ShadingFidelity =
+  | ScribbleShadingFidelity
+  | StipplingShadingFidelity
+
+/** Scalar diagnostics for one complete Shading artwork preparation. */
+export interface ShadingDiagnostics {
+  /** Truthful convergence or deterministic safety-budget stop condition. */
+  readonly termination: ShadingTermination
+  /** Sum of generated strategy segment lengths in Composition Frame units. */
   readonly pathLength: number
-  /** Number of generated Scribble polylines, excluding structural artwork. */
+  /** Number of generated strategy polylines, excluding structural artwork. */
   readonly polylineCount: number
-  /** Pen lifts between generated Scribble polylines. */
+  /** Pen lifts between generated strategy polylines. */
   readonly penLiftCount: number
+  /** Strategy-specific fidelity meaning, carried with the displayed result. */
+  readonly fidelity: ShadingFidelity
 }
 
 /** One complete Scene plus compact diagnostics, without duplicate geometry. */
-export interface ScribbleArtwork {
+export interface ShadingArtwork {
   readonly scene: Scene
-  readonly diagnostics: ScribbleDiagnostics
+  readonly diagnostics: ShadingDiagnostics
 }
 
-/** Derive immutable scalar diagnostics from a completed Scribble pass. */
-export function createScribbleDiagnostics(
-  result: Readonly<ScribbleResult>,
-): ScribbleDiagnostics {
+/** Derive common metrics from generated strategy geometry, never the Scene. */
+export function createShadingDiagnostics(
+  result: Readonly<ShadingResult>,
+  fidelity: ShadingFidelity,
+): ShadingDiagnostics {
   return Object.freeze({
     termination: result.termination,
-    residualError: result.residualError,
     pathLength: totalPathLength(result.polylines),
     polylineCount: polylineCount(result.polylines),
     penLiftCount: penLiftCount(result.polylines),
+    fidelity: Object.freeze({ ...fidelity }),
   })
 }
 
@@ -435,19 +785,19 @@ export interface StatelessSketch extends SketchBase {
   ): Scene
 
   /**
-   * Optionally prepare this Sketch's complete Scribble-backed artwork.
+   * Optionally prepare this Sketch's complete Shading-backed artwork.
    *
    * The observer is diagnostic only. Implementations return the same complete
-   * Scene as cold `generate`, alongside scalar Scribble metrics; they do not
+   * Scene as cold `generate`, alongside scalar Shading metrics; they do not
    * duplicate the generated polylines outside the Scene.
    */
-  generateScribbleArtwork?(
+  generateShadingArtwork?(
     params: Params,
     seed: Seed,
     frame: CoordinateSpace,
-    observer?: ScribbleObserver,
+    observer?: ShadingObserver,
     environment?: SketchEnvironment,
-  ): ScribbleArtwork
+  ): ShadingArtwork
 
   /**
    * Optionally split time-invariant preparation from repeated sampling in `t`.
@@ -476,8 +826,8 @@ export interface StatelessSketch extends SketchBase {
    * values describe sources and occluders, and the Harness's ordinary
    * Hidden-line pass produces the completed stroke-only Scene. The
    * {@link OutlineTarget} may affect stroke width only. Every emitted stroke
-   * must use its exact physical-width quotient; stroke presence and color,
-   * geometry, primitive order, closure, fills, background, and Hidden-line roles
+   * must use its exact physical-width quotient; stroke presence, color, and line
+   * cap, geometry, primitive order, closure, fills, background, and Hidden-line roles
    * must be invariant across valid targets. This hook never runs in the live Fill
    * loop. Sketches that omit both Outline source hooks retain the non-opt-in
    * legacy behavior of processing their sampled Fill Scene directly.
@@ -497,12 +847,12 @@ export interface StatelessSketch extends SketchBase {
    *
    * Unlike {@link generateOutlineSource}, this capability receives the exact
    * completed Scene instead of the inputs that could regenerate it. It is for
-   * caller-owned preparation paths such as Scribble, where the prepared result
+   * caller-owned preparation paths such as Shading, where the prepared result
    * is the authoritative artwork and must not be rerun or substituted while
    * applying physical-tool styling. As with {@link generateOutlineSource}, the
    * target may affect stroke width only: every emitted stroke uses the exact
-   * physical-width quotient, while stroke presence and color, geometry, and
-   * Hidden-line semantics remain invariant across valid targets. The returned
+   * physical-width quotient, while stroke presence, color, line cap, geometry,
+   * and Hidden-line semantics remain invariant across valid targets. The returned
    * Scene still enters the same generic Hidden-line pass as every other Outline
    * source.
    */
@@ -547,7 +897,7 @@ export function definePreparedSketch(
       StatelessSketch,
       | 'deriveOutlineSource'
       | 'generateOutlineSource'
-      | 'generateScribbleArtwork'
+      | 'generateShadingArtwork'
     > & {
       prepare(
         params: Params,

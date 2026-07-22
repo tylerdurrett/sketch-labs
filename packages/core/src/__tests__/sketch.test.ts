@@ -1,11 +1,16 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 
 import {
+  activeParams,
   defaultParams,
   definePreparedSketch,
+  isParamActive,
   newSeed,
   prepareSketch,
   randomize,
+  validateChoiceParamSpec,
+  validateChoiceParamValue,
+  validateParamSchema,
 } from '../sketch'
 import type { Params, ParamSchema, StatelessSketch } from '../sketch'
 import type { Scene } from '../scene'
@@ -16,7 +21,7 @@ import {
   createToneField,
   sampleEffectiveTone,
 } from '../shadingFields'
-import type { ScribbleProgress } from '../scribbleStrategy'
+import type { ShadingProgress } from '../shadingStrategy'
 
 /**
  * A scripted `rand` stub: yields the given values in order, so a test can pin
@@ -76,9 +81,594 @@ describe('defaultParams', () => {
     }
     expect(defaultParams(schema)).toEqual({ image: 'portrait-a1b2c3d4' })
   })
+
+  it('seeds a Choice param with its declared stable-value default', () => {
+    const schema: ParamSchema = {
+      strategy: {
+        kind: 'choice',
+        options: [
+          { value: 'scribble', label: 'Scribble' },
+          { value: 'stippling', label: 'Stippling' },
+        ],
+        default: 'scribble',
+      },
+    }
+    expect(defaultParams(schema)).toEqual({ strategy: 'scribble' })
+  })
+})
+
+describe('validateChoiceParamSpec', () => {
+  const valid = {
+    kind: 'choice',
+    options: [
+      { value: 'scribble', label: 'Scribble' },
+      { value: 'stippling', label: 'Stippling' },
+    ],
+    default: 'scribble',
+  } as const
+
+  it('accepts a nonempty option set with unique stable values and a declared default', () => {
+    expect(() => validateChoiceParamSpec(valid, 'strategy')).not.toThrow()
+  })
+
+  it.each([
+    [
+      'an empty option set',
+      { ...valid, options: [] },
+      /must declare at least one option/,
+    ],
+    [
+      'an empty value',
+      { ...valid, options: [{ value: ' ', label: 'Scribble' }] },
+      /nonempty string value/,
+    ],
+    [
+      'an empty label',
+      { ...valid, options: [{ value: 'scribble', label: '' }] },
+      /nonempty string label/,
+    ],
+    [
+      'a repeated stable value',
+      {
+        ...valid,
+        options: [
+          { value: 'scribble', label: 'Scribble' },
+          { value: 'scribble', label: 'Another label' },
+        ],
+      },
+      /duplicate option value/,
+    ],
+    [
+      'a default outside the option set',
+      { ...valid, default: 'hatching' },
+      /default must be one of its declared option values/,
+    ],
+  ])('rejects %s', (_name, spec, message) => {
+    expect(() => validateChoiceParamSpec(spec, 'strategy')).toThrow(message)
+  })
+
+  it('makes defaultParams a loud Choice declaration boundary', () => {
+    const schema = {
+      strategy: { ...valid, default: 'hatching' },
+    } as unknown as ParamSchema
+    expect(() => defaultParams(schema)).toThrow(/Choice param `strategy` default/)
+  })
+})
+
+describe('validateChoiceParamValue', () => {
+  const spec = {
+    kind: 'choice',
+    options: [
+      { value: 'scribble', label: 'Scribble' },
+      { value: 'stippling', label: 'Stippling' },
+    ],
+    default: 'scribble',
+  } as const
+
+  it('returns a declared string value', () => {
+    const value = validateChoiceParamValue(spec, 'stippling', 'strategy')
+    expect(value).toBe('stippling')
+    expectTypeOf(value).toEqualTypeOf<'scribble' | 'stippling'>()
+  })
+
+  it('rejects a non-string present value directly', () => {
+    expect(() => validateChoiceParamValue(spec, 42, 'strategy')).toThrow(
+      /value must be one of its declared option values/,
+    )
+  })
+
+  it('rejects an undeclared string value directly', () => {
+    expect(() =>
+      validateChoiceParamValue(spec, 'hatching', 'strategy'),
+    ).toThrow(/value must be one of its declared option values/)
+  })
+})
+
+describe('conditional parameter applicability', () => {
+  const strategy = {
+    kind: 'choice',
+    options: [
+      { value: 'scribble', label: 'Scribble' },
+      { value: 'stippling', label: 'Stippling' },
+    ],
+    default: 'scribble',
+  } as const
+
+  it.each([
+    ['number', { kind: 'number', min: 0, max: 1, default: 0.5 }],
+    ['color', { kind: 'color', default: '#1a2b3c' }],
+    ['image asset', { kind: 'image-asset', default: 'portrait-a1b2c3d4' }],
+    [
+      'Choice',
+      {
+        kind: 'choice',
+        options: [{ value: 'fine', label: 'Fine' }],
+        default: 'fine',
+      },
+    ],
+  ] as const)(
+    'supports activeWhen on a %s parameter',
+    (_name, dependentSpec) => {
+      const schema = {
+        strategy,
+        dependent: {
+          ...dependentSpec,
+          activeWhen: { key: 'strategy', equals: 'stippling' },
+        },
+      } satisfies ParamSchema
+
+      expect(() => validateParamSchema(schema)).not.toThrow()
+      expect(isParamActive(schema, { strategy: 'stippling' }, 'dependent')).toBe(
+        true,
+      )
+      expect(isParamActive(schema, { strategy: 'scribble' }, 'dependent')).toBe(
+        false,
+      )
+    },
+  )
+
+  it('treats an unconditional parameter as active', () => {
+    const schema = { strategy } satisfies ParamSchema
+    expect(isParamActive(schema, {}, 'strategy')).toBe(true)
+  })
+
+  it('uses the validated Choice default when the controller value is missing', () => {
+    const schema = {
+      strategy,
+      scribbleDensity: {
+        kind: 'number',
+        min: 1,
+        max: 10,
+        default: 5,
+        activeWhen: { key: 'strategy', equals: 'scribble' },
+      },
+      stippleDensity: {
+        kind: 'number',
+        min: 1,
+        max: 10,
+        default: 5,
+        activeWhen: { key: 'strategy', equals: 'stippling' },
+      },
+    } satisfies ParamSchema
+
+    expect(isParamActive(schema, {}, 'scribbleDensity')).toBe(true)
+    expect(isParamActive(schema, {}, 'stippleDensity')).toBe(false)
+  })
+
+  it('rejects a present controller value outside its declared options', () => {
+    const schema = {
+      strategy,
+      density: {
+        kind: 'number',
+        min: 1,
+        max: 10,
+        default: 5,
+        activeWhen: { key: 'strategy', equals: 'stippling' },
+      },
+    } satisfies ParamSchema
+
+    expect(() =>
+      isParamActive(schema, { strategy: 'hatching' }, 'density'),
+    ).toThrow(/Choice param `strategy` value must be one of/)
+  })
+
+  it.each([
+    [
+      'a missing controller',
+      {
+        activeWhen: { key: 'missing', equals: 'stippling' },
+      },
+      /missing controller `missing`/,
+    ],
+    [
+      'a non-Choice controller',
+      {
+        activeWhen: { key: 'amount', equals: 'stippling' },
+      },
+      /controller `amount` must be a Choice param/,
+    ],
+    [
+      'a self-reference',
+      {
+        activeWhen: { key: 'dependent', equals: 'stippling' },
+      },
+      /cannot reference itself/,
+    ],
+    [
+      'an undeclared comparison value',
+      {
+        activeWhen: { key: 'strategy', equals: 'hatching' },
+      },
+      /equals must be a declared option/,
+    ],
+  ])('rejects %s', (_name, overrides, message) => {
+    const schema = {
+      strategy,
+      amount: { kind: 'number', min: 0, max: 1, default: 0.5 },
+      dependent: {
+        kind: 'number',
+        min: 0,
+        max: 1,
+        default: 0.5,
+        ...overrides,
+      },
+    } as ParamSchema
+
+    expect(() => validateParamSchema(schema)).toThrow(message)
+    expect(() => defaultParams(schema)).toThrow(message)
+  })
+
+  it('rejects a requested key inherited through the schema prototype', () => {
+    const schema = Object.create({ inherited: strategy }) as ParamSchema
+
+    expect(() => isParamActive(schema, {}, 'inherited')).toThrow(
+      /Unknown param `inherited`/,
+    )
+  })
+
+  it('rejects an activeWhen controller supplied by the schema prototype', () => {
+    const schema = Object.assign(Object.create({ strategy }), {
+      density: {
+        kind: 'number' as const,
+        min: 0,
+        max: 1,
+        default: 0.5,
+        activeWhen: { key: 'strategy', equals: 'stippling' },
+      },
+    }) as ParamSchema
+
+    expect(() => validateParamSchema(schema)).toThrow(
+      /missing controller `strategy`/,
+    )
+    expect(() =>
+      isParamActive(schema, { strategy: 'stippling' }, 'density'),
+    ).toThrow(/missing controller `strategy`/)
+  })
+
+  it('is pure and does not recursively evaluate the Choice controller', () => {
+    const schema = Object.freeze({
+      mode: Object.freeze({
+        kind: 'choice' as const,
+        options: Object.freeze([
+          Object.freeze({ value: 'advanced', label: 'Advanced' }),
+        ]),
+        default: 'advanced',
+      }),
+      strategy: Object.freeze({
+        kind: 'choice' as const,
+        options: Object.freeze([
+          Object.freeze({ value: 'stippling', label: 'Stippling' }),
+        ]),
+        default: 'stippling',
+        activeWhen: Object.freeze({ key: 'mode', equals: 'never-declared' }),
+      }),
+      density: Object.freeze({
+        kind: 'number' as const,
+        min: 0,
+        max: 1,
+        default: 0.5,
+        activeWhen: Object.freeze({ key: 'strategy', equals: 'stippling' }),
+      }),
+    }) as ParamSchema
+    const params = Object.freeze({ strategy: 'stippling' })
+
+    expect(isParamActive(schema, params, 'density')).toBe(true)
+    expect(params).toEqual({ strategy: 'stippling' })
+  })
+})
+
+describe('activeParams', () => {
+  const schema = {
+    strategy: {
+      kind: 'choice',
+      options: [
+        { value: 'scribble', label: 'Scribble' },
+        { value: 'stippling', label: 'Stippling' },
+      ],
+      default: 'scribble',
+    },
+    always: { kind: 'color', default: '#1a2b3c' },
+    scribbleDensity: {
+      kind: 'number',
+      min: 1,
+      max: 10,
+      default: 4,
+      activeWhen: { key: 'strategy', equals: 'scribble' },
+    },
+    stippleSource: {
+      kind: 'image-asset',
+      default: 'portrait-default',
+      activeWhen: { key: 'strategy', equals: 'stippling' },
+    },
+  } as const satisfies ParamSchema
+
+  it('projects a mixed schema to active keys with exact present values', () => {
+    expect(
+      activeParams(schema, {
+        strategy: 'scribble',
+        always: '#abcdef',
+        scribbleDensity: 99,
+        stippleSource: 'portrait-selected',
+      }),
+    ).toEqual({
+      strategy: 'scribble',
+      always: '#abcdef',
+      scribbleDensity: 99,
+    })
+  })
+
+  it('switches the projected dependent while retaining inactive input values', () => {
+    const params = {
+      strategy: 'stippling',
+      always: '#abcdef',
+      scribbleDensity: 7,
+      stippleSource: 'portrait-selected',
+    }
+
+    expect(activeParams(schema, params)).toEqual({
+      strategy: 'stippling',
+      always: '#abcdef',
+      stippleSource: 'portrait-selected',
+    })
+    expect(params).toEqual({
+      strategy: 'stippling',
+      always: '#abcdef',
+      scribbleDensity: 7,
+      stippleSource: 'portrait-selected',
+    })
+  })
+
+  it('uses validated defaults for absent active values', () => {
+    expect(activeParams(schema, {})).toEqual({
+      strategy: 'scribble',
+      always: '#1a2b3c',
+      scribbleDensity: 4,
+    })
+  })
+
+  it('preserves schema order and excludes extras and inherited schema keys', () => {
+    const withInherited = Object.assign(
+      Object.create({ inherited: { kind: 'color', default: '#000000' } }),
+      schema,
+    ) as ParamSchema
+    const projected = activeParams(withInherited, {
+      extra: 'discarded',
+      strategy: 'scribble',
+      scribbleDensity: 6,
+    })
+
+    expect(Object.keys(projected)).toEqual([
+      'strategy',
+      'always',
+      'scribbleDensity',
+    ])
+    expect(projected).not.toHaveProperty('extra')
+    expect(projected).not.toHaveProperty('inherited')
+  })
+
+  it('is pure over frozen schema and Params inputs', () => {
+    const frozenSchema = Object.freeze(schema)
+    const params = Object.freeze({ strategy: 'scribble', scribbleDensity: 8 })
+
+    const projected = activeParams(frozenSchema, params)
+
+    expect(projected).toEqual({
+      strategy: 'scribble',
+      always: '#1a2b3c',
+      scribbleDensity: 8,
+    })
+    expect(projected).not.toBe(params)
+  })
+
+  it('rejects a malformed applicability relationship before projecting', () => {
+    const malformed = {
+      strategy: schema.strategy,
+      density: {
+        kind: 'number',
+        min: 1,
+        max: 10,
+        default: 4,
+        activeWhen: { key: 'strategy', equals: 'hatching' },
+      },
+    } as const satisfies ParamSchema
+
+    expect(() => activeParams(malformed, {})).toThrow(
+      /equals must be a declared option/,
+    )
+  })
+
+  it('rejects an invalid present Choice value before projecting', () => {
+    expect(() => activeParams(schema, { strategy: 'hatching' })).toThrow(
+      /Choice param `strategy` value must be one of/,
+    )
+  })
+
+  it.each([42, 'coarse'])(
+    'rejects an invalid present inactive Choice value (%s)',
+    (inactiveValue) => {
+      const withInactiveChoice = {
+        ...schema,
+        stippleQuality: {
+          kind: 'choice',
+          options: [{ value: 'fine', label: 'Fine' }],
+          default: 'fine',
+          activeWhen: { key: 'strategy', equals: 'stippling' },
+        },
+      } as const satisfies ParamSchema
+
+      expect(() =>
+        activeParams(withInactiveChoice, {
+          strategy: 'scribble',
+          stippleQuality: inactiveValue,
+        }),
+      ).toThrow(/Choice param `stippleQuality` value must be one of/)
+    },
+  )
 })
 
 describe('randomize', () => {
+  const conditionalSchema = {
+    strategy: {
+      kind: 'choice',
+      options: [
+        { value: 'scribble', label: 'Scribble' },
+        { value: 'stippling', label: 'Stippling' },
+      ],
+      default: 'scribble',
+    },
+    scribbleDensity: {
+      kind: 'number',
+      min: 0,
+      max: 10,
+      default: 4,
+      activeWhen: { key: 'strategy', equals: 'scribble' },
+    },
+    stippleSpacing: {
+      kind: 'number',
+      min: 20,
+      max: 100,
+      default: 60,
+      activeWhen: { key: 'strategy', equals: 'stippling' },
+    },
+    lockedActive: {
+      kind: 'number',
+      min: 0,
+      max: 100,
+      default: 50,
+    },
+    always: { kind: 'number', min: 0, max: 100, default: 50 },
+    ink: { kind: 'color', default: '#1a2b3c' },
+    image: { kind: 'image-asset', default: 'portrait-default' },
+  } as const satisfies ParamSchema
+
+  const conditionalParams = {
+    strategy: 'scribble',
+    scribbleDensity: 4,
+    stippleSpacing: 60,
+    lockedActive: 50,
+    always: 50,
+    ink: '#c0ffee',
+    image: 'portrait-selected',
+    extra: 'keep-me',
+  }
+
+  it('consumes RNG only for active unlocked Number params in schema order', () => {
+    const rand = vi.fn(scriptedRand([0.25, 0.75]))
+    const next = randomize(
+      conditionalSchema,
+      conditionalParams,
+      new Set(['strategy', 'lockedActive']),
+      rand,
+    )
+
+    expect(rand).toHaveBeenCalledTimes(2)
+    expect(next).toEqual({
+      strategy: 'scribble',
+      scribbleDensity: 2.5,
+      stippleSpacing: 60,
+      lockedActive: 50,
+      always: 75,
+      ink: '#c0ffee',
+      image: 'portrait-selected',
+      extra: 'keep-me',
+    })
+  })
+
+  it('switches which conditional Number consumes the scripted sample', () => {
+    const next = randomize(
+      conditionalSchema,
+      { ...conditionalParams, strategy: 'stippling' },
+      new Set(['lockedActive', 'always']),
+      scriptedRand([0.25]),
+    )
+
+    expect(next.scribbleDensity).toBe(4)
+    expect(next.stippleSpacing).toBe(40)
+    expect(next.always).toBe(50)
+  })
+
+  it('uses the Choice default to determine activity when its value is absent', () => {
+    const params = { ...conditionalParams }
+    delete (params as Partial<typeof params>).strategy
+
+    const next = randomize(
+      conditionalSchema,
+      params,
+      new Set(['lockedActive', 'always']),
+      scriptedRand([0.5]),
+    )
+
+    expect(next.scribbleDensity).toBe(5)
+    expect(next.stippleSpacing).toBe(60)
+  })
+
+  it('rejects an invalid present controlling Choice before consuming RNG', () => {
+    const rand = vi.fn(scriptedRand([]))
+
+    expect(() =>
+      randomize(
+        conditionalSchema,
+        { ...conditionalParams, strategy: 'hatching' },
+        new Set(['lockedActive', 'always']),
+        rand,
+      ),
+    ).toThrow(/Choice param `strategy` value must be one of/)
+    expect(rand).not.toHaveBeenCalled()
+  })
+
+  it.each([42, 'hatching'])(
+    'rejects an invalid standalone Choice value (%s) without consuming RNG',
+    (value) => {
+      const schema = {
+        strategy: conditionalSchema.strategy,
+      } satisfies ParamSchema
+      const rand = vi.fn(scriptedRand([]))
+
+      expect(() =>
+        randomize(schema, { strategy: value }, new Set(), rand),
+      ).toThrow(/Choice param `strategy` value must be one of/)
+      expect(rand).not.toHaveBeenCalled()
+    },
+  )
+
+  it('validates a Choice controller even when all its dependents are locked', () => {
+    const schema = {
+      strategy: conditionalSchema.strategy,
+      density: conditionalSchema.scribbleDensity,
+    } satisfies ParamSchema
+    const rand = vi.fn(scriptedRand([]))
+
+    expect(() =>
+      randomize(
+        schema,
+        { strategy: 'hatching', density: 4 },
+        new Set(['density']),
+        rand,
+      ),
+    ).toThrow(/Choice param `strategy` value must be one of/)
+    expect(rand).not.toHaveBeenCalled()
+  })
+
   it('rolls each unlocked numeric param within its own [min, max] via min + rand()*(max-min)', () => {
     const schema: ParamSchema = {
       count: { kind: 'number', min: 1, max: 80, default: 24 },
@@ -88,6 +678,29 @@ describe('randomize', () => {
     // 0.5 -> midpoint of each range.
     const next = randomize(schema, params, new Set(), scriptedRand([0.5, 0.5]))
     expect(next).toEqual({ count: 40.5, radius: 51 })
+  })
+
+  it('rolls logarithmic sliders uniformly across their declared decades', () => {
+    const schema: ParamSchema = {
+      density: {
+        kind: 'number',
+        min: 0.25,
+        max: 400,
+        default: 1,
+        sliderScale: 'logarithmic',
+      },
+    }
+
+    const next = randomize(
+      schema,
+      { density: 1 },
+      new Set(),
+      scriptedRand([0.25]),
+    )
+    expect(next.density).toBeCloseTo(
+      0.25 * (400 / 0.25) ** 0.25,
+      12,
+    )
   })
 
   it('rounds an integer-marked param to a whole number, ignoring step', () => {
@@ -171,6 +784,26 @@ describe('randomize', () => {
       scriptedRand([]),
     )
     expect(next.image).toBe('portrait-selected')
+  })
+
+  it('passes a locked Choice value through untouched without consuming randomness', () => {
+    const schema: ParamSchema = {
+      strategy: {
+        kind: 'choice',
+        options: [
+          { value: 'scribble', label: 'Scribble' },
+          { value: 'stippling', label: 'Stippling' },
+        ],
+        default: 'scribble',
+      },
+    }
+    const next = randomize(
+      schema,
+      { strategy: 'stippling' },
+      new Set(['strategy']),
+      scriptedRand([]),
+    )
+    expect(next.strategy).toBe('stippling')
   })
 
   it('passes non-rolled keys present in params but absent from schema through unchanged', () => {
@@ -352,8 +985,8 @@ describe('caller-owned prepared frames', () => {
     expect(generatedEnvironments).toEqual([environment])
   })
 
-  it('preserves an optional Scribble artwork capability on a prepared Sketch', () => {
-    const progress: ScribbleProgress[] = []
+  it('preserves an optional Shading artwork capability on a prepared Sketch', () => {
+    const progress: ShadingProgress[] = []
     const artworkScene = sceneAt(7)
     const sketch = definePreparedSketch({
       id: 'prepared-scribble',
@@ -362,7 +995,7 @@ describe('caller-owned prepared frames', () => {
       prepare() {
         return sceneAt
       },
-      generateScribbleArtwork(_params, _seed, _frame, observer) {
+      generateShadingArtwork(_params, _seed, _frame, observer) {
         observer?.({
           completedWorkUnits: 2,
           totalWorkUnits: 2,
@@ -372,17 +1005,17 @@ describe('caller-owned prepared frames', () => {
           scene: artworkScene,
           diagnostics: {
             termination: 'completed',
-            residualError: 0,
             pathLength: 1,
             polylineCount: 1,
             penLiftCount: 0,
+            fidelity: { kind: 'scribble', residualError: 0 },
           },
         }
       },
     })
 
     expect(
-      sketch.generateScribbleArtwork?.(
+      sketch.generateShadingArtwork?.(
         {},
         'seed',
         DEFAULT_COMPOSITION_FRAME,
@@ -392,10 +1025,10 @@ describe('caller-owned prepared frames', () => {
       scene: artworkScene,
       diagnostics: {
         termination: 'completed',
-        residualError: 0,
         pathLength: 1,
         polylineCount: 1,
         penLiftCount: 0,
+        fidelity: { kind: 'scribble', residualError: 0 },
       },
     })
     expect(progress).toEqual([
@@ -502,16 +1135,16 @@ describe('optional Sketch environment', () => {
           shadingMask: createShadingMask(() => 0),
         }
       },
-      generateScribbleArtwork(_params, _seed, _frame, _observer, current) {
+      generateShadingArtwork(_params, _seed, _frame, _observer, current) {
         received.push(current)
         return {
           scene,
           diagnostics: {
             termination: 'completed',
-            residualError: 0,
             pathLength: 0,
             polylineCount: 0,
             penLiftCount: 0,
+            fidelity: { kind: 'scribble', residualError: 0 },
           },
         }
       },
@@ -523,7 +1156,7 @@ describe('optional Sketch environment', () => {
 
     sketch.generate({}, 1, 0, DEFAULT_COMPOSITION_FRAME, environment)
     sketch.generateToneSource?.({}, DEFAULT_COMPOSITION_FRAME, environment)
-    sketch.generateScribbleArtwork?.(
+    sketch.generateShadingArtwork?.(
       {},
       1,
       DEFAULT_COMPOSITION_FRAME,

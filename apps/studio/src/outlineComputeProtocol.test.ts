@@ -42,7 +42,7 @@ const scene: Scene = {
         [70, 10],
         [90, 20],
       ],
-      stroke: { color: "black", width: 1 },
+      stroke: { color: "black", width: 1, lineCap: "round" },
       hiddenLineRole: "source",
     },
   ],
@@ -162,6 +162,8 @@ describe("outline compute identity", () => {
       (copy) => delete copy.sourceScene.primitives[0].fill,
       (copy) => (copy.sourceScene.primitives[0].stroke.color = "black"),
       (copy) => (copy.sourceScene.primitives[0].stroke.width = 3),
+      (copy) => (copy.sourceScene.primitives[1].stroke.lineCap = "square"),
+      (copy) => delete copy.sourceScene.primitives[1].stroke.lineCap,
       (copy) => delete copy.sourceScene.primitives[0].stroke,
       (copy) => (copy.sourceScene.primitives[0].hiddenLineRole = "both"),
       (copy) => delete copy.sourceScene.primitives[0].hiddenLineRole,
@@ -211,6 +213,8 @@ describe("outline compute identity", () => {
       (copy) => delete copy.sourceScene.primitives[0].fill,
       (copy) => (copy.sourceScene.primitives[0].stroke.color = "black"),
       (copy) => (copy.sourceScene.primitives[0].stroke.width = 3),
+      (copy) => (copy.sourceScene.primitives[1].stroke.lineCap = "square"),
+      (copy) => delete copy.sourceScene.primitives[1].stroke.lineCap,
       (copy) => delete copy.sourceScene.primitives[0].stroke,
       (copy) => (copy.sourceScene.primitives[0].hiddenLineRole = "both"),
       (copy) => delete copy.sourceScene.primitives[0].hiddenLineRole,
@@ -381,6 +385,7 @@ describe("outline compute identity", () => {
 
     expect(restored.primitives[0]?.hiddenLineRole).toBe("occluder");
     expect(restored.primitives[1]?.hiddenLineRole).toBe("source");
+    expect(restored.primitives[1]?.stroke?.lineCap).toBe("round");
     expect(
       "hiddenLineRole" in mutableScene(omitted.sourceScene).primitives[1]!,
     ).toBe(false);
@@ -520,6 +525,29 @@ describe("outline compute protocol guards", () => {
 
     const malformedScene = structuredClone(scene) as Record<string, any>;
     malformedScene.primitives[0].hiddenLineRole = "grass-mask";
+
+    expect(isOutlineComputeRequest(malformedRequest)).toBe(false);
+    expect(
+      isOutlineComputeResponse({
+        type: "success",
+        jobId: 1,
+        identity: identity(),
+        scene: malformedScene,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects unknown stroke caps in requests and response Scenes", () => {
+    const malformedRequest = structuredClone({
+      type: "compute",
+      jobId: 1,
+      identity: identity(),
+    }) as Record<string, any>;
+    malformedRequest.identity.sourceScene.primitives[1].stroke.lineCap =
+      "triangle";
+
+    const malformedScene = structuredClone(scene) as Record<string, any>;
+    malformedScene.primitives[1].stroke.lineCap = "triangle";
 
     expect(isOutlineComputeRequest(malformedRequest)).toBe(false);
     expect(

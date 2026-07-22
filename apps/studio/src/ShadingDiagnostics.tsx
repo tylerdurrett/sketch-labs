@@ -1,4 +1,4 @@
-import type { ScribbleDiagnostics, ScribbleProgress } from "@harness/core";
+import type { ShadingDiagnostics, ShadingProgress } from "@harness/core";
 
 import { Button } from "./components/ui/button";
 import type { RollingEtaEstimate } from "./rollingEta";
@@ -6,7 +6,7 @@ import type { RollingEtaEstimate } from "./rollingEta";
 /** Final metrics and provenance for the geometry currently retained on screen. */
 export interface DisplayedShadingDiagnostics {
   readonly freshness: "current" | "stale";
-  readonly diagnostics: ScribbleDiagnostics;
+  readonly diagnostics: ShadingDiagnostics;
   readonly computeTimeMs: number;
 }
 
@@ -15,7 +15,7 @@ export type ShadingPreparationDiagnostics =
   | { readonly kind: "idle" }
   | {
       readonly kind: "preparing";
-      readonly progress: ScribbleProgress | null;
+      readonly progress: ShadingProgress | null;
       readonly eta: RollingEtaEstimate;
     }
   | {
@@ -49,7 +49,7 @@ function formatPathLength(value: number): string {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} units`;
 }
 
-function progressPercent(progress: ScribbleProgress): number {
+function progressPercent(progress: ShadingProgress): number {
   if (progress.totalWorkUnits === 0) return 0;
   return Math.min(
     100,
@@ -60,7 +60,7 @@ function progressPercent(progress: ScribbleProgress): number {
 function ProgressSummary({
   progress,
 }: {
-  readonly progress: ScribbleProgress | null;
+  readonly progress: ShadingProgress | null;
 }) {
   if (progress === null) return <>Preparing</>;
   if (progress.terminal) return <>Preparation complete</>;
@@ -140,6 +140,36 @@ function Metric({
   );
 }
 
+function assertNever(value: never): never {
+  throw new TypeError(`Unsupported Shading fidelity: ${String(value)}`);
+}
+
+/** Render fidelity from the retained result itself, never from live controls. */
+function FidelityMetric({
+  fidelity,
+}: {
+  readonly fidelity: ShadingDiagnostics["fidelity"];
+}) {
+  switch (fidelity.kind) {
+    case "scribble":
+      return (
+        <Metric
+          label="Residual error"
+          value={formatPercent(fidelity.residualError)}
+        />
+      );
+    case "stippling":
+      return (
+        <Metric
+          label="Distribution error"
+          value={formatPercent(fidelity.distributionError)}
+        />
+      );
+  }
+
+  return assertNever(fidelity);
+}
+
 function DisplayedLane({
   displayed,
 }: {
@@ -176,10 +206,7 @@ function DisplayedLane({
                 : "Budget exhausted"
           }
         />
-        <Metric
-          label="Residual error"
-          value={formatPercent(diagnostics.residualError)}
-        />
+        <FidelityMetric fidelity={diagnostics.fidelity} />
         <Metric
           label="Compute time"
           value={formatDuration(displayed.computeTimeMs)}
@@ -311,7 +338,7 @@ function FailureLane({
 }
 
 /**
- * Compact, read-only diagnostics for complete Scribble geometry and its current
+ * Compact, read-only diagnostics for complete Shading geometry and its current
  * worker job. The disclosure starts collapsed; provenance stays explicit when
  * stale geometry is retained so its final metrics cannot be mistaken for the
  * replacement's observational progress.

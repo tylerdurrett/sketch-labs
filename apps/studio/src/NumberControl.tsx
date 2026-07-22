@@ -54,11 +54,37 @@ export function coerceToDomain(raw: number, spec: NumberParamSpec): number {
   return spec.integer ? Math.round(clamped) : clamped;
 }
 
+function assertLogarithmicDomain(spec: NumberParamSpec): void {
+  if (spec.min <= 0 || spec.max <= 0) {
+    throw new RangeError("A logarithmic slider requires positive bounds");
+  }
+}
+
+/** Map one stored numeric value onto its declared slider coordinate. */
+export function sliderPositionForValue(
+  value: number,
+  spec: NumberParamSpec,
+): number {
+  if (spec.sliderScale !== "logarithmic") return value;
+  assertLogarithmicDomain(spec);
+  return Math.log10(value);
+}
+
+/** Map one slider coordinate back to the unchanged authored value domain. */
+export function valueForSliderPosition(
+  position: number,
+  spec: NumberParamSpec,
+): number {
+  if (spec.sliderScale !== "logarithmic") return position;
+  assertLogarithmicDomain(spec);
+  return 10 ** position;
+}
+
 /**
  * A single numeric control, laid out as TWO lines. Top line: the param label,
  * a free-entry number input, and a lucide Lock toggle. Bottom line: a full-width
- * {@link Slider}. Both the number input and the slider are two-way bound to the
- * same `value`.
+ * {@link Slider}. Both are two-way bound to the same authored `value`; a schema
+ * may map only the slider's presentation through logarithmic coordinates.
  *
  * The slider's `step` is `spec.step` (defaulting to a fine, range-relative
  * increment so an unspecified step gives effectively continuous drag — Base UI's
@@ -131,10 +157,12 @@ export function NumberControl({
     editHistory?.onCancel();
   };
 
-  // Drag granularity: the declared step, or a fine range-relative fallback that
-  // stands in for the old native `step="any"` (Base UI's Slider takes a numeric
-  // step only, defaulting to a coarse `1`).
-  const sliderStep = spec.step ?? (spec.max - spec.min) / 1000;
+  // Drag granularity on the declared slider axis: ordinary value units or,
+  // for logarithmic presentation, decades. The fallback stands in for the old
+  // native `step="any"` (Base UI's Slider requires a numeric step).
+  const sliderMin = sliderPositionForValue(spec.min, spec);
+  const sliderMax = sliderPositionForValue(spec.max, spec);
+  const sliderStep = spec.step ?? (sliderMax - sliderMin) / 1000;
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -214,11 +242,13 @@ export function NumberControl({
       </div>
       <Slider
         aria-label={`${paramKey} slider`}
-        min={spec.min}
-        max={spec.max}
+        min={sliderMin}
+        max={sliderMax}
         step={sliderStep}
-        value={value}
-        onValueChange={(next) => preview(coerceToDomain(next, spec))}
+        value={sliderPositionForValue(value, spec)}
+        onValueChange={(next) =>
+          preview(coerceToDomain(valueForSliderPosition(next, spec), spec))
+        }
         onValueCommitted={commitTransaction}
       />
     </div>

@@ -25,7 +25,11 @@ export interface ImmutablePrimitive {
   readonly points: readonly ImmutablePoint[];
   readonly closed?: boolean;
   readonly fill?: Readonly<{ color: string }>;
-  readonly stroke?: Readonly<{ color: string; width: number }>;
+  readonly stroke?: Readonly<{
+    color: string;
+    width: number;
+    lineCap?: "butt" | "round" | "square";
+  }>;
   readonly hiddenLineRole?: HiddenLineRole;
 }
 
@@ -156,7 +160,11 @@ export function immutableScene(scene: Scene | ImmutableScene): ImmutableScene {
       points: ImmutablePoint[];
       closed?: boolean;
       fill?: Readonly<{ color: string }>;
-      stroke?: Readonly<{ color: string; width: number }>;
+      stroke?: Readonly<{
+        color: string;
+        width: number;
+        lineCap?: "butt" | "round" | "square";
+      }>;
       hiddenLineRole?: HiddenLineRole;
     } = {
       points: primitive.points.map(
@@ -171,6 +179,9 @@ export function immutableScene(scene: Scene | ImmutableScene): ImmutableScene {
       copy.stroke = Object.freeze({
         color: primitive.stroke.color,
         width: primitive.stroke.width,
+        ...(primitive.stroke.lineCap === undefined
+          ? {}
+          : { lineCap: primitive.stroke.lineCap }),
       });
     }
     if (
@@ -311,6 +322,12 @@ function isHiddenLineRole(value: unknown): value is HiddenLineRole {
   return value === "source" || value === "occluder" || value === "both";
 }
 
+function isStrokeLineCap(
+  value: unknown,
+): value is "butt" | "round" | "square" {
+  return value === "butt" || value === "round" || value === "square";
+}
+
 function isScene(value: unknown): value is Scene {
   if (!isRecord(value) || !isRecord(value.space)) return false;
   if (
@@ -357,7 +374,9 @@ function isScene(value: unknown): value is Scene {
       !hasOwn(candidate, "stroke") ||
       (isRecord(candidate.stroke) &&
         typeof candidate.stroke.color === "string" &&
-        isFiniteNumber(candidate.stroke.width))
+        isFiniteNumber(candidate.stroke.width) &&
+        (!hasOwn(candidate.stroke, "lineCap") ||
+          isStrokeLineCap(candidate.stroke.lineCap)))
     );
   });
 }
@@ -495,7 +514,12 @@ function optionalStyleEqual(
   const rightStyle = right[key];
   if (!isRecord(leftStyle) || !isRecord(rightStyle)) return false;
   if (!Object.is(leftStyle.color, rightStyle.color)) return false;
-  return key === "fill" || Object.is(leftStyle.width, rightStyle.width);
+  return (
+    key === "fill" ||
+    (Object.is(leftStyle.width, rightStyle.width) &&
+      hasOwn(leftStyle, "lineCap") === hasOwn(rightStyle, "lineCap") &&
+      Object.is(leftStyle.lineCap, rightStyle.lineCap))
+  );
 }
 
 function sceneEqual(left: ImmutableScene, right: ImmutableScene): boolean {
@@ -647,6 +671,9 @@ export function mutableScene(scene: ImmutableScene): Scene {
         copy.stroke = {
           color: primitive.stroke.color,
           width: primitive.stroke.width,
+          ...(primitive.stroke.lineCap === undefined
+            ? {}
+            : { lineCap: primitive.stroke.lineCap }),
         };
       }
       if (primitive.hiddenLineRole !== undefined) {

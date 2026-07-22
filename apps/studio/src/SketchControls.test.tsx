@@ -10,6 +10,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  activeParams,
+  applyPreset,
   clipSceneToBounds,
   computePlotMapping,
   createShadingMask,
@@ -23,6 +25,7 @@ import {
   hiddenLinePass,
   IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
   leafField,
+  newSeed,
   photoScribble,
   prepareImageDetailAnalysis,
   renderPlotterSVG,
@@ -30,14 +33,15 @@ import {
   resolvePlotCompositionFrame,
   scribbleMoon,
   toneCalibration,
-  type ParamSchema,
   type CoordinateSpace,
   type DetailField,
+  type Params,
+  type ParamSchema,
   type PageFrame,
   type PlotProfile,
   type Preset,
   type Scene,
-  type ScribbleDiagnostics,
+  type ShadingDiagnostics,
   type Seed,
   type SketchEnvironment,
   type ToneSource,
@@ -64,7 +68,7 @@ import {
   type PageFramePointer,
 } from "./pageFrameManipulation";
 import type { PageFrameEditDraft } from "./pageFrameEditDraft";
-import { isScribbleComputeIdentity } from "./scribbleComputeProtocol";
+import { isShadingComputeIdentity } from "./shadingComputeProtocol";
 import { SketchControls } from "./SketchControls";
 import type { EditHistory } from "./editHistory";
 import {
@@ -127,15 +131,15 @@ const outlineJob = vi.hoisted(() => ({
     cancel: () => void;
   },
 }));
-const scribbleJob = vi.hoisted(() => ({
+const shadingJob = vi.hoisted(() => ({
   coordinators: 0,
   disposals: 0,
   cancelCount: 0,
   starts: [] as Array<{
-    identity: import("./scribbleComputeProtocol").ScribbleComputeIdentity;
+    identity: import("./shadingComputeProtocol").ShadingComputeIdentity;
     resolve: (result: unknown) => void;
     observeProgress:
-      | import("./scribbleCoordinator").ScribbleProgressObserver
+      | import("./shadingCoordinator").ShadingProgressObserver
       | undefined;
   }>,
 }));
@@ -224,34 +228,34 @@ vi.mock("./imageAssetResolver", async (importActual) => {
   };
 });
 
-vi.mock("./scribbleCoordinator", () => ({
-  ScribbleCoordinator: class {
+vi.mock("./shadingCoordinator", () => ({
+  ShadingCoordinator: class {
     private disposed = false;
 
     constructor() {
-      scribbleJob.coordinators += 1;
+      shadingJob.coordinators += 1;
     }
 
     start(
-      identity: import("./scribbleComputeProtocol").ScribbleComputeIdentity,
-      observeProgress?: import("./scribbleCoordinator").ScribbleProgressObserver,
+      identity: import("./shadingComputeProtocol").ShadingComputeIdentity,
+      observeProgress?: import("./shadingCoordinator").ShadingProgressObserver,
     ) {
-      orchestrationEvents.push("scribble:start");
+      orchestrationEvents.push("shading:start");
       return new Promise((resolve) => {
-        scribbleJob.starts.push({ identity, resolve, observeProgress });
+        shadingJob.starts.push({ identity, resolve, observeProgress });
       });
     }
 
     cancel() {
-      orchestrationEvents.push("scribble:cancel");
-      scribbleJob.cancelCount += 1;
+      orchestrationEvents.push("shading:cancel");
+      shadingJob.cancelCount += 1;
       return true;
     }
 
     dispose() {
       if (this.disposed) return;
       this.disposed = true;
-      scribbleJob.disposals += 1;
+      shadingJob.disposals += 1;
       this.cancel();
     }
   },
@@ -923,10 +927,10 @@ beforeEach(() => {
   outlineJob.active = null;
   outlineJob.lastIdentity = null;
   outlineJob.lastCompletedScene = null;
-  scribbleJob.coordinators = 0;
-  scribbleJob.disposals = 0;
-  scribbleJob.cancelCount = 0;
-  scribbleJob.starts = [];
+  shadingJob.coordinators = 0;
+  shadingJob.disposals = 0;
+  shadingJob.cancelCount = 0;
+  shadingJob.starts = [];
   detailJob.cancelCount = 0;
   detailJob.resolveOnCancel = true;
   detailJob.disposals = 0;
@@ -1025,6 +1029,25 @@ function paramInput(el: HTMLElement, key: string): HTMLInputElement {
   const input = el.querySelector<HTMLInputElement>(`#control-${key}`);
   if (input === null) throw new Error(`no input for param ${key}`);
   return input;
+}
+
+/** The schema-derived Choice select for a given parameter key. */
+function choiceParamSelect(el: HTMLElement, key: string): HTMLSelectElement {
+  const select = el.querySelector<HTMLSelectElement>(`select#control-${key}`);
+  if (select === null) throw new Error(`no Choice control for param ${key}`);
+  return select;
+}
+
+/** Set one controlled select through the native setter React observes. */
+function selectValue(select: HTMLSelectElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLSelectElement.prototype,
+    "value",
+  )!.set!;
+  act(() => {
+    setter.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 }
 
 function clickButton(el: HTMLElement, text: string): void {
@@ -2806,7 +2829,7 @@ describe("SketchControls — Image Asset aspect recomposition (#349)", () => {
     const beforeComposition = structuredClone(lastCompositionFrame);
     const beforeGenerateCalls = generate.mock.calls.length;
     const beforeOutlineStarts = outlineJob.starts;
-    const beforeScribbleStarts = scribbleJob.starts.length;
+    const beforeShadingStarts = shadingJob.starts.length;
     historyCapture.atomic.length = 0;
 
     clickButton(el, "Recompose to this image’s aspect");
@@ -2824,7 +2847,7 @@ describe("SketchControls — Image Asset aspect recomposition (#349)", () => {
     expect(lastCompositionFrame).toEqual(beforeComposition);
     expect(generate).toHaveBeenCalledTimes(beforeGenerateCalls);
     expect(outlineJob.starts).toBe(beforeOutlineStarts);
-    expect(scribbleJob.starts).toHaveLength(beforeScribbleStarts);
+    expect(shadingJob.starts).toHaveLength(beforeShadingStarts);
   });
 
   it("contains the decoded aspect in one atomic recompose and Undo/Redo restores full states", async () => {
@@ -3329,6 +3352,225 @@ describe("SketchControls — randomize / lock wiring", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(paramInput(el, "radius").value).toBe("42");
+  });
+});
+
+describe("SketchControls — conditional authored-state acceptance", () => {
+  const schema: ParamSchema = {
+    strategy: {
+      kind: "choice",
+      default: "scribble",
+      options: [
+        { value: "scribble", label: "Scribble" },
+        { value: "stipple", label: "Stippling" },
+      ],
+    },
+    scribbleDensity: {
+      kind: "number",
+      min: 0,
+      max: 100,
+      default: 10,
+      activeWhen: { key: "strategy", equals: "scribble" },
+    },
+    scribbleFidelity: {
+      kind: "number",
+      min: 0,
+      max: 100,
+      default: 20,
+      activeWhen: { key: "strategy", equals: "scribble" },
+    },
+    stippleDensity: {
+      kind: "number",
+      min: 0,
+      max: 100,
+      default: 60,
+      activeWhen: { key: "strategy", equals: "stipple" },
+    },
+  };
+
+  const commitNumber = (
+    el: HTMLElement,
+    key: string,
+    value: string,
+  ): void => {
+    const input = paramInput(el, key);
+    act(() => input.focus());
+    setInput(input, value);
+    act(() => input.blur());
+  };
+
+  it("keeps hidden tuning through one-command Choice Undo/Redo and randomizes only active unlocked numbers", async () => {
+    const el = mount(
+      <SketchControls sketch={sketchWith("conditional-history", schema)} />,
+    );
+    await flush();
+
+    expect(choiceParamSelect(el, "strategy").value).toBe("scribble");
+    expect(paramInput(el, "scribbleDensity").value).toBe("10");
+    expect(el.querySelector("#control-stippleDensity")).toBeNull();
+    commitNumber(el, "scribbleDensity", "23");
+
+    const commitsBeforeFirstSwitch = historyCapture.transactionCommits.length;
+    selectValue(choiceParamSelect(el, "strategy"), "stipple");
+    expect(historyCapture.transactionCommits).toHaveLength(
+      commitsBeforeFirstSwitch + 1,
+    );
+    const firstSwitch = historyCapture.transactionCommits.at(-1)!;
+    expect(firstSwitch.before.transactionStart?.params.strategy).toBe(
+      "scribble",
+    );
+    expect(firstSwitch.before.present.params.strategy).toBe("stipple");
+    expect(firstSwitch.after.present.params.strategy).toBe("stipple");
+    expect(firstSwitch.after.past).toHaveLength(
+      firstSwitch.before.past.length + 1,
+    );
+    expect(el.querySelector("#control-scribbleDensity")).toBeNull();
+    expect(paramInput(el, "stippleDensity").value).toBe("60");
+
+    commitNumber(el, "stippleDensity", "81");
+    const commitsBeforeReturn = historyCapture.transactionCommits.length;
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    expect(historyCapture.transactionCommits).toHaveLength(
+      commitsBeforeReturn + 1,
+    );
+    expect(paramInput(el, "scribbleDensity").value).toBe("23");
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(choiceParamSelect(el, "strategy").value).toBe("stipple");
+    expect(paramInput(el, "stippleDensity").value).toBe("81");
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(choiceParamSelect(el, "strategy").value).toBe("scribble");
+    expect(paramInput(el, "scribbleDensity").value).toBe("23");
+
+    act(() => {
+      el.querySelector('button[aria-label="scribbleDensity lock"]')!.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    clickButton(el, "Randomize");
+
+    expect(paramInput(el, "scribbleDensity").value).toBe("23");
+    expect(paramInput(el, "scribbleFidelity").value).toBe("50");
+    expect(random).toHaveBeenCalledTimes(1);
+    const authored = historyCapture.atomic.at(-1)!.after.present.params as Params;
+    const authoredSnapshot = { ...authored };
+    expect(authored).toEqual({
+      strategy: "scribble",
+      scribbleDensity: 23,
+      scribbleFidelity: 50,
+      stippleDensity: 81,
+    });
+    expect(activeParams(schema, authored)).toEqual({
+      strategy: "scribble",
+      scribbleDensity: 23,
+      scribbleFidelity: 50,
+    });
+    expect(authored).toEqual(authoredSnapshot);
+
+    selectValue(choiceParamSelect(el, "strategy"), "stipple");
+    expect(paramInput(el, "stippleDensity").value).toBe("81");
+  });
+
+  it("saves complete conditional state and reloads the selected and hidden branches", async () => {
+    const loaded: Preset = {
+      version: 2,
+      sketch: "conditional-preset",
+      name: "authored",
+      seed: 777,
+      params: {
+        strategy: "stipple",
+        scribbleDensity: 31,
+        scribbleFidelity: 42,
+        stippleDensity: 87,
+      },
+      locks: ["scribbleDensity"],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    };
+    listPresets.mockResolvedValue(["authored"]);
+    loadPreset.mockResolvedValue(loaded);
+    const el = mount(
+      <SketchControls sketch={sketchWith("conditional-preset", schema)} />,
+    );
+    await flush();
+
+    commitNumber(el, "scribbleDensity", "23");
+    selectValue(choiceParamSelect(el, "strategy"), "stipple");
+    commitNumber(el, "stippleDensity", "81");
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      "conditional-save",
+    );
+    clickButton(el, "Save");
+    await flush();
+
+    expect(savePreset).toHaveBeenCalledTimes(1);
+    expect(savePreset.mock.calls[0]![0]).toMatchObject({
+      sketch: "conditional-preset",
+      name: "conditional-save",
+      params: {
+        strategy: "stipple",
+        scribbleDensity: 23,
+        scribbleFidelity: 20,
+        stippleDensity: 81,
+      },
+    });
+
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    selectValue(picker, "authored");
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(choiceParamSelect(el, "strategy").value).toBe("stipple");
+    expect(paramInput(el, "stippleDensity").value).toBe("87");
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual(
+      loaded.params,
+    );
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    expect(paramInput(el, "scribbleDensity").value).toBe("31");
+    expect(paramInput(el, "scribbleFidelity").value).toBe("42");
+  });
+
+  it("reconciles a legacy Preset missing Choice and dependent fields to live defaults", async () => {
+    listPresets.mockResolvedValue(["legacy"]);
+    loadPreset.mockResolvedValue({
+      version: 1,
+      sketch: "conditional-legacy",
+      name: "legacy",
+      seed: 888,
+      params: {},
+      locks: [],
+    });
+    const el = mount(
+      <SketchControls sketch={sketchWith("conditional-legacy", schema)} />,
+    );
+    await flush();
+
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    selectValue(picker, "legacy");
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(choiceParamSelect(el, "strategy").value).toBe("scribble");
+    expect(paramInput(el, "scribbleDensity").value).toBe("10");
+    expect(paramInput(el, "scribbleFidelity").value).toBe("20");
+    expect(el.querySelector("#control-stippleDensity")).toBeNull();
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual({
+      strategy: "scribble",
+      scribbleDensity: 10,
+      scribbleFidelity: 20,
+      stippleDensity: 60,
+    });
   });
 });
 
@@ -6284,6 +6526,19 @@ describe("SketchControls — Tone reference mode (#316)", () => {
 });
 
 describe("SketchControls — Tone Calibration target (#324)", () => {
+  const scribbleControlKeys = [
+    "pathDensity",
+    "scribbleScale",
+    "momentum",
+    "chaos",
+    "toneFidelity",
+    "stopPoint",
+  ] as const;
+  const stipplingControlKeys = [
+    "stippleDensity",
+    "distributionFidelity",
+  ] as const;
+
   function button(el: HTMLElement, label: string): HTMLButtonElement {
     const match = [...el.querySelectorAll<HTMLButtonElement>("button")].find(
       (candidate) => candidate.textContent === label,
@@ -6292,21 +6547,56 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     return match;
   }
 
-  it("shows exactly the six Scribble controls while keeping the source fixed", () => {
-    const el = mount(<SketchControls sketch={toneCalibration} />);
+  function visibleNumberKeys(el: HTMLElement): string[] {
+    return [...el.querySelectorAll<HTMLInputElement>(
+      '#inspector input[id^="control-"]',
+    )].map((input) => input.id.slice("control-".length));
+  }
 
-    expect(
-      [...el.querySelectorAll('#inspector input[id^="control-"]')].map(
-        (input) => input.id,
-      ),
-    ).toEqual([
-      "control-pathDensity",
-      "control-scribbleScale",
-      "control-momentum",
-      "control-chaos",
-      "control-toneFidelity",
-      "control-stopPoint",
+  function commitToneNumber(
+    el: HTMLElement,
+    key: string,
+    value: number,
+  ): void {
+    const input = paramInput(el, key);
+    act(() => input.focus());
+    setInput(input, String(value));
+    act(() => input.blur());
+  }
+
+  function toneSamples(source: ToneSource): number[] {
+    const frame = lastCompositionFrame!;
+    const points: [number, number][] = [
+      [0, frame.height * 0.25],
+      [frame.width / 2, frame.height * 0.25],
+      [frame.width / 2, frame.height * 0.75],
+    ];
+    return points.flatMap((point) => [
+      source.toneField.sample(point),
+      source.shadingMask.sample(point),
     ]);
+  }
+
+  function blobText(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+  }
+
+  it("defaults to Scribble, exposes only its six controls, and keeps the Tone target fixed across strategies", async () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+    const strategy = choiceParamSelect(el, "strategy");
+
+    expect(strategy.value).toBe("scribble");
+    expect([...strategy.options].map(({ value, text }) => [value, text])).toEqual([
+      ["scribble", "Scribble"],
+      ["stippling", "Stippling"],
+    ]);
+    expect(visibleNumberKeys(el)).toEqual(scribbleControlKeys);
     expect(paramInput(el, "pathDensity").value).toBe("1");
     expect(paramInput(el, "pathDensity").max).toBe("20");
     expect(paramInput(el, "scribbleScale").value).toBe("1");
@@ -6337,6 +6627,325 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
     ];
     expect(points.map((point) => lastToneSource!.toneField.sample(point))).toEqual(
       points.map((point) => expected.toneField.sample(point)),
+    );
+
+    const scribbleTarget = toneSamples(lastToneSource!);
+    selectValue(strategy, "stippling");
+    expect(visibleNumberKeys(el)).toEqual(stipplingControlKeys);
+    expect(paramInput(el, "stippleDensity").value).toBe("1");
+    expect(paramInput(el, "distributionFidelity").value).toBe("0.5");
+    expect(lastToneSource).not.toBeNull();
+    expect(toneSamples(lastToneSource!)).toEqual(scribbleTarget);
+  });
+
+  it("retains both real strategy branches through atomic Choice Undo and Redo", async () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+
+    commitToneNumber(el, "pathDensity", 2.5);
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    commitToneNumber(el, "stippleDensity", 1.75);
+    commitToneNumber(el, "distributionFidelity", 0.8);
+
+    const commitsBeforeReturn = historyCapture.transactionCommits.length;
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    expect(historyCapture.transactionCommits).toHaveLength(
+      commitsBeforeReturn + 1,
+    );
+    const strategyCommit = historyCapture.transactionCommits.at(-1)!;
+    expect(strategyCommit.before.transactionStart?.params.strategy).toBe(
+      "stippling",
+    );
+    expect(strategyCommit.after.past).toHaveLength(
+      strategyCommit.before.past.length + 1,
+    );
+    expect(strategyCommit.after.present.params).toMatchObject({
+      strategy: "scribble",
+      pathDensity: 2.5,
+      stippleDensity: 1.75,
+      distributionFidelity: 0.8,
+    });
+    expect(paramInput(el, "pathDensity").value).toBe("2.5");
+
+    expect(
+      pressHistoryShortcut(window, { ctrlKey: true }).defaultPrevented,
+    ).toBe(true);
+    expect(choiceParamSelect(el, "strategy").value).toBe("stippling");
+    expect(paramInput(el, "stippleDensity").value).toBe("1.75");
+    expect(paramInput(el, "distributionFidelity").value).toBe("0.8");
+
+    expect(
+      pressHistoryShortcut(window, { key: "y", ctrlKey: true })
+        .defaultPrevented,
+    ).toBe(true);
+    expect(choiceParamSelect(el, "strategy").value).toBe("scribble");
+    expect(paramInput(el, "pathDensity").value).toBe("2.5");
+  });
+
+  it("randomizes only active unlocked Tone numbers with exact branch-local random consumption", async () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    commitToneNumber(el, "stippleDensity", 2);
+    commitToneNumber(el, "distributionFidelity", 0.8);
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    act(() => {
+      el.querySelector<HTMLButtonElement>(
+        'button[aria-label="scribbleScale lock"]',
+      )!.click();
+    });
+
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    clickButton(el, "Randomize");
+    expect(random).toHaveBeenCalledTimes(5);
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual({
+      strategy: "scribble",
+      pathDensity: 10.25,
+      scribbleScale: 1,
+      momentum: 0.5,
+      chaos: 0.5,
+      toneFidelity: 0.5,
+      stopPoint: 50,
+      stippleDensity: 2,
+      distributionFidelity: 0.8,
+    });
+
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    expect(paramInput(el, "stippleDensity").value).toBe("2");
+    expect(paramInput(el, "distributionFidelity").value).toBe("0.8");
+    act(() => {
+      el.querySelector<HTMLButtonElement>(
+        'button[aria-label="distributionFidelity lock"]',
+      )!.click();
+    });
+    random.mockClear().mockReturnValue(0.25);
+    clickButton(el, "Randomize");
+    expect(random).toHaveBeenCalledTimes(1);
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual({
+      strategy: "stippling",
+      pathDensity: 10.25,
+      scribbleScale: 1,
+      momentum: 0.5,
+      chaos: 0.5,
+      toneFidelity: 0.5,
+      stopPoint: 50,
+      stippleDensity: 0.25 * (400 / 0.25) ** 0.25,
+      distributionFidelity: 0.8,
+    });
+  });
+
+  it("saves and reloads all nine authored Tone fields across both strategies", async () => {
+    const reloadedParams: Params = {
+      strategy: "stippling",
+      pathDensity: 4.5,
+      scribbleScale: 1.4,
+      momentum: 0.65,
+      chaos: 0.35,
+      toneFidelity: 0.85,
+      stopPoint: 90,
+      stippleDensity: 1.8,
+      distributionFidelity: 0.7,
+    };
+    listPresets.mockResolvedValue(["authored"]);
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: toneCalibration.id,
+      name: "authored",
+      seed: 777,
+      params: reloadedParams,
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+
+    const savedParams: Params = {
+      strategy: "stippling",
+      pathDensity: 2.5,
+      scribbleScale: 1.3,
+      momentum: 0.6,
+      chaos: 0.4,
+      toneFidelity: 0.8,
+      stopPoint: 80,
+      stippleDensity: 2,
+      distributionFidelity: 0.75,
+    };
+    for (const key of scribbleControlKeys) {
+      commitToneNumber(el, key, Number(savedParams[key]));
+    }
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    for (const key of stipplingControlKeys) {
+      commitToneNumber(el, key, Number(savedParams[key]));
+    }
+    setInput(
+      el.querySelector<HTMLInputElement>('input[aria-label="preset name"]')!,
+      "complete-tone",
+    );
+    clickButton(el, "Save");
+    await flush();
+    expect(savePreset.mock.calls.at(-1)?.[0]).toMatchObject({
+      sketch: toneCalibration.id,
+      name: "complete-tone",
+      params: savedParams,
+    });
+    expect(Object.keys(savePreset.mock.calls.at(-1)![0].params)).toHaveLength(9);
+
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    selectValue(picker, "authored");
+    clickButton(el, "Reload");
+    await flush();
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual(
+      reloadedParams,
+    );
+    expect(choiceParamSelect(el, "strategy").value).toBe("stippling");
+    expect(stipplingControlKeys.map((key) => paramInput(el, key).value)).toEqual([
+      "1.8",
+      "0.7",
+    ]);
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    expect(scribbleControlKeys.map((key) => paramInput(el, key).value)).toEqual([
+      "4.5",
+      "1.4",
+      "0.65",
+      "0.35",
+      "0.85",
+      "90",
+    ]);
+  });
+
+  it("reconciles the existing neat Preset to Scribble and live Stippling defaults", async () => {
+    listPresets.mockResolvedValue(["neat"]);
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: toneCalibration.id,
+      name: "neat",
+      seed: 6329797832350081,
+      params: {
+        pathDensity: 19.7,
+        scribbleScale: 1,
+        momentum: 0.75,
+        chaos: 0.25,
+        toneFidelity: 0.9,
+        stopPoint: 100,
+      },
+      locks: [],
+      profile: {
+        width: 200,
+        height: 200,
+        insets: { top: 10, right: 10, bottom: 10, left: 10 },
+        includeFrame: true,
+      },
+    } as unknown as Preset);
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+
+    selectValue(
+      el.querySelector<HTMLSelectElement>(
+        'select[aria-label="saved presets"]',
+      )!,
+      "neat",
+    );
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(choiceParamSelect(el, "strategy").value).toBe("scribble");
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toEqual({
+      strategy: "scribble",
+      pathDensity: 19.7,
+      scribbleScale: 1,
+      momentum: 0.75,
+      chaos: 0.25,
+      toneFidelity: 0.9,
+      stopPoint: 100,
+      stippleDensity: 1,
+      distributionFidelity: 0.5,
+    });
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    expect(visibleNumberKeys(el)).toEqual(stipplingControlKeys);
+    expect(paramInput(el, "stippleDensity").value).toBe("1");
+    expect(paramInput(el, "distributionFidelity").value).toBe("0.5");
+  });
+
+  it("embeds all authored Tone fields in SVG metadata while worker identity stays active-only", async () => {
+    const authoredParams: Params = {
+      strategy: "stippling",
+      pathDensity: 4.5,
+      scribbleScale: 1.4,
+      momentum: 0.65,
+      chaos: 0.35,
+      toneFidelity: 0.85,
+      stopPoint: 90,
+      stippleDensity: 1.8,
+      distributionFidelity: 0.7,
+    };
+    listPresets.mockResolvedValue(["metadata"]);
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: toneCalibration.id,
+      name: "metadata",
+      seed: 999,
+      params: authoredParams,
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await flush();
+    selectValue(
+      el.querySelector<HTMLSelectElement>(
+        'select[aria-label="saved presets"]',
+      )!,
+      "metadata",
+    );
+    clickButton(el, "Reload");
+    await flush();
+
+    const jobIndex = shadingJob.starts.length - 1;
+    const job = shadingJob.starts[jobIndex]!;
+    expect(job.identity.params).toEqual([
+      { key: "strategy", value: "stippling" },
+      { key: "stippleDensity", value: 1.8 },
+      { key: "distributionFidelity", value: 0.7 },
+    ]);
+    await act(async () => {
+      job.resolve({
+        status: "success",
+        jobId: jobIndex + 1,
+        identity: job.identity,
+        scene: {
+          space: lastCompositionFrame!,
+          primitives: [
+            {
+              points: [[1, 1], [1.1, 1.1]],
+              closed: false,
+              stroke: { color: "black", width: 1 },
+              hiddenLineRole: "source",
+            },
+          ],
+        },
+        diagnostics: {
+          termination: "completed",
+          pathLength: 0.14,
+          polylineCount: 1,
+          penLiftCount: 0,
+          fidelity: { kind: "stippling", distributionError: 0.02 },
+        },
+        computeTimeMs: 5,
+      });
+      await Promise.resolve();
+    });
+
+    clickButton(el, "Export SVG");
+    const svg = await blobText(downloadBlob.mock.calls.at(-1)![0]);
+    const encoded = svg.match(/<metadata>([\s\S]*?)<\/metadata>/)?.[1];
+    expect(encoded).toBeDefined();
+    const metadata = JSON.parse(encoded!) as Preset;
+    expect(metadata.params).toEqual(authoredParams);
+    expect(Object.keys(metadata.params)).toHaveLength(9);
+    expect(applyPreset(toneCalibration.schema, metadata).params).toEqual(
+      authoredParams,
     );
   });
 
@@ -6382,7 +6991,7 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
       ],
     };
     await act(async () => {
-      const job = scribbleJob.starts[0]!;
+      const job = shadingJob.starts[0]!;
       job.resolve({
         status: "success",
         jobId: 1,
@@ -6390,10 +6999,10 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
         scene: prepared,
         diagnostics: {
           termination: "completed",
-          residualError: 0.01,
           pathLength: 1,
           polylineCount: 1,
           penLiftCount: 0,
+          fidelity: { kind: "scribble", residualError: 0.01 },
         },
         computeTimeMs: 5,
       });
@@ -6444,22 +7053,25 @@ describe("SketchControls — Tone Calibration target (#324)", () => {
   });
 });
 
-describe("SketchControls — Scribble preparation composition (#318)", () => {
+describe("SketchControls — Shading preparation composition (#318)", () => {
   const diagnostics = {
     termination: "completed" as const,
-    residualError: 0.01,
     pathLength: 12,
     polylineCount: 2,
     penLiftCount: 1,
+    fidelity: {
+      kind: "scribble" as const,
+      residualError: 0.01,
+    },
   };
 
-  async function completeScribble(
+  async function completeShading(
     index: number,
     scene: Scene,
-    resultDiagnostics: ScribbleDiagnostics = diagnostics,
+    resultDiagnostics: ShadingDiagnostics = diagnostics,
   ): Promise<void> {
-    const job = scribbleJob.starts[index];
-    if (job === undefined) throw new Error(`no Scribble job ${index}`);
+    const job = shadingJob.starts[index];
+    if (job === undefined) throw new Error(`no Shading job ${index}`);
     await act(async () => {
       job.resolve({
         status: "success",
@@ -6498,7 +7110,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     });
   }
 
-  function reportScribbleProgress(
+  function reportShadingProgress(
     index: number,
     completedWorkUnits: number,
     totalWorkUnits: number,
@@ -6507,8 +7119,8 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       revision: 1,
     },
   ): void {
-    const observe = scribbleJob.starts[index]?.observeProgress;
-    if (observe === undefined) throw new Error(`no Scribble observer ${index}`);
+    const observe = shadingJob.starts[index]?.observeProgress;
+    if (observe === undefined) throw new Error(`no Shading observer ${index}`);
     act(() => {
       observe({
         snapshot: {
@@ -6521,9 +7133,9 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     });
   }
 
-  async function failScribble(index: number, error: string): Promise<void> {
-    const job = scribbleJob.starts[index];
-    if (job === undefined) throw new Error(`no Scribble job ${index}`);
+  async function failShading(index: number, error: string): Promise<void> {
+    const job = shadingJob.starts[index];
+    if (job === undefined) throw new Error(`no Shading job ${index}`);
     await act(async () => {
       job.resolve({ status: "failure", jobId: index + 1, error });
       await Promise.resolve();
@@ -6560,13 +7172,156 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     return match;
   }
 
-  it("scales, pans, applies, and resets a fixed Page without restarting Scribble or revising painted provenance", async () => {
+  function readBlobText(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+  }
+
+  function historyWriteCount(): number {
+    return (
+      historyCapture.atomic.length +
+      historyCapture.transactionCommits.length +
+      historyCapture.cancels.length
+    );
+  }
+
+  const shadingParamEntries = (params: Params) =>
+    Object.entries(activeParams(toneCalibration.schema, params)).map(
+      ([key, value]) => ({ key, value }),
+    );
+
+  it("ignores an actual Tone inactive-branch-only Preset edit without disturbing current Shading", async () => {
+    const initialParams = defaultParams(toneCalibration.schema);
+    const initialSeed = newSeed(() => 0.125);
+    vi.spyOn(Math, "random").mockReturnValue(0.125);
+    listPresets.mockResolvedValue(["inactive-stippling"]);
+    loadPreset.mockResolvedValue({
+      version: 2,
+      sketch: toneCalibration.id,
+      name: "inactive-stippling",
+      seed: initialSeed,
+      params: {
+        ...initialParams,
+        stippleDensity: 1.75,
+        distributionFidelity: 0.8,
+      },
+      locks: [],
+      profile: HARNESS_FALLBACK_PLOT_PROFILE,
+    });
+
     const el = mount(<SketchControls sketch={toneCalibration} />);
-    await completeScribble(0, preparedScene(77));
+    await flush();
+    expect(shadingJob.starts[0]!.identity.params).toEqual(
+      shadingParamEntries(initialParams),
+    );
+    await completeShading(0, preparedScene(70));
+
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const presentation = {
+      sourceInputRevision: canvas.dataset.sourceInputRevision,
+      contentRevision: canvas.dataset.contentRevision,
+      diagnostics: shadingDisclosure(el).textContent,
+      cancelCount: shadingJob.cancelCount,
+    };
+    const picker = el.querySelector<HTMLSelectElement>(
+      'select[aria-label="saved presets"]',
+    )!;
+    selectValue(picker, "inactive-stippling");
+    clickButton(el, "Reload");
+    await flush();
+
+    expect(historyCapture.atomic.at(-1)!.after.present.params).toMatchObject({
+      strategy: "scribble",
+      stippleDensity: 1.75,
+      distributionFidelity: 0.8,
+    });
+    expect(shadingJob.starts).toHaveLength(1);
+    expect(shadingJob.cancelCount).toBe(presentation.cancelCount);
+    expect(canvas.dataset.sourceInputRevision).toBe(
+      presentation.sourceInputRevision,
+    );
+    expect(canvas.dataset.contentRevision).toBe(presentation.contentRevision);
+    expect(shadingDisclosure(el).textContent).toBe(presentation.diagnostics);
+  });
+
+  it("settles actual Tone previews once and switches strategies with only the restored active branch", async () => {
+    const authored = defaultParams(toneCalibration.schema);
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    expect(shadingJob.starts[0]!.identity.params).toEqual(
+      shadingParamEntries(authored),
+    );
+    await completeShading(0, preparedScene(71));
+
+    const pathDensity = paramInput(el, "pathDensity");
+    act(() => pathDensity.focus());
+    setInput(pathDensity, "1.5");
+    setInput(pathDensity, "2");
+    setInput(pathDensity, "2.5");
+    expect(shadingJob.starts).toHaveLength(1);
+    act(() => pathDensity.blur());
+
+    authored.pathDensity = 2.5;
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(shadingJob.starts[1]!.identity.params).toEqual(
+      shadingParamEntries(authored),
+    );
+    await completeShading(1, preparedScene(72));
+
+    const commitsBeforeStippling = historyCapture.transactionCommits.length;
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    authored.strategy = "stippling";
+    expect(historyCapture.transactionCommits).toHaveLength(
+      commitsBeforeStippling + 1,
+    );
+    expect(shadingJob.starts).toHaveLength(3);
+    expect(shadingJob.starts[2]!.identity.params).toEqual(
+      shadingParamEntries(authored),
+    );
+    expect(shadingJob.starts[2]!.identity.params).not.toContainEqual({
+      key: "pathDensity",
+      value: 2.5,
+    });
+    await completeShading(2, preparedScene(73));
+
+    const stippleDensity = paramInput(el, "stippleDensity");
+    act(() => stippleDensity.focus());
+    setInput(stippleDensity, "1.5");
+    act(() => stippleDensity.blur());
+    authored.stippleDensity = 1.5;
+    expect(shadingJob.starts).toHaveLength(4);
+    expect(shadingJob.starts[3]!.identity.params).toEqual(
+      shadingParamEntries(authored),
+    );
+    await completeShading(3, preparedScene(74));
+
+    const commitsBeforeScribble = historyCapture.transactionCommits.length;
+    selectValue(choiceParamSelect(el, "strategy"), "scribble");
+    authored.strategy = "scribble";
+    expect(historyCapture.transactionCommits).toHaveLength(
+      commitsBeforeScribble + 1,
+    );
+    expect(shadingJob.starts).toHaveLength(5);
+    expect(shadingJob.starts[4]!.identity.params).toEqual(
+      shadingParamEntries(authored),
+    );
+    expect(paramInput(el, "pathDensity").value).toBe("2.5");
+    expect(shadingJob.starts[4]!.identity.params).not.toContainEqual({
+      key: "stippleDensity",
+      value: 1.5,
+    });
+  });
+
+  it("scales, pans, applies, and resets a fixed Page without restarting Shading or revising painted provenance", async () => {
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    await completeShading(0, preparedScene(77));
     const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
     const sourceRevision = canvas.dataset.sourceInputRevision;
     const contentRevision = canvas.dataset.contentRevision;
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
 
     clickButton(el, "Crop");
     act(() =>
@@ -6593,10 +7348,10 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     );
     expect(lastPageFrameEditDraft?.frame).not.toEqual(scaled.frame);
     expect(historyCapture.atomic).toHaveLength(0);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     clickButton(el, "Apply");
     expect(historyCapture.atomic).toHaveLength(1);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
     expect(canvas.dataset.contentRevision).toBe(contentRevision);
 
@@ -6608,7 +7363,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     );
     clickButton(el, "Reset Frame");
     expect(historyCapture.atomic).toHaveLength(2);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
     expect(canvas.dataset.contentRevision).toBe(contentRevision);
   });
@@ -6621,7 +7376,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     );
     const source = preparedScene(78);
     source.primitives[0]!.stroke = { color: "navy", width: 7 };
-    await completeScribble(0, source);
+    await completeShading(0, source);
     clickButton(el, "Outline");
     act(() => lastOnOutlineComputed?.());
     expect(outlineJob.starts).toBe(1);
@@ -6662,7 +7417,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       millimetersPerSceneUnit: targetScale,
     });
     expect(outlineJob.starts).toBe(1);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
 
     const scaledStrokePolicy = lastOutlineFinalizationStrokePolicy;
@@ -6676,12 +7431,12 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(lastRenderScene).toBe(cachedOutlineScene);
     expect(lastOutlineFinalizationStrokePolicy).toBe(scaledStrokePolicy);
     expect(outlineJob.starts).toBe(1);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
 
     clickButton(el, "Apply");
     expect(outlineJob.starts).toBe(1);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
 
     clickButton(el, "Crop");
@@ -6704,7 +7459,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(lastRenderScene).toBe(cachedOutlineScene);
     expect(lastOutlineFinalizationStrokePolicy).toBe(scaledStrokePolicy);
     expect(outlineJob.starts).toBe(1);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
 
     clickButton(el, "Export Hidden-line SVG");
@@ -6735,7 +7490,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     const el = mount(<SketchControls sketch={sketch} />);
     await flush();
     expect(lastCompositionFrame).toEqual(FIXED_PAGE_PARITY_COMPOSITION);
-    await completeScribble(0, source);
+    await completeShading(0, source);
 
     // Drive the public editor: 2× absolute scale, then the asymmetric origin.
     clickButton(el, "Crop");
@@ -6754,7 +7509,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(lastProfile).toEqual(FIXED_PAGE_PARITY_PROFILE);
     expect(lastCommittedPageFrame).toEqual(FIXED_PAGE_PARITY_FRAME);
     expect(historyCapture.atomic).toHaveLength(1);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
 
     // Tone sees the same committed Page; placement bytes are asserted through
@@ -6862,7 +7617,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       (lastProfile!.width - lastProfile!.insets.left - lastProfile!.insets.right) /
         FIXED_PAGE_PARITY_FRAME.width,
     ).toBeCloseTo(265 / FIXED_PAGE_PARITY_COMPOSITION.width, 12);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
 
     clickButton(el, "Export SVG");
@@ -6915,7 +7670,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     ["padding", { x: -25, y: -10, width: 150, height: 120 }],
     ["mixed crop and padding", { x: 25, y: -10, width: 100, height: 80 }],
   ] as const)(
-    "frames the acknowledged Scribble Scene for %s ordinary SVG without recomputation",
+    "frames the acknowledged Shading Scene for %s ordinary SVG without recomputation",
     async (_label, percentages) => {
       const generate = vi.fn(toneCalibration.generate);
       const el = mount(
@@ -6937,7 +7692,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
           },
         ],
       };
-      await completeScribble(0, source);
+      await completeShading(0, source);
       const canvas = el.querySelector<HTMLElement>(
         '[data-testid="canvas-seed"]',
       )!;
@@ -6959,7 +7714,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         width: (composition.width * percentages.width) / 100,
         height: (composition.height * percentages.height) / 100,
       };
-      expect(scribbleJob.starts).toHaveLength(1);
+      expect(shadingJob.starts).toHaveLength(1);
       expect(generate).not.toHaveBeenCalled();
       expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
       expect(canvas.dataset.contentRevision).toBe(contentRevision);
@@ -6998,21 +7753,21 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
 
       clickButton(el, "Export PNG");
       await flush();
-      expect(scribbleJob.starts).toHaveLength(1);
+      expect(shadingJob.starts).toHaveLength(1);
       expect(generate).not.toHaveBeenCalled();
       expect(canvas.dataset.sourceInputRevision).toBe(sourceRevision);
       expect(canvas.dataset.contentRevision).toBe(contentRevision);
     },
   );
 
-  it("aborts framed Scribble SVG when the retained canvas provenance is stale", async () => {
+  it("aborts framed Shading SVG when the retained canvas provenance is stale", async () => {
     const generate = vi.fn(toneCalibration.generate);
     const el = mount(
       <SketchControls sketch={{ ...toneCalibration, generate }} />,
     );
     await flush();
     const source = preparedScene(78);
-    await completeScribble(0, source);
+    await completeShading(0, source);
 
     clickButton(el, "Crop");
     setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "10");
@@ -7033,11 +7788,11 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
 
     expect(exportSceneCapture.current).toBeNull();
     expect(downloadBlob).not.toHaveBeenCalled();
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
   });
 
-  it("reuses one Scribble and Outline base through repeated Page history, frame visibility, and exports", async () => {
+  it("reuses one Shading and Outline base through repeated Page history, frame visibility, and exports", async () => {
     autoFireOutlineComputed = false;
     const generate = vi.fn(toneCalibration.generate);
     const el = mount(
@@ -7045,7 +7800,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     );
     await flush();
     const source = preparedScene(79);
-    await completeScribble(0, source);
+    await completeShading(0, source);
 
     clickButton(el, "Outline");
     expect(outlineJob.starts).toBe(1);
@@ -7094,7 +7849,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
     expect(outlineJob.exportDerivations).toBe(0);
     expect(outlineJob.starts).toBe(1);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(generate).not.toHaveBeenCalled();
 
     const exportAndExpectFrame = async (pageFrame: PageFrame | null) => {
@@ -7104,7 +7859,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       expect(outlineJob.lastExportSnapshot?.reusableOutline).toBeDefined();
       expect(outlineJob.exportDerivations).toBe(0);
       expect(outlineJob.starts).toBe(1);
-      expect(scribbleJob.starts).toHaveLength(1);
+      expect(shadingJob.starts).toHaveLength(1);
       expect(generate).not.toHaveBeenCalled();
     };
 
@@ -7281,7 +8036,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       />,
     );
     await resolveManagedEnvironment();
-    const scribbleStarts = scribbleJob.starts.length;
+    const shadingStarts = shadingJob.starts.length;
 
     clickButton(el, "Detail");
     expect(renderState(el)).toBe("detail-reference-loading");
@@ -7302,7 +8057,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     act(() => lastDetailRetry?.());
     expect(renderState(el)).toBe("detail-reference-loading");
     expect(detailJob.starts).toHaveLength(2);
-    expect(scribbleJob.starts).toHaveLength(scribbleStarts);
+    expect(shadingJob.starts).toHaveLength(shadingStarts);
     expect(outlineJob.starts).toBe(0);
   });
 
@@ -7396,14 +8151,14 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(renderState(el)).toBe("detail-reference");
   });
 
-  it("keeps sensitivity-only edits outside Fill, Outline, and Scribble provenance", async () => {
+  it("keeps sensitivity-only edits outside Fill, Outline, and Shading provenance", async () => {
     const el = mount(
       <SketchControls
         sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
       />,
     );
     await resolveManagedEnvironment();
-    await completeScribble(0, preparedScene(94));
+    await completeShading(0, preparedScene(94));
     const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
     const initialProvenance = {
       sourceInputRevision: canvas.dataset.sourceInputRevision,
@@ -7417,8 +8172,8 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     };
 
     editSensitivity("0.6");
-    expect(scribbleJob.starts).toHaveLength(1);
-    expect(scribbleJob.cancelCount).toBe(0);
+    expect(shadingJob.starts).toHaveLength(1);
+    expect(shadingJob.cancelCount).toBe(0);
     expect(canvas.dataset.sourceInputRevision).toBe(
       initialProvenance.sourceInputRevision,
     );
@@ -7452,8 +8207,8 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     editSensitivity("0.8");
     clickButton(el, "Fill");
     await flush();
-    expect(scribbleJob.starts).toHaveLength(1);
-    expect(scribbleJob.cancelCount).toBe(0);
+    expect(shadingJob.starts).toHaveLength(1);
+    expect(shadingJob.cancelCount).toBe(0);
     expect(canvas.dataset.sourceInputRevision).toBe(
       initialProvenance.sourceInputRevision,
     );
@@ -7470,27 +8225,27 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       />,
     );
     await resolveManagedEnvironment();
-    await completeScribble(0, preparedScene(95));
+    await completeShading(0, preparedScene(95));
 
     const influence = paramInput(el, "detailInfluence");
     act(() => influence.focus());
     setInput(influence, "0.5");
     act(() => influence.blur());
-    expect(scribbleJob.starts).toHaveLength(2);
-    await completeScribble(1, preparedScene(96));
+    expect(shadingJob.starts).toHaveLength(2);
+    await completeShading(1, preparedScene(96));
 
     const sensitivity = paramInput(el, "detailSensitivity");
     act(() => sensitivity.focus());
     setInput(sensitivity, "0.8");
     act(() => sensitivity.blur());
 
-    expect(scribbleJob.starts).toHaveLength(3);
-    expect(scribbleJob.starts[2]!.identity.params).toContainEqual({
+    expect(shadingJob.starts).toHaveLength(3);
+    expect(shadingJob.starts[2]!.identity.params).toContainEqual({
       key: "detailSensitivity",
       value: 0.8,
     });
     const detailScene = preparedScene(97);
-    await completeScribble(2, detailScene);
+    await completeShading(2, detailScene);
 
     expect(lastRenderScene).toBe(detailScene);
     clickButton(el, "Export SVG");
@@ -7528,14 +8283,14 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     );
     await resolveManagedEnvironment();
     const retainedScene = preparedScene(98);
-    await completeScribble(0, retainedScene);
+    await completeShading(0, retainedScene);
 
     const influence = paramInput(el, "detailInfluence");
     act(() => influence.focus());
     setInput(influence, "0.5");
     act(() => influence.blur());
     const longFailure = `analysis failed: ${"x".repeat(700)}`;
-    await failScribble(1, longFailure);
+    await failShading(1, longFailure);
 
     const diagnosticsPanel = shadingDisclosure(el);
     expect(lastRenderScene).toBe(retainedScene);
@@ -7554,9 +8309,9 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     clickButton(el, "Fill");
 
     clickButton(el, "Retry");
-    expect(scribbleJob.starts).toHaveLength(3);
-    expect(scribbleJob.starts[2]!.identity).toEqual(
-      scribbleJob.starts[1]!.identity,
+    expect(shadingJob.starts).toHaveLength(3);
+    expect(shadingJob.starts[2]!.identity).toEqual(
+      shadingJob.starts[1]!.identity,
     );
     expect(diagnosticsPanel.textContent).toContain("Preparing replacement");
     expect(diagnosticsPanel.textContent).not.toContain("Preparation failed:");
@@ -7720,7 +8475,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       />,
     );
     await resolveManagedEnvironment();
-    await completeScribble(0, preparedScene(117));
+    await completeShading(0, preparedScene(117));
     const detail = renderModeButtons(el).find(
       ({ textContent }) => textContent === "Detail",
     )!;
@@ -7755,7 +8510,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(downloadBlob).not.toHaveBeenCalled();
   });
 
-  it("suspends Scribble before requesting Detail and rejects stale pre-entry paint", async () => {
+  it("suspends Shading before requesting Detail and rejects stale pre-entry paint", async () => {
     const generateDetailField = vi.fn(photoScribble.generateDetailField!);
     const el = mount(
       <SketchControls
@@ -7771,12 +8526,12 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       );
       await Promise.resolve();
     });
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(detailJob.starts).toHaveLength(0);
 
     orchestrationEvents.length = 0;
     clickButton(el, "Detail");
-    expect(orchestrationEvents).toEqual(["scribble:cancel", "detail:start"]);
+    expect(orchestrationEvents).toEqual(["shading:cancel", "detail:start"]);
     expect(detailJob.starts[0]!.identity).toEqual({
       imageAssetId: assetA,
       analysisDefinitionId: IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
@@ -7786,7 +8541,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         .renderState,
     ).toBe("detail-reference-loading");
 
-    await completeScribble(0, preparedScene(91));
+    await completeShading(0, preparedScene(91));
     expect(
       el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!.dataset
         .renderState,
@@ -7803,8 +8558,8 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
 
     clickButton(el, "Fill");
     await flush();
-    expect(orchestrationEvents.at(-1)).toBe("scribble:start");
-    expect(scribbleJob.starts).toHaveLength(2);
+    expect(orchestrationEvents.at(-1)).toBe("shading:start");
+    expect(shadingJob.starts).toHaveLength(2);
   });
 
   it("cancels Detail on exit and starts no analysis for later inactive asset changes", async () => {
@@ -7848,7 +8603,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(detailJob.starts).toHaveLength(1);
   });
 
-  it("reuses one Detail analysis across authored edits and resumes one latest Scribble for Outline", async () => {
+  it("reuses one Detail analysis across authored edits and resumes one latest Shading for Outline", async () => {
     managedImageAssetJob.list.mockResolvedValue([
       { id: assetA, name: "portrait alpha", url: `/image-assets/${assetA}.png` },
       { id: assetB, name: "portrait beta", url: `/image-assets/${assetB}.png` },
@@ -7868,7 +8623,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       );
       await Promise.resolve();
     });
-    await completeScribble(0, preparedScene(92));
+    await completeShading(0, preparedScene(92));
     clickButton(el, "Detail");
     await completeDetail(0);
 
@@ -7883,12 +8638,12 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     }
     clickButton(el, "New seed");
     expect(detailJob.starts).toHaveLength(1);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(generateDetailField.mock.calls.length).toBeGreaterThan(1);
 
     const assetBChoice = await openAssetBChoice(el);
     act(() => assetBChoice.click());
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(detailJob.starts).toHaveLength(2);
     expect(detailJob.starts[1]!.identity.imageAssetId).toBe(assetB);
     await act(async () => {
@@ -7898,19 +8653,19 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       await Promise.resolve();
     });
     expect(detailJob.starts).toHaveLength(2);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     await completeDetail(1, 192);
 
     clickButton(el, "Outline");
     await flush();
-    expect(scribbleJob.starts).toHaveLength(2);
+    expect(shadingJob.starts).toHaveLength(2);
     expect(outlineJob.starts).toBe(0);
-    await completeScribble(1, preparedScene(93));
+    await completeShading(1, preparedScene(93));
     await flush();
     expect(outlineJob.starts).toBe(1);
   });
 
-  it("resumes no Scribble work when Detail exits with authored inputs already current", async () => {
+  it("resumes no Shading work when Detail exits with authored inputs already current", async () => {
     const el = mount(
       <SketchControls
         sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
@@ -7922,12 +8677,12 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       );
       await Promise.resolve();
     });
-    await completeScribble(0, preparedScene(94));
+    await completeShading(0, preparedScene(94));
     clickButton(el, "Detail");
     await completeDetail(0);
     clickButton(el, "Fill");
     await flush();
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
 
     clickButton(el, "Detail");
     await flush();
@@ -7937,7 +8692,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         .renderState,
     ).toBe("detail-reference");
     clickButton(el, "Fill");
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
   });
 
   it("turns synchronous Detail binding assertions into retryable safe failure", async () => {
@@ -8080,7 +8835,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       sketchEnvironmentJob.starts[0]!.resolve(environmentA);
       await Promise.resolve();
     });
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     clickButton(el, "Tone");
     expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentA);
     expect(lastToneSource).not.toBeNull();
@@ -8114,7 +8869,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(sketchEnvironmentJob.starts[0]!.signal.aborted).toBe(true);
     expect(sketchEnvironmentJob.starts[1]!.params.imageAsset).toBe(assetB);
     expect(lastToneSource).toBeNull();
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
 
     const environmentB = resolvedAssetEnvironment(assetB, 224);
     await act(async () => {
@@ -8124,9 +8879,9 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
 
     expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentB);
     expect(lastToneSource).not.toBeNull();
-    expect(scribbleJob.starts).toHaveLength(2);
-    const workerIdentity = scribbleJob.starts[1]!.identity;
-    expect(isScribbleComputeIdentity(workerIdentity)).toBe(true);
+    expect(shadingJob.starts).toHaveLength(2);
+    const workerIdentity = shadingJob.starts[1]!.identity;
+    expect(isShadingComputeIdentity(workerIdentity)).toBe(true);
     expect(workerIdentity.params).toContainEqual({
       key: "imageAsset",
       value: assetB,
@@ -8153,15 +8908,15 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     ).toBe(assetA);
     expect(sketchEnvironmentJob.starts).toHaveLength(3);
     expect(sketchEnvironmentJob.starts[1]!.signal.aborted).toBe(true);
-    expect(scribbleJob.starts).toHaveLength(2);
+    expect(shadingJob.starts).toHaveLength(2);
 
     const environmentAAfterUndo = resolvedAssetEnvironment(assetA, 32);
     await act(async () => {
       sketchEnvironmentJob.starts[2]!.resolve(environmentAAfterUndo);
       await Promise.resolve();
     });
-    expect(scribbleJob.starts).toHaveLength(3);
-    expect(scribbleJob.starts[2]!.identity.params).toContainEqual({
+    expect(shadingJob.starts).toHaveLength(3);
+    expect(shadingJob.starts[2]!.identity.params).toContainEqual({
       key: "imageAsset",
       value: assetA,
     });
@@ -8238,7 +8993,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(sketchEnvironmentJob.starts).toHaveLength(2);
     expect(sketchEnvironmentJob.starts[0]!.signal.aborted).toBe(true);
     expect(lastToneSource).toBeNull();
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
 
     const environmentB = resolvedAssetEnvironment(assetB, 192);
     await act(async () => {
@@ -8250,12 +9005,12 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       frozenFraming,
     );
     expect(lastCompositionFrame).toBe(frozenComposition);
-    expect(scribbleJob.starts).toHaveLength(2);
-    expect(scribbleJob.starts[1]!.identity.params).toContainEqual({
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(shadingJob.starts[1]!.identity.params).toContainEqual({
       key: "imageAsset",
       value: assetB,
     });
-    expect(containsBinaryPayload(scribbleJob.starts[1]!.identity)).toBe(false);
+    expect(containsBinaryPayload(shadingJob.starts[1]!.identity)).toBe(false);
   });
 
   it.each([
@@ -8311,13 +9066,13 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       expect(historyCapture.atomic).toHaveLength(0);
       expect(sketchEnvironmentJob.starts).toHaveLength(1);
       expect(sketchEnvironmentJob.starts[0]!.signal.aborted).toBe(false);
-      expect(scribbleJob.starts).toHaveLength(1);
+      expect(shadingJob.starts).toHaveLength(1);
       expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentA);
       expect(lastToneSource).not.toBeNull();
     },
   );
 
-  it("keys main-thread asset readiness across Tone and Scribble preparation", async () => {
+  it("keys main-thread asset readiness across Tone and Shading preparation", async () => {
     const presetAssetB = "portrait-beta-000000000002";
     const invalidAsset = "unresolved://not-an-asset-id";
     const schema = {
@@ -8374,7 +9129,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
     expect(sketchEnvironmentJob.starts).toHaveLength(1);
     expect(sketchEnvironmentJob.starts[0]!.params.photo).toBe(assetA);
-    expect(scribbleJob.starts).toHaveLength(0);
+    expect(shadingJob.starts).toHaveLength(0);
     clickButton(el, "Tone");
     expect(toneSourceFor).not.toHaveBeenCalled();
     expect(lastToneSource).toBeNull();
@@ -8384,7 +9139,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       sketchEnvironmentJob.starts[0]!.resolve(environmentA);
       await Promise.resolve();
     });
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(toneSourceFor).toHaveBeenCalledTimes(1);
     expect(toneSourceFor.mock.calls[0]?.[2]).toBe(environmentA);
     expect(lastToneSource).not.toBeNull();
@@ -8392,14 +9147,14 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     // Seed, Tone selection, and ordinary Scribble-param edits retain the exact
     // same decoded environment because the opaque Image Asset ID set is equal.
     clickButton(el, "New seed");
-    expect(scribbleJob.starts).toHaveLength(2);
+    expect(shadingJob.starts).toHaveLength(2);
     clickButton(el, "Fill");
     clickButton(el, "Tone");
     const density = paramInput(el, "pathDensity");
     act(() => density.focus());
     setInput(density, "2");
     act(() => density.blur());
-    expect(scribbleJob.starts).toHaveLength(3);
+    expect(shadingJob.starts).toHaveLength(3);
     expect(sketchEnvironmentJob.starts).toHaveLength(1);
 
     await flush();
@@ -8422,7 +9177,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     await flush();
     expect(sketchEnvironmentJob.starts).toHaveLength(2);
     expect(sketchEnvironmentJob.starts[1]!.params.photo).toBe(presetAssetB);
-    expect(scribbleJob.starts).toHaveLength(3);
+    expect(shadingJob.starts).toHaveLength(3);
     expect(lastToneSource).toBeNull();
 
     const environmentB = resolvedEnvironment(presetAssetB);
@@ -8430,15 +9185,15 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       sketchEnvironmentJob.starts[1]!.resolve(environmentB);
       await Promise.resolve();
     });
-    expect(scribbleJob.starts).toHaveLength(4);
-    expect(scribbleJob.starts[3]!.identity.params).toContainEqual({
+    expect(shadingJob.starts).toHaveLength(4);
+    expect(shadingJob.starts[3]!.identity.params).toContainEqual({
       key: "photo",
       value: presetAssetB,
     });
     expect(toneSourceFor.mock.calls.at(-1)?.[2]).toBe(environmentB);
-    const startsAfterB = scribbleJob.starts.length;
+    const startsAfterB = shadingJob.starts.length;
     await flush();
-    expect(scribbleJob.starts).toHaveLength(startsAfterB);
+    expect(shadingJob.starts).toHaveLength(startsAfterB);
 
     selectPreset("invalid");
     clickButton(el, "Reload");
@@ -8448,13 +9203,13 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(historyCapture.atomic.at(-1)?.after.present.params.photo).toBe(
       invalidAsset,
     );
-    expect(scribbleJob.starts).toHaveLength(startsAfterB);
+    expect(shadingJob.starts).toHaveLength(startsAfterB);
     expect(lastToneSource).toBeNull();
     await act(async () => {
       sketchEnvironmentJob.starts[2]!.reject(new Error("invalid-id"));
       await Promise.resolve();
     });
-    expect(scribbleJob.starts).toHaveLength(startsAfterB);
+    expect(shadingJob.starts).toHaveLength(startsAfterB);
     expect(toneSourceFor.mock.calls.at(-1)?.[2]).toBe(environmentB);
     expect(lastToneSource).toBeNull();
     expect(canvas.dataset.renderState).toBe("unavailable");
@@ -8480,7 +9235,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(canvas.dataset.unavailableStatus).toBe("loading");
     expect(canvas.dataset.unresolvedAssetIds).toBe(assetA);
     expect(el.textContent).toContain("Loading exact Image Asset");
-    expect(scribbleJob.starts).toHaveLength(0);
+    expect(shadingJob.starts).toHaveLength(0);
 
     clickButton(el, "Tone");
     expect(generateToneSource).not.toHaveBeenCalled();
@@ -8495,7 +9250,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(canvas.dataset.renderState).toBe("unavailable");
     expect(canvas.dataset.unavailableStatus).toBe("missing");
     expect(el.textContent).toContain("Image Asset is missing");
-    expect(scribbleJob.starts).toHaveLength(0);
+    expect(shadingJob.starts).toHaveLength(0);
 
     clickButton(el, "Retry exact asset");
     expect(sketchEnvironmentJob.starts).toHaveLength(2);
@@ -8511,13 +9266,13 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(generateToneSource).toHaveBeenCalledTimes(1);
     expect(generateToneSource.mock.calls[0]?.[2]).toBe(recovered);
     expect(canvas.dataset.renderState).toBe("tone-reference");
-    expect(scribbleJob.starts).toHaveLength(1);
-    expect(scribbleJob.starts[0]!.identity.params).toContainEqual({
+    expect(shadingJob.starts).toHaveLength(1);
+    expect(shadingJob.starts[0]!.identity.params).toContainEqual({
       key: "imageAsset",
       value: assetA,
     });
     await flush();
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
   });
 
   it("ignores late A, then retries unchanged B into exactly one B job", async () => {
@@ -8550,7 +9305,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(historyCapture.atomic[0]!.after.present.params.imageAsset).toBe(
       assetB,
     );
-    expect(scribbleJob.starts).toHaveLength(0);
+    expect(shadingJob.starts).toHaveLength(0);
 
     await act(async () => {
       pendingB.reject(new ImageAssetResolutionError("missing", assetB));
@@ -8572,7 +9327,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     });
     expect(canvas.dataset.unavailableStatus).toBe("missing");
     expect(canvas.dataset.unresolvedAssetIds).toBe(assetB);
-    expect(scribbleJob.starts).toHaveLength(0);
+    expect(shadingJob.starts).toHaveLength(0);
 
     const historyAfterSelection = historyCapture.atomic[0]!.after;
     clickButton(el, "Retry exact asset");
@@ -8592,13 +9347,13 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     });
     expect(generateToneSource).toHaveBeenCalledTimes(1);
     expect(generateToneSource.mock.calls[0]?.[2]).toBe(recoveredB);
-    expect(scribbleJob.starts).toHaveLength(1);
-    expect(scribbleJob.starts[0]!.identity.params).toContainEqual({
+    expect(shadingJob.starts).toHaveLength(1);
+    expect(shadingJob.starts[0]!.identity.params).toContainEqual({
       key: "imageAsset",
       value: assetB,
     });
     await flush();
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
   });
 
   it("keeps a malformed authored ID visible and handler-guards every unavailable action", async () => {
@@ -8662,7 +9417,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(canvas.dataset.unavailableStatus).toBe("error");
     expect(canvas.dataset.unresolvedAssetIds).toBe(malformed);
     expect(generateToneSource).not.toHaveBeenCalled();
-    expect(scribbleJob.starts).toHaveLength(0);
+    expect(shadingJob.starts).toHaveLength(0);
 
     const guarded = [
       exportButton(el, "Export PNG"),
@@ -8731,7 +9486,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       );
       await Promise.resolve();
     });
-    await completeScribble(0, preparedScene(50));
+    await completeShading(0, preparedScene(50));
     expect(
       ["Export PNG", "Export SVG", "Outline", "Export Hidden-line SVG"].map(
         (label) => exportButton(el, label).disabled,
@@ -8760,7 +9515,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       );
       await Promise.resolve();
     });
-    await completeScribble(0, preparedScene(51));
+    await completeShading(0, preparedScene(51));
     const choice = await openAssetBChoice(el);
     const forced = [
       exportButton(el, "Export PNG"),
@@ -8814,7 +9569,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       );
       await Promise.resolve();
     });
-    await completeScribble(0, preparedScene(52));
+    await completeShading(0, preparedScene(52));
     const choice = await openAssetBChoice(el);
 
     clickButton(el, "Export PNG");
@@ -8848,7 +9603,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       );
       await Promise.resolve();
     });
-    await completeScribble(0, preparedScene(53));
+    await completeShading(0, preparedScene(53));
     const choice = await openAssetBChoice(el);
 
     clickButton(el, "Outline");
@@ -8893,7 +9648,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       );
       await Promise.resolve();
     });
-    await completeScribble(0, preparedScene(54));
+    await completeShading(0, preparedScene(54));
     const choice = await openAssetBChoice(el);
 
     clickButton(el, "Export Hidden-line SVG");
@@ -8953,21 +9708,21 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       sketchEnvironmentJob.starts[0]!.resolve(environmentA);
       await Promise.resolve();
     });
-    await completeScribble(0, preparedScene(40));
+    await completeShading(0, preparedScene(40));
     clickButton(el, "Tone");
     expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentA);
 
     // Leave a same-environment replacement active so its late completion races
     // the two subsequent exact-asset selections.
     clickButton(el, "New seed");
-    expect(scribbleJob.starts).toHaveLength(2);
+    expect(shadingJob.starts).toHaveLength(2);
     await selectManagedAsset("portrait beta");
     const obsoleteEnvironment = sketchEnvironmentJob.starts[1]!;
     expect(canvas.dataset.renderState).toBe("unavailable");
     expect(canvas.dataset.unresolvedAssetIds).toBe(assetB);
     expect(shadingDisclosure(el).textContent).not.toContain("Converged");
     expect(lastToneSource).toBeNull();
-    expect(scribbleJob.cancelCount).toBeGreaterThan(0);
+    expect(shadingJob.cancelCount).toBeGreaterThan(0);
 
     await selectManagedAsset("portrait charlie");
     expect(obsoleteEnvironment.signal.aborted).toBe(true);
@@ -8981,7 +9736,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(canvas.dataset.renderState).toBe("unavailable");
     expect(canvas.dataset.unresolvedAssetIds).toBe(assetC);
     expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentA);
-    expect(scribbleJob.starts).toHaveLength(2);
+    expect(shadingJob.starts).toHaveLength(2);
 
     const environmentC = resolvedAssetEnvironment(assetC, 224);
     await act(async () => {
@@ -8989,8 +9744,8 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       await Promise.resolve();
     });
     expect(generateToneSource.mock.calls.at(-1)?.[2]).toBe(environmentC);
-    expect(scribbleJob.starts).toHaveLength(3);
-    expect(scribbleJob.starts[2]!.identity.params).toContainEqual({
+    expect(shadingJob.starts).toHaveLength(3);
+    expect(shadingJob.starts[2]!.identity.params).toContainEqual({
       key: "imageAsset",
       value: assetC,
     });
@@ -9007,7 +9762,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       toneCalls: generateToneSource.mock.calls.length,
     };
 
-    await completeScribble(1, preparedScene(99));
+    await completeShading(1, preparedScene(99));
     expect(canvas.dataset.sourceInputRevision).toBe(
       presentationBeforeLateWorker.sourceInputRevision,
     );
@@ -9020,9 +9775,9 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(generateToneSource).toHaveBeenCalledTimes(
       presentationBeforeLateWorker.toneCalls,
     );
-    expect(scribbleJob.starts).toHaveLength(3);
+    expect(shadingJob.starts).toHaveLength(3);
 
-    await completeScribble(2, preparedScene(41));
+    await completeShading(2, preparedScene(41));
     expect(shadingDisclosure(el).textContent).not.toContain(
       "Displayed result: stale",
     );
@@ -9031,18 +9786,18 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     );
   });
 
-  it("keeps asset-free Scribble sketches on the existing immediate path", () => {
+  it("keeps asset-free Shading sketches on the existing immediate path", () => {
     const el = mount(<SketchControls sketch={toneCalibration} />);
     const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
 
     expect(sketchEnvironmentJob.starts).toHaveLength(0);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(canvas.dataset.renderState).toBe("fill-held");
     expect(canvas.dataset.unavailableStatus).toBe("");
     expect(el.textContent).not.toContain("Loading exact Image Asset");
   });
 
-  it("shows diagnostics only for Scribble-capable Sketches", () => {
+  it("shows diagnostics only for Shading-capable Sketches", () => {
     const ordinary = mount(<SketchControls sketch={leafField} />);
     expect(ordinary.textContent).not.toContain("Shading");
 
@@ -9051,9 +9806,9 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     container!.remove();
     container = null;
 
-    const scribble = mount(<SketchControls sketch={toneCalibration} />);
-    expect(shadingDisclosure(scribble).open).toBe(false);
-    expect(shadingDisclosure(scribble).textContent).toContain("Preparing");
+    const shading = mount(<SketchControls sketch={toneCalibration} />);
+    expect(shadingDisclosure(shading).open).toBe(false);
+    expect(shadingDisclosure(shading).textContent).toContain("Preparing");
   });
 
   it("attributes Tone progress, cancellation, stale metrics, failure, and budget completion to the right result", async () => {
@@ -9078,7 +9833,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     );
     expect(generate).not.toHaveBeenCalled();
 
-    reportScribbleProgress(0, 25, 100, {
+    reportShadingProgress(0, 25, 100, {
       kind: "remaining",
       revision: 2,
       remainingMs: 12_500,
@@ -9091,7 +9846,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(diagnosticsPanel.textContent).toContain("25% (25 of 100 work units)");
     expect(diagnosticsPanel.textContent).toContain("12.5 s");
 
-    await completeScribble(0, preparedScene(1));
+    await completeShading(0, preparedScene(1));
     expect(diagnosticsPanel.textContent).toContain("Converged");
     expect(diagnosticsPanel.textContent).not.toContain("Current result:");
     expect(diagnosticsPanel.textContent).toContain("Residual error1.00%");
@@ -9101,8 +9856,8 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     setInput(density, "2");
     expect(diagnosticsPanel.textContent).toContain("Displayed result: stale");
     act(() => density.blur());
-    expect(scribbleJob.starts).toHaveLength(2);
-    reportScribbleProgress(1, 40, 100, {
+    expect(shadingJob.starts).toHaveLength(2);
+    reportShadingProgress(1, 40, 100, {
       kind: "remaining",
       revision: 2,
       remainingMs: 2_000,
@@ -9114,30 +9869,30 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     // its later result and progress are ignored while the retained metrics stay stale.
     act(() => density.focus());
     setInput(density, "3");
-    expect(scribbleJob.cancelCount).toBe(1);
+    expect(shadingJob.cancelCount).toBe(1);
     expect(diagnosticsPanel.textContent).toContain("Displayed result: stale");
     expect(diagnosticsPanel.textContent).not.toContain("Preparing replacement");
-    reportScribbleProgress(1, 90, 100, {
+    reportShadingProgress(1, 90, 100, {
       kind: "remaining",
       revision: 3,
       remainingMs: 100,
     });
     expect(diagnosticsPanel.textContent).not.toContain("Preparing 90%");
-    await completeScribble(1, preparedScene(99));
+    await completeShading(1, preparedScene(99));
     expect(diagnosticsPanel.textContent).toContain("Residual error1.00%");
     act(() => density.blur());
-    expect(scribbleJob.starts).toHaveLength(3);
+    expect(shadingJob.starts).toHaveLength(3);
 
-    await failScribble(2, "safe worker detail");
+    await failShading(2, "safe worker detail");
     expect(diagnosticsPanel.textContent).toContain("Preparation failed");
     expect(diagnosticsPanel.textContent).toContain("safe worker detail");
     expect(diagnosticsPanel.textContent).toContain("Displayed result: stale");
 
     clickButton(el, "New seed");
-    await completeScribble(3, preparedScene(4), {
+    await completeShading(3, preparedScene(4), {
       ...diagnostics,
       termination: "budget-exhausted",
-      residualError: 0.3,
+      fidelity: { kind: "scribble", residualError: 0.3 },
     });
     expect(diagnosticsPanel.textContent).toContain("Budget exhausted");
     expect(diagnosticsPanel.textContent).not.toContain("Current result:");
@@ -9147,7 +9902,189 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
-  it("gates every export on current painted provenance and never generates Scribble synchronously", async () => {
+  it("keeps a Scribble → Stippling race on exact displayed and current identities through retry, paint, and bounded completion", async () => {
+    const toBlob = vi.fn((callback: BlobCallback) => {
+      callback(new Blob([MINIMAL_PNG], { type: "image/png" }));
+    });
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(<SketchControls sketch={toneCalibration} />);
+    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const diagnosticsPanel = shadingDisclosure(el);
+    const png = exportButton(el, "Export PNG");
+    const svg = exportButton(el, "Export SVG");
+    const scribbleScene = preparedScene(120);
+
+    await completeShading(0, scribbleScene, {
+      ...diagnostics,
+      fidelity: { kind: "scribble", residualError: 0.04 },
+    });
+    expect([png.disabled, svg.disabled]).toEqual([false, false]);
+    expect(diagnosticsPanel.textContent).toContain("Residual error4.00%");
+    expect(diagnosticsPanel.textContent).not.toContain("Distribution error");
+
+    // Keep the initial Scribble paint acknowledged, then require explicit paint
+    // acknowledgement for every replacement below.
+    autoAcknowledgeDisplayedScene = false;
+    const density = paramInput(el, "pathDensity");
+    act(() => density.focus());
+    setInput(density, "2");
+    act(() => density.blur());
+    expect(shadingJob.starts).toHaveLength(2);
+
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    expect(shadingJob.cancelCount).toBeGreaterThan(0);
+    expect(shadingJob.starts).toHaveLength(3);
+    expect(shadingJob.starts[2]!.identity.params).toEqual([
+      { key: "strategy", value: "stippling" },
+      { key: "stippleDensity", value: 1 },
+      { key: "distributionFidelity", value: 0.5 },
+    ]);
+    expect(lastRenderScene).toBe(scribbleScene);
+    expect(canvas.dataset.sourceInputRevision).toBe("0");
+    expect(diagnosticsPanel.textContent).toContain("Displayed result: stale");
+    expect(diagnosticsPanel.textContent).toContain("Residual error4.00%");
+    expect(diagnosticsPanel.textContent).not.toContain("Distribution error");
+    expect([png.disabled, svg.disabled]).toEqual([true, true]);
+
+    reportShadingProgress(2, 35, 100, {
+      kind: "remaining",
+      revision: 2,
+      remainingMs: 4_000,
+    });
+    expect(diagnosticsPanel.textContent).toContain(
+      "35% (35 of 100 work units)",
+    );
+    expect(diagnosticsPanel.textContent).toContain("4.0 s");
+
+    // The canceled Scribble worker may still have callbacks queued. Neither its
+    // progress nor its successful completion may replace the retained Scribble
+    // metrics or the current Stippling progress lane.
+    reportShadingProgress(1, 90, 100, {
+      kind: "remaining",
+      revision: 3,
+      remainingMs: 100,
+    });
+    await completeShading(1, preparedScene(121));
+    expect(lastRenderScene).toBe(scribbleScene);
+    expect(diagnosticsPanel.textContent).toContain(
+      "35% (35 of 100 work units)",
+    );
+    expect(diagnosticsPanel.textContent).not.toContain("Preparing 90%");
+    expect(diagnosticsPanel.textContent).toContain("Residual error4.00%");
+
+    const writesAfterStrategy = historyWriteCount();
+    await failShading(2, "safe retryable Stippling failure");
+    expect(diagnosticsPanel.textContent).toContain("Preparation failed");
+    expect(diagnosticsPanel.textContent).toContain(
+      "safe retryable Stippling failure",
+    );
+    const failedIdentity = shadingJob.starts[2]!.identity;
+    clickButton(el, "Retry");
+    expect(shadingJob.starts).toHaveLength(4);
+    expect(shadingJob.starts[3]!.identity).toEqual(failedIdentity);
+    expect(historyWriteCount()).toBe(writesAfterStrategy);
+
+    // An active Stippling edit supersedes that exact retry. Its late failure is
+    // ignored, while only the newly-authored identity owns current progress.
+    const stippleDensity = paramInput(el, "stippleDensity");
+    act(() => stippleDensity.focus());
+    setInput(stippleDensity, "1.4");
+    expect([png.disabled, svg.disabled]).toEqual([true, true]);
+    expect(lastRenderScene).toBe(scribbleScene);
+    act(() => stippleDensity.blur());
+    expect(shadingJob.starts).toHaveLength(5);
+    expect(shadingJob.starts[4]!.identity.params).toContainEqual({
+      key: "stippleDensity",
+      value: 1.4,
+    });
+    reportShadingProgress(4, 20, 100, {
+      kind: "remaining",
+      revision: 2,
+      remainingMs: 8_000,
+    });
+    await failShading(3, "obsolete retry failure");
+    expect(diagnosticsPanel.textContent).not.toContain(
+      "obsolete retry failure",
+    );
+    expect(diagnosticsPanel.textContent).toContain(
+      "20% (20 of 100 work units)",
+    );
+
+    const stipplingScene = preparedScene(122);
+    await completeShading(4, stipplingScene, {
+      ...diagnostics,
+      fidelity: { kind: "stippling", distributionError: 0.08 },
+    });
+    expect(lastRenderScene).toBe(stipplingScene);
+    expect(diagnosticsPanel.textContent).toContain("Distribution error8.00%");
+    expect(diagnosticsPanel.textContent).not.toContain("Residual error");
+    expect([png.disabled, svg.disabled]).toEqual([true, true]);
+    act(() => acknowledgeDisplayedScene?.());
+    expect([png.disabled, svg.disabled]).toEqual([false, false]);
+
+    // Exercise an honest bounded Stippling completion while observational state
+    // is live, then prove none of it enters history or a saved Preset.
+    const distributionFidelity = paramInput(el, "distributionFidelity");
+    act(() => distributionFidelity.focus());
+    setInput(distributionFidelity, "0.75");
+    act(() => distributionFidelity.blur());
+    expect(shadingJob.starts).toHaveLength(6);
+    reportShadingProgress(5, 60, 100, {
+      kind: "remaining",
+      revision: 2,
+      remainingMs: 3_000,
+    });
+    const authoredWrites = historyWriteCount();
+    expect(JSON.stringify(historyCapture)).not.toMatch(
+      /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+    );
+    setInput(
+      el.querySelector('input[aria-label="preset name"]') as HTMLInputElement,
+      "stippling-race",
+    );
+    clickButton(el, "Save");
+    await flush();
+    expect(historyWriteCount()).toBe(authoredWrites);
+    expect(JSON.stringify(savePreset.mock.calls.at(-1)![0])).not.toMatch(
+      /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+    );
+
+    const boundedScene = preparedScene(123);
+    await completeShading(5, boundedScene, {
+      ...diagnostics,
+      termination: "budget-exhausted",
+      fidelity: { kind: "stippling", distributionError: 1.25 },
+    });
+    expect(lastRenderScene).toBe(boundedScene);
+    expect(diagnosticsPanel.textContent).toContain("Budget exhausted");
+    expect(diagnosticsPanel.textContent).toContain(
+      "bounded partial result, not a computation error",
+    );
+    expect(diagnosticsPanel.textContent).toContain(
+      "Distribution error125.00%",
+    );
+    expect([png.disabled, svg.disabled]).toEqual([true, true]);
+    act(() => acknowledgeDisplayedScene?.());
+    expect([png.disabled, svg.disabled]).toEqual([false, false]);
+
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).toBe(boundedScene);
+    clickButton(el, "Export PNG");
+    await flush();
+    expect(toBlob).toHaveBeenCalledOnce();
+    expect(downloadBlob).toHaveBeenCalledTimes(2);
+    expect(historyWriteCount()).toBe(authoredWrites);
+
+    const svgText = await readBlobText(downloadBlob.mock.calls[0]![0]);
+    const pngText = await readBlobText(downloadBlob.mock.calls[1]![0]);
+    for (const reproduction of [svgText, pngText]) {
+      expect(reproduction).not.toMatch(
+        /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
+      );
+    }
+  });
+
+  it("gates every export on current painted provenance and never generates Shading synchronously", async () => {
     const toBlob = vi.fn((callback: BlobCallback) => {
       callback(new Blob([MINIMAL_PNG], { type: "image/png" }));
     });
@@ -9182,7 +10119,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(generate).not.toHaveBeenCalled();
 
     const exactScene = preparedScene(10);
-    await completeScribble(0, exactScene);
+    await completeShading(0, exactScene);
     await flush();
     expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
       false,
@@ -9228,7 +10165,321 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(downloadBlob).not.toHaveBeenCalled();
   });
 
-  it("carries the exact painted Scribble Scene through completed-Scene Outline identity and reuse", async () => {
+  it("keeps one acknowledged ordered Stippling Scene through SVG, cached physical Outline, and proportional Page output", async () => {
+    autoFireOutlineComputed = false;
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(shadingJob.starts[1]!.identity.params).toEqual([
+      { key: "strategy", value: "stippling" },
+      { key: "stippleDensity", value: 1 },
+      { key: "distributionFidelity", value: 0.5 },
+    ]);
+
+    const composition = lastCompositionFrame!;
+    const stipples: Scene = {
+      space: { ...composition },
+      primitives: [
+        {
+          points: [[150, 250], [150.5, 250]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[400, 300], [400, 300.5]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[800, 700], [799.5, 700]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+      ],
+    };
+    const sourcePoints = stipples.primitives.map(({ points }) => points);
+    autoAcknowledgeDisplayedScene = false;
+    await completeShading(1, stipples, {
+      ...diagnostics,
+      fidelity: { kind: "stippling", distributionError: 0.02 },
+    });
+
+    const ordinary = exportButton(el, "Export SVG");
+    const plotter = exportButton(el, "Export Hidden-line SVG");
+    expect([ordinary.disabled, plotter.disabled]).toEqual([true, true]);
+    act(() => {
+      for (const candidate of [ordinary, plotter]) {
+        candidate.disabled = false;
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+
+    act(() => acknowledgeDisplayedScene?.());
+    expect([ordinary.disabled, plotter.disabled]).toEqual([false, false]);
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).toBe(stipples);
+    expect(
+      (exportSceneCapture.current as Scene).primitives.map(
+        ({ points }) => points,
+      ),
+    ).toEqual(sourcePoints);
+    expect(
+      (exportSceneCapture.current as Scene).primitives.every(
+        ({ points, closed }) => points.length === 2 && closed === false,
+      ),
+    ).toBe(true);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    const preparedIdentity = outlineJob.lastIdentity;
+    expect(preparedIdentity).toMatchObject({
+      sourceKind: "completed-scene-sketch",
+      compositionFrame: composition,
+      sourceScene: stipples,
+      outlineTarget: {
+        toolWidthMillimeters: 0.3,
+        millimetersPerSceneUnit: 0.18,
+      },
+    });
+    if (preparedIdentity?.sourceKind !== "completed-scene-sketch") {
+      throw new Error("expected completed-Scene Stippling identity");
+    }
+    expect(preparedIdentity.sourceScene).not.toBe(stipples);
+    expect(
+      preparedIdentity.sourceScene.primitives.map(({ points }) => points),
+    ).toEqual(sourcePoints);
+    act(() => lastOnOutlineComputed?.());
+    await flush();
+    const cachedOutline = outlineJob.lastCompletedScene!;
+    expect(cachedOutline.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+    expect(
+      cachedOutline.primitives.every(
+        ({ points, closed }) => points.length === 2 && closed !== true,
+      ),
+    ).toBe(true);
+
+    const margin = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Linked paper margin (mm)"]',
+    )!;
+    act(() => margin.focus());
+    setInput(margin, "20");
+    act(() => margin.blur());
+    const toolWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Tool width (mm)"]',
+    )!;
+    act(() => toolWidth.focus());
+    setInput(toolWidth, "0.5");
+    act(() => toolWidth.blur());
+
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.lastIdentity).toBe(preparedIdentity);
+    expect(outlineJob.lastCompletedScene).toBe(cachedOutline);
+    expect(cachedOutline.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+    expect(lastCompositionFrame).toBe(composition);
+    expect(lastOutlineFinalizationStrokePolicy).toEqual({
+      kind: "physical-tool",
+      target: {
+        toolWidthMillimeters: 0.5,
+        millimetersPerSceneUnit: 0.16,
+      },
+    });
+
+    clickButton(el, "Fill");
+    clickButton(el, "Crop");
+    for (const [name, value] of Object.entries({
+      x: 10,
+      y: 20,
+      width: 80,
+      height: 60,
+    })) {
+      setInput(
+        el.querySelector<HTMLInputElement>(`input[name="${name}"]`)!,
+        String(value),
+      );
+    }
+    clickButton(el, "Apply");
+    const pageFrame: PageFrame = {
+      x: 100,
+      y: 200,
+      width: 800,
+      height: 600,
+    };
+    expect(lastCommittedPageFrame).toEqual(pageFrame);
+    expect(lastProfile).toEqual({
+      width: 168,
+      height: 136,
+      insets: { top: 20, right: 20, bottom: 20, left: 20 },
+      includeFrame: true,
+      toolWidthMillimeters: 0.5,
+    });
+    expect(lastCompositionFrame).toBe(composition);
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.lastCompletedScene).toBe(cachedOutline);
+
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).toEqual({
+      space: { width: 800, height: 600 },
+      primitives: [
+        {
+          points: [[50, 50], [50.5, 50]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[300, 100], [300, 100.5]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[700, 500], [699.5, 500]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+      ],
+    });
+    const ordinarySvg = await readBlobText(downloadBlob.mock.calls.at(-1)![0]);
+    const ordinaryDocument = new DOMParser().parseFromString(
+      ordinarySvg,
+      "image/svg+xml",
+    );
+    expect(ordinaryDocument.documentElement.getAttribute("viewBox")).toBe(
+      "0 0 800 600",
+    );
+    expect(
+      [...ordinaryDocument.querySelectorAll(":root > path")].map((path) =>
+        path.getAttribute("d"),
+      ),
+    ).toEqual([
+      "M50 50 L50.5 50",
+      "M300 100 L300 100.5",
+      "M700 500 L699.5 500",
+    ]);
+
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.lastExportSnapshot).toMatchObject({
+      pageFrame,
+      identity: {
+        sourceKind: "completed-scene-sketch",
+        compositionFrame: composition,
+        sourceScene: stipples,
+        outlineTarget: {
+          toolWidthMillimeters: 0.5,
+          millimetersPerSceneUnit: 0.16,
+        },
+      },
+      reusableOutline: { scene: cachedOutline },
+    });
+    expect(plotterExportCapture.current?.scene).toEqual({
+      space: { width: 800, height: 600 },
+      primitives: [
+        {
+          points: [[50, 50], [50.5, 50]],
+          stroke: { color: "black", width: 3.125 },
+        },
+        {
+          points: [[300, 100], [300, 100.5]],
+          stroke: { color: "black", width: 3.125 },
+        },
+        {
+          points: [[700, 500], [699.5, 500]],
+          stroke: { color: "black", width: 3.125 },
+        },
+        {
+          points: [[0, 0], [800, 0], [800, 600], [0, 600], [0, 0]],
+          stroke: { color: "black", width: 3.125 },
+        },
+      ],
+    });
+    const plotterSvg = await readBlobText(downloadBlob.mock.calls.at(-1)![0]);
+    const plotterDocument = new DOMParser().parseFromString(
+      plotterSvg,
+      "image/svg+xml",
+    );
+    const paths = [...plotterDocument.querySelectorAll(":root > path")];
+    expect(paths.map((path) => path.getAttribute("d"))).toEqual([
+      "M28 28 L28.08 28",
+      "M68 36 L68 36.08",
+      "M132 100 L131.92 100",
+      "M20 20 L148 20 L148 116 L20 116 L20 20",
+    ]);
+    expect(paths.map((path) => path.getAttribute("stroke-width"))).toEqual([
+      "0.5",
+      "0.5",
+      "0.5",
+      "0.5",
+    ]);
+    expect(plotterSvg).not.toMatch(/<rect\b|fill="(?!none)/);
+    expect(generate).not.toHaveBeenCalled();
+
+    clickButton(el, "Crop");
+    clickButton(el, "Reset Frame");
+    expect(lastCommittedPageFrame).toBeNull();
+    expect(lastCompositionFrame).toBe(composition);
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(outlineJob.starts).toBe(1);
+
+    downloadBlob.mockClear();
+    exportSceneCapture.current = null;
+    outlineJob.exportStarts = 0;
+    const paperWidth = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+    act(() => paperWidth.focus());
+    setInput(paperWidth, "300");
+    act(() => paperWidth.blur());
+
+    expect(lastCompositionFrame).not.toBe(composition);
+    expect(shadingJob.starts).toHaveLength(3);
+    expect(shadingJob.starts[2]!.identity.compositionFrame).toEqual(
+      lastCompositionFrame,
+    );
+    expect(outlineJob.starts).toBe(1);
+    const staleOrdinary = exportButton(el, "Export SVG");
+    const stalePlotter = exportButton(el, "Export Hidden-line SVG");
+    expect([staleOrdinary.disabled, stalePlotter.disabled]).toEqual([
+      true,
+      true,
+    ]);
+    act(() => {
+      for (const candidate of [staleOrdinary, stalePlotter]) {
+        candidate.disabled = false;
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("carries the exact painted Shading Scene through completed-Scene Outline identity and reuse", async () => {
     autoFireOutlineComputed = false;
     const generate = vi.fn(toneCalibration.generate);
     const deriveOutlineSource = vi.fn((completed: Readonly<Scene>) =>
@@ -9241,7 +10492,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     );
     const exactScene = preparedScene(21);
     exactScene.primitives[0]!.stroke = { color: "navy", width: 0.75 };
-    await completeScribble(0, exactScene);
+    await completeShading(0, exactScene);
 
     clickButton(el, "Outline");
     expect(outlineJob.starts).toBe(1);
@@ -9298,7 +10549,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         space: { ...firstFrame },
       };
       firstScene.primitives[0]!.stroke = { color: "black", width: 9 };
-      await completeScribble(0, firstScene);
+      await completeShading(0, firstScene);
 
       clickButton(el, "Outline");
       expect(outlineJob.starts).toBe(1);
@@ -9328,7 +10579,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       setInput(margin, "20");
       act(() => margin.blur());
 
-      expect(scribbleJob.starts).toHaveLength(1);
+      expect(shadingJob.starts).toHaveLength(1);
       expect(lastCompositionFrame).toBe(firstFrame);
       expect(outlineJob.starts).toBe(1);
       expect(outlineJob.lastIdentity).toBe(initialOutline);
@@ -9345,7 +10596,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       setInput(toolWidth, "0.5");
       act(() => toolWidth.blur());
 
-      expect(scribbleJob.starts).toHaveLength(1);
+      expect(shadingJob.starts).toHaveLength(1);
       expect(lastCompositionFrame).toBe(firstFrame);
       expect(outlineJob.starts).toBe(1);
       expect(outlineJob.lastIdentity).toBe(initialOutline);
@@ -9376,8 +10627,8 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       act(() => width.blur());
 
       expect(lastCompositionFrame).not.toBe(firstFrame);
-      expect(scribbleJob.starts).toHaveLength(2);
-      expect(scribbleJob.starts[1]?.identity.compositionFrame).toEqual(
+      expect(shadingJob.starts).toHaveLength(2);
+      expect(shadingJob.starts[1]?.identity.compositionFrame).toEqual(
         lastCompositionFrame,
       );
       expect(outlineJob.starts).toBe(1);
@@ -9386,7 +10637,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         ...preparedScene(32),
         space: { ...lastCompositionFrame! },
       };
-      await completeScribble(1, replacementScene);
+      await completeShading(1, replacementScene);
       await flush();
       expect(outlineJob.starts).toBe(2);
       expect(outlineJob.lastIdentity).toMatchObject({
@@ -9401,7 +10652,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
 
   it("waits for a cache re-promotion to repaint before re-enabling export", async () => {
     const el = mount(<SketchControls sketch={toneCalibration} />);
-    await completeScribble(0, preparedScene(1));
+    await completeShading(0, preparedScene(1));
     const svg = exportButton(el, "Export SVG");
     expect(svg.disabled).toBe(false);
 
@@ -9415,19 +10666,19 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       );
     });
 
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(svg.disabled).toBe(true);
     act(() => acknowledgeDisplayedScene?.());
     expect(svg.disabled).toBe(false);
   });
 
-  it("drops an asynchronous PNG snapshot when its Scribble provenance becomes stale", async () => {
+  it("drops an asynchronous PNG snapshot when its Shading provenance becomes stale", async () => {
     let finishToBlob: BlobCallback | null = null;
     fakeCanvasToBlob = vi.fn((callback: BlobCallback) => {
       finishToBlob = callback;
     }) as HTMLCanvasElement["toBlob"];
     const el = mount(<SketchControls sketch={toneCalibration} />);
-    await completeScribble(0, preparedScene(2));
+    await completeShading(0, preparedScene(2));
 
     clickButton(el, "Export PNG");
     expect(finishToBlob).not.toBeNull();
@@ -9444,7 +10695,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
   it("exports a proven current Outline and rejects a stale displayed Outline", async () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={toneCalibration} />);
-    await completeScribble(0, preparedScene(3));
+    await completeShading(0, preparedScene(3));
     clickButton(el, "Outline");
     act(() => lastOnOutlineComputed?.());
     const currentOutline = outlineJob.lastCompletedScene!;
@@ -9476,19 +10727,170 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(downloadBlob).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a current budget-exhausted Scribble result exportable", async () => {
-    const el = mount(<SketchControls sketch={toneCalibration} />);
-    await completeScribble(0, preparedScene(7), {
+  it("keeps an acknowledged budget-exhausted Stippling result current across Fill and every export", async () => {
+    autoFireOutlineComputed = false;
+    const toBlob = vi.fn((callback: BlobCallback) => {
+      callback(new Blob([MINIMAL_PNG], { type: "image/png" }));
+    });
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const generate = vi.fn(toneCalibration.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...toneCalibration, generate }} />,
+    );
+    selectValue(choiceParamSelect(el, "strategy"), "stippling");
+    expect(shadingJob.starts).toHaveLength(2);
+
+    const stipples: Scene = {
+      space: { ...lastCompositionFrame! },
+      primitives: [
+        {
+          points: [[150, 250], [150.5, 250]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[400, 300], [400, 300.5]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+        {
+          points: [[800, 700], [799.5, 700]],
+          closed: false,
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+      ],
+    };
+    const sourcePoints = stipples.primitives.map(({ points }) => points);
+    autoAcknowledgeDisplayedScene = false;
+    await completeShading(1, stipples, {
       ...diagnostics,
       termination: "budget-exhausted",
-      residualError: 0.3,
+      fidelity: { kind: "stippling", distributionError: 0.3 },
     });
 
-    expect(exportButton(el, "Export PNG").disabled).toBe(false);
-    expect(exportButton(el, "Export SVG").disabled).toBe(false);
-    expect(exportButton(el, "Export Hidden-line SVG").disabled).toBe(false);
+    const diagnosticsPanel = shadingDisclosure(el);
+    expect(diagnosticsPanel.textContent).toContain("Budget exhausted");
+    expect(diagnosticsPanel.textContent).toContain(
+      "bounded partial result, not a computation error",
+    );
+    expect(diagnosticsPanel.textContent).toContain("Distribution error30.00%");
+    expect(diagnosticsPanel.textContent).not.toContain("Residual error");
+
+    const png = exportButton(el, "Export PNG");
+    const svg = exportButton(el, "Export SVG");
+    const hidden = exportButton(el, "Export Hidden-line SVG");
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    act(() => {
+      for (const candidate of [png, svg, hidden]) {
+        candidate.disabled = false;
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+
+    act(() => acknowledgeDisplayedScene?.());
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect(diagnosticsPanel.textContent).toContain("Budget exhausted");
+    clickButton(el, "Fill");
+    expect(lastRenderScene).toBe(stipples);
+
     clickButton(el, "Export SVG");
-    expect(downloadBlob).toHaveBeenCalledTimes(1);
+    expect(exportSceneCapture.current).toBe(stipples);
+    expect(
+      (exportSceneCapture.current as Scene).primitives.map(
+        ({ points }) => points,
+      ),
+    ).toEqual(sourcePoints);
+    clickButton(el, "Export PNG");
+    await flush();
+    expect(toBlob).toHaveBeenCalledOnce();
+
+    const includeFrame = compositionFrameCheckbox(el);
+    expect(includeFrame.checked).toBe(true);
+    act(() => includeFrame.click());
+    clickButton(el, "Outline");
+    expect(outlineJob.starts).toBe(1);
+    const identity = outlineJob.lastIdentity;
+    expect(identity).toMatchObject({
+      sourceKind: "completed-scene-sketch",
+      sourceScene: stipples,
+    });
+    if (identity?.sourceKind !== "completed-scene-sketch") {
+      throw new Error("expected completed-Scene Stippling identity");
+    }
+    expect(identity.sourceScene).not.toBe(stipples);
+    expect(identity.sourceScene.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+    act(() => lastOnOutlineComputed?.());
+    await flush();
+    const cachedOutline = outlineJob.lastCompletedScene!;
+    expect(cachedOutline.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(outlineJob.exportDerivations).toBe(0);
+    expect(outlineJob.lastExportSnapshot).toMatchObject({
+      identity: { sourceKind: "completed-scene-sketch" },
+      reusableOutline: { scene: cachedOutline },
+    });
+    const plotterScene = plotterExportCapture.current?.scene as Scene;
+    expect(plotterScene.primitives.map(({ points }) => points)).toEqual(
+      sourcePoints,
+    );
+    expect(
+      plotterScene.primitives.every(
+        ({ points, closed }) => points.length === 2 && closed !== true,
+      ),
+    ).toBe(true);
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(generate).not.toHaveBeenCalled();
+    expect(downloadBlob).toHaveBeenCalledTimes(3);
+
+    toBlob.mockClear();
+    downloadBlob.mockClear();
+    exportSceneCapture.current = null;
+    outlineJob.exportStarts = 0;
+    const density = paramInput(el, "stippleDensity");
+    act(() => density.focus());
+    setInput(density, "1.4");
+    act(() => density.blur());
+    expect(shadingJob.starts).toHaveLength(3);
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    act(() => {
+      for (const candidate of [png, svg, hidden]) {
+        candidate.disabled = false;
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(exportSceneCapture.current).toBeNull();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
   });
 
   it("holds empty/current/stale artwork and settles one latest edit without main-thread generation", async () => {
@@ -9497,12 +10899,12 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     const el = mount(<SketchControls sketch={sketch} />);
     const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
 
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     expect(canvas.dataset.renderState).toBe("fill-held");
     expect(canvas.dataset.contentRevision).toBe("");
     expect(generate).not.toHaveBeenCalled();
 
-    await completeScribble(0, preparedScene(1));
+    await completeShading(0, preparedScene(1));
     expect(canvas.dataset.sourceInputRevision).toBe("0");
     expect(canvas.dataset.contentRevision).toBe("1");
 
@@ -9512,17 +10914,17 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     setInput(density, "3");
     expect(canvas.dataset.sourceInputRevision).toBe("0");
     expect(canvas.dataset.contentRevision).toBe("1");
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
 
     act(() => density.blur());
-    expect(scribbleJob.starts).toHaveLength(2);
-    expect(scribbleJob.starts[1]!.identity.params).toContainEqual({
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(shadingJob.starts[1]!.identity.params).toContainEqual({
       key: "pathDensity",
       value: 3,
     });
     expect(generate).not.toHaveBeenCalled();
 
-    await completeScribble(1, preparedScene(2));
+    await completeShading(1, preparedScene(2));
     expect(canvas.dataset.sourceInputRevision).toBe("2");
     expect(canvas.dataset.contentRevision).toBe("2");
   });
@@ -9541,10 +10943,10 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
 
     expect(lastToneSource).not.toBeNull();
     expect(lastToneSource).not.toBe(originalSource);
-    expect(scribbleJob.starts).toHaveLength(1);
+    expect(shadingJob.starts).toHaveLength(1);
     act(() => lightAngle.blur());
-    expect(scribbleJob.starts).toHaveLength(2);
-    expect(scribbleJob.starts[1]!.identity.params).toContainEqual({
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(shadingJob.starts[1]!.identity.params).toContainEqual({
       key: "lightAngle",
       value: 180,
     });
@@ -9564,7 +10966,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         },
       ],
     };
-    await completeScribble(1, completeMoon);
+    await completeShading(1, completeMoon);
     clickButton(el, "Fill");
     clickButton(el, "Export SVG");
     expect(exportSceneCapture.current).toBe(completeMoon);
@@ -9579,7 +10981,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
 
   it("keeps progress observational and out of params, Presets, history, and export metadata", async () => {
     const el = mount(<SketchControls sketch={toneCalibration} />);
-    reportScribbleProgress(0, 30, 100, {
+    reportShadingProgress(0, 30, 100, {
       kind: "remaining",
       revision: 2,
       remainingMs: 7_000,
@@ -9612,7 +11014,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
       /completedWorkUnits|totalWorkUnits|remainingMs|diagnostics|computeTimeMs/,
     );
 
-    await completeScribble(0, preparedScene(8));
+    await completeShading(0, preparedScene(8));
     clickButton(el, "Export SVG");
     const svgBlob = downloadBlob.mock.calls[0]![0];
     const svg = await new Promise<string>((resolve, reject) => {
@@ -9653,7 +11055,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={toneCalibration} />);
     const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
-    await completeScribble(0, preparedScene(1));
+    await completeShading(0, preparedScene(1));
 
     const density = paramInput(el, "pathDensity");
     act(() => density.focus());
@@ -9663,7 +11065,7 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(outlineJob.starts).toBe(0);
     expect(canvas.dataset.sourceInputRevision).toBe("0");
 
-    await completeScribble(1, preparedScene(2));
+    await completeShading(1, preparedScene(2));
     await flush();
     expect(outlineJob.starts).toBe(1);
     expect(outlineJob.lastIdentity?.params).toContainEqual({
@@ -9684,11 +11086,11 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     expect(outlineJob.starts).toBe(1);
   });
 
-  it("releases an Outline-only edit after active export with the painted Scribble provenance", async () => {
+  it("releases an Outline-only edit after active export with the painted Shading provenance", async () => {
     autoFireOutlineComputed = false;
     const el = mount(<SketchControls sketch={toneCalibration} />);
     const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
-    await completeScribble(0, preparedScene(1));
+    await completeShading(0, preparedScene(1));
 
     clickButton(el, "Outline");
     expect(outlineJob.starts).toBe(1);
@@ -9732,14 +11134,14 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
     ).toBe(false);
   });
 
-  it("disposes each Scribble coordinator across StrictMode and keyed switches", () => {
+  it("disposes each Shading coordinator across StrictMode and keyed switches", () => {
     mount(
       <StrictMode>
         <SketchControls key="calibration" sketch={toneCalibration} />
       </StrictMode>,
     );
-    expect(scribbleJob.coordinators).toBe(2);
-    expect(scribbleJob.disposals).toBe(1);
+    expect(shadingJob.coordinators).toBe(2);
+    expect(shadingJob.disposals).toBe(1);
 
     act(() => {
       root!.render(
@@ -9748,12 +11150,12 @@ describe("SketchControls — Scribble preparation composition (#318)", () => {
         </StrictMode>,
       );
     });
-    expect(scribbleJob.coordinators).toBe(4);
-    expect(scribbleJob.disposals).toBe(3);
+    expect(shadingJob.coordinators).toBe(4);
+    expect(shadingJob.disposals).toBe(3);
 
     act(() => root!.unmount());
     root = null;
-    expect(scribbleJob.disposals).toBe(4);
+    expect(shadingJob.disposals).toBe(4);
   });
 });
 

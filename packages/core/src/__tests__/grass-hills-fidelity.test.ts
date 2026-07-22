@@ -204,6 +204,7 @@ function noOpCanvas(): Canvas2DContext {
     stroke() {},
     fillStyle: '',
     strokeStyle: '',
+    lineCap: 'butt',
     lineWidth: 0,
     setTransform() {},
     fillRect() {},

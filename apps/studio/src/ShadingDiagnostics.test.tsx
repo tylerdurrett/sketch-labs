@@ -3,7 +3,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ScribbleDiagnostics } from "@harness/core";
+import type {
+  ShadingDiagnostics as CoreShadingDiagnostics,
+} from "@harness/core";
 
 import {
   ShadingDiagnostics,
@@ -14,24 +16,30 @@ import {
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-const converged: ScribbleDiagnostics = {
+const converged: CoreShadingDiagnostics = {
   termination: "completed",
-  residualError: 0.0234,
   pathLength: 1_234.567,
   polylineCount: 48,
   penLiftCount: 47,
+  fidelity: { kind: "scribble", residualError: 0.0234 },
 };
 
-const exhausted: ScribbleDiagnostics = {
+const exhausted: CoreShadingDiagnostics = {
   ...converged,
   termination: "budget-exhausted",
-  residualError: 0.2,
+  fidelity: { kind: "scribble", residualError: 0.2 },
 };
 
-const stoppedEarly: ScribbleDiagnostics = {
+const stoppedEarly: CoreShadingDiagnostics = {
   ...converged,
   termination: "stopped-early",
-  residualError: 0.12,
+  fidelity: { kind: "scribble", residualError: 0.12 },
+};
+
+const stipplingExhausted: CoreShadingDiagnostics = {
+  ...converged,
+  termination: "budget-exhausted",
+  fidelity: { kind: "stippling", distributionError: 1.25 },
 };
 
 let container: HTMLDivElement | null = null;
@@ -212,6 +220,36 @@ describe("ShadingDiagnostics", () => {
     expect(displayed.textContent).toContain("Compute time1 min 5 s");
   });
 
+  it("labels retained Stippling fidelity and preserves the bounded-partial warning", () => {
+    const el = mount({
+      displayed: {
+        freshness: "stale",
+        diagnostics: stipplingExhausted,
+        computeTimeMs: 842,
+      },
+      preparation: {
+        kind: "preparing",
+        progress: {
+          completedWorkUnits: 3,
+          totalWorkUnits: 10,
+          terminal: false,
+        },
+        eta: { kind: "remaining", revision: 1, remainingMs: 1_000 },
+      },
+    });
+    expand(el);
+
+    const retained = lane(el, "Displayed result (stale)");
+    expect(retained.textContent).toContain("Distribution error125.00%");
+    expect(retained.textContent).not.toContain("Residual error");
+    expect(retained.textContent).toContain("bounded partial result");
+    expect(retained.querySelector('[role="alert"]')).toBeNull();
+
+    const replacement = lane(el, "Preparing replacement");
+    expect(replacement.textContent).not.toContain("Distribution error");
+    expect(replacement.textContent).not.toContain("Residual error");
+  });
+
   it("presents an authored early stop as a neutral finished result", () => {
     const el = mount({
       displayed: {
@@ -338,7 +376,7 @@ describe("ShadingDiagnostics", () => {
       },
       preparation: {
         kind: "failure",
-        message: "Scribble worker returned an invalid response",
+        message: "Shading worker returned an invalid response",
         onRetry: retry,
       },
     });
@@ -362,7 +400,7 @@ describe("ShadingDiagnostics", () => {
     const failure = lane(el, "Replacement preparation");
     const alert = failure.querySelector('[role="alert"]');
     expect(alert?.textContent).toBe(
-      "Preparation failed: Scribble worker returned an invalid response",
+      "Preparation failed: Shading worker returned an invalid response",
     );
     expect(failure.textContent).not.toContain("Residual error");
     const retryButton = failure.querySelector<HTMLButtonElement>("button");

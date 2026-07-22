@@ -3,18 +3,18 @@ import { describe, expect, it } from "vitest";
 import type { ParamSchema, Scene } from "@harness/core";
 
 import {
-  copyScribbleComputeIdentity,
-  createScribbleComputeIdentity,
-  isScribbleComputeFailure,
-  isScribbleComputeIdentity,
-  isScribbleComputeProgress,
-  isScribbleComputeRequest,
-  isScribbleComputeResponse,
-  isScribbleComputeSuccess,
-  isScribbleWorkerMessage,
-  scribbleComputeIdentitiesEqual,
-  type ScribbleComputeIdentity,
-} from "./scribbleComputeProtocol";
+  copyShadingComputeIdentity,
+  createShadingComputeIdentity,
+  isShadingComputeFailure,
+  isShadingComputeIdentity,
+  isShadingComputeProgress,
+  isShadingComputeRequest,
+  isShadingComputeResponse,
+  isShadingComputeSuccess,
+  isShadingWorkerMessage,
+  shadingComputeIdentitiesEqual,
+  type ShadingComputeIdentity,
+} from "./shadingComputeProtocol";
 
 const schema: ParamSchema = {
   zeta: { kind: "number", min: 0, max: 10, default: 1 },
@@ -24,6 +24,38 @@ const schema: ParamSchema = {
 
 const imageAssetSchema: ParamSchema = {
   imageAsset: { kind: "image-asset", default: "portrait-default" },
+};
+
+const conditionalSchema: ParamSchema = {
+  strategy: {
+    kind: "choice",
+    options: [
+      { value: "scribble", label: "Scribble" },
+      { value: "stippling", label: "Stippling" },
+    ],
+    default: "scribble",
+  },
+  scribbleDensity: {
+    kind: "number",
+    min: 0,
+    max: 10,
+    default: 1,
+    activeWhen: { key: "strategy", equals: "scribble" },
+  },
+  scribbleFidelity: {
+    kind: "number",
+    min: 0,
+    max: 10,
+    default: 2,
+    activeWhen: { key: "strategy", equals: "scribble" },
+  },
+  stippleDensity: {
+    kind: "number",
+    min: 0,
+    max: 10,
+    default: 3,
+    activeWhen: { key: "strategy", equals: "stippling" },
+  },
 };
 
 const scene: Scene = {
@@ -38,7 +70,7 @@ const scene: Scene = {
       ],
       closed: true,
       fill: { color: "red" },
-      stroke: { color: "blue", width: 2 },
+      stroke: { color: "blue", width: 2, lineCap: "round" },
       hiddenLineRole: "both",
     },
   ],
@@ -51,8 +83,8 @@ function identity(
     seed: string | number;
     compositionFrame: { width: number; height: number };
   }> = {},
-): ScribbleComputeIdentity {
-  return createScribbleComputeIdentity({
+): ShadingComputeIdentity {
+  return createShadingComputeIdentity({
     sketchId: overrides.sketchId ?? "tone-calibration",
     schema,
     // Deliberately differs from both schema order and alphabetical order.
@@ -70,11 +102,23 @@ function identity(
   });
 }
 
-function imageAssetIdentity(value: unknown): ScribbleComputeIdentity {
-  return createScribbleComputeIdentity({
+function imageAssetIdentity(value: unknown): ShadingComputeIdentity {
+  return createShadingComputeIdentity({
     sketchId: "photo-scribble",
     schema: imageAssetSchema,
     params: { imageAsset: value },
+    seed: "seed",
+    compositionFrame: { width: 120, height: 90 },
+  });
+}
+
+function conditionalIdentity(
+  params: Record<string, unknown>,
+): ShadingComputeIdentity {
+  return createShadingComputeIdentity({
+    sketchId: "conditional",
+    schema: conditionalSchema,
+    params,
     seed: "seed",
     compositionFrame: { width: 120, height: 90 },
   });
@@ -88,24 +132,30 @@ function success() {
     scene: structuredClone(scene),
     diagnostics: {
       termination: "completed",
-      residualError: 0.02,
       pathLength: 123.5,
       polylineCount: 4,
       penLiftCount: 3,
+      fidelity: { kind: "scribble", residualError: 0.02 },
     },
     computeTimeMs: 42.25,
   } as const;
 }
 
-function changed(
-  mutate: (copy: Record<string, any>) => void,
-): ScribbleComputeIdentity {
-  const copy = structuredClone(identity()) as Record<string, any>;
-  mutate(copy);
-  return copy as ScribbleComputeIdentity;
+function successWithFidelity(fidelity: unknown) {
+  const candidate = structuredClone(success()) as Record<string, any>;
+  candidate.diagnostics.fidelity = fidelity;
+  return candidate;
 }
 
-describe("Scribble compute identity", () => {
+function changed(
+  mutate: (copy: Record<string, any>) => void,
+): ShadingComputeIdentity {
+  const copy = structuredClone(identity()) as Record<string, any>;
+  mutate(copy);
+  return copy as ShadingComputeIdentity;
+}
+
+describe("Shading compute identity", () => {
   it("uses canonical schema declaration order, independent of params order", () => {
     const first = identity();
     const reordered = identity({
@@ -117,7 +167,75 @@ describe("Scribble compute identity", () => {
       { key: "alpha", value: "#abcdef" },
       { key: "middle", value: 8 },
     ]);
-    expect(scribbleComputeIdentitiesEqual(first, reordered)).toBe(true);
+    expect(shadingComputeIdentitiesEqual(first, reordered)).toBe(true);
+  });
+
+  it("projects only the selected branch with schema defaults and declaration order", () => {
+    const scribble = conditionalIdentity({
+      scribbleFidelity: 8,
+      stippleDensity: 9,
+      extra: "ignored",
+    });
+    const stippling = conditionalIdentity({
+      strategy: "stippling",
+      scribbleDensity: 7,
+      scribbleFidelity: 8,
+      stippleDensity: 9,
+      extra: "ignored",
+    });
+
+    expect(scribble.params).toEqual([
+      { key: "strategy", value: "scribble" },
+      { key: "scribbleDensity", value: 1 },
+      { key: "scribbleFidelity", value: 8 },
+    ]);
+    expect(stippling.params).toEqual([
+      { key: "strategy", value: "stippling" },
+      { key: "stippleDensity", value: 9 },
+    ]);
+    expect(Object.isFrozen(stippling)).toBe(true);
+    expect(Object.isFrozen(stippling.params)).toBe(true);
+    expect(stippling.params.every(Object.isFrozen)).toBe(true);
+  });
+
+  it("ignores inactive edits but distinguishes active edits and restored branch values", () => {
+    const scribble = conditionalIdentity({
+      strategy: "scribble",
+      scribbleDensity: 4,
+      scribbleFidelity: 5,
+      stippleDensity: 6,
+    });
+    const inactiveEdit = conditionalIdentity({
+      strategy: "scribble",
+      scribbleDensity: 4,
+      scribbleFidelity: 5,
+      stippleDensity: 9,
+    });
+    const activeEdit = conditionalIdentity({
+      strategy: "scribble",
+      scribbleDensity: 7,
+      scribbleFidelity: 5,
+      stippleDensity: 6,
+    });
+    const switched = conditionalIdentity({
+      strategy: "stippling",
+      scribbleDensity: 4,
+      scribbleFidelity: 5,
+      stippleDensity: 6,
+    });
+    const switchedWithRestoredEdit = conditionalIdentity({
+      strategy: "stippling",
+      scribbleDensity: 4,
+      scribbleFidelity: 5,
+      stippleDensity: 9,
+    });
+
+    expect(shadingComputeIdentitiesEqual(scribble, inactiveEdit)).toBe(true);
+    expect(shadingComputeIdentitiesEqual(scribble, activeEdit)).toBe(false);
+    expect(shadingComputeIdentitiesEqual(scribble, switched)).toBe(false);
+    expect(
+      shadingComputeIdentitiesEqual(switched, switchedWithRestoredEdit),
+    ).toBe(false);
   });
 
   it("does not include extra params or any Outline-only derivation inputs", () => {
@@ -149,17 +267,17 @@ describe("Scribble compute identity", () => {
       (copy) => (copy.compositionFrame.height = 91),
     ];
 
-    expect(scribbleComputeIdentitiesEqual(current, identity())).toBe(true);
+    expect(shadingComputeIdentitiesEqual(current, identity())).toBe(true);
     for (const mutate of mutations) {
-      expect(scribbleComputeIdentitiesEqual(current, changed(mutate))).toBe(
+      expect(shadingComputeIdentitiesEqual(current, changed(mutate))).toBe(
         false,
       );
     }
   });
 
   it("copies into isolated, deeply immutable cache ownership", () => {
-    const source = structuredClone(identity()) as ScribbleComputeIdentity;
-    const copied = copyScribbleComputeIdentity(source);
+    const source = structuredClone(identity()) as ShadingComputeIdentity;
+    const copied = copyShadingComputeIdentity(source);
     (source.params[0] as { key: string }).key = "mutated";
     (source.compositionFrame as { width: number }).width = 999;
 
@@ -172,7 +290,7 @@ describe("Scribble compute identity", () => {
   });
 
   it("keeps an Image Asset parameter as its opaque ID only", () => {
-    const current = createScribbleComputeIdentity({
+    const current = createShadingComputeIdentity({
       sketchId: "photo-scribble",
       schema: imageAssetSchema,
       params: {
@@ -183,7 +301,7 @@ describe("Scribble compute identity", () => {
       seed: "seed",
       compositionFrame: { width: 120, height: 90 },
     });
-    const cached = copyScribbleComputeIdentity(current);
+    const cached = copyShadingComputeIdentity(current);
 
     expect(current.params).toEqual([
       { key: "imageAsset", value: "portrait-a1b2c3d4" },
@@ -202,12 +320,38 @@ describe("Scribble compute identity", () => {
       { key: "imageAsset", value: unresolved },
     ]);
     expect(
-      scribbleComputeIdentitiesEqual(
+      shadingComputeIdentitiesEqual(
         current,
         imageAssetIdentity("unresolved://not-an-asset-id?variant=β"),
       ),
     ).toBe(false);
     expect(imageAssetIdentity("").params[0]?.value).toBe("");
+  });
+
+  it("preserves declared Choice strings and rejects invalid present values", () => {
+    expect(
+      createShadingComputeIdentity({
+        sketchId: "tone-calibration",
+        schema: conditionalSchema,
+        params: { strategy: "stippling" },
+        seed: "seed",
+        compositionFrame: { width: 120, height: 90 },
+      }).params,
+    ).toEqual([
+      { key: "strategy", value: "stippling" },
+      { key: "stippleDensity", value: 3 },
+    ]);
+    for (const strategy of [1, undefined, "hatching"]) {
+      expect(() =>
+        createShadingComputeIdentity({
+          sketchId: "tone-calibration",
+          schema: conditionalSchema,
+          params: { strategy },
+          seed: "seed",
+          compositionFrame: { width: 120, height: 90 },
+        }),
+      ).toThrow(/strategy/);
+    }
   });
 
   it("rejects only non-string Image Asset parameter values", () => {
@@ -216,7 +360,7 @@ describe("Scribble compute identity", () => {
     }
   });
 
-  it("rejects missing, mistyped, and non-finite authored inputs", () => {
+  it("defaults missing values and rejects mistyped or non-finite authored inputs", () => {
     expect(() => identity({ sketchId: "" })).toThrow(TypeError);
     expect(() =>
       identity({ params: { zeta: NaN, alpha: "#fff", middle: 1 } }),
@@ -224,9 +368,11 @@ describe("Scribble compute identity", () => {
     expect(() =>
       identity({ params: { zeta: 1, alpha: 2, middle: 1 } }),
     ).toThrow(/alpha/);
-    expect(() => identity({ params: { zeta: 1, alpha: "#fff" } })).toThrow(
-      /middle/,
-    );
+    expect(identity({ params: { zeta: 1, alpha: "#fff" } }).params).toEqual([
+      { key: "zeta", value: 1 },
+      { key: "alpha", value: "#fff" },
+      { key: "middle", value: 2 },
+    ]);
     expect(() => identity({ seed: Infinity })).toThrow(TypeError);
     expect(() =>
       identity({ compositionFrame: { width: 0, height: 90 } }),
@@ -237,7 +383,25 @@ describe("Scribble compute identity", () => {
   });
 });
 
-describe("Scribble compute protocol guards", () => {
+describe("Shading compute protocol guards", () => {
+  it("accepts exact Scribble and Stippling fidelity variants at their boundaries", () => {
+    for (const residualError of [0, 1]) {
+      expect(
+        isShadingComputeSuccess(
+          successWithFidelity({ kind: "scribble", residualError }),
+        ),
+      ).toBe(true);
+    }
+
+    for (const distributionError of [0, 1.25, 2]) {
+      expect(
+        isShadingComputeSuccess(
+          successWithFidelity({ kind: "stippling", distributionError }),
+        ),
+      ).toBe(true);
+    }
+  });
+
   it("accepts strict request, progress, success, and failure messages", () => {
     const request = { type: "compute", jobId: 7, identity: identity() };
     const progress = {
@@ -265,15 +429,15 @@ describe("Scribble compute protocol guards", () => {
       error: "safe failure",
     };
 
-    expect(isScribbleComputeRequest(request)).toBe(true);
-    expect(isScribbleComputeProgress(progress)).toBe(true);
-    expect(isScribbleComputeSuccess(completed)).toBe(true);
-    expect(isScribbleComputeSuccess(stoppedEarly)).toBe(true);
-    expect(isScribbleComputeFailure(failure)).toBe(true);
-    expect(isScribbleComputeResponse(completed)).toBe(true);
-    expect(isScribbleComputeResponse(failure)).toBe(true);
-    expect(isScribbleWorkerMessage(progress)).toBe(true);
-    expect(isScribbleWorkerMessage(completed)).toBe(true);
+    expect(isShadingComputeRequest(request)).toBe(true);
+    expect(isShadingComputeProgress(progress)).toBe(true);
+    expect(isShadingComputeSuccess(completed)).toBe(true);
+    expect(isShadingComputeSuccess(stoppedEarly)).toBe(true);
+    expect(isShadingComputeFailure(failure)).toBe(true);
+    expect(isShadingComputeResponse(completed)).toBe(true);
+    expect(isShadingComputeResponse(failure)).toBe(true);
+    expect(isShadingWorkerMessage(progress)).toBe(true);
+    expect(isShadingWorkerMessage(completed)).toBe(true);
   });
 
   it("accepts early terminal progress and keeps it compact and identity-free", () => {
@@ -286,9 +450,9 @@ describe("Scribble compute protocol guards", () => {
         terminal: true,
       },
     };
-    expect(isScribbleComputeProgress(progress)).toBe(true);
+    expect(isShadingComputeProgress(progress)).toBe(true);
     expect(
-      isScribbleComputeProgress({
+      isShadingComputeProgress({
         ...progress,
         snapshot: {
           completedWorkUnits: 0,
@@ -299,7 +463,7 @@ describe("Scribble compute protocol guards", () => {
     ).toBe(true);
     expect(progress).not.toHaveProperty("identity");
     expect(
-      isScribbleComputeProgress({ ...progress, identity: identity() }),
+      isShadingComputeProgress({ ...progress, identity: identity() }),
     ).toBe(false);
   });
 
@@ -322,10 +486,10 @@ describe("Scribble compute protocol guards", () => {
     ];
 
     for (const candidate of invalidIdentities) {
-      expect(isScribbleComputeIdentity(candidate)).toBe(false);
+      expect(isShadingComputeIdentity(candidate)).toBe(false);
     }
     expect(
-      isScribbleComputeRequest({
+      isShadingComputeRequest({
         type: "compute",
         jobId: 7,
         identity: current,
@@ -367,13 +531,13 @@ describe("Scribble compute protocol guards", () => {
       { ...progress, snapshot: { ...progress.snapshot, extra: true } },
     ];
     for (const candidate of invalid) {
-      expect(isScribbleComputeProgress(candidate)).toBe(false);
+      expect(isShadingComputeProgress(candidate)).toBe(false);
     }
     expect(
-      isScribbleComputeRequest({ type: "compute", jobId: 1, identity: {} }),
+      isShadingComputeRequest({ type: "compute", jobId: 1, identity: {} }),
     ).toBe(false);
     expect(
-      isScribbleComputeRequest({
+      isShadingComputeRequest({
         type: "compute",
         jobId: 1,
         identity: current,
@@ -395,12 +559,13 @@ describe("Scribble compute protocol guards", () => {
       (copy) => (copy.scene.primitives[0].fill.extra = true),
       (copy) => (copy.scene.primitives[0].stroke.extra = true),
       (copy) => (copy.scene.primitives[0].stroke.width = Infinity),
+      (copy) => (copy.scene.primitives[0].stroke.lineCap = "triangle"),
       (copy) => (copy.scene.primitives[0].hiddenLineRole = "unknown"),
     ];
     for (const mutate of mutations) {
       const candidate = structuredClone(success()) as Record<string, any>;
       mutate(candidate);
-      expect(isScribbleComputeSuccess(candidate)).toBe(false);
+      expect(isShadingComputeSuccess(candidate)).toBe(false);
     }
   });
 
@@ -408,19 +573,44 @@ describe("Scribble compute protocol guards", () => {
     const mutations: Array<(copy: Record<string, any>) => void> = [
       (copy) => (copy.diagnostics.extra = true),
       (copy) => (copy.diagnostics.termination = "unknown"),
-      (copy) => (copy.diagnostics.residualError = -0.1),
-      (copy) => (copy.diagnostics.residualError = 1.1),
       (copy) => (copy.diagnostics.pathLength = Infinity),
       (copy) => (copy.diagnostics.polylineCount = 1.5),
       (copy) => (copy.diagnostics.penLiftCount = -1),
       (copy) => (copy.diagnostics.penLiftCount = 2),
+      (copy) => (copy.diagnostics.fidelity.extra = true),
+      (copy) => (copy.diagnostics.fidelity.kind = "unknown"),
+      (copy) => (copy.diagnostics.fidelity.residualError = -0.1),
+      (copy) => (copy.diagnostics.fidelity.residualError = 1.1),
+      (copy) => (copy.diagnostics.fidelity.residualError = NaN),
+      (copy) => (copy.diagnostics.fidelity.residualError = Infinity),
       (copy) => (copy.computeTimeMs = NaN),
       (copy) => (copy.computeTimeMs = -1),
     ];
     for (const mutate of mutations) {
       const candidate = structuredClone(success()) as Record<string, any>;
       mutate(candidate);
-      expect(isScribbleComputeSuccess(candidate)).toBe(false);
+      expect(isShadingComputeSuccess(candidate)).toBe(false);
+    }
+  });
+
+  it("rejects malformed, out-of-range, mixed, and extra Stippling fidelity", () => {
+    const malformedFidelity: readonly unknown[] = [
+      null,
+      { kind: "stippling" },
+      { kind: "stippling", distributionError: "1.25" },
+      { kind: "stippling", distributionError: -0.1 },
+      { kind: "stippling", distributionError: 2.1 },
+      { kind: "stippling", distributionError: NaN },
+      { kind: "stippling", distributionError: Infinity },
+      { kind: "stippling", distributionError: 1.25, residualError: 0.1 },
+      { kind: "stippling", distributionError: 1.25, extra: true },
+      { kind: "scribble", residualError: 0.1, distributionError: 1.25 },
+    ];
+
+    for (const fidelity of malformedFidelity) {
+      expect(
+        isShadingComputeSuccess(successWithFidelity(fidelity)),
+      ).toBe(false);
     }
   });
 
@@ -433,9 +623,9 @@ describe("Scribble compute protocol guards", () => {
       error: "safe failure",
     };
 
-    expect(isScribbleComputeProgress(completed)).toBe(false);
-    expect(isScribbleComputeFailure(completed)).toBe(false);
-    expect(isScribbleComputeSuccess(failure)).toBe(false);
-    expect(isScribbleComputeRequest(completed)).toBe(false);
+    expect(isShadingComputeProgress(completed)).toBe(false);
+    expect(isShadingComputeFailure(completed)).toBe(false);
+    expect(isShadingComputeSuccess(failure)).toBe(false);
+    expect(isShadingComputeRequest(completed)).toBe(false);
   });
 });

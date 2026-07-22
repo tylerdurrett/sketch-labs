@@ -1,91 +1,91 @@
-import type { Scene, ScribbleDiagnostics } from "@harness/core";
+import type { Scene, ShadingDiagnostics } from "@harness/core";
 
 import {
-  scribbleComputeIdentitiesEqual,
-  type ScribbleComputeIdentity,
-} from "./scribbleComputeProtocol";
+  shadingComputeIdentitiesEqual,
+  type ShadingComputeIdentity,
+} from "./shadingComputeProtocol";
 
 /** Work the driver has not started yet. */
-export interface PendingScribbleRequest {
+export interface PendingShadingRequest {
   readonly token: number;
-  readonly identity: ScribbleComputeIdentity;
+  readonly identity: ShadingComputeIdentity;
   readonly sourceInputRevision: number;
 }
 
-/** Work currently owned by the Scribble worker driver. */
-export interface ActiveScribbleRequest {
+/** Work currently owned by the Shading worker driver. */
+export interface ActiveShadingRequest {
   readonly token: number;
-  readonly identity: ScribbleComputeIdentity;
+  readonly identity: ShadingComputeIdentity;
   readonly sourceInputRevision: number;
 }
 
-/** The last complete Scribble record, whether current or intentionally stale. */
-export interface DisplayedScribbleResult {
-  readonly identity: ScribbleComputeIdentity;
+/** The last complete Shading record, whether current or intentionally stale. */
+export interface DisplayedShadingResult {
+  readonly identity: ShadingComputeIdentity;
   readonly scene: Scene;
-  readonly diagnostics: ScribbleDiagnostics;
+  readonly diagnostics: ShadingDiagnostics;
   readonly computeTimeMs: number;
   readonly sourceInputRevision: number;
   /** Changes on both worker completion and exact-cache promotion. */
   readonly contentRevision: number;
 }
 
-export interface ScribbleSessionState {
-  readonly desiredIdentity: ScribbleComputeIdentity | null;
+export interface ShadingSessionState {
+  readonly desiredIdentity: ShadingComputeIdentity | null;
   readonly sourceInputRevision: number | null;
   readonly transactionOpen: boolean;
   /** Whether worker ownership is explicitly paused while authored state advances. */
   readonly suspended: boolean;
-  readonly pending: PendingScribbleRequest | null;
-  readonly active: ActiveScribbleRequest | null;
-  readonly displayed: DisplayedScribbleResult | null;
+  readonly pending: PendingShadingRequest | null;
+  readonly active: ActiveShadingRequest | null;
+  readonly displayed: DisplayedShadingResult | null;
   readonly failure: string | null;
   readonly nextToken: number;
   readonly nextContentRevision: number;
 }
 
-export type ScribbleSessionAction =
+export type ShadingSessionAction =
   | { readonly type: "suspend" }
   | { readonly type: "resume-latest" }
   | { readonly type: "transaction-began" }
   | {
       readonly type: "desired-identity-changed";
-      readonly identity: ScribbleComputeIdentity;
+      readonly identity: ShadingComputeIdentity;
       readonly sourceInputRevision: number;
     }
   | {
       readonly type: "transaction-settled";
-      readonly identity: ScribbleComputeIdentity;
+      readonly identity: ShadingComputeIdentity;
       readonly sourceInputRevision: number;
     }
   | {
       readonly type: "launched";
       readonly token: number;
-      readonly identity: ScribbleComputeIdentity;
+      readonly identity: ShadingComputeIdentity;
     }
   | {
       readonly type: "succeeded";
       readonly token: number;
-      readonly identity: ScribbleComputeIdentity;
+      readonly identity: ShadingComputeIdentity;
       readonly scene: Scene;
-      readonly diagnostics: ScribbleDiagnostics;
+      readonly diagnostics: ShadingDiagnostics;
       readonly computeTimeMs: number;
     }
   | { readonly type: "cancelled"; readonly token: number }
   | {
       readonly type: "failed";
       readonly token: number;
-      readonly identity: ScribbleComputeIdentity;
+      readonly identity: ShadingComputeIdentity;
       readonly error: string;
     }
   | {
       readonly type: "retry";
-      readonly identity: ScribbleComputeIdentity;
+      readonly identity: ShadingComputeIdentity;
       readonly sourceInputRevision: number;
     }
   | { readonly type: "dispose" };
 
-function emptyScribbleSessionState(): ScribbleSessionState {
+function emptyShadingSessionState(): ShadingSessionState {
   return {
     desiredIdentity: null,
     sourceInputRevision: null,
@@ -101,13 +101,13 @@ function emptyScribbleSessionState(): ScribbleSessionState {
 }
 
 /** Create one session and enqueue its initial identity exactly once. */
-export function createScribbleSessionState(
-  initialIdentity: ScribbleComputeIdentity,
+export function createShadingSessionState(
+  initialIdentity: ShadingComputeIdentity,
   initialInputRevision: number,
-): ScribbleSessionState {
+): ShadingSessionState {
   const token = 1;
   return {
-    ...emptyScribbleSessionState(),
+    ...emptyShadingSessionState(),
     desiredIdentity: initialIdentity,
     sourceInputRevision: initialInputRevision,
     pending: {
@@ -120,22 +120,22 @@ export function createScribbleSessionState(
 }
 
 function identitiesEqual(
-  left: ScribbleComputeIdentity | null,
-  right: ScribbleComputeIdentity,
+  left: ShadingComputeIdentity | null,
+  right: ShadingComputeIdentity,
 ): boolean {
-  return left !== null && scribbleComputeIdentitiesEqual(left, right);
+  return left !== null && shadingComputeIdentitiesEqual(left, right);
 }
 
 function requestsSameIdentity(
-  request: PendingScribbleRequest | ActiveScribbleRequest | null,
-  identity: ScribbleComputeIdentity,
+  request: PendingShadingRequest | ActiveShadingRequest | null,
+  identity: ShadingComputeIdentity,
 ): boolean {
   return request !== null && identitiesEqual(request.identity, identity);
 }
 
 function desiredMatches(
-  state: ScribbleSessionState,
-  identity: ScribbleComputeIdentity,
+  state: ShadingSessionState,
+  identity: ShadingComputeIdentity,
   sourceInputRevision: number,
 ): boolean {
   return (
@@ -145,7 +145,7 @@ function desiredMatches(
 }
 
 function isStaleInputRevision(
-  state: ScribbleSessionState,
+  state: ShadingSessionState,
   sourceInputRevision: number,
 ): boolean {
   return (
@@ -155,10 +155,10 @@ function isStaleInputRevision(
 }
 
 function settleDesiredIdentity(
-  state: ScribbleSessionState,
-  identity: ScribbleComputeIdentity,
+  state: ShadingSessionState,
+  identity: ShadingComputeIdentity,
   sourceInputRevision: number,
-): ScribbleSessionState {
+): ShadingSessionState {
   const desiredIsUnchanged = desiredMatches(
     state,
     identity,
@@ -265,11 +265,11 @@ function settleDesiredIdentity(
   };
 }
 
-/** Pure, stale-safe state machine for one keyed Sketch's Scribble preparation. */
-export function scribbleSessionReducer(
-  state: ScribbleSessionState,
-  action: ScribbleSessionAction,
-): ScribbleSessionState {
+/** Pure, stale-safe state machine for one keyed Sketch's Shading preparation. */
+export function shadingSessionReducer(
+  state: ShadingSessionState,
+  action: ShadingSessionAction,
+): ShadingSessionState {
   switch (action.type) {
     case "suspend":
       if (
@@ -433,14 +433,14 @@ export function scribbleSessionReducer(
       };
     }
     case "dispose":
-      return emptyScribbleSessionState();
+      return emptyShadingSessionState();
   }
 }
 
 /** The displayed result is current only for the settled authored provenance. */
-export function selectCurrentScribbleResult(
-  state: ScribbleSessionState,
-): DisplayedScribbleResult | null {
+export function selectCurrentShadingResult(
+  state: ShadingSessionState,
+): DisplayedShadingResult | null {
   if (
     state.transactionOpen ||
     state.displayed === null ||
@@ -454,8 +454,8 @@ export function selectCurrentScribbleResult(
 }
 
 /** Budget exhaustion is a truthful completion and remains exportable when current. */
-export function selectExportableScribbleResult(
-  state: ScribbleSessionState,
-): DisplayedScribbleResult | null {
-  return selectCurrentScribbleResult(state);
+export function selectExportableShadingResult(
+  state: ShadingSessionState,
+): DisplayedShadingResult | null {
+  return selectCurrentShadingResult(state);
 }
