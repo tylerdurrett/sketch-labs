@@ -230,6 +230,22 @@ describe('Pencil Contour path cleanup', () => {
     )
   })
 
+  it('rejects an intermediate removal that would link identical neighbours', () => {
+    const source = path([
+      [0, 0],
+      [1, 1],
+      [0, 0],
+      [3, 0],
+    ])
+
+    const result = clean([source], graph(), 1, 0.5)[0]!
+
+    expect(result.points).toEqual(source.points)
+    for (let index = 1; index < result.points.length; index += 1) {
+      expect(result.points[index]).not.toEqual(result.points[index - 1])
+    }
+  })
+
   it('does not regress an open path touching the lattice boundary at levels 14→15', () => {
     const source = path([
       [7, 5.5625733165],

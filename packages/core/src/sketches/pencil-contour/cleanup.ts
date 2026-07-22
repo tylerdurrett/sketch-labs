@@ -559,6 +559,12 @@ function nestedSimplification(
     const right = next[index]!
     if (left < 0 || right < 0) continue
     if (
+      squaredDistance(source[left]!, source[right]!) <=
+      POINT_EPSILON_SQUARED
+    ) {
+      continue
+    }
+    if (
       !fullySupported &&
       !segmentHasPositiveSupport(graph, source[left]!, source[right]!)
     ) {
@@ -676,6 +682,12 @@ export function cleanupPencilContourPaths(
       input.graph,
       fullySupported,
     )
+    if (
+      accepted.length < minimumPointCount ||
+      !nondegenerateSegments(accepted, path.closed)
+    ) {
+      continue
+    }
 
     const frozenPoints = Object.freeze(
       accepted.map((point) =>
