@@ -17,6 +17,7 @@ import {
   type PencilContourControls,
 } from './controls'
 import { localizePencilContourEdges } from './edges'
+import { prunePencilContourGraph } from './fragment-pruning'
 import { tracePencilContourEdges } from './tracing'
 import type {
   LocalizedEdgeGraph,
@@ -307,14 +308,23 @@ export function generatePencilContour(
   )
   if (fit === null) return empty()
 
-  const graph = localizePencilContourEdges(analyzed, controls.contourDetail)
-  if (!validGraph(graph)) return empty()
+  const localizedGraph = localizePencilContourEdges(
+    analyzed,
+    controls.contourDetail,
+  )
+  if (!validGraph(localizedGraph)) return empty()
+  const graph = prunePencilContourGraph(
+    localizedGraph,
+    controls.contourDetail,
+    controls.contourSmoothing,
+  )
   const traced = tracePencilContourEdges(graph)
   const cleaned = cleanupPencilContourPaths({
     paths: traced,
     graph,
     detail: controls.contourDetail,
     smoothing: controls.contourSmoothing,
+    fragmentsPrunedBeforeTracing: true,
   })
   if (
     cleaned.length === 0 ||

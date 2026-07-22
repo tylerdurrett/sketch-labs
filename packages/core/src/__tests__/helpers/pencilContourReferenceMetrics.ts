@@ -5,6 +5,7 @@ import {
   localizePencilContourEdges,
 } from '../../sketches/pencil-contour/edges'
 import { tracePencilContourEdges } from '../../sketches/pencil-contour/tracing'
+import { prunePencilContourGraph } from '../../sketches/pencil-contour/fragment-pruning'
 import type {
   AnalyzedRaster,
   TracedContourPath,
@@ -205,25 +206,33 @@ export function pencilContourReferenceDiagnostics(
     contourDetail,
   )
   const graph = localizePencilContourEdges(raster, contourDetail)
-  const traced = tracePencilContourEdges(graph)
   const cleanAt = (smoothing: number) =>
-    cleanupPencilContourPaths({
-      paths: traced,
-      graph,
-      detail: contourDetail,
-      smoothing,
-    })
+    (() => {
+      const pruned = prunePencilContourGraph(
+        graph,
+        contourDetail,
+        smoothing,
+      )
+      return cleanupPencilContourPaths({
+        paths: tracePencilContourEdges(pruned),
+        graph: pruned,
+        detail: contourDetail,
+        smoothing,
+        fragmentsPrunedBeforeTracing: true,
+      })
+    })()
 
   return {
     candidates,
     localizedEdgeCount: graph.edges.length,
-    tracedPathCount: traced.length,
+    tracedPathCount: tracePencilContourEdges(graph).length,
     sampling: {
       stepLatticeUnits: PENCIL_CONTOUR_REFERENCE_SAMPLE_STEP,
       minimumPathLengthLatticeUnits:
         PENCIL_CONTOUR_REFERENCE_LONG_PATH_LENGTH,
       turnPercentileMethod: 'nearest-rank',
     },
+    smoothing050: smoothingDiagnostics(cleanAt(0.5)),
     smoothing075: smoothingDiagnostics(cleanAt(0.75)),
     smoothing100: smoothingDiagnostics(cleanAt(1)),
   }

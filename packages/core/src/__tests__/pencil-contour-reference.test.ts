@@ -11,6 +11,8 @@ import { pencilContourHysteresisReplayDiagnostics } from './helpers/pencilContou
 import type { AnalyzedRaster } from '../sketches/pencil-contour/types'
 import { localizePencilContourEdges } from '../sketches/pencil-contour/edges'
 import { tracePencilContourEdges } from '../sketches/pencil-contour/tracing'
+import { cleanupPencilContourPaths } from '../sketches/pencil-contour/cleanup'
+import { prunePencilContourGraph } from '../sketches/pencil-contour/fragment-pruning'
 
 const FIXTURE_BINARY_URL = new URL(
   './fixtures/pencil-contour/flower-analysis.f64le',
@@ -95,54 +97,18 @@ function referenceRaster(
   })
 }
 
-function expectSmoothingDiagnosticsClose(
-  actual: ReferenceDiagnostics['smoothing100'],
-  expected: ReferenceDiagnostics['smoothing100'],
-): void {
-  expect({ ...actual, sampledPaths: undefined }).toEqual({
-    ...expected,
-    bMedianPathLength: actual.bMedianPathLength,
-    turnP95Degrees: actual.turnP95Degrees,
-    turnFractionOver25Degrees: actual.turnFractionOver25Degrees,
-    turnFractionOver45Degrees: actual.turnFractionOver45Degrees,
-    sampledPaths: undefined,
-  })
-  expect(actual.bMedianPathLength).toBeCloseTo(expected.bMedianPathLength, 12)
-  expect(actual.turnP95Degrees).toBeCloseTo(expected.turnP95Degrees, 12)
-  expect(actual.turnFractionOver25Degrees).toBeCloseTo(
-    expected.turnFractionOver25Degrees,
-    12,
-  )
-  expect(actual.turnFractionOver45Degrees).toBeCloseTo(
-    expected.turnFractionOver45Degrees,
-    12,
-  )
-  expect(actual.sampledPaths).toHaveLength(expected.sampledPaths.length)
-  for (const [pathIndex, actualPath] of actual.sampledPaths.entries()) {
-    const expectedPath = expected.sampledPaths[pathIndex]!
-    expect({
-      pathIndex: actualPath.pathIndex,
-      closed: actualPath.closed,
-      provenance: actualPath.provenance,
-      pointCount: actualPath.points.length,
-      turnCount: actualPath.turnsDegrees.length,
-    }).toEqual({
-      pathIndex: expectedPath.pathIndex,
-      closed: expectedPath.closed,
-      provenance: expectedPath.provenance,
-      pointCount: expectedPath.points.length,
-      turnCount: expectedPath.turnsDegrees.length,
-    })
-    expect(actualPath.length).toBeCloseTo(expectedPath.length, 12)
-    for (const [pointIndex, actualPoint] of actualPath.points.entries()) {
-      const expectedPoint = expectedPath.points[pointIndex]!
-      expect(actualPoint[0]).toBeCloseTo(expectedPoint[0], 12)
-      expect(actualPoint[1]).toBeCloseTo(expectedPoint[1], 12)
-    }
-    for (const [turnIndex, actualTurn] of actualPath.turnsDegrees.entries()) {
-      expect(actualTurn).toBeCloseTo(expectedPath.turnsDegrees[turnIndex]!, 10)
-    }
-  }
+function occupiedLongPathBins(
+  diagnostics: ReferenceDiagnostics['smoothing100'],
+  width: number,
+  height: number,
+): ReadonlySet<string> {
+  return new Set(diagnostics.sampledPaths.flatMap(({ points }) =>
+    points.map(([x, y]) =>
+      `${Math.min(3, Math.floor(x / (width / 4)))},${
+        Math.min(3, Math.floor(y / (height / 4)))
+      }`,
+    ),
+  ))
 }
 
 describe('Pencil Contour flower downstream reference', () => {
@@ -184,7 +150,7 @@ describe('Pencil Contour flower downstream reference', () => {
     )
   })
 
-  it('reproduces exact candidate, fragment, and sampled-turn diagnostics', () => {
+  it('reproduces exact candidate and calibrated fragment diagnostics', () => {
     const metadata = referenceMetadata()
     const bytes = readFileSync(FIXTURE_BINARY_URL)
     const raster = referenceRaster(bytes, metadata)
@@ -204,17 +170,48 @@ describe('Pencil Contour flower downstream reference', () => {
     )
     expect(first.tracedPathCount).toBe(metadata.diagnostics.tracedPathCount)
     expect(first.sampling).toEqual(metadata.diagnostics.sampling)
-    // Chrome and Node can differ by a few final bits in Math.hypot. The
-    // browser verifier is byte-exact; this cross-runtime test keeps the same
-    // path identities and checks every recorded coordinate/turn narrowly.
-    expectSmoothingDiagnosticsClose(
-      first.smoothing075,
-      metadata.diagnostics.smoothing075,
+    expect(first.smoothing050).toMatchObject({
+      pathCount: 1_061,
+      b2TwoPointOpenPaths: 169,
+      b3PathsShorterThanThree: 627,
+      sampledPathCount: 130,
+    })
+    expect(first.smoothing075).toMatchObject({
+      pathCount: 984,
+      b2TwoPointOpenPaths: 139,
+      b3PathsShorterThanThree: 561,
+      sampledPathCount: 130,
+    })
+    expect(first.smoothing100).toMatchObject({
+      pathCount: 903,
+      b2TwoPointOpenPaths: 128,
+      b3PathsShorterThanThree: 508,
+      sampledPathCount: 129,
+    })
+    expect(first.smoothing050.bMedianPathLength).toBeCloseTo(
+      2.4713308612651512,
+      12,
     )
-    expectSmoothingDiagnosticsClose(
+    expect(first.smoothing075.bMedianPathLength).toBeCloseTo(
+      2.5213182029951176,
+      12,
+    )
+    expect(first.smoothing100.bMedianPathLength).toBeCloseTo(
+      2.6089969331616634,
+      12,
+    )
+    expect(first.smoothing100.b3PathsShorterThanThree).toBeLessThanOrEqual(
+      metadata.diagnostics.smoothing100.b3PathsShorterThanThree * 0.75,
+    )
+    expect(occupiedLongPathBins(
       first.smoothing100,
+      raster.width,
+      raster.height,
+    )).toEqual(occupiedLongPathBins(
       metadata.diagnostics.smoothing100,
-    )
+      raster.width,
+      raster.height,
+    ))
 
     const { candidates } = first
     expect(candidates.afterStrengthFloor).toBe(
@@ -238,7 +235,11 @@ describe('Pencil Contour flower downstream reference', () => {
       ),
     ).toBe(true)
 
-    for (const smoothing of [first.smoothing075, first.smoothing100]) {
+    for (const smoothing of [
+      first.smoothing050,
+      first.smoothing075,
+      first.smoothing100,
+    ]) {
       expect(smoothing.sampledPaths).toHaveLength(smoothing.sampledPathCount)
       expect(
         smoothing.sampledPaths.reduce(
@@ -253,6 +254,35 @@ describe('Pencil Contour flower downstream reference', () => {
         ),
       ).toBe(smoothing.turnCount)
     }
+  })
+
+  it('keeps the frozen flower output exact at smoothing zero', () => {
+    const metadata = referenceMetadata()
+    const raster = referenceRaster(readFileSync(FIXTURE_BINARY_URL), metadata)
+    const graph = localizePencilContourEdges(
+      raster,
+      metadata.controls.contourDetail,
+    )
+    const legacy = cleanupPencilContourPaths({
+      paths: tracePencilContourEdges(graph),
+      graph,
+      detail: metadata.controls.contourDetail,
+      smoothing: 0,
+    })
+    const pruned = prunePencilContourGraph(
+      graph,
+      metadata.controls.contourDetail,
+      0,
+    )
+    const current = cleanupPencilContourPaths({
+      paths: tracePencilContourEdges(pruned),
+      graph: pruned,
+      detail: metadata.controls.contourDetail,
+      smoothing: 0,
+      fragmentsPrunedBeforeTracing: true,
+    })
+
+    expect(current).toEqual(legacy)
   })
 
   it('keeps immutable luminance evidence stable across all 101 detail values', () => {

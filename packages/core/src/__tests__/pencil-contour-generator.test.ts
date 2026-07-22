@@ -475,11 +475,11 @@ describe('generatePencilContour', () => {
     })
     const lowDetail = generate(detailed, {
       contourDetail: 0,
-      contourSmoothing: 1,
+      contourSmoothing: 0,
     })
     const highDetail = generate(detailed, {
       contourDetail: 1,
-      contourSmoothing: 1,
+      contourSmoothing: 0,
     })
     expect(highDetail.primitives.length).toBeGreaterThan(lowDetail.primitives.length)
     expect(

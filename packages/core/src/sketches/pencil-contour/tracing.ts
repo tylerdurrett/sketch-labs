@@ -28,6 +28,7 @@ interface TraceEdge {
   readonly endKey: string;
   readonly evidenceId?: string;
   readonly strength?: number;
+  readonly adjacentEvidenceIds?: readonly string[];
 }
 
 interface TraceVertex {
@@ -169,6 +170,7 @@ function sourceEvidenceByEdge(graph: Readonly<LocalizedEdgeGraph>): ReadonlyMap<
   Readonly<{
     readonly id: string;
     readonly strength: number;
+    readonly adjacentEvidenceIds: readonly string[];
   }>
 > {
   const result = new Map<
@@ -176,6 +178,7 @@ function sourceEvidenceByEdge(graph: Readonly<LocalizedEdgeGraph>): ReadonlyMap<
     Readonly<{
       readonly id: string;
       readonly strength: number;
+      readonly adjacentEvidenceIds: readonly string[];
     }>
   >();
   if (
@@ -203,7 +206,11 @@ function sourceEvidenceByEdge(graph: Readonly<LocalizedEdgeGraph>): ReadonlyMap<
     ) {
       continue;
     }
-    result.set(edge, { id: evidence.id, strength: evidence.strength });
+    result.set(edge, {
+      id: evidence.id,
+      strength: evidence.strength,
+      adjacentEvidenceIds: evidence.adjacentEdgeIds,
+    });
   }
   return result;
 }
@@ -231,6 +238,7 @@ function buildProvenanceGraph(
     Readonly<{
       readonly id: string;
       readonly strength: number;
+      readonly adjacentEvidenceIds: readonly string[];
     }>
   >,
 ): ProvenanceGraph {
@@ -260,7 +268,11 @@ function buildProvenanceGraph(
       endKey: end.key,
       ...(evidence === undefined
         ? {}
-        : { evidenceId: evidence.id, strength: evidence.strength }),
+        : {
+            evidenceId: evidence.id,
+            strength: evidence.strength,
+            adjacentEvidenceIds: evidence.adjacentEvidenceIds,
+          }),
     });
     start.edgeIds.push(id);
     end.edgeIds.push(id);
@@ -286,6 +298,36 @@ function otherVertexKey(edge: TraceEdge, vertexKey: string): string {
 
 function buildJunctionPairings(graph: ProvenanceGraph): JunctionPairings {
   if (graph.provenance.kind !== "luminance") return new Map();
+  if (graph.edges.every(({ evidenceId }) => evidenceId !== undefined)) {
+    const traceIdByEvidenceId = new Map(
+      graph.edges.map((edge) => [edge.evidenceId!, edge.id]),
+    );
+    const pairings = new Map<string, Map<number, number>>();
+    for (const edge of graph.edges) {
+      for (const adjacentEvidenceId of edge.adjacentEvidenceIds ?? []) {
+        const adjacentId = traceIdByEvidenceId.get(adjacentEvidenceId);
+        if (adjacentId === undefined || adjacentId <= edge.id) continue;
+        const adjacent = graph.edges[adjacentId]!;
+        const vertexKey =
+          edge.startKey === adjacent.startKey ||
+          edge.startKey === adjacent.endKey
+            ? edge.startKey
+            : edge.endKey === adjacent.startKey ||
+                edge.endKey === adjacent.endKey
+              ? edge.endKey
+              : undefined;
+        if (vertexKey === undefined) continue;
+        let atVertex = pairings.get(vertexKey);
+        if (atVertex === undefined) {
+          atVertex = new Map<number, number>();
+          pairings.set(vertexKey, atVertex);
+        }
+        atVertex.set(edge.id, adjacentId);
+        atVertex.set(adjacentId, edge.id);
+      }
+    }
+    return pairings;
+  }
   return directionCompatibleTopology(
     graph.edges.map((edge) => ({
       start: graph.vertices.get(edge.startKey)!.point,

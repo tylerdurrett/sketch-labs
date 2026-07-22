@@ -41,6 +41,8 @@ export interface PencilContourCleanupInput {
   readonly detail: number
   /** Already-normalized Contour smoothing in `[0, 1]`. */
   readonly smoothing: number
+  /** Fragment masks were already applied to edge IDs before tracing. */
+  readonly fragmentsPrunedBeforeTracing?: boolean
 }
 
 interface AlphaSample {
@@ -842,7 +844,9 @@ export function cleanupPencilContourPaths(
   const fullySupported = input.graph.positiveSupport.every(
     (supported, index) => supported && input.graph.alpha[index]! > 0,
   )
-  const componentLengths = fragmentComponentLengths(input.graph)
+  const componentLengths = input.fragmentsPrunedBeforeTracing
+    ? new Map<string, number>()
+    : fragmentComponentLengths(input.graph)
   const result: Readonly<TracedContourPath>[] = []
 
   for (const path of input.paths) {
@@ -851,9 +855,11 @@ export function cleanupPencilContourPaths(
     const minimumPointCount = path.closed ? 3 : 2
     if (source.length < minimumPointCount) continue
     const tracedLength = pathLength(source, path.closed)
-    const fragmentLength =
-      componentLengths.get(componentPointKey(source[0]!, path.provenance)) ??
-      tracedLength
+    const fragmentLength = input.fragmentsPrunedBeforeTracing
+      ? Number.POSITIVE_INFINITY
+      : componentLengths.get(
+          componentPointKey(source[0]!, path.provenance),
+        ) ?? tracedLength
     if (
       fragmentLength < minimumLength ||
       !nondegenerateSegments(source, path.closed) ||
