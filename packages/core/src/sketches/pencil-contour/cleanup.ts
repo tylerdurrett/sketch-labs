@@ -922,6 +922,9 @@ export function cleanupPencilContourPaths(
         points: frozenPoints,
         closed: path.closed,
         provenance: canonicalProvenance(path.provenance),
+        ...(path.luminanceEvidence === undefined
+          ? {}
+          : { luminanceEvidence: path.luminanceEvidence }),
       }),
     )
   }

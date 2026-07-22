@@ -52,6 +52,24 @@ export interface LocalizedEdge {
   readonly provenance: Readonly<EdgeProvenance>
 }
 
+/**
+ * @internal Immutable evidence for one localized luminance candidate.
+ *
+ * This inventory is solved from the complete bounded candidate universe, so
+ * identity, response strength, endpoints, and adjacency do not depend on the
+ * authored detail value. Detail selection lives separately on the graph.
+ */
+export interface LocalizedLuminanceEdgeEvidence {
+  /** Stable orientation-and-lattice-pair identity. */
+  readonly id: string
+  /** Original post-NMS luminance response, before detail thresholding. */
+  readonly strength: number
+  readonly start: Readonly<Point>
+  readonly end: Readonly<Point>
+  /** Stable straight-through neighbours from the full evidence universe. */
+  readonly adjacentEdgeIds: readonly string[]
+}
+
 /** @internal Stable edge order and coordinate extent passed into tracing. */
 export interface LocalizedEdgeGraph {
   readonly width: number
@@ -60,6 +78,10 @@ export interface LocalizedEdgeGraph {
   readonly alpha: readonly number[]
   /** Exact source permission retained independently from alpha interpolation. */
   readonly positiveSupport: readonly boolean[]
+  /** Full luminance evidence; absent only on hand-authored legacy test graphs. */
+  readonly luminanceEvidence?: readonly Readonly<LocalizedLuminanceEdgeEvidence>[]
+  /** Detail-selected stable IDs; never stored as mutable flags on evidence. */
+  readonly selectedLuminanceEdgeIds?: readonly string[]
   readonly edges: readonly Readonly<LocalizedEdge>[]
 }
 
@@ -73,6 +95,12 @@ export interface TracedContourPath {
   readonly points: readonly Readonly<Point>[]
   readonly closed: boolean
   readonly provenance: Readonly<EdgeProvenance>
+  /** Present only for production luminance traces with complete source evidence. */
+  readonly luminanceEvidence?: Readonly<{
+    readonly edgeIds: readonly string[]
+    readonly maximumStrength: number
+    readonly meanStrength: number
+  }>
 }
 
 /** Complete reusable input, independent of registered Sketch machinery. */

@@ -15,7 +15,9 @@ import type {
   EdgeProvenance,
   LocalizedEdge,
   LocalizedEdgeGraph,
+  LocalizedLuminanceEdgeEvidence,
 } from './types'
+import { directionCompatibleAdjacency } from './topology'
 
 // A stable half-coverage boundary represents meaningful continuous opacity;
 // exact alpha > 0 remains the separate permission policy in positiveSupport.
@@ -398,12 +400,16 @@ function positiveLuminancePairCount(
 function candidateDiagnostic(
   candidate: Readonly<LuminanceCandidate>,
 ): Readonly<PencilContourLuminanceCandidateDiagnostic> {
-  const orientation =
-    candidate.orientation === 'horizontal-pair' ? 'horizontal' : 'vertical'
   return Object.freeze({
-    id: `${orientation}:${candidate.x},${candidate.y}`,
+    id: candidateId(candidate),
     strength: candidate.strength,
   })
+}
+
+function candidateId(candidate: Readonly<LuminanceCandidate>): string {
+  const orientation =
+    candidate.orientation === 'horizontal-pair' ? 'horizontal' : 'vertical'
+  return `${orientation}:${candidate.x},${candidate.y}`
 }
 
 function cellKey(x: number, y: number): string {
@@ -753,10 +759,14 @@ function detailCandidates(
     .sort((first, second) => first.order - second.order)
 }
 
-function selectLuminanceEdges(
+interface LocalizedLuminanceCandidate {
+  readonly candidate: Readonly<LuminanceCandidate>
+  readonly edge: Readonly<LocalizedEdge>
+}
+
+function localizedLuminanceUniverse(
   raster: Readonly<AnalyzedRaster>,
-  contourDetail: number,
-): readonly Readonly<LocalizedEdge>[] {
+): readonly Readonly<LocalizedLuminanceCandidate>[] {
   const candidates = luminanceCandidates(raster)
 
   // Geometry is solved from the complete bounded universe that any detail can
@@ -764,13 +774,48 @@ function selectLuminanceEdges(
   // exactly the same endpoints and connectivity.
   const universe = candidateUniverse(raster, candidates)
   const vertices = dualVertices(raster, universe)
-  const selected = detailCandidates(universe, contourDetail)
-    .map((candidate) => luminanceEdge(raster, candidate, vertices))
-    .filter(
-      (edge): edge is Readonly<LocalizedEdge> => edge !== undefined,
-    )
+  return universe.flatMap((candidate) => {
+    const edge = luminanceEdge(raster, candidate, vertices)
+    return edge === undefined ? [] : [{ candidate, edge }]
+  })
+}
 
-  return selected
+function freezeLuminanceEvidence(
+  localized: readonly Readonly<LocalizedLuminanceCandidate>[],
+): readonly Readonly<LocalizedLuminanceEdgeEvidence>[] {
+  const adjacency = directionCompatibleAdjacency(
+    localized.map(({ edge }) => edge),
+  )
+  const ids = localized.map(({ candidate }) => candidateId(candidate))
+  return Object.freeze(
+    localized.map(({ candidate, edge }, index) =>
+      Object.freeze({
+        id: ids[index]!,
+        strength: candidate.strength,
+        start: edge.start,
+        end: edge.end,
+        adjacentEdgeIds: Object.freeze(
+          adjacency[index]!.map((adjacentIndex) => ids[adjacentIndex]!),
+        ),
+      }),
+    ),
+  )
+}
+
+function selectedLuminance(
+  localized: readonly Readonly<LocalizedLuminanceCandidate>[],
+  contourDetail: number,
+): readonly Readonly<LocalizedLuminanceCandidate>[] {
+  const selectedCandidates = new Set(
+    detailCandidates(
+      localized.map(({ candidate }) => candidate),
+      contourDetail,
+    ),
+  )
+
+  return localized
+    .filter(({ candidate }) => selectedCandidates.has(candidate))
+    .sort((first, second) => first.candidate.order - second.candidate.order)
 }
 
 /**
@@ -957,8 +1002,14 @@ export function localizePencilContourEdges(
   raster: Readonly<AnalyzedRaster>,
   contourDetail: number,
 ): Readonly<LocalizedEdgeGraph> {
+  const localizedLuminance = localizedLuminanceUniverse(raster)
+  const luminanceEvidence = freezeLuminanceEvidence(localizedLuminance)
+  const selected = selectedLuminance(localizedLuminance, contourDetail)
+  const selectedLuminanceEdgeIds = Object.freeze(
+    selected.map(({ candidate }) => candidateId(candidate)),
+  )
   const edges = Object.freeze([
-    ...selectLuminanceEdges(raster, contourDetail),
+    ...selected.map(({ edge }) => edge),
     ...alphaBoundaryEdges(raster),
   ])
 
@@ -967,6 +1018,8 @@ export function localizePencilContourEdges(
     height: raster.height,
     alpha: raster.alpha,
     positiveSupport: raster.positiveSupport,
+    luminanceEvidence,
+    selectedLuminanceEdgeIds,
     edges,
   })
 }

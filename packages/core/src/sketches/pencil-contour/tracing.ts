@@ -13,6 +13,7 @@ import type {
   LocalizedEdgeGraph,
   TracedContourPath,
 } from "./types";
+import { directionCompatibleTopology } from "./topology";
 
 const LUMINANCE_PROVENANCE: Readonly<EdgeProvenance> = Object.freeze({
   kind: "luminance",
@@ -25,6 +26,8 @@ interface TraceEdge {
   readonly id: number;
   readonly startKey: string;
   readonly endKey: string;
+  readonly evidenceId?: string;
+  readonly strength?: number;
 }
 
 interface TraceVertex {
@@ -45,8 +48,6 @@ interface TracedProvenanceGraph {
 }
 
 type JunctionPairings = ReadonlyMap<string, ReadonlyMap<number, number>>;
-
-const MAX_STRAIGHT_THROUGH_DOT = -Math.SQRT1_2;
 
 function comparePoints(
   first: Readonly<Point>,
@@ -163,6 +164,50 @@ function validEdges(
   );
 }
 
+function sourceEvidenceByEdge(graph: Readonly<LocalizedEdgeGraph>): ReadonlyMap<
+  Readonly<LocalizedEdge>,
+  Readonly<{
+    readonly id: string;
+    readonly strength: number;
+  }>
+> {
+  const result = new Map<
+    Readonly<LocalizedEdge>,
+    Readonly<{
+      readonly id: string;
+      readonly strength: number;
+    }>
+  >();
+  if (
+    !Array.isArray(graph.luminanceEvidence) ||
+    !Array.isArray(graph.selectedLuminanceEdgeIds)
+  ) {
+    return result;
+  }
+  const evidenceById = new Map(
+    graph.luminanceEvidence.map((evidence) => [evidence.id, evidence]),
+  );
+  for (
+    let index = 0;
+    index < graph.selectedLuminanceEdgeIds.length;
+    index += 1
+  ) {
+    const edge = graph.edges[index];
+    const evidence = evidenceById.get(graph.selectedLuminanceEdgeIds[index]!);
+    if (
+      edge?.provenance.kind !== "luminance" ||
+      evidence === undefined ||
+      !Number.isFinite(evidence.strength) ||
+      pointKey(edge.start) !== pointKey(evidence.start) ||
+      pointKey(edge.end) !== pointKey(evidence.end)
+    ) {
+      continue;
+    }
+    result.set(edge, { id: evidence.id, strength: evidence.strength });
+  }
+  return result;
+}
+
 function compareCanonicalEdges(
   first: Readonly<LocalizedEdge>,
   second: Readonly<LocalizedEdge>,
@@ -181,6 +226,13 @@ function compareCanonicalEdges(
 function buildProvenanceGraph(
   sourceEdges: readonly Readonly<LocalizedEdge>[],
   provenance: Readonly<EdgeProvenance>,
+  evidenceByEdge: ReadonlyMap<
+    Readonly<LocalizedEdge>,
+    Readonly<{
+      readonly id: string;
+      readonly strength: number;
+    }>
+  >,
 ): ProvenanceGraph {
   const matching = sourceEdges
     .filter((edge) => edge.provenance.kind === provenance.kind)
@@ -201,7 +253,15 @@ function buildProvenanceGraph(
   for (const [id, edge] of matching.entries()) {
     const start = vertexFor(edge.start);
     const end = vertexFor(edge.end);
-    edges.push({ id, startKey: start.key, endKey: end.key });
+    const evidence = evidenceByEdge.get(edge);
+    edges.push({
+      id,
+      startKey: start.key,
+      endKey: end.key,
+      ...(evidence === undefined
+        ? {}
+        : { evidenceId: evidence.id, strength: evidence.strength }),
+    });
     start.edgeIds.push(id);
     end.edgeIds.push(id);
   }
@@ -226,68 +286,12 @@ function otherVertexKey(edge: TraceEdge, vertexKey: string): string {
 
 function buildJunctionPairings(graph: ProvenanceGraph): JunctionPairings {
   if (graph.provenance.kind !== "luminance") return new Map();
-
-  const result = new Map<string, ReadonlyMap<number, number>>();
-  for (const vertex of graph.vertices.values()) {
-    if (vertex.edgeIds.length <= 2) continue;
-
-    const candidates: { firstId: number; secondId: number; dot: number }[] = [];
-    for (let firstIndex = 0; firstIndex < vertex.edgeIds.length; firstIndex += 1) {
-      const firstId = vertex.edgeIds[firstIndex]!;
-      const firstPoint = graph.vertices.get(
-        otherVertexKey(graph.edges[firstId]!, vertex.key),
-      )!.point;
-      const firstX = firstPoint[0] - vertex.point[0];
-      const firstY = firstPoint[1] - vertex.point[1];
-      const firstLength = Math.hypot(firstX, firstY);
-
-      for (
-        let secondIndex = firstIndex + 1;
-        secondIndex < vertex.edgeIds.length;
-        secondIndex += 1
-      ) {
-        const secondId = vertex.edgeIds[secondIndex]!;
-        const secondPoint = graph.vertices.get(
-          otherVertexKey(graph.edges[secondId]!, vertex.key),
-        )!.point;
-        const secondX = secondPoint[0] - vertex.point[0];
-        const secondY = secondPoint[1] - vertex.point[1];
-        const secondLength = Math.hypot(secondX, secondY);
-        const dot =
-          (firstX * secondX + firstY * secondY) /
-          (firstLength * secondLength);
-
-        if (dot < MAX_STRAIGHT_THROUGH_DOT) {
-          candidates.push({
-            firstId: Math.min(firstId, secondId),
-            secondId: Math.max(firstId, secondId),
-            dot,
-          });
-        }
-      }
-    }
-
-    candidates.sort(
-      (first, second) =>
-        first.dot - second.dot ||
-        first.firstId - second.firstId ||
-        first.secondId - second.secondId,
-    );
-
-    const paired = new Map<number, number>();
-    for (const candidate of candidates) {
-      if (
-        paired.has(candidate.firstId) ||
-        paired.has(candidate.secondId)
-      ) {
-        continue;
-      }
-      paired.set(candidate.firstId, candidate.secondId);
-      paired.set(candidate.secondId, candidate.firstId);
-    }
-    if (paired.size > 0) result.set(vertex.key, paired);
-  }
-  return result;
+  return directionCompatibleTopology(
+    graph.edges.map((edge) => ({
+      start: graph.vertices.get(edge.startKey)!.point,
+      end: graph.vertices.get(edge.endKey)!.point,
+    })),
+  ).pairings;
 }
 
 function continuationEdge(
@@ -319,6 +323,10 @@ function traceFrom(
   visited: Set<number>,
 ): Readonly<TracedContourPath> {
   const points: Readonly<Point>[] = [start.point];
+  const evidenceIds: string[] = [];
+  let strengthTotal = 0;
+  let maximumStrength = -Infinity;
+  let completeEvidence = graph.provenance.kind === "luminance";
   let current = start;
   let edgeId: number | undefined = firstEdgeId;
   let closed = false;
@@ -329,6 +337,13 @@ function traceFrom(
     if (consumed >= graph.edges.length || visited.has(edgeId)) break;
     visited.add(edgeId);
     const edge = graph.edges[edgeId]!;
+    if (edge.evidenceId === undefined || edge.strength === undefined) {
+      completeEvidence = false;
+    } else {
+      evidenceIds.push(edge.evidenceId);
+      strengthTotal += edge.strength;
+      maximumStrength = Math.max(maximumStrength, edge.strength);
+    }
     current = graph.vertices.get(otherVertexKey(edge, current.key))!;
     points.push(current.point);
 
@@ -343,10 +358,19 @@ function traceFrom(
     edgeId = nextEdgeId;
   }
 
+  const luminanceEvidence =
+    completeEvidence && evidenceIds.length > 0
+      ? Object.freeze({
+          edgeIds: Object.freeze(evidenceIds),
+          maximumStrength,
+          meanStrength: strengthTotal / evidenceIds.length,
+        })
+      : undefined;
   return Object.freeze({
     points: Object.freeze(points),
     closed,
     provenance: graph.provenance,
+    ...(luminanceEvidence === undefined ? {} : { luminanceEvidence }),
   });
 }
 
@@ -363,10 +387,7 @@ function traceProvenanceGraph(graph: ProvenanceGraph): TracedProvenanceGraph {
   // makes compatible junction segments internal without inventing new edges.
   for (const vertex of orderedVertices) {
     for (const edgeId of vertex.edgeIds) {
-      if (
-        !visited.has(edgeId) &&
-        unpairedIncidence(pairings, vertex, edgeId)
-      ) {
+      if (!visited.has(edgeId) && unpairedIncidence(pairings, vertex, edgeId)) {
         branches.push(traceFrom(graph, pairings, vertex, edgeId, visited));
       }
     }
@@ -427,11 +448,12 @@ export function tracePencilContourEdges(
   }
 
   const edges = validEdges(graph);
+  const evidenceByEdge = sourceEvidenceByEdge(graph);
   const luminance = traceProvenanceGraph(
-    buildProvenanceGraph(edges, LUMINANCE_PROVENANCE),
+    buildProvenanceGraph(edges, LUMINANCE_PROVENANCE, evidenceByEdge),
   );
   const alphaBoundary = traceProvenanceGraph(
-    buildProvenanceGraph(edges, ALPHA_BOUNDARY_PROVENANCE),
+    buildProvenanceGraph(edges, ALPHA_BOUNDARY_PROVENANCE, evidenceByEdge),
   );
   const paths = [
     ...[...luminance.branches, ...alphaBoundary.branches].sort(comparePaths),
