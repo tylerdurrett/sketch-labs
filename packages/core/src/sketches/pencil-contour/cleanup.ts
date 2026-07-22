@@ -15,14 +15,11 @@ import type {
 
 const MIN_FRAGMENT_LENGTH = 0.5
 const MAX_FRAGMENT_LENGTH = 2.5
-const MAX_SIMPLIFICATION_TOLERANCE = 0.75
-const MAX_SMOOTHING_WEIGHT = 0.5
 const MAX_ANALYSIS_DIMENSION = 256
 const POINT_EPSILON_SQUARED = 1e-18
 const ISOVALUE = 0.5
 const ISOVALUE_TOLERANCE = 1e-7
 const PARAMETER_EPSILON = 1e-12
-const COORDINATE_EPSILON = 1e-12
 const METRIC_EPSILON = 1e-12
 const SMOOTHING_LEVELS = 100
 const LUMINANCE_PROVENANCE: Readonly<EdgeProvenance> = Object.freeze({
@@ -43,14 +40,11 @@ export interface PencilContourCleanupInput {
 
 interface AlphaSample {
   readonly value: number
-  readonly dx: number
-  readonly dy: number
 }
 
-interface CleanupCandidate {
-  readonly points: readonly Point[]
-  readonly length: number
-  readonly jaggedness: number
+interface RemovalCandidate {
+  readonly index: number
+  readonly priority: number
 }
 
 function finitePoint(value: unknown): value is Readonly<Point> {
@@ -176,7 +170,7 @@ function alphaSample(
       graph.height,
       point,
     )
-    return value === undefined ? undefined : { value, dx: 0, dy: 0 }
+    return value === undefined ? undefined : { value }
   }
 
   const left = Math.min(Math.floor(point[0]), graph.width - 2)
@@ -190,13 +184,7 @@ function alphaSample(
   const topValue = topLeft * (1 - horizontal) + topRight * horizontal
   const bottomValue =
     bottomLeft * (1 - horizontal) + bottomRight * horizontal
-  return {
-    value: topValue * (1 - vertical) + bottomValue * vertical,
-    dx:
-      (topRight - topLeft) * (1 - vertical) +
-      (bottomRight - bottomLeft) * vertical,
-    dy: bottomValue - topValue,
-  }
+  return { value: topValue * (1 - vertical) + bottomValue * vertical }
 }
 
 function sampleSupport(
@@ -245,7 +233,16 @@ function segmentHasPositiveSupport(
   const addCrossings = (first: number, second: number, limit: number) => {
     const delta = second - first
     if (delta === 0) return
-    for (let boundary = 0; boundary < limit; boundary += 1) {
+    const firstBoundary = Math.max(0, Math.ceil(Math.min(first, second)))
+    const lastBoundary = Math.min(
+      limit - 1,
+      Math.floor(Math.max(first, second)),
+    )
+    for (
+      let boundary = firstBoundary;
+      boundary <= lastBoundary;
+      boundary += 1
+    ) {
       const amount = (boundary - first) / delta
       if (amount > PARAMETER_EPSILON && amount < 1 - PARAMETER_EPSILON) {
         parameters.push(amount)
@@ -341,243 +338,6 @@ function perpendicularDistance(
   )
 }
 
-function simplifyOpenIndices(
-  points: readonly Readonly<Point>[],
-  sourceIndices: readonly number[],
-  tolerance: number,
-  canShortcut: (start: Readonly<Point>, end: Readonly<Point>) => boolean,
-): number[] {
-  if (sourceIndices.length <= 2 || tolerance <= 0) return [...sourceIndices]
-  const keep = new Set<number>([0, sourceIndices.length - 1])
-  const stack: Array<readonly [number, number]> = [
-    [0, sourceIndices.length - 1],
-  ]
-
-  while (stack.length > 0) {
-    const [start, end] = stack.pop()!
-    let farthest = -1
-    let maximumDistance = -1
-    for (let index = start + 1; index < end; index += 1) {
-      const distance = perpendicularDistance(
-        points[sourceIndices[index]!]!,
-        points[sourceIndices[start]!]!,
-        points[sourceIndices[end]!]!,
-      )
-      if (distance > maximumDistance) {
-        maximumDistance = distance
-        farthest = index
-      }
-    }
-
-    const shortcutSupported = canShortcut(
-      points[sourceIndices[start]!]!,
-      points[sourceIndices[end]!]!,
-    )
-    if (farthest >= 0 && (maximumDistance > tolerance || !shortcutSupported)) {
-      keep.add(farthest)
-      stack.push([start, farthest], [farthest, end])
-    }
-  }
-  return [...keep].sort((first, second) => first - second).map(
-    (index) => sourceIndices[index]!,
-  )
-}
-
-function simplifyIndices(
-  points: readonly Readonly<Point>[],
-  closed: boolean,
-  tolerance: number,
-  canShortcut: (start: Readonly<Point>, end: Readonly<Point>) => boolean,
-): number[] {
-  if (!closed) {
-    return simplifyOpenIndices(
-      points,
-      points.map((_, index) => index),
-      tolerance,
-      canShortcut,
-    )
-  }
-  if (points.length <= 3 || tolerance <= 0) {
-    return points.map((_, index) => index)
-  }
-
-  let opposite = 1
-  for (let index = 2; index < points.length; index += 1) {
-    if (
-      squaredDistance(points[0]!, points[index]!) >
-      squaredDistance(points[0]!, points[opposite]!)
-    ) {
-      opposite = index
-    }
-  }
-  const firstArc = Array.from({ length: opposite + 1 }, (_, index) => index)
-  const secondArc = [
-    ...Array.from(
-      { length: points.length - opposite },
-      (_, index) => opposite + index,
-    ),
-    0,
-  ]
-  const first = simplifyOpenIndices(points, firstArc, tolerance, canShortcut)
-  const second = simplifyOpenIndices(points, secondArc, tolerance, canShortcut)
-  const retained = [...first.slice(0, -1), ...second.slice(0, -1)]
-
-  if (retained.length < 3) {
-    let third = -1
-    let maximumDistance = -1
-    for (let index = 1; index < points.length; index += 1) {
-      if (index === opposite) continue
-      const distance = perpendicularDistance(
-        points[index]!,
-        points[0]!,
-        points[opposite]!,
-      )
-      if (distance > maximumDistance) {
-        maximumDistance = distance
-        third = index
-      }
-    }
-    if (third >= 0) retained.push(third)
-  }
-  return [...new Set(retained)].sort((firstIndex, secondIndex) => {
-    // Preserve ring traversal, not numeric sorting after the second arc wraps.
-    const firstOrder = retained.indexOf(firstIndex)
-    const secondOrder = retained.indexOf(secondIndex)
-    return firstOrder - secondOrder
-  })
-}
-
-function projectedAlphaBoundaryPoint(
-  graph: Readonly<LocalizedEdgeGraph>,
-  candidate: Readonly<Point>,
-): Readonly<Point> | undefined {
-  let x = Math.min(graph.width - 1, Math.max(0, candidate[0]))
-  let y = Math.min(graph.height - 1, Math.max(0, candidate[1]))
-  for (let iteration = 0; iteration < 12; iteration += 1) {
-    const sample = alphaSample(graph, [x, y])
-    if (sample === undefined) return undefined
-    const error = sample.value - ISOVALUE
-    if (Math.abs(error) <= ISOVALUE_TOLERANCE) {
-      const point = [x, y] as Point
-      return pointHasPositiveSupport(graph, point) ? point : undefined
-    }
-    const gradientSquared = sample.dx * sample.dx + sample.dy * sample.dy
-    if (gradientSquared <= POINT_EPSILON_SQUARED) return undefined
-    x = Math.min(
-      graph.width - 1,
-      Math.max(0, x - (error * sample.dx) / gradientSquared),
-    )
-    y = Math.min(
-      graph.height - 1,
-      Math.max(0, y - (error * sample.dy) / gradientSquared),
-    )
-  }
-  return undefined
-}
-
-function clampCoordinateOvershoot(value: number, maximum: number): number {
-  const epsilon = COORDINATE_EPSILON * Math.max(1, maximum)
-  if (value < 0 && value >= -epsilon) return 0
-  if (value > maximum && value <= maximum + epsilon) return maximum
-  return value
-}
-
-function smoothRetainedPoints(
-  source: readonly Readonly<Point>[],
-  retained: readonly number[],
-  closed: boolean,
-  pathProvenance: Readonly<EdgeProvenance>,
-  smoothing: number,
-  graph: Readonly<LocalizedEdgeGraph>,
-): Point[] {
-  const original = retained.map((index) => [
-    source[index]![0],
-    source[index]![1],
-  ] as Point)
-  if (smoothing <= 0) return original
-  const weight = smoothing * MAX_SMOOTHING_WEIGHT
-  const result = original.map((point) => [...point] as Point)
-
-  const openTargets: readonly Readonly<Point>[] | undefined = closed
-    ? undefined
-    : (() => {
-        // Put every source station on the endpoint chord at its cumulative
-        // arclength fraction. Interpolation toward these ordered stations has
-        // nonincreasing total length; dropping a station at a simplification
-        // threshold also cannot add length (triangle inequality). Defining the
-        // targets before selecting retained indices avoids transition jumps.
-        const cumulative = new Array<number>(source.length).fill(0)
-        for (let index = 1; index < source.length; index += 1) {
-          cumulative[index] =
-            cumulative[index - 1]! +
-            Math.sqrt(squaredDistance(source[index - 1]!, source[index]!))
-        }
-        const total = cumulative.at(-1)!
-        const start = source[0]!
-        const end = source.at(-1)!
-        return retained.map((sourceIndex) => {
-          const amount = total > 0 ? cumulative[sourceIndex]! / total : 0
-          return [
-            start[0] + (end[0] - start[0]) * amount,
-            start[1] + (end[1] - start[1]) * amount,
-          ] as Point
-        })
-      })()
-
-  for (let index = 0; index < original.length; index += 1) {
-    if (!closed && (index === 0 || index === original.length - 1)) continue
-    const current = original[index]!
-    const target = closed
-      ? (() => {
-          const previous =
-            original[(index - 1 + original.length) % original.length]!
-          const next = original[(index + 1) % original.length]!
-          return [
-            (previous[0] + next[0]) / 2,
-            (previous[1] + next[1]) / 2,
-          ] as Point
-        })()
-      : openTargets![index]!
-    const candidate: Point = [
-      clampCoordinateOvershoot(
-        current[0] + (target[0] - current[0]) * weight,
-        graph.width - 1,
-      ),
-      clampCoordinateOvershoot(
-        current[1] + (target[1] - current[1]) * weight,
-        graph.height - 1,
-      ),
-    ]
-    const accepted =
-      pathProvenance.kind === 'alpha-boundary'
-        ? projectedAlphaBoundaryPoint(graph, candidate)
-        : pointHasPositiveSupport(graph, candidate)
-          ? candidate
-          : undefined
-    if (accepted !== undefined) result[index] = [accepted[0], accepted[1]]
-  }
-
-  const segmentCount = closed ? result.length : result.length - 1
-  // Candidate vertices are evaluated together above. If any moved pair creates
-  // an invalid segment, deterministic endpoint rollback converges to the
-  // already-validated original shortcut geometry.
-  for (let pass = 0; pass < result.length; pass += 1) {
-    let changed = false
-    for (let index = 0; index < segmentCount; index += 1) {
-      const next = (index + 1) % result.length
-      if (!segmentHasPositiveSupport(graph, result[index]!, result[next]!)) {
-        if (closed || index > 0) result[index] = [...original[index]!] as Point
-        if (closed || next < result.length - 1) {
-          result[next] = [...original[next]!] as Point
-        }
-        changed = true
-      }
-    }
-    if (!changed) break
-  }
-  return result
-}
-
 function validPath(
   path: Readonly<TracedContourPath>,
   graph: Readonly<LocalizedEdgeGraph>,
@@ -671,55 +431,191 @@ function pathJaggedness(
   return jaggedness
 }
 
-function cleanupCandidate(
-  source: readonly Readonly<Point>[],
-  path: Readonly<TracedContourPath>,
-  smoothingLevel: number,
-  graph: Readonly<LocalizedEdgeGraph>,
-): CleanupCandidate | undefined {
-  const smoothing = smoothingLevel / SMOOTHING_LEVELS
-  const retained = simplifyIndices(
-    source,
-    path.closed,
-    smoothing * MAX_SIMPLIFICATION_TOLERANCE,
-    (start, end) => segmentHasPositiveSupport(graph, start, end),
-  )
-  const points = smoothRetainedPoints(
-    source,
-    retained,
-    path.closed,
-    path.provenance,
-    smoothing,
-    graph,
-  )
-  const minimumPointCount = path.closed ? 3 : 2
-  if (
-    points.length < minimumPointCount ||
-    !points.every((point) => finitePoint(point)) ||
-    !nondegenerateSegments(points, path.closed) ||
-    !emittedSegmentsAreSupported(points, path.closed, graph) ||
-    !alphaBoundaryPointsStayOnIsovalue(points, path.provenance, graph)
-  ) {
-    return undefined
-  }
-  const length = pathLength(points, path.closed)
-  if (length <= Math.sqrt(POINT_EPSILON_SQUARED)) return undefined
-  return { points, length, jaggedness: pathJaggedness(points, path.closed) }
-}
-
 function metricDoesNotIncrease(candidate: number, previous: number): boolean {
   return candidate <= previous + METRIC_EPSILON * Math.max(1, previous)
 }
 
-function candidateDoesNotRegress(
-  candidate: Readonly<CleanupCandidate>,
-  previous: Readonly<CleanupCandidate>,
-): boolean {
-  return (
-    candidate.points.length <= previous.points.length &&
-    metricDoesNotIncrease(candidate.length, previous.length) &&
-    metricDoesNotIncrease(candidate.jaggedness, previous.jaggedness)
+function compareRemovalCandidates(
+  first: Readonly<RemovalCandidate>,
+  second: Readonly<RemovalCandidate>,
+): number {
+  return first.priority - second.priority || first.index - second.index
+}
+
+function pushRemovalCandidate(
+  heap: RemovalCandidate[],
+  candidate: Readonly<RemovalCandidate>,
+): void {
+  heap.push(candidate)
+  let index = heap.length - 1
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2)
+    if (compareRemovalCandidates(heap[parent]!, candidate) <= 0) break
+    heap[index] = heap[parent]!
+    index = parent
+  }
+  heap[index] = candidate
+}
+
+function popRemovalCandidate(heap: RemovalCandidate[]): RemovalCandidate {
+  const first = heap[0]!
+  const last = heap.pop()!
+  if (heap.length === 0) return first
+  let index = 0
+  while (true) {
+    const left = index * 2 + 1
+    if (left >= heap.length) break
+    const right = left + 1
+    const child =
+      right < heap.length &&
+      compareRemovalCandidates(heap[right]!, heap[left]!) < 0
+        ? right
+        : left
+    if (compareRemovalCandidates(last, heap[child]!) <= 0) break
+    heap[index] = heap[child]!
+    index = child
+  }
+  heap[index] = last
+  return first
+}
+
+function effectiveArea(
+  previous: Readonly<Point>,
+  current: Readonly<Point>,
+  next: Readonly<Point>,
+): number {
+  return Math.abs(
+    (current[0] - previous[0]) * (next[1] - previous[1]) -
+      (current[1] - previous[1]) * (next[0] - previous[0]),
   )
+}
+
+function linkedJaggednessContribution(
+  points: readonly Readonly<Point>[],
+  index: number,
+  previous: number,
+  next: number,
+): number {
+  if (previous < 0 || next < 0) return 0
+  return perpendicularDistance(
+    points[index]!,
+    points[previous]!,
+    points[next]!,
+  )
+}
+
+/**
+ * Consider one stable effective-area prefix and retain only monotonic removals.
+ * Each source vertex is popped at most once, so the heap dominates at
+ * `O(points log points)` and every smoothing level denotes a nested prefix.
+ */
+function nestedSimplification(
+  source: readonly Readonly<Point>[],
+  closed: boolean,
+  smoothingLevel: number,
+  graph: Readonly<LocalizedEdgeGraph>,
+  fullySupported: boolean,
+): readonly Readonly<Point>[] {
+  if (smoothingLevel === 0) return source
+  const pointCount = source.length
+  const minimumPointCount = closed ? 3 : 2
+  const removableCount = pointCount - minimumPointCount
+  const candidatesToConsider = Math.floor(
+    (removableCount * smoothingLevel) / SMOOTHING_LEVELS,
+  )
+  if (candidatesToConsider === 0) return source
+
+  const previous = new Int32Array(pointCount)
+  const next = new Int32Array(pointCount)
+  const alive = new Uint8Array(pointCount)
+  const heap: RemovalCandidate[] = []
+  for (let index = 0; index < pointCount; index += 1) {
+    previous[index] = index > 0 ? index - 1 : closed ? pointCount - 1 : -1
+    next[index] = index + 1 < pointCount ? index + 1 : closed ? 0 : -1
+    alive[index] = 1
+    if (closed || (index > 0 && index + 1 < pointCount)) {
+      pushRemovalCandidate(heap, {
+        index,
+        priority: effectiveArea(
+          source[previous[index]!]!,
+          source[index]!,
+          source[next[index]!]!,
+        ),
+      })
+    }
+  }
+
+  let retainedCount = pointCount
+  let currentLength = pathLength(source, closed)
+  let currentJaggedness = pathJaggedness(source, closed)
+  for (
+    let considered = 0;
+    considered < candidatesToConsider && heap.length > 0;
+    considered += 1
+  ) {
+    const { index } = popRemovalCandidate(heap)
+    if (alive[index] !== 1 || retainedCount <= minimumPointCount) continue
+    const left = previous[index]!
+    const right = next[index]!
+    if (left < 0 || right < 0) continue
+    if (
+      !fullySupported &&
+      !segmentHasPositiveSupport(graph, source[left]!, source[right]!)
+    ) {
+      continue
+    }
+
+    const beforeLength =
+      Math.sqrt(squaredDistance(source[left]!, source[index]!)) +
+      Math.sqrt(squaredDistance(source[index]!, source[right]!))
+    const afterLength = Math.sqrt(
+      squaredDistance(source[left]!, source[right]!),
+    )
+    const candidateLength = currentLength - beforeLength + afterLength
+    const beforeJaggedness =
+      linkedJaggednessContribution(
+        source,
+        left,
+        previous[left]!,
+        index,
+      ) +
+      linkedJaggednessContribution(source, index, left, right) +
+      linkedJaggednessContribution(source, right, index, next[right]!)
+    const afterJaggedness =
+      linkedJaggednessContribution(
+        source,
+        left,
+        previous[left]!,
+        right,
+      ) +
+      linkedJaggednessContribution(source, right, left, next[right]!)
+    const candidateJaggedness =
+      currentJaggedness - beforeJaggedness + afterJaggedness
+    if (
+      !metricDoesNotIncrease(candidateLength, currentLength) ||
+      !metricDoesNotIncrease(candidateJaggedness, currentJaggedness)
+    ) {
+      continue
+    }
+
+    alive[index] = 0
+    next[left] = right
+    previous[right] = left
+    retainedCount -= 1
+    currentLength = candidateLength
+    currentJaggedness = Math.max(0, candidateJaggedness)
+  }
+
+  const retained: Readonly<Point>[] = []
+  let index = 0
+  while (index < pointCount && alive[index] !== 1) index += 1
+  if (index >= pointCount) return retained
+  const start = index
+  do {
+    retained.push(source[index]!)
+    index = next[index]!
+  } while (index >= 0 && index !== start)
+  return retained
 }
 
 /**
@@ -750,6 +646,9 @@ export function cleanupPencilContourPaths(
   const requestedSmoothingLevel = Math.round(
     input.smoothing * SMOOTHING_LEVELS,
   )
+  const fullySupported = input.graph.positiveSupport.every(
+    (supported, index) => supported && input.graph.alpha[index]! > 0,
+  )
   const result: Readonly<TracedContourPath>[] = []
 
   for (const path of input.paths) {
@@ -759,29 +658,27 @@ export function cleanupPencilContourPaths(
     if (
       source.length < minimumPointCount ||
       pathLength(source, path.closed) < minimumLength ||
-      !emittedSegmentsAreSupported(source, path.closed, input.graph)
+      !nondegenerateSegments(source, path.closed) ||
+      !emittedSegmentsAreSupported(source, path.closed, input.graph) ||
+      !alphaBoundaryPointsStayOnIsovalue(
+        source,
+        path.provenance,
+        input.graph,
+      )
     ) {
       continue
     }
 
-    let accepted = cleanupCandidate(source, path, 0, input.graph)
-    if (accepted === undefined) continue
-    // Controls have 0.01 precision. Replaying that finite prefix makes every
-    // call at level N share exactly the same accepted history as level N - 1.
-    // Permission/topology gates run before the monotonic geometry envelope;
-    // at most 101 candidates are evaluated for any path.
-    for (let level = 1; level <= requestedSmoothingLevel; level += 1) {
-      const candidate = cleanupCandidate(source, path, level, input.graph)
-      if (
-        candidate !== undefined &&
-        candidateDoesNotRegress(candidate, accepted)
-      ) {
-        accepted = candidate
-      }
-    }
+    const accepted = nestedSimplification(
+      source,
+      path.closed,
+      requestedSmoothingLevel,
+      input.graph,
+      fullySupported,
+    )
 
     const frozenPoints = Object.freeze(
-      accepted.points.map((point) =>
+      accepted.map((point) =>
         Object.freeze([point[0], point[1]] as Point),
       ),
     )

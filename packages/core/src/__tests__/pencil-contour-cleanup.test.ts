@@ -194,7 +194,7 @@ describe('Pencil Contour path cleanup', () => {
     expect(pathLength(result[1]!.points, true)).toBeGreaterThan(2.5)
   })
 
-  it('keeps open endpoints fixed while smoothing retained interior vertices', () => {
+  it('keeps open endpoints fixed while simplifying interior vertices', () => {
     const source = path([
       [1, 1],
       [2, 4],
@@ -206,7 +206,7 @@ describe('Pencil Contour path cleanup', () => {
     expect(result.closed).toBe(false)
     expect(result.points[0]).toEqual(source.points[0])
     expect(result.points.at(-1)).toEqual(source.points.at(-1))
-    expect(result.points[1]![1]).toBeLessThan(source.points[1]![1])
+    expect(result.points.length).toBeLessThan(source.points.length)
   })
 
   it('keeps length and point count nonincreasing across a simplification threshold', () => {
@@ -369,7 +369,7 @@ describe('Pencil Contour path cleanup', () => {
     }
   })
 
-  it('reprojects smoothed alpha-boundary vertices to the fixed half-alpha isovalue', () => {
+  it('keeps simplified alpha-boundary vertices on the fixed half-alpha isovalue', () => {
     const width = 5
     const height = 5
     const alpha = Array.from(
@@ -388,10 +388,10 @@ describe('Pencil Contour path cleanup', () => {
       ALPHA_BOUNDARY,
     )
 
-    const result = clean([boundary], sourceGraph, 1, 0.2)[0]!
+    const result = clean([boundary], sourceGraph, 1, 1)[0]!
 
     expect(result.provenance).toEqual(ALPHA_BOUNDARY)
-    expect(result.points[1]).not.toEqual(boundary.points[1])
+    expect(result.points.length).toBeLessThan(boundary.points.length)
     for (const point of result.points) {
       expect(bilinearAlpha(sourceGraph, point)).toBeCloseTo(0.5, 6)
     }
@@ -477,4 +477,36 @@ describe('Pencil Contour path cleanup', () => {
     expect(result[0]!.provenance).toEqual({ kind: 'luminance' })
     expect(Object.isFrozen(callerProvenance)).toBe(false)
   })
+
+  it(
+    'keeps maximum-lattice serpentine cleanup within a broad work bound',
+    () => {
+      const width = 256
+      const height = 256
+      const points: Point[] = []
+      for (let y = 0; y < height; y += 1) {
+        if (y % 2 === 0) {
+          for (let x = 0; x < width; x += 1) points.push([x, y])
+        } else {
+          for (let x = width - 1; x >= 0; x -= 1) points.push([x, y])
+        }
+      }
+      const started = performance.now()
+
+      const result = clean(
+        [path(points)],
+        graph(width, height),
+        1,
+        1,
+      )
+      const elapsed = performance.now() - started
+
+      expect(result).toHaveLength(1)
+      expect(result[0]!.points.length).toBeLessThan(points.length)
+      // This is deliberately broad: it catches the former 101 full-path
+      // replays (~8 seconds) without treating normal CI variance as failure.
+      expect(elapsed).toBeLessThan(4_000)
+    },
+    5_000,
+  )
 })
