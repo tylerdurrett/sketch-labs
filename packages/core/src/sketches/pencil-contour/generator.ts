@@ -26,8 +26,6 @@ import type {
 } from './types'
 
 const STROKE = Object.freeze({ color: 'black', width: 1 })
-const HALF_ALPHA = 0.5
-const ISOVALUE_TOLERANCE = 1e-7
 const PARAMETER_EPSILON = 1e-12
 const POINT_EPSILON_SQUARED = 1e-18
 
@@ -238,20 +236,11 @@ function validFinalPath(
   for (let index = 0; index < path.points.length; index += 1) {
     if (!Object.prototype.hasOwnProperty.call(path.points, index)) return false
     const point = path.points[index]
-    if (
-      !finiteLatticePoint(point, graph) ||
-      !pointHasPositiveSupport(graph, point)
-    ) {
+    if (!finiteLatticePoint(point, graph)) {
       return false
     }
-    if (path.provenance.kind === 'alpha-boundary') {
-      const alpha = sampleField(graph.alpha, graph, point)
-      if (
-        alpha === undefined ||
-        Math.abs(alpha - HALF_ALPHA) > ISOVALUE_TOLERANCE
-      ) {
-        return false
-      }
+    if (!pointHasPositiveSupport(graph, point)) {
+      return false
     }
   }
 

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { localizePencilContourEdges } from '../sketches/pencil-contour/edges'
+import {
+  localizePencilContourEdges,
+  solveDualVertex,
+} from '../sketches/pencil-contour/edges'
 import type {
   AnalyzedRaster,
   LocalizedEdge,
@@ -30,7 +33,68 @@ function withProvenance(
   return edges.filter((edge) => edge.provenance.kind === kind)
 }
 
+function lengthWeightedOctilinearFraction(
+  edges: readonly Readonly<LocalizedEdge>[],
+): number {
+  let matchingLength = 0
+  let totalLength = 0
+  const tolerance = (3 * Math.PI) / 180
+
+  for (const edge of edges) {
+    const dx = edge.end[0] - edge.start[0]
+    const dy = edge.end[1] - edge.start[1]
+    const length = Math.hypot(dx, dy)
+    const angle = Math.atan2(dy, dx)
+    const nearest = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
+    totalLength += length
+    if (Math.abs(angle - nearest) <= tolerance) matchingLength += length
+  }
+
+  return totalLength === 0 ? 0 : matchingLength / totalLength
+}
+
 describe('Pencil Contour edge localization', () => {
+  it('minimizes an out-of-cell skewed QEF on the correct box side', () => {
+    const firstSlope = 0.3
+    const secondSlope = 0.5
+    const firstLength = Math.hypot(firstSlope, 1)
+    const secondLength = Math.hypot(secondSlope, 1)
+    const vertex = solveDualVertex(
+      [
+        {
+          point: [0, 0.7],
+          normal: [-firstSlope / firstLength, 1 / firstLength],
+        },
+        {
+          point: [0, 0.4],
+          normal: [-secondSlope / secondLength, 1 / secondLength],
+        },
+      ],
+      0,
+      0,
+    )
+
+    // The unconstrained line intersection is (1.5, 1.15). Independently
+    // clamping those coordinates would incorrectly choose the top-right
+    // corner; the constrained minimum lies inside the right side instead.
+    expect(vertex[0]).toBeCloseTo(0.999999, 12)
+    expect(vertex[1]).toBeCloseTo(0.9534184102564103, 12)
+  })
+
+  it('keeps adjacent box-constrained dual vertices from sharing a corner', () => {
+    const samples = [
+      { point: [1, 0] as const, normal: [1, 0] as const },
+      { point: [0, 1] as const, normal: [0, 1] as const },
+    ]
+
+    const left = solveDualVertex(samples, 0, 0)
+    const right = solveDualVertex(samples, 1, 0)
+
+    expect(left).toEqual([0.999999, 0.999999])
+    expect(right).toEqual([1.000001, 0.999999])
+    expect(right[0] - left[0]).toBeGreaterThan(1e-6)
+  })
+
   it('localizes vertical and horizontal luminance transitions in lattice coordinates', () => {
     const vertical = localizePencilContourEdges(
       analyzedRaster(
@@ -57,6 +121,30 @@ describe('Pencil Contour edge localization', () => {
     expect(horizontalEdges).toHaveLength(3)
     expect(horizontalEdges.every((edge) => edge.start[1] === 1.5)).toBe(true)
     expect(horizontalEdges.every((edge) => edge.end[1] === 1.5)).toBe(true)
+  })
+
+  it('localizes a soft oblique luminance edge without octilinear quantization', () => {
+    const width = 24
+    const height = 24
+    const normalAngle = (23 * Math.PI) / 180
+    const normalX = Math.cos(normalAngle)
+    const normalY = Math.sin(normalAngle)
+    const offset = ((width - 1) * normalX + (height - 1) * normalY) / 2
+    const luminance = Array.from({ length: width * height }, (_, index) => {
+      const x = index % width
+      const y = Math.floor(index / width)
+      const signedDistance = x * normalX + y * normalY - offset
+      return 1 / (1 + Math.exp(-signedDistance / 1.4))
+    })
+
+    const graph = localizePencilContourEdges(
+      analyzedRaster(width, height, luminance),
+      1,
+    )
+    const luminanceEdges = withProvenance(graph.edges, 'luminance')
+
+    expect(luminanceEdges.length).toBeGreaterThan(12)
+    expect(lengthWeightedOctilinearFraction(luminanceEdges)).toBeLessThan(0.5)
   })
 
   it('marches an alpha-only silhouette at one fixed interpolated isovalue', () => {

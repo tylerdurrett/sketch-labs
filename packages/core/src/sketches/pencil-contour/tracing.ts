@@ -44,6 +44,10 @@ interface TracedProvenanceGraph {
   readonly cycles: readonly Readonly<TracedContourPath>[];
 }
 
+type JunctionPairings = ReadonlyMap<string, ReadonlyMap<number, number>>;
+
+const MAX_STRAIGHT_THROUGH_DOT = -Math.SQRT1_2;
+
 function comparePoints(
   first: Readonly<Point>,
   second: Readonly<Point>,
@@ -220,15 +224,96 @@ function otherVertexKey(edge: TraceEdge, vertexKey: string): string {
   return edge.startKey === vertexKey ? edge.endKey : edge.startKey;
 }
 
-function nextUnusedEdge(
+function buildJunctionPairings(graph: ProvenanceGraph): JunctionPairings {
+  if (graph.provenance.kind !== "luminance") return new Map();
+
+  const result = new Map<string, ReadonlyMap<number, number>>();
+  for (const vertex of graph.vertices.values()) {
+    if (vertex.edgeIds.length <= 2) continue;
+
+    const candidates: { firstId: number; secondId: number; dot: number }[] = [];
+    for (let firstIndex = 0; firstIndex < vertex.edgeIds.length; firstIndex += 1) {
+      const firstId = vertex.edgeIds[firstIndex]!;
+      const firstPoint = graph.vertices.get(
+        otherVertexKey(graph.edges[firstId]!, vertex.key),
+      )!.point;
+      const firstX = firstPoint[0] - vertex.point[0];
+      const firstY = firstPoint[1] - vertex.point[1];
+      const firstLength = Math.hypot(firstX, firstY);
+
+      for (
+        let secondIndex = firstIndex + 1;
+        secondIndex < vertex.edgeIds.length;
+        secondIndex += 1
+      ) {
+        const secondId = vertex.edgeIds[secondIndex]!;
+        const secondPoint = graph.vertices.get(
+          otherVertexKey(graph.edges[secondId]!, vertex.key),
+        )!.point;
+        const secondX = secondPoint[0] - vertex.point[0];
+        const secondY = secondPoint[1] - vertex.point[1];
+        const secondLength = Math.hypot(secondX, secondY);
+        const dot =
+          (firstX * secondX + firstY * secondY) /
+          (firstLength * secondLength);
+
+        if (dot < MAX_STRAIGHT_THROUGH_DOT) {
+          candidates.push({
+            firstId: Math.min(firstId, secondId),
+            secondId: Math.max(firstId, secondId),
+            dot,
+          });
+        }
+      }
+    }
+
+    candidates.sort(
+      (first, second) =>
+        first.dot - second.dot ||
+        first.firstId - second.firstId ||
+        first.secondId - second.secondId,
+    );
+
+    const paired = new Map<number, number>();
+    for (const candidate of candidates) {
+      if (
+        paired.has(candidate.firstId) ||
+        paired.has(candidate.secondId)
+      ) {
+        continue;
+      }
+      paired.set(candidate.firstId, candidate.secondId);
+      paired.set(candidate.secondId, candidate.firstId);
+    }
+    if (paired.size > 0) result.set(vertex.key, paired);
+  }
+  return result;
+}
+
+function continuationEdge(
+  pairings: JunctionPairings,
   vertex: TraceVertex,
-  visited: ReadonlySet<number>,
+  incomingEdgeId: number,
 ): number | undefined {
-  return vertex.edgeIds.find((edgeId) => !visited.has(edgeId));
+  if (vertex.edgeIds.length === 2) {
+    return vertex.edgeIds[0] === incomingEdgeId
+      ? vertex.edgeIds[1]
+      : vertex.edgeIds[0];
+  }
+  return pairings.get(vertex.key)?.get(incomingEdgeId);
+}
+
+function unpairedIncidence(
+  pairings: JunctionPairings,
+  vertex: TraceVertex,
+  edgeId: number,
+): boolean {
+  return continuationEdge(pairings, vertex, edgeId) === undefined;
 }
 
 function traceFrom(
   graph: ProvenanceGraph,
+  pairings: JunctionPairings,
   start: TraceVertex,
   firstEdgeId: number,
   visited: Set<number>,
@@ -236,6 +321,7 @@ function traceFrom(
   const points: Readonly<Point>[] = [start.point];
   let current = start;
   let edgeId: number | undefined = firstEdgeId;
+  let closed = false;
 
   // Each iteration permanently consumes one edge, making the graph's own edge
   // count a strict safety ceiling even for malformed adjacency in future edits.
@@ -246,12 +332,17 @@ function traceFrom(
     current = graph.vertices.get(otherVertexKey(edge, current.key))!;
     points.push(current.point);
 
-    if (current.key === start.key || current.edgeIds.length !== 2) break;
-    edgeId = nextUnusedEdge(current, visited);
+    const nextEdgeId = continuationEdge(pairings, current, edgeId);
+    if (nextEdgeId === undefined) break;
+    if (current.key === start.key && nextEdgeId === firstEdgeId) {
+      closed = true;
+      points.pop();
+      break;
+    }
+    if (visited.has(nextEdgeId)) break;
+    edgeId = nextEdgeId;
   }
 
-  const closed = current.key === start.key;
-  if (closed) points.pop();
   return Object.freeze({
     points: Object.freeze(points),
     closed,
@@ -263,27 +354,32 @@ function traceProvenanceGraph(graph: ProvenanceGraph): TracedProvenanceGraph {
   const visited = new Set<number>();
   const branches: Readonly<TracedContourPath>[] = [];
   const cycles: Readonly<TracedContourPath>[] = [];
+  const pairings = buildJunctionPairings(graph);
   const orderedVertices = [...graph.vertices.values()].sort((first, second) =>
     comparePoints(first.point, second.point),
   );
 
-  // Split at endpoints and junctions first. Degree-two vertices remain internal
-  // to a maximal branch and are intentionally allowed to appear in many paths.
+  // Start at every unpaired incidence. Pairing straight-through luminance arms
+  // makes compatible junction segments internal without inventing new edges.
   for (const vertex of orderedVertices) {
-    if (vertex.edgeIds.length === 2) continue;
-    let edgeId = nextUnusedEdge(vertex, visited);
-    while (edgeId !== undefined) {
-      branches.push(traceFrom(graph, vertex, edgeId, visited));
-      edgeId = nextUnusedEdge(vertex, visited);
+    for (const edgeId of vertex.edgeIds) {
+      if (
+        !visited.has(edgeId) &&
+        unpairedIncidence(pairings, vertex, edgeId)
+      ) {
+        branches.push(traceFrom(graph, pairings, vertex, edgeId, visited));
+      }
     }
   }
 
-  // What remains consists only of degree-two components. The first unvisited
-  // edge incident to the row-major-smallest vertex fixes cycle direction.
+  // What remains consists of paired cycles. The first unvisited edge incident
+  // to the row-major-smallest vertex fixes cycle direction.
   for (const vertex of orderedVertices) {
-    const edgeId = nextUnusedEdge(vertex, visited);
+    const edgeId = vertex.edgeIds.find((candidate) => !visited.has(candidate));
     if (edgeId !== undefined) {
-      cycles.push(traceFrom(graph, vertex, edgeId, visited));
+      const path = traceFrom(graph, pairings, vertex, edgeId, visited);
+      if (path.closed) cycles.push(path);
+      else branches.push(path);
     }
   }
 

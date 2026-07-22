@@ -12,9 +12,11 @@ import type {
   LocalizedEdgeGraph,
   TracedContourPath,
 } from './types'
+import { refinePencilContourCurve } from './curve-refinement'
 
 const MIN_FRAGMENT_LENGTH = 0.5
 const MAX_FRAGMENT_LENGTH = 2.5
+const MAX_SIMPLIFICATION_FRACTION = 0.5
 const MAX_ANALYSIS_DIMENSION = 256
 const POINT_EPSILON_SQUARED = 1e-18
 const ISOVALUE = 0.5
@@ -22,6 +24,9 @@ const ISOVALUE_TOLERANCE = 1e-7
 const PARAMETER_EPSILON = 1e-12
 const METRIC_EPSILON = 1e-12
 const SMOOTHING_LEVELS = 100
+const REFINEMENT_TUBE = 1
+const TUBE_PROOF_MAX_DEPTH = 12
+const MAX_REFINEMENT_CONTROL_POINTS = 1024
 const LUMINANCE_PROVENANCE: Readonly<EdgeProvenance> = Object.freeze({
   kind: 'luminance',
 })
@@ -351,6 +356,105 @@ function perpendicularDistance(
   )
 }
 
+function distanceToSegment(
+  point: Readonly<Point>,
+  start: Readonly<Point>,
+  end: Readonly<Point>,
+): number {
+  const dx = end[0] - start[0]
+  const dy = end[1] - start[1]
+  const lengthSquared = dx * dx + dy * dy
+  if (lengthSquared === 0) return Math.sqrt(squaredDistance(point, start))
+  const projection = Math.max(0, Math.min(1,
+    ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) /
+      lengthSquared,
+  ))
+  return Math.hypot(
+    point[0] - (start[0] + dx * projection),
+    point[1] - (start[1] + dy * projection),
+  )
+}
+
+function pointDistanceToPath(
+  point: Readonly<Point>,
+  controls: readonly Readonly<Point>[],
+  closed: boolean,
+): number {
+  let minimum = Number.POSITIVE_INFINITY
+  const segmentCount = closed ? controls.length : controls.length - 1
+  for (let index = 0; index < segmentCount; index += 1) {
+    minimum = Math.min(minimum, distanceToSegment(
+      point,
+      controls[index]!,
+      controls[(index + 1) % controls.length]!,
+    ))
+  }
+  return minimum
+}
+
+function segmentStaysWithinRefinementTube(
+  start: Readonly<Point>,
+  end: Readonly<Point>,
+  controls: readonly Readonly<Point>[],
+  closed: boolean,
+): boolean {
+  const visit = (
+    first: Readonly<Point>,
+    second: Readonly<Point>,
+    startDistance: number,
+    endDistance: number,
+    depth: number,
+  ): boolean => {
+    if (
+      startDistance > REFINEMENT_TUBE + 1e-12 ||
+      endDistance > REFINEMENT_TUBE + 1e-12
+    ) {
+      return false
+    }
+    const length = Math.hypot(second[0] - first[0], second[1] - first[1])
+    // Distance to the source polyline is 1-Lipschitz. This bound proves the
+    // entire interval; subdivision is only needed while it is inconclusive.
+    if (Math.max(startDistance, endDistance) + length / 2 <= REFINEMENT_TUBE) {
+      return true
+    }
+    if (depth >= TUBE_PROOF_MAX_DEPTH) return false
+    const middle: Point = [
+      (first[0] + second[0]) / 2,
+      (first[1] + second[1]) / 2,
+    ]
+    const middleDistance = pointDistanceToPath(middle, controls, closed)
+    return visit(
+      first, middle, startDistance, middleDistance, depth + 1,
+    ) && visit(
+      middle, second, middleDistance, endDistance, depth + 1,
+    )
+  }
+
+  return visit(
+    start,
+    end,
+    pointDistanceToPath(start, controls, closed),
+    pointDistanceToPath(end, controls, closed),
+    0,
+  )
+}
+
+function staysWithinRefinementTube(
+  points: readonly Readonly<Point>[],
+  controls: readonly Readonly<Point>[],
+  closed: boolean,
+): boolean {
+  const segmentCount = closed ? points.length : points.length - 1
+  for (let index = 0; index < segmentCount; index += 1) {
+    const start = points[index]!
+    const end = points[(index + 1) % points.length]!
+    if (!segmentStaysWithinRefinementTube(start, end, controls, closed)) {
+      return false
+    }
+  }
+  return true
+}
+
 function validPath(
   path: Readonly<TracedContourPath>,
   graph: Readonly<LocalizedEdgeGraph>,
@@ -534,7 +638,8 @@ function nestedSimplification(
   const minimumPointCount = closed ? 3 : 2
   const removableCount = pointCount - minimumPointCount
   const candidatesToConsider = Math.floor(
-    (removableCount * smoothingLevel) / SMOOTHING_LEVELS,
+    (removableCount * smoothingLevel * MAX_SIMPLIFICATION_FRACTION) /
+      SMOOTHING_LEVELS,
   )
   if (candidatesToConsider === 0) return source
 
@@ -776,8 +881,39 @@ export function cleanupPencilContourPaths(
       continue
     }
 
+    let refined = accepted
+    if (source.length <= MAX_REFINEMENT_CONTROL_POINTS) {
+      const refinementControls =
+        path.provenance.kind === 'alpha-boundary' ||
+        !staysWithinRefinementTube(accepted, source, path.closed)
+          ? source
+          : accepted
+      refined = refinePencilContourCurve({
+        points: refinementControls,
+        closed: path.closed,
+        weight: requestedSmoothingLevel / SMOOTHING_LEVELS,
+        ...(path.provenance.kind === 'alpha-boundary' ? {
+          localFallback: true,
+          localMaxDeviation: REFINEMENT_TUBE,
+          segmentAccepts: (start: Readonly<Point>, end: Readonly<Point>) =>
+              inBounds(start, input.graph) &&
+              inBounds(end, input.graph) &&
+              squaredDistance(start, end) > POINT_EPSILON_SQUARED &&
+              (fullySupported ||
+                segmentHasPositiveSupport(input.graph, start, end)),
+        } : {}),
+        accepts: (points, closed) =>
+          points.length >= minimumPointCount &&
+          points.every((point) => inBounds(point, input.graph)) &&
+          nondegenerateSegments(points, closed) &&
+          (path.provenance.kind === 'alpha-boundary' ||
+            staysWithinRefinementTube(points, source, closed)) &&
+          (fullySupported ||
+            emittedSegmentsAreSupported(points, closed, input.graph)),
+      })
+    }
     const frozenPoints = Object.freeze(
-      accepted.map((point) =>
+      refined.map((point) =>
         Object.freeze([point[0], point[1]] as Point),
       ),
     )

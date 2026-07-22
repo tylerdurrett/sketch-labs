@@ -69,8 +69,219 @@ function alphaDisk(size = 12): DecodedPixels {
   })
 }
 
+function opaqueTwoToneCircle(size = 32): DecodedPixels {
+  const center = (size - 1) / 2
+  const radiusSquared = (size * 0.3) ** 2
+  return pixels(size, size, (x, y) => {
+    const inside = (x - center) ** 2 + (y - center) ** 2 <= radiusSquared
+    const byte = inside ? 32 : 224
+    return [byte, byte, byte, 255]
+  })
+}
+
+function junctionRichObliqueStructure(size = 64): DecodedPixels {
+  const center = (size - 1) / 2
+  return pixels(size, size, (x, y) => {
+    const first = x * Math.cos(0.37) + y * Math.sin(0.37) - center * 1.3
+    const second = x * Math.cos(1.19) + y * Math.sin(1.19) - center * 1.25
+    const radial = Math.hypot(x - center * 1.08, y - center * 0.92) - size * 0.24
+    const tone =
+      0.12 +
+      0.38 / (1 + Math.exp(-first / 1.5)) +
+      0.27 * Math.exp(-(second * second) / 7) +
+      0.2 / (1 + Math.exp(-radial / 1.2))
+    const byte = Math.round(Math.min(1, Math.max(0, tone)) * 255)
+    return [byte, byte, byte, 255]
+  })
+}
+
+function hardAlphaLobes(size = 96): DecodedPixels {
+  const center = (size - 1) / 2
+  return pixels(size, size, (x, y) => {
+    const dx = x - center
+    const dy = y - center
+    const angle = Math.atan2(dy, dx)
+    const radius = 28 * (
+      1 + 0.14 * Math.cos(3 * angle) + 0.05 * Math.cos(5 * angle + 0.4)
+    )
+    const opaque = Math.hypot(dx, dy) <= radius
+    return [96, 96, 96, opaque ? 255 : 0]
+  })
+}
+
 function allPoints(scene: Readonly<Scene>): readonly Readonly<Point>[] {
   return scene.primitives.flatMap((primitive) => primitive.points)
+}
+
+function lengthWeightedOctilinearFraction(
+  scene: Readonly<Scene>,
+  toleranceDegrees: number,
+): number {
+  let matchingLength = 0
+  let totalLength = 0
+  const tolerance = (toleranceDegrees * Math.PI) / 180
+  for (const primitive of scene.primitives) {
+    const segmentCount = primitive.closed
+      ? primitive.points.length
+      : primitive.points.length - 1
+    for (let index = 0; index < segmentCount; index += 1) {
+      const start = primitive.points[index]!
+      const end = primitive.points[(index + 1) % primitive.points.length]!
+      const dx = end[0] - start[0]
+      const dy = end[1] - start[1]
+      const length = Math.hypot(dx, dy)
+      const angle = Math.atan2(dy, dx)
+      const nearest = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
+      totalLength += length
+      if (Math.abs(angle - nearest) <= tolerance) matchingLength += length
+    }
+  }
+  return totalLength === 0 ? 0 : matchingLength / totalLength
+}
+
+interface WeightedTurn {
+  readonly degrees: number
+  readonly weight: number
+}
+
+function pathTurns(
+  points: readonly Readonly<Point>[],
+  closed: boolean,
+): readonly WeightedTurn[] {
+  const turns: WeightedTurn[] = []
+  if (points.length < 3) return turns
+  const first = closed ? 0 : 1
+  const end = closed ? points.length : points.length - 1
+  for (let index = first; index < end; index += 1) {
+      const previous = points[(index - 1 + points.length) % points.length]!
+      const current = points[index]!
+      const next = points[(index + 1) % points.length]!
+      const incoming: Point = [
+        current[0] - previous[0],
+        current[1] - previous[1],
+      ]
+      const outgoing: Point = [next[0] - current[0], next[1] - current[1]]
+      const incomingLength = Math.hypot(...incoming)
+      const outgoingLength = Math.hypot(...outgoing)
+      if (incomingLength === 0 || outgoingLength === 0) continue
+      const cosine = Math.max(-1, Math.min(1,
+        (incoming[0] * outgoing[0] + incoming[1] * outgoing[1]) /
+          (incomingLength * outgoingLength),
+      ))
+      turns.push({
+        degrees: Math.acos(cosine) * 180 / Math.PI,
+        weight: (incomingLength + outgoingLength) / 2,
+      })
+  }
+  return turns
+}
+
+function resampleAtFixedSpacing(
+  primitive: Readonly<Primitive>,
+  spacing: number,
+): readonly Readonly<Point>[] {
+  const segmentCount = primitive.closed
+    ? primitive.points.length
+    : primitive.points.length - 1
+  const cumulative = [0]
+  for (let index = 0; index < segmentCount; index += 1) {
+    const start = primitive.points[index]!
+    const end = primitive.points[(index + 1) % primitive.points.length]!
+    cumulative.push(cumulative.at(-1)! + Math.hypot(
+      end[0] - start[0],
+      end[1] - start[1],
+    ))
+  }
+  const total = cumulative.at(-1)!
+  const distances: number[] = []
+  for (let distance = 0; distance < total; distance += spacing) {
+    distances.push(distance)
+  }
+  if (!primitive.closed) distances.push(total)
+
+  let segment = 0
+  return distances.map((distance): Point => {
+    while (
+      segment + 1 < cumulative.length - 1 &&
+      cumulative[segment + 1]! < distance
+    ) {
+      segment += 1
+    }
+    const start = primitive.points[segment]!
+    const end = primitive.points[(segment + 1) % primitive.points.length]!
+    const length = cumulative[segment + 1]! - cumulative[segment]!
+    const amount = length === 0 ? 0 : (distance - cumulative[segment]!) / length
+    return [
+      start[0] + (end[0] - start[0]) * amount,
+      start[1] + (end[1] - start[1]) * amount,
+    ]
+  })
+}
+
+function fixedSpacingSceneTurns(
+  scene: Readonly<Scene>,
+  spacing: number,
+): readonly WeightedTurn[] {
+  return scene.primitives.flatMap((primitive) =>
+    pathTurns(resampleAtFixedSpacing(primitive, spacing), primitive.closed),
+  )
+}
+
+function percentile(values: readonly number[], fraction: number): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((first, second) => first - second)
+  return sorted[Math.floor(fraction * (sorted.length - 1))]!
+}
+
+function weightedTurnFraction(
+  turns: readonly WeightedTurn[],
+  threshold: number,
+): number {
+  const total = turns.reduce((sum, turn) => sum + turn.weight, 0)
+  const matching = turns.reduce(
+    (sum, turn) => sum + (turn.degrees > threshold + 1e-7 ? turn.weight : 0),
+    0,
+  )
+  return total === 0 ? 0 : matching / total
+}
+
+function primitiveLength(primitive: Readonly<Primitive>): number {
+  let length = 0
+  const segmentCount = primitive.closed
+    ? primitive.points.length
+    : primitive.points.length - 1
+  for (let index = 0; index < segmentCount; index += 1) {
+    const start = primitive.points[index]!
+    const end = primitive.points[(index + 1) % primitive.points.length]!
+    length += Math.hypot(end[0] - start[0], end[1] - start[1])
+  }
+  return length
+}
+
+function distanceToPrimitive(
+  point: Readonly<Point>,
+  primitive: Readonly<Primitive>,
+): number {
+  let minimum = Number.POSITIVE_INFINITY
+  const segmentCount = primitive.closed
+    ? primitive.points.length
+    : primitive.points.length - 1
+  for (let index = 0; index < segmentCount; index += 1) {
+    const start = primitive.points[index]!
+    const end = primitive.points[(index + 1) % primitive.points.length]!
+    const dx = end[0] - start[0]
+    const dy = end[1] - start[1]
+    const lengthSquared = dx * dx + dy * dy
+    const amount = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1,
+      ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) /
+        lengthSquared,
+    ))
+    minimum = Math.min(minimum, Math.hypot(
+      point[0] - (start[0] + dx * amount),
+      point[1] - (start[1] + dy * amount),
+    ))
+  }
+  return minimum
 }
 
 function segmentSamples(primitive: Readonly<Primitive>): readonly Point[] {
@@ -148,6 +359,9 @@ describe('generatePencilContour', () => {
         {
           points: [
             [40, 5],
+            [40, 30],
+            [40, 40],
+            [40, 50],
             [40, 55],
           ],
           closed: false,
@@ -176,6 +390,10 @@ describe('generatePencilContour', () => {
       {
         points: [
           [5, 30],
+          [40, 30],
+          [50, 30],
+          [60, 30],
+          [70, 30],
           [75, 30],
         ],
         closed: false,
@@ -250,7 +468,7 @@ describe('generatePencilContour', () => {
     ).toEqual([])
   })
 
-  it('lets detail add secondary structure and smoothing simplify paths', () => {
+  it('lets detail add secondary structure', () => {
     const detailed = pixels(8, 6, (x) => {
       const byte = x < 2 ? 0 : x < 4 ? 255 : 240
       return [byte, byte, byte, 255]
@@ -263,23 +481,100 @@ describe('generatePencilContour', () => {
       contourDetail: 1,
       contourSmoothing: 1,
     })
-    const unsmoothed = generate(transition('vertical'), {
-      contourSmoothing: 0,
-    })
-    const smoothed = generate(transition('vertical'), {
-      contourSmoothing: 1,
-    })
-
     expect(highDetail.primitives.length).toBeGreaterThan(lowDetail.primitives.length)
     expect(
       highDetail.primitives.reduce((sum, primitive) => sum + primitive.points.length, 0),
     ).toBeGreaterThan(
       lowDetail.primitives.reduce((sum, primitive) => sum + primitive.points.length, 0),
     )
-    expect(smoothed.primitives).toHaveLength(unsmoothed.primitives.length)
-    expect(smoothed.primitives[0]!.points.length).toBeLessThan(
-      unsmoothed.primitives[0]!.points.length,
+  })
+
+  it('preserves a curved luminance contour deterministically at maximum smoothing', () => {
+    const source = opaqueTwoToneCircle()
+    const frame = { width: source.width, height: source.height }
+    const unsmoothed = generate(source, {
+      contourDetail: 0.5,
+      contourSmoothing: 0,
+    }, frame)
+    const smoothed = generate(source, {
+      contourDetail: 0.5,
+      contourSmoothing: 1,
+    }, frame)
+    const repeated = generate(source, {
+      contourDetail: 0.5,
+      contourSmoothing: 1,
+    }, frame)
+    expect(repeated).toEqual(smoothed)
+    const unsmoothedP95 = percentile(
+      fixedSpacingSceneTurns(unsmoothed, 1).map(({ degrees }) => degrees), 0.95,
     )
+    const smoothedP95 = percentile(
+      fixedSpacingSceneTurns(smoothed, 1).map(({ degrees }) => degrees), 0.95,
+    )
+    expect(smoothedP95).toBeLessThan(unsmoothedP95)
+    expect(smoothedP95).toBeLessThanOrEqual(25)
+    expect(smoothed.primitives.some((primitive) => primitive.closed)).toBe(true)
+    expect(allPoints(smoothed).every(([x, y]) =>
+      Number.isFinite(x) && Number.isFinite(y) &&
+      x >= 0 && x <= frame.width && y >= 0 && y <= frame.height,
+    )).toBe(true)
+  })
+
+  it('turns a hard-alpha lobe silhouette into a genuinely smooth curve', () => {
+    const source = hardAlphaLobes()
+    const frame = { width: source.width, height: source.height }
+    const unsmoothed = generate(source, {
+      contourDetail: 0.5,
+      contourSmoothing: 0,
+    }, frame)
+    const smoothed = generate(source, {
+      contourDetail: 0.5,
+      contourSmoothing: 1,
+    }, frame)
+    const repeated = generate(source, {
+      contourDetail: 0.5,
+      contourSmoothing: 1,
+    }, frame)
+    const turns = fixedSpacingSceneTurns(smoothed, 1)
+
+    expect(smoothed).toEqual(repeated)
+    expect(smoothed.primitives).toHaveLength(unsmoothed.primitives.length)
+    expect(smoothed.primitives).toHaveLength(1)
+    expect(smoothed.primitives[0]!.closed).toBe(true)
+    expect(smoothed.primitives[0]!.points.at(-1)).not.toEqual(
+      smoothed.primitives[0]!.points[0],
+    )
+    const unsmoothedLength = primitiveLength(unsmoothed.primitives[0]!)
+    const smoothedLength = primitiveLength(smoothed.primitives[0]!)
+    expect(smoothedLength).toBeGreaterThan(unsmoothedLength * 0.9)
+    expect(smoothedLength).toBeLessThanOrEqual(unsmoothedLength * 1.01)
+    const maximumDisplacement = Math.max(
+      ...smoothed.primitives[0]!.points.map((point) =>
+      distanceToPrimitive(point, unsmoothed.primitives[0]!),
+      ),
+    )
+    expect(maximumDisplacement).toBeGreaterThan(0.1)
+    expect(maximumDisplacement).toBeLessThanOrEqual(1 + 1e-12)
+    expect(percentile(turns.map(({ degrees }) => degrees), 0.95))
+      .toBeLessThanOrEqual(15)
+    expect(weightedTurnFraction(turns, 25)).toBeLessThanOrEqual(0.05)
+    expect(weightedTurnFraction(turns, 45)).toBeLessThanOrEqual(0.01)
+  })
+
+  it('keeps junction-rich oblique structure from collapsing to grid directions', () => {
+    const source = junctionRichObliqueStructure()
+    const frame = { width: source.width, height: source.height }
+    const atDefaultDetail = generate(source, {
+      contourDetail: 0.5,
+      contourSmoothing: 1,
+    }, frame)
+    const atMaximumDetail = generate(source, {
+      contourDetail: 1,
+      contourSmoothing: 1,
+    }, frame)
+
+    expect(lengthWeightedOctilinearFraction(atDefaultDetail, 3)).toBeLessThanOrEqual(0.35)
+    expect(lengthWeightedOctilinearFraction(atMaximumDetail, 3)).toBeLessThanOrEqual(0.45)
   })
 
   it('keeps lower-detail segment inventory when new edges create junctions', () => {

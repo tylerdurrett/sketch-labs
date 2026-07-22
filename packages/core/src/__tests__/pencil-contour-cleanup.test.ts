@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cleanupPencilContourPaths } from '../sketches/pencil-contour/cleanup'
+import { pairedCurveSamplesCoincide } from '../sketches/pencil-contour/curve-refinement'
 import { localizePencilContourEdges } from '../sketches/pencil-contour/edges'
 import { tracePencilContourEdges } from '../sketches/pencil-contour/tracing'
 import type {
@@ -64,42 +65,34 @@ function pathLength(points: readonly Readonly<Point>[], closed: boolean): number
   return length
 }
 
-function perpendicularDistance(
-  point: Readonly<Point>,
-  start: Readonly<Point>,
-  end: Readonly<Point>,
-): number {
-  const dx = end[0] - start[0]
-  const dy = end[1] - start[1]
-  const lengthSquared = dx * dx + dy * dy
-  if (lengthSquared === 0) return Math.hypot(point[0] - start[0], point[1] - start[1])
-  return (
-    Math.abs(dx * (point[1] - start[1]) - dy * (point[0] - start[0])) /
-    Math.sqrt(lengthSquared)
-  )
-}
-
-function jaggedness(contour: Readonly<TracedContourPath>): number {
-  if (contour.points.length < 3) return 0
-  let result = 0
-  const start = contour.closed ? 0 : 1
-  const end = contour.closed ? contour.points.length : contour.points.length - 1
-  for (let index = start; index < end; index += 1) {
-    result += perpendicularDistance(
-      contour.points[index]!,
-      contour.points[(index - 1 + contour.points.length) % contour.points.length]!,
-      contour.points[(index + 1) % contour.points.length]!,
-    )
-  }
-  return result
-}
-
 function centeredAlphaRing() {
   const width = 6
   const height = 6
   const alpha = Array<number>(width * height).fill(0)
   for (let y = 2; y <= 3; y += 1) {
     for (let x = 2; x <= 3; x += 1) alpha[y * width + x] = 1
+  }
+  const positiveSupport = alpha.map((value) => value > 0)
+  const raster: Readonly<AnalyzedRaster> = Object.freeze({
+    sourceWidth: width,
+    sourceHeight: height,
+    width,
+    height,
+    luminance: Object.freeze(Array<number>(width * height).fill(0)),
+    alpha: Object.freeze(alpha),
+    positiveSupport: Object.freeze(positiveSupport),
+  })
+  const edgeGraph = localizePencilContourEdges(raster, 0.5)
+  const paths = tracePencilContourEdges(edgeGraph)
+  return { graph: edgeGraph, paths }
+}
+
+function transparentAlphaHole() {
+  const width = 20
+  const height = 20
+  const alpha = Array<number>(width * height).fill(1)
+  for (let y = 5; y <= 14; y += 1) {
+    for (let x = 5; x <= 14; x += 1) alpha[y * width + x] = 0
   }
   const positiveSupport = alpha.map((value) => value > 0)
   const raster: Readonly<AnalyzedRaster> = Object.freeze({
@@ -157,7 +150,49 @@ function sampledSegments(
   return samples
 }
 
+function distanceToPolyline(
+  point: Readonly<Point>,
+  controls: readonly Readonly<Point>[],
+  closed: boolean,
+): number {
+  let minimum = Number.POSITIVE_INFINITY
+  const segmentCount = closed ? controls.length : controls.length - 1
+  for (let index = 0; index < segmentCount; index += 1) {
+    const start = controls[index]!
+    const end = controls[(index + 1) % controls.length]!
+    const dx = end[0] - start[0]
+    const dy = end[1] - start[1]
+    const lengthSquared = dx * dx + dy * dy
+    const amount = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1,
+      ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) /
+        lengthSquared,
+    ))
+    minimum = Math.min(minimum, Math.hypot(
+      point[0] - (start[0] + dx * amount),
+      point[1] - (start[1] + dy * amount),
+    ))
+  }
+  return minimum
+}
+
 describe('Pencil Contour path cleanup', () => {
+  it('does not deduplicate a closed seam across different baseline arms', () => {
+    const sharedHybrid: Point = [Math.SQRT1_2, Math.SQRT1_2]
+
+    expect(pairedCurveSamplesCoincide(
+      sharedHybrid,
+      [-0.5, 0],
+      sharedHybrid,
+      [0, 0.5],
+    )).toBe(false)
+    expect(pairedCurveSamplesCoincide(
+      sharedHybrid,
+      [0, 0],
+      sharedHybrid,
+      [0, 0],
+    )).toBe(true)
+  })
+
   it('removes short noise but retains meaningful open and closed geometry', () => {
     const paths = [
       path([
@@ -218,7 +253,7 @@ describe('Pencil Contour path cleanup', () => {
     expect(result.map(({ points }) => points)).not.toContainEqual(branches[3]!.points)
   })
 
-  it('keeps open endpoints fixed while simplifying interior vertices', () => {
+  it('curves a three-point bend while preserving its open endpoints', () => {
     const source = path([
       [1, 1],
       [2, 4],
@@ -230,10 +265,13 @@ describe('Pencil Contour path cleanup', () => {
     expect(result.closed).toBe(false)
     expect(result.points[0]).toEqual(source.points[0])
     expect(result.points.at(-1)).toEqual(source.points.at(-1))
-    expect(result.points.length).toBeLessThan(source.points.length)
+    expect(result.points.length).toBeGreaterThan(source.points.length)
+    expect(result.points.length).toBeLessThanOrEqual(
+      (source.points.length - 1) * 16 + 1,
+    )
   })
 
-  it('keeps length and point count nonincreasing across a simplification threshold', () => {
+  it('preserves open endpoints across a high smoothing threshold', () => {
     const source = path([
       [0.5, 0.5],
       [1.5, 0.5],
@@ -246,12 +284,13 @@ describe('Pencil Contour path cleanup', () => {
     const below = clean([source], graph(4, 4), 1, 0.99)[0]!
     const at = clean([source], graph(4, 4), 1, 1)[0]!
 
-    expect(below.points).toHaveLength(4)
-    expect(at.points).toHaveLength(3)
-    expect(at.points.length).toBeLessThanOrEqual(below.points.length)
-    expect(pathLength(at.points, false)).toBeLessThanOrEqual(
-      pathLength(below.points, false),
-    )
+    for (const contour of [below, at]) {
+      expect(contour.points[0]).toEqual(source.points[0])
+      expect(contour.points.at(-1)).toEqual(source.points.at(-1))
+      expect(contour.points.length).toBeLessThanOrEqual(
+        (source.points.length - 1) * 16 + 1,
+      )
+    }
   })
 
   it('rejects an intermediate removal that would link identical neighbours', () => {
@@ -264,33 +303,14 @@ describe('Pencil Contour path cleanup', () => {
 
     const result = clean([source], graph(), 1, 0.5)[0]!
 
-    expect(result.points).toEqual(source.points)
+    expect(result.points.length).toBeLessThanOrEqual(
+      (source.points.length - 1) * 16 + 1,
+    )
+    expect(result.points[0]).toEqual(source.points[0])
+    expect(result.points.at(-1)).toEqual(source.points.at(-1))
     for (let index = 1; index < result.points.length; index += 1) {
       expect(result.points[index]).not.toEqual(result.points[index - 1])
     }
-  })
-
-  it('does not regress an open path touching the lattice boundary at levels 14→15', () => {
-    const source = path([
-      [7, 5.5625733165],
-      [7, 5.3999329368],
-      [6.4940462462, 5.1999704614],
-      [6.4269217253, 5.2289650887],
-      [7, 6.1887467662],
-    ])
-    const sourceGraph = graph(8, 8)
-
-    const level14 = clean([source], sourceGraph, 1, 0.14)[0]!
-    const level15 = clean([source], sourceGraph, 1, 0.15)[0]!
-
-    expect(level15.points.length).toBeLessThanOrEqual(level14.points.length)
-    expect(pathLength(level15.points, false)).toBeLessThanOrEqual(
-      pathLength(level14.points, false) + 1e-12,
-    )
-    expect(jaggedness(level15)).toBeLessThanOrEqual(
-      jaggedness(level14) + 1e-12,
-    )
-    expect(level15.points.every(([x, y]) => x >= 0 && x <= 7 && y >= 0 && y <= 7)).toBe(true)
   })
 
   it('simplifies closed rings as wrapped rings without losing closure', () => {
@@ -320,72 +340,47 @@ describe('Pencil Contour path cleanup', () => {
       expect(contour.points.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y))).toBe(true)
       expect(contour.points.at(-1)).not.toEqual(contour.points[0])
     }
-    expect(normal.points.length).toBeLessThanOrEqual(minimum.points.length)
-    expect(maximum.points.length).toBeLessThanOrEqual(normal.points.length)
-    expect(pathLength(normal.points, true)).toBeLessThanOrEqual(
-      pathLength(minimum.points, true),
-    )
-    expect(pathLength(maximum.points, true)).toBeLessThanOrEqual(
-      pathLength(normal.points, true),
-    )
+    expect(normal.points.length).toBeLessThanOrEqual(ring.points.length * 16)
+    expect(maximum.points.length).toBeLessThanOrEqual(ring.points.length * 16)
   })
 
-  it('keeps the real centered alpha ring monotonic from level 99→100', () => {
+  it('smooths the real centered alpha ring deterministically with support', () => {
     const fixture = centeredAlphaRing()
     expect(fixture.paths).toHaveLength(1)
     expect(fixture.paths[0]!.closed).toBe(true)
 
-    const level99 = clean(fixture.paths, fixture.graph, 1, 0.99)[0]!
     const level100 = clean(fixture.paths, fixture.graph, 1, 1)[0]!
+    const repeated = clean(fixture.paths, fixture.graph, 1, 1)[0]!
 
-    expect(level100.points.length).toBeLessThanOrEqual(level99.points.length)
-    expect(pathLength(level100.points, true)).toBeLessThanOrEqual(
-      pathLength(level99.points, true) + 1e-12,
+    expect(level100).toEqual(repeated)
+    expect(level100.closed).toBe(true)
+    expect(level100.points.at(-1)).not.toEqual(level100.points[0])
+    expect(level100.points.length).toBeLessThanOrEqual(
+      fixture.paths[0]!.points.length * 16,
     )
-    expect(jaggedness(level100)).toBeLessThanOrEqual(
-      jaggedness(level99) + 1e-12,
-    )
-    for (const point of level100.points) {
-      expect(bilinearAlpha(fixture.graph, point)).toBeCloseTo(0.5, 6)
+    for (const point of sampledSegments(level100)) {
+      expect(bilinearAlpha(fixture.graph, point)).toBeGreaterThan(0)
     }
   })
 
-  it('enforces a monotonic 101-level envelope for representative open and closed paths', () => {
-    const openGraph = graph(8, 8)
-    const open = path([
+  it('keeps smoothing zero exact and refinement bounded across control levels', () => {
+    const source = path([
       [0.5, 0.5],
-      [1.5, 0.5],
-      [1.5, 1.5],
-      [1.5, 2.5],
-      [2.5, 2.5],
-      [2.5, 3],
+      [1.5, 3.5],
+      [2.5, 1],
+      [3.5, 4],
+      [4.5, 0.75],
+      [5.5, 3.75],
+      [6.5, 1.25],
+      [7.5, 3.5],
+      [8.5, 0.5],
     ])
-    const closed = centeredAlphaRing()
-    let previousOpen = clean([open], openGraph, 1, 0)[0]!
-    let previousClosed = clean(closed.paths, closed.graph, 1, 0)[0]!
-
-    for (let level = 1; level <= 100; level += 1) {
-      const nextOpen = clean([open], openGraph, 1, level / 100)[0]!
-      const nextClosed = clean(
-        closed.paths,
-        closed.graph,
-        1,
-        level / 100,
-      )[0]!
-      for (const [previous, next] of [
-        [previousOpen, nextOpen],
-        [previousClosed, nextClosed],
-      ] as const) {
-        expect(next.points.length).toBeLessThanOrEqual(previous.points.length)
-        expect(pathLength(next.points, next.closed)).toBeLessThanOrEqual(
-          pathLength(previous.points, previous.closed) + 1e-12,
-        )
-        expect(jaggedness(next)).toBeLessThanOrEqual(
-          jaggedness(previous) + 1e-12,
-        )
-      }
-      previousOpen = nextOpen
-      previousClosed = nextClosed
+    const sourceGraph = graph(10, 6)
+    expect(clean([source], sourceGraph, 1, 0)[0]!.points).toEqual(source.points)
+    for (let level = 0; level <= 100; level += 1) {
+      const count = clean([source], sourceGraph, 1, level / 100)[0]!.points
+        .length
+      expect(count).toBeLessThanOrEqual((source.points.length - 1) * 16 + 1)
     }
   })
 
@@ -409,7 +404,7 @@ describe('Pencil Contour path cleanup', () => {
     }
   })
 
-  it('keeps simplified alpha-boundary vertices on the fixed half-alpha isovalue', () => {
+  it('refines alpha boundaries off the control isovalue without losing support', () => {
     const width = 5
     const height = 5
     const alpha = Array.from(
@@ -431,12 +426,85 @@ describe('Pencil Contour path cleanup', () => {
     const result = clean([boundary], sourceGraph, 1, 1)[0]!
 
     expect(result.provenance).toEqual(ALPHA_BOUNDARY)
-    expect(result.points.length).toBeLessThan(boundary.points.length)
-    for (const point of result.points) {
-      expect(bilinearAlpha(sourceGraph, point)).toBeCloseTo(0.5, 6)
-    }
+    expect(result.closed).toBe(false)
+    expect(result.points[0]).toEqual(boundary.points[0])
+    expect(result.points.at(-1)).toEqual(boundary.points.at(-1))
+    expect(result.points.length).toBeGreaterThan(boundary.points.length)
+    expect(result.points.length).toBeLessThanOrEqual(
+      (boundary.points.length - 1) * 16 + 1,
+    )
     for (const point of sampledSegments(result)) {
       expect(bilinearAlpha(sourceGraph, point)).toBeGreaterThan(0)
+    }
+  })
+
+  it('keeps a refined long alpha corner inside a one-pixel control tube', () => {
+    const controls: readonly Readonly<Point>[] = [
+      [2, 2],
+      [22, 2],
+      [22, 22],
+      [2, 22],
+    ]
+    const sourceGraph = graph(25, 25, Array<number>(25 * 25).fill(0.5))
+    const source = path(controls, true, ALPHA_BOUNDARY)
+
+    const result = clean([source], sourceGraph, 1, 1)[0]!
+
+    expect(result.closed).toBe(true)
+    expect(result.provenance).toEqual(ALPHA_BOUNDARY)
+    expect(result.points.length).toBeLessThanOrEqual(controls.length * 16)
+    expect(Math.max(...sampledSegments(result).map((point) =>
+      distanceToPolyline(point, controls, true),
+    ))).toBeLessThanOrEqual(1 + 1e-12)
+  })
+
+  it('rejects an alpha simplification fallback outside the control tube', () => {
+    const controls: readonly Readonly<Point>[] = [
+      [1, 1],
+      [1, 10],
+      [10, 10],
+      [10, 1],
+    ]
+    const sourceGraph = graph(12, 12, Array<number>(12 * 12).fill(0.5))
+    const source = path(controls, false, ALPHA_BOUNDARY)
+
+    const result = clean([source], sourceGraph, 1, 1)[0]!
+
+    expect(result.points[0]).toEqual(controls[0])
+    expect(result.points.at(-1)).toEqual(controls.at(-1))
+    expect(Math.max(...sampledSegments(result).map((point) =>
+      distanceToPolyline(point, controls, false),
+    ))).toBeLessThanOrEqual(1 + 1e-12)
+  })
+
+  it('enforces the refinement tube between quarter-point samples', () => {
+    const controls: readonly Readonly<Point>[] = [
+      [0, 120],
+      [242.65722753945738, 129.73475436214358],
+      [213.25658278539777, 1.15819729515351],
+    ]
+    const sourceGraph = graph(256, 132, Array<number>(256 * 132).fill(0.5))
+    const source = path(controls, false, ALPHA_BOUNDARY)
+
+    const result = clean([source], sourceGraph, 1, 1)[0]!
+
+    expect(Math.max(...sampledSegments(result).map((point) =>
+      distanceToPolyline(point, controls, false),
+    ))).toBeLessThanOrEqual(1 + 1e-12)
+  })
+
+  it('never rounds an alpha boundary into a transparent hole', () => {
+    const fixture = transparentAlphaHole()
+    expect(fixture.paths).toHaveLength(1)
+    expect(fixture.paths[0]!.provenance).toEqual(ALPHA_BOUNDARY)
+
+    const result = clean(fixture.paths, fixture.graph, 1, 1)
+    const repeated = clean(fixture.paths, fixture.graph, 1, 1)
+
+    expect(result).toEqual(repeated)
+    expect(result).toHaveLength(1)
+    for (const point of sampledSegments(result[0]!)) {
+      expect(bilinearAlpha(fixture.graph, point)).toBeGreaterThan(0)
     }
   })
 
@@ -519,6 +587,42 @@ describe('Pencil Contour path cleanup', () => {
   })
 
   it(
+    'keeps a representative alpha loop refinement within its work bound',
+    () => {
+      const width = 256
+      const height = 256
+      const center = (width - 1) / 2
+      const alpha = Array.from({ length: width * height }, (_, index) => {
+        const x = index % width
+        const y = Math.floor(index / width)
+        return Math.hypot(x - center, y - center) <= 80 ? 1 : 0
+      })
+      const raster: Readonly<AnalyzedRaster> = Object.freeze({
+        sourceWidth: width,
+        sourceHeight: height,
+        width,
+        height,
+        luminance: Object.freeze(Array<number>(width * height).fill(0)),
+        alpha: Object.freeze(alpha),
+        positiveSupport: Object.freeze(alpha.map((value) => value > 0)),
+      })
+      const edgeGraph = localizePencilContourEdges(raster, 0.5)
+      const paths = tracePencilContourEdges(edgeGraph)
+      expect(paths).toHaveLength(1)
+      expect(paths[0]!.points.length).toBeGreaterThan(500)
+      const started = performance.now()
+
+      const result = clean(paths, edgeGraph, 1, 1)
+      const elapsed = performance.now() - started
+
+      expect(result).toHaveLength(1)
+      expect(result[0]!.closed).toBe(true)
+      expect(elapsed).toBeLessThan(300)
+    },
+    2_000,
+  )
+
+  it(
     'keeps maximum-lattice serpentine cleanup within a broad work bound',
     () => {
       const width = 256
@@ -542,11 +646,9 @@ describe('Pencil Contour path cleanup', () => {
       const elapsed = performance.now() - started
 
       expect(result).toHaveLength(1)
-      expect(result[0]!.points.length).toBeLessThan(points.length)
-      // This is deliberately broad: it catches the former 101 full-path
-      // replays (~8 seconds) without treating normal CI variance as failure.
-      expect(elapsed).toBeLessThan(4_000)
+      expect(result[0]!.points.length).toBeLessThanOrEqual(points.length * 16)
+      expect(elapsed).toBeLessThan(500)
     },
-    5_000,
+    2_000,
   )
 })

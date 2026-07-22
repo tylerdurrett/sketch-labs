@@ -56,35 +56,172 @@ describe("Pencil Contour graph tracing", () => {
     ]);
   });
 
-  it("splits a junction into deterministic endpoint-to-junction branches", () => {
+  it("pairs a luminance cross into deterministic straight-through paths", () => {
+    const edges = [
+      edge([2, 2], [2, 4]),
+      edge([2, 2], [4, 2]),
+      edge([2, 0], [2, 2]),
+      edge([0, 2], [2, 2]),
+    ];
+    const paths = tracePencilContourEdges(graph(edges, 5, 5));
+
+    expect(paths.map((path) => path.points)).toEqual([
+      [
+        [2, 0],
+        [2, 2],
+        [2, 4],
+      ],
+      [
+        [0, 2],
+        [2, 2],
+        [4, 2],
+      ],
+    ]);
+    expect(paths.every((path) => path.closed === false)).toBe(true);
+    expect(
+      tracePencilContourEdges(graph([...edges].reverse(), 5, 5)),
+    ).toEqual(paths);
+  });
+
+  it("pairs only the straight-through arms of a luminance T-junction", () => {
     const paths = tracePencilContourEdges(
       graph([
-        edge([1, 1], [1, 2]),
-        edge([1, 1], [2, 1]),
-        edge([1, 0], [1, 1]),
-        edge([0, 1], [1, 1]),
-      ]),
+        edge([2, 2], [2, 4]),
+        edge([2, 2], [4, 2]),
+        edge([0, 2], [2, 2]),
+      ], 5, 5),
     );
 
     expect(paths.map((path) => path.points)).toEqual([
       [
-        [1, 0],
-        [1, 1],
+        [0, 2],
+        [2, 2],
+        [4, 2],
       ],
       [
-        [0, 1],
-        [1, 1],
-      ],
-      [
-        [1, 1],
-        [2, 1],
-      ],
-      [
-        [1, 1],
-        [1, 2],
+        [2, 2],
+        [2, 4],
       ],
     ]);
-    expect(paths.every((path) => path.closed === false)).toBe(true);
+  });
+
+  it("leaves a luminance Y-junction split when no turn is under 45 degrees", () => {
+    const paths = tracePencilContourEdges(
+      graph([
+        edge([3, 3], [3, 1]),
+        edge([3, 3], [1, 4]),
+        edge([3, 3], [5, 4]),
+      ], 6, 5),
+    );
+
+    expect(paths.map((path) => path.points)).toEqual([
+      [
+        [3, 1],
+        [3, 3],
+      ],
+      [
+        [3, 3],
+        [1, 4],
+      ],
+      [
+        [3, 3],
+        [5, 4],
+      ],
+    ]);
+  });
+
+  it("keeps alpha-boundary crosses split at their junction", () => {
+    const paths = tracePencilContourEdges(
+      graph([
+        edge([2, 2], [2, 4], ALPHA_BOUNDARY),
+        edge([2, 2], [4, 2], ALPHA_BOUNDARY),
+        edge([2, 0], [2, 2], ALPHA_BOUNDARY),
+        edge([0, 2], [2, 2], ALPHA_BOUNDARY),
+      ], 5, 5),
+    );
+
+    expect(paths.map((path) => path.points)).toEqual([
+      [
+        [2, 0],
+        [2, 2],
+      ],
+      [
+        [0, 2],
+        [2, 2],
+      ],
+      [
+        [2, 2],
+        [4, 2],
+      ],
+      [
+        [2, 2],
+        [2, 4],
+      ],
+    ]);
+  });
+
+  it("does not falsely close a trail that revisits a junction through unpaired incidences", () => {
+    const paths = tracePencilContourEdges(
+      graph([
+        edge([2, 2], [0, 2]),
+        edge([2, 2], [4, 2]),
+        edge([2, 2], [1, 4]),
+        edge([2, 2], [3, 4]),
+        edge([1, 4], [2, 5]),
+        edge([2, 5], [3, 4]),
+      ], 5, 6),
+    );
+
+    expect(paths).toEqual([
+      {
+        points: [
+          [0, 2],
+          [2, 2],
+          [4, 2],
+        ],
+        closed: false,
+        provenance: { kind: "luminance" },
+      },
+      {
+        points: [
+          [2, 2],
+          [1, 4],
+          [2, 5],
+          [3, 4],
+          [2, 2],
+        ],
+        closed: false,
+        provenance: { kind: "luminance" },
+      },
+    ]);
+    expect(
+      paths.reduce((total, path) => total + representedEdgeCount(path), 0),
+    ).toBe(6);
+  });
+
+  it("traces a cycle that passes through two pairings at one junction", () => {
+    const paths = tracePencilContourEdges(
+      graph(
+        [
+          edge([3, 3], [3, 1]),
+          edge([3, 1], [1, 1]),
+          edge([1, 1], [1, 3]),
+          edge([1, 3], [3, 3]),
+          edge([3, 3], [5, 3]),
+          edge([5, 3], [5, 5]),
+          edge([5, 5], [3, 5]),
+          edge([3, 5], [3, 3]),
+        ],
+        6,
+        6,
+      ),
+    );
+
+    expect(paths).toHaveLength(1);
+    expect(paths[0]!.closed).toBe(true);
+    expect(paths[0]!.points.filter((point) => point[0] === 3 && point[1] === 3))
+      .toHaveLength(2);
+    expect(representedEdgeCount(paths[0]!)).toBe(8);
   });
 
   it("orders disconnected paths by canonical row-major point sequences", () => {
