@@ -45,6 +45,26 @@ interface LuminanceCandidate {
   readonly hermite: HermiteSample
 }
 
+/** @internal Stable read-only identity for reference-fixture diagnostics. */
+export interface PencilContourLuminanceCandidateDiagnostic {
+  readonly id: string
+  readonly strength: number
+}
+
+/**
+ * @internal Selection inventory exposed only so downstream reference fixtures
+ * can pin the real edge-admission inputs without copying this implementation.
+ */
+export interface PencilContourLuminanceSelectionDiagnostics {
+  readonly beforeNms: number
+  readonly afterNms: number
+  readonly afterStrengthFloor: number
+  readonly afterSelectionLimit: number
+  readonly afterDetailSelection: number
+  readonly selected: readonly Readonly<PencilContourLuminanceCandidateDiagnostic>[]
+  readonly unselected: readonly Readonly<PencilContourLuminanceCandidateDiagnostic>[]
+}
+
 interface HermiteSample {
   readonly point: Readonly<Point>
   readonly normal: Readonly<Point>
@@ -358,6 +378,34 @@ function luminanceCandidates(
   return candidates
 }
 
+function positiveLuminancePairCount(
+  raster: Readonly<AnalyzedRaster>,
+): number {
+  let count = 0
+  for (let y = 0; y < raster.height; y += 1) {
+    for (let x = 0; x + 1 < raster.width; x += 1) {
+      if (horizontalDifference(raster, x, y) > 0) count += 1
+    }
+  }
+  for (let y = 0; y + 1 < raster.height; y += 1) {
+    for (let x = 0; x < raster.width; x += 1) {
+      if (verticalDifference(raster, x, y) > 0) count += 1
+    }
+  }
+  return count
+}
+
+function candidateDiagnostic(
+  candidate: Readonly<LuminanceCandidate>,
+): Readonly<PencilContourLuminanceCandidateDiagnostic> {
+  const orientation =
+    candidate.orientation === 'horizontal-pair' ? 'horizontal' : 'vertical'
+  return Object.freeze({
+    id: `${orientation}:${candidate.x},${candidate.y}`,
+    strength: candidate.strength,
+  })
+}
+
 function cellKey(x: number, y: number): string {
   return `${x},${y}`
 }
@@ -669,43 +717,91 @@ function luminanceEdge(
   return createEdge(start, end, LUMINANCE_PROVENANCE)
 }
 
-function selectLuminanceEdges(
-  raster: Readonly<AnalyzedRaster>,
-  contourDetail: number,
-): readonly Readonly<LocalizedEdge>[] {
-  const detail = clampUnit(contourDetail)
-  const threshold =
-    MAX_LUMINANCE_EDGE_STRENGTH -
-    detail *
-      (MAX_LUMINANCE_EDGE_STRENGTH - MIN_LUMINANCE_EDGE_STRENGTH)
+function selectionLimit(raster: Readonly<AnalyzedRaster>): number {
   // A fixed ceiling keeps growth bounded without breaking a strong contour
   // into progressively longer fragments as detail changes.
-  const limit = Math.ceil(
+  return Math.ceil(
     raster.width * raster.height * MAX_SELECTION_FRACTION,
   )
+}
 
-  // Geometry is solved from the complete bounded universe that any detail can
-  // admit. A candidate retained at multiple detail values therefore reuses
-  // exactly the same endpoints and connectivity.
-  const candidates = luminanceCandidates(raster)
-  const universe = candidates
+function candidateUniverse(
+  raster: Readonly<AnalyzedRaster>,
+  candidates: readonly Readonly<LuminanceCandidate>[],
+): readonly Readonly<LuminanceCandidate>[] {
+  return candidates
     .filter(({ strength }) => strength >= MIN_LUMINANCE_EDGE_STRENGTH)
     .sort((first, second) =>
       second.strength === first.strength
         ? first.order - second.order
         : second.strength - first.strength,
     )
-    .slice(0, limit)
-  const vertices = dualVertices(raster, universe)
-  const selected = universe
+    .slice(0, selectionLimit(raster))
+}
+
+function detailCandidates(
+  universe: readonly Readonly<LuminanceCandidate>[],
+  contourDetail: number,
+): readonly Readonly<LuminanceCandidate>[] {
+  const detail = clampUnit(contourDetail)
+  const threshold =
+    MAX_LUMINANCE_EDGE_STRENGTH -
+    detail *
+      (MAX_LUMINANCE_EDGE_STRENGTH - MIN_LUMINANCE_EDGE_STRENGTH)
+  return universe
     .filter(({ strength }) => strength >= threshold)
     .sort((first, second) => first.order - second.order)
+}
+
+function selectLuminanceEdges(
+  raster: Readonly<AnalyzedRaster>,
+  contourDetail: number,
+): readonly Readonly<LocalizedEdge>[] {
+  const candidates = luminanceCandidates(raster)
+
+  // Geometry is solved from the complete bounded universe that any detail can
+  // admit. A candidate retained at multiple detail values therefore reuses
+  // exactly the same endpoints and connectivity.
+  const universe = candidateUniverse(raster, candidates)
+  const vertices = dualVertices(raster, universe)
+  const selected = detailCandidates(universe, contourDetail)
     .map((candidate) => luminanceEdge(raster, candidate, vertices))
     .filter(
       (edge): edge is Readonly<LocalizedEdge> => edge !== undefined,
     )
 
   return selected
+}
+
+/**
+ * Inspect deterministic luminance admission for an exact downstream fixture.
+ * This does not participate in generation and does not retain Hermite samples.
+ */
+export function inspectPencilContourLuminanceSelection(
+  raster: Readonly<AnalyzedRaster>,
+  contourDetail: number,
+): Readonly<PencilContourLuminanceSelectionDiagnostics> {
+  const candidates = luminanceCandidates(raster)
+  const aboveFloor = candidates.filter(
+    ({ strength }) => strength >= MIN_LUMINANCE_EDGE_STRENGTH,
+  )
+  const universe = candidateUniverse(raster, candidates)
+  const selected = detailCandidates(universe, contourDetail)
+  const selectedOrders = new Set(selected.map(({ order }) => order))
+
+  return Object.freeze({
+    beforeNms: positiveLuminancePairCount(raster),
+    afterNms: candidates.length,
+    afterStrengthFloor: aboveFloor.length,
+    afterSelectionLimit: universe.length,
+    afterDetailSelection: selected.length,
+    selected: Object.freeze(selected.map(candidateDiagnostic)),
+    unselected: Object.freeze(
+      aboveFloor
+        .filter(({ order }) => !selectedOrders.has(order))
+        .map(candidateDiagnostic),
+    ),
+  })
 }
 
 type CellEdge = 'top' | 'right' | 'bottom' | 'left'
