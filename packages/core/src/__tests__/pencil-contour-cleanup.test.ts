@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { cleanupPencilContourPaths } from '../sketches/pencil-contour/cleanup'
-import { pairedCurveSamplesCoincide } from '../sketches/pencil-contour/curve-refinement'
+import {
+  pairedCurveSamplesCoincide,
+  refinePencilContourCurve,
+} from '../sketches/pencil-contour/curve-refinement'
 import { localizePencilContourEdges } from '../sketches/pencil-contour/edges'
 import { tracePencilContourEdges } from '../sketches/pencil-contour/tracing'
 import type {
@@ -176,6 +179,24 @@ function distanceToPolyline(
 }
 
 describe('Pencil Contour path cleanup', () => {
+  it('leaves two-point paths identical at maximum smoothing', () => {
+    const points: readonly Readonly<Point>[] = Object.freeze([
+      Object.freeze([1, 1] as Point),
+      Object.freeze([4, 3] as Point),
+    ])
+
+    const result = refinePencilContourCurve({
+      points,
+      closed: false,
+      weight: 1,
+      accepts: () => {
+        throw new Error('two-point refinement must return before validation')
+      },
+    })
+
+    expect(result).toBe(points)
+  })
+
   it('does not deduplicate a closed seam across different baseline arms', () => {
     const sharedHybrid: Point = [Math.SQRT1_2, Math.SQRT1_2]
 

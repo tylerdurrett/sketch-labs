@@ -245,6 +245,28 @@ function weightedTurnFraction(
   return total === 0 ? 0 : matching / total
 }
 
+function expectHighSmoothingResponse(
+  smoothing075: readonly WeightedTurn[],
+  smoothing100: readonly WeightedTurn[],
+): void {
+  const baselineP95 = percentile(
+    smoothing075.map(({ degrees }) => degrees),
+    0.95,
+  )
+  const maximumP95 = percentile(
+    smoothing100.map(({ degrees }) => degrees),
+    0.95,
+  )
+
+  // This absolute floor makes the relative assertion meaningful instead of
+  // treating an already-straight, near-zero baseline as an improvement case.
+  expect(baselineP95).toBeGreaterThan(5)
+  expect(maximumP95).toBeLessThanOrEqual(25)
+  expect(maximumP95).toBeLessThanOrEqual(baselineP95 * 0.85)
+  expect(weightedTurnFraction(smoothing100, 25)).toBeLessThanOrEqual(0.05)
+  expect(weightedTurnFraction(smoothing100, 45)).toBeLessThanOrEqual(0.01)
+}
+
 function primitiveLength(primitive: Readonly<Primitive>): number {
   let length = 0
   const segmentCount = primitive.closed
@@ -500,6 +522,10 @@ describe('generatePencilContour', () => {
       contourDetail: 0.5,
       contourSmoothing: 1,
     }, frame)
+    const smoothing075 = generate(source, {
+      contourDetail: 0.5,
+      contourSmoothing: 0.75,
+    }, frame)
     const repeated = generate(source, {
       contourDetail: 0.5,
       contourSmoothing: 1,
@@ -511,9 +537,21 @@ describe('generatePencilContour', () => {
     const smoothedP95 = percentile(
       fixedSpacingSceneTurns(smoothed, 1).map(({ degrees }) => degrees), 0.95,
     )
+    const smoothing075Turns = fixedSpacingSceneTurns(smoothing075, 1)
+    const smoothedTurns = fixedSpacingSceneTurns(smoothed, 1)
     expect(smoothedP95).toBeLessThan(unsmoothedP95)
-    expect(smoothedP95).toBeLessThanOrEqual(25)
+    expectHighSmoothingResponse(smoothing075Turns, smoothedTurns)
     expect(smoothed.primitives.some((primitive) => primitive.closed)).toBe(true)
+    expect(smoothed.primitives).toHaveLength(unsmoothed.primitives.length)
+    const maximumDisplacement = Math.max(
+      ...smoothed.primitives.flatMap((primitive, index) =>
+        primitive.points.map((point) =>
+          distanceToPrimitive(point, unsmoothed.primitives[index]!),
+        ),
+      ),
+    )
+    expect(maximumDisplacement).toBeGreaterThan(0.1)
+    expect(maximumDisplacement).toBeLessThanOrEqual(1 + 1e-12)
     expect(allPoints(smoothed).every(([x, y]) =>
       Number.isFinite(x) && Number.isFinite(y) &&
       x >= 0 && x <= frame.width && y >= 0 && y <= frame.height,
@@ -531,6 +569,10 @@ describe('generatePencilContour', () => {
       contourDetail: 0.5,
       contourSmoothing: 1,
     }, frame)
+    const smoothing075 = generate(source, {
+      contourDetail: 0.5,
+      contourSmoothing: 0.75,
+    }, frame)
     const repeated = generate(source, {
       contourDetail: 0.5,
       contourSmoothing: 1,
@@ -538,6 +580,7 @@ describe('generatePencilContour', () => {
     const turns = fixedSpacingSceneTurns(smoothed, 1)
 
     expect(smoothed).toEqual(repeated)
+    expectHighSmoothingResponse(fixedSpacingSceneTurns(smoothing075, 1), turns)
     expect(smoothed.primitives).toHaveLength(unsmoothed.primitives.length)
     expect(smoothed.primitives).toHaveLength(1)
     expect(smoothed.primitives[0]!.closed).toBe(true)

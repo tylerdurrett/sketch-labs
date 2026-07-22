@@ -2,12 +2,14 @@
  * Deterministic approximating-curve refinement for Pencil Contour cleanup.
  *
  * Luminance paths use fixed-arc resampling, one denoise pass, and two
- * endpoint-aware Chaikin passes; a whole-path weight backoff enforces bounds,
- * support, and the source tube. Alpha boundaries instead preserve every raw
- * source vertex in a <=0.5-unit baseline and target a circular arc-distance
- * Gaussian (sigma 2). Only unsafe alpha neighborhoods blend back toward the
- * known-safe baseline, so one transparent corner cannot weaken the whole
- * silhouette. Both branches emit deterministic ordinary polyline points.
+ * endpoint-aware Chaikin passes. Above 0.75 smoothing, a third pass ramps in
+ * linearly so the established lower range remains exact; a whole-path weight
+ * backoff enforces bounds, support, and the source tube. Alpha boundaries
+ * instead preserve every raw source vertex in a <=0.5-unit baseline and target
+ * a circular arc-distance Gaussian (sigma 2). Only unsafe alpha neighborhoods
+ * blend back toward the known-safe baseline, so one transparent corner cannot
+ * weaken the whole silhouette. Both branches emit deterministic ordinary
+ * polyline points.
  */
 
 import type { Point } from '../../types'
@@ -21,6 +23,8 @@ const LOCAL_MAX_SUBDIVISIONS = 16
 const MAX_LOCAL_REFINED_POINTS = 2048
 const GAUSSIAN_SIGMA = 2
 const GAUSSIAN_RADIUS = GAUSSIAN_SIGMA * 3
+const HIGH_SMOOTHING_START = 0.75
+const CHAIKIN_CUT_AMOUNT = 0.25
 
 export interface CurveRefinementInput {
   readonly points: readonly Readonly<Point>[]
@@ -108,7 +112,7 @@ function cornerCut(
   weight: number,
 ): readonly Readonly<Point>[] {
   let result = points
-  const amount = 0.25 * weight
+  const amount = CHAIKIN_CUT_AMOUNT * weight
   for (let pass = 0; pass < REFINEMENT_PASSES; pass += 1) {
     result = cornerCutOnce(result, closed, amount)
   }
@@ -389,12 +393,25 @@ export function refinePencilContourCurve(
 
   if (input.localFallback) return locallyRefinedCurve(input)
 
+  const highSmoothingWeight = Math.max(
+    0,
+    Math.min(1, (input.weight - HIGH_SMOOTHING_START) /
+      (1 - HIGH_SMOOTHING_START)),
+  )
+
   for (const targetSpacing of [TARGET_CONTROL_SPACING, TARGET_CONTROL_SPACING / 2]) {
     const controls = resampleControls(input.points, input.closed, targetSpacing)
     let weight = Math.min(1, input.weight)
     for (let attempt = 0; attempt < BACKOFF_ATTEMPTS; attempt += 1) {
       const denoised = denoiseControls(controls, input.closed, weight)
-      const refined = cornerCut(denoised, input.closed, weight)
+      const refined = highSmoothingWeight === 0
+        ? cornerCut(denoised, input.closed, weight)
+        : cornerCutOnce(
+            cornerCut(denoised, input.closed, weight),
+            input.closed,
+            CHAIKIN_CUT_AMOUNT * highSmoothingWeight *
+              (weight / input.weight),
+          )
       if (input.accepts(refined, input.closed)) return refined
       weight /= 2
     }

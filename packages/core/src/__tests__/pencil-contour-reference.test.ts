@@ -111,6 +111,56 @@ function occupiedLongPathBins(
   ))
 }
 
+function expectSmoothingDiagnosticsClose(
+  actual: ReferenceDiagnostics['smoothing100'],
+  expected: ReferenceDiagnostics['smoothing100'],
+): void {
+  expect({ ...actual, sampledPaths: undefined }).toEqual({
+    ...expected,
+    bMedianPathLength: actual.bMedianPathLength,
+    turnP95Degrees: actual.turnP95Degrees,
+    turnFractionOver25Degrees: actual.turnFractionOver25Degrees,
+    turnFractionOver45Degrees: actual.turnFractionOver45Degrees,
+    sampledPaths: undefined,
+  })
+  expect(actual.bMedianPathLength).toBeCloseTo(expected.bMedianPathLength, 12)
+  expect(actual.turnP95Degrees).toBeCloseTo(expected.turnP95Degrees, 12)
+  expect(actual.turnFractionOver25Degrees).toBeCloseTo(
+    expected.turnFractionOver25Degrees,
+    12,
+  )
+  expect(actual.turnFractionOver45Degrees).toBeCloseTo(
+    expected.turnFractionOver45Degrees,
+    12,
+  )
+  expect(actual.sampledPaths).toHaveLength(expected.sampledPaths.length)
+  for (const [pathIndex, actualPath] of actual.sampledPaths.entries()) {
+    const expectedPath = expected.sampledPaths[pathIndex]!
+    expect({
+      pathIndex: actualPath.pathIndex,
+      closed: actualPath.closed,
+      provenance: actualPath.provenance,
+      pointCount: actualPath.points.length,
+      turnCount: actualPath.turnsDegrees.length,
+    }).toEqual({
+      pathIndex: expectedPath.pathIndex,
+      closed: expectedPath.closed,
+      provenance: expectedPath.provenance,
+      pointCount: expectedPath.points.length,
+      turnCount: expectedPath.turnsDegrees.length,
+    })
+    expect(actualPath.length).toBeCloseTo(expectedPath.length, 12)
+    for (const [pointIndex, actualPoint] of actualPath.points.entries()) {
+      const expectedPoint = expectedPath.points[pointIndex]!
+      expect(actualPoint[0]).toBeCloseTo(expectedPoint[0], 12)
+      expect(actualPoint[1]).toBeCloseTo(expectedPoint[1], 12)
+    }
+    for (const [turnIndex, actualTurn] of actualPath.turnsDegrees.entries()) {
+      expect(actualTurn).toBeCloseTo(expectedPath.turnsDegrees[turnIndex]!, 10)
+    }
+  }
+}
+
 describe('Pencil Contour flower downstream reference', () => {
   it('pins the browser-decoded AnalyzedRaster bytes and authored tuple', () => {
     const metadata = referenceMetadata()
@@ -150,7 +200,7 @@ describe('Pencil Contour flower downstream reference', () => {
     )
   })
 
-  it('reproduces exact candidate and calibrated fragment diagnostics', () => {
+  it('reproduces exact candidate, fragment, and sampled-turn diagnostics', () => {
     const metadata = referenceMetadata()
     const bytes = readFileSync(FIXTURE_BINARY_URL)
     const raster = referenceRaster(bytes, metadata)
@@ -196,22 +246,45 @@ describe('Pencil Contour flower downstream reference', () => {
       2.5213182029951176,
       12,
     )
-    expect(first.smoothing100.bMedianPathLength).toBeCloseTo(
-      2.6089969331616634,
-      12,
+    // The frozen diagnostics describe the combined pruning and high-smoothing
+    // behavior. Chrome and Node can differ by a few final bits in Math.hypot.
+    expectSmoothingDiagnosticsClose(
+      first.smoothing075,
+      metadata.diagnostics.smoothing075,
     )
+    expectSmoothingDiagnosticsClose(
+      first.smoothing100,
+      metadata.diagnostics.smoothing100,
+    )
+    // 686 is the production baseline's smoothing=1 short-path count before
+    // pre-trace fragment pruning was introduced.
     expect(first.smoothing100.b3PathsShorterThanThree).toBeLessThanOrEqual(
-      metadata.diagnostics.smoothing100.b3PathsShorterThanThree * 0.75,
+      686 * 0.75,
     )
     expect(occupiedLongPathBins(
       first.smoothing100,
       raster.width,
       raster.height,
-    )).toEqual(occupiedLongPathBins(
-      metadata.diagnostics.smoothing100,
-      raster.width,
-      raster.height,
-    ))
+    )).toEqual(new Set([
+      '0,0', '0,1', '0,2', '0,3',
+      '1,0', '1,1', '1,2', '1,3',
+      '2,0', '2,1', '2,2', '2,3',
+      '3,0', '3,1', '3,2', '3,3',
+    ]))
+    expect(first.smoothing075.turnP95Degrees).toBeGreaterThan(1)
+    expect(first.smoothing100.turnP95Degrees).toBeLessThanOrEqual(25)
+    expect(first.smoothing100.turnP95Degrees).toBeLessThanOrEqual(
+      first.smoothing075.turnP95Degrees * 0.85,
+    )
+    expect(first.smoothing100.turnFractionOver25Degrees).toBeLessThanOrEqual(
+      0.05,
+    )
+    expect(first.smoothing100.turnFractionOver45Degrees).toBeLessThanOrEqual(
+      0.01,
+    )
+    expect(first.smoothing100.bMedianPathLength).toBeGreaterThanOrEqual(
+      first.smoothing075.bMedianPathLength * 0.98,
+    )
 
     const { candidates } = first
     expect(candidates.afterStrengthFloor).toBe(
@@ -395,11 +468,11 @@ describe('Pencil Contour flower downstream reference', () => {
       recoveredBaselinePathCount: 28,
       hysteresisAuthorized: false,
     })
-    expect(replay.baselineShortPathLength).toBeCloseTo(1222.364499352788, 12)
-    expect(replay.recoveredLength).toBeCloseTo(48.863016510289164, 12)
-    expect(replay.recoveryRatio).toBeCloseTo(0.03997417835364241, 12)
-    expect(replay.unmatchedAddedLength).toBeCloseTo(0.46402864739638816, 12)
-    expect(replay.unmatchedFraction).toBeCloseTo(0.009496520692673096, 12)
+    expect(replay.baselineShortPathLength).toBeCloseTo(1221.836258708441, 12)
+    expect(replay.recoveredLength).toBeCloseTo(48.84609834720022, 12)
+    expect(replay.recoveryRatio).toBeCloseTo(0.03997761402074748, 12)
+    expect(replay.unmatchedAddedLength).toBeCloseTo(0.46402864739637906, 12)
+    expect(replay.unmatchedFraction).toBeCloseTo(0.009499809874230752, 12)
     expect(replay.unmatchedFraction).toBeLessThanOrEqual(0.1)
     expect(replay.recoveries).toHaveLength(13)
     expect(
