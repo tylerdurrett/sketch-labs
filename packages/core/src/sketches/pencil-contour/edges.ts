@@ -23,6 +23,8 @@ const ALPHA_BOUNDARY_ISOVALUE = 0.5
 const MIN_LUMINANCE_EDGE_STRENGTH = 0.03
 const MAX_LUMINANCE_EDGE_STRENGTH = 0.3
 const MAX_SELECTION_FRACTION = 0.5
+const MIN_EDGE_LENGTH = 1e-9
+const MIN_EDGE_LENGTH_SQUARED = MIN_EDGE_LENGTH * MIN_EDGE_LENGTH
 
 const LUMINANCE_PROVENANCE: Readonly<EdgeProvenance> = Object.freeze({
   kind: 'luminance',
@@ -50,11 +52,19 @@ function freezePoint(x: number, y: number): Readonly<Point> {
   return Object.freeze([x, y] as Point)
 }
 
-function freezeEdge(
+function createEdge(
   start: Readonly<Point>,
   end: Readonly<Point>,
   provenance: Readonly<EdgeProvenance>,
-): Readonly<LocalizedEdge> {
+): Readonly<LocalizedEdge> | undefined {
+  const horizontal = end[0] - start[0]
+  const vertical = end[1] - start[1]
+  if (
+    horizontal * horizontal + vertical * vertical <=
+    MIN_EDGE_LENGTH_SQUARED
+  ) {
+    return undefined
+  }
   return Object.freeze({ start, end, provenance })
 }
 
@@ -133,15 +143,12 @@ function luminanceCandidates(
 
       if (strength > 0 && !isSuppressed(strength, previous, next)) {
         const edgeX = x + 0.5
-        candidates.push({
-          edge: freezeEdge(
-            freezePoint(edgeX, Math.max(0, y - 0.5)),
-            freezePoint(edgeX, Math.min(raster.height - 1, y + 0.5)),
-            LUMINANCE_PROVENANCE,
-          ),
-          strength,
-          order,
-        })
+        const edge = createEdge(
+          freezePoint(edgeX, Math.max(0, y - 0.5)),
+          freezePoint(edgeX, Math.min(raster.height - 1, y + 0.5)),
+          LUMINANCE_PROVENANCE,
+        )
+        if (edge !== undefined) candidates.push({ edge, strength, order })
       }
       order += 1
     }
@@ -159,15 +166,12 @@ function luminanceCandidates(
 
       if (strength > 0 && !isSuppressed(strength, previous, next)) {
         const edgeY = y + 0.5
-        candidates.push({
-          edge: freezeEdge(
-            freezePoint(Math.max(0, x - 0.5), edgeY),
-            freezePoint(Math.min(raster.width - 1, x + 0.5), edgeY),
-            LUMINANCE_PROVENANCE,
-          ),
-          strength,
-          order,
-        })
+        const edge = createEdge(
+          freezePoint(Math.max(0, x - 0.5), edgeY),
+          freezePoint(Math.min(raster.width - 1, x + 0.5), edgeY),
+          LUMINANCE_PROVENANCE,
+        )
+        if (edge !== undefined) candidates.push({ edge, strength, order })
       }
       order += 1
     }
@@ -331,7 +335,8 @@ function alphaBoundaryEdges(
         const start = crossings[startSide]
         const end = crossings[endSide]
         if (start !== undefined && end !== undefined) {
-          edges.push(freezeEdge(start, end, ALPHA_BOUNDARY_PROVENANCE))
+          const edge = createEdge(start, end, ALPHA_BOUNDARY_PROVENANCE)
+          if (edge !== undefined) edges.push(edge)
         }
       }
     }

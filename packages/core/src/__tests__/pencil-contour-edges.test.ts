@@ -159,6 +159,33 @@ describe('Pencil Contour edge localization', () => {
     ])
   })
 
+  it('rejects an alpha segment collapsed onto an exact isovalue vertex', () => {
+    const collapsed = analyzedRaster(2, 2, [0, 0, 0, 0], [0.5, 0, 0, 0])
+    const mixed = analyzedRaster(
+      3,
+      2,
+      [0, 0, 0, 0, 0, 0],
+      [0.5, 0, 1, 0, 0, 1],
+    )
+
+    expect(localizePencilContourEdges(collapsed, 0.5).edges).toEqual([])
+    expect(localizePencilContourEdges(mixed, 0.5).edges).toEqual([
+      {
+        start: [1.5, 0],
+        end: [1.5, 1],
+        provenance: { kind: 'alpha-boundary' },
+      },
+    ])
+  })
+
+  it('does not emit collapsed luminance edges from one-dimensional lattices', () => {
+    const horizontal = analyzedRaster(4, 1, [0, 0, 1, 1])
+    const vertical = analyzedRaster(1, 4, [0, 0, 1, 1])
+
+    expect(localizePencilContourEdges(horizontal, 1).edges).toEqual([])
+    expect(localizePencilContourEdges(vertical, 1).edges).toEqual([])
+  })
+
   it('bounds deterministic luminance selection on noisy input', () => {
     const width = 8
     const height = 8
