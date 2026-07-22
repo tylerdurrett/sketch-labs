@@ -22,6 +22,9 @@ const POINT_EPSILON_SQUARED = 1e-18
 const ISOVALUE = 0.5
 const ISOVALUE_TOLERANCE = 1e-7
 const PARAMETER_EPSILON = 1e-12
+const COORDINATE_EPSILON = 1e-12
+const METRIC_EPSILON = 1e-12
+const SMOOTHING_LEVELS = 100
 const LUMINANCE_PROVENANCE: Readonly<EdgeProvenance> = Object.freeze({
   kind: 'luminance',
 })
@@ -42,6 +45,12 @@ interface AlphaSample {
   readonly value: number
   readonly dx: number
   readonly dy: number
+}
+
+interface CleanupCandidate {
+  readonly points: readonly Point[]
+  readonly length: number
+  readonly jaggedness: number
 }
 
 function finitePoint(value: unknown): value is Readonly<Point> {
@@ -466,6 +475,13 @@ function projectedAlphaBoundaryPoint(
   return undefined
 }
 
+function clampCoordinateOvershoot(value: number, maximum: number): number {
+  const epsilon = COORDINATE_EPSILON * Math.max(1, maximum)
+  if (value < 0 && value >= -epsilon) return 0
+  if (value > maximum && value <= maximum + epsilon) return maximum
+  return value
+}
+
 function smoothRetainedPoints(
   source: readonly Readonly<Point>[],
   retained: readonly number[],
@@ -523,8 +539,14 @@ function smoothRetainedPoints(
         })()
       : openTargets![index]!
     const candidate: Point = [
-      current[0] * (1 - weight) + target[0] * weight,
-      current[1] * (1 - weight) + target[1] * weight,
+      clampCoordinateOvershoot(
+        current[0] + (target[0] - current[0]) * weight,
+        graph.width - 1,
+      ),
+      clampCoordinateOvershoot(
+        current[1] + (target[1] - current[1]) * weight,
+        graph.height - 1,
+      ),
     ]
     const accepted =
       pathProvenance.kind === 'alpha-boundary'
@@ -597,6 +619,109 @@ function emittedSegmentsAreSupported(
   return true
 }
 
+function nondegenerateSegments(
+  points: readonly Readonly<Point>[],
+  closed: boolean,
+): boolean {
+  const segmentCount = closed ? points.length : points.length - 1
+  for (let index = 0; index < segmentCount; index += 1) {
+    if (
+      squaredDistance(
+        points[index]!,
+        points[(index + 1) % points.length]!,
+      ) <= POINT_EPSILON_SQUARED
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function alphaBoundaryPointsStayOnIsovalue(
+  points: readonly Readonly<Point>[],
+  pathProvenance: Readonly<EdgeProvenance>,
+  graph: Readonly<LocalizedEdgeGraph>,
+): boolean {
+  if (pathProvenance.kind !== 'alpha-boundary') return true
+  return points.every((point) => {
+    const sample = alphaSample(graph, point)
+    return (
+      sample !== undefined &&
+      Math.abs(sample.value - ISOVALUE) <= ISOVALUE_TOLERANCE
+    )
+  })
+}
+
+/** Sum of each vertex's deviation from its immediate-neighbour chord. */
+function pathJaggedness(
+  points: readonly Readonly<Point>[],
+  closed: boolean,
+): number {
+  if (points.length < 3) return 0
+  let jaggedness = 0
+  const start = closed ? 0 : 1
+  const end = closed ? points.length : points.length - 1
+  for (let index = start; index < end; index += 1) {
+    jaggedness += perpendicularDistance(
+      points[index]!,
+      points[(index - 1 + points.length) % points.length]!,
+      points[(index + 1) % points.length]!,
+    )
+  }
+  return jaggedness
+}
+
+function cleanupCandidate(
+  source: readonly Readonly<Point>[],
+  path: Readonly<TracedContourPath>,
+  smoothingLevel: number,
+  graph: Readonly<LocalizedEdgeGraph>,
+): CleanupCandidate | undefined {
+  const smoothing = smoothingLevel / SMOOTHING_LEVELS
+  const retained = simplifyIndices(
+    source,
+    path.closed,
+    smoothing * MAX_SIMPLIFICATION_TOLERANCE,
+    (start, end) => segmentHasPositiveSupport(graph, start, end),
+  )
+  const points = smoothRetainedPoints(
+    source,
+    retained,
+    path.closed,
+    path.provenance,
+    smoothing,
+    graph,
+  )
+  const minimumPointCount = path.closed ? 3 : 2
+  if (
+    points.length < minimumPointCount ||
+    !points.every((point) => finitePoint(point)) ||
+    !nondegenerateSegments(points, path.closed) ||
+    !emittedSegmentsAreSupported(points, path.closed, graph) ||
+    !alphaBoundaryPointsStayOnIsovalue(points, path.provenance, graph)
+  ) {
+    return undefined
+  }
+  const length = pathLength(points, path.closed)
+  if (length <= Math.sqrt(POINT_EPSILON_SQUARED)) return undefined
+  return { points, length, jaggedness: pathJaggedness(points, path.closed) }
+}
+
+function metricDoesNotIncrease(candidate: number, previous: number): boolean {
+  return candidate <= previous + METRIC_EPSILON * Math.max(1, previous)
+}
+
+function candidateDoesNotRegress(
+  candidate: Readonly<CleanupCandidate>,
+  previous: Readonly<CleanupCandidate>,
+): boolean {
+  return (
+    candidate.points.length <= previous.points.length &&
+    metricDoesNotIncrease(candidate.length, previous.length) &&
+    metricDoesNotIncrease(candidate.jaggedness, previous.jaggedness)
+  )
+}
+
 /**
  * Remove short fragments, simplify permission-valid shortcuts, and smooth the
  * survivors without changing topology, provenance, or source inputs.
@@ -622,7 +747,9 @@ export function cleanupPencilContourPaths(
   const minimumLength =
     MAX_FRAGMENT_LENGTH -
     input.detail * (MAX_FRAGMENT_LENGTH - MIN_FRAGMENT_LENGTH)
-  const tolerance = input.smoothing * MAX_SIMPLIFICATION_TOLERANCE
+  const requestedSmoothingLevel = Math.round(
+    input.smoothing * SMOOTHING_LEVELS,
+  )
   const result: Readonly<TracedContourPath>[] = []
 
   for (const path of input.paths) {
@@ -637,31 +764,26 @@ export function cleanupPencilContourPaths(
       continue
     }
 
-    const retained = simplifyIndices(
-      source,
-      path.closed,
-      tolerance,
-      (start, end) => segmentHasPositiveSupport(input.graph, start, end),
-    )
-    const points = smoothRetainedPoints(
-      source,
-      retained,
-      path.closed,
-      path.provenance,
-      input.smoothing,
-      input.graph,
-    )
-    if (
-      points.length < minimumPointCount ||
-      !points.every((point) => finitePoint(point)) ||
-      !emittedSegmentsAreSupported(points, path.closed, input.graph) ||
-      pathLength(points, path.closed) <= Math.sqrt(POINT_EPSILON_SQUARED)
-    ) {
-      continue
+    let accepted = cleanupCandidate(source, path, 0, input.graph)
+    if (accepted === undefined) continue
+    // Controls have 0.01 precision. Replaying that finite prefix makes every
+    // call at level N share exactly the same accepted history as level N - 1.
+    // Permission/topology gates run before the monotonic geometry envelope;
+    // at most 101 candidates are evaluated for any path.
+    for (let level = 1; level <= requestedSmoothingLevel; level += 1) {
+      const candidate = cleanupCandidate(source, path, level, input.graph)
+      if (
+        candidate !== undefined &&
+        candidateDoesNotRegress(candidate, accepted)
+      ) {
+        accepted = candidate
+      }
     }
 
     const frozenPoints = Object.freeze(
-      points.map((point) => Object.freeze([point[0], point[1]] as Point)),
+      accepted.points.map((point) =>
+        Object.freeze([point[0], point[1]] as Point),
+      ),
     )
     result.push(
       Object.freeze({

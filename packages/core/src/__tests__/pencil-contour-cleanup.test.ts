@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { cleanupPencilContourPaths } from '../sketches/pencil-contour/cleanup'
+import { localizePencilContourEdges } from '../sketches/pencil-contour/edges'
+import { tracePencilContourEdges } from '../sketches/pencil-contour/tracing'
 import type {
+  AnalyzedRaster,
   EdgeProvenance,
   LocalizedEdgeGraph,
   TracedContourPath,
@@ -59,6 +62,58 @@ function pathLength(points: readonly Readonly<Point>[], closed: boolean): number
     length += Math.hypot(end[0] - start[0], end[1] - start[1])
   }
   return length
+}
+
+function perpendicularDistance(
+  point: Readonly<Point>,
+  start: Readonly<Point>,
+  end: Readonly<Point>,
+): number {
+  const dx = end[0] - start[0]
+  const dy = end[1] - start[1]
+  const lengthSquared = dx * dx + dy * dy
+  if (lengthSquared === 0) return Math.hypot(point[0] - start[0], point[1] - start[1])
+  return (
+    Math.abs(dx * (point[1] - start[1]) - dy * (point[0] - start[0])) /
+    Math.sqrt(lengthSquared)
+  )
+}
+
+function jaggedness(contour: Readonly<TracedContourPath>): number {
+  if (contour.points.length < 3) return 0
+  let result = 0
+  const start = contour.closed ? 0 : 1
+  const end = contour.closed ? contour.points.length : contour.points.length - 1
+  for (let index = start; index < end; index += 1) {
+    result += perpendicularDistance(
+      contour.points[index]!,
+      contour.points[(index - 1 + contour.points.length) % contour.points.length]!,
+      contour.points[(index + 1) % contour.points.length]!,
+    )
+  }
+  return result
+}
+
+function centeredAlphaRing() {
+  const width = 6
+  const height = 6
+  const alpha = Array<number>(width * height).fill(0)
+  for (let y = 2; y <= 3; y += 1) {
+    for (let x = 2; x <= 3; x += 1) alpha[y * width + x] = 1
+  }
+  const positiveSupport = alpha.map((value) => value > 0)
+  const raster: Readonly<AnalyzedRaster> = Object.freeze({
+    sourceWidth: width,
+    sourceHeight: height,
+    width,
+    height,
+    luminance: Object.freeze(Array<number>(width * height).fill(0)),
+    alpha: Object.freeze(alpha),
+    positiveSupport: Object.freeze(positiveSupport),
+  })
+  const edgeGraph = localizePencilContourEdges(raster, 0.5)
+  const paths = tracePencilContourEdges(edgeGraph)
+  return { graph: edgeGraph, paths }
 }
 
 function bilinearAlpha(
@@ -175,6 +230,29 @@ describe('Pencil Contour path cleanup', () => {
     )
   })
 
+  it('does not regress an open path touching the lattice boundary at levels 14→15', () => {
+    const source = path([
+      [7, 5.5625733165],
+      [7, 5.3999329368],
+      [6.4940462462, 5.1999704614],
+      [6.4269217253, 5.2289650887],
+      [7, 6.1887467662],
+    ])
+    const sourceGraph = graph(8, 8)
+
+    const level14 = clean([source], sourceGraph, 1, 0.14)[0]!
+    const level15 = clean([source], sourceGraph, 1, 0.15)[0]!
+
+    expect(level15.points.length).toBeLessThanOrEqual(level14.points.length)
+    expect(pathLength(level15.points, false)).toBeLessThanOrEqual(
+      pathLength(level14.points, false) + 1e-12,
+    )
+    expect(jaggedness(level15)).toBeLessThanOrEqual(
+      jaggedness(level14) + 1e-12,
+    )
+    expect(level15.points.every(([x, y]) => x >= 0 && x <= 7 && y >= 0 && y <= 7)).toBe(true)
+  })
+
   it('simplifies closed rings as wrapped rings without losing closure', () => {
     const ring = path(
       [
@@ -210,6 +288,65 @@ describe('Pencil Contour path cleanup', () => {
     expect(pathLength(maximum.points, true)).toBeLessThanOrEqual(
       pathLength(normal.points, true),
     )
+  })
+
+  it('keeps the real centered alpha ring monotonic from level 99→100', () => {
+    const fixture = centeredAlphaRing()
+    expect(fixture.paths).toHaveLength(1)
+    expect(fixture.paths[0]!.closed).toBe(true)
+
+    const level99 = clean(fixture.paths, fixture.graph, 1, 0.99)[0]!
+    const level100 = clean(fixture.paths, fixture.graph, 1, 1)[0]!
+
+    expect(level100.points.length).toBeLessThanOrEqual(level99.points.length)
+    expect(pathLength(level100.points, true)).toBeLessThanOrEqual(
+      pathLength(level99.points, true) + 1e-12,
+    )
+    expect(jaggedness(level100)).toBeLessThanOrEqual(
+      jaggedness(level99) + 1e-12,
+    )
+    for (const point of level100.points) {
+      expect(bilinearAlpha(fixture.graph, point)).toBeCloseTo(0.5, 6)
+    }
+  })
+
+  it('enforces a monotonic 101-level envelope for representative open and closed paths', () => {
+    const openGraph = graph(8, 8)
+    const open = path([
+      [0.5, 0.5],
+      [1.5, 0.5],
+      [1.5, 1.5],
+      [1.5, 2.5],
+      [2.5, 2.5],
+      [2.5, 3],
+    ])
+    const closed = centeredAlphaRing()
+    let previousOpen = clean([open], openGraph, 1, 0)[0]!
+    let previousClosed = clean(closed.paths, closed.graph, 1, 0)[0]!
+
+    for (let level = 1; level <= 100; level += 1) {
+      const nextOpen = clean([open], openGraph, 1, level / 100)[0]!
+      const nextClosed = clean(
+        closed.paths,
+        closed.graph,
+        1,
+        level / 100,
+      )[0]!
+      for (const [previous, next] of [
+        [previousOpen, nextOpen],
+        [previousClosed, nextClosed],
+      ] as const) {
+        expect(next.points.length).toBeLessThanOrEqual(previous.points.length)
+        expect(pathLength(next.points, next.closed)).toBeLessThanOrEqual(
+          pathLength(previous.points, previous.closed) + 1e-12,
+        )
+        expect(jaggedness(next)).toBeLessThanOrEqual(
+          jaggedness(previous) + 1e-12,
+        )
+      }
+      previousOpen = nextOpen
+      previousClosed = nextClosed
+    }
   })
 
   it('rejects simplification shortcuts through exact-zero support', () => {
