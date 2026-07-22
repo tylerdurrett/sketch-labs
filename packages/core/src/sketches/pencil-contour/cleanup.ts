@@ -22,6 +22,12 @@ const POINT_EPSILON_SQUARED = 1e-18
 const ISOVALUE = 0.5
 const ISOVALUE_TOLERANCE = 1e-7
 const PARAMETER_EPSILON = 1e-12
+const LUMINANCE_PROVENANCE: Readonly<EdgeProvenance> = Object.freeze({
+  kind: 'luminance',
+})
+const ALPHA_BOUNDARY_PROVENANCE: Readonly<EdgeProvenance> = Object.freeze({
+  kind: 'alpha-boundary',
+})
 
 export interface PencilContourCleanupInput {
   readonly paths: readonly Readonly<TracedContourPath>[]
@@ -51,6 +57,14 @@ function provenance(value: unknown): value is Readonly<EdgeProvenance> {
   if (value === null || typeof value !== 'object') return false
   const kind = (value as { readonly kind?: unknown }).kind
   return kind === 'luminance' || kind === 'alpha-boundary'
+}
+
+function canonicalProvenance(
+  value: Readonly<EdgeProvenance>,
+): Readonly<EdgeProvenance> {
+  return value.kind === 'luminance'
+    ? LUMINANCE_PROVENANCE
+    : ALPHA_BOUNDARY_PROVENANCE
 }
 
 function validGraph(graph: Readonly<LocalizedEdgeGraph>): boolean {
@@ -468,14 +482,49 @@ function smoothRetainedPoints(
   const weight = smoothing * MAX_SMOOTHING_WEIGHT
   const result = original.map((point) => [...point] as Point)
 
+  const openTargets: readonly Readonly<Point>[] | undefined = closed
+    ? undefined
+    : (() => {
+        // Put every source station on the endpoint chord at its cumulative
+        // arclength fraction. Interpolation toward these ordered stations has
+        // nonincreasing total length; dropping a station at a simplification
+        // threshold also cannot add length (triangle inequality). Defining the
+        // targets before selecting retained indices avoids transition jumps.
+        const cumulative = new Array<number>(source.length).fill(0)
+        for (let index = 1; index < source.length; index += 1) {
+          cumulative[index] =
+            cumulative[index - 1]! +
+            Math.sqrt(squaredDistance(source[index - 1]!, source[index]!))
+        }
+        const total = cumulative.at(-1)!
+        const start = source[0]!
+        const end = source.at(-1)!
+        return retained.map((sourceIndex) => {
+          const amount = total > 0 ? cumulative[sourceIndex]! / total : 0
+          return [
+            start[0] + (end[0] - start[0]) * amount,
+            start[1] + (end[1] - start[1]) * amount,
+          ] as Point
+        })
+      })()
+
   for (let index = 0; index < original.length; index += 1) {
     if (!closed && (index === 0 || index === original.length - 1)) continue
-    const previous = original[(index - 1 + original.length) % original.length]!
     const current = original[index]!
-    const next = original[(index + 1) % original.length]!
+    const target = closed
+      ? (() => {
+          const previous =
+            original[(index - 1 + original.length) % original.length]!
+          const next = original[(index + 1) % original.length]!
+          return [
+            (previous[0] + next[0]) / 2,
+            (previous[1] + next[1]) / 2,
+          ] as Point
+        })()
+      : openTargets![index]!
     const candidate: Point = [
-      current[0] * (1 - weight) + ((previous[0] + next[0]) / 2) * weight,
-      current[1] * (1 - weight) + ((previous[1] + next[1]) / 2) * weight,
+      current[0] * (1 - weight) + target[0] * weight,
+      current[1] * (1 - weight) + target[1] * weight,
     ]
     const accepted =
       pathProvenance.kind === 'alpha-boundary'
@@ -511,16 +560,21 @@ function validPath(
   path: Readonly<TracedContourPath>,
   graph: Readonly<LocalizedEdgeGraph>,
 ): boolean {
-  return (
-    path !== null &&
-    typeof path === 'object' &&
-    typeof path.closed === 'boolean' &&
-    provenance(path.provenance) &&
-    Array.isArray(path.points) &&
-    path.points.every(
-      (point) => finitePoint(point) && inBounds(point, graph),
-    )
-  )
+  if (
+    path === null ||
+    typeof path !== 'object' ||
+    typeof path.closed !== 'boolean' ||
+    !provenance(path.provenance) ||
+    !Array.isArray(path.points)
+  ) {
+    return false
+  }
+  for (let index = 0; index < path.points.length; index += 1) {
+    if (!Object.prototype.hasOwnProperty.call(path.points, index)) return false
+    const point = path.points[index]
+    if (!finitePoint(point) || !inBounds(point, graph)) return false
+  }
+  return true
 }
 
 function emittedSegmentsAreSupported(
@@ -613,7 +667,7 @@ export function cleanupPencilContourPaths(
       Object.freeze({
         points: frozenPoints,
         closed: path.closed,
-        provenance: path.provenance,
+        provenance: canonicalProvenance(path.provenance),
       }),
     )
   }

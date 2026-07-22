@@ -154,6 +154,27 @@ describe('Pencil Contour path cleanup', () => {
     expect(result.points[1]![1]).toBeLessThan(source.points[1]![1])
   })
 
+  it('keeps length and point count nonincreasing across a simplification threshold', () => {
+    const source = path([
+      [0.5, 0.5],
+      [1.5, 0.5],
+      [1.5, 1.5],
+      [1.5, 2.5],
+      [2.5, 2.5],
+      [2.5, 3],
+    ])
+
+    const below = clean([source], graph(4, 4), 1, 0.99)[0]!
+    const at = clean([source], graph(4, 4), 1, 1)[0]!
+
+    expect(below.points).toHaveLength(4)
+    expect(at.points).toHaveLength(3)
+    expect(at.points.length).toBeLessThanOrEqual(below.points.length)
+    expect(pathLength(at.points, false)).toBeLessThanOrEqual(
+      pathLength(below.points, false),
+    )
+  })
+
   it('simplifies closed rings as wrapped rings without losing closure', () => {
     const ring = path(
       [
@@ -232,7 +253,7 @@ describe('Pencil Contour path cleanup', () => {
 
     const result = clean([boundary], sourceGraph, 1, 0.2)[0]!
 
-    expect(result.provenance).toBe(ALPHA_BOUNDARY)
+    expect(result.provenance).toEqual(ALPHA_BOUNDARY)
     expect(result.points[1]).not.toEqual(boundary.points[1])
     for (const point of result.points) {
       expect(bilinearAlpha(sourceGraph, point)).toBeCloseTo(0.5, 6)
@@ -258,7 +279,9 @@ describe('Pencil Contour path cleanup', () => {
 
     expect(source).toEqual(beforePath)
     expect(sourceGraph).toEqual(beforeGraph)
-    expect(result[0]!.provenance).toBe(LUMINANCE)
+    expect(result[0]!.provenance).toEqual(LUMINANCE)
+    expect(result[0]!.provenance).not.toBe(LUMINANCE)
+    expect(Object.isFrozen(result[0]!.provenance)).toBe(true)
     expect(Object.isFrozen(result)).toBe(true)
     expect(Object.isFrozen(result[0])).toBe(true)
     expect(Object.isFrozen(result[0]!.points)).toBe(true)
@@ -282,5 +305,39 @@ describe('Pencil Contour path cleanup', () => {
         smoothing: 1,
       }),
     ).toEqual([])
+  })
+
+  it('fails closed for sparse point arrays without throwing', () => {
+    const points = Array<Readonly<Point>>(3)
+    points[0] = [0, 0]
+    points[2] = [2, 0]
+    const sparse = {
+      points,
+      closed: false,
+      provenance: LUMINANCE,
+    } as Readonly<TracedContourPath>
+
+    expect(() => clean([sparse], graph(), 1, 1)).not.toThrow()
+    expect(clean([sparse], graph(), 1, 1)).toEqual([])
+  })
+
+  it('isolates output provenance from later caller mutation', () => {
+    const callerProvenance: { kind: 'luminance' | 'alpha-boundary' } = {
+      kind: 'luminance',
+    }
+    const source: Readonly<TracedContourPath> = {
+      points: [
+        [0, 0],
+        [3, 0],
+      ],
+      closed: false,
+      provenance: callerProvenance,
+    }
+
+    const result = clean([source], graph(), 1, 0)
+    callerProvenance.kind = 'alpha-boundary'
+
+    expect(result[0]!.provenance).toEqual({ kind: 'luminance' })
+    expect(Object.isFrozen(callerProvenance)).toBe(false)
   })
 })
