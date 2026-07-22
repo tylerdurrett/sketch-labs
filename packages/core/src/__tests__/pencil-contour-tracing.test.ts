@@ -4,6 +4,7 @@ import type {
   EdgeProvenance,
   LocalizedEdge,
   LocalizedEdgeGraph,
+  LocalizedLuminanceEdgeEvidence,
   TracedContourPath,
 } from "../sketches/pencil-contour/types";
 import type { Point } from "../types";
@@ -103,6 +104,58 @@ describe("Pencil Contour graph tracing", () => {
         [2, 4],
       ],
     ]);
+  });
+
+  it("does not bridge selected degree-two edges that full evidence left unpaired", () => {
+    const left = edge([0, 2], [2, 2]);
+    const right = edge([2, 2], [4, 2]);
+    const arm = edge([2, 2], [2, 4]);
+    const evidence = Object.freeze([
+      Object.freeze({
+        id: "left",
+        strength: 0.3,
+        start: left.start,
+        end: left.end,
+        adjacentEdgeIds: Object.freeze(["right"]),
+      }),
+      Object.freeze({
+        id: "right",
+        strength: 0.3,
+        start: right.start,
+        end: right.end,
+        adjacentEdgeIds: Object.freeze(["left"]),
+      }),
+      Object.freeze({
+        id: "arm",
+        strength: 0.2,
+        start: arm.start,
+        end: arm.end,
+        adjacentEdgeIds: Object.freeze([]),
+      }),
+    ] satisfies readonly Readonly<LocalizedLuminanceEdgeEvidence>[]);
+    const selected = graph([left, arm], 5, 5);
+
+    const paths = tracePencilContourEdges(
+      Object.freeze({
+        ...selected,
+        luminanceEvidence: evidence,
+        selectedLuminanceEdgeIds: Object.freeze(["left", "arm"]),
+      }),
+    );
+
+    expect(paths.map(({ points }) => points)).toEqual([
+      [
+        [0, 2],
+        [2, 2],
+      ],
+      [
+        [2, 2],
+        [2, 4],
+      ],
+    ]);
+    expect(
+      paths.map(({ luminanceEvidence }) => luminanceEvidence?.edgeIds),
+    ).toEqual([["left"], ["arm"]]);
   });
 
   it("leaves a luminance Y-junction split when no turn is under 45 degrees", () => {

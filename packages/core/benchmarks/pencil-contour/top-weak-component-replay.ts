@@ -1,12 +1,12 @@
-import type { Point } from '../../types'
-import { cleanupPencilContourPaths } from '../../sketches/pencil-contour/cleanup'
-import { tracePencilContourEdges } from '../../sketches/pencil-contour/tracing'
+import type { Point } from '../../src/types'
+import { cleanupPencilContourPaths } from '../../src/sketches/pencil-contour/cleanup'
+import { tracePencilContourEdges } from '../../src/sketches/pencil-contour/tracing'
 import type {
   LocalizedEdge,
   LocalizedEdgeGraph,
   LocalizedLuminanceEdgeEvidence,
   TracedContourPath,
-} from '../../sketches/pencil-contour/types'
+} from '../../src/sketches/pencil-contour/types'
 
 const FLOWER_DETAIL = 0.5
 const FLOWER_WEAK_FLOOR = 0.0825
@@ -14,6 +14,8 @@ const SHORT_PATH_LENGTH = 3
 const SAMPLE_STEP = 0.5
 const MATCHING_TUBE = 2
 const REPLAY_LIMIT = 64
+const MINIMUM_RECOVERY_RATIO = 0.3
+const MAXIMUM_UNMATCHED_FRACTION = 0.1
 const LUMINANCE_PROVENANCE = Object.freeze({ kind: 'luminance' as const })
 
 interface WeakComponent {
@@ -33,12 +35,18 @@ export interface PencilContourReplayRecovery {
   readonly outputPathLength: number
 }
 
-export interface PencilContourHysteresisReplayDiagnostics {
+export interface PencilContourTopWeakComponentReplayDiagnostics {
+  readonly policy: Readonly<{
+    readonly selection: 'top-ranked-components'
+    readonly componentLimit: number
+    readonly minimumRecoveryRatio: number
+    readonly maximumUnmatchedFraction: number
+  }>
   readonly weakFloor: number
   readonly matchingTube: number
   readonly componentCount: number
-  readonly replayedComponentCount: number
-  readonly unreplayedComponentCount: number
+  readonly evaluatedComponentCount: number
+  readonly unevaluatedComponentCount: number
   readonly eligibleEdgeCount: number
   readonly usedEligibleEdgeCount: number
   readonly baselineShortPathCount: number
@@ -48,7 +56,7 @@ export interface PencilContourHysteresisReplayDiagnostics {
   readonly recoveryRatio: number
   readonly unmatchedAddedLength: number
   readonly unmatchedFraction: number
-  readonly hysteresisAuthorized: boolean
+  readonly topComponentPolicyPassed: boolean
   readonly recoveries: readonly Readonly<PencilContourReplayRecovery>[]
 }
 
@@ -120,15 +128,24 @@ function edgeLength(edge: Readonly<LocalizedLuminanceEdgeEvidence>): number {
   return Math.hypot(edge.end[0] - edge.start[0], edge.end[1] - edge.start[1])
 }
 
+function parseEvidenceId(id: string): {
+  readonly orientation: number
+  readonly x: number
+  readonly y: number
+} {
+  const [orientation, coordinates = '0,0'] = id.split(':')
+  const [x = 0, y = 0] = coordinates.split(',').map(Number)
+  return { orientation: orientation === 'horizontal' ? 0 : 1, x, y }
+}
+
 function compareEvidenceIds(first: string, second: string): number {
-  const parse = (id: string) => {
-    const [orientation, coordinates = '0,0'] = id.split(':')
-    const [x = 0, y = 0] = coordinates.split(',').map(Number)
-    return { orientation: orientation === 'horizontal' ? 0 : 1, x, y }
-  }
-  const a = parse(first)
-  const b = parse(second)
-  return a.orientation - b.orientation || a.y - b.y || a.x - b.x
+  const firstId = parseEvidenceId(first)
+  const secondId = parseEvidenceId(second)
+  return (
+    firstId.orientation - secondId.orientation ||
+    firstId.y - secondId.y ||
+    firstId.x - secondId.x
+  )
 }
 
 /** Enumerate eligible weak components once in O(E), then rank canonically. */
@@ -263,12 +280,15 @@ function unmatchedLength(
 }
 
 /**
- * Bounded counterfactual flower replay. This is deliberately test-only: it
- * measures whether fixed weak evidence earns a production hysteresis change.
+ * Bounded counterfactual flower replay for an explicit offline diagnostic.
+ *
+ * The result applies only to the top-ranked component policy and limit below.
+ * A failed policy does not establish that every possible hysteresis strategy
+ * is ineffective.
  */
-export function pencilContourHysteresisReplayDiagnostics(
+export function pencilContourTopWeakComponentReplayDiagnostics(
   baselineGraph: Readonly<LocalizedEdgeGraph>,
-): Readonly<PencilContourHysteresisReplayDiagnostics> {
+): Readonly<PencilContourTopWeakComponentReplayDiagnostics> {
   const components = weakComponents(baselineGraph)
   const replayed = components.slice(0, REPLAY_LIMIT)
   const baselinePaths = cleanedPaths(baselineGraph)
@@ -368,11 +388,17 @@ export function pencilContourHysteresisReplayDiagnostics(
   ).size
 
   return Object.freeze({
+    policy: Object.freeze({
+      selection: 'top-ranked-components',
+      componentLimit: REPLAY_LIMIT,
+      minimumRecoveryRatio: MINIMUM_RECOVERY_RATIO,
+      maximumUnmatchedFraction: MAXIMUM_UNMATCHED_FRACTION,
+    }),
     weakFloor: FLOWER_WEAK_FLOOR,
     matchingTube: MATCHING_TUBE,
     componentCount: components.length,
-    replayedComponentCount: replayed.length,
-    unreplayedComponentCount: components.length - replayed.length,
+    evaluatedComponentCount: replayed.length,
+    unevaluatedComponentCount: components.length - replayed.length,
     eligibleEdgeCount: components.reduce(
       (total, component) => total + component.edgeIds.length,
       0,
@@ -385,11 +411,11 @@ export function pencilContourHysteresisReplayDiagnostics(
     recoveryRatio,
     unmatchedAddedLength,
     unmatchedFraction,
-    hysteresisAuthorized:
-      recoveryRatio >= 0.3 &&
+    topComponentPolicyPassed:
+      recoveryRatio >= MINIMUM_RECOVERY_RATIO &&
       usedEligibleEdgeCount > 0 &&
       Number.isFinite(unmatchedFraction) &&
-      unmatchedFraction <= 0.1,
+      unmatchedFraction <= MAXIMUM_UNMATCHED_FRACTION,
     recoveries: Object.freeze(recoveries),
   })
 }

@@ -48,7 +48,10 @@ interface TracedProvenanceGraph {
   readonly cycles: readonly Readonly<TracedContourPath>[];
 }
 
-type JunctionPairings = ReadonlyMap<string, ReadonlyMap<number, number>>;
+interface JunctionTopology {
+  readonly pairings: ReadonlyMap<string, ReadonlyMap<number, number>>;
+  readonly usesEvidencePairings: boolean;
+}
 
 function comparePoints(
   first: Readonly<Point>,
@@ -296,8 +299,23 @@ function otherVertexKey(edge: TraceEdge, vertexKey: string): string {
   return edge.startKey === vertexKey ? edge.endKey : edge.startKey;
 }
 
-function buildJunctionPairings(graph: ProvenanceGraph): JunctionPairings {
-  if (graph.provenance.kind !== "luminance") return new Map();
+function sharedVertexKey(
+  first: TraceEdge,
+  second: TraceEdge,
+): string | undefined {
+  if (first.startKey === second.startKey || first.startKey === second.endKey) {
+    return first.startKey;
+  }
+  if (first.endKey === second.startKey || first.endKey === second.endKey) {
+    return first.endKey;
+  }
+  return undefined;
+}
+
+function buildJunctionTopology(graph: ProvenanceGraph): JunctionTopology {
+  if (graph.provenance.kind !== "luminance") {
+    return { pairings: new Map(), usesEvidencePairings: false };
+  }
   if (graph.edges.every(({ evidenceId }) => evidenceId !== undefined)) {
     const traceIdByEvidenceId = new Map(
       graph.edges.map((edge) => [edge.evidenceId!, edge.id]),
@@ -308,14 +326,7 @@ function buildJunctionPairings(graph: ProvenanceGraph): JunctionPairings {
         const adjacentId = traceIdByEvidenceId.get(adjacentEvidenceId);
         if (adjacentId === undefined || adjacentId <= edge.id) continue;
         const adjacent = graph.edges[adjacentId]!;
-        const vertexKey =
-          edge.startKey === adjacent.startKey ||
-          edge.startKey === adjacent.endKey
-            ? edge.startKey
-            : edge.endKey === adjacent.startKey ||
-                edge.endKey === adjacent.endKey
-              ? edge.endKey
-              : undefined;
+        const vertexKey = sharedVertexKey(edge, adjacent);
         if (vertexKey === undefined) continue;
         let atVertex = pairings.get(vertexKey);
         if (atVertex === undefined) {
@@ -326,40 +337,35 @@ function buildJunctionPairings(graph: ProvenanceGraph): JunctionPairings {
         atVertex.set(adjacentId, edge.id);
       }
     }
-    return pairings;
+    return { pairings, usesEvidencePairings: true };
   }
-  return directionCompatibleTopology(
-    graph.edges.map((edge) => ({
-      start: graph.vertices.get(edge.startKey)!.point,
-      end: graph.vertices.get(edge.endKey)!.point,
-    })),
-  ).pairings;
+  return {
+    pairings: directionCompatibleTopology(
+      graph.edges.map((edge) => ({
+        start: graph.vertices.get(edge.startKey)!.point,
+        end: graph.vertices.get(edge.endKey)!.point,
+      })),
+    ).pairings,
+    usesEvidencePairings: false,
+  };
 }
 
 function continuationEdge(
-  pairings: JunctionPairings,
+  topology: JunctionTopology,
   vertex: TraceVertex,
   incomingEdgeId: number,
 ): number | undefined {
-  if (vertex.edgeIds.length === 2) {
+  if (!topology.usesEvidencePairings && vertex.edgeIds.length === 2) {
     return vertex.edgeIds[0] === incomingEdgeId
       ? vertex.edgeIds[1]
       : vertex.edgeIds[0];
   }
-  return pairings.get(vertex.key)?.get(incomingEdgeId);
-}
-
-function unpairedIncidence(
-  pairings: JunctionPairings,
-  vertex: TraceVertex,
-  edgeId: number,
-): boolean {
-  return continuationEdge(pairings, vertex, edgeId) === undefined;
+  return topology.pairings.get(vertex.key)?.get(incomingEdgeId);
 }
 
 function traceFrom(
   graph: ProvenanceGraph,
-  pairings: JunctionPairings,
+  topology: JunctionTopology,
   start: TraceVertex,
   firstEdgeId: number,
   visited: Set<number>,
@@ -389,7 +395,7 @@ function traceFrom(
     current = graph.vertices.get(otherVertexKey(edge, current.key))!;
     points.push(current.point);
 
-    const nextEdgeId = continuationEdge(pairings, current, edgeId);
+    const nextEdgeId = continuationEdge(topology, current, edgeId);
     if (nextEdgeId === undefined) break;
     if (current.key === start.key && nextEdgeId === firstEdgeId) {
       closed = true;
@@ -420,7 +426,7 @@ function traceProvenanceGraph(graph: ProvenanceGraph): TracedProvenanceGraph {
   const visited = new Set<number>();
   const branches: Readonly<TracedContourPath>[] = [];
   const cycles: Readonly<TracedContourPath>[] = [];
-  const pairings = buildJunctionPairings(graph);
+  const topology = buildJunctionTopology(graph);
   const orderedVertices = [...graph.vertices.values()].sort((first, second) =>
     comparePoints(first.point, second.point),
   );
@@ -429,8 +435,11 @@ function traceProvenanceGraph(graph: ProvenanceGraph): TracedProvenanceGraph {
   // makes compatible junction segments internal without inventing new edges.
   for (const vertex of orderedVertices) {
     for (const edgeId of vertex.edgeIds) {
-      if (!visited.has(edgeId) && unpairedIncidence(pairings, vertex, edgeId)) {
-        branches.push(traceFrom(graph, pairings, vertex, edgeId, visited));
+      if (
+        !visited.has(edgeId) &&
+        continuationEdge(topology, vertex, edgeId) === undefined
+      ) {
+        branches.push(traceFrom(graph, topology, vertex, edgeId, visited));
       }
     }
   }
@@ -440,7 +449,7 @@ function traceProvenanceGraph(graph: ProvenanceGraph): TracedProvenanceGraph {
   for (const vertex of orderedVertices) {
     const edgeId = vertex.edgeIds.find((candidate) => !visited.has(candidate));
     if (edgeId !== undefined) {
-      const path = traceFrom(graph, pairings, vertex, edgeId, visited);
+      const path = traceFrom(graph, topology, vertex, edgeId, visited);
       if (path.closed) cycles.push(path);
       else branches.push(path);
     }

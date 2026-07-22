@@ -12,6 +12,7 @@
     "benchmark:grass-hills-density": "vitest run --config vitest.grass-hills-density-benchmark.config.ts",
     "benchmark:hidden-line": "vitest run --config vitest.hidden-line-benchmark.config.ts",
     "benchmark:leaf-field": "vitest run --config vitest.leaf-field-benchmark.config.ts",
+    "diagnostic:pencil-contour-replay": "vitest run --config vitest.pencil-contour-diagnostic.config.ts",
     "benchmark:photo-scribble": "vitest run --config vitest.photo-scribble-benchmark.config.ts",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

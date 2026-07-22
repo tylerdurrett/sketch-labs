@@ -171,7 +171,7 @@ async function capture(page, url) {
       return {
         bytesBase64: btoa(binary),
         metadata: {
-          formatVersion: 1,
+          formatVersion: 2,
           productionBaseline: baseline,
           source: {
             assetId,
@@ -284,8 +284,6 @@ async function main() {
       await assertExisting(fixtureMetadata, firstJson)
     }
 
-    const withoutSampledPaths = ({ sampledPaths: _sampledPaths, ...metrics }) =>
-      metrics
     console.log(
       JSON.stringify({
         success: true,
@@ -304,12 +302,8 @@ async function main() {
             afterDetailSelection:
               first.metadata.diagnostics.candidates.afterDetailSelection,
           },
-          smoothing075: withoutSampledPaths(
-            first.metadata.diagnostics.smoothing075,
-          ),
-          smoothing100: withoutSampledPaths(
-            first.metadata.diagnostics.smoothing100,
-          ),
+          smoothing075: first.metadata.diagnostics.smoothing075,
+          smoothing100: first.metadata.diagnostics.smoothing100,
         },
       }),
     )

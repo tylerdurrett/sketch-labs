@@ -179,20 +179,47 @@ describe('Pencil Contour edge localization', () => {
     const row = [0, 0, 1, 1, 0.85, 0.85]
     const raster = analyzedRaster(6, 3, [...row, ...row, ...row])
 
-    const lowDetail = withProvenance(
-      localizePencilContourEdges(raster, 0).edges,
-      'luminance',
-    )
-    const highDetail = withProvenance(
-      localizePencilContourEdges(raster, 1).edges,
-      'luminance',
-    )
+    const lowGraph = localizePencilContourEdges(raster, 0)
+    const middleGraph = localizePencilContourEdges(raster, 0.5)
+    const highGraph = localizePencilContourEdges(raster, 1)
+    const lowDetail = withProvenance(lowGraph.edges, 'luminance')
+    const highDetail = withProvenance(highGraph.edges, 'luminance')
 
     expect(lowDetail).toHaveLength(3)
     expect(highDetail).toHaveLength(6)
     expect(highDetail).toEqual(expect.arrayContaining(lowDetail))
     expect(lowDetail.every((edge) => edge.start[0] === 1.5)).toBe(true)
     expect(highDetail.some((edge) => edge.start[0] === 3.5)).toBe(true)
+    expect(middleGraph.luminanceEvidence).toEqual(lowGraph.luminanceEvidence)
+    expect(highGraph.luminanceEvidence).toEqual(lowGraph.luminanceEvidence)
+    expect(Object.isFrozen(lowGraph.luminanceEvidence)).toBe(true)
+    expect(
+      lowGraph.luminanceEvidence!.every(
+        (evidence) =>
+          Object.isFrozen(evidence) &&
+          Object.isFrozen(evidence.adjacentEdgeIds),
+      ),
+    ).toBe(true)
+    const middleIds = new Set(middleGraph.selectedLuminanceEdgeIds)
+    const highIds = new Set(highGraph.selectedLuminanceEdgeIds)
+    expect(
+      lowGraph.selectedLuminanceEdgeIds!.every((id) => middleIds.has(id)),
+    ).toBe(true)
+    expect(
+      middleGraph.selectedLuminanceEdgeIds!.every((id) => highIds.has(id)),
+    ).toBe(true)
+    for (const graph of [lowGraph, middleGraph, highGraph]) {
+      const evidenceById = new Map(
+        graph.luminanceEvidence!.map((evidence) => [evidence.id, evidence]),
+      )
+      const selectedEdges = withProvenance(graph.edges, 'luminance')
+      expect(selectedEdges).toHaveLength(graph.selectedLuminanceEdgeIds!.length)
+      graph.selectedLuminanceEdgeIds!.forEach((id, index) => {
+        const evidence = evidenceById.get(id)!
+        expect(selectedEdges[index]!.start).toEqual(evidence.start)
+        expect(selectedEdges[index]!.end).toEqual(evidence.end)
+      })
+    }
   })
 
   it('never seeds luminance edges from hidden RGB or across zero-alpha samples', () => {

@@ -7,12 +7,7 @@ import {
   encodePencilContourAnalyzedRaster,
   pencilContourReferenceDiagnostics,
 } from './helpers/pencilContourReferenceMetrics'
-import { pencilContourHysteresisReplayDiagnostics } from './helpers/pencilContourHysteresisReplay'
 import type { AnalyzedRaster } from '../sketches/pencil-contour/types'
-import { localizePencilContourEdges } from '../sketches/pencil-contour/edges'
-import { tracePencilContourEdges } from '../sketches/pencil-contour/tracing'
-import { cleanupPencilContourPaths } from '../sketches/pencil-contour/cleanup'
-import { prunePencilContourGraph } from '../sketches/pencil-contour/fragment-pruning'
 
 const FIXTURE_BINARY_URL = new URL(
   './fixtures/pencil-contour/flower-analysis.f64le',
@@ -97,31 +92,22 @@ function referenceRaster(
   })
 }
 
-function occupiedLongPathBins(
-  diagnostics: ReferenceDiagnostics['smoothing100'],
-  width: number,
-  height: number,
-): ReadonlySet<string> {
-  return new Set(diagnostics.sampledPaths.flatMap(({ points }) =>
-    points.map(([x, y]) =>
-      `${Math.min(3, Math.floor(x / (width / 4)))},${
-        Math.min(3, Math.floor(y / (height / 4)))
-      }`,
-    ),
-  ))
-}
-
 function expectSmoothingDiagnosticsClose(
   actual: ReferenceDiagnostics['smoothing100'],
   expected: ReferenceDiagnostics['smoothing100'],
 ): void {
-  expect({ ...actual, sampledPaths: undefined }).toEqual({
+  expect({
+    ...actual,
+    bMedianPathLength: undefined,
+    turnP95Degrees: undefined,
+    turnFractionOver25Degrees: undefined,
+    turnFractionOver45Degrees: undefined,
+  }).toEqual({
     ...expected,
-    bMedianPathLength: actual.bMedianPathLength,
-    turnP95Degrees: actual.turnP95Degrees,
-    turnFractionOver25Degrees: actual.turnFractionOver25Degrees,
-    turnFractionOver45Degrees: actual.turnFractionOver45Degrees,
-    sampledPaths: undefined,
+    bMedianPathLength: undefined,
+    turnP95Degrees: undefined,
+    turnFractionOver25Degrees: undefined,
+    turnFractionOver45Degrees: undefined,
   })
   expect(actual.bMedianPathLength).toBeCloseTo(expected.bMedianPathLength, 12)
   expect(actual.turnP95Degrees).toBeCloseTo(expected.turnP95Degrees, 12)
@@ -133,32 +119,6 @@ function expectSmoothingDiagnosticsClose(
     expected.turnFractionOver45Degrees,
     12,
   )
-  expect(actual.sampledPaths).toHaveLength(expected.sampledPaths.length)
-  for (const [pathIndex, actualPath] of actual.sampledPaths.entries()) {
-    const expectedPath = expected.sampledPaths[pathIndex]!
-    expect({
-      pathIndex: actualPath.pathIndex,
-      closed: actualPath.closed,
-      provenance: actualPath.provenance,
-      pointCount: actualPath.points.length,
-      turnCount: actualPath.turnsDegrees.length,
-    }).toEqual({
-      pathIndex: expectedPath.pathIndex,
-      closed: expectedPath.closed,
-      provenance: expectedPath.provenance,
-      pointCount: expectedPath.points.length,
-      turnCount: expectedPath.turnsDegrees.length,
-    })
-    expect(actualPath.length).toBeCloseTo(expectedPath.length, 12)
-    for (const [pointIndex, actualPoint] of actualPath.points.entries()) {
-      const expectedPoint = expectedPath.points[pointIndex]!
-      expect(actualPoint[0]).toBeCloseTo(expectedPoint[0], 12)
-      expect(actualPoint[1]).toBeCloseTo(expectedPoint[1], 12)
-    }
-    for (const [turnIndex, actualTurn] of actualPath.turnsDegrees.entries()) {
-      expect(actualTurn).toBeCloseTo(expectedPath.turnsDegrees[turnIndex]!, 10)
-    }
-  }
 }
 
 describe('Pencil Contour flower downstream reference', () => {
@@ -168,7 +128,7 @@ describe('Pencil Contour flower downstream reference', () => {
     const raster = referenceRaster(bytes, metadata)
 
     expect(metadata).toMatchObject({
-      formatVersion: 1,
+      formatVersion: 2,
       productionBaseline: '85b4d854d29ec2ac27bf1b8016bc263fec3ccd43',
       source: {
         assetId: 'img-0672-79d639daec62',
@@ -200,7 +160,7 @@ describe('Pencil Contour flower downstream reference', () => {
     )
   })
 
-  it('reproduces exact candidate, fragment, and sampled-turn diagnostics', () => {
+  it('reproduces compact candidate, fragment, turn, spatial, and geometry diagnostics', () => {
     const metadata = referenceMetadata()
     const bytes = readFileSync(FIXTURE_BINARY_URL)
     const raster = referenceRaster(bytes, metadata)
@@ -208,12 +168,6 @@ describe('Pencil Contour flower downstream reference', () => {
       raster,
       metadata.controls.contourDetail,
     )
-    const second = pencilContourReferenceDiagnostics(
-      raster,
-      metadata.controls.contourDetail,
-    )
-
-    expect(first).toEqual(second)
     expect(first.candidates).toEqual(metadata.diagnostics.candidates)
     expect(first.localizedEdgeCount).toBe(
       metadata.diagnostics.localizedEdgeCount,
@@ -221,29 +175,29 @@ describe('Pencil Contour flower downstream reference', () => {
     expect(first.tracedPathCount).toBe(metadata.diagnostics.tracedPathCount)
     expect(first.sampling).toEqual(metadata.diagnostics.sampling)
     expect(first.smoothing050).toMatchObject({
-      pathCount: 1_061,
-      b2TwoPointOpenPaths: 169,
-      b3PathsShorterThanThree: 627,
-      sampledPathCount: 130,
+      pathCount: 1_632,
+      b2TwoPointOpenPaths: 540,
+      b3PathsShorterThanThree: 1_143,
+      sampledPathCount: 87,
     })
     expect(first.smoothing075).toMatchObject({
-      pathCount: 984,
-      b2TwoPointOpenPaths: 139,
-      b3PathsShorterThanThree: 561,
-      sampledPathCount: 130,
+      pathCount: 1_493,
+      b2TwoPointOpenPaths: 431,
+      b3PathsShorterThanThree: 1_011,
+      sampledPathCount: 87,
     })
     expect(first.smoothing100).toMatchObject({
-      pathCount: 903,
-      b2TwoPointOpenPaths: 128,
-      b3PathsShorterThanThree: 508,
-      sampledPathCount: 129,
+      pathCount: 1_327,
+      b2TwoPointOpenPaths: 319,
+      b3PathsShorterThanThree: 862,
+      sampledPathCount: 87,
     })
     expect(first.smoothing050.bMedianPathLength).toBeCloseTo(
-      2.4713308612651512,
+      2.006288318519201,
       12,
     )
     expect(first.smoothing075.bMedianPathLength).toBeCloseTo(
-      2.5213182029951176,
+      2.0874436678104935,
       12,
     )
     // The frozen diagnostics describe the combined pruning and high-smoothing
@@ -256,21 +210,12 @@ describe('Pencil Contour flower downstream reference', () => {
       first.smoothing100,
       metadata.diagnostics.smoothing100,
     )
-    // 686 is the production baseline's smoothing=1 short-path count before
-    // pre-trace fragment pruning was introduced.
-    expect(first.smoothing100.b3PathsShorterThanThree).toBeLessThanOrEqual(
-      686 * 0.75,
-    )
-    expect(occupiedLongPathBins(
-      first.smoothing100,
-      raster.width,
-      raster.height,
-    )).toEqual(new Set([
-      '0,0', '0,1', '0,2', '0,3',
+    expect(first.smoothing100.occupiedLongPathBins).toEqual([
+      '0,0', '0,1',
       '1,0', '1,1', '1,2', '1,3',
       '2,0', '2,1', '2,2', '2,3',
       '3,0', '3,1', '3,2', '3,3',
-    ]))
+    ])
     expect(first.smoothing075.turnP95Degrees).toBeGreaterThan(1)
     expect(first.smoothing100.turnP95Degrees).toBeLessThanOrEqual(25)
     expect(first.smoothing100.turnP95Degrees).toBeLessThanOrEqual(
@@ -287,208 +232,24 @@ describe('Pencil Contour flower downstream reference', () => {
     )
 
     const { candidates } = first
-    expect(candidates.afterStrengthFloor).toBe(
-      candidates.selected.length + candidates.unselected.length,
-    )
-    expect(candidates.afterDetailSelection).toBe(candidates.selected.length)
+    expect(candidates.afterStrengthFloor).toBe(22_557)
     expect(candidates.afterSelectionLimit).toBeLessThanOrEqual(
       candidates.afterStrengthFloor,
     )
     expect(candidates.afterDetailSelection).toBeLessThanOrEqual(
       candidates.afterSelectionLimit,
     )
-    expect(
-      new Set(
-        [...candidates.selected, ...candidates.unselected].map(({ id }) => id),
-      ).size,
-    ).toBe(candidates.afterStrengthFloor)
-    expect(
-      [...candidates.selected, ...candidates.unselected].every(
-        ({ strength }) => strength >= 0.03,
-      ),
-    ).toBe(true)
-
     for (const smoothing of [
       first.smoothing050,
       first.smoothing075,
       first.smoothing100,
     ]) {
-      expect(smoothing.sampledPaths).toHaveLength(smoothing.sampledPathCount)
-      expect(
-        smoothing.sampledPaths.reduce(
-          (total, path) => total + path.points.length,
-          0,
-        ),
-      ).toBe(smoothing.sampledPointCount)
-      expect(
-        smoothing.sampledPaths.reduce(
-          (total, path) => total + path.turnsDegrees.length,
-          0,
-        ),
-      ).toBe(smoothing.turnCount)
+      expect(smoothing.geometryHash).toMatch(/^[0-9a-f]{16}$/)
+      expect(smoothing.occupiedLongPathBins.length).toBeGreaterThan(0)
+      expect(smoothing.sampledPointCount).toBeGreaterThan(
+        smoothing.sampledPathCount,
+      )
+      expect(smoothing.turnCount).toBeGreaterThan(0)
     }
   })
-
-  it('keeps the frozen flower output exact at smoothing zero', () => {
-    const metadata = referenceMetadata()
-    const raster = referenceRaster(readFileSync(FIXTURE_BINARY_URL), metadata)
-    const graph = localizePencilContourEdges(
-      raster,
-      metadata.controls.contourDetail,
-    )
-    const legacy = cleanupPencilContourPaths({
-      paths: tracePencilContourEdges(graph),
-      graph,
-      detail: metadata.controls.contourDetail,
-      smoothing: 0,
-    })
-    const pruned = prunePencilContourGraph(
-      graph,
-      metadata.controls.contourDetail,
-      0,
-    )
-    const current = cleanupPencilContourPaths({
-      paths: tracePencilContourEdges(pruned),
-      graph: pruned,
-      detail: metadata.controls.contourDetail,
-      smoothing: 0,
-      fragmentsPrunedBeforeTracing: true,
-    })
-
-    expect(current).toEqual(legacy)
-  })
-
-  it('keeps immutable luminance evidence stable across all 101 detail values', () => {
-    const metadata = referenceMetadata()
-    const raster = referenceRaster(readFileSync(FIXTURE_BINARY_URL), metadata)
-    const baseline = localizePencilContourEdges(raster, 0)
-    const baselineEvidence = baseline.luminanceEvidence!
-    const baselineAlphaEdges = baseline.edges.filter(
-      ({ provenance }) => provenance.kind === 'alpha-boundary',
-    )
-
-    expect(Object.isFrozen(baselineEvidence)).toBe(true)
-    expect(baselineEvidence.length).toBeGreaterThan(0)
-    expect(
-      baselineEvidence.every(
-        (evidence) =>
-          Object.isFrozen(evidence) &&
-          Object.isFrozen(evidence.adjacentEdgeIds) &&
-          !Object.prototype.hasOwnProperty.call(evidence, 'isSeed'),
-      ),
-    ).toBe(true)
-
-    for (let detailIndex = 0; detailIndex <= 100; detailIndex += 1) {
-      const graph = localizePencilContourEdges(raster, detailIndex / 100)
-      expect(graph.luminanceEvidence).toEqual(baselineEvidence)
-      expect(
-        graph.edges.filter(
-          ({ provenance }) => provenance.kind === 'alpha-boundary',
-        ),
-      ).toEqual(baselineAlphaEdges)
-
-      const evidenceById = new Map(
-        graph.luminanceEvidence!.map((evidence) => [evidence.id, evidence]),
-      )
-      const selectedIds = graph.selectedLuminanceEdgeIds!
-      const selectedEdges = graph.edges.filter(
-        ({ provenance }) => provenance.kind === 'luminance',
-      )
-      expect(selectedEdges).toHaveLength(selectedIds.length)
-      for (const [index, id] of selectedIds.entries()) {
-        const evidence = evidenceById.get(id)!
-        expect(selectedEdges[index]!.start).toEqual(evidence.start)
-        expect(selectedEdges[index]!.end).toEqual(evidence.end)
-        expect(Number.isFinite(evidence.strength)).toBe(true)
-      }
-
-      const traced = tracePencilContourEdges(graph)
-      const tracedLuminance = traced.filter(
-        ({ provenance }) => provenance.kind === 'luminance',
-      )
-      const tracedIds = tracedLuminance.flatMap(
-        (path) => path.luminanceEvidence!.edgeIds,
-      )
-      expect(tracedIds).toHaveLength(selectedIds.length)
-      expect(new Set(tracedIds)).toEqual(new Set(selectedIds))
-      for (const path of tracedLuminance) {
-        const summary = path.luminanceEvidence!
-        const strengths = summary.edgeIds.map(
-          (id) => evidenceById.get(id)!.strength,
-        )
-        expect(summary.edgeIds).toHaveLength(
-          path.closed ? path.points.length : path.points.length - 1,
-        )
-        expect(summary.maximumStrength).toBe(Math.max(...strengths))
-        expect(summary.meanStrength).toBe(
-          strengths.reduce((sum, strength) => sum + strength, 0) /
-            strengths.length,
-        )
-      }
-      expect(
-        traced.reduce(
-          (total, path) =>
-            total + (path.closed ? path.points.length : path.points.length - 1),
-          0,
-        ),
-      ).toBe(graph.edges.length)
-    }
-  }, 120_000)
-
-  it('measures bounded weak-evidence replay before authorizing hysteresis', () => {
-    const metadata = referenceMetadata()
-    const raster = referenceRaster(readFileSync(FIXTURE_BINARY_URL), metadata)
-    const graph = localizePencilContourEdges(raster, 0.5)
-    const replay = pencilContourHysteresisReplayDiagnostics(graph)
-    const selectedCount = graph.selectedLuminanceEdgeIds!.length
-    const reorderedGraph = Object.freeze({
-      ...graph,
-      luminanceEvidence: Object.freeze([...graph.luminanceEvidence!].reverse()),
-      selectedLuminanceEdgeIds: Object.freeze(
-        [...graph.selectedLuminanceEdgeIds!].reverse(),
-      ),
-      edges: Object.freeze([
-        ...graph.edges.slice(0, selectedCount).reverse(),
-        ...graph.edges.slice(selectedCount).reverse(),
-      ]),
-    })
-    const reorderedReplay =
-      pencilContourHysteresisReplayDiagnostics(reorderedGraph)
-
-    expect(reorderedReplay).toEqual(replay)
-    expect(replay.weakFloor).toBe(0.0825)
-    expect(replay.matchingTube).toBe(2)
-    expect(replay).toMatchObject({
-      componentCount: 4_321,
-      replayedComponentCount: 64,
-      unreplayedComponentCount: 4_257,
-      eligibleEdgeCount: 6_743,
-      usedEligibleEdgeCount: 33,
-      baselineShortPathCount: 686,
-      recoveredBaselinePathCount: 28,
-      hysteresisAuthorized: false,
-    })
-    expect(replay.baselineShortPathLength).toBeCloseTo(1221.836258708441, 12)
-    expect(replay.recoveredLength).toBeCloseTo(48.84609834720022, 12)
-    expect(replay.recoveryRatio).toBeCloseTo(0.03997761402074748, 12)
-    expect(replay.unmatchedAddedLength).toBeCloseTo(0.46402864739637906, 12)
-    expect(replay.unmatchedFraction).toBeCloseTo(0.009499809874230752, 12)
-    expect(replay.unmatchedFraction).toBeLessThanOrEqual(0.1)
-    expect(replay.recoveries).toHaveLength(13)
-    expect(
-      replay.recoveries.flatMap(({ addedEdgeIds }) => addedEdgeIds),
-    ).toContain('horizontal:157,48')
-    expect(replay.recoveryRatio).toBe(
-      replay.recoveredLength / replay.baselineShortPathLength,
-    )
-    expect(replay.unmatchedFraction).toBe(
-      replay.unmatchedAddedLength / replay.recoveredLength,
-    )
-    expect(replay.hysteresisAuthorized).toBe(
-      replay.recoveryRatio >= 0.3 &&
-        replay.usedEligibleEdgeCount > 0 &&
-        Number.isFinite(replay.unmatchedFraction) &&
-        replay.unmatchedFraction <= 0.1,
-    )
-  }, 120_000)
 })

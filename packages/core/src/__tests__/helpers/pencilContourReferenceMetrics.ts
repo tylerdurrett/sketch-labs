@@ -17,6 +17,34 @@ export const PENCIL_CONTOUR_REFERENCE_LONG_PATH_LENGTH = 8
 const FLOAT64_BYTES = 8
 const TURN_25_DEGREES = 25
 const TURN_45_DEGREES = 45
+const HASH_QUANTIZATION_DIGITS = 10
+
+type HashAppend = (value: string | number | boolean) => void
+
+function canonicalHashValue(value: string | number | boolean): string {
+  if (typeof value !== 'number') return String(value)
+  if (Number.isInteger(value)) return String(value)
+  return value.toFixed(HASH_QUANTIZATION_DIGITS)
+}
+
+function stableHash(write: (append: HashAppend) => void): string {
+  let first = 0x811c9dc5
+  let second = 0x9e3779b9
+  const append: HashAppend = (value) => {
+    const text = canonicalHashValue(value)
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index)
+      first = Math.imul(first ^ code, 0x01000193)
+      second = Math.imul(second ^ code, 0x85ebca6b)
+    }
+    first = Math.imul(first ^ 0xff, 0x01000193)
+    second = Math.imul(second ^ 0xff, 0x85ebca6b)
+  }
+  write(append)
+  return [first, second]
+    .map((value) => (value >>> 0).toString(16).padStart(8, '0'))
+    .join('')
+}
 
 function pathLength(path: Readonly<TracedContourPath>): number {
   const segmentCount = path.closed
@@ -131,8 +159,44 @@ function median(values: readonly number[]): number {
     : sorted[middle]!
 }
 
+function pathGeometryHash(
+  paths: readonly Readonly<TracedContourPath>[],
+): string {
+  return stableHash((append) => {
+    for (const path of paths) {
+      append(path.provenance.kind)
+      append(path.closed)
+      append(path.points.length)
+      for (const [x, y] of path.points) {
+        append(x)
+        append(y)
+      }
+    }
+  })
+}
+
+function occupiedLongPathBins(
+  sampledPaths: readonly Readonly<{
+    readonly points: readonly Readonly<Point>[]
+  }>[],
+  width: number,
+  height: number,
+): readonly string[] {
+  const bins = new Set<string>()
+  for (const { points } of sampledPaths) {
+    for (const [x, y] of points) {
+      const column = Math.min(3, Math.floor(x / (width / 4)))
+      const row = Math.min(3, Math.floor(y / (height / 4)))
+      bins.add(`${column},${row}`)
+    }
+  }
+  return Object.freeze([...bins].sort())
+}
+
 function smoothingDiagnostics(
   paths: readonly Readonly<TracedContourPath>[],
+  width: number,
+  height: number,
 ) {
   const lengths = paths.map(pathLength)
   const sampledPaths = paths.flatMap((path, pathIndex) => {
@@ -170,7 +234,38 @@ function smoothingDiagnostics(
       turns.filter((turn) => turn > TURN_25_DEGREES).length / turns.length,
     turnFractionOver45Degrees:
       turns.filter((turn) => turn > TURN_45_DEGREES).length / turns.length,
-    sampledPaths,
+    occupiedLongPathBins: occupiedLongPathBins(sampledPaths, width, height),
+    geometryHash: pathGeometryHash(paths),
+  }
+}
+
+function candidateDiagnostics(
+  raster: Readonly<AnalyzedRaster>,
+  contourDetail: number,
+) {
+  const inventory = inspectPencilContourLuminanceSelection(
+    raster,
+    contourDetail,
+  )
+  function candidateHash(
+    candidates: typeof inventory.selected,
+  ): string {
+    return stableHash((append) => {
+      for (const candidate of candidates) {
+        append(candidate.id)
+        append(candidate.strength)
+      }
+    })
+  }
+
+  return {
+    beforeNms: inventory.beforeNms,
+    afterNms: inventory.afterNms,
+    afterStrengthFloor: inventory.afterStrengthFloor,
+    afterSelectionLimit: inventory.afterSelectionLimit,
+    afterDetailSelection: inventory.afterDetailSelection,
+    selectedHash: candidateHash(inventory.selected),
+    unselectedHash: candidateHash(inventory.unselected),
   }
 }
 
@@ -201,26 +296,18 @@ export function pencilContourReferenceDiagnostics(
   raster: Readonly<AnalyzedRaster>,
   contourDetail: number,
 ) {
-  const candidates = inspectPencilContourLuminanceSelection(
-    raster,
-    contourDetail,
-  )
+  const candidates = candidateDiagnostics(raster, contourDetail)
   const graph = localizePencilContourEdges(raster, contourDetail)
-  const cleanAt = (smoothing: number) =>
-    (() => {
-      const pruned = prunePencilContourGraph(
-        graph,
-        contourDetail,
-        smoothing,
-      )
-      return cleanupPencilContourPaths({
-        paths: tracePencilContourEdges(pruned),
-        graph: pruned,
-        detail: contourDetail,
-        smoothing,
-        fragmentsPrunedBeforeTracing: true,
-      })
-    })()
+  function cleanAt(smoothing: number) {
+    const pruned = prunePencilContourGraph(graph, contourDetail, smoothing)
+    return cleanupPencilContourPaths({
+      paths: tracePencilContourEdges(pruned),
+      graph: pruned,
+      detail: contourDetail,
+      smoothing,
+      fragmentsPrunedBeforeTracing: true,
+    })
+  }
 
   return {
     candidates,
@@ -232,8 +319,8 @@ export function pencilContourReferenceDiagnostics(
         PENCIL_CONTOUR_REFERENCE_LONG_PATH_LENGTH,
       turnPercentileMethod: 'nearest-rank',
     },
-    smoothing050: smoothingDiagnostics(cleanAt(0.5)),
-    smoothing075: smoothingDiagnostics(cleanAt(0.75)),
-    smoothing100: smoothingDiagnostics(cleanAt(1)),
+    smoothing050: smoothingDiagnostics(cleanAt(0.5), graph.width, graph.height),
+    smoothing075: smoothingDiagnostics(cleanAt(0.75), graph.width, graph.height),
+    smoothing100: smoothingDiagnostics(cleanAt(1), graph.width, graph.height),
   }
 }
