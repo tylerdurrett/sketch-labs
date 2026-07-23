@@ -38,6 +38,11 @@ const SRGB_BYTE_TO_LINEAR = Float64Array.from(
   (_, byte) => srgbByteToLinear(byte),
 )
 
+const TYPED_ARRAY_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  'length',
+)?.get
+
 const EMPTY_VALUES = Object.freeze([]) as readonly number[]
 const EMPTY_SUPPORT = Object.freeze([]) as readonly boolean[]
 
@@ -75,9 +80,20 @@ function validateRasterFailClosed(
   pixels: Readonly<DecodedPixels>,
 ): ValidatedDecodedRaster | null {
   try {
-    return validateDecodedRaster(pixels)
+    const raster = validateDecodedRaster(pixels)
+    if (
+      raster === null ||
+      TYPED_ARRAY_LENGTH_GETTER === undefined ||
+      !ArrayBuffer.isView(raster.data)
+    ) {
+      return null
+    }
+
+    const expectedLength = raster.width * raster.height * CHANNELS_PER_PIXEL
+    const intrinsicLength = TYPED_ARRAY_LENGTH_GETTER.call(raster.data)
+    return intrinsicLength === expectedLength ? raster : null
   } catch {
-    // Hostile records and getters are malformed decoded input.
+    // Hostile records, proxies, and lying typed-array views are malformed.
     return null
   }
 }
@@ -179,73 +195,83 @@ export function prepareFlowingContoursRaster(
   accounting: FlowingContoursAccounting,
   limits: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
 ): PreparedFlowingContoursRaster {
-  const raster = validateRasterFailClosed(pixels)
-  if (raster === null) {
+  try {
+    const raster = validateRasterFailClosed(pixels)
+    if (raster === null) {
+      invalidate(accounting)
+      return EMPTY_PREPARED_RASTER
+    }
+
+    const [width, height] = analysisDimensions(raster.width, raster.height)
+    const sampleCount = width * height
+    if (
+      !isWithinFlowingContoursLimit(
+        'analysis-dimension',
+        Math.max(width, height),
+        limits,
+      )
+    ) {
+      terminateFlowingContoursAtSafetyLimit(accounting, 'analysis-dimension')
+      return EMPTY_PREPARED_RASTER
+    }
+    if (
+      !isWithinFlowingContoursLimit(
+        'analysis-sample-count',
+        sampleCount,
+        limits,
+      )
+    ) {
+      terminateFlowingContoursAtSafetyLimit(accounting, 'analysis-sample-count')
+      return EMPTY_PREPARED_RASTER
+    }
+
+    const luminance = new Array<number>(sampleCount)
+    const alpha = new Array<number>(sampleCount)
+    const positiveSupport = new Array<boolean>(sampleCount)
+
+    for (let row = 0; row < height; row += 1) {
+      const v = (row + 0.5) / height
+      for (let column = 0; column < width; column += 1) {
+        const sample = mapImageUvToLatticeSample(
+          { u: (column + 0.5) / width, v },
+          raster.width,
+          raster.height,
+        )
+        // Valid dimensions and unit coordinates guarantee a sample. Retain a
+        // fail-closed guard against a tightened generic mapper contract.
+        if (sample === null) {
+          invalidate(accounting)
+          return EMPTY_PREPARED_RASTER
+        }
+
+        const index = row * width + column
+        const sampledAlpha = sampleAlpha(raster.data, sample)
+        alpha[index] = sampledAlpha
+        positiveSupport[index] = sampledAlpha > 0
+        luminance[index] = sampleVisibleLinearLuminance(
+          raster.data,
+          sample,
+          sampledAlpha,
+        )
+      }
+    }
+
+    accounting.analysisWidth = width
+    accounting.analysisHeight = height
+    accounting.analysisSampleCount = sampleCount
+
+    return Object.freeze({
+      sourceWidth: raster.width,
+      sourceHeight: raster.height,
+      width,
+      height,
+      luminance: Object.freeze(luminance),
+      alpha: Object.freeze(alpha),
+      positiveSupport: Object.freeze(positiveSupport),
+    })
+  } catch {
+    // Keep every byte access within this boundary even after validation.
     invalidate(accounting)
     return EMPTY_PREPARED_RASTER
   }
-
-  const [width, height] = analysisDimensions(raster.width, raster.height)
-  const sampleCount = width * height
-  if (
-    !isWithinFlowingContoursLimit(
-      'analysis-dimension',
-      Math.max(width, height),
-      limits,
-    )
-  ) {
-    terminateFlowingContoursAtSafetyLimit(accounting, 'analysis-dimension')
-    return EMPTY_PREPARED_RASTER
-  }
-  if (
-    !isWithinFlowingContoursLimit('analysis-sample-count', sampleCount, limits)
-  ) {
-    terminateFlowingContoursAtSafetyLimit(accounting, 'analysis-sample-count')
-    return EMPTY_PREPARED_RASTER
-  }
-
-  const luminance = new Array<number>(sampleCount)
-  const alpha = new Array<number>(sampleCount)
-  const positiveSupport = new Array<boolean>(sampleCount)
-
-  for (let row = 0; row < height; row += 1) {
-    const v = (row + 0.5) / height
-    for (let column = 0; column < width; column += 1) {
-      const sample = mapImageUvToLatticeSample(
-        { u: (column + 0.5) / width, v },
-        raster.width,
-        raster.height,
-      )
-      // Validated dimensions and finite unit coordinates guarantee a sample.
-      // Retain a fail-closed guard against a tightened generic contract.
-      if (sample === null) {
-        invalidate(accounting)
-        return EMPTY_PREPARED_RASTER
-      }
-
-      const index = row * width + column
-      const sampledAlpha = sampleAlpha(raster.data, sample)
-      alpha[index] = sampledAlpha
-      positiveSupport[index] = sampledAlpha > 0
-      luminance[index] = sampleVisibleLinearLuminance(
-        raster.data,
-        sample,
-        sampledAlpha,
-      )
-    }
-  }
-
-  accounting.analysisWidth = width
-  accounting.analysisHeight = height
-  accounting.analysisSampleCount = sampleCount
-
-  return Object.freeze({
-    sourceWidth: raster.width,
-    sourceHeight: raster.height,
-    width,
-    height,
-    luminance: Object.freeze(luminance),
-    alpha: Object.freeze(alpha),
-    positiveSupport: Object.freeze(positiveSupport),
-  })
 }

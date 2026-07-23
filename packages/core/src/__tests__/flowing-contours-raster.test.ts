@@ -228,6 +228,40 @@ describe('Flowing Contours raster preparation', () => {
     expect(accounting.analysisSampleCount).toBe(0)
   })
 
+  it('rejects a Proxy-wrapped typed array before hostile numeric access', () => {
+    const sharedEmpty = prepare(pixels(1, 1, new Uint8Array())).raster
+    const target = Uint8Array.of(255, 255, 255, 255)
+    const data = new Proxy(target, {
+      get(inner, property) {
+        if (property === 'length') return inner.length
+        if (typeof property === 'string' && /^\d+$/.test(property)) {
+          throw new Error('hostile numeric access')
+        }
+        return Reflect.get(inner, property, inner)
+      },
+    })
+    const accounting = createFlowingContoursAccounting()
+
+    const raster = prepareFlowingContoursRaster(pixels(1, 1, data), accounting)
+
+    expect(raster).toBe(sharedEmpty)
+    expect(accounting.termination).toBe('invalid-input')
+    expect(accounting.analysisSampleCount).toBe(0)
+  })
+
+  it('rejects a typed-array instance whose own length hides storage size', () => {
+    const sharedEmpty = prepare(pixels(1, 1, new Uint8Array())).raster
+    const data = new Uint8Array(3)
+    Object.defineProperty(data, 'length', { value: 4 })
+    const accounting = createFlowingContoursAccounting()
+
+    const raster = prepareFlowingContoursRaster(pixels(1, 1, data), accounting)
+
+    expect(raster).toBe(sharedEmpty)
+    expect(accounting.termination).toBe('invalid-input')
+    expect(accounting.analysisSampleCount).toBe(0)
+  })
+
   it('returns the shared frozen empty record for repeated failures', () => {
     const firstAccounting = createFlowingContoursAccounting()
     const secondAccounting = createFlowingContoursAccounting()
