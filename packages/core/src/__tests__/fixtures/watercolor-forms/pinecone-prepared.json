@@ -1,7 +1,7 @@
 {
   "formatVersion": 1,
   "fixtureStatus": "provisional",
-  "preparedFromCommit": "f567708cd04b2771bdcccde9965fc738d63bf1d4",
+  "preparedFromCommit": "b2624401209581d26ebee20a4896fce822ea4fc4",
   "preparationVersion": "watercolor-forms-prepared-raster-v1",
   "source": {
     "assetId": "pinecone-4330aa0314f7",
@@ -15,6 +15,9 @@
     "height": 1000
   },
   "controls": {
+    "gamma": 0.5,
+    "contrast": 0.5,
+    "pivot": 0.5,
     "formDetail": 0.5,
     "colorSensitivity": 0.5,
     "boundaryStrength": 0.5,
