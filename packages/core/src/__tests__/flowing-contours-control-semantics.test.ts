@@ -13,7 +13,10 @@ import {
   type FlowingContoursControls,
 } from '../sketches/flowing-contours/controls'
 import { fitFlowingContoursCurve } from '../sketches/flowing-contours/curves'
-import { sampleFlowingContoursField } from '../sketches/flowing-contours/field'
+import {
+  buildFlowingContoursField,
+  sampleFlowingContoursField,
+} from '../sketches/flowing-contours/field'
 import { generateFlowingContours } from '../sketches/flowing-contours/generator'
 import {
   growFlowingContoursDirection,
@@ -25,6 +28,7 @@ import {
   scoreFlowingContoursCandidate,
 } from '../sketches/flowing-contours/objective'
 import { runFlowingContoursPipeline } from '../sketches/flowing-contours/pipeline'
+import { prepareFlowingContoursRaster } from '../sketches/flowing-contours/raster'
 import { searchFlowingContoursCandidate } from '../sketches/flowing-contours/search'
 import { selectFlowingContoursCandidate } from '../sketches/flowing-contours/selection'
 import {
@@ -36,6 +40,7 @@ import type {
   CorrectedFlowingRidgeSample,
   FlowingContoursCandidateScore,
   FlowingContoursField,
+  FlowingContoursPipelineResult,
   FlowingContoursSpanSupportProvenance,
 } from '../sketches/flowing-contours/types'
 import type { Point } from '../types'
@@ -129,6 +134,20 @@ function field(
 
 function gaussian(distance: number, width = 0.55): number {
   return Math.exp(-(distance * distance) / (2 * width * width))
+}
+
+function flowingCurveField(): Readonly<FlowingContoursField> {
+  return field(48, 25, (x, y) => {
+    const center = 12 + 3 * Math.sin(x / 8)
+    const slope = (3 / 8) * Math.cos(x / 8)
+    const tangentLength = Math.hypot(1, slope)
+    const distance = Math.abs(y - center) / tangentLength
+    return {
+      evidence: gaussian(distance, 0.6),
+      tangent: [1 / tangentLength, slope / tangentLength],
+      scale: 2,
+    }
+  })
 }
 
 function sample(
@@ -310,6 +329,79 @@ function turnMetrics(points: readonly Readonly<Point>[]) {
   return { energy, maximum, moderate, abrupt }
 }
 
+function omitDiagnostics(
+  source: Readonly<Record<string, unknown>>,
+  names: readonly string[],
+): Readonly<Record<string, unknown>> {
+  const result = { ...source }
+  for (const name of names) delete result[name]
+  return result
+}
+
+function expectValidFittedTubes(
+  source: Readonly<FlowingContoursField>,
+  result: Readonly<FlowingContoursPipelineResult>,
+): void {
+  expect(result.fittedCurves).toHaveLength(
+    result.acceptedTrajectories.length,
+  )
+  for (let index = 0; index < result.fittedCurves.length; index += 1) {
+    const raw = result.acceptedTrajectories[index]!
+    const curve = result.fittedCurves[index]!
+    const tube = createFlowingContoursEvidenceTube(source, raw)
+    expect(tube).not.toBeNull()
+    if (tube === null) continue
+    expect(
+      validateFlowingContoursTubeCurve(source, tube, {
+        points: curve.points,
+        sourceSampleIndices: curve.provenance.sourceSampleIndices,
+      }),
+    ).not.toBeNull()
+  }
+}
+
+function axisAlternationCount(
+  points: readonly Readonly<Point>[],
+): number {
+  let count = 0
+  for (let index = 2; index < points.length; index += 1) {
+    const a = points[index - 2]!
+    const b = points[index - 1]!
+    const c = points[index]!
+    const firstAxis =
+      Math.abs(b[0] - a[0]) > Math.abs(b[1] - a[1]) ? 'x' : 'y'
+    const secondAxis =
+      Math.abs(c[0] - b[0]) > Math.abs(c[1] - b[1]) ? 'x' : 'y'
+    if (firstAxis !== secondAxis) count += 1
+  }
+  return count
+}
+
+function segmentObliqueness(
+  points: readonly Readonly<Point>[],
+): readonly number[] {
+  return points.slice(1).map((point, index) => {
+    const previous = points[index]!
+    const dx = Math.abs(point[0] - previous[0])
+    const dy = Math.abs(point[1] - previous[1])
+    const length = Math.hypot(dx, dy)
+    return length === 0 ? 0 : Math.min(dx, dy) / length
+  })
+}
+
+function smoothingInvariantTrajectory(
+  source: Readonly<AcceptedFlowingTrajectory>,
+) {
+  return {
+    ...source,
+    score: {
+      ...source.score,
+      curvaturePenalty: 0,
+      total: 0,
+    },
+  }
+}
+
 function raster(
   width: number,
   height: number,
@@ -417,6 +509,60 @@ describe('Flowing Contours artist-control semantics', () => {
         admissions[index - 1]!.minimumSelectionScore,
       )
     }
+    const lowPipeline = runFlowingContoursPipeline(source, {
+      ...BASE_CONTROLS,
+      curveDetail: 0.2,
+      minimumStrokeLength: 0.005,
+    })
+    const highPipeline = runFlowingContoursPipeline(source, {
+      ...BASE_CONTROLS,
+      curveDetail: 1,
+      minimumStrokeLength: 0.005,
+    })
+    const detailOwnedDeltas = [
+      'eligibleAnchorCount',
+      'processedAnchorCount',
+      'directionalTraceCount',
+      'searchStepCount',
+      'candidateCount',
+      'acceptedCandidateCount',
+      'endpointReasonCounts',
+      'rawTrajectoryCount',
+      'rawTrajectoryPointCount',
+      'suppressedEvidenceSampleCount',
+      'fittedCurveCount',
+      'fittedCurvePointCount',
+      'primitiveCount',
+    ] as const
+    expect(
+      omitDiagnostics(lowPipeline.diagnostics, detailOwnedDeltas),
+    ).toEqual(
+      omitDiagnostics(highPipeline.diagnostics, detailOwnedDeltas),
+    )
+    expect(highPipeline.diagnostics.eligibleAnchorCount).toBeGreaterThan(
+      lowPipeline.diagnostics.eligibleAnchorCount,
+    )
+    expect(highPipeline.acceptedTrajectories.length).toBeGreaterThan(
+      lowPipeline.acceptedTrajectories.length,
+    )
+    expect(
+      highPipeline.acceptedTrajectories.slice(
+        0,
+        lowPipeline.acceptedTrajectories.length,
+      ),
+    ).toEqual(lowPipeline.acceptedTrajectories)
+    expect(
+      highPipeline.fittedCurves.slice(0, lowPipeline.fittedCurves.length),
+    ).toEqual(lowPipeline.fittedCurves)
+    expect(
+      highPipeline.acceptedTrajectories.every(
+        (raw) =>
+          raw.length >=
+          0.005 * Math.hypot(source.width, source.height),
+      ),
+    ).toBe(true)
+    expectValidFittedTubes(source, lowPipeline)
+    expectValidFittedTubes(source, highPipeline)
 
     const coherent = field(18, 12, () => ({
       evidence: 1,
@@ -479,6 +625,58 @@ describe('Flowing Contours artist-control semantics', () => {
     expect(gapLengths).toEqual([...gapLengths].sort((a, b) => a - b))
     expect(gapLengths[0]).toBe(0)
     expect(gapLengths.at(-1)).toBe(3)
+    const lowPipeline = runFlowingContoursPipeline(interrupted, {
+      ...BASE_CONTROLS,
+      continuity: 0,
+      minimumStrokeLength: 0.005,
+    })
+    const highPipeline = runFlowingContoursPipeline(interrupted, {
+      ...BASE_CONTROLS,
+      continuity: 1,
+      minimumStrokeLength: 0.005,
+    })
+    const continuityOwnedDeltas = [
+      'searchStepCount',
+      'candidateCount',
+      'acceptedCandidateCount',
+      'endpointReasonCounts',
+      'rawTrajectoryCount',
+      'rawTrajectoryPointCount',
+      'acceptedMaximumUnsupportedSpanLength',
+      'acceptedTotalUnsupportedSpanLength',
+      'suppressedEvidenceSampleCount',
+      'fittedCurveCount',
+      'fittedCurvePointCount',
+      'primitiveCount',
+    ] as const
+    expect(
+      omitDiagnostics(lowPipeline.diagnostics, continuityOwnedDeltas),
+    ).toEqual(
+      omitDiagnostics(highPipeline.diagnostics, continuityOwnedDeltas),
+    )
+    expect(lowPipeline.acceptedTrajectories).toHaveLength(2)
+    expect(highPipeline.acceptedTrajectories).toHaveLength(1)
+    expect(
+      lowPipeline.diagnostics.acceptedTotalUnsupportedSpanLength,
+    ).toBe(0)
+    expect(
+      highPipeline.diagnostics.acceptedTotalUnsupportedSpanLength,
+    ).toBeGreaterThan(0)
+    expect(
+      highPipeline.acceptedTrajectories[0]!.spanSupport.some(
+        (span) => span.kind === 'bounded-gap',
+      ),
+    ).toBe(true)
+    for (const result of [lowPipeline, highPipeline]) {
+      expect(
+        result.acceptedTrajectories.every(
+          (raw) =>
+            raw.length >=
+            0.005 * Math.hypot(interrupted.width, interrupted.height),
+        ),
+      ).toBe(true)
+      expectValidFittedTubes(interrupted, result)
+    }
 
     const beyondHardCap = field(16, 9, (x, y) => ({
       evidence: (x >= 5 && x <= 7 ? 0.01 : 1) * gaussian(y - 4),
@@ -648,6 +846,73 @@ describe('Flowing Contours artist-control semantics', () => {
     }
     expect(changed).toBe(true)
 
+    const flowing = flowingCurveField()
+    const lowPipeline = runFlowingContoursPipeline(flowing, {
+      ...BASE_CONTROLS,
+      curveDetail: 1,
+      continuity: 0.5,
+      flowSmoothing: 0,
+    })
+    const highPipeline = runFlowingContoursPipeline(flowing, {
+      ...BASE_CONTROLS,
+      curveDetail: 1,
+      continuity: 0.5,
+      flowSmoothing: 1,
+    })
+    expect(
+      lowPipeline.acceptedTrajectories.map(
+        smoothingInvariantTrajectory,
+      ),
+    ).toEqual(
+      highPipeline.acceptedTrajectories.map(
+        smoothingInvariantTrajectory,
+      ),
+    )
+    expect(
+      highPipeline.acceptedTrajectories[0]!.score.curvaturePenalty,
+    ).toBeGreaterThan(
+      lowPipeline.acceptedTrajectories[0]!.score.curvaturePenalty,
+    )
+    expect(
+      omitDiagnostics(lowPipeline.diagnostics, [
+        'fittedCurvePointCount',
+      ]),
+    ).toEqual(
+      omitDiagnostics(highPipeline.diagnostics, [
+        'fittedCurvePointCount',
+      ]),
+    )
+    expect(lowPipeline.fittedCurves).toHaveLength(1)
+    expect(highPipeline.fittedCurves).toHaveLength(1)
+    expect(highPipeline.fittedCurves[0]!.points).not.toEqual(
+      lowPipeline.fittedCurves[0]!.points,
+    )
+    const lowPipelineTurns = turnMetrics(
+      lowPipeline.fittedCurves[0]!.points,
+    )
+    const highPipelineTurns = turnMetrics(
+      highPipeline.fittedCurves[0]!.points,
+    )
+    expect(highPipelineTurns.energy).toBeLessThanOrEqual(
+      lowPipelineTurns.energy + 1e-10,
+    )
+    expect(highPipelineTurns.maximum).toBeLessThanOrEqual(
+      lowPipelineTurns.maximum + 1e-10,
+    )
+    expect(highPipelineTurns.moderate).toBeLessThanOrEqual(
+      lowPipelineTurns.moderate,
+    )
+    expect(highPipelineTurns.abrupt).toBeLessThanOrEqual(
+      lowPipelineTurns.abrupt,
+    )
+    expect(
+      highPipeline.fittedCurves[0]!.points.length,
+    ).toBeLessThan(
+      lowPipeline.fittedCurves[0]!.points.length,
+    )
+    expectValidFittedTubes(flowing, lowPipeline)
+    expectValidFittedTubes(flowing, highPipeline)
+
     const interrupted = field(14, 9, (x, y) => ({
       evidence: (x >= 5 && x <= 6 ? 0.01 : 1) * gaussian(y - 4),
       tangent: [1, 0],
@@ -709,6 +974,59 @@ describe('Flowing Contours artist-control semantics', () => {
       kind: 'rejected',
       reason: 'below-minimum-length',
     })
+    const oneCandidateLimits = createFlowingContoursTestLimits({
+      'candidate-count': 1,
+    })!
+    const exactPipeline = runFlowingContoursPipeline(
+      source,
+      {
+        ...BASE_CONTROLS,
+        curveDetail: 1,
+        minimumStrokeLength: threshold,
+      },
+      oneCandidateLimits,
+    )
+    const abovePipeline = runFlowingContoursPipeline(
+      source,
+      {
+        ...BASE_CONTROLS,
+        curveDetail: 1,
+        minimumStrokeLength: threshold + Number.EPSILON,
+      },
+      oneCandidateLimits,
+    )
+    expect(exactPipeline.acceptedTrajectories).toHaveLength(1)
+    expect(exactPipeline.fittedCurves).toHaveLength(1)
+    expect(abovePipeline.acceptedTrajectories).toEqual([])
+    expect(abovePipeline.fittedCurves).toEqual([])
+    expect({
+      analysisWidth: exactPipeline.diagnostics.analysisWidth,
+      analysisHeight: exactPipeline.diagnostics.analysisHeight,
+      analysisSampleCount: exactPipeline.diagnostics.analysisSampleCount,
+      contourEvidenceSampleCount:
+        exactPipeline.diagnostics.contourEvidenceSampleCount,
+      correctedRidgeSampleCount:
+        exactPipeline.diagnostics.correctedRidgeSampleCount,
+      eligibleAnchorCount: exactPipeline.diagnostics.eligibleAnchorCount,
+      directionalTraceCount:
+        exactPipeline.diagnostics.directionalTraceCount,
+      searchStepCount: exactPipeline.diagnostics.searchStepCount,
+      candidateCount: exactPipeline.diagnostics.candidateCount,
+    }).toEqual({
+      analysisWidth: abovePipeline.diagnostics.analysisWidth,
+      analysisHeight: abovePipeline.diagnostics.analysisHeight,
+      analysisSampleCount: abovePipeline.diagnostics.analysisSampleCount,
+      contourEvidenceSampleCount:
+        abovePipeline.diagnostics.contourEvidenceSampleCount,
+      correctedRidgeSampleCount:
+        abovePipeline.diagnostics.correctedRidgeSampleCount,
+      eligibleAnchorCount: abovePipeline.diagnostics.eligibleAnchorCount,
+      directionalTraceCount:
+        abovePipeline.diagnostics.directionalTraceCount,
+      searchStepCount: abovePipeline.diagnostics.searchStepCount,
+      candidateCount: abovePipeline.diagnostics.candidateCount,
+    })
+    expectValidFittedTubes(source, exactPipeline)
 
     const pixels = raster(80, 40, (x, y) =>
       x < 35 + y * 0.2
@@ -718,9 +1036,6 @@ describe('Flowing Contours artist-control semantics', () => {
     const controls = {
       ...BASE_CONTROLS,
       minimumStrokeLength: 0.2,
-      pageWidth: 123,
-      toolWidth: 999,
-      outputScale: 0.001,
     }
     const frames = [
       { width: 1000, height: 1000 },
@@ -735,47 +1050,56 @@ describe('Flowing Contours artist-control semantics', () => {
       }),
     )
     expect(generated[0]!.diagnostics.primitiveCount).toBeGreaterThan(0)
-    expect(
-      generated.map((result) => ({
-        accepted: result.diagnostics.acceptedCandidateCount,
-        raw: result.diagnostics.rawTrajectoryCount,
-        fitted: result.diagnostics.fittedCurveCount,
-        primitive: result.diagnostics.primitiveCount,
-      })),
-    ).toEqual([
-      {
-        accepted: generated[0]!.diagnostics.acceptedCandidateCount,
-        raw: generated[0]!.diagnostics.rawTrajectoryCount,
-        fitted: generated[0]!.diagnostics.fittedCurveCount,
-        primitive: generated[0]!.diagnostics.primitiveCount,
-      },
-      {
-        accepted: generated[0]!.diagnostics.acceptedCandidateCount,
-        raw: generated[0]!.diagnostics.rawTrajectoryCount,
-        fitted: generated[0]!.diagnostics.fittedCurveCount,
-        primitive: generated[0]!.diagnostics.primitiveCount,
-      },
-      {
-        accepted: generated[0]!.diagnostics.acceptedCandidateCount,
-        raw: generated[0]!.diagnostics.rawTrajectoryCount,
-        fitted: generated[0]!.diagnostics.fittedCurveCount,
-        primitive: generated[0]!.diagnostics.primitiveCount,
-      },
-    ])
+    expect(generated[1]!.diagnostics).toEqual(generated[0]!.diagnostics)
+    expect(generated[2]!.diagnostics).toEqual(generated[0]!.diagnostics)
+
+    const accounting = createFlowingContoursAccounting()
+    const prepared = prepareFlowingContoursRaster(pixels, accounting)
+    const imageField = buildFlowingContoursField(prepared, accounting)
+    const baselineControls = normalizeFlowingContoursControls(controls)
+    const baselinePipeline = runFlowingContoursPipeline(
+      imageField,
+      baselineControls,
+    )
+    const baselineGenerator = generateFlowingContours({
+      pixels,
+      frame: frames[0]!,
+      controls: baselineControls,
+    })
+    const irrelevantSettings = [
+      ['pageWidth', Number.NEGATIVE_INFINITY],
+      ['pageWidth', Number.MAX_VALUE],
+      ['toolWidth', Number.NaN],
+      ['toolWidth', -Number.MAX_VALUE],
+      ['outputScale', Number.POSITIVE_INFINITY],
+      ['outputScale', Number.MAX_VALUE],
+    ] as const
+    for (const [name, value] of irrelevantSettings) {
+      const withOneIrrelevantSetting = {
+        ...controls,
+        [name]: value,
+      }
+      expect(
+        normalizeFlowingContoursControls(withOneIrrelevantSetting),
+      ).toEqual(baselineControls)
+      expect(
+        runFlowingContoursPipeline(
+          imageField,
+          withOneIrrelevantSetting,
+        ),
+      ).toEqual(baselinePipeline)
+      expect(
+        generateFlowingContours({
+          pixels,
+          frame: frames[0]!,
+          controls: withOneIrrelevantSetting,
+        }),
+      ).toEqual(baselineGenerator)
+    }
   })
 
   it('keeps coherent curved output long, oblique, and free of grid-stump alternation', () => {
-    const source = field(48, 25, (x, y) => {
-      const center = 12 + 3 * Math.sin(x / 8)
-      const slope = (3 / 8) * Math.cos(x / 8)
-      const tangentLength = Math.hypot(1, slope)
-      const distance = Math.abs(y - center) / tangentLength
-      return {
-        evidence: gaussian(distance, 0.6),
-        tangent: [1 / tangentLength, slope / tangentLength],
-        scale: 2,
-      }
-    })
+    const source = flowingCurveField()
     const controls = {
       curveDetail: 1,
       continuity: 0.5,
@@ -787,51 +1111,56 @@ describe('Flowing Contours artist-control semantics', () => {
     const diagonal = Math.hypot(source.width, source.height)
 
     expect(first).toEqual(second)
-    expect(first.acceptedTrajectories.length).toBeGreaterThan(0)
-    expect(first.fittedCurves).toHaveLength(
-      first.acceptedTrajectories.length,
-    )
+    expect(first.acceptedTrajectories).toHaveLength(1)
+    expect(first.fittedCurves).toHaveLength(1)
     expect(
       first.acceptedTrajectories.every(
-        (raw) => raw.length >= controls.minimumStrokeLength * diagonal,
-      ),
-    ).toBe(true)
-    expect(
-      Math.max(
-        ...first.acceptedTrajectories.map((raw) => raw.length),
-      ),
-    ).toBeGreaterThan(source.width * 0.7)
-    expect(
-      first.fittedCurves.some((curve) =>
-        curve.points.slice(1).some((point, index) => {
-          const previous = curve.points[index]!
-          return (
-            Math.abs(point[0] - previous[0]) > 0.1 &&
-            Math.abs(point[1] - previous[1]) > 0.1
-          )
-        }),
+        (raw) =>
+          raw.length >= controls.minimumStrokeLength * diagonal &&
+          raw.length > source.width * 0.7,
       ),
     ).toBe(true)
     for (const curve of first.fittedCurves) {
       const metrics = turnMetrics(curve.points)
+      expect(pathLength(curve.points)).toBeGreaterThan(source.width * 0.7)
+      expect(
+        segmentObliqueness(curve.points).every((ratio) => ratio > 0.02),
+      ).toBe(true)
+      expect(metrics.moderate).toBe(0)
       expect(metrics.abrupt).toBe(0)
+      expect(metrics.maximum).toBeLessThan((25 * Math.PI) / 180)
       expect(
         Number.isFinite(
           measureFlowingContoursCurvatureChange(curve.points),
         ),
       ).toBe(true)
-      let alternatingOrthogonalSteps = 0
-      for (let index = 2; index < curve.points.length; index += 1) {
-        const a = curve.points[index - 2]!
-        const b = curve.points[index - 1]!
-        const c = curve.points[index]!
-        const firstAxis =
-          Math.abs(b[0] - a[0]) > Math.abs(b[1] - a[1]) ? 'x' : 'y'
-        const secondAxis =
-          Math.abs(c[0] - b[0]) > Math.abs(c[1] - b[1]) ? 'x' : 'y'
-        if (firstAxis !== secondAxis) alternatingOrthogonalSteps += 1
-      }
-      expect(alternatingOrthogonalSteps).toBeLessThanOrEqual(1)
+      expect(axisAlternationCount(curve.points)).toBeLessThanOrEqual(1)
     }
+    expectValidFittedTubes(source, first)
+  })
+
+  it('has shape metrics that reject known stump and grid counterexamples', () => {
+    const stump = [
+      [0, 0],
+      [1, 0],
+    ] as const
+    const grid = [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [2, 1],
+      [2, 2],
+      [3, 2],
+      [3, 3],
+      [4, 3],
+    ] as const
+
+    expect(pathLength(stump)).toBeLessThan(48 * 0.7)
+    expect(segmentObliqueness(stump)).toEqual([0])
+    expect(segmentObliqueness(grid).every((ratio) => ratio === 0)).toBe(
+      true,
+    )
+    expect(axisAlternationCount(grid)).toBe(grid.length - 2)
+    expect(turnMetrics(grid).abrupt).toBeGreaterThan(0)
   })
 })
