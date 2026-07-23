@@ -208,6 +208,39 @@ describe('partitionWatercolorFormsRaster', () => {
     ])
   })
 
+  it('ignores hidden RGB when measuring a support boundary', () => {
+    const partitionWithHiddenColor = (
+      hiddenColor: readonly [number, number, number],
+    ) =>
+      partitionWatercolorFormsRaster(
+        raster(
+          2,
+          1,
+          [[0.2, 0.4, 0.6], hiddenColor],
+          [0.1, 0],
+          [true, false],
+        ),
+      )
+    const hiddenRed = partitionWithHiddenColor([1, 0, 0])
+    const hiddenGreen = partitionWithHiddenColor([0, 1, 0])
+
+    expect(hiddenRed.regionBySample).toEqual(hiddenGreen.regionBySample)
+    expect(hiddenRed.regions).toEqual(hiddenGreen.regions)
+    expect(hiddenRed.sharedBoundarySegments).toEqual(
+      hiddenGreen.sharedBoundarySegments,
+    )
+    expect(hiddenRed.sharedBoundarySegments).toEqual([
+      {
+        id: 0,
+        regionIds: [-1, 0],
+        start: [1, 0],
+        end: [1, 1],
+        strength: 0.1,
+        provenance: 'alpha-boundary',
+      },
+    ])
+  })
+
   it('returns no regions or boundaries for fully transparent support', () => {
     const source = raster(
       2,

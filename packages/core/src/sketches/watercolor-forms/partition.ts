@@ -172,10 +172,16 @@ function buildCanonicalEdges(
     secondSampleId: number,
     orientation: EdgeOrientation,
   ): void => {
-    const colorDistance = perceptualDistance(
-      perceptual[firstSampleId]!,
-      perceptual[secondSampleId]!,
-    )
+    // Exact-zero support has no visible color. Hidden RGB must therefore
+    // contribute neither merge evidence nor support-boundary strength.
+    const colorDistance =
+      raster.positiveSupport[firstSampleId] &&
+      raster.positiveSupport[secondSampleId]
+        ? perceptualDistance(
+            perceptual[firstSampleId]!,
+            perceptual[secondSampleId]!,
+          )
+        : 0
     const alphaDistance = Math.abs(
       raster.alpha[firstSampleId]! - raster.alpha[secondSampleId]!,
     )
