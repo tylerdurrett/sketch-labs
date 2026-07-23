@@ -315,6 +315,30 @@ function dot(first: Readonly<Point>, second: Readonly<Point>): number {
   return Math.max(-1, Math.min(1, first[0] * second[0] + first[1] * second[1]))
 }
 
+function normalizedAlignment(
+  first: Readonly<Point>,
+  second: Readonly<Point>,
+): number | null {
+  const firstLength = Math.hypot(first[0], first[1])
+  const secondLength = Math.hypot(second[0], second[1])
+  if (
+    !Number.isFinite(firstLength) ||
+    firstLength <= VECTOR_EPSILON ||
+    !Number.isFinite(secondLength) ||
+    secondLength <= VECTOR_EPSILON
+  ) {
+    return null
+  }
+  return Math.max(
+    -1,
+    Math.min(
+      1,
+      (first[0] / firstLength) * (second[0] / secondLength) +
+        (first[1] / firstLength) * (second[1] / secondLength),
+    ),
+  )
+}
+
 function displacementUnit(
   first: Readonly<Point>,
   second: Readonly<Point>,
@@ -685,10 +709,12 @@ function snapshotAndValidateScore(
     evidenceSum += sample.evidence
     ambiguitySum += sample.ambiguity
     if (index > 0) {
-      coherenceSum += Math.max(
-        0,
-        dot(samples[index - 1]!.tangent, sample.tangent),
+      const alignment = normalizedAlignment(
+        samples[index - 1]!.tangent,
+        sample.tangent,
       )
+      if (alignment === null) return null
+      coherenceSum += Math.max(0, alignment)
     }
   }
   const expectedAccumulatedEvidence =

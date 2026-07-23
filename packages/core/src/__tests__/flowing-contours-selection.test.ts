@@ -101,6 +101,7 @@ function support(
 function candidateScore(
   samples: readonly CorrectedFlowingRidgeSample[],
   spans: readonly FlowingContoursSpanSupportProvenance[],
+  directionalCoherence?: number,
 ): Readonly<FlowingContoursCandidateScore> {
   const length = lengthBetween(samples, 0, samples.length - 1)
   const segmentCount = samples.length - 1
@@ -115,7 +116,8 @@ function candidateScore(
         samples.length,
       usefulLength: length / ANALYSIS_DIAGONAL,
       directionalCoherence:
-        samples.slice(1).reduce((sum, value, index) => {
+        directionalCoherence ??
+        (samples.slice(1).reduce((sum, value, index) => {
           const previous = samples[index]!.tangent
           return (
             sum +
@@ -124,7 +126,8 @@ function candidateScore(
               previous[0] * value.tangent[0] + previous[1] * value.tangent[1],
             )
           )
-        }, 0) / segmentCount,
+        }, 0) /
+          segmentCount),
       curvatureChange:
         measureFlowingContoursCurvatureChange(
           samples.map((value) => value.point),
@@ -337,6 +340,36 @@ describe('Flowing Contours atomic candidate selection', () => {
     ).toBe(false)
   })
 
+  it('accepts canonical coherence scored from legal near-unit tangents', () => {
+    const tangentScale = 1 + 5e-9
+    const samples = [
+      sample(0, { tangent: [1, 0] }),
+      sample(10, {
+        tangent: [0.8 * tangentScale, 0.6 * tangentScale],
+      }),
+    ]
+    const firstTangentLength = Math.hypot(...samples[0]!.tangent)
+    const secondTangentLength = Math.hypot(...samples[1]!.tangent)
+    const rawAlignment =
+      samples[0]!.tangent[0] * samples[1]!.tangent[0] +
+      samples[0]!.tangent[1] * samples[1]!.tangent[1]
+    const normalizedAlignment =
+      (samples[0]!.tangent[0] / firstTangentLength) *
+        (samples[1]!.tangent[0] / secondTangentLength) +
+      (samples[0]!.tangent[1] / firstTangentLength) *
+        (samples[1]!.tangent[1] / secondTangentLength)
+    const spans = [support(samples, 'direct-evidence', 0, 1)]
+    const source = candidate(undefined, {
+      samples,
+      support: spans,
+      score: candidateScore(samples, spans, normalizedAlignment),
+    })
+
+    expect(Math.abs(secondTangentLength - 1)).toBeLessThan(1e-8)
+    expect(normalizedAlignment).not.toBe(rawAlignment)
+    expect(select(source).result.kind).toBe('accepted')
+  })
+
   it('uses exact recomputed composition-relative length below and at the threshold', () => {
     const nextBelowTen = 10 - Number.EPSILON * 10
     const below = select(candidate([0, 5, nextBelowTen]))
@@ -508,6 +541,18 @@ describe('Flowing Contours atomic candidate selection', () => {
         ;(value.score as { accumulatedEvidence: number }).accumulatedEvidence =
           4
         ;(value.score as { total: number }).total += 0.8
+      },
+    ],
+    [
+      'forged directional coherence',
+      (value: FlowingContoursCandidate) => {
+        ;(
+          value.score as {
+            directionalCoherence: number
+            total: number
+          }
+        ).directionalCoherence -= 0.25
+        ;(value.score as { total: number }).total -= 0.25
       },
     ],
     [
