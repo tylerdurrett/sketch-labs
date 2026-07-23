@@ -23,6 +23,8 @@ import type {
 const MAX_TURN_RADIANS = Math.PI / 2
 const AMBIGUOUS_TURN_DELTA_RADIANS = Math.PI / 180
 const ANGLE_EPSILON = 1e-12
+// A canonical planar lattice vertex has at most four incident edge segments.
+const MAX_VERTEX_DEGREE = 4
 
 type TracingLimitName =
   | 'maxRetainedBoundarySegmentCount'
@@ -45,6 +47,8 @@ export interface WatercolorBoundaryTracingDiagnostics {
   readonly validSegmentCount: number
   readonly duplicateSegmentCount: number
   readonly invalidSegmentCount: number
+  /** Vertices conservatively left unpaired because they exceeded lattice degree. */
+  readonly overfullVertexCount: number
   readonly consumedSegmentCount: number
   readonly boundaryPathCount: number
 }
@@ -78,6 +82,7 @@ interface TraceGraph {
   readonly segments: ReadonlyMap<number, CanonicalSegment>
   readonly vertices: ReadonlyMap<string, TraceVertex>
   readonly pairings: ReadonlyMap<string, ReadonlyMap<number, number>>
+  readonly overfullVertexCount: number
 }
 
 interface MutablePath {
@@ -93,7 +98,9 @@ interface ValidatedSegments {
 }
 
 function frozenPoint(point: Readonly<Point>): Readonly<Point> {
-  return Object.freeze([point[0], point[1]] as Point)
+  const x = Object.is(point[0], -0) ? 0 : point[0]
+  const y = Object.is(point[1], -0) ? 0 : point[1]
+  return Object.freeze([x, y] as Point)
 }
 
 function comparePoints(
@@ -280,10 +287,20 @@ function turnDeviation(
 function buildPairings(
   segments: ReadonlyMap<number, CanonicalSegment>,
   vertices: ReadonlyMap<string, TraceVertex>,
-): ReadonlyMap<string, ReadonlyMap<number, number>> {
-  const result = new Map<string, ReadonlyMap<number, number>>()
+): Readonly<{
+  readonly pairings: ReadonlyMap<string, ReadonlyMap<number, number>>
+  readonly overfullVertexCount: number
+}> {
+  const pairings = new Map<string, ReadonlyMap<number, number>>()
+  let overfullVertexCount = 0
 
   for (const vertex of vertices.values()) {
+    // Do not let malformed non-lattice fan-outs turn mutual-best selection into
+    // quadratic work. Stopping every incidence is the conservative topology.
+    if (vertex.segmentIds.length > MAX_VERTEX_DEGREE) {
+      overfullVertexCount += 1
+      continue
+    }
     const best = new Map<number, number>()
     for (const segmentId of vertex.segmentIds) {
       const segment = segments.get(segmentId)!
@@ -323,12 +340,15 @@ function buildPairings(
         mutual.set(segmentId, candidateId)
       }
     }
-    if (mutual.size > 0) result.set(vertex.key, mutual)
+    if (mutual.size > 0) pairings.set(vertex.key, mutual)
   }
-  return result
+  return { pairings, overfullVertexCount }
 }
 
-function buildGraph(source: readonly CanonicalSegment[]): TraceGraph {
+function graphParts(source: readonly CanonicalSegment[]): Readonly<{
+  readonly segments: ReadonlyMap<number, CanonicalSegment>
+  readonly vertices: ReadonlyMap<string, TraceVertex>
+}> {
   const segments = new Map<number, CanonicalSegment>()
   const vertices = new Map<string, TraceVertex>()
   const vertexFor = (
@@ -350,11 +370,21 @@ function buildGraph(source: readonly CanonicalSegment[]): TraceGraph {
   for (const vertex of vertices.values()) {
     vertex.segmentIds.sort((first, second) => first - second)
   }
+  return { segments, vertices }
+}
 
+function buildGraph(
+  retained: readonly CanonicalSegment[],
+  topologySource: readonly CanonicalSegment[],
+): TraceGraph {
+  const traced = graphParts(retained)
+  const topology = graphParts(topologySource)
+  const junctions = buildPairings(topology.segments, topology.vertices)
   return {
-    segments,
-    vertices,
-    pairings: buildPairings(segments, vertices),
+    segments: traced.segments,
+    vertices: traced.vertices,
+    pairings: junctions.pairings,
+    overfullVertexCount: junctions.overfullVertexCount,
   }
 }
 
@@ -605,6 +635,7 @@ function invalidResult(inputSegmentCount: number): WatercolorBoundaryTracingResu
     validSegmentCount: 0,
     duplicateSegmentCount: 0,
     invalidSegmentCount: inputSegmentCount,
+    overfullVertexCount: 0,
     consumedSegmentCount: 0,
     boundaryPathCount: 0,
   })
@@ -643,7 +674,10 @@ export function traceWatercolorBoundaryNetwork(
     segmentLimit ??
     WATERCOLOR_FORMS_LIMITS.maxRetainedBoundarySegmentCount
   const retained = validated.segments.slice(0, effectiveSegmentLimit)
-  const traced = traceGraph(buildGraph(retained))
+  // Junction choices see omitted valid incidences too. A safety prefix may
+  // remove geometry, but it must never remove ambiguity and create a bridge.
+  const graph = buildGraph(retained, validated.segments)
+  const traced = traceGraph(graph)
   const effectivePathLimit =
     pathLimit ?? WATERCOLOR_FORMS_LIMITS.maxBoundaryPathCount
   const returned = traced.slice(0, effectivePathLimit).map(freezePath)
@@ -665,6 +699,7 @@ export function traceWatercolorBoundaryNetwork(
     validSegmentCount: validated.segments.length,
     duplicateSegmentCount: validated.duplicateCount,
     invalidSegmentCount: validated.invalidCount,
+    overfullVertexCount: graph.overfullVertexCount,
     consumedSegmentCount,
     boundaryPathCount: returned.length,
   })

@@ -291,6 +291,70 @@ describe('Watercolor Forms shared-boundary tracing', () => {
     })
   })
 
+  it('does not let a segment cap hide a near tie and invent a continuation', () => {
+    const center: Point = [0, 0]
+    const atAngle = (degrees: number): Point => {
+      const radians = (degrees * Math.PI) / 180
+      return [Math.cos(radians), Math.sin(radians)]
+    }
+    const result = traceWatercolorBoundaryNetwork(
+      [
+        segment(1, center, [-1, 0]),
+        segment(2, center, atAngle(-0.4)),
+        segment(3, center, atAngle(0.4)),
+      ],
+      { maxRetainedBoundarySegmentCount: 2 },
+    )
+
+    expect(result.paths.map((path) => path.boundarySegmentIds)).toEqual([
+      [2],
+      [1],
+    ])
+    expect(result.diagnostics).toMatchObject({
+      termination: 'limit-reached',
+      limitedBy: 'maxRetainedBoundarySegmentCount',
+      validSegmentCount: 3,
+      consumedSegmentCount: 2,
+    })
+  })
+
+  it('bounds work at an adversarial overfull junction and stops every arm', () => {
+    const center: Point = [0, 0]
+    const source = Array.from({ length: 2_000 }, (_, index) => {
+      const radians = (index * Math.PI * 2) / 2_000
+      return segment(index, center, [
+        Math.cos(radians),
+        Math.sin(radians),
+      ])
+    })
+    const result = traceWatercolorBoundaryNetwork(source)
+
+    expect(result.paths).toHaveLength(2_000)
+    expect(
+      result.paths.every((path) => path.boundarySegmentIds.length === 1),
+    ).toBe(true)
+    expect(result.diagnostics).toMatchObject({
+      termination: 'complete',
+      validSegmentCount: 2_000,
+      overfullVertexCount: 1,
+      consumedSegmentCount: 2_000,
+    })
+  })
+
+  it('normalizes signed zero before duplicate selection and output', () => {
+    const first = segment(1, [-0, 1], [2, 0])
+    const duplicate = segment(1, [2, -0], [0, 1])
+    const forward = traceWatercolorBoundaryNetwork([first, duplicate])
+    const reversed = traceWatercolorBoundaryNetwork([duplicate, first])
+
+    expect(forward).toEqual(reversed)
+    expect(forward.diagnostics.duplicateSegmentCount).toBe(1)
+    for (const point of forward.paths[0]!.points) {
+      expect(Object.is(point[0], -0)).toBe(false)
+      expect(Object.is(point[1], -0)).toBe(false)
+    }
+  })
+
   it('returns a stable partial path prefix and honest conservation at the path cap', () => {
     const result = traceWatercolorBoundaryNetwork(
       [
