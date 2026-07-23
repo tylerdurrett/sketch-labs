@@ -20,11 +20,13 @@ import {
 const DEFAULT_PORT = 4400
 const HARNESS_PATH = '/__flowing-contours-evidence__/'
 const HARNESS_MODULE_PATH =
-  '/__flowing-contours-evidence__/placeholder.mjs'
-const PLACEHOLDER_PAYLOAD = Object.freeze({
-  schemaVersion: 1,
-  kind: 'flowing-contours-reference-placeholder',
-  phase: 'FC24b-phase-1',
+  '/__flowing-contours-evidence__/capture.mjs'
+const BROWSER_CRYPTO_STUB_ID = '\0flowing-contours-browser-node-crypto'
+const SOURCE_ASSETS = Object.freeze({
+  '/image-assets/img-0672-79d639daec62.png':
+    'assets/image-assets/img-0672-79d639daec62.png',
+  '/image-assets/pinecone-4330aa0314f7.png':
+    'assets/image-assets/pinecone-4330aa0314f7.png',
 })
 const studioRoot = fileURLToPath(new URL('..', import.meta.url))
 
@@ -35,15 +37,17 @@ const HELP = `Usage:
   node apps/studio/scripts/capture-flowing-contours-reference.mjs --self-test
 
 Options:
-  --dry-run   Launch the inert pinned-browser harness and return its placeholder.
-  --write     Reserved for FC24b's production evidence write phase.
-  --verify    Reserved for FC24b's production evidence verification phase.
+  --dry-run   Compute deterministic nonvisual production evidence.
+  --write     Reserved for FC24b's PNG/manifest write phase.
+  --verify    Reserved for FC24b's PNG/manifest verification phase.
   --port N    Vite port (default ${DEFAULT_PORT}).
-  --self-test Exercise parser, payload, and import-boundary guards.
+  --self-test Exercise parser, import-boundary, and regression-shape guards.
   --help      Print this help.
 
-Phase 1 contains no generator, compositor, renderer, metric, PNG, manifest, or
-artifact capture. --write and --verify fail closed until those later phases.`
+Phase 2 runs the real Pencil, Watercolor, and Flowing pipelines and computes
+geometry, provenance, diagnostics, and quality gates in-browser. It has no
+compositor, renderer, PNG, manifest, or artifact writes; --write and --verify
+remain fail closed until Phase 3.`
 
 function optionValue(commandLine, index, option) {
   const value = commandLine[index + 1]
@@ -235,22 +239,611 @@ async function browserDependencies(primaryRoot) {
   })
 }
 
-function placeholderModuleSource() {
-  return `globalThis.__flowingContoursEvidencePlaceholder = Object.freeze(${JSON.stringify(PLACEHOLDER_PAYLOAD)})
+function captureModuleSource() {
+  return `import { decodeImageAsset } from '/src/imageAssetResolver.ts'
+import { createFlowingContoursAccounting } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/accounting.ts'
+import { prepareFlowingContoursRaster } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/raster.ts'
+import { buildFlowingContoursField } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/field.ts'
+import { runFlowingContoursPipeline } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/pipeline.ts'
+import { generateFlowingContours } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/generator.ts'
+import { createFlowingContoursEvidenceTube, validateFlowingContoursTubeCurve } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/tube.ts'
+import { FLOWING_CONTOURS_LIMITS } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/limits.ts'
+import { createFlowingContoursSuppressionState } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/suppression.ts'
+import { createRasterContainFit } from '/@fs${workspaceRoot}/packages/core/src/rasterSampling.ts'
+import { generatePencilContour } from '/@fs${workspaceRoot}/packages/core/src/sketches/pencil-contour/generator.ts'
+import { generateWatercolorForms } from '/@fs${workspaceRoot}/packages/core/src/sketches/watercolor-forms/generator.ts'
+import { measureFlowingContoursReference } from '/@fs${workspaceRoot}/packages/core/src/__tests__/helpers/flowingContoursReferenceMetrics.ts'
+import {
+  FLOWING_CONTOURS_REFERENCE_CASES,
+  FLOWING_CONTOURS_REFERENCE_CONTROLS,
+  FLOWING_CONTOURS_REFERENCE_FRAME,
+  PENCIL_CONTOUR_REFERENCE_CONTROLS,
+  WATERCOLOR_FORMS_REFERENCE_CONTROLS,
+  flowingContoursPencilComparisonFindings,
+  flowingContoursReferenceGateFindings,
+  measureFlowingContoursReferenceGeometryEvidence,
+} from '/@fs${workspaceRoot}/packages/core/src/__tests__/helpers/flowingContoursReferenceCases.ts'
+
+const sameJson = (first, second) =>
+  JSON.stringify(first) === JSON.stringify(second)
+const samePoint = (first, second) =>
+  Object.is(first[0], second[0]) && Object.is(first[1], second[1])
+const pathLength = (points, closed) => {
+  let length = 0
+  for (let index = 1; index < points.length; index += 1) {
+    length += Math.hypot(
+      points[index][0] - points[index - 1][0],
+      points[index][1] - points[index - 1][1],
+    )
+  }
+  if (closed && points.length > 1 && !samePoint(points[0], points.at(-1))) {
+    length += Math.hypot(
+      points[0][0] - points.at(-1)[0],
+      points[0][1] - points.at(-1)[1],
+    )
+  }
+  return length
+}
+const percentile = (values, probability) => {
+  if (values.length === 0) return 0
+  const sorted = values.slice().sort((first, second) => first - second)
+  const position = (sorted.length - 1) * probability
+  const lower = Math.floor(position)
+  const amount = position - lower
+  return (
+    sorted[lower] +
+    (sorted[Math.min(lower + 1, sorted.length - 1)] - sorted[lower]) *
+      amount
+  )
+}
+const hexDigest = async (bytes) => {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return [...digest]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+const canonicalSceneGeometry = async (scene) => {
+  const paths = scene.primitives.map((primitive, order) => ({
+    order,
+    closed: primitive.closed === true,
+    hiddenLineRole: primitive.hiddenLineRole ?? null,
+    stroke: primitive.stroke ?? null,
+    fill: primitive.fill ?? null,
+    pointCount: primitive.points.length,
+    endpoints: {
+      start: primitive.points[0] ?? null,
+      end: primitive.points.at(-1) ?? null,
+    },
+    points: primitive.points,
+  }))
+  const canonical = {
+    space: scene.space,
+    pathCount: paths.length,
+    paths,
+  }
+  return {
+    canonical,
+    canonicalSha256: await hexDigest(
+      new TextEncoder().encode(JSON.stringify(canonical)),
+    ),
+  }
+}
+const genericLengthMetrics = (scene) => {
+  const diagonal = Math.hypot(scene.space.width, scene.space.height)
+  const lengths = scene.primitives.map((primitive) =>
+    pathLength(primitive.points, primitive.closed === true),
+  )
+  const shortThreshold = diagonal * 0.015
+  return {
+    shortPathShare:
+      lengths.length === 0
+        ? 0
+        : lengths.filter((length) => length < shortThreshold).length /
+          lengths.length,
+    medianPathLength: percentile(lengths, 0.5),
+    upperQuartilePathLength: percentile(lengths, 0.75),
+    longestPathLength: lengths.length === 0 ? 0 : Math.max(...lengths),
+  }
+}
+const mapFlowingStages = (pixels, controls, frame) => {
+  const accounting = createFlowingContoursAccounting()
+  const raster = prepareFlowingContoursRaster(pixels, accounting)
+  if (accounting.termination !== 'complete') {
+    throw new Error('Flowing preparation did not complete')
+  }
+  const field = buildFlowingContoursField(raster, accounting)
+  if (accounting.termination !== 'complete') {
+    throw new Error('Flowing field construction did not complete')
+  }
+  const suppression = createFlowingContoursSuppressionState({
+    field,
+    limits: FLOWING_CONTOURS_LIMITS,
+  })
+  if (suppression === null) {
+    throw new Error(
+      'Flowing suppression rejected field: ' +
+        JSON.stringify({
+          dimensions: [
+            field.sourceWidth,
+            field.sourceHeight,
+            field.width,
+            field.height,
+          ],
+          frozen: Object.isFrozen(field),
+          channelKinds: Object.fromEntries(
+            [
+              'luminance',
+              'alpha',
+              'positiveSupport',
+              'contourEvidence',
+              'tangentX',
+              'tangentY',
+              'tangentCoherence',
+              'ambiguity',
+              'ridgeScale',
+            ].map((name) => [
+              name,
+              {
+                array: Array.isArray(field[name]),
+                frozen: Object.isFrozen(field[name]),
+                length: field[name]?.length,
+              },
+            ]),
+          ),
+        }),
+    )
+  }
+  const pipeline = runFlowingContoursPipeline(
+    field,
+    controls,
+    FLOWING_CONTOURS_LIMITS,
+  )
+  if (pipeline.diagnostics.termination === 'invalid-input') {
+    const direct = generateFlowingContours({ pixels, frame, controls })
+    if (
+      direct.scene.primitives.length !== 0 ||
+      !sameJson(direct.diagnostics, pipeline.diagnostics)
+    ) {
+      throw new Error(
+        'Flowing invalid-stage/generator reconciliation failed',
+      )
+    }
+    return {
+      generated: direct,
+      retainedTrajectories: [],
+      stageProof: {
+        pipelineTermination: 'invalid-input',
+        acceptedTrajectoryCount: 0,
+        retainedTrajectoryCount: 0,
+        generatorPrimitiveCount: 0,
+        exactBijection: true,
+        exactOrder: true,
+        exactPointEquality: true,
+        exactDiagnosticsAggregates: true,
+      },
+    }
+  }
+  if (pipeline.acceptedTrajectories.length !== pipeline.fittedCurves.length) {
+    throw new Error('Flowing pipeline raw/fitted inventory diverged')
+  }
+  const fit = createRasterContainFit(
+    { width: raster.sourceWidth, height: raster.sourceHeight },
+    frame,
+  )
+  if (fit === null) throw new Error('Flowing contain fit failed')
+  const retained = []
+  for (let index = 0; index < pipeline.fittedCurves.length; index += 1) {
+    const trajectory = pipeline.acceptedTrajectories[index]
+    const curve = pipeline.fittedCurves[index]
+    if (
+      curve.provenance.sourceTrajectoryId !== trajectory.id ||
+      curve.points.length !== curve.provenance.sourceSampleIndices.length
+    ) {
+      throw new Error('Flowing fitted provenance diverged')
+    }
+    const tube = createFlowingContoursEvidenceTube(field, trajectory)
+    if (
+      tube === null ||
+      validateFlowingContoursTubeCurve(field, tube, {
+        points: curve.points,
+        sourceSampleIndices: curve.provenance.sourceSampleIndices,
+      }) === null
+    ) {
+      continue
+    }
+    const points = curve.points.map((point) => [
+      fit.left + ((point[0] + 0.5) / field.width) * fit.fittedWidth,
+      fit.top + ((point[1] + 0.5) / field.height) * fit.fittedHeight,
+    ])
+    const closed =
+      trajectory.samples.length >= 4 &&
+      samePoint(
+        trajectory.samples[0].point,
+        trajectory.samples.at(-1).point,
+      )
+    const length = pathLength(points, closed)
+    const minimum =
+      controls.minimumStrokeLength *
+      Math.hypot(fit.fittedWidth, fit.fittedHeight)
+    if (length + 1e-9 < minimum) continue
+    retained.push({
+      trajectory,
+      curve,
+      primitive: {
+        points,
+        closed,
+        stroke: { color: 'black', width: 1 },
+        hiddenLineRole: 'source',
+      },
+    })
+  }
+  const generated = generateFlowingContours({ pixels, frame, controls })
+  if (generated.scene.primitives.length !== retained.length) {
+    throw new Error('Flowing generator/stage path bijection failed')
+  }
+  for (let index = 0; index < retained.length; index += 1) {
+    const expected = retained[index].primitive
+    const actual = generated.scene.primitives[index]
+    if (
+      actual.closed !== expected.closed ||
+      actual.hiddenLineRole !== expected.hiddenLineRole ||
+      !sameJson(actual.stroke, expected.stroke) ||
+      actual.points.length !== expected.points.length ||
+      !actual.points.every((point, pointIndex) =>
+        samePoint(point, expected.points[pointIndex]),
+      )
+    ) {
+      throw new Error(
+        'Flowing generator/stage order or exact point equality failed',
+      )
+    }
+  }
+  const endpointReasonCounts = Object.fromEntries(
+    Object.keys(pipeline.diagnostics.endpointReasonCounts).map((name) => [
+      name,
+      0,
+    ]),
+  )
+  let rawPointCount = 0
+  let fittedPointCount = 0
+  let maximumUnsupported = 0
+  let totalUnsupported = 0
+  for (const item of retained) {
+    rawPointCount += item.trajectory.samples.length
+    fittedPointCount += item.curve.points.length
+    maximumUnsupported = Math.max(
+      maximumUnsupported,
+      item.trajectory.maximumUnsupportedSpanLength,
+    )
+    totalUnsupported += item.trajectory.totalUnsupportedSpanLength
+    endpointReasonCounts[item.trajectory.startEndpointReason] += 1
+    endpointReasonCounts[item.trajectory.endEndpointReason] += 1
+  }
+  const expectedDiagnostics = {
+    ...pipeline.diagnostics,
+    acceptedCandidateCount: retained.length,
+    rejectedCandidateCount:
+      pipeline.diagnostics.candidateCount - retained.length,
+    endpointReasonCounts,
+    rawTrajectoryCount: retained.length,
+    rawTrajectoryPointCount: rawPointCount,
+    acceptedMaximumUnsupportedSpanLength: maximumUnsupported,
+    acceptedTotalUnsupportedSpanLength: totalUnsupported,
+    fittedCurveCount: retained.length,
+    fittedCurvePointCount: fittedPointCount,
+    primitiveCount: retained.length,
+  }
+  if (!sameJson(generated.diagnostics, expectedDiagnostics)) {
+    throw new Error('Flowing generator/stage diagnostics aggregate failed')
+  }
+  return {
+    generated,
+    retainedTrajectories: retained.map((item) => item.trajectory),
+    stageProof: {
+      pipelineTermination: pipeline.diagnostics.termination,
+      acceptedTrajectoryCount: pipeline.acceptedTrajectories.length,
+      retainedTrajectoryCount: retained.length,
+      generatorPrimitiveCount: generated.scene.primitives.length,
+      exactBijection: true,
+      exactOrder: true,
+      exactPointEquality: true,
+      exactDiagnosticsAggregates: true,
+    },
+  }
+}
+const regionHit = (primitive, region, frame) => {
+  const points = primitive.points
+  for (let index = 1; index < points.length; index += 1) {
+    const first = points[index - 1]
+    const second = points[index]
+    for (let step = 0; step <= 16; step += 1) {
+      const amount = step / 16
+      const x =
+        (first[0] + (second[0] - first[0]) * amount) / frame.width
+      const y =
+        (first[1] + (second[1] - first[1]) * amount) / frame.height
+      if (
+        x >= region.left &&
+        x <= region.right &&
+        y >= region.top &&
+        y <= region.bottom
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
+const topologyEvidence = (name, reference, flowing) => {
+  const regions = Object.fromEntries(
+    reference.regions.map((region) => [region.name, region]),
+  )
+  const hits = flowing.generated.scene.primitives.map((primitive) =>
+    Object.fromEntries(
+      reference.regions.map((region) => [
+        region.name,
+        regionHit(primitive, region, reference.frame),
+      ]),
+    ),
+  )
+  const unsupported = flowing.retainedTrajectories.map(
+    (trajectory) => trajectory.totalUnsupportedSpanLength,
+  )
+  const anyHit = (regionName) => hits.some((path) => path[regionName])
+  const connected = (first, second, supportedOnly) =>
+    hits.some(
+      (path, index) =>
+        path[first] &&
+        path[second] &&
+        (!supportedOnly || unsupported[index] === 0),
+    )
+  if (name === 'flower') {
+    return [
+      {
+        name: reference.topologyChecks[0],
+        sourceConnectionVerified:
+          connected('left-petals', 'flower-center', true) ||
+          connected('flower-center', 'right-petals', true),
+        forbiddenBridgeObserved: false,
+      },
+      {
+        name: reference.topologyChecks[1],
+        sourceConnectionVerified:
+          anyHit('flower-center') && anyHit('lower-gesture'),
+        forbiddenBridgeObserved:
+          connected('flower-center', 'lower-gesture', false) &&
+          hits.some(
+            (path, index) =>
+              path['flower-center'] &&
+              path['lower-gesture'] &&
+              unsupported[index] > 0,
+          ),
+      },
+    ]
+  }
+  return [
+    {
+      name: reference.topologyChecks[0],
+      sourceConnectionVerified:
+        connected('upper-scales', 'middle-scales', true) ||
+        connected('middle-scales', 'lower-scales', true),
+      forbiddenBridgeObserved: false,
+    },
+    {
+      name: reference.topologyChecks[1],
+      sourceConnectionVerified:
+        anyHit('left-interior') && anyHit('right-interior'),
+      forbiddenBridgeObserved:
+        connected('left-interior', 'right-interior', false) &&
+        hits.some(
+          (path, index) =>
+            path['left-interior'] &&
+            path['right-interior'] &&
+            unsupported[index] > 0,
+        ),
+    },
+  ]
+}
+const source = async (reference) => {
+  const response = await fetch(
+    '/image-assets/' + reference.source.assetId + '.png',
+  )
+  if (!response.ok) {
+    throw new Error(
+      'Reference source returned ' + String(response.status),
+    )
+  }
+  const bytes = await response.arrayBuffer()
+  const pixels = await decodeImageAsset(reference.source.assetId)
+  const metadata = {
+    assetId: reference.source.assetId,
+    repositoryPath: reference.source.repositoryPath,
+    sha256: await hexDigest(bytes),
+    decodedWidth: pixels.width,
+    decodedHeight: pixels.height,
+  }
+  if (!sameJson(metadata, reference.source)) {
+    throw new Error('Reference source identity drifted')
+  }
+  return { pixels, metadata }
+}
+const captureReferenceCase = async (name, reference) => {
+  const resolved = await source(reference)
+  const flowing = mapFlowingStages(
+    resolved.pixels,
+    FLOWING_CONTOURS_REFERENCE_CONTROLS,
+    FLOWING_CONTOURS_REFERENCE_FRAME,
+  )
+  const pencil = generatePencilContour({
+    pixels: resolved.pixels,
+    frame: FLOWING_CONTOURS_REFERENCE_FRAME,
+    controls: PENCIL_CONTOUR_REFERENCE_CONTROLS,
+  })
+  const watercolor = generateWatercolorForms({
+    pixels: resolved.pixels,
+    frame: FLOWING_CONTOURS_REFERENCE_FRAME,
+    controls: WATERCOLOR_FORMS_REFERENCE_CONTROLS,
+  })
+  const flowingMetrics = measureFlowingContoursReference({
+    scene: flowing.generated.scene,
+    acceptedTrajectories: flowing.retainedTrajectories,
+    diagnostics: flowing.generated.diagnostics,
+    options: { regions: reference.regions },
+  })
+  const collectionEvidence =
+    measureFlowingContoursReferenceGeometryEvidence(
+      flowing.generated.scene,
+    )
+  if (collectionEvidence === null) {
+    throw new Error('Flowing collection evidence failed')
+  }
+  const topology = topologyEvidence(name, reference, flowing)
+  const gateFindings = flowingContoursReferenceGateFindings(
+    name,
+    flowingMetrics,
+    { geometry: collectionEvidence, topology },
+  )
+  const pencilMetrics = genericLengthMetrics(pencil.scene)
+  const pencilFindings = flowingContoursPencilComparisonFindings(
+    flowingMetrics,
+    pencilMetrics,
+  )
+  return {
+    source: resolved.metadata,
+    frame: FLOWING_CONTOURS_REFERENCE_FRAME,
+    controls: {
+      flowing: FLOWING_CONTOURS_REFERENCE_CONTROLS,
+      pencil: PENCIL_CONTOUR_REFERENCE_CONTROLS,
+      watercolor: WATERCOLOR_FORMS_REFERENCE_CONTROLS,
+    },
+    flowing: {
+      geometry: await canonicalSceneGeometry(flowing.generated.scene),
+      diagnostics: flowing.generated.diagnostics,
+      stageProof: flowing.stageProof,
+      metrics: flowingMetrics,
+      collectionEvidence,
+      topologyEvidence: topology,
+      gateFindings,
+      pencilComparator: {
+        metrics: pencilMetrics,
+        deltas: {
+          shortPathShare:
+            flowingMetrics.shortPathShare - pencilMetrics.shortPathShare,
+          medianPathLength:
+            flowingMetrics.medianPathLength -
+            pencilMetrics.medianPathLength,
+          upperQuartilePathLength:
+            flowingMetrics.upperQuartilePathLength -
+            pencilMetrics.upperQuartilePathLength,
+          longestPathLength:
+            flowingMetrics.longestPathLength -
+            pencilMetrics.longestPathLength,
+        },
+        findings: pencilFindings,
+      },
+    },
+    pencil: {
+      geometry: await canonicalSceneGeometry(pencil.scene),
+      metrics: pencilMetrics,
+    },
+    watercolor: {
+      geometry: await canonicalSceneGeometry(watercolor.scene),
+      diagnostics: watercolor.diagnostics,
+    },
+  }
+}
+const syntheticDiagonalCurve = () => {
+  const width = 128
+  const height = 96
+  const data = new Uint8ClampedArray(width * height * 4)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const diagonal = 14 + x * 0.52
+      const curve =
+        68 + Math.sin((x / (width - 1)) * Math.PI * 2) * 12
+      const ink =
+        Math.abs(y - diagonal) <= 2 || Math.abs(y - curve) <= 2
+      const value = ink ? 18 : 244
+      const offset = (y * width + x) * 4
+      data[offset] = value
+      data[offset + 1] = value
+      data[offset + 2] = value
+      data[offset + 3] = 255
+    }
+  }
+  return { width, height, data }
+}
+const captureSynthetic = async () => {
+  const flowing = mapFlowingStages(
+    syntheticDiagonalCurve(),
+    FLOWING_CONTOURS_REFERENCE_CONTROLS,
+    FLOWING_CONTOURS_REFERENCE_FRAME,
+  )
+  const metrics = measureFlowingContoursReference({
+    scene: flowing.generated.scene,
+    acceptedTrajectories: flowing.retainedTrajectories,
+    diagnostics: flowing.generated.diagnostics,
+  })
+  return {
+    identity: 'opaque-128x96-diagonal-plus-sinusoidal-curve-v1',
+    geometry: await canonicalSceneGeometry(flowing.generated.scene),
+    diagnostics: flowing.generated.diagnostics,
+    stageProof: flowing.stageProof,
+    antiStaircaseMetrics: {
+      pathCount: metrics.pathCount,
+      shortPathShare: metrics.shortPathShare,
+      medianPathLength: metrics.medianPathLength,
+      longestPathLength: metrics.longestPathLength,
+      turnsOver25DegreesShare: metrics.turnsOver25DegreesShare,
+      turnsOver45DegreesShare: metrics.turnsOver45DegreesShare,
+      staircasePairCount: metrics.staircasePairCount,
+      orthogonalStaircaseSignature:
+        metrics.orthogonalStaircaseSignature,
+    },
+  }
+}
+globalThis.__captureFlowingContoursEvidence = async () => ({
+  schemaVersion: 1,
+  kind: 'flowing-contours-nonvisual-reference-evidence',
+  phase: 'FC24b-phase-2',
+  cases: {
+    flower: await captureReferenceCase(
+      'flower',
+      FLOWING_CONTOURS_REFERENCE_CASES.flower,
+    ),
+    pinecone: await captureReferenceCase(
+      'pinecone',
+      FLOWING_CONTOURS_REFERENCE_CASES.pinecone,
+    ),
+  },
+  synthetic: await captureSynthetic(),
+})
 `
 }
 
-function placeholderHarnessPlugin() {
+function evidenceHarnessPlugin() {
   const requestedPaths = new Set()
   const html =
     '<!doctype html><meta charset="utf-8">' +
     '<link rel="icon" href="data:,">' +
     `<script type="module" src="${HARNESS_MODULE_PATH}"></script>`
-  const moduleSource = placeholderModuleSource()
+  const moduleSource = captureModuleSource()
   return Object.freeze({
     requestedPaths,
     plugin: {
-      name: 'flowing-contours-evidence-placeholder',
+      name: 'flowing-contours-nonvisual-evidence',
+      enforce: 'pre',
+      resolveId(id) {
+        if (id === 'node:crypto') return BROWSER_CRYPTO_STUB_ID
+      },
+      load(id) {
+        if (id === BROWSER_CRYPTO_STUB_ID) {
+          return `export function createHash() {
+  throw new Error('node:crypto hash is outside the browser evidence path')
+}
+`
+        }
+      },
       configureServer(server) {
         server.middlewares.use((request, response, next) => {
           const path = request.url?.split('?', 1)[0] ?? ''
@@ -270,6 +863,23 @@ function placeholderHarnessPlugin() {
             response.end(moduleSource)
             return
           }
+          const asset = SOURCE_ASSETS[path]
+          if (asset !== undefined) {
+            readFile(`${workspaceRoot}/${asset}`).then(
+              (bytes) => {
+                response.statusCode = 200
+                response.setHeader('Content-Type', 'image/png')
+                response.end(bytes)
+              },
+              next,
+            )
+            return
+          }
+          if (path.startsWith('/image-assets/')) {
+            response.statusCode = 404
+            response.end()
+            return
+          }
           next()
         })
       },
@@ -278,25 +888,18 @@ function placeholderHarnessPlugin() {
 }
 
 function assertInertRequests(requestedPaths) {
-  const allowed = new Set([HARNESS_PATH, HARNESS_MODULE_PATH])
-  for (const path of requestedPaths) {
-    if (!allowed.has(path)) {
-      throw new Error(`placeholder harness requested unexpected path: ${path}`)
-    }
-  }
   for (const forbidden of [
     'main.tsx',
     'App.tsx',
     'registry.ts',
-    'generator.ts',
     'compositor',
     'renderer',
-    'metrics',
-    'scene.ts',
+    'renderTo',
+    'Canvas',
   ]) {
     if ([...requestedPaths].some((path) => path.includes(forbidden))) {
       throw new Error(
-        `placeholder harness loaded forbidden path: ${forbidden}`,
+        `nonvisual harness loaded forbidden path: ${forbidden}`,
       )
     }
   }
@@ -308,13 +911,28 @@ async function captureInFreshContext(browser, url) {
   let payload
   try {
     const page = await context.newPage()
+    page.setDefaultTimeout(30_000)
+    const pageErrors = []
+    page.on('pageerror', (error) => {
+      pageErrors.push(error instanceof Error ? error.message : String(error))
+    })
     await page.goto(url, { waitUntil: 'networkidle0' })
-    await page.waitForFunction(
-      () =>
-        globalThis.__flowingContoursEvidencePlaceholder !== undefined,
-    )
+    try {
+      await page.waitForFunction(
+        () => globalThis.__captureFlowingContoursEvidence !== undefined,
+      )
+    } catch (error) {
+      if (pageErrors.length > 0) {
+        throw new Error(
+          `nonvisual harness module failed: ${pageErrors.join(' | ')}`,
+          { cause: error },
+        )
+      }
+      throw error
+    }
+    page.setDefaultTimeout(180_000)
     payload = await page.evaluate(
-      () => globalThis.__flowingContoursEvidencePlaceholder,
+      () => globalThis.__captureFlowingContoursEvidence(),
     )
   } catch (error) {
     primaryError = error
@@ -376,7 +994,7 @@ async function runDryRun(options) {
     runtimeDirectory = await mkdtemp(
       join(tmpdir(), 'flowing-contours-evidence-vite-'),
     )
-    const harness = placeholderHarnessPlugin()
+    const harness = evidenceHarnessPlugin()
     server = await vite.api.createServer({
       appType: 'custom',
       cacheDir: runtimeDirectory,
@@ -410,11 +1028,8 @@ async function runDryRun(options) {
     const url = `http://127.0.0.1:${options.port}${HARNESS_PATH}`
     const first = await captureInFreshContext(browser, url)
     const second = await captureInFreshContext(browser, url)
-    if (
-      JSON.stringify(first) !== JSON.stringify(PLACEHOLDER_PAYLOAD) ||
-      JSON.stringify(second) !== JSON.stringify(PLACEHOLDER_PAYLOAD)
-    ) {
-      throw new Error('Independent placeholder captures differed')
+    if (JSON.stringify(first) !== JSON.stringify(second)) {
+      throw new Error('Independent nonvisual evidence captures differed')
     }
     assertInertRequests(harness.requestedPaths)
     output = {
@@ -427,7 +1042,7 @@ async function runDryRun(options) {
         puppeteerBrowsers: browserTools.browsersVersion,
         vite: vite.version,
       },
-      payload: first,
+      evidence: first,
     }
   } catch (error) {
     primaryError = error
@@ -451,6 +1066,37 @@ function expectArgumentError(args, fragment) {
   throw new Error(`Expected parser rejection containing: ${fragment}`)
 }
 
+function regressionShapeFindings(summary) {
+  const findings = []
+  if (
+    summary.shortPathShare > 0.15 ||
+    summary.medianPathDiagonalFraction < 0.03 ||
+    summary.longGeometryShare < 0.7
+  ) {
+    findings.push('stumpy')
+  }
+  if (
+    summary.turnsOver25DegreesShare > 0.1 ||
+    summary.turnsOver45DegreesShare > 0.025 ||
+    summary.staircasePairCount > 3 ||
+    summary.orthogonalStaircaseSignature > 0.025
+  ) {
+    findings.push('staircase')
+  }
+  if (
+    summary.occupiedCoverageBinCount < 8 ||
+    summary.gateFindings.some(
+      (finding) =>
+        finding === 'coverage' ||
+        finding.startsWith('region:') ||
+        finding.startsWith('topology:'),
+    )
+  ) {
+    findings.push('smooth-but-wrong')
+  }
+  return findings
+}
+
 function selfTest() {
   for (const mode of ['--dry-run', '--write', '--verify']) {
     const parsed = argumentsFrom([mode, '--port', '4401'])
@@ -472,18 +1118,78 @@ function selfTest() {
   ]) {
     expectArgumentError(args, fragment)
   }
-  if (
-    JSON.stringify(
-      JSON.parse(
-        placeholderModuleSource()
-          .match(/Object\.freeze\((\{.*\})\)/)?.[1] ?? '',
-      ),
-    ) !== JSON.stringify(PLACEHOLDER_PAYLOAD) ||
-    /\b(import|require)\b/.test(placeholderModuleSource())
-  ) {
-    throw new Error('placeholder payload or import boundary drifted')
+  const moduleSource = captureModuleSource()
+  for (const required of [
+    'generateFlowingContours',
+    'generatePencilContour',
+    'generateWatercolorForms',
+    'prepareFlowingContoursRaster',
+    'buildFlowingContoursField',
+    'runFlowingContoursPipeline',
+    'measureFlowingContoursReference',
+    'flowingContoursReferenceGateFindings',
+  ]) {
+    if (!moduleSource.includes(required)) {
+      throw new Error(`nonvisual capture import is missing: ${required}`)
+    }
   }
-  assertInertRequests(new Set([HARNESS_PATH, HARNESS_MODULE_PATH]))
+  for (const forbidden of [
+    'renderToSVG',
+    'drawScene',
+    'CanvasRenderingContext',
+    'toDataURL',
+    'image/png',
+  ]) {
+    if (moduleSource.includes(forbidden)) {
+      throw new Error(`nonvisual capture imported output path: ${forbidden}`)
+    }
+  }
+  const diagonal = Math.hypot(1000, 1000)
+  const base = {
+    shortPathShare: 0,
+    medianPathDiagonalFraction: 0.08,
+    longGeometryShare: 0.9,
+    turnsOver25DegreesShare: 0,
+    turnsOver45DegreesShare: 0,
+    staircasePairCount: 0,
+    orthogonalStaircaseSignature: 0,
+    occupiedCoverageBinCount: 12,
+    gateFindings: [],
+  }
+  const negatives = {
+    stump: regressionShapeFindings({
+      ...base,
+      shortPathShare: 0.8,
+      medianPathDiagonalFraction: 8 / diagonal,
+      longGeometryShare: 0.2,
+    }),
+    stair: regressionShapeFindings({
+      ...base,
+      turnsOver25DegreesShare: 0.4,
+      turnsOver45DegreesShare: 0.3,
+      staircasePairCount: 45,
+      orthogonalStaircaseSignature: 0.75,
+    }),
+    smoothWrong: regressionShapeFindings({
+      ...base,
+      occupiedCoverageBinCount: 2,
+      gateFindings: ['coverage', 'region:subject'],
+    }),
+  }
+  if (
+    !negatives.stump.includes('stumpy') ||
+    !negatives.stair.includes('staircase') ||
+    !negatives.smoothWrong.includes('smooth-but-wrong')
+  ) {
+    throw new Error('stump/stair/smooth-wrong negative guards failed')
+  }
+  assertInertRequests(
+    new Set([
+      HARNESS_PATH,
+      HARNESS_MODULE_PATH,
+      ...Object.keys(SOURCE_ASSETS),
+    ]),
+  )
   return { success: true, mode: 'self-test' }
 }
 
