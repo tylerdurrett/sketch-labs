@@ -368,12 +368,41 @@ describe('Watercolor Forms adversarial generator safety', () => {
       expect(first.diagnostics.termination).toBe('limit-reached')
       expect(first.diagnostics.limitedBy).toBe('maxMergeQueueEntryCount')
       expect(first.scene.primitives.length).toBeGreaterThan(0)
+      expect(first.diagnostics.selectedRegionCount).toBeLessThanOrEqual(
+        first.diagnostics.sampleCount / 8,
+      )
+      expect(
+        first.diagnostics.retainedBoundarySegmentCount,
+      ).toBeLessThanOrEqual(first.diagnostics.gridAdjacencyCount / 4)
+      expect(first.diagnostics.primitiveCount).toBeLessThanOrEqual(
+        first.diagnostics.sampleCount / 8,
+      )
+      expect(first.diagnostics.curvePointCount).toBeLessThanOrEqual(
+        first.diagnostics.sampleCount / 4,
+      )
       expect(first.diagnostics.boundaryPathCount).toBeLessThan(
         first.diagnostics.retainedBoundarySegmentCount,
       )
       expect(first.diagnostics.curvePointCount).toBeLessThan(
         first.diagnostics.retainedBoundarySegmentCount * 2,
       )
+      const plottedLength = first.scene.primitives.reduce(
+        (total, primitive) =>
+          total +
+          primitive.points.reduce(
+            (length, point, index) =>
+              index === 0
+                ? length
+                : length +
+                  Math.hypot(
+                    point[0] - primitive.points[index - 1]![0],
+                    point[1] - primitive.points[index - 1]![1],
+                  ),
+            0,
+          ),
+        0,
+      )
+      expect(plottedLength).toBeGreaterThan(FRAME.width)
       expectFiniteBoundedResult(first)
     },
     120_000,

@@ -4,9 +4,10 @@
  * Form detail moves a monotonic cut through the hierarchy: higher values apply
  * a shorter merge prefix. A decreasing area and persistence floor then admits
  * progressively smaller or shorter-lived forms. Qualifying coarse nodes retain
- * descendant coverage as the cut refines. Rejected forms are contracted into
- * an admitted neighbor, while never-admitted components disappear before any
- * boundary inventory can be constructed.
+ * descendant coverage as the cut refines. Work-limited, over-dense cuts retain
+ * a fixed minimum drawable area as an adversarial safety policy. Rejected forms
+ * are contracted into an admitted neighbor, while never-admitted components
+ * disappear before any boundary inventory can be constructed.
  */
 
 import type {
@@ -18,6 +19,8 @@ import type {
 const TRANSPARENT_SUPPORT_REGION_ID = -1
 const MAX_MINIMUM_FORM_AREA = 16
 const MAX_MINIMUM_FORM_PERSISTENCE = 0.04
+const ADVERSARIAL_FORM_DENSITY_DIVISOR = 8
+const ADVERSARIAL_MINIMUM_FORM_AREA = 16
 
 interface AdjacencyEvidence {
   strengthLengthSum: number
@@ -526,7 +529,7 @@ export function selectWatercolorForms(
     hierarchy.partition.raster.width * hierarchy.partition.raster.height,
   )
   const detailRemainder = 1 - formDetail
-  const minimumArea = Math.min(
+  const authoredMinimumArea = Math.min(
     totalSampleCount,
     1 +
       Math.floor(
@@ -535,6 +538,20 @@ export function selectWatercolorForms(
           Math.min(MAX_MINIMUM_FORM_AREA - 1, totalSampleCount - 1),
       ),
   )
+  // A work-limited hierarchy over arbitrary high-entropy input can otherwise
+  // admit almost one singleton per sample. Once that incomplete hierarchy's
+  // form density crosses this fixed safety threshold, require enough
+  // hierarchy-backed area to represent a drawable form. Completed hierarchies
+  // retain the authored detail policy. Rejected leaves still contract through
+  // their weakest selected interface, so this preserves coherent region
+  // ownership instead of taking an arbitrary boundary or primitive prefix.
+  const underAdversarialFormPressure =
+    !hierarchy.complete &&
+    selectedRegionIds.length >
+    Math.ceil(totalSampleCount / ADVERSARIAL_FORM_DENSITY_DIVISOR)
+  const minimumArea = underAdversarialFormPressure
+    ? Math.max(authoredMinimumArea, ADVERSARIAL_MINIMUM_FORM_AREA)
+    : authoredMinimumArea
   const minimumPersistence =
     detailRemainder *
     detailRemainder *
