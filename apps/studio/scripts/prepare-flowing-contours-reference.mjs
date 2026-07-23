@@ -865,10 +865,20 @@ function assertInertRequests(requestedPaths) {
   }
 }
 
-async function closeRuntime(browser, server, primaryError) {
+async function closeRuntime(
+  browser,
+  server,
+  runtimeDirectory,
+  primaryError,
+) {
   const results = await Promise.allSettled([
     Promise.resolve().then(() => browser?.close()),
     Promise.resolve().then(() => server?.close()),
+    Promise.resolve().then(() =>
+      runtimeDirectory === undefined
+        ? undefined
+        : rm(runtimeDirectory, { recursive: true, force: true }),
+    ),
   ])
   if (primaryError !== undefined) throw primaryError
   const failures = results
@@ -891,11 +901,16 @@ async function runCapture(options) {
   ])
   let server
   let browser
+  let runtimeDirectory
   let primaryError
   let output
   try {
+    runtimeDirectory = await mkdtemp(
+      join(tmpdir(), 'flowing-contours-reference-vite-'),
+    )
     const referenceBootstrap = await vite.api.createServer({
       appType: 'custom',
+      cacheDir: runtimeDirectory,
       configFile: false,
       logLevel: 'silent',
       root: studioRoot,
@@ -918,6 +933,7 @@ async function runCapture(options) {
     await server.close()
     server = await vite.api.createServer({
       appType: 'custom',
+      cacheDir: runtimeDirectory,
       configFile: false,
       logLevel: 'silent',
       plugins: [harness.plugin],
@@ -1008,7 +1024,12 @@ async function runCapture(options) {
   } catch (error) {
     primaryError = error
   }
-  await closeRuntime(browser, server, primaryError)
+  await closeRuntime(
+    browser,
+    server,
+    runtimeDirectory,
+    primaryError,
+  )
   return output
 }
 
