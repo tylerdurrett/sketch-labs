@@ -71,6 +71,23 @@ function gaussian(distance: number, width = 0.55): number {
   return Math.exp(-(distance * distance) / (2 * width * width))
 }
 
+function crossingField(): Readonly<FlowingContoursField> {
+  const center = 15
+  const diagonalLength = Math.SQRT2
+  return field(31, 31, (x, y) => {
+    const horizontal = gaussian(y - center)
+    const diagonal =
+      0.95 * gaussian((y - center - (x - center)) / diagonalLength)
+    return {
+      evidence: Math.max(horizontal, diagonal),
+      tangent:
+        horizontal >= diagonal
+          ? [1, 0]
+          : [1 / diagonalLength, 1 / diagonalLength],
+    }
+  })
+}
+
 function at(
   source: Readonly<FlowingContoursField>,
   point: Readonly<Point>,
@@ -429,6 +446,42 @@ describe('Flowing Contours directional growth', () => {
     expect(perpendicular.samples.at(-1)!.point[1]).toBeGreaterThan(10)
   })
 
+  it('does not commit a locally dominant tangent reached by a ridge hop', () => {
+    const crossing = crossingField()
+    const incoming = [-Math.SQRT1_2, -Math.SQRT1_2] as const
+    const trace = growFlowingContoursDirection(
+      crossing,
+      at(crossing, [16.409009742330266, 16.409009742330266]),
+      incoming,
+      'backward',
+      {
+        continuity: 1,
+        flowSmoothing: 0.8,
+        ridgeStepOptions: { stepLength: 0.75 },
+      },
+      createFlowingContoursTestLimits({ 'search-step-count': 16 })!,
+    )
+
+    expect(trace.endpointReason).toBe('curvature')
+    expect(trace.samples).toHaveLength(2)
+    expect(
+      trace.samples.every(
+        (sample) =>
+          Math.abs(
+            sample.tangent[0] * incoming[0] +
+              sample.tangent[1] * incoming[1],
+          ) >= 0.8,
+      ),
+    ).toBe(true)
+    expect(
+      trace.samples.some(
+        (sample) =>
+          Math.abs(sample.point[0] - 15.5953772726) < 1e-6 &&
+          Math.abs(sample.point[1] - 15.0314557629) < 1e-6,
+      ),
+    ).toBe(false)
+  })
+
   it('uses segment travel rather than the corrected field tangent for overlap', () => {
     const source = field(13, 13, (_x, y) => ({
       evidence: gaussian(y - 6),
@@ -437,7 +490,7 @@ describe('Flowing Contours directional growth', () => {
     const sampledTangents: Readonly<Point>[] = []
     const trace = growFlowingContoursDirection(
       source,
-      at(source, [2, 5.55]),
+      at(source, [2, 5.94]),
       [1, 0],
       'forward',
       {
@@ -459,8 +512,8 @@ describe('Flowing Contours directional growth', () => {
         samples: trace.samples.map((sample) => sample.point),
       }),
     ).not.toHaveLength(0)
-    expect(Math.abs(sampledTangents[0]![0])).toBeLessThan(0.3)
-    expect(Math.abs(sampledTangents[0]![1])).toBeGreaterThan(0.9)
+    expect(Math.abs(sampledTangents[0]![0])).toBeLessThan(0.98)
+    expect(Math.abs(sampledTangents[0]![1])).toBeGreaterThan(0.1)
     expect(source.tangentX.every((value) => value === 1)).toBe(true)
     expect(source.tangentY.every((value) => value === 0)).toBe(true)
   })

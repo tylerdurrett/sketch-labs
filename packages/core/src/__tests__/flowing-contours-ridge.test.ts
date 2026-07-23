@@ -71,6 +71,23 @@ function gaussian(distance: number, width = 0.7): number {
   return Math.exp(-(distance * distance) / (2 * width * width))
 }
 
+function crossingField(): Readonly<FlowingContoursField> {
+  const center = 15
+  const diagonalLength = Math.SQRT2
+  return field(31, 31, (x, y) => {
+    const horizontal = gaussian(y - center, 0.55)
+    const diagonal =
+      0.95 * gaussian((y - center - (x - center)) / diagonalLength, 0.55)
+    return {
+      evidence: Math.max(horizontal, diagonal),
+      tangent:
+        horizontal >= diagonal
+          ? [1, 0]
+          : [1 / diagonalLength, 1 / diagonalLength],
+    }
+  })
+}
+
 function at(
   source: Readonly<FlowingContoursField>,
   point: Readonly<Point>,
@@ -260,6 +277,42 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
     expect(result.sample.tangent[1]).toBeGreaterThan(0.95)
   })
 
+  it('accepts both directions of a gradual arc under the 60-degree turn budget', () => {
+    const center = [9, 9] as const
+    const radius = 5
+    const arc = field(19, 19, (x, y) => {
+      const dx = x - center[0]
+      const dy = y - center[1]
+      const distance = Math.hypot(dx, dy)
+      const inverse = distance > 0 ? 1 / distance : 0
+      return {
+        evidence: gaussian(distance - radius, 0.8),
+        tangent: [-dy * inverse, dx * inverse],
+      }
+    })
+    const start = at(arc, [center[0] + radius, center[1]])
+    const stepLength = 1
+    const forward = stepFlowingContoursRidge(arc, start, [0, 1], {
+      stepLength,
+      maximumTurnRadians: Math.PI / 3,
+    })
+    const backward = stepFlowingContoursRidge(arc, start, [0, -1], {
+      stepLength,
+      maximumTurnRadians: Math.PI / 3,
+    })
+
+    expect(forward.kind).toBe('corrected')
+    expect(backward.kind).toBe('corrected')
+    if (forward.kind === 'corrected' && backward.kind === 'corrected') {
+      expect(forward.sample.point[1]).toBeGreaterThan(center[1])
+      expect(backward.sample.point[1]).toBeLessThan(center[1])
+      expect(forward.sample.point[0]).toBeCloseTo(
+        backward.sample.point[0],
+        12,
+      )
+    }
+  })
+
   it('corrects a deliberate normal prediction offset back to the same ridge', () => {
     const straight = field(15, 13, (_x, y) => ({
       evidence: gaussian(y - 6, 0.6),
@@ -323,6 +376,29 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
         ONE_PIXEL_STEP,
       ).kind,
     ).toBe('curvature')
+  })
+
+  it('rejects a corrected tangent that snaps away from its segment chord', () => {
+    const crossing = crossingField()
+    const incoming = [-Math.SQRT1_2, -Math.SQRT1_2] as const
+    const approach = corrected(
+      stepFlowingContoursRidge(
+        crossing,
+        at(crossing, [16.409009742330266, 16.409009742330266]),
+        incoming,
+        { stepLength: 0.75 },
+      ),
+    )
+    const hop = stepFlowingContoursRidge(
+      crossing,
+      approach.sample,
+      approach.sample.tangent,
+      { stepLength: 0.75 },
+    )
+
+    expect(approach.sample.point[0]).toBeCloseTo(16.0273339731, 8)
+    expect(approach.sample.point[1]).toBeCloseTo(15.7300253398, 8)
+    expect(hop.kind).toBe('curvature')
   })
 
   it('stops at two close parallel maxima within the ambiguity margin', () => {

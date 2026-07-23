@@ -29,6 +29,8 @@ const MAXIMUM_ADJACENT_SCALE_RATIO = 2 + 1e-6
 const HARD_MAXIMUM_PREDICTOR_HEADING_RADIANS = (25 * Math.PI) / 180
 /** Correction ownership is always narrower than half an analysis pixel. */
 const HARD_MAXIMUM_OWNERSHIP_RADIUS = 0.49
+/** Covers bounded bilinear/chord error without admitting a visible turn. */
+const ENDPOINT_CHORD_TOLERANCE_RADIANS = (1.25 * Math.PI) / 180
 const SUPPORT_TRAVERSAL_SPACING = 0.25
 const MAXIMUM_SUPPORT_TRAVERSAL_SAMPLE_COUNT = 64
 
@@ -733,6 +735,30 @@ export function stepFlowingContoursRidge(
       return stop('curvature', predictedPoint, sampleCount)
     }
 
+    const segmentTangent = finiteUnitVector([travelX, travelY])
+    const exitTangent =
+      segmentTangent === null
+        ? null
+        : signAlignedUnitVector(correctedTangent, segmentTangent)
+    if (segmentTangent === null || exitTangent === null) {
+      return stop('curvature', predictedPoint, sampleCount)
+    }
+    const exitCosine =
+      segmentTangent[0] * exitTangent[0] +
+      segmentTangent[1] * exitTangent[1]
+    const exitTurn = Math.acos(Math.max(-1, Math.min(1, exitCosine)))
+    // A gradual segment chord lies between its endpoint tangents. If the
+    // corrected exit turns farther than half the total per-step turn budget,
+    // the maximum belongs to another ridge even when both endpoint tangents
+    // pass the broader turn gate.
+    if (
+      exitTurn >
+      resolved.maximumTurnRadians / 2 +
+        ENDPOINT_CHORD_TOLERANCE_RADIANS +
+        ORIENTATION_COHERENCE_EPSILON
+    ) {
+      return stop('curvature', predictedPoint, sampleCount)
+    }
     return Object.freeze({
       kind: 'corrected',
       predictedPoint,

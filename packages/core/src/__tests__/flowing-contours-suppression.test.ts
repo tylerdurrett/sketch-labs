@@ -260,7 +260,7 @@ describe('Flowing Contours accepted-geometry suppression', () => {
     expect(queryFlowingContoursSuppression(query, [5, 2])).toBeLessThan(0.7)
   })
 
-  it('integrates growth segment direction with crossing-aware occupancy', () => {
+  it('does not let crossing-aware occupancy conceal a ridge hop', () => {
     const source = field(13, 9)
     const { result } = commit(source, authenticSelection(source, [5, 2]))
     const query = queryFor(result.state, source)
@@ -303,9 +303,8 @@ describe('Flowing Contours accepted-geometry suppression', () => {
       limits,
     )
 
-    expect(crossing.samples).toHaveLength(2)
-    expect(crossing.samples.at(-1)!.point[1]).toBeGreaterThan(1.9)
-    expect(crossing.endpointReason).toBe('safety-limit')
+    expect(crossing.samples).toHaveLength(1)
+    expect(crossing.endpointReason).toBe('curvature')
     expect(duplicate.samples).toHaveLength(1)
     expect(duplicate.endpointReason).toBe('represented-collision')
   })

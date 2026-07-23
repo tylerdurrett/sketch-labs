@@ -15,11 +15,9 @@ import { searchFlowingContoursCandidate } from '../sketches/flowing-contours/sea
 import { selectFlowingContoursCandidate } from '../sketches/flowing-contours/selection'
 import {
   FLOWING_CONTOURS_ENDPOINT_REASONS,
-  type AcceptedFlowingTrajectory,
   type FlowingContoursField,
   type FlowingContoursLimitName,
 } from '../sketches/flowing-contours/types'
-import type { Point } from '../types'
 
 function field(
   width = 32,
@@ -181,60 +179,6 @@ function endpointTotal(
   )
 }
 
-function segmentDirection(
-  first: Readonly<Point>,
-  second: Readonly<Point>,
-): Readonly<Point> {
-  const dx = second[0] - first[0]
-  const dy = second[1] - first[1]
-  const length = Math.hypot(dx, dy)
-  if (!Number.isFinite(length) || length <= 0) {
-    throw new Error('fixture segment must be nondegenerate')
-  }
-  return Object.freeze([dx / length, dy / length])
-}
-
-function endpointDirection(
-  trajectory: Readonly<AcceptedFlowingTrajectory>,
-  endpoint: 'start' | 'end',
-): Readonly<Point> {
-  const samples = trajectory.samples
-  return endpoint === 'start'
-    ? segmentDirection(samples[1]!.point, samples[0]!.point)
-    : segmentDirection(samples.at(-2)!.point, samples.at(-1)!.point)
-}
-
-function endpointDistance(
-  point: Readonly<Point>,
-  trajectory: Readonly<AcceptedFlowingTrajectory>,
-): number {
-  const first = trajectory.samples[0]!.point
-  const last = trajectory.samples.at(-1)!.point
-  return Math.min(
-    Math.hypot(point[0] - first[0], point[1] - first[1]),
-    Math.hypot(point[0] - last[0], point[1] - last[1]),
-  )
-}
-
-function nearestEndpoint(
-  point: Readonly<Point>,
-  trajectory: Readonly<AcceptedFlowingTrajectory>,
-): 'start' | 'end' {
-  const first = trajectory.samples[0]!.point
-  const last = trajectory.samples.at(-1)!.point
-  return Math.hypot(point[0] - first[0], point[1] - first[1]) <=
-    Math.hypot(point[0] - last[0], point[1] - last[1])
-    ? 'start'
-    : 'end'
-}
-
-function absoluteAlignment(
-  first: Readonly<Point>,
-  second: Readonly<Point>,
-): number {
-  return Math.abs(first[0] * second[0] + first[1] * second[1])
-}
-
 describe('Flowing Contours pipeline', () => {
   it('composes stable whole trajectories, fitting, suppression, and exact diagnostics', () => {
     const source = field()
@@ -375,14 +319,11 @@ describe('Flowing Contours pipeline', () => {
     )
     const diagonal = Math.hypot(source.width, source.height)
     const traversals = output.acceptedTrajectories.map(
-      (trajectory, index) => {
+      (trajectory) => {
         const first = trajectory.samples[0]!.point
         const last = trajectory.samples.at(-1)!.point
-        const direction = segmentDirection(first, last)
         return {
-          index,
           trajectory,
-          direction,
           horizontal:
             Math.abs(last[0] - first[0]) > 20 &&
             Math.abs(last[1] - first[1]) < 6,
@@ -444,7 +385,7 @@ describe('Flowing Contours pipeline', () => {
       ),
     ).toBe(true)
 
-    const coreCollisions = transverse.flatMap((traversal) =>
+    const coreStops = transverse.flatMap((traversal) =>
       (['start', 'end'] as const).flatMap((endpoint) => {
         const reason =
           endpoint === 'start'
@@ -454,41 +395,21 @@ describe('Flowing Contours pipeline', () => {
           endpoint === 'start'
             ? traversal.trajectory.samples[0]!.point
             : traversal.trajectory.samples.at(-1)!.point
-        return reason === 'represented-collision' &&
+        return (reason === 'ambiguity' || reason === 'curvature') &&
           Math.abs(point[0] - 15) <= 1.5 &&
           Math.abs(point[1] - 15) <= 1.5
-          ? [{ ...traversal, endpoint, point }]
+          ? [{ endpoint, point, reason }]
           : []
       }),
     )
-    expect(coreCollisions.length).toBeGreaterThan(0)
-    for (const collision of coreCollisions) {
-      const collisionDirection = endpointDirection(
-        collision.trajectory,
-        collision.endpoint,
-      )
-      const priorMatch = transverse
-        .filter((candidate) => candidate.index < collision.index)
-        .find((candidate) => {
-          const endpoint = nearestEndpoint(
-            collision.point,
-            candidate.trajectory,
-          )
-          return (
-            endpointDistance(collision.point, candidate.trajectory) <=
-              0.1 * diagonal &&
-            absoluteAlignment(
-              collisionDirection,
-              endpointDirection(candidate.trajectory, endpoint),
-            ) >= 0.8
-          )
-        })
-
-      expect(priorMatch).toBeDefined()
-      expect(
-        absoluteAlignment(collisionDirection, dominant[0]!.direction),
-      ).toBeLessThan(0.8)
-    }
+    expect(coreStops).toHaveLength(transverse.length)
+    expect(coreStops.map((stop) => stop.reason).sort()).toEqual([
+      'ambiguity',
+      'curvature',
+    ])
+    expect(output.diagnostics.endpointReasonCounts['represented-collision']).toBe(
+      0,
+    )
     expect(output.fittedCurves).toHaveLength(
       output.acceptedTrajectories.length,
     )
