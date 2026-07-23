@@ -4,9 +4,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID,
   PENCIL_CONTOUR_DEFAULT_IMAGE_ASSET_ID,
   PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
   WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID,
+  flowingContours,
   watercolorForms,
   type Preset,
 } from "@harness/core";
@@ -550,9 +552,228 @@ describe("App — Photo Scribble integration (#333)", () => {
   });
 });
 
-describe("App — Watercolor Forms integration (#402 WF10)", () => {
-  it("opens as the newest Sketch with its managed source, authored controls, and a live ordinary preview", async () => {
+describe("App — Flowing Contours integration (#403 FC21)", () => {
+  it("opens as the newest Sketch with its managed source, exact four controls, and an ordinary live preview", async () => {
     mountApp();
+    await act(async () => Promise.resolve());
+
+    expect(trigger().textContent).toBe("Flowing Contours");
+    expect(appImageResolution.ids).toEqual([
+      FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID,
+    ]);
+    expect(
+      document.querySelector(
+        '[aria-label="imageAsset image asset identity"]',
+      )?.textContent,
+    ).toBe(FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID);
+    expect(
+      [...document.querySelectorAll('#inspector input[id^="control-"]')].map(
+        (input) => input.id,
+      ),
+    ).toEqual([
+      "control-curveDetail",
+      "control-continuity",
+      "control-flowSmoothing",
+      "control-minimumStrokeLength",
+    ]);
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-params"),
+    ).toBe(
+      JSON.stringify({
+        imageAsset: FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID,
+        curveDetail: 0.45,
+        continuity: 0.45,
+        flowSmoothing: 0.7,
+        minimumStrokeLength: 0.04,
+      }),
+    );
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-render-state"),
+    ).toBe("fill-live");
+
+    setNumberInput(
+      document.querySelector<HTMLInputElement>("#control-continuity")!,
+      "0.73",
+    );
+    expect(
+      JSON.parse(
+        document
+          .querySelector('[data-testid="canvas"]')!
+          .getAttribute("data-params")!,
+      ),
+    ).toMatchObject({ continuity: 0.73 });
+    expect(
+      ["Save", "Reload", "Export PNG", "Export SVG", "Export Hidden-line SVG"].map(
+        (label) => button(label).textContent,
+      ),
+    ).toEqual([
+      "Save",
+      "Reload",
+      "Export PNG",
+      "Export SVG",
+      "Export Hidden-line SVG",
+    ]);
+  });
+
+  it("round-trips all four independent controls through Presets and honors locks when Randomizing", async () => {
+    appPresetClient.list
+      .mockResolvedValueOnce([])
+      .mockResolvedValue(["flowing-authored"]);
+    mountApp();
+    await act(async () => Promise.resolve());
+
+    const curveDetail =
+      document.querySelector<HTMLInputElement>("#control-curveDetail")!;
+    const continuity =
+      document.querySelector<HTMLInputElement>("#control-continuity")!;
+    const flowSmoothing =
+      document.querySelector<HTMLInputElement>("#control-flowSmoothing")!;
+    const minimumStrokeLength = document.querySelector<HTMLInputElement>(
+      "#control-minimumStrokeLength",
+    )!;
+
+    setNumberInput(curveDetail, "0.61");
+    setNumberInput(continuity, "0.72");
+    setNumberInput(flowSmoothing, "0.83");
+    setNumberInput(minimumStrokeLength, "0.095");
+    act(() =>
+      document
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="curveDetail lock"]',
+        )!
+        .click(),
+    );
+    expect(
+      document
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="curveDetail lock"]',
+        )
+        ?.getAttribute("aria-pressed"),
+    ).toBe("true");
+
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.2);
+    act(() => button("Randomize").click());
+    expect(curveDetail.value).toBe("0.61");
+    expect(continuity.value).toBe("0.2");
+    expect(flowSmoothing.value).toBe("0.2");
+    expect(Number(minimumStrokeLength.value)).toBeCloseTo(0.054);
+    expect(random).toHaveBeenCalledTimes(3);
+
+    setTextInput(
+      document.querySelector<HTMLInputElement>(
+        'input[aria-label="preset name"]',
+      )!,
+      "flowing-authored",
+    );
+    act(() => button("Save").click());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(appPresetClient.save).toHaveBeenCalledOnce();
+    const saved = appPresetClient.save.mock.calls[0]![0];
+    expect(saved).toMatchObject({
+      sketch: "flowing-contours",
+      name: "flowing-authored",
+      locks: ["curveDetail"],
+      params: {
+        imageAsset: FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID,
+        curveDetail: 0.61,
+        continuity: 0.2,
+        flowSmoothing: 0.2,
+        minimumStrokeLength: expect.closeTo(0.054),
+      },
+    });
+
+    setNumberInput(curveDetail, "0.12");
+    setNumberInput(continuity, "0.13");
+    appPresetClient.load.mockResolvedValue(saved);
+    setSelectValue(
+      document.querySelector<HTMLSelectElement>(
+        'select[aria-label="saved presets"]',
+      )!,
+      "flowing-authored",
+    );
+    act(() => button("Reload").click());
+    await act(async () => Promise.resolve());
+
+    expect(appPresetClient.load).toHaveBeenCalledWith(
+      "flowing-contours",
+      "flowing-authored",
+    );
+    expect(curveDetail.value).toBe("0.61");
+    expect(continuity.value).toBe("0.2");
+    expect(flowSmoothing.value).toBe("0.2");
+    expect(Number(minimumStrokeLength.value)).toBeCloseTo(0.054);
+    expect(
+      document
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="curveDetail lock"]',
+        )
+        ?.getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  it("keeps a missing managed source unresolved without launching analysis or enabling exports", async () => {
+    appImageResolution.failure = "missing";
+    const generate = vi.spyOn(flowingContours, "generate");
+    mountApp();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const canvas = document.querySelector<HTMLElement>(
+      '[data-testid="canvas"]',
+    )!;
+    expect(trigger().textContent).toBe("Flowing Contours");
+    expect(appImageResolution.ids).toEqual([
+      FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID,
+    ]);
+    expect(
+      document.querySelector(
+        '[aria-label="imageAsset image asset identity"]',
+      )?.textContent,
+    ).toBe(FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID);
+    expect(JSON.parse(canvas.dataset.params!)).toMatchObject({
+      imageAsset: FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID,
+    });
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("missing");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(
+      FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID,
+    );
+    expect(document.body.textContent).toContain("Image Asset is missing");
+    for (const label of [
+      "Fill",
+      "Export PNG",
+      "Export SVG",
+      "Export Hidden-line SVG",
+    ]) {
+      expect(button(label).disabled).toBe(true);
+      act(() => button(label).click());
+    }
+    expect(generate).not.toHaveBeenCalled();
+    expect(appCanvas.captureCalls).toBe(0);
+    expect(exportJob.starts).toBe(0);
+    expect(appImageResolution.ids).toEqual([
+      FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID,
+    ]);
+    generate.mockRestore();
+  });
+});
+
+describe("App — Watercolor Forms integration (#402 WF10)", () => {
+  it("remains navigable with its managed source, authored controls, and a live ordinary preview", async () => {
+    mountApp();
+    await act(async () => Promise.resolve());
+    appImageResolution.ids = [];
+    selectOption("Watercolor Forms");
     await act(async () => Promise.resolve());
 
     expect(trigger().textContent).toBe("Watercolor Forms");
@@ -626,8 +847,11 @@ describe("App — Watercolor Forms integration (#402 WF10)", () => {
   it("round-trips its independent controls through the ordinary Preset surface", async () => {
     appPresetClient.list
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValue(["watercolor-authored"]);
     mountApp();
+    await act(async () => Promise.resolve());
+    selectOption("Watercolor Forms");
     await act(async () => Promise.resolve());
 
     setNumberInput(
@@ -698,6 +922,12 @@ describe("App — Watercolor Forms integration (#402 WF10)", () => {
     appImageResolution.failure = "missing";
     const generate = vi.spyOn(watercolorForms, "generate");
     mountApp();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    appImageResolution.ids = [];
+    selectOption("Watercolor Forms");
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
