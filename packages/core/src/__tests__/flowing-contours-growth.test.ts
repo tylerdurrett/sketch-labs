@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { sampleFlowingContoursField } from '../sketches/flowing-contours/field'
 import {
   growFlowingContoursDirection,
+  measureFlowingContoursCurvatureChange,
   type FlowingContoursDirectionalGrowthOptions,
 } from '../sketches/flowing-contours/growth'
 import { createFlowingContoursTestLimits } from '../sketches/flowing-contours/limits'
@@ -362,7 +363,31 @@ describe('Flowing Contours directional growth', () => {
     expect(trace.endpointReason).toBe('represented-collision')
     expect(trace.samples.at(-1)!.point[0]).toBe(6)
     expect(trace.samples.some((sample) => sample.point[0] === 7)).toBe(false)
-    expect(sampled).toHaveLength(trace.searchStepCount + 1)
+    expect(sampled.length).toBeGreaterThan(trace.searchStepCount + 1)
+    expect(sampled.length).toBeLessThanOrEqual(
+      trace.searchStepCount * 64 + 1,
+    )
+  })
+
+  it('detects a thin represented barrier crossed inside a candidate segment', () => {
+    const straight = field(15, 9, (_x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+    const sampledX: number[] = []
+    const trace = grow(straight, [3, 4], {
+      ...OPTIONS,
+      ridgeStepOptions: { stepLength: 2.4 },
+      representedOverlapSampler(point) {
+        sampledX.push(point[0])
+        return Math.abs(point[0] - 5) < 1e-12 ? 0.9 : 0
+      },
+    })
+
+    expect(trace.endpointReason).toBe('represented-collision')
+    expect(trace.samples).toHaveLength(1)
+    expect(trace.searchStepCount).toBe(1)
+    expect(sampledX).toContain(5)
   })
 
   it('enforces exact search-step, breadth, and weak-step caps', () => {
@@ -425,6 +450,19 @@ describe('Flowing Contours directional growth', () => {
     expect(distanceLimited.endpointReason).toBe('evidence-exhausted')
     expect(distanceLimited.searchStepCount).toBe(2)
     expect(distanceLimited.samples).toHaveLength(1)
+
+    const pointLimited = grow(
+      straight,
+      [3, 4],
+      OPTIONS,
+      createFlowingContoursTestLimits({
+        'search-step-count': 32,
+        'raw-trajectory-point-count': 4,
+      })!,
+    )
+    expect(pointLimited.endpointReason).toBe('safety-limit')
+    expect(pointLimited.searchStepCount).toBe(3)
+    expect(pointLimited.samples).toHaveLength(4)
   })
 
   it('uses overlap penalty to order bounded directional alternatives', () => {
@@ -484,6 +522,151 @@ describe('Flowing Contours directional growth', () => {
     expect(first.samples).toHaveLength(3)
   })
 
+  it('does useful distinct beam work from an aligned anchor and deduplicates successors', () => {
+    const straight = field(15, 9, (_x, y) => ({
+      evidence: gaussian(y - 4, 0.8),
+      tangent: [1, 0],
+    }))
+    const sampled: Point[] = []
+    const trace = grow(
+      straight,
+      [3, 4],
+      {
+        ...OPTIONS,
+        directionAlternatives: [
+          [1, 0.35],
+          [1, -0.35],
+          [2, 0],
+        ],
+        representedOverlapSampler(point) {
+          sampled.push([point[0], point[1]])
+          return 0
+        },
+      },
+      createFlowingContoursTestLimits({
+        'search-breadth': 3,
+        'search-step-count': 6,
+      })!,
+    )
+
+    const firstAttemptSamples = sampled.filter(
+      (point) => point[0] > 3 && point[0] < 4.1,
+    )
+    expect(trace.searchStepCount).toBeLessThanOrEqual(6)
+    expect(trace.searchStepCount).toBeGreaterThanOrEqual(4)
+    expect(trace.samples.length).toBeGreaterThan(1)
+    expect(
+      new Set(firstAttemptSamples.map((point) => point[1].toFixed(8))).size,
+    ).toBeGreaterThan(1)
+  })
+
+  it('deduplicates numerically identical successors before the next beam wave', () => {
+    const straight = field(20, 9, (_x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+    const trace = grow(
+      straight,
+      [3, 4],
+      {
+        ...OPTIONS,
+        directionAlternatives: [
+          [1, 1e-16],
+          [1, -1e-16],
+        ],
+      },
+      createFlowingContoursTestLimits({
+        'search-breadth': 3,
+        'search-step-count': 6,
+      })!,
+    )
+
+    expect(trace.searchStepCount).toBe(6)
+    expect(trace.samples).toHaveLength(5)
+    expect(trace.endpointReason).toBe('safety-limit')
+  })
+
+  it('bounds a long smooth loop by raw points with linear attempted work', () => {
+    const center = [16, 16] as const
+    const radius = 9
+    const loop = field(33, 33, (x, y) => {
+      const dx = x - center[0]
+      const dy = y - center[1]
+      const radial = Math.hypot(dx, dy)
+      return {
+        evidence: gaussian(radial - radius, 0.7),
+        tangent:
+          radial === 0
+            ? ([1, 0] as const)
+            : ([-dy / radial, dx / radial] as const),
+      }
+    })
+    let overlapCalls = 0
+    const trace = growFlowingContoursDirection(
+      loop,
+      at(loop, [25, 16]),
+      [0, 1],
+      'forward',
+      {
+        ...OPTIONS,
+        representedOverlapSampler() {
+          overlapCalls += 1
+          return 0
+        },
+      },
+      createFlowingContoursTestLimits({
+        'search-step-count': 100,
+        'raw-trajectory-point-count': 8,
+      })!,
+    )
+
+    expect(trace.endpointReason).toBe('safety-limit')
+    expect(trace.samples).toHaveLength(8)
+    expect(trace.searchStepCount).toBe(7)
+    expect(overlapCalls).toBeLessThanOrEqual(1 + trace.searchStepCount * 64)
+  })
+
+  it('penalizes signed zigzag turn changes more than a matched smooth arc', () => {
+    const smooth = [0, 1, 2, 3, 4].map((index) => {
+      const angle = (index * Math.PI) / 12
+      return [Math.cos(angle), Math.sin(angle)] as Point
+    })
+    const zigzag = [
+      [0, 0] as Point,
+      [1, 0.3] as Point,
+      [2, -0.3] as Point,
+      [3, 0.3] as Point,
+      [4, -0.3] as Point,
+    ]
+
+    expect(measureFlowingContoursCurvatureChange(smooth)).toBeLessThan(0.01)
+    expect(measureFlowingContoursCurvatureChange(zigzag)).toBeGreaterThan(0.5)
+  })
+
+  it('discards provisional overlap when competing terminal gaps roll back', () => {
+    const oneSided = field(10, 9, (x, y) => ({
+      evidence: (x < 5 ? 1 : 0.01) * gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+    const withoutOverlap = grow(oneSided, [4, 4], {
+      ...OPTIONS,
+      continuity: 1,
+      directionAlternatives: [[1, 0.2]],
+    })
+    const withProvisionalOverlap = grow(oneSided, [4, 4], {
+      ...OPTIONS,
+      continuity: 1,
+      directionAlternatives: [[1, 0.2]],
+      representedOverlapSampler(point) {
+        return point[0] > 4 ? 0.6 : 0
+      },
+    })
+
+    expect(withProvisionalOverlap).toEqual(withoutOverlap)
+    expect(withProvisionalOverlap.samples).toHaveLength(1)
+    expect(withProvisionalOverlap.endpointReason).toBe('source-boundary')
+  })
+
   it('uses Flow smoothing only for beam curvature preference', () => {
     const straight = field(15, 9, (_x, y) => ({
       evidence: gaussian(y - 4),
@@ -531,6 +714,10 @@ describe('Flowing Contours directional growth', () => {
       {
         ...OPTIONS,
         ridgeStepOptions: { stepLength: -1 },
+      },
+      {
+        ...OPTIONS,
+        ridgeStepOptions: { stepLength: 0.01 },
       },
     ] as readonly FlowingContoursDirectionalGrowthOptions[]
 

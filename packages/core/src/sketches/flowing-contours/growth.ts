@@ -1,16 +1,17 @@
 /**
  * Bounded one-direction Flowing Contours growth.
  *
- * Weak ridge observations are provisional. They become public trajectory
- * samples only when compatible corrected evidence is found on the far side;
- * every other stop rolls the provisional suffix back to the last directly
- * supported sample.
+ * Search states retain persistent predecessor nodes and incremental objective
+ * totals. Arrays are materialized only for the selected terminal trace. Weak
+ * ridge observations remain provisional until compatible corrected evidence
+ * is reacquired; every other stop rolls back to the last supported node.
  */
 
 import type { Point } from '../../types'
 import {
   compareFlowingContoursObjectiveOrder,
   scoreFlowingContoursCandidate,
+  type FlowingContoursObjectiveOrderKey,
 } from './objective'
 import {
   FLOWING_CONTOURS_LIMITS,
@@ -31,14 +32,21 @@ import type {
 
 const VECTOR_EPSILON = 1e-12
 const GAP_ALIGNMENT_FLOOR = 0.75
+const MINIMUM_GROWTH_STEP_LENGTH = 0.125
+const DEFAULT_RIDGE_STEP_LENGTH = 0.75
 const DEFAULT_REPRESENTED_COLLISION_THRESHOLD = 0.7
+const OVERLAP_TRAVERSAL_SPACING = 0.25
+const MAXIMUM_OVERLAP_SAMPLES_PER_SEGMENT = 64
 const DEFAULT_RIDGE_OPTIONS = Object.freeze({}) as FlowingRidgeStepOptions
 const EMPTY_ALTERNATIVES =
   Object.freeze([]) as readonly Readonly<Point>[]
 
 /**
- * A pure occupancy query. It is called at most once for the anchor and once
- * per consumed search step, so its total work is bounded by FC03 accounting.
+ * A pure occupancy query returning represented coverage in `[0, 1]`.
+ *
+ * Growth calls it on the anchor and on a fixed, bounded set of samples along
+ * each attempted segment. The maximum is collision policy; the bounded mean
+ * contributes to beam ordering.
  */
 export type FlowingContoursRepresentedOverlapSampler = (
   point: Readonly<Point>,
@@ -53,7 +61,7 @@ export interface FlowingContoursDirectionalGrowthOptions {
   readonly ridgeStepOptions?: Readonly<FlowingRidgeStepOptions>
   /**
    * Stable signed alternatives for the bounded beam. The primary requested
-   * direction is always first and every alternative must share its sign.
+   * heading is first and alternatives must occupy the same signed half-plane.
    */
   readonly directionAlternatives?: readonly Readonly<Point>[]
   readonly representedOverlapSampler?: FlowingContoursRepresentedOverlapSampler
@@ -71,38 +79,82 @@ interface ResolvedOptions {
   readonly representedCollisionThreshold: number
 }
 
+interface PathNode {
+  readonly previous: Readonly<PathNode> | null
+  readonly sample: Readonly<CorrectedFlowingRidgeSample>
+  readonly sampleIndex: number
+}
+
+interface SupportNode {
+  readonly previous: Readonly<SupportNode> | null
+  readonly span: Readonly<FlowingContoursSpanSupportProvenance>
+  readonly count: number
+}
+
+interface IncrementalMetrics {
+  readonly sampleCount: number
+  readonly evidenceSum: number
+  readonly ambiguitySum: number
+  readonly segmentCount: number
+  readonly coherenceSum: number
+  readonly curvatureChangeSum: number
+  readonly lastSegmentDirection: Readonly<Point> | null
+  readonly lastSignedTurn: number | null
+}
+
 interface SearchState {
   readonly stableId: number
-  readonly samples: readonly Readonly<CorrectedFlowingRidgeSample>[]
-  readonly spanSupport: readonly Readonly<FlowingContoursSpanSupportProvenance>[]
-  readonly current: Readonly<CorrectedFlowingRidgeSample>
+  readonly committedTail: Readonly<PathNode>
+  readonly currentTail: Readonly<PathNode>
+  readonly supportTail: Readonly<SupportNode> | null
+  readonly committedMetrics: Readonly<IncrementalMetrics>
+  readonly currentMetrics: Readonly<IncrementalMetrics>
   readonly travelDirection: Readonly<Point>
-  readonly provisional: readonly Readonly<CorrectedFlowingRidgeSample>[]
   readonly provisionalLength: number
   readonly provisionalMinimumAlignment: number
   readonly weakStepCount: number
-  readonly length: number
-  readonly overlapSum: number
+  readonly committedLength: number
+  readonly committedOverlapSum: number
+  readonly committedOverlapCount: number
+  readonly provisionalOverlapSum: number
+  readonly provisionalOverlapCount: number
   readonly endpointReason: FlowingContoursEndpointReason | null
 }
+
+interface OverlapMeasurement {
+  readonly maximum: number
+  readonly sum: number
+  readonly count: number
+}
+
+type RequiredGrowthLimit =
+  | 'search-breadth'
+  | 'search-step-count'
+  | 'weak-span-step-count'
+  | 'weak-span-distance'
+  | 'raw-trajectory-point-count'
 
 function frozenPoint(x: number, y: number): Readonly<Point> {
   return Object.freeze([x, y] as Point)
 }
 
 function unit(vector: Readonly<Point>): Readonly<Point> | null {
-  const x = vector[0]
-  const y = vector[1]
-  const length = Math.hypot(x, y)
-  if (
-    !Number.isFinite(x) ||
-    !Number.isFinite(y) ||
-    !Number.isFinite(length) ||
-    length <= VECTOR_EPSILON
-  ) {
+  try {
+    const x = vector[0]
+    const y = vector[1]
+    const length = Math.hypot(x, y)
+    if (
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      !Number.isFinite(length) ||
+      length <= VECTOR_EPSILON
+    ) {
+      return null
+    }
+    return frozenPoint(x / length, y / length)
+  } catch {
     return null
   }
-  return frozenPoint(x / length, y / length)
 }
 
 function aligned(
@@ -133,13 +185,11 @@ function aligned(
 
 function snapshotSample(
   source: Readonly<CorrectedFlowingRidgeSample>,
-  direction?: Readonly<Point>,
+  direction: Readonly<Point>,
 ): Readonly<CorrectedFlowingRidgeSample> | null {
   try {
     const point = frozenPoint(source.point[0], source.point[1])
-    const tangent = direction
-      ? aligned(source.tangent, direction)?.tangent
-      : unit(source.tangent)
+    const tangent = aligned(source.tangent, direction)?.tangent
     if (
       tangent == null ||
       !Number.isFinite(point[0]) ||
@@ -205,11 +255,7 @@ function gapDirectionalAlignment(
 }
 
 function limitValue(
-  name:
-    | 'search-breadth'
-    | 'search-step-count'
-    | 'weak-span-step-count'
-    | 'weak-span-distance',
+  name: RequiredGrowthLimit,
   limits: Readonly<FlowingContoursLimits>,
 ): number | null {
   try {
@@ -225,6 +271,31 @@ function limitValue(
   } catch {
     return null
   }
+}
+
+function explicitStepLength(
+  ridgeOptions: Readonly<FlowingRidgeStepOptions>,
+): number | null {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      ridgeOptions,
+      'stepLength',
+    )
+    if (descriptor === undefined) return DEFAULT_RIDGE_STEP_LENGTH
+    if (!('value' in descriptor)) return null
+    const value = descriptor.value
+    return typeof value === 'number' &&
+      Number.isFinite(value) &&
+      value >= MINIMUM_GROWTH_STEP_LENGTH
+      ? value
+      : null
+  } catch {
+    return null
+  }
+}
+
+function directionKey(direction: Readonly<Point>): string {
+  return `${direction[0]}|${direction[1]}`
 }
 
 function resolveOptions(
@@ -251,13 +322,9 @@ function resolveOptions(
 
     const suppliedAlternatives =
       options.directionAlternatives ?? EMPTY_ALTERNATIVES
-    if (
-      !Array.isArray(suppliedAlternatives) ||
-      suppliedAlternatives.length + 1 > breadth
-    ) {
-      return null
-    }
-    const directions = [primary]
+    if (!Array.isArray(suppliedAlternatives)) return null
+    const directions: Readonly<Point>[] = [primary]
+    const seenDirections = new Set([directionKey(primary)])
     for (const alternative of suppliedAlternatives) {
       const candidate = unit(alternative)
       if (
@@ -267,8 +334,23 @@ function resolveOptions(
       ) {
         return null
       }
-      directions.push(candidate)
+      const key = directionKey(candidate)
+      if (!seenDirections.has(key)) {
+        seenDirections.add(key)
+        directions.push(candidate)
+      }
     }
+    if (directions.length > breadth) return null
+
+    const ridgeSource = options.ridgeStepOptions ?? DEFAULT_RIDGE_OPTIONS
+    if (explicitStepLength(ridgeSource) === null) return null
+    const ridgeStepOptions =
+      directions.length > 1
+        ? Object.freeze({
+            ...ridgeSource,
+            predictorHeadingInfluence: 1,
+          })
+        : ridgeSource
 
     const sampler = options.representedOverlapSampler ?? null
     const threshold =
@@ -286,7 +368,7 @@ function resolveOptions(
     return Object.freeze({
       continuity: options.continuity,
       flowSmoothing: options.flowSmoothing,
-      ridgeStepOptions: options.ridgeStepOptions ?? DEFAULT_RIDGE_OPTIONS,
+      ridgeStepOptions,
       directions: Object.freeze(directions),
       representedOverlapSampler: sampler,
       representedCollisionThreshold: threshold,
@@ -309,97 +391,282 @@ function sampleOverlap(
   }
 }
 
-function appendDirectSpan(
-  spans: readonly Readonly<FlowingContoursSpanSupportProvenance>[],
-  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
-  next: Readonly<CorrectedFlowingRidgeSample>,
+function overlapAlongSegment(
+  sampler: FlowingContoursRepresentedOverlapSampler | null,
+  start: Readonly<Point>,
+  end: Readonly<Point>,
+): Readonly<OverlapMeasurement> | null {
+  if (sampler === null) return Object.freeze({ maximum: 0, sum: 0, count: 0 })
+  const dx = end[0] - start[0]
+  const dy = end[1] - start[1]
+  const segmentLength = Math.hypot(dx, dy)
+  if (!Number.isFinite(segmentLength) || segmentLength <= VECTOR_EPSILON) {
+    return null
+  }
+
+  const parameters: number[] = []
+  const intervalCount = Math.max(
+    1,
+    Math.ceil(segmentLength / OVERLAP_TRAVERSAL_SPACING),
+  )
+  for (let index = 1; index <= intervalCount; index += 1) {
+    parameters.push(index / intervalCount)
+  }
+  if (Math.abs(dx) > VECTOR_EPSILON) {
+    for (
+      let x = Math.ceil(Math.min(start[0], end[0]));
+      x <= Math.floor(Math.max(start[0], end[0]));
+      x += 1
+    ) {
+      parameters.push((x - start[0]) / dx)
+    }
+  }
+  if (Math.abs(dy) > VECTOR_EPSILON) {
+    for (
+      let y = Math.ceil(Math.min(start[1], end[1]));
+      y <= Math.floor(Math.max(start[1], end[1]));
+      y += 1
+    ) {
+      parameters.push((y - start[1]) / dy)
+    }
+  }
+  if (parameters.length > MAXIMUM_OVERLAP_SAMPLES_PER_SEGMENT) return null
+
+  parameters.sort((left, right) => left - right)
+  let previous = Number.NEGATIVE_INFINITY
+  let maximum = 0
+  let sum = 0
+  let count = 0
+  for (const parameter of parameters) {
+    if (
+      !Number.isFinite(parameter) ||
+      parameter <= 0 ||
+      parameter > 1 ||
+      Math.abs(parameter - previous) <= VECTOR_EPSILON
+    ) {
+      continue
+    }
+    previous = parameter
+    const value = sampleOverlap(
+      sampler,
+      frozenPoint(start[0] + dx * parameter, start[1] + dy * parameter),
+    )
+    if (value === null) return null
+    maximum = Math.max(maximum, value)
+    sum += value
+    count += 1
+  }
+  return Object.freeze({ maximum, sum, count })
+}
+
+function wrapSignedRadians(value: number): number {
+  let wrapped = value
+  while (wrapped <= -Math.PI) wrapped += 2 * Math.PI
+  while (wrapped > Math.PI) wrapped -= 2 * Math.PI
+  return wrapped
+}
+
+function signedTurn(
+  first: Readonly<Point>,
+  second: Readonly<Point>,
+): number {
+  return Math.atan2(
+    first[0] * second[1] - first[1] * second[0],
+    first[0] * second[0] + first[1] * second[1],
+  )
+}
+
+function rootMetrics(
+  sample: Readonly<CorrectedFlowingRidgeSample>,
+): Readonly<IncrementalMetrics> {
+  return Object.freeze({
+    sampleCount: 1,
+    evidenceSum: sample.evidence,
+    ambiguitySum: sample.ambiguity,
+    segmentCount: 0,
+    coherenceSum: 0,
+    curvatureChangeSum: 0,
+    lastSegmentDirection: null,
+    lastSignedTurn: null,
+  })
+}
+
+function extendMetrics(
+  metrics: Readonly<IncrementalMetrics>,
+  previous: Readonly<CorrectedFlowingRidgeSample>,
+  sample: Readonly<CorrectedFlowingRidgeSample>,
+): Readonly<IncrementalMetrics> | null {
+  const segmentDirection = unit([
+    sample.point[0] - previous.point[0],
+    sample.point[1] - previous.point[1],
+  ])
+  if (segmentDirection === null) return null
+  const turn =
+    metrics.lastSegmentDirection === null
+      ? null
+      : signedTurn(metrics.lastSegmentDirection, segmentDirection)
+  const curvatureChange =
+    turn === null || metrics.lastSignedTurn === null
+      ? 0
+      : Math.abs(wrapSignedRadians(turn - metrics.lastSignedTurn)) / Math.PI
+  const tangentAlignment = Math.max(
+    0,
+    Math.min(
+      1,
+      previous.tangent[0] * sample.tangent[0] +
+        previous.tangent[1] * sample.tangent[1],
+    ),
+  )
+  return Object.freeze({
+    sampleCount: metrics.sampleCount + 1,
+    evidenceSum: metrics.evidenceSum + sample.evidence,
+    ambiguitySum: metrics.ambiguitySum + sample.ambiguity,
+    segmentCount: metrics.segmentCount + 1,
+    coherenceSum: metrics.coherenceSum + tangentAlignment,
+    curvatureChangeSum: metrics.curvatureChangeSum + curvatureChange,
+    lastSegmentDirection: segmentDirection,
+    lastSignedTurn: turn,
+  })
+}
+
+/** Signed-turn curvature-change measurement shared with focused witnesses. */
+export function measureFlowingContoursCurvatureChange(
+  points: readonly Readonly<Point>[],
+): number {
+  try {
+    let previousDirection: Readonly<Point> | null = null
+    let previousTurn: number | null = null
+    let total = 0
+    for (let index = 1; index < points.length; index += 1) {
+      const first = points[index - 1]!
+      const second = points[index]!
+      const direction = unit([second[0] - first[0], second[1] - first[1]])
+      if (direction === null) return 1
+      if (previousDirection !== null) {
+        const turn = signedTurn(previousDirection, direction)
+        if (previousTurn !== null) {
+          total += Math.abs(wrapSignedRadians(turn - previousTurn)) / Math.PI
+        }
+        previousTurn = turn
+      }
+      previousDirection = direction
+    }
+    return Number.isFinite(total) ? total : 1
+  } catch {
+    return 1
+  }
+}
+
+function appendPathNode(
+  previous: Readonly<PathNode>,
+  sample: Readonly<CorrectedFlowingRidgeSample>,
+): Readonly<PathNode> {
+  return Object.freeze({
+    previous,
+    sample,
+    sampleIndex: previous.sampleIndex + 1,
+  })
+}
+
+function appendDirectSupport(
+  tail: Readonly<SupportNode> | null,
+  samplesBeforeAppend: number,
+  entry: Readonly<CorrectedFlowingRidgeSample>,
+  exit: Readonly<CorrectedFlowingRidgeSample>,
   segmentLength: number,
   alignment: number,
-): readonly Readonly<FlowingContoursSpanSupportProvenance>[] {
-  const endSampleIndex = samples.length
-  const previous = spans[spans.length - 1]
+): Readonly<SupportNode> {
   if (
-    previous?.kind === 'direct-evidence' &&
-    previous.endSampleIndex === endSampleIndex - 1
+    tail?.span.kind === 'direct-evidence' &&
+    tail.span.endSampleIndex === samplesBeforeAppend - 1
   ) {
-    return Object.freeze([
-      ...spans.slice(0, -1),
-      Object.freeze({
-        ...previous,
-        endSampleIndex,
-        length: previous.length + segmentLength,
-        exitEvidence: next.evidence,
+    return Object.freeze({
+      previous: tail.previous,
+      count: tail.count,
+      span: Object.freeze({
+        ...tail.span,
+        endSampleIndex: samplesBeforeAppend,
+        length: tail.span.length + segmentLength,
+        exitEvidence: exit.evidence,
         directionalAlignment: Math.min(
-          previous.directionalAlignment,
+          tail.span.directionalAlignment,
           alignment,
         ),
       }),
-    ])
+    })
   }
-  return Object.freeze([
-    ...spans,
-    Object.freeze({
-      kind: 'direct-evidence' as const,
-      startSampleIndex: endSampleIndex - 1,
-      endSampleIndex,
+  return Object.freeze({
+    previous: tail,
+    count: (tail?.count ?? 0) + 1,
+    span: Object.freeze({
+      kind: 'direct-evidence',
+      startSampleIndex: samplesBeforeAppend - 1,
+      endSampleIndex: samplesBeforeAppend,
       length: segmentLength,
-      entryEvidence: samples[endSampleIndex - 1]!.evidence,
-      exitEvidence: next.evidence,
+      entryEvidence: entry.evidence,
+      exitEvidence: exit.evidence,
       directionalAlignment: alignment,
     }),
-  ])
+  })
+}
+
+function appendGapSupport(
+  tail: Readonly<SupportNode> | null,
+  startSampleIndex: number,
+  endSampleIndex: number,
+  length: number,
+  entryEvidence: number,
+  exitEvidence: number,
+  directionalAlignment: number,
+): Readonly<SupportNode> {
+  return Object.freeze({
+    previous: tail,
+    count: (tail?.count ?? 0) + 1,
+    span: Object.freeze({
+      kind: 'bounded-gap',
+      startSampleIndex,
+      endSampleIndex,
+      length,
+      entryEvidence,
+      exitEvidence,
+      directionalAlignment,
+    }),
+  })
 }
 
 function prefixOrderKey(
   state: Readonly<SearchState>,
   field: Readonly<FlowingContoursField>,
   flowSmoothing: number,
-) {
-  const samples = [...state.samples, ...state.provisional]
-  let evidence = 0
-  let ambiguity = 0
-  let alignment = 0
-  let curvatureChange = 0
-  let previousTurn = 0
-  for (let index = 0; index < samples.length; index += 1) {
-    const sample = samples[index]!
-    evidence += sample.evidence
-    ambiguity += sample.ambiguity
-    if (index === 0) continue
-    const previous = samples[index - 1]!
-    const dot = Math.max(
-      -1,
-      Math.min(
-        1,
-        previous.tangent[0] * sample.tangent[0] +
-          previous.tangent[1] * sample.tangent[1],
-      ),
-    )
-    alignment += Math.max(0, dot)
-    const turn = Math.acos(dot)
-    if (index > 1) curvatureChange += Math.abs(turn - previousTurn) / Math.PI
-    previousTurn = turn
-  }
-  const segmentCount = Math.max(1, samples.length - 1)
+): Readonly<FlowingContoursObjectiveOrderKey> {
+  const metrics = state.currentMetrics
   const diagonal = Math.max(1, Math.hypot(field.width, field.height))
-  return {
+  const overlapSum =
+    state.committedOverlapSum + state.provisionalOverlapSum
+  const overlapCount =
+    state.committedOverlapCount + state.provisionalOverlapCount
+  return Object.freeze({
     score: scoreFlowingContoursCandidate(
       {
-        accumulatedEvidence: evidence / Math.max(1, samples.length),
-        usefulLength: (state.length + state.provisionalLength) / diagonal,
-        directionalCoherence: alignment / segmentCount,
-        curvatureChange: curvatureChange / segmentCount,
+        accumulatedEvidence:
+          metrics.evidenceSum / Math.max(1, metrics.sampleCount),
+        usefulLength:
+          (state.committedLength + state.provisionalLength) / diagonal,
+        directionalCoherence:
+          metrics.coherenceSum / Math.max(1, metrics.segmentCount),
+        curvatureChange:
+          metrics.curvatureChangeSum / Math.max(1, metrics.segmentCount),
         unsupportedTravel: state.provisionalLength / diagonal,
-        ambiguity: ambiguity / Math.max(1, samples.length),
-        representedOverlap:
-          state.overlapSum / Math.max(1, samples.length),
+        ambiguity:
+          metrics.ambiguitySum / Math.max(1, metrics.sampleCount),
+        representedOverlap: overlapSum / Math.max(1, overlapCount),
       },
       flowSmoothing,
     ),
     stableId: state.stableId,
-    sampleIndex: samples.length - 1,
-    point: state.current.point,
-  }
+    sampleIndex: state.currentTail.sampleIndex,
+    point: state.currentTail.sample.point,
+  })
 }
 
 function orderStates(
@@ -418,17 +685,79 @@ function stopped(
   state: Readonly<SearchState>,
   reason: FlowingContoursEndpointReason,
 ): SearchState {
-  const current = state.samples[state.samples.length - 1]!
   return {
     ...state,
-    current,
-    travelDirection: current.tangent,
-    provisional: Object.freeze([]),
+    currentTail: state.committedTail,
+    currentMetrics: state.committedMetrics,
+    travelDirection: state.committedTail.sample.tangent,
     provisionalLength: 0,
     provisionalMinimumAlignment: 1,
     weakStepCount: 0,
+    provisionalOverlapSum: 0,
+    provisionalOverlapCount: 0,
     endpointReason: reason,
   }
+}
+
+function stateKey(state: Readonly<SearchState>): string {
+  const sample = state.currentTail.sample
+  return [
+    sample.point[0],
+    sample.point[1],
+    sample.tangent[0],
+    sample.tangent[1],
+    state.currentTail.sampleIndex,
+    state.committedTail.sampleIndex,
+    state.weakStepCount,
+  ].join('|')
+}
+
+function dedupeStates(
+  states: readonly Readonly<SearchState>[],
+  field: Readonly<FlowingContoursField>,
+  flowSmoothing: number,
+): SearchState[] {
+  const unique = new Map<string, SearchState>()
+  for (const state of states) {
+    const key = stateKey(state)
+    const previous = unique.get(key)
+    if (
+      previous === undefined ||
+      orderStates(state, previous, field, flowSmoothing) < 0
+    ) {
+      unique.set(key, state)
+    }
+  }
+  return [...unique.values()]
+}
+
+function materializeSamples(
+  tail: Readonly<PathNode>,
+): readonly Readonly<CorrectedFlowingRidgeSample>[] {
+  const samples = new Array<Readonly<CorrectedFlowingRidgeSample>>(
+    tail.sampleIndex + 1,
+  )
+  let node: Readonly<PathNode> | null = tail
+  while (node !== null) {
+    samples[node.sampleIndex] = node.sample
+    node = node.previous
+  }
+  return Object.freeze(samples)
+}
+
+function materializeSupport(
+  tail: Readonly<SupportNode> | null,
+): readonly Readonly<FlowingContoursSpanSupportProvenance>[] {
+  if (tail === null) return Object.freeze([])
+  const spans = new Array<
+    Readonly<FlowingContoursSpanSupportProvenance>
+  >(tail.count)
+  let node: Readonly<SupportNode> | null = tail
+  for (let index = tail.count - 1; index >= 0 && node !== null; index -= 1) {
+    spans[index] = node.span
+    node = node.previous
+  }
+  return Object.freeze(spans)
 }
 
 function freezeTrace(
@@ -437,12 +766,16 @@ function freezeTrace(
   searchStepCount: number,
   fallbackSamples: readonly Readonly<CorrectedFlowingRidgeSample>[],
 ): Readonly<FlowingContoursDirectionalTrace> {
-  const samples = Object.freeze([...(state?.samples ?? fallbackSamples)])
-  const spanSupport = Object.freeze([...(state?.spanSupport ?? [])])
   return Object.freeze({
     direction: direction === 'backward' ? 'backward' : 'forward',
-    samples,
-    spanSupport,
+    samples:
+      state === null
+        ? Object.freeze([...fallbackSamples])
+        : materializeSamples(state.committedTail),
+    spanSupport:
+      state === null
+        ? Object.freeze([])
+        : materializeSupport(state.supportTail),
     endpointReason: state?.endpointReason ?? 'safety-limit',
     searchStepCount,
   })
@@ -451,9 +784,9 @@ function freezeTrace(
 /**
  * Grow one signed trace from `start`.
  *
- * The returned `searchStepCount` is total beam work, including failed and
- * rolled-back weak hypotheses. The start sample appears exactly once in every
- * valid trace.
+ * `searchStepCount` is actual FC07 invocations across the beam, including
+ * attempts later deduplicated or rolled back. The start sample appears once in
+ * every valid trace.
  */
 export function growFlowingContoursDirection(
   field: Readonly<FlowingContoursField>,
@@ -466,20 +799,29 @@ export function growFlowingContoursDirection(
   const initialDirection = unit(requestedDirection)
   const anchor =
     initialDirection === null ? null : snapshotSample(start, initialDirection)
-  const fallbackSamples = anchor === null ? Object.freeze([]) : [anchor]
+  const fallbackSamples =
+    anchor === null
+      ? Object.freeze([])
+      : Object.freeze([anchor])
 
   try {
     const resolved = resolveOptions(requestedDirection, options, limits)
     const searchStepLimit = limitValue('search-step-count', limits)
     const weakStepLimit = limitValue('weak-span-step-count', limits)
     const weakDistanceLimit = limitValue('weak-span-distance', limits)
+    const rawPointLimit = limitValue(
+      'raw-trajectory-point-count',
+      limits,
+    )
     if (
       (direction !== 'forward' && direction !== 'backward') ||
       anchor === null ||
       resolved === null ||
       searchStepLimit === null ||
       weakStepLimit === null ||
-      weakDistanceLimit === null
+      weakDistanceLimit === null ||
+      rawPointLimit === null ||
+      rawPointLimit < 1
     ) {
       return freezeTrace(direction, null, 0, fallbackSamples)
     }
@@ -491,22 +833,45 @@ export function growFlowingContoursDirection(
     if (anchorOverlap === null) {
       return freezeTrace(direction, null, 0, fallbackSamples)
     }
+    const anchorNode: Readonly<PathNode> = Object.freeze({
+      previous: null,
+      sample: anchor,
+      sampleIndex: 0,
+    })
+    const metrics = rootMetrics(anchor)
+    const initialState = (
+      travelDirection: Readonly<Point>,
+      stableId: number,
+      endpointReason: FlowingContoursEndpointReason | null,
+    ): SearchState => ({
+      stableId,
+      committedTail: anchorNode,
+      currentTail: anchorNode,
+      supportTail: null,
+      committedMetrics: metrics,
+      currentMetrics: metrics,
+      travelDirection,
+      provisionalLength: 0,
+      provisionalMinimumAlignment: 1,
+      weakStepCount: 0,
+      committedLength: 0,
+      committedOverlapSum: anchorOverlap,
+      committedOverlapCount: 1,
+      provisionalOverlapSum: 0,
+      provisionalOverlapCount: 0,
+      endpointReason,
+    })
     if (anchorOverlap >= resolved.representedCollisionThreshold) {
-      const state: SearchState = {
-        stableId: 0,
-        samples: Object.freeze([anchor]),
-        spanSupport: Object.freeze([]),
-        current: anchor,
-        travelDirection: resolved.directions[0]!,
-        provisional: Object.freeze([]),
-        provisionalLength: 0,
-        provisionalMinimumAlignment: 1,
-        weakStepCount: 0,
-        length: 0,
-        overlapSum: anchorOverlap,
-        endpointReason: 'represented-collision',
-      }
-      return freezeTrace(direction, state, 0, fallbackSamples)
+      return freezeTrace(
+        direction,
+        initialState(
+          resolved.directions[0]!,
+          0,
+          'represented-collision',
+        ),
+        0,
+        fallbackSamples,
+      )
     }
 
     const allowedWeakSteps = Math.min(
@@ -521,21 +886,9 @@ export function growFlowingContoursDirection(
       resolved.continuity *
         FLOWING_CONTOURS_LIMITS['weak-span-distance'],
     )
-    let active: SearchState[] = resolved.directions.map(
-      (travelDirection, stableId) => ({
-        stableId,
-        samples: Object.freeze([anchor]),
-        spanSupport: Object.freeze([]),
-        current: anchor,
-        travelDirection,
-        provisional: Object.freeze([]),
-        provisionalLength: 0,
-        provisionalMinimumAlignment: 1,
-        weakStepCount: 0,
-        length: 0,
-        overlapSum: anchorOverlap,
-        endpointReason: null,
-      }),
+    const breadth = limitValue('search-breadth', limits)!
+    let active = resolved.directions.map((travelDirection, stableId) =>
+      initialState(travelDirection, stableId, null),
     )
     const terminal: SearchState[] = []
     let searchStepCount = 0
@@ -544,27 +897,32 @@ export function growFlowingContoursDirection(
       const next: SearchState[] = []
       for (let activeIndex = 0; activeIndex < active.length; activeIndex += 1) {
         const state = active[activeIndex]!
-        if (searchStepCount >= searchStepLimit) {
+        if (
+          searchStepCount >= searchStepLimit ||
+          state.currentTail.sampleIndex + 1 >= rawPointLimit
+        ) {
           terminal.push(stopped(state, 'safety-limit'))
-          for (
-            let remainder = activeIndex + 1;
-            remainder < active.length;
-            remainder += 1
-          ) {
-            terminal.push(stopped(active[remainder]!, 'safety-limit'))
+          if (searchStepCount >= searchStepLimit) {
+            for (
+              let remainder = activeIndex + 1;
+              remainder < active.length;
+              remainder += 1
+            ) {
+              terminal.push(stopped(active[remainder]!, 'safety-limit'))
+            }
+            break
           }
-          break
+          continue
         }
 
         const step = stepFlowingContoursRidge(
           field,
-          state.current,
+          state.currentTail.sample,
           state.travelDirection,
           resolved.ridgeStepOptions,
           limits,
         )
         searchStepCount += 1
-
         if (step.kind !== 'corrected' && step.kind !== 'weak') {
           terminal.push(stopped(state, step.kind))
           continue
@@ -573,36 +931,48 @@ export function growFlowingContoursDirection(
           terminal.push(stopped(state, 'evidence-exhausted'))
           continue
         }
-        const sample = snapshotSample(step.sample, state.travelDirection)
+        const sample = snapshotSample(
+          step.sample,
+          state.travelDirection,
+        )
         if (sample === null) {
           terminal.push(stopped(state, 'safety-limit'))
           continue
         }
+        const previousSample = state.currentTail.sample
         const sampleAlignment = aligned(
           sample.tangent,
           state.travelDirection,
         )?.alignment
-        const segmentLength = distance(state.current, sample)
+        const segmentLength = distance(previousSample, sample)
+        const nextMetrics = extendMetrics(
+          state.currentMetrics,
+          previousSample,
+          sample,
+        )
         if (
           sampleAlignment === undefined ||
           !Number.isFinite(segmentLength) ||
-          segmentLength <= VECTOR_EPSILON
+          segmentLength <= VECTOR_EPSILON ||
+          nextMetrics === null
         ) {
           terminal.push(stopped(state, 'safety-limit'))
           continue
         }
-        const overlap = sampleOverlap(
+        const overlap = overlapAlongSegment(
           resolved.representedOverlapSampler,
+          previousSample.point,
           sample.point,
         )
         if (overlap === null) {
           terminal.push(stopped(state, 'safety-limit'))
           continue
         }
-        if (overlap >= resolved.representedCollisionThreshold) {
+        if (overlap.maximum >= resolved.representedCollisionThreshold) {
           terminal.push(stopped(state, 'represented-collision'))
           continue
         }
+        const nextTail = appendPathNode(state.currentTail, sample)
 
         if (step.kind === 'weak') {
           const weakStepCount = state.weakStepCount + 1
@@ -610,44 +980,41 @@ export function growFlowingContoursDirection(
             state.provisionalLength + segmentLength
           const gapAlignment = Math.min(
             sampleAlignment,
-            gapDirectionalAlignment(
-              state.samples[state.samples.length - 1]!,
-              sample,
-            ),
+            gapDirectionalAlignment(state.committedTail.sample, sample),
           )
-          const compatible =
-            gapAlignment >= GAP_ALIGNMENT_FLOOR &&
-            weakStepCount <= allowedWeakSteps &&
-            provisionalLength <= allowedWeakDistance
-          if (!compatible) {
+          if (
+            gapAlignment < GAP_ALIGNMENT_FLOOR ||
+            weakStepCount > allowedWeakSteps ||
+            provisionalLength > allowedWeakDistance
+          ) {
             terminal.push(stopped(state, 'evidence-exhausted'))
             continue
           }
           next.push({
             ...state,
-            current: sample,
+            currentTail: nextTail,
+            currentMetrics: nextMetrics,
             travelDirection: sample.tangent,
-            provisional: Object.freeze([...state.provisional, sample]),
             provisionalLength,
             provisionalMinimumAlignment: Math.min(
               state.provisionalMinimumAlignment,
               gapAlignment,
             ),
             weakStepCount,
-            overlapSum: state.overlapSum + overlap,
+            provisionalOverlapSum:
+              state.provisionalOverlapSum + overlap.sum,
+            provisionalOverlapCount:
+              state.provisionalOverlapCount + overlap.count,
           })
           continue
         }
 
-        if (state.provisional.length > 0) {
+        if (state.weakStepCount > 0) {
           const gapLength = state.provisionalLength + segmentLength
           const gapAlignment = Math.min(
             state.provisionalMinimumAlignment,
             sampleAlignment,
-            gapDirectionalAlignment(
-              state.samples[state.samples.length - 1]!,
-              sample,
-            ),
+            gapDirectionalAlignment(state.committedTail.sample, sample),
           )
           if (
             gapAlignment < GAP_ALIGNMENT_FLOOR ||
@@ -656,53 +1023,61 @@ export function growFlowingContoursDirection(
             terminal.push(stopped(state, 'evidence-exhausted'))
             continue
           }
-          const committed = Object.freeze([
-            ...state.samples,
-            ...state.provisional,
-            sample,
-          ])
+          const committedOverlapSum =
+            state.committedOverlapSum +
+            state.provisionalOverlapSum +
+            overlap.sum
+          const committedOverlapCount =
+            state.committedOverlapCount +
+            state.provisionalOverlapCount +
+            overlap.count
           next.push({
             ...state,
-            samples: committed,
-            spanSupport: Object.freeze([
-              ...state.spanSupport,
-              Object.freeze({
-                kind: 'bounded-gap' as const,
-                startSampleIndex: state.samples.length - 1,
-                endSampleIndex: committed.length - 1,
-                length: gapLength,
-                entryEvidence: state.samples[state.samples.length - 1]!
-                  .evidence,
-                exitEvidence: sample.evidence,
-                directionalAlignment: gapAlignment,
-              }),
-            ]),
-            current: sample,
+            committedTail: nextTail,
+            currentTail: nextTail,
+            supportTail: appendGapSupport(
+              state.supportTail,
+              state.committedTail.sampleIndex,
+              nextTail.sampleIndex,
+              gapLength,
+              state.committedTail.sample.evidence,
+              sample.evidence,
+              gapAlignment,
+            ),
+            committedMetrics: nextMetrics,
+            currentMetrics: nextMetrics,
             travelDirection: sample.tangent,
-            provisional: Object.freeze([]),
             provisionalLength: 0,
             provisionalMinimumAlignment: 1,
             weakStepCount: 0,
-            length: state.length + gapLength,
-            overlapSum: state.overlapSum + overlap,
+            committedLength: state.committedLength + gapLength,
+            committedOverlapSum,
+            committedOverlapCount,
+            provisionalOverlapSum: 0,
+            provisionalOverlapCount: 0,
           })
           continue
         }
 
         next.push({
           ...state,
-          samples: Object.freeze([...state.samples, sample]),
-          spanSupport: appendDirectSpan(
-            state.spanSupport,
-            state.samples,
+          committedTail: nextTail,
+          currentTail: nextTail,
+          supportTail: appendDirectSupport(
+            state.supportTail,
+            nextTail.sampleIndex,
+            previousSample,
             sample,
             segmentLength,
             sampleAlignment,
           ),
-          current: sample,
+          committedMetrics: nextMetrics,
+          currentMetrics: nextMetrics,
           travelDirection: sample.tangent,
-          length: state.length + segmentLength,
-          overlapSum: state.overlapSum + overlap,
+          committedLength: state.committedLength + segmentLength,
+          committedOverlapSum: state.committedOverlapSum + overlap.sum,
+          committedOverlapCount:
+            state.committedOverlapCount + overlap.count,
         })
       }
 
@@ -712,7 +1087,11 @@ export function growFlowingContoursDirection(
         )
         active = []
       } else {
-        active = next
+        active = dedupeStates(
+          next,
+          field,
+          resolved.flowSmoothing,
+        )
           .sort((first, second) =>
             orderStates(
               first,
@@ -721,7 +1100,7 @@ export function growFlowingContoursDirection(
               resolved.flowSmoothing,
             ),
           )
-          .slice(0, resolved.directions.length)
+          .slice(0, breadth)
       }
     }
 
