@@ -268,6 +268,55 @@ describe('Flowing Contours corrected-trajectory evidence tube', () => {
     ).toBeNull()
   })
 
+  it.each([
+    { channel: 'zero alpha', alpha: 0, evidence: 1 },
+    { channel: 'unresolved evidence', alpha: 1, evidence: 0 },
+  ])(
+    'finds a phase-offset $channel line at an exact lattice crossing',
+    ({ alpha, evidence }) => {
+      const source = field(9, 7, (x, y) => ({
+        scale: 4,
+        alpha: x === 4 && y === 3 ? alpha : 1,
+        evidence: x === 4 && y === 3 ? evidence : 1,
+      }))
+      const points = [
+        [1.1, 2.2],
+        [3, 2.2],
+        [5, 2.2],
+        [6.7, 2.2],
+      ] as const
+      const raw = trajectory(source, points)
+      const tube = createFlowingContoursEvidenceTube(source, raw)!
+
+      expect(tube).not.toBeNull()
+      expect(
+        validateFlowingContoursTubeCurve(source, tube, {
+          points: [points[0], [3, 3], [5, 3], points.at(-1)!],
+          sourceSampleIndices: [0, 1, 2, 3],
+        }),
+      ).toBeNull()
+    },
+  )
+
+  it('rejects a radius-0.25 chord whose true interior deviation is 0.2795', () => {
+    const source = field(8, 8)
+    const points = [
+      [2, 4],
+      [3, 4.2795],
+      [4, 4],
+    ] as const
+    const raw = trajectory(source, points)
+    const tube = createFlowingContoursEvidenceTube(source, raw)!
+
+    expect(tube.evidenceTubeRadius).toBe(0.25)
+    expect(
+      validateFlowingContoursTubeCurve(source, tube, {
+        points: [points[0], points[2]],
+        sourceSampleIndices: [0, 2],
+      }),
+    ).toBeNull()
+  })
+
   it('rejects source-boundary and endpoint overshoot', () => {
     const source = field(8, 7, () => ({ scale: 4 }))
     const points = [
@@ -295,17 +344,16 @@ describe('Flowing Contours corrected-trajectory evidence tube', () => {
 
   it('keeps a valid bounded gap weak but rejects widening and a chord shortcut', () => {
     const source = field(10, 9, (x) => ({
-      scale: 4,
-      evidence: x === 0 || x === 1 || x >= 6 ? 1 : 0.01,
+      evidence: x <= 1 || x >= 5 ? 1 : 0.01,
     }))
     const points = [
       [0, 4],
       [1, 4],
-      [2, 2],
-      [3.5, 1],
-      [5, 2],
+      [2, 3.5],
+      [3, 3.25],
+      [4, 3.5],
+      [5, 4],
       [6, 4],
-      [7, 4],
     ] as const
     const samples = points.map((point) => sampled(source, point))
     const gapLength = length(points.slice(1, 6))
@@ -318,7 +366,7 @@ describe('Flowing Contours corrected-trajectory evidence tube', () => {
         length: gapLength,
         entryEvidence: samples[1]!.evidence,
         exitEvidence: samples[5]!.evidence,
-        directionalAlignment: 0.75,
+        directionalAlignment: 2 / Math.sqrt(5),
       }),
       directSpan(samples, 5, 6),
     ] as const
@@ -333,7 +381,7 @@ describe('Flowing Contours corrected-trajectory evidence tube', () => {
     ).not.toBeNull()
     expect(
       validateFlowingContoursTubePoint(source, tube, {
-        point: [3.5, 3],
+        point: [3, 3.6],
         sourceSampleIndex: 3,
       }),
     ).toBeNull()
@@ -341,6 +389,125 @@ describe('Flowing Contours corrected-trajectory evidence tube', () => {
       validateFlowingContoursTubeCurve(source, tube, {
         points: [points[0], points[1], points[5], points[6]],
         sourceSampleIndices: [0, 1, 5, 6],
+      }),
+    ).toBeNull()
+    expect(
+      validateFlowingContoursTubePoint(source, tube, {
+        point: [0.9, 4],
+        sourceSampleIndex: 1,
+      }),
+    ).toMatchObject({ supportKind: 'direct-evidence' })
+    expect(
+      validateFlowingContoursTubePoint(source, tube, {
+        point: [1.1, 3.95],
+        sourceSampleIndex: 1,
+      }),
+    ).toMatchObject({ supportKind: 'bounded-gap' })
+
+    const fabricatedGap = {
+      ...spans[1],
+      directionalAlignment: 0.8,
+    } as const
+    expect(
+      createFlowingContoursEvidenceTube(source, {
+        ...raw,
+        spanSupport: [spans[0], fabricatedGap, spans[2]],
+      }),
+    ).toBeNull()
+    expect(
+      createFlowingContoursEvidenceTube(source, {
+        ...raw,
+        spanSupport: [
+          spans[0],
+          { ...spans[1], directionalAlignment: -0.1 },
+          spans[2],
+        ],
+      }),
+    ).toBeNull()
+  })
+
+  it('rejects a bounded gap with weak boundary evidence', () => {
+    const source = field(8, 7, (x) => ({
+      evidence: x === 0 || x >= 5 ? 1 : 0.01,
+    }))
+    const points = [
+      [0, 3],
+      [1, 3],
+      [2, 3],
+      [3, 3],
+      [4, 3],
+      [5, 3],
+      [6, 3],
+    ] as const
+    const samples = points.map((point) => sampled(source, point))
+    const spans = [
+      directSpan(samples, 0, 1),
+      {
+        kind: 'bounded-gap',
+        startSampleIndex: 1,
+        endSampleIndex: 5,
+        length: 4,
+        entryEvidence: samples[1]!.evidence,
+        exitEvidence: samples[5]!.evidence,
+        directionalAlignment: 1,
+      },
+      directSpan(samples, 5, 6),
+    ] as const
+
+    expect(
+      createFlowingContoursEvidenceTube(
+        source,
+        trajectory(source, points, spans),
+      ),
+    ).toBeNull()
+  })
+
+  it('uses true stable global sample provenance on a nonlocal loop', () => {
+    const source = field(8, 8, () => ({ scale: 4 }))
+    const points = [
+      [1, 1],
+      [2, 1],
+      [3, 1],
+      [3, 2],
+      [2.05, 1.05],
+      [1, 2],
+    ] as const
+    const raw = trajectory(source, points)
+    const tube = createFlowingContoursEvidenceTube(source, raw)!
+
+    expect(
+      validateFlowingContoursTubePoint(source, tube, {
+        point: [2.04, 1.04],
+        sourceSampleIndex: 1,
+      }),
+    ).toBeNull()
+    expect(
+      validateFlowingContoursTubePoint(source, tube, {
+        point: [2.04, 1.04],
+        sourceSampleIndex: 4,
+      }),
+    ).not.toBeNull()
+  })
+
+  it('does not shortcut between nearby nonlocal ends of a loop', () => {
+    const source = field(8, 7, () => ({ scale: 4 }))
+    const points = [
+      [1, 2],
+      [2, 2],
+      [3, 2],
+      [4, 2],
+      [4, 2.2],
+      [3, 2.2],
+      [2, 2.2],
+      [1, 2.2],
+    ] as const
+    const raw = trajectory(source, points)
+    const tube = createFlowingContoursEvidenceTube(source, raw)!
+
+    expect(
+      validateFlowingContoursTubeCurve(source, tube, {
+        points: [points[0], points.at(-1)!],
+        sourceSampleIndices: [0, points.length - 1],
       }),
     ).toBeNull()
   })
@@ -431,6 +598,38 @@ describe('Flowing Contours corrected-trajectory evidence tube', () => {
         ...raw,
         maximumUnsupportedSpanLength: 1,
       }),
+    ).toBeNull()
+  })
+
+  it('binds a tube to one immutable field identity', () => {
+    const source = field(8, 7)
+    const points = [
+      [2, 3],
+      [3, 3],
+      [4, 3],
+      [5, 3],
+    ] as const
+    const raw = trajectory(source, points)
+    const tube = createFlowingContoursEvidenceTube(source, raw)!
+    const equivalentOtherField = field(8, 7)
+    const mutableAlpha = [...source.alpha]
+    const mutableChannelField = Object.freeze({
+      ...source,
+      alpha: mutableAlpha,
+    }) as FlowingContoursField
+
+    expect(
+      validateFlowingContoursTubeCurve(equivalentOtherField, tube, {
+        points,
+        sourceSampleIndices: allIndices(points.length),
+      }),
+    ).toBeNull()
+    expect(
+      createFlowingContoursEvidenceTube(mutableChannelField, raw),
+    ).toBeNull()
+    mutableAlpha[3] = 0
+    expect(
+      createFlowingContoursEvidenceTube(mutableChannelField, raw),
     ).toBeNull()
   })
 })

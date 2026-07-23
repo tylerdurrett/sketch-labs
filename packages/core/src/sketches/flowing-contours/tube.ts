@@ -10,8 +10,9 @@
  * The local radius is one quarter of the smaller adjacent FC05 analysis scale,
  * never less than 0.25 lattice pixels and never greater than 1.5. Direct spans
  * must also remain in the resolved FC05 evidence corridor. A bounded gap may be
- * weak only while its correspondence remains inside that exact recorded span;
- * positive alpha and the visible analysis extent remain mandatory everywhere.
+ * weak only while its correspondence remains inside that exact recorded span
+ * and its recomputed directional alignment is at least 0.75. Positive alpha
+ * and the visible analysis extent remain mandatory everywhere.
  */
 
 import type { Point } from '../../types'
@@ -30,15 +31,17 @@ const VALUE_TOLERANCE = 1e-8
 const ENDPOINT_TOLERANCE = 1e-9
 const TUBE_RADIUS_SCALE_FACTOR = 0.25
 const MINIMUM_TUBE_RADIUS = 0.25
-const VALIDATION_SAMPLE_SPACING = 0.25
-const LOCAL_ARC_SEARCH_RADIUS = 2
 const DIRECT_MINIMUM_EVIDENCE = 0.04
 const DIRECT_MINIMUM_COHERENCE = 0.25
 const DIRECT_MAXIMUM_AMBIGUITY = 0.7
 const MINIMUM_DIRECTIONAL_ALIGNMENT = 0.5
+const ARC_COORDINATE_TOLERANCE = 1e-8
 
 /** A fit can never move farther than this many analysis-lattice pixels. */
 export const FLOWING_CONTOURS_EVIDENCE_TUBE_HARD_MAX_RADIUS = 1.5
+
+/** Hard directional proof floor for every retained bounded-gap span. */
+export const FLOWING_CONTOURS_BOUNDED_GAP_ALIGNMENT_FLOOR = 0.75
 
 /**
  * Explicit ceiling across raw-corridor preparation or one validation call.
@@ -72,6 +75,7 @@ export interface FlowingContoursTubePointValidation {
   readonly sourceSegmentIndex: number
   readonly supportKind: 'direct-evidence' | 'bounded-gap'
   readonly deviation: number
+  readonly validationSampleCount: number
 }
 
 export interface FlowingContoursTubeSegment {
@@ -95,6 +99,7 @@ export interface FlowingContoursTubeCurveValidation
 }
 
 interface TubeData {
+  readonly field: Readonly<FlowingContoursField>
   readonly samples: readonly Readonly<CorrectedFlowingRidgeSample>[]
   readonly segmentSupport:
     readonly Readonly<FlowingContoursSpanSupportProvenance>[]
@@ -104,7 +109,8 @@ interface TubeData {
 
 interface LocatedArc {
   readonly segmentIndex: number
-  readonly point: Readonly<Point>
+  readonly segmentProgress: number
+  readonly arcCoordinate: number
   readonly tangent: Readonly<Point>
   readonly support: Readonly<FlowingContoursSpanSupportProvenance>
   readonly radius: number
@@ -114,6 +120,11 @@ interface LocatedArc {
 interface MutableBudget {
   remaining: number
   consumed: number
+}
+
+interface SegmentEvaluation {
+  readonly progress: number
+  readonly located: Readonly<LocatedArc>
 }
 
 const TUBE_DATA = new WeakMap<object, Readonly<TubeData>>()
@@ -298,7 +309,10 @@ function segmentDistance(
   point: Readonly<Point>,
   start: Readonly<Point>,
   end: Readonly<Point>,
-): { readonly point: Readonly<Point>; readonly distance: number } | null {
+): {
+  readonly progress: number
+  readonly distance: number
+} | null {
   const dx = end[0] - start[0]
   const dy = end[1] - start[1]
   const lengthSquared = dx * dx + dy * dy
@@ -321,7 +335,53 @@ function segmentDistance(
     point[0] - nearest[0],
     point[1] - nearest[1],
   )
-  return Number.isFinite(distance) ? { point: nearest, distance } : null
+  return Number.isFinite(distance) ? { progress: projection, distance } : null
+}
+
+function isImmutableField(field: Readonly<FlowingContoursField>): boolean {
+  try {
+    return (
+      Object.isFrozen(field) &&
+      Object.isFrozen(field.luminance) &&
+      Object.isFrozen(field.alpha) &&
+      Object.isFrozen(field.positiveSupport) &&
+      Object.isFrozen(field.contourEvidence) &&
+      Object.isFrozen(field.tangentX) &&
+      Object.isFrozen(field.tangentY) &&
+      Object.isFrozen(field.tangentCoherence) &&
+      Object.isFrozen(field.ambiguity) &&
+      Object.isFrozen(field.ridgeScale)
+    )
+  } catch {
+    return false
+  }
+}
+
+function recomputeGapAlignment(
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+  startIndex: number,
+  endIndex: number,
+): number | null {
+  const entry = samples[startIndex]!
+  let minimum = 1
+  for (let index = startIndex + 1; index <= endIndex; index += 1) {
+    const sample = samples[index]!
+    const displacement = unit(
+      sample.point[0] - entry.point[0],
+      sample.point[1] - entry.point[1],
+    )
+    if (displacement === null) return null
+    minimum = Math.min(
+      minimum,
+      entry.tangent[0] * sample.tangent[0] +
+        entry.tangent[1] * sample.tangent[1],
+      entry.tangent[0] * displacement[0] +
+        entry.tangent[1] * displacement[1],
+      sample.tangent[0] * displacement[0] +
+        sample.tangent[1] * displacement[1],
+    )
+  }
+  return Number.isFinite(minimum) ? minimum : null
 }
 
 function snapshotSupport(
@@ -360,7 +420,7 @@ function snapshotSupport(
         source.exitEvidence < 0 ||
         source.exitEvidence > 1 ||
         !Number.isFinite(source.directionalAlignment) ||
-        source.directionalAlignment < -1 ||
+        source.directionalAlignment < 0 ||
         source.directionalAlignment > 1 ||
         !nearlyEqual(
           source.entryEvidence,
@@ -390,6 +450,28 @@ function snapshotSupport(
         measuredLength += length
       }
       if (!nearlyEqual(measuredLength, source.length)) return null
+
+      if (source.kind === 'bounded-gap') {
+        const entry = samples[source.startSampleIndex]!
+        const exit = samples[source.endSampleIndex]!
+        const measuredAlignment = recomputeGapAlignment(
+          samples,
+          source.startSampleIndex,
+          source.endSampleIndex,
+        )
+        if (
+          !isResolvedEvidence(entry) ||
+          !isResolvedEvidence(exit) ||
+          measuredAlignment === null ||
+          measuredAlignment <
+            FLOWING_CONTOURS_BOUNDED_GAP_ALIGNMENT_FLOOR ||
+          source.directionalAlignment <
+            FLOWING_CONTOURS_BOUNDED_GAP_ALIGNMENT_FLOOR ||
+          !nearlyEqual(source.directionalAlignment, measuredAlignment)
+        ) {
+          return null
+        }
+      }
 
       const span = Object.freeze({
         kind: source.kind,
@@ -439,12 +521,6 @@ function snapshotSupport(
   }
 }
 
-function denseSampleCount(length: number): number | null {
-  if (!Number.isFinite(length) || length < 0) return null
-  const count = Math.max(1, Math.ceil(length / VALIDATION_SAMPLE_SPACING))
-  return Number.isSafeInteger(count) ? count : null
-}
-
 function verifyRawCorridor(
   field: Readonly<FlowingContoursField>,
   samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
@@ -454,24 +530,43 @@ function verifyRawCorridor(
   for (let index = 0; index < samples.length - 1; index += 1) {
     const start = samples[index]!
     const end = samples[index + 1]!
-    const length = Math.hypot(
-      end.point[0] - start.point[0],
-      end.point[1] - start.point[1],
+    const parameters = latticeTraversalParameters(
+      start.point,
+      end.point,
+      budget,
     )
-    const steps = denseSampleCount(length)
-    if (steps === null || !consume(budget, steps + (index === 0 ? 1 : 0))) {
-      return false
-    }
-    for (let step = index === 0 ? 0 : 1; step <= steps; step += 1) {
-      const t = step / steps
+    if (parameters === null) return false
+    for (const progress of parameters) {
+      if (!consume(budget)) return false
       const sampled = sampleFlowingContoursField(field, [
-        start.point[0] + (end.point[0] - start.point[0]) * t,
-        start.point[1] + (end.point[1] - start.point[1]) * t,
+        start.point[0] +
+          (end.point[0] - start.point[0]) * progress,
+        start.point[1] +
+          (end.point[1] - start.point[1]) * progress,
       ])
       if (
         sampled === null ||
         (segmentSupport[index]!.kind === 'direct-evidence' &&
           !isResolvedEvidence(sampled))
+      ) {
+        return false
+      }
+    }
+    for (
+      let parameterIndex = 0;
+      parameterIndex + 2 < parameters.length;
+      parameterIndex += 2
+    ) {
+      if (
+        !proveScalarPermissionInterval(
+          field,
+          start.point,
+          end.point,
+          parameters[parameterIndex]!,
+          parameters[parameterIndex + 2]!,
+          segmentSupport[index]!.kind === 'direct-evidence',
+          budget,
+        )
       ) {
         return false
       }
@@ -491,6 +586,7 @@ function prepareTubeData(
       field.sourceWidth <= 0 ||
       !Number.isSafeInteger(field.sourceHeight) ||
       field.sourceHeight <= 0 ||
+      !isImmutableField(field) ||
       !Number.isSafeInteger(trajectory.id) ||
       trajectory.id < 0 ||
       trajectory.samples.length < 2 ||
@@ -538,6 +634,7 @@ function prepareTubeData(
     }
 
     return Object.freeze({
+      field,
       samples: frozenSamples,
       segmentSupport: support.segmentSupport,
       cumulativeLength: Object.freeze(cumulativeLength),
@@ -585,6 +682,7 @@ export function createFlowingContoursEvidenceTube(
 }
 
 function tubeData(
+  field: Readonly<FlowingContoursField>,
   tube: Readonly<FlowingContoursEvidenceTube>,
 ): Readonly<TubeData> | null {
   try {
@@ -593,6 +691,7 @@ function tubeData(
       data === undefined ? null : maximumValue(data.segmentRadii)
     return data !== undefined &&
       maximumRadius !== null &&
+      field === data.field &&
       Object.isFrozen(tube) &&
       tube.sourceTrajectoryId >= 0 &&
       tube.rawSampleCount === data.samples.length &&
@@ -604,28 +703,12 @@ function tubeData(
   }
 }
 
-function segmentAtArcLength(
-  cumulativeLength: readonly number[],
-  target: number,
-  minimumSegment: number,
-  maximumSegment: number,
-): number {
-  let low = minimumSegment
-  let high = maximumSegment
-  while (low < high) {
-    const middle = Math.floor((low + high + 1) / 2)
-    if (cumulativeLength[middle]! <= target) low = middle
-    else high = middle - 1
-  }
-  return Math.min(maximumSegment, low)
-}
-
 function locateArc(
   data: Readonly<TubeData>,
   point: Readonly<Point>,
   startSampleIndex: number,
   endSampleIndex: number,
-  progress: number,
+  budget: MutableBudget,
 ): Readonly<LocatedArc> | null {
   const minimumSegment =
     endSampleIndex > startSampleIndex
@@ -635,32 +718,17 @@ function locateArc(
     endSampleIndex > startSampleIndex
       ? Math.min(data.samples.length - 2, endSampleIndex - 1)
       : minimumSegment
-  const startLength = data.cumulativeLength[startSampleIndex]!
-  const endLength = data.cumulativeLength[endSampleIndex]!
-  const targetLength = startLength + (endLength - startLength) * progress
-  const targetSegment = segmentAtArcLength(
-    data.cumulativeLength,
-    targetLength,
-    minimumSegment,
-    maximumSegment,
-  )
-  const searchStart = Math.max(
-    minimumSegment,
-    targetSegment - LOCAL_ARC_SEARCH_RADIUS,
-  )
-  const searchEnd = Math.min(
-    maximumSegment,
-    targetSegment + LOCAL_ARC_SEARCH_RADIUS,
-  )
+  const segmentCount = maximumSegment - minimumSegment + 1
+  if (!consume(budget, segmentCount)) return null
 
   let best:
     | {
         readonly segmentIndex: number
-        readonly point: Readonly<Point>
+        readonly progress: number
         readonly deviation: number
       }
     | null = null
-  for (let index = searchStart; index <= searchEnd; index += 1) {
+  for (let index = minimumSegment; index <= maximumSegment; index += 1) {
     const nearest = segmentDistance(
       point,
       data.samples[index]!.point,
@@ -669,34 +737,63 @@ function locateArc(
     if (
       nearest !== null &&
       (best === null ||
-        nearest.distance < best.deviation - VALUE_TOLERANCE ||
-        (nearlyEqual(nearest.distance, best.deviation) &&
-          index < best.segmentIndex))
+        nearest.distance < best.deviation ||
+        (nearest.distance === best.deviation &&
+          (index < best.segmentIndex ||
+            (index === best.segmentIndex &&
+              nearest.progress < best.progress))))
     ) {
       best = {
         segmentIndex: index,
-        point: nearest.point,
+        progress: nearest.progress,
         deviation: nearest.distance,
       }
     }
   }
   if (best === null) return null
 
-  const targetStart = data.samples[targetSegment]!
-  const targetEnd = data.samples[targetSegment + 1]!
+  const targetStart = data.samples[best.segmentIndex]!
+  const targetEnd = data.samples[best.segmentIndex + 1]!
   const tangent =
     unit(
       targetEnd.point[0] - targetStart.point[0],
       targetEnd.point[1] - targetStart.point[1],
     ) ?? targetStart.tangent
   return Object.freeze({
-    segmentIndex: targetSegment,
-    point: best.point,
+    segmentIndex: best.segmentIndex,
+    segmentProgress: best.progress,
+    arcCoordinate:
+      data.cumulativeLength[best.segmentIndex]! +
+      (data.cumulativeLength[best.segmentIndex + 1]! -
+        data.cumulativeLength[best.segmentIndex]!) *
+        best.progress,
     tangent,
-    support: data.segmentSupport[targetSegment]!,
-    radius: data.segmentRadii[targetSegment]!,
+    support: data.segmentSupport[best.segmentIndex]!,
+    radius: data.segmentRadii[best.segmentIndex]!,
     deviation: best.deviation,
   })
+}
+
+function minimumTubeRadius(
+  data: Readonly<TubeData>,
+  startSampleIndex: number,
+  endSampleIndex: number,
+  budget: MutableBudget,
+): number | null {
+  const minimumSegment =
+    endSampleIndex > startSampleIndex
+      ? startSampleIndex
+      : Math.max(0, Math.min(data.samples.length - 2, startSampleIndex - 1))
+  const maximumSegment =
+    endSampleIndex > startSampleIndex
+      ? Math.min(data.samples.length - 2, endSampleIndex - 1)
+      : minimumSegment
+  if (!consume(budget, maximumSegment - minimumSegment + 1)) return null
+  let minimum = Infinity
+  for (let index = minimumSegment; index <= maximumSegment; index += 1) {
+    minimum = Math.min(minimum, data.segmentRadii[index]!)
+  }
+  return Number.isFinite(minimum) ? minimum : null
 }
 
 function validSourceIndex(index: number, data: Readonly<TubeData>): boolean {
@@ -707,36 +804,371 @@ function validSourceIndex(index: number, data: Readonly<TubeData>): boolean {
   )
 }
 
-function hasLocalNearestSampleCorrespondence(
+function nearestSourceSampleIndex(
   point: Readonly<Point>,
-  sourceIndex: number,
   data: Readonly<TubeData>,
-): boolean {
-  const source = data.samples[sourceIndex]!.point
-  const sourceDistance = Math.hypot(
-    point[0] - source[0],
-    point[1] - source[1],
-  )
-  const start = Math.max(0, sourceIndex - LOCAL_ARC_SEARCH_RADIUS)
-  const end = Math.min(
-    data.samples.length - 1,
-    sourceIndex + LOCAL_ARC_SEARCH_RADIUS,
-  )
-  for (let index = start; index <= end; index += 1) {
-    if (index === sourceIndex) continue
+  budget: MutableBudget,
+): number | null {
+  if (!consume(budget, data.samples.length)) return null
+  let nearestIndex = -1
+  let nearestDistance = Infinity
+  for (let index = 0; index < data.samples.length; index += 1) {
     const candidate = data.samples[index]!.point
-    const candidateDistance = Math.hypot(
+    const distance = Math.hypot(
       point[0] - candidate[0],
       point[1] - candidate[1],
     )
     if (
-      candidateDistance < sourceDistance - VALUE_TOLERANCE ||
-      (nearlyEqual(candidateDistance, sourceDistance) && index < sourceIndex)
+      distance < nearestDistance ||
+      (distance === nearestDistance && index < nearestIndex)
+    ) {
+      nearestIndex = index
+      nearestDistance = distance
+    }
+  }
+  return nearestIndex >= 0 ? nearestIndex : null
+}
+
+function latticeTraversalParameters(
+  start: Readonly<Point>,
+  end: Readonly<Point>,
+  budget: MutableBudget,
+): readonly number[] | null {
+  const parameters = [0, 1]
+  for (let axis = 0; axis < 2; axis += 1) {
+    const first = axis === 0 ? start[0] : start[1]
+    const second = axis === 0 ? end[0] : end[1]
+    const delta = second - first
+    if (Math.abs(delta) <= VECTOR_EPSILON) continue
+    const lower = Math.min(first, second)
+    const upper = Math.max(first, second)
+    const firstBoundary = Math.floor(lower) + 1
+    const lastBoundary = Math.ceil(upper) - 1
+    const crossingCount = Math.max(0, lastBoundary - firstBoundary + 1)
+    if (
+      !Number.isSafeInteger(crossingCount) ||
+      !consume(budget, crossingCount)
+    ) {
+      return null
+    }
+    for (
+      let boundary = firstBoundary;
+      boundary <= lastBoundary;
+      boundary += 1
+    ) {
+      const progress = (boundary - first) / delta
+      if (progress > 0 && progress < 1 && Number.isFinite(progress)) {
+        parameters.push(progress)
+      }
+    }
+  }
+  parameters.sort((first, second) => first - second)
+  const crossings = parameters.filter(
+    (value, index) =>
+      index === 0 ||
+      Math.abs(value - parameters[index - 1]!) > VALUE_TOLERANCE,
+  )
+  const complete: number[] = []
+  for (let index = 0; index < crossings.length; index += 1) {
+    const value = crossings[index]!
+    complete.push(value)
+    const next = crossings[index + 1]
+    if (next !== undefined) complete.push((value + next) / 2)
+  }
+  if (!consume(budget, complete.length)) return null
+  return Object.freeze(complete)
+}
+
+function bilinearScalar(
+  values: readonly number[],
+  width: number,
+  height: number,
+  point: Readonly<Point>,
+): number | null {
+  const x = point[0]
+  const y = point[1]
+  if (
+    x < 0 ||
+    y < 0 ||
+    x > width - 1 ||
+    y > height - 1
+  ) {
+    return null
+  }
+  const left = Math.floor(x)
+  const top = Math.floor(y)
+  const right = Math.min(width - 1, left + 1)
+  const bottom = Math.min(height - 1, top + 1)
+  const horizontal = x - left
+  const vertical = y - top
+  const topValue =
+    values[top * width + left]! * (1 - horizontal) +
+    values[top * width + right]! * horizontal
+  const bottomValue =
+    values[bottom * width + left]! * (1 - horizontal) +
+    values[bottom * width + right]! * horizontal
+  const value = topValue * (1 - vertical) + bottomValue * vertical
+  return Number.isFinite(value) ? value : null
+}
+
+function bilinearSupport(
+  values: readonly boolean[],
+  width: number,
+  height: number,
+  point: Readonly<Point>,
+): number | null {
+  const numeric = (index: number): number => (values[index] ? 1 : 0)
+  const x = point[0]
+  const y = point[1]
+  if (x < 0 || y < 0 || x > width - 1 || y > height - 1) return null
+  const left = Math.floor(x)
+  const top = Math.floor(y)
+  const right = Math.min(width - 1, left + 1)
+  const bottom = Math.min(height - 1, top + 1)
+  const horizontal = x - left
+  const vertical = y - top
+  const topValue =
+    numeric(top * width + left) * (1 - horizontal) +
+    numeric(top * width + right) * horizontal
+  const bottomValue =
+    numeric(bottom * width + left) * (1 - horizontal) +
+    numeric(bottom * width + right) * horizontal
+  const value = topValue * (1 - vertical) + bottomValue * vertical
+  return Number.isFinite(value) ? value : null
+}
+
+function quadraticMinimum(
+  start: number,
+  middle: number,
+  end: number,
+): number | null {
+  if (
+    !Number.isFinite(start) ||
+    !Number.isFinite(middle) ||
+    !Number.isFinite(end)
+  ) {
+    return null
+  }
+  const quadratic = 2 * (end + start - 2 * middle)
+  const linear = end - start - quadratic
+  let minimum = Math.min(start, end)
+  if (quadratic > VECTOR_EPSILON) {
+    const critical = -linear / (2 * quadratic)
+    if (critical > 0 && critical < 1) {
+      minimum = Math.min(
+        minimum,
+        start + linear * critical + quadratic * critical * critical,
+      )
+    }
+  }
+  return Number.isFinite(minimum) ? minimum : null
+}
+
+function proveScalarPermissionInterval(
+  field: Readonly<FlowingContoursField>,
+  segmentStart: Readonly<Point>,
+  segmentEnd: Readonly<Point>,
+  startProgress: number,
+  endProgress: number,
+  directEvidence: boolean,
+  budget: MutableBudget,
+): boolean {
+  if (!consume(budget)) return false
+  const middleProgress = (startProgress + endProgress) / 2
+  const pointAt = (progress: number): Readonly<Point> =>
+    frozenPoint(
+      segmentStart[0] +
+        (segmentEnd[0] - segmentStart[0]) * progress,
+      segmentStart[1] +
+        (segmentEnd[1] - segmentStart[1]) * progress,
+    )
+  const progressValues = [
+    startProgress,
+    middleProgress,
+    endProgress,
+  ] as const
+  const alphaValues: number[] = []
+  const supportValues: number[] = []
+  const evidenceValues: number[] = []
+  for (const progress of progressValues) {
+    const point = pointAt(progress)
+    const alpha = bilinearScalar(
+      field.alpha,
+      field.width,
+      field.height,
+      point,
+    )
+    const support = bilinearSupport(
+      field.positiveSupport,
+      field.width,
+      field.height,
+      point,
+    )
+    const evidence = directEvidence
+      ? bilinearScalar(
+          field.contourEvidence,
+          field.width,
+          field.height,
+          point,
+        )
+      : 1
+    if (alpha === null || support === null || evidence === null) return false
+    alphaValues.push(alpha)
+    supportValues.push(support)
+    evidenceValues.push(evidence)
+  }
+  const alphaMinimum = quadraticMinimum(
+    alphaValues[0]!,
+    alphaValues[1]!,
+    alphaValues[2]!,
+  )
+  const supportMinimum = quadraticMinimum(
+    supportValues[0]!,
+    supportValues[1]!,
+    supportValues[2]!,
+  )
+  const evidenceMinimum = quadraticMinimum(
+    evidenceValues[0]!,
+    evidenceValues[1]!,
+    evidenceValues[2]!,
+  )
+  return (
+    alphaMinimum !== null &&
+    alphaMinimum > 0 &&
+    supportMinimum !== null &&
+    supportMinimum > 0 &&
+    evidenceMinimum !== null &&
+    (!directEvidence ||
+      evidenceMinimum >= DIRECT_MINIMUM_EVIDENCE - VALUE_TOLERANCE)
+  )
+}
+
+function proveScalarPermissionRange(
+  field: Readonly<FlowingContoursField>,
+  segmentStart: Readonly<Point>,
+  segmentEnd: Readonly<Point>,
+  startProgress: number,
+  endProgress: number,
+  directEvidence: boolean,
+  budget: MutableBudget,
+): boolean {
+  const rangeStart = frozenPoint(
+    segmentStart[0] +
+      (segmentEnd[0] - segmentStart[0]) * startProgress,
+    segmentStart[1] +
+      (segmentEnd[1] - segmentStart[1]) * startProgress,
+  )
+  const rangeEnd = frozenPoint(
+    segmentStart[0] +
+      (segmentEnd[0] - segmentStart[0]) * endProgress,
+    segmentStart[1] +
+      (segmentEnd[1] - segmentStart[1]) * endProgress,
+  )
+  const parameters = latticeTraversalParameters(rangeStart, rangeEnd, budget)
+  if (parameters === null) return false
+  for (let index = 0; index + 2 < parameters.length; index += 2) {
+    if (
+      !proveScalarPermissionInterval(
+        field,
+        rangeStart,
+        rangeEnd,
+        parameters[index]!,
+        parameters[index + 2]!,
+        directEvidence,
+        budget,
+      )
     ) {
       return false
     }
   }
   return true
+}
+
+function proveCapsuleInterval(
+  startProgress: number,
+  endProgress: number,
+  start: Readonly<SegmentEvaluation>,
+  end: Readonly<SegmentEvaluation>,
+  segmentLength: number,
+  minimumRadius: number,
+  evaluate: (progress: number) => Readonly<SegmentEvaluation> | null,
+  provePermission: (
+    startProgress: number,
+    endProgress: number,
+    support: Readonly<FlowingContoursSpanSupportProvenance>,
+  ) => boolean,
+  cumulativeLength: readonly number[],
+  depth = 0,
+): boolean {
+  if (
+    start.located.arcCoordinate >
+      end.located.arcCoordinate + ARC_COORDINATE_TOLERANCE ||
+    depth >= 64
+  ) {
+    return false
+  }
+  const middleProgress = (startProgress + endProgress) / 2
+  if (
+    middleProgress === startProgress ||
+    middleProgress === endProgress
+  ) {
+    return false
+  }
+  const middle = evaluate(middleProgress)
+  if (
+    middle === null ||
+    middle.located.arcCoordinate + ARC_COORDINATE_TOLERANCE <
+      start.located.arcCoordinate ||
+    end.located.arcCoordinate + ARC_COORDINATE_TOLERANCE <
+      middle.located.arcCoordinate
+  ) {
+    return false
+  }
+  const intervalLength = segmentLength * (endProgress - startProgress)
+  const support = middle.located.support
+  const supportStart = cumulativeLength[support.startSampleIndex]!
+  const supportEnd = cumulativeLength[support.endSampleIndex]!
+  const remainsInsideOneAuthoredSpan =
+    start.located.arcCoordinate >=
+      supportStart - ARC_COORDINATE_TOLERANCE &&
+    end.located.arcCoordinate <= supportEnd + ARC_COORDINATE_TOLERANCE
+  const doesNotSkipRawArc =
+    end.located.arcCoordinate - start.located.arcCoordinate <=
+    intervalLength + 2 * minimumRadius + ARC_COORDINATE_TOLERANCE
+  if (
+    remainsInsideOneAuthoredSpan &&
+    doesNotSkipRawArc &&
+    middle.located.deviation + intervalLength / 2 <=
+    minimumRadius + VALUE_TOLERANCE
+  ) {
+    return provePermission(startProgress, endProgress, support)
+  }
+  return (
+    proveCapsuleInterval(
+      startProgress,
+      middleProgress,
+      start,
+      middle,
+      segmentLength,
+      minimumRadius,
+      evaluate,
+      provePermission,
+      cumulativeLength,
+      depth + 1,
+    ) &&
+    proveCapsuleInterval(
+      middleProgress,
+      endProgress,
+      middle,
+      end,
+      segmentLength,
+      minimumRadius,
+      evaluate,
+      provePermission,
+      cumulativeLength,
+      depth + 1,
+    )
+  )
 }
 
 /**
@@ -746,19 +1178,17 @@ export function validateFlowingContoursTubePoint(
   field: Readonly<FlowingContoursField>,
   tube: Readonly<FlowingContoursEvidenceTube>,
   proposal: Readonly<FlowingContoursTubePoint>,
+  options: Readonly<FlowingContoursTubeValidationOptions> = {},
 ): Readonly<FlowingContoursTubePointValidation> | null {
   try {
-    const data = tubeData(tube)
+    const data = tubeData(field, tube)
+    const maximumSamples = resolveMaximumSamples(options)
     const point = finitePoint(proposal.point)
     if (
       data === null ||
+      maximumSamples === null ||
       point === null ||
       !validSourceIndex(proposal.sourceSampleIndex, data) ||
-      !hasLocalNearestSampleCorrespondence(
-        point,
-        proposal.sourceSampleIndex,
-        data,
-      ) ||
       (proposal.sourceSampleIndex === 0 &&
         !samePoint(point, data.samples[0]!.point, ENDPOINT_TOLERANCE)) ||
       (proposal.sourceSampleIndex === data.samples.length - 1 &&
@@ -771,19 +1201,20 @@ export function validateFlowingContoursTubePoint(
     ) {
       return null
     }
+    const budget: MutableBudget = {
+      remaining: maximumSamples,
+      consumed: 0,
+    }
+    if (
+      nearestSourceSampleIndex(point, data, budget) !==
+      proposal.sourceSampleIndex
+    ) {
+      return null
+    }
     const sourceIndex = proposal.sourceSampleIndex
     const start = Math.max(0, sourceIndex - 1)
     const end = Math.min(data.samples.length - 1, sourceIndex + 1)
-    const progress =
-      end === start
-        ? 0
-        : (data.cumulativeLength[sourceIndex]! -
-            data.cumulativeLength[start]!) /
-          Math.max(
-            VECTOR_EPSILON,
-            data.cumulativeLength[end]! - data.cumulativeLength[start]!,
-          )
-    const located = locateArc(data, point, start, end, progress)
+    const located = locateArc(data, point, start, end, budget)
     const sampled = sampleFlowingContoursField(field, point)
     if (
       located === null ||
@@ -799,6 +1230,7 @@ export function validateFlowingContoursTubePoint(
       sourceSegmentIndex: located.segmentIndex,
       supportKind: located.support.kind,
       deviation: located.deviation,
+      validationSampleCount: budget.consumed,
     })
   } catch {
     return null
@@ -821,8 +1253,8 @@ function validateSegment(
     !validSourceIndex(startIndex, data) ||
     !validSourceIndex(endIndex, data) ||
     startIndex > endIndex ||
-    !hasLocalNearestSampleCorrespondence(start, startIndex, data) ||
-    !hasLocalNearestSampleCorrespondence(end, endIndex, data) ||
+    nearestSourceSampleIndex(start, data, budget) !== startIndex ||
+    nearestSourceSampleIndex(end, data, budget) !== endIndex ||
     (startIndex === 0 &&
       !samePoint(start, data.samples[0]!.point, ENDPOINT_TOLERANCE)) ||
     (endIndex === data.samples.length - 1 &&
@@ -834,21 +1266,27 @@ function validateSegment(
   const dy = end[1] - start[1]
   const direction = unit(dx, dy)
   const length = Math.hypot(dx, dy)
-  const steps = denseSampleCount(length)
-  if (
-    direction === null ||
-    steps === null ||
-    !consume(budget, steps + 1)
-  ) {
+  const minimumRadius = minimumTubeRadius(
+    data,
+    startIndex,
+    endIndex,
+    budget,
+  )
+  if (direction === null || !Number.isFinite(length) || minimumRadius === null) {
     return null
   }
 
   let maximumDeviation = 0
-  for (let step = 0; step <= steps; step += 1) {
-    const progress = step / steps
+  const cache = new Map<number, Readonly<SegmentEvaluation>>()
+  const evaluate = (
+    progress: number,
+  ): Readonly<SegmentEvaluation> | null => {
+    const cached = cache.get(progress)
+    if (cached !== undefined) return cached
+    if (!consume(budget)) return null
     const point = frozenPoint(start[0] + dx * progress, start[1] + dy * progress)
     const sampled = sampleFlowingContoursField(field, point)
-    const located = locateArc(data, point, startIndex, endIndex, progress)
+    const located = locateArc(data, point, startIndex, endIndex, budget)
     if (
       sampled === null ||
       located === null ||
@@ -864,10 +1302,83 @@ function validateSegment(
       return null
     }
     maximumDeviation = Math.max(maximumDeviation, located.deviation)
+    const result = Object.freeze({ progress, located })
+    cache.set(progress, result)
+    return result
+  }
+
+  const parameters = latticeTraversalParameters(start, end, budget)
+  if (parameters === null) return null
+  let previous: Readonly<SegmentEvaluation> | null = null
+  for (const progress of parameters) {
+    const evaluation = evaluate(progress)
+    if (
+      evaluation === null ||
+      (previous !== null &&
+        evaluation.located.arcCoordinate + ARC_COORDINATE_TOLERANCE <
+          previous.located.arcCoordinate)
+    ) {
+      return null
+    }
+    previous = evaluation
+  }
+  for (let index = 0; index + 2 < parameters.length; index += 2) {
+    const startProgress = parameters[index]!
+    const middleProgress = parameters[index + 1]!
+    const endProgress = parameters[index + 2]!
+    const middle = cache.get(middleProgress)
+    if (
+      middle === undefined ||
+      !proveScalarPermissionInterval(
+        field,
+        start,
+        end,
+        startProgress,
+        endProgress,
+        middle.located.support.kind === 'direct-evidence',
+        budget,
+      )
+    ) {
+      return null
+    }
+  }
+
+  const first = evaluate(0)
+  const last = evaluate(1)
+  const provePermission = (
+    startProgress: number,
+    endProgress: number,
+    support: Readonly<FlowingContoursSpanSupportProvenance>,
+  ): boolean =>
+    proveScalarPermissionRange(
+      field,
+      start,
+      end,
+      startProgress,
+      endProgress,
+      support.kind === 'direct-evidence',
+      budget,
+    )
+  if (
+    first === null ||
+    last === null ||
+    !proveCapsuleInterval(
+      0,
+      1,
+      first,
+      last,
+      length,
+      minimumRadius,
+      evaluate,
+      provePermission,
+      data.cumulativeLength,
+    )
+  ) {
+    return null
   }
   return Object.freeze({
     maximumDeviation,
-    validationSampleCount: steps + 1,
+    validationSampleCount: budget.consumed,
   })
 }
 
@@ -881,7 +1392,7 @@ export function validateFlowingContoursTubeSegment(
   options: Readonly<FlowingContoursTubeValidationOptions> = {},
 ): Readonly<FlowingContoursTubeSegmentValidation> | null {
   try {
-    const data = tubeData(tube)
+    const data = tubeData(field, tube)
     const maximumSamples = resolveMaximumSamples(options)
     if (data === null || maximumSamples === null) return null
     return validateSegment(field, data, segment, {
@@ -906,7 +1417,7 @@ export function validateFlowingContoursTubeCurve(
   options: Readonly<FlowingContoursTubeValidationOptions> = {},
 ): Readonly<FlowingContoursTubeCurveValidation> | null {
   try {
-    const data = tubeData(tube)
+    const data = tubeData(field, tube)
     const maximumSamples = resolveMaximumSamples(options)
     if (
       data === null ||
@@ -925,13 +1436,17 @@ export function validateFlowingContoursTubeCurve(
 
     const points: Readonly<Point>[] = []
     const indices: number[] = []
+    const budget: MutableBudget = {
+      remaining: maximumSamples,
+      consumed: 0,
+    }
     for (let index = 0; index < curve.points.length; index += 1) {
       const point = finitePoint(curve.points[index]!)
       const sourceIndex = curve.sourceSampleIndices[index]!
       if (
         point === null ||
         !validSourceIndex(sourceIndex, data) ||
-        !hasLocalNearestSampleCorrespondence(point, sourceIndex, data) ||
+        nearestSourceSampleIndex(point, data, budget) !== sourceIndex ||
         (index > 0 && sourceIndex < indices[index - 1]!)
       ) {
         return null
@@ -950,10 +1465,6 @@ export function validateFlowingContoursTubeCurve(
       return null
     }
 
-    const budget: MutableBudget = {
-      remaining: maximumSamples,
-      consumed: 0,
-    }
     let maximumDeviation = 0
     for (let index = 1; index < points.length; index += 1) {
       const validation = validateSegment(
