@@ -29,6 +29,209 @@ const SOURCE_ASSETS = Object.freeze({
     'assets/image-assets/pinecone-4330aa0314f7.png',
 })
 const studioRoot = fileURLToPath(new URL('..', import.meta.url))
+const EVIDENCE_SERIALIZATION_LIMITS = Object.freeze({
+  // FC03's exact raw/fitted point ceiling and per-analysis-sample maxima.
+  maxArrayLength: 524_288,
+  maxComparatorPathCount: 65_536,
+  maxCoordinateMagnitude: 1_000_000,
+  maxDepth: 24,
+  // FC03 permits at most 65,536 / 32 accepted Flowing curves.
+  maxFlowingPathCount: 2_048,
+  maxJsonBytes: 64 * 1024 * 1024,
+  maxObjectKeys: 128,
+  maxPathPointCount: 524_288,
+  maxScenePointCount: 524_288,
+  maxStringLength: 4_096,
+  maxTotalValues: 2_000_000,
+})
+
+function assertSerializableEvidence(
+  value,
+  label = 'evidence',
+  limits = EVIDENCE_SERIALIZATION_LIMITS,
+) {
+  const ancestors = new WeakSet()
+  let valueCount = 0
+  const fail = (path, reason) => {
+    throw new Error(`${label} is not safely serializable at ${path}: ${reason}`)
+  }
+  const visit = (current, path, depth) => {
+    valueCount += 1
+    if (valueCount > limits.maxTotalValues) {
+      fail(path, 'payload inventory exceeds bound')
+    }
+    if (depth > limits.maxDepth) fail(path, 'payload nesting exceeds bound')
+    if (current === null || typeof current === 'boolean') return
+    if (typeof current === 'number') {
+      if (!Number.isFinite(current)) fail(path, 'number is not finite')
+      return
+    }
+    if (typeof current === 'string') {
+      if (current.length > limits.maxStringLength) {
+        fail(path, 'string exceeds bound')
+      }
+      return
+    }
+    if (typeof current !== 'object') {
+      fail(path, `unsupported ${typeof current}`)
+    }
+    if (ancestors.has(current)) fail(path, 'cyclic inventory')
+    ancestors.add(current)
+    try {
+      if (Array.isArray(current)) {
+        if (
+          Object.getPrototypeOf(current) !== Array.prototype ||
+          current.length > limits.maxArrayLength
+        ) {
+          fail(path, 'array shape or inventory exceeds bound')
+        }
+        const keys = Reflect.ownKeys(current)
+        if (
+          keys.length !== current.length + 1 ||
+          keys.some(
+            (key) =>
+              key !== 'length' &&
+              (typeof key !== 'string' ||
+                !/^(0|[1-9][0-9]*)$/.test(key) ||
+                Number(key) >= current.length),
+          )
+        ) {
+          fail(path, 'array is sparse or has extra properties')
+        }
+        for (let index = 0; index < current.length; index += 1) {
+          const descriptor = Object.getOwnPropertyDescriptor(current, index)
+          if (descriptor === undefined || !('value' in descriptor)) {
+            fail(`${path}[${index}]`, 'array entry is not a data property')
+          }
+          visit(descriptor.value, `${path}[${index}]`, depth + 1)
+        }
+        return
+      }
+      const prototype = Object.getPrototypeOf(current)
+      if (prototype !== Object.prototype && prototype !== null) {
+        fail(path, 'object prototype is not plain')
+      }
+      const keys = Reflect.ownKeys(current)
+      if (
+        keys.length > limits.maxObjectKeys ||
+        keys.some((key) => typeof key !== 'string')
+      ) {
+        fail(path, 'object key inventory exceeds bound')
+      }
+      if (keys.includes('toJSON')) fail(path, 'custom JSON conversion')
+      for (const key of keys) {
+        const descriptor = Object.getOwnPropertyDescriptor(current, key)
+        if (
+          descriptor === undefined ||
+          !('value' in descriptor) ||
+          descriptor.enumerable !== true
+        ) {
+          fail(`${path}.${key}`, 'object entry is not enumerable data')
+        }
+        visit(descriptor.value, `${path}.${key}`, depth + 1)
+      }
+    } finally {
+      ancestors.delete(current)
+    }
+  }
+  visit(value, '$', 0)
+  return value
+}
+
+function safeEvidenceJson(value, label = 'evidence') {
+  assertSerializableEvidence(value, label)
+  const text = JSON.stringify(value)
+  if (
+    typeof text !== 'string' ||
+    new TextEncoder().encode(text).byteLength >
+      EVIDENCE_SERIALIZATION_LIMITS.maxJsonBytes
+  ) {
+    throw new Error(`${label} JSON exceeds its byte bound`)
+  }
+  return text
+}
+
+function canonicalSceneSnapshot(
+  scene,
+  maxPathCount = EVIDENCE_SERIALIZATION_LIMITS.maxComparatorPathCount,
+) {
+  if (
+    scene === null ||
+    typeof scene !== 'object' ||
+    scene.space === null ||
+    typeof scene.space !== 'object' ||
+    !Number.isFinite(scene.space.width) ||
+    scene.space.width <= 0 ||
+    scene.space.width >
+      EVIDENCE_SERIALIZATION_LIMITS.maxCoordinateMagnitude ||
+    !Number.isFinite(scene.space.height) ||
+    scene.space.height <= 0 ||
+    scene.space.height >
+      EVIDENCE_SERIALIZATION_LIMITS.maxCoordinateMagnitude ||
+    !Array.isArray(scene.primitives) ||
+    scene.primitives.length > maxPathCount
+  ) {
+    throw new Error('Scene has invalid space or path inventory')
+  }
+  let totalPointCount = 0
+  const paths = scene.primitives.map((primitive, order) => {
+    if (
+      primitive === null ||
+      typeof primitive !== 'object' ||
+      typeof primitive.closed !== 'boolean' ||
+      !Array.isArray(primitive.points) ||
+      primitive.points.length < 2 ||
+      primitive.points.length >
+        EVIDENCE_SERIALIZATION_LIMITS.maxPathPointCount
+    ) {
+      throw new Error(`Scene path ${order} has invalid shape or inventory`)
+    }
+    totalPointCount += primitive.points.length
+    if (
+      totalPointCount >
+      EVIDENCE_SERIALIZATION_LIMITS.maxScenePointCount
+    ) {
+      throw new Error('Scene point inventory exceeds bound')
+    }
+    const points = primitive.points.map((point, pointIndex) => {
+      if (
+        !Array.isArray(point) ||
+        point.length !== 2 ||
+        !Number.isFinite(point[0]) ||
+        !Number.isFinite(point[1]) ||
+        Math.abs(point[0]) >
+          EVIDENCE_SERIALIZATION_LIMITS.maxCoordinateMagnitude ||
+        Math.abs(point[1]) >
+          EVIDENCE_SERIALIZATION_LIMITS.maxCoordinateMagnitude
+      ) {
+        throw new Error(
+          `Scene path ${order} point ${pointIndex} is invalid`,
+        )
+      }
+      return [point[0], point[1]]
+    })
+    return {
+      order,
+      closed: primitive.closed,
+      hiddenLineRole: primitive.hiddenLineRole ?? null,
+      stroke: primitive.stroke ?? null,
+      fill: primitive.fill ?? null,
+      pointCount: points.length,
+      endpoints: {
+        start: points[0],
+        end: points.at(-1),
+      },
+      points,
+    }
+  })
+  const canonical = {
+    space: { width: scene.space.width, height: scene.space.height },
+    pathCount: paths.length,
+    paths,
+  }
+  assertSerializableEvidence(canonical, 'canonical Scene geometry')
+  return canonical
+}
 
 const HELP = `Usage:
   node apps/studio/scripts/capture-flowing-contours-reference.mjs --dry-run
@@ -264,8 +467,15 @@ import {
   measureFlowingContoursReferenceGeometryEvidence,
 } from '/@fs${workspaceRoot}/packages/core/src/__tests__/helpers/flowingContoursReferenceCases.ts'
 
+const EVIDENCE_SERIALIZATION_LIMITS = Object.freeze(${JSON.stringify(EVIDENCE_SERIALIZATION_LIMITS)})
+${assertSerializableEvidence.toString()}
+${safeEvidenceJson.toString()}
+${canonicalSceneSnapshot.toString()}
+${regressionShapeFindings.toString()}
+
 const sameJson = (first, second) =>
-  JSON.stringify(first) === JSON.stringify(second)
+  safeEvidenceJson(first, 'comparison lhs') ===
+  safeEvidenceJson(second, 'comparison rhs')
 const samePoint = (first, second) =>
   Object.is(first[0], second[0]) && Object.is(first[1], second[1])
 const pathLength = (points, closed) => {
@@ -302,29 +512,19 @@ const hexDigest = async (bytes) => {
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('')
 }
-const canonicalSceneGeometry = async (scene) => {
-  const paths = scene.primitives.map((primitive, order) => ({
-    order,
-    closed: primitive.closed === true,
-    hiddenLineRole: primitive.hiddenLineRole ?? null,
-    stroke: primitive.stroke ?? null,
-    fill: primitive.fill ?? null,
-    pointCount: primitive.points.length,
-    endpoints: {
-      start: primitive.points[0] ?? null,
-      end: primitive.points.at(-1) ?? null,
-    },
-    points: primitive.points,
-  }))
-  const canonical = {
-    space: scene.space,
-    pathCount: paths.length,
-    paths,
-  }
+const canonicalSceneGeometry = async (
+  scene,
+  maxPathCount = EVIDENCE_SERIALIZATION_LIMITS.maxComparatorPathCount,
+) => {
+  const canonical = canonicalSceneSnapshot(scene, maxPathCount)
+  const serialization = safeEvidenceJson(
+    canonical,
+    'canonical Scene geometry',
+  )
   return {
     canonical,
     canonicalSha256: await hexDigest(
-      new TextEncoder().encode(JSON.stringify(canonical)),
+      new TextEncoder().encode(serialization),
     ),
   }
 }
@@ -575,9 +775,6 @@ const regionHit = (primitive, region, frame) => {
   return false
 }
 const topologyEvidence = (name, reference, flowing) => {
-  const regions = Object.fromEntries(
-    reference.regions.map((region) => [region.name, region]),
-  )
   const hits = flowing.generated.scene.primitives.map((primitive) =>
     Object.fromEntries(
       reference.regions.map((region) => [
@@ -602,7 +799,7 @@ const topologyEvidence = (name, reference, flowing) => {
       {
         name: reference.topologyChecks[0],
         sourceConnectionVerified:
-          connected('left-petals', 'flower-center', true) ||
+          connected('left-petals', 'flower-center', true) &&
           connected('flower-center', 'right-petals', true),
         forbiddenBridgeObserved: false,
       },
@@ -625,7 +822,7 @@ const topologyEvidence = (name, reference, flowing) => {
     {
       name: reference.topologyChecks[0],
       sourceConnectionVerified:
-        connected('upper-scales', 'middle-scales', true) ||
+        connected('upper-scales', 'middle-scales', true) &&
         connected('middle-scales', 'lower-scales', true),
       forbiddenBridgeObserved: false,
     },
@@ -708,7 +905,7 @@ const captureReferenceCase = async (name, reference) => {
     flowingMetrics,
     pencilMetrics,
   )
-  return {
+  const evidence = {
     source: resolved.metadata,
     frame: FLOWING_CONTOURS_REFERENCE_FRAME,
     controls: {
@@ -717,7 +914,10 @@ const captureReferenceCase = async (name, reference) => {
       watercolor: WATERCOLOR_FORMS_REFERENCE_CONTROLS,
     },
     flowing: {
-      geometry: await canonicalSceneGeometry(flowing.generated.scene),
+      geometry: await canonicalSceneGeometry(
+        flowing.generated.scene,
+        EVIDENCE_SERIALIZATION_LIMITS.maxFlowingPathCount,
+      ),
       diagnostics: flowing.generated.diagnostics,
       stageProof: flowing.stageProof,
       metrics: flowingMetrics,
@@ -751,6 +951,8 @@ const captureReferenceCase = async (name, reference) => {
       diagnostics: watercolor.diagnostics,
     },
   }
+  assertSerializableEvidence(evidence, name + ' reference evidence')
+  return evidence
 }
 const syntheticDiagonalCurve = () => {
   const width = 128
@@ -784,11 +986,53 @@ const captureSynthetic = async () => {
     acceptedTrajectories: flowing.retainedTrajectories,
     diagnostics: flowing.generated.diagnostics,
   })
-  return {
+  const collectionEvidence =
+    measureFlowingContoursReferenceGeometryEvidence(
+      flowing.generated.scene,
+    )
+  if (collectionEvidence === null) {
+    throw new Error('Synthetic collection evidence failed')
+  }
+  const summary = {
+    termination: flowing.generated.diagnostics.termination,
+    pathCount: metrics.pathCount,
+    shortPathShare: metrics.shortPathShare,
+    medianPathDiagonalFraction:
+      metrics.medianPathLength /
+      Math.hypot(
+        flowing.generated.scene.space.width,
+        flowing.generated.scene.space.height,
+      ),
+    longestPathDiagonalFraction:
+      metrics.longestPathLength /
+      Math.hypot(
+        flowing.generated.scene.space.width,
+        flowing.generated.scene.space.height,
+      ),
+    longGeometryShare: metrics.longGeometryShare,
+    turnsOver25DegreesShare: metrics.turnsOver25DegreesShare,
+    turnsOver45DegreesShare: metrics.turnsOver45DegreesShare,
+    staircasePairCount: metrics.staircasePairCount,
+    orthogonalStaircaseSignature:
+      metrics.orthogonalStaircaseSignature,
+    occupiedCoverageBinCount: metrics.occupiedCoverageBinCount,
+    gridFamilyObserved:
+      collectionEvidence.primaryAxisLengthShare >= 0.2 &&
+      collectionEvidence.perpendicularAxisLengthShare >= 0.2 &&
+      collectionEvidence.primaryAxisPathCount >= 3 &&
+      collectionEvidence.perpendicularAxisPathCount >= 3,
+    gateFindings: [],
+  }
+  const findings = regressionShapeFindings(summary)
+  const evidence = {
     identity: 'opaque-128x96-diagonal-plus-sinusoidal-curve-v1',
-    geometry: await canonicalSceneGeometry(flowing.generated.scene),
+    geometry: await canonicalSceneGeometry(
+      flowing.generated.scene,
+      EVIDENCE_SERIALIZATION_LIMITS.maxFlowingPathCount,
+    ),
     diagnostics: flowing.generated.diagnostics,
     stageProof: flowing.stageProof,
+    collectionEvidence,
     antiStaircaseMetrics: {
       pathCount: metrics.pathCount,
       shortPathShare: metrics.shortPathShare,
@@ -800,24 +1044,36 @@ const captureSynthetic = async () => {
       orthogonalStaircaseSignature:
         metrics.orthogonalStaircaseSignature,
     },
+    regressionGuard: {
+      summary,
+      findings,
+      verdict: findings.length === 0 ? 'pass' : 'fail',
+    },
   }
+  assertSerializableEvidence(evidence, 'synthetic evidence')
+  return evidence
 }
-globalThis.__captureFlowingContoursEvidence = async () => ({
-  schemaVersion: 1,
-  kind: 'flowing-contours-nonvisual-reference-evidence',
-  phase: 'FC24b-phase-2',
-  cases: {
-    flower: await captureReferenceCase(
-      'flower',
-      FLOWING_CONTOURS_REFERENCE_CASES.flower,
-    ),
-    pinecone: await captureReferenceCase(
-      'pinecone',
-      FLOWING_CONTOURS_REFERENCE_CASES.pinecone,
-    ),
-  },
-  synthetic: await captureSynthetic(),
-})
+globalThis.__captureFlowingContoursEvidence = async () => {
+  const payload = {
+    schemaVersion: 1,
+    kind: 'flowing-contours-nonvisual-reference-evidence',
+    phase: 'FC24b-phase-2',
+    cases: {
+      flower: await captureReferenceCase(
+        'flower',
+        FLOWING_CONTOURS_REFERENCE_CASES.flower,
+      ),
+      pinecone: await captureReferenceCase(
+        'pinecone',
+        FLOWING_CONTOURS_REFERENCE_CASES.pinecone,
+      ),
+    },
+    synthetic: await captureSynthetic(),
+  }
+  assertSerializableEvidence(payload, 'complete evidence payload')
+  safeEvidenceJson(payload, 'complete evidence payload')
+  return payload
+}
 `
 }
 
@@ -1028,7 +1284,9 @@ async function runDryRun(options) {
     const url = `http://127.0.0.1:${options.port}${HARNESS_PATH}`
     const first = await captureInFreshContext(browser, url)
     const second = await captureInFreshContext(browser, url)
-    if (JSON.stringify(first) !== JSON.stringify(second)) {
+    const firstJson = safeEvidenceJson(first, 'first browser evidence')
+    const secondJson = safeEvidenceJson(second, 'second browser evidence')
+    if (firstJson !== secondJson) {
       throw new Error('Independent nonvisual evidence captures differed')
     }
     assertInertRequests(harness.requestedPaths)
@@ -1069,12 +1327,23 @@ function expectArgumentError(args, fragment) {
 function regressionShapeFindings(summary) {
   const findings = []
   if (
-    summary.shortPathShare > 0.15 ||
+    summary.termination !== 'complete' &&
+    summary.termination !== 'limit-reached'
+  ) {
+    findings.push('invalid-termination')
+  }
+  if (summary.pathCount === 0) findings.push('zero-paths')
+  if (
     summary.medianPathDiagonalFraction < 0.03 ||
+    summary.longestPathDiagonalFraction < 0.08 ||
     summary.longGeometryShare < 0.7
   ) {
-    findings.push('stumpy')
+    findings.push('insufficient-length')
   }
+  if (summary.occupiedCoverageBinCount < 8) {
+    findings.push('insufficient-coverage')
+  }
+  if (summary.shortPathShare > 0.15) findings.push('stumpy')
   if (
     summary.turnsOver25DegreesShare > 0.1 ||
     summary.turnsOver45DegreesShare > 0.025 ||
@@ -1083,8 +1352,8 @@ function regressionShapeFindings(summary) {
   ) {
     findings.push('staircase')
   }
+  if (summary.gridFamilyObserved) findings.push('orthogonal-grid-family')
   if (
-    summary.occupiedCoverageBinCount < 8 ||
     summary.gateFindings.some(
       (finding) =>
         finding === 'coverage' ||
@@ -1095,6 +1364,16 @@ function regressionShapeFindings(summary) {
     findings.push('smooth-but-wrong')
   }
   return findings
+}
+
+function expectEvidenceError(callback, fragment) {
+  try {
+    callback()
+  } catch (error) {
+    if (String(error.message).includes(fragment)) return
+    throw error
+  }
+  throw new Error(`Expected evidence rejection containing: ${fragment}`)
 }
 
 function selfTest() {
@@ -1144,24 +1423,43 @@ function selfTest() {
       throw new Error(`nonvisual capture imported output path: ${forbidden}`)
     }
   }
-  const diagonal = Math.hypot(1000, 1000)
   const base = {
+    termination: 'complete',
+    pathCount: 12,
     shortPathShare: 0,
     medianPathDiagonalFraction: 0.08,
+    longestPathDiagonalFraction: 0.3,
     longGeometryShare: 0.9,
     turnsOver25DegreesShare: 0,
     turnsOver45DegreesShare: 0,
     staircasePairCount: 0,
     orthogonalStaircaseSignature: 0,
     occupiedCoverageBinCount: 12,
+    gridFamilyObserved: false,
     gateFindings: [],
   }
   const negatives = {
+    invalid: regressionShapeFindings({
+      ...base,
+      termination: 'invalid-input',
+    }),
+    zero: regressionShapeFindings({
+      ...base,
+      pathCount: 0,
+    }),
+    short: regressionShapeFindings({
+      ...base,
+      medianPathDiagonalFraction: 0.01,
+      longestPathDiagonalFraction: 0.03,
+      longGeometryShare: 0.2,
+    }),
+    sparse: regressionShapeFindings({
+      ...base,
+      occupiedCoverageBinCount: 2,
+    }),
     stump: regressionShapeFindings({
       ...base,
       shortPathShare: 0.8,
-      medianPathDiagonalFraction: 8 / diagonal,
-      longGeometryShare: 0.2,
     }),
     stair: regressionShapeFindings({
       ...base,
@@ -1172,17 +1470,115 @@ function selfTest() {
     }),
     smoothWrong: regressionShapeFindings({
       ...base,
-      occupiedCoverageBinCount: 2,
       gateFindings: ['coverage', 'region:subject'],
     }),
+    grid: regressionShapeFindings({
+      ...base,
+      gridFamilyObserved: true,
+    }),
   }
+  const witness = regressionShapeFindings(base)
   if (
+    !negatives.invalid.includes('invalid-termination') ||
+    !negatives.zero.includes('zero-paths') ||
+    !negatives.short.includes('insufficient-length') ||
+    !negatives.sparse.includes('insufficient-coverage') ||
     !negatives.stump.includes('stumpy') ||
     !negatives.stair.includes('staircase') ||
-    !negatives.smoothWrong.includes('smooth-but-wrong')
+    !negatives.smoothWrong.includes('smooth-but-wrong') ||
+    !negatives.grid.includes('orthogonal-grid-family') ||
+    witness.length !== 0
   ) {
-    throw new Error('stump/stair/smooth-wrong negative guards failed')
+    throw new Error('live regression-shape guards failed')
   }
+  const canonicalWitness = canonicalSceneSnapshot({
+    space: { width: 10, height: 10 },
+    primitives: [
+      {
+        points: [
+          [1, 1],
+          [9, 9],
+        ],
+        closed: false,
+        stroke: { color: 'black', width: 1 },
+      },
+    ],
+  })
+  safeEvidenceJson(
+    { canonicalWitness, verdict: 'pass', findings: witness },
+    'self-test witness',
+  )
+  expectEvidenceError(
+    () => safeEvidenceJson({ value: Number.NaN }),
+    'not finite',
+  )
+  expectEvidenceError(
+    () => safeEvidenceJson({ value: Number.POSITIVE_INFINITY }),
+    'not finite',
+  )
+  expectEvidenceError(
+    () => safeEvidenceJson({ value: undefined }),
+    'unsupported undefined',
+  )
+  expectEvidenceError(
+    () => safeEvidenceJson({ values: Array(1) }),
+    'sparse',
+  )
+  const accessor = {}
+  Object.defineProperty(accessor, 'value', {
+    enumerable: true,
+    get: () => 1,
+  })
+  expectEvidenceError(
+    () => safeEvidenceJson(accessor),
+    'enumerable data',
+  )
+  const cycle = {}
+  cycle.self = cycle
+  expectEvidenceError(
+    () => safeEvidenceJson(cycle),
+    'cyclic inventory',
+  )
+  expectEvidenceError(
+    () =>
+      assertSerializableEvidence(
+        [1, 2],
+        'bounded array',
+        { ...EVIDENCE_SERIALIZATION_LIMITS, maxArrayLength: 1 },
+      ),
+    'inventory exceeds bound',
+  )
+  expectEvidenceError(
+    () =>
+      canonicalSceneSnapshot(
+        {
+          space: { width: 10, height: 10 },
+          primitives: [
+            {
+              points: [[Number.NaN, 1], [2, 2]],
+              closed: false,
+            },
+          ],
+        },
+      ),
+    'point 0 is invalid',
+  )
+  expectEvidenceError(
+    () =>
+      canonicalSceneSnapshot(
+        {
+          space: { width: 10, height: 10 },
+          primitives: [
+            {
+              points: [[1, 1], [2, 2]],
+              closed: false,
+            },
+          ],
+        },
+        0,
+      ),
+    'path inventory',
+  )
   assertInertRequests(
     new Set([
       HARNESS_PATH,
@@ -1208,7 +1604,8 @@ async function main() {
       `${options.write ? '--write' : '--verify'} is reserved until FC24b production capture is implemented`,
     )
   }
-  console.log(JSON.stringify(await runDryRun(options)))
+  const result = await runDryRun(options)
+  console.log(safeEvidenceJson(result, 'capture command result'))
 }
 
 const isEntryPoint =
