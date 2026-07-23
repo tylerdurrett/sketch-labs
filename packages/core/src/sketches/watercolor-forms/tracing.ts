@@ -154,6 +154,7 @@ function canonicalSegment(value: unknown): CanonicalSegment | undefined {
 
   const inputStart = frozenPoint(segment.start)
   const inputEnd = frozenPoint(segment.end)
+  const id = Object.is(segment.id, -0) ? 0 : segment.id
   const start =
     comparePoints(inputStart, inputEnd) <= 0 ? inputStart : inputEnd
   const end = start === inputStart ? inputEnd : inputStart
@@ -169,7 +170,7 @@ function canonicalSegment(value: unknown): CanonicalSegment | undefined {
   ].join('|')
 
   return {
-    id: segment.id,
+    id,
     regionIds: Object.freeze([
       segment.regionIds[0],
       segment.regionIds[1],

@@ -342,13 +342,15 @@ describe('Watercolor Forms shared-boundary tracing', () => {
   })
 
   it('normalizes signed zero before duplicate selection and output', () => {
-    const first = segment(1, [-0, 1], [2, 0])
-    const duplicate = segment(1, [2, -0], [0, 1])
+    const first = segment(-0, [-0, 1], [2, 0])
+    const duplicate = segment(0, [2, -0], [0, 1])
     const forward = traceWatercolorBoundaryNetwork([first, duplicate])
     const reversed = traceWatercolorBoundaryNetwork([duplicate, first])
 
     expect(forward).toEqual(reversed)
     expect(forward.diagnostics.duplicateSegmentCount).toBe(1)
+    expect(Object.is(forward.paths[0]!.boundarySegmentIds[0], -0)).toBe(false)
+    expect(forward.paths[0]!.boundarySegmentIds).toEqual([0])
     for (const point of forward.paths[0]!.points) {
       expect(Object.is(point[0], -0)).toBe(false)
       expect(Object.is(point[1], -0)).toBe(false)
