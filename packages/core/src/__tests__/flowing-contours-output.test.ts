@@ -317,6 +317,84 @@ function expectFlowyPath(primitive: Readonly<Primitive>): void {
   }
 }
 
+function segmentsIntersect(
+  firstStart: Readonly<Point>,
+  firstEnd: Readonly<Point>,
+  secondStart: Readonly<Point>,
+  secondEnd: Readonly<Point>,
+): boolean {
+  const cross = (
+    origin: Readonly<Point>,
+    first: Readonly<Point>,
+    second: Readonly<Point>,
+  ) =>
+    (first[0] - origin[0]) * (second[1] - origin[1]) -
+    (first[1] - origin[1]) * (second[0] - origin[0])
+  const firstSideStart = cross(firstStart, firstEnd, secondStart)
+  const firstSideEnd = cross(firstStart, firstEnd, secondEnd)
+  const secondSideStart = cross(secondStart, secondEnd, firstStart)
+  const secondSideEnd = cross(secondStart, secondEnd, firstEnd)
+  return (
+    firstSideStart * firstSideEnd <= 0 &&
+    secondSideStart * secondSideEnd <= 0
+  )
+}
+
+/**
+ * Share of paths that cross at least two members of a near-perpendicular
+ * straight family. One straight contour and an isolated authentic crossing
+ * both score zero; a repeated disconnected grid scores one.
+ */
+function repeatedPerpendicularLatticeShare(scene: Readonly<Scene>): number {
+  const straightPaths = scene.primitives.flatMap((primitive, index) => {
+    const start = primitive.points[0]
+    const end = primitive.points.at(-1)
+    if (start === undefined || end === undefined) return []
+    const length = pathLength(primitive.points, primitive.closed)
+    const chord = distance(start, end)
+    if (length <= 0 || chord / length < 0.95) return []
+    return [
+      {
+        index,
+        start,
+        end,
+        direction: [(end[0] - start[0]) / chord, (end[1] - start[1]) / chord],
+      },
+    ]
+  })
+  const perpendicularCrossings = new Array<number>(
+    scene.primitives.length,
+  ).fill(0)
+  for (let firstIndex = 0; firstIndex < straightPaths.length; firstIndex += 1) {
+    const first = straightPaths[firstIndex]!
+    for (
+      let secondIndex = firstIndex + 1;
+      secondIndex < straightPaths.length;
+      secondIndex += 1
+    ) {
+      const second = straightPaths[secondIndex]!
+      const dot = Math.abs(
+        first.direction[0]! * second.direction[0]! +
+          first.direction[1]! * second.direction[1]!,
+      )
+      if (
+        dot > Math.sin((15 * Math.PI) / 180) ||
+        !segmentsIntersect(first.start, first.end, second.start, second.end)
+      ) {
+        continue
+      }
+      perpendicularCrossings[first.index] += 1
+      perpendicularCrossings[second.index] += 1
+    }
+  }
+  const repeatedFamilyMembers = perpendicularCrossings.filter(
+    (count) => count >= 2,
+  ).length
+  return (
+    repeatedFamilyMembers / Math.max(1, scene.primitives.length)
+  )
+}
+
 function expectFlowingGeometry(
   scene: Readonly<Scene>,
   minimumLongestPath = 60,
@@ -340,6 +418,7 @@ function expectFlowingGeometry(
   expect(
     scene.primitives.every((primitive) => primitive.points.length >= 4),
   ).toBe(true)
+  expect(repeatedPerpendicularLatticeShare(scene)).toBeLessThan(0.25)
   for (const primitive of scene.primitives) expectFlowyPath(primitive)
 }
 
@@ -431,6 +510,8 @@ describe('Flowing Contours output contract', () => {
     const outlineSource = sketch.deriveOutlineSource!(scene, target)
     const outlined = hiddenLinePass(outlineSource)
     expectFlowingGeometry(outlined)
+    expect(outlineSource.space).toEqual(scene.space)
+    expect(outlined.space).toEqual(scene.space)
     expect(outlineSource.primitives).toHaveLength(scene.primitives.length)
     expect(outlined.primitives).toHaveLength(scene.primitives.length)
     scene.primitives.forEach((completedPrimitive, index) => {
@@ -559,6 +640,51 @@ describe('Flowing Contours output contract', () => {
         lengths.reduce((sum, length) => sum + length, 0),
     ).toBeGreaterThan(0.89)
     expect(() => expectFlowingGeometry(longWithStumps, 60)).toThrow()
+
+    const disconnectedGrid: Scene = {
+      space: { width: 100, height: 100 },
+      primitives: [
+        ...[20, 40, 60, 80].map(
+          (y): Primitive => ({
+            points: [
+              [5, y],
+              [35, y],
+              [65, y],
+              [95, y],
+            ],
+            stroke: { color: 'black', width: 1 },
+          }),
+        ),
+        ...[20, 40, 60, 80].map(
+          (x): Primitive => ({
+            points: [
+              [x, 5],
+              [x, 35],
+              [x, 65],
+              [x, 95],
+            ],
+            stroke: { color: 'black', width: 1 },
+          }),
+        ),
+      ],
+    }
+    expect(
+      disconnectedGrid.primitives.every(
+        (primitive) =>
+          measureTurns(primitive.points, false).maximum === 0,
+      ),
+    ).toBe(true)
+    expect(repeatedPerpendicularLatticeShare(disconnectedGrid)).toBe(1)
+    expect(() => expectFlowingGeometry(disconnectedGrid, 60)).toThrow()
+
+    const legitimateSingleStraight: Scene = {
+      space: { width: 100, height: 100 },
+      primitives: [disconnectedGrid.primitives[0]!],
+    }
+    expect(repeatedPerpendicularLatticeShare(legitimateSingleStraight)).toBe(0)
+    expect(() =>
+      expectFlowingGeometry(legitimateSingleStraight, 60),
+    ).not.toThrow()
   })
 
   it('retargets only tool width, then uses generic Page clipping, rebasing, margins, and physical mapping', () => {
