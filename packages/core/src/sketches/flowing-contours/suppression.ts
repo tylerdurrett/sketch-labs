@@ -15,6 +15,7 @@ import {
   isWithinFlowingContoursLimit,
   type FlowingContoursLimits,
 } from './limits'
+import type { FlowingContoursSelectionResult } from './selection'
 import {
   FLOWING_CONTOURS_ENDPOINT_REASONS,
   type AcceptedFlowingTrajectory,
@@ -29,6 +30,8 @@ const VALUE_TOLERANCE = 1e-8
 const OCCUPANCY_SAMPLE_SPACING = 0.25
 const OWNERSHIP_RADIUS = 0.55
 const CROSSING_CORE_RADIUS = 0.16
+const CROSSING_OVERLAP_CEILING = 0.45
+const POINT_ONLY_OVERLAP_CEILING = 0.65
 const TANGENT_ALIGNMENT_FLOOR = 0.8
 const ANCHOR_SUPPRESSION_THRESHOLD = 0.7
 const EVIDENCE_SUPPRESSION_THRESHOLD = 0.35
@@ -53,6 +56,19 @@ export interface FlowingContoursSuppressionState {
   readonly height: number
   readonly occupancySampleCount: number
   readonly suppressedEvidenceSampleCount: number
+}
+
+/** Opaque exact-field query capability for one immutable state snapshot. */
+export interface FlowingContoursSuppressionQuery {
+  readonly field: Readonly<FlowingContoursField>
+  readonly occupancySampleCount: number
+}
+
+/** Opaque proof that FC11 accepted one trajectory for this exact field. */
+export interface RegisteredFlowingTrajectorySuppression {
+  readonly field: Readonly<FlowingContoursField>
+  readonly trajectoryId: number
+  readonly rawSampleCount: number
 }
 
 export type FlowingContoursSuppressionCommitResult =
@@ -81,11 +97,22 @@ interface SuppressionData {
   readonly rawTrajectoryPointLimit: number
 }
 
-type SuppressionQuery = Readonly<Point> | Readonly<CorrectedFlowingRidgeSample>
-
 const STATE_DATA = new WeakMap<
   Readonly<FlowingContoursSuppressionState>,
   Readonly<SuppressionData>
+>()
+
+const QUERY_DATA = new WeakMap<
+  Readonly<FlowingContoursSuppressionQuery>,
+  Readonly<SuppressionData>
+>()
+
+const REGISTRATION_DATA = new WeakMap<
+  Readonly<RegisteredFlowingTrajectorySuppression>,
+  {
+    readonly field: Readonly<FlowingContoursField>
+    readonly trajectory: Readonly<AcceptedFlowingTrajectory>
+  }
 >()
 
 const ENDPOINT_REASONS: ReadonlySet<FlowingContoursEndpointReason> = new Set(
@@ -368,55 +395,233 @@ export function createFlowingContoursSuppressionState(
   }
 }
 
-function pointQuery(
-  query: SuppressionQuery,
-  explicitTangent?: Readonly<Point>,
-): {
-  readonly point: Readonly<Point>
-  readonly tangent: Readonly<Point> | null
-  readonly sample: Readonly<CorrectedFlowingRidgeSample> | null
-} | null {
+function snapshotPoint(source: unknown): Readonly<Point> | null {
   try {
-    if (Array.isArray(query)) {
-      if (
-        query.length !== 2 ||
-        !Number.isFinite(query[0]) ||
-        !Number.isFinite(query[1])
-      ) {
-        return null
-      }
-      const tangent =
-        explicitTangent === undefined ? null : unit(explicitTangent)
-      if (explicitTangent !== undefined && tangent === null) return null
-      return Object.freeze({
-        point: frozenPoint(query[0]!, query[1]!),
-        tangent,
-        sample: null,
-      })
-    }
-    if (typeof query !== 'object' || query === null) return null
-    const sample = query as Readonly<CorrectedFlowingRidgeSample>
-    const point = sample.point
-    const tangent = unit(explicitTangent ?? sample.tangent)
+    if (!Array.isArray(source)) return null
+    const length = ownDataValue(source, 'length')
+    const x = ownDataValue(source, 0)
+    const y = ownDataValue(source, 1)
+    return length === 2 &&
+      typeof x === 'number' &&
+      Number.isFinite(x) &&
+      typeof y === 'number' &&
+      Number.isFinite(y)
+      ? frozenPoint(x, y)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function snapshotSample(
+  source: unknown,
+): Readonly<CorrectedFlowingRidgeSample> | null {
+  try {
+    if (typeof source !== 'object' || source === null) return null
+    const point = snapshotPoint(ownDataValue(source, 'point'))
+    const tangent = snapshotPoint(ownDataValue(source, 'tangent'))
+    const evidence = ownDataValue(source, 'evidence')
+    const coherence = ownDataValue(source, 'coherence')
+    const ambiguity = ownDataValue(source, 'ambiguity')
+    const scale = ownDataValue(source, 'scale')
+    const alpha = ownDataValue(source, 'alpha')
     if (
-      !Array.isArray(point) ||
-      point.length !== 2 ||
-      !Number.isFinite(point[0]) ||
-      !Number.isFinite(point[1]) ||
+      point === null ||
       tangent === null ||
-      !finiteUnit(sample.evidence) ||
-      !finiteUnit(sample.coherence) ||
-      !finiteUnit(sample.ambiguity) ||
-      !finitePositive(sample.scale) ||
-      !finitePositive(sample.alpha) ||
-      sample.alpha > 1
+      unit(tangent) === null ||
+      !finiteUnit(evidence) ||
+      !finiteUnit(coherence) ||
+      !finiteUnit(ambiguity) ||
+      !finitePositive(scale) ||
+      !finitePositive(alpha) ||
+      alpha > 1
     ) {
       return null
     }
     return Object.freeze({
-      point: frozenPoint(point[0], point[1]),
+      point,
       tangent,
-      sample,
+      evidence,
+      coherence,
+      ambiguity,
+      scale,
+      alpha,
+    })
+  } catch {
+    return null
+  }
+}
+
+function snapshotScore(
+  source: unknown,
+): AcceptedFlowingTrajectory['score'] | null {
+  try {
+    if (typeof source !== 'object' || source === null) return null
+    const names = [
+      'accumulatedEvidence',
+      'usefulLength',
+      'directionalCoherence',
+      'curvaturePenalty',
+      'unsupportedTravelPenalty',
+      'ambiguityPenalty',
+      'representedOverlapPenalty',
+      'total',
+    ] as const
+    const values = Object.fromEntries(
+      names.map((name) => [name, ownDataValue(source, name)]),
+    ) as Record<(typeof names)[number], unknown>
+    for (const name of names) {
+      const value = values[name]
+      if (
+        typeof value !== 'number' ||
+        !Number.isFinite(value) ||
+        (name !== 'total' && value < 0)
+      ) {
+        return null
+      }
+    }
+    return Object.freeze({
+      accumulatedEvidence: values.accumulatedEvidence as number,
+      usefulLength: values.usefulLength as number,
+      directionalCoherence: values.directionalCoherence as number,
+      curvaturePenalty: values.curvaturePenalty as number,
+      unsupportedTravelPenalty: values.unsupportedTravelPenalty as number,
+      ambiguityPenalty: values.ambiguityPenalty as number,
+      representedOverlapPenalty: values.representedOverlapPenalty as number,
+      total: values.total as number,
+    })
+  } catch {
+    return null
+  }
+}
+
+function snapshotSpans(
+  source: unknown,
+): AcceptedFlowingTrajectory['spanSupport'] | null {
+  try {
+    if (!Array.isArray(source)) return null
+    const length = ownDataValue(source, 'length')
+    if (
+      !Number.isSafeInteger(length) ||
+      (length as number) < 1 ||
+      (length as number) > FLOWING_CONTOURS_LIMITS['raw-trajectory-point-count']
+    ) {
+      return null
+    }
+    const spans = []
+    for (let index = 0; index < (length as number); index += 1) {
+      const candidate = ownDataValue(source, index)
+      if (typeof candidate !== 'object' || candidate === null) return null
+      const kind = ownDataValue(candidate, 'kind')
+      const startSampleIndex = ownDataValue(candidate, 'startSampleIndex')
+      const endSampleIndex = ownDataValue(candidate, 'endSampleIndex')
+      const spanLength = ownDataValue(candidate, 'length')
+      const entryEvidence = ownDataValue(candidate, 'entryEvidence')
+      const exitEvidence = ownDataValue(candidate, 'exitEvidence')
+      const directionalAlignment = ownDataValue(
+        candidate,
+        'directionalAlignment',
+      )
+      if (
+        (kind !== 'direct-evidence' && kind !== 'bounded-gap') ||
+        !Number.isSafeInteger(startSampleIndex) ||
+        !Number.isSafeInteger(endSampleIndex) ||
+        !finitePositive(spanLength) ||
+        !finiteUnit(entryEvidence) ||
+        !finiteUnit(exitEvidence) ||
+        !finiteUnit(directionalAlignment)
+      ) {
+        return null
+      }
+      spans.push(
+        Object.freeze({
+          kind,
+          startSampleIndex: startSampleIndex as number,
+          endSampleIndex: endSampleIndex as number,
+          length: spanLength,
+          entryEvidence,
+          exitEvidence,
+          directionalAlignment,
+        }),
+      )
+    }
+    return Object.freeze(spans)
+  } catch {
+    return null
+  }
+}
+
+function snapshotTrajectory(
+  source: unknown,
+): Readonly<AcceptedFlowingTrajectory> | null {
+  try {
+    if (typeof source !== 'object' || source === null) return null
+    const id = ownDataValue(source, 'id')
+    const anchorId = ownDataValue(source, 'anchorId')
+    const sampleSource = ownDataValue(source, 'samples')
+    const spanSupport = snapshotSpans(ownDataValue(source, 'spanSupport'))
+    const startEndpointReason = ownDataValue(source, 'startEndpointReason')
+    const endEndpointReason = ownDataValue(source, 'endEndpointReason')
+    const length = ownDataValue(source, 'length')
+    const maximumUnsupportedSpanLength = ownDataValue(
+      source,
+      'maximumUnsupportedSpanLength',
+    )
+    const totalUnsupportedSpanLength = ownDataValue(
+      source,
+      'totalUnsupportedSpanLength',
+    )
+    const score = snapshotScore(ownDataValue(source, 'score'))
+    if (
+      !Number.isSafeInteger(id) ||
+      (id as number) < 0 ||
+      !Number.isSafeInteger(anchorId) ||
+      (anchorId as number) < 0 ||
+      !Array.isArray(sampleSource) ||
+      spanSupport === null ||
+      !ENDPOINT_REASONS.has(
+        startEndpointReason as FlowingContoursEndpointReason,
+      ) ||
+      !ENDPOINT_REASONS.has(
+        endEndpointReason as FlowingContoursEndpointReason,
+      ) ||
+      !finitePositive(length) ||
+      typeof maximumUnsupportedSpanLength !== 'number' ||
+      !Number.isFinite(maximumUnsupportedSpanLength) ||
+      maximumUnsupportedSpanLength < 0 ||
+      typeof totalUnsupportedSpanLength !== 'number' ||
+      !Number.isFinite(totalUnsupportedSpanLength) ||
+      totalUnsupportedSpanLength < 0 ||
+      score === null
+    ) {
+      return null
+    }
+    const sampleCount = ownDataValue(sampleSource, 'length')
+    if (
+      !Number.isSafeInteger(sampleCount) ||
+      (sampleCount as number) < 2 ||
+      (sampleCount as number) >
+        FLOWING_CONTOURS_LIMITS['raw-trajectory-point-count']
+    ) {
+      return null
+    }
+    const samples: Readonly<CorrectedFlowingRidgeSample>[] = []
+    for (let index = 0; index < (sampleCount as number); index += 1) {
+      const sample = snapshotSample(ownDataValue(sampleSource, index))
+      if (sample === null) return null
+      samples.push(sample)
+    }
+    return Object.freeze({
+      id: id as number,
+      anchorId: anchorId as number,
+      samples: Object.freeze(samples),
+      spanSupport,
+      startEndpointReason: startEndpointReason as FlowingContoursEndpointReason,
+      endEndpointReason: endEndpointReason as FlowingContoursEndpointReason,
+      length,
+      maximumUnsupportedSpanLength,
+      totalUnsupportedSpanLength,
+      score,
     })
   } catch {
     return null
@@ -476,7 +681,10 @@ function overlapAt(
             tangent[0] * occupied.tangent[0] + tangent[1] * occupied.tangent[1],
           )
           if (alignment < TANGENT_ALIGNMENT_FLOOR) {
-            overlap = spatialOverlap(distance, CROSSING_CORE_RADIUS)
+            overlap = Math.min(
+              CROSSING_OVERLAP_CEILING,
+              spatialOverlap(distance, CROSSING_CORE_RADIUS),
+            )
           }
         }
         maximum = Math.max(maximum, overlap)
@@ -487,31 +695,97 @@ function overlapAt(
 }
 
 /**
- * Query represented overlap in `[0, 1]`.
+ * Bind queries to exactly one immutable state and analysis-field identity.
  *
- * A point-only query is suitable for FC09/FC10's current sampler seam. Passing
- * a corrected sample (or an explicit tangent with a point) enables the stricter
- * ridge-aware decision. Corrected samples must belong to the state's field.
+ * FC14 should rebuild this inexpensive capability after each successful commit
+ * and close over it when wiring suppression into search.
+ */
+export function createFlowingContoursSuppressionQuery(
+  state: Readonly<FlowingContoursSuppressionState>,
+  field: Readonly<FlowingContoursField>,
+): Readonly<FlowingContoursSuppressionQuery> | null {
+  const data = stateData(state)
+  if (data === null || field !== data.field) return null
+  const query: Readonly<FlowingContoursSuppressionQuery> = Object.freeze({
+    field,
+    occupancySampleCount: data.occupancy.length,
+  })
+  QUERY_DATA.set(query, data)
+  return query
+}
+
+function queryData(
+  query: Readonly<FlowingContoursSuppressionQuery>,
+): Readonly<SuppressionData> | null {
+  try {
+    const data = QUERY_DATA.get(query)
+    return data !== undefined &&
+      Object.isFrozen(query) &&
+      query.field === data.field &&
+      query.occupancySampleCount === data.occupancy.length
+      ? data
+      : null
+  } catch {
+    return null
+  }
+}
+
+function inField(
+  data: Readonly<SuppressionData>,
+  point: Readonly<Point>,
+): boolean {
+  return (
+    point[0] >= 0 &&
+    point[1] >= 0 &&
+    point[0] <= data.field.width - 1 &&
+    point[1] <= data.field.height - 1
+  )
+}
+
+/**
+ * Conservative point-only overlap for FC09/FC10's existing callback seam.
+ *
+ * Lacking a travel tangent, this query can contribute overlap penalty but is
+ * deliberately capped below the hard collision threshold. That prevents an
+ * unknown perpendicular crossing from terminating a later long gesture.
  */
 export function queryFlowingContoursSuppression(
-  state: Readonly<FlowingContoursSuppressionState>,
-  sampleOrPoint: SuppressionQuery,
-  tangent?: Readonly<Point>,
+  query: Readonly<FlowingContoursSuppressionQuery>,
+  sourcePoint: Readonly<Point>,
 ): number | null {
-  const data = stateData(state)
-  const query = pointQuery(sampleOrPoint, tangent)
+  const data = queryData(query)
+  const point = snapshotPoint(sourcePoint)
+  if (data === null || point === null || !inField(data, point)) {
+    return null
+  }
+  return Math.min(POINT_ONLY_OVERLAP_CEILING, overlapAt(data, point, null))
+}
+
+/**
+ * Tangent-aware collision query for growth.
+ *
+ * FC14 should prefer this whenever the current predictor/corrector tangent is
+ * available. Same-ridge travel reaches hard collision; a perpendicular
+ * crossing remains a bounded soft overlap and may continue through it.
+ */
+export function queryFlowingContoursSuppressionAlongTangent(
+  query: Readonly<FlowingContoursSuppressionQuery>,
+  sourcePoint: Readonly<Point>,
+  sourceTangent: Readonly<Point>,
+): number | null {
+  const data = queryData(query)
+  const point = snapshotPoint(sourcePoint)
+  const tangentPoint = snapshotPoint(sourceTangent)
+  const tangent = tangentPoint === null ? null : unit(tangentPoint)
   if (
     data === null ||
-    query === null ||
-    query.point[0] < 0 ||
-    query.point[1] < 0 ||
-    query.point[0] > data.field.width - 1 ||
-    query.point[1] > data.field.height - 1 ||
-    (query.sample !== null && !sampleMatchesField(data.field, query.sample))
+    point === null ||
+    tangent === null ||
+    !inField(data, point)
   ) {
     return null
   }
-  return overlapAt(data, query.point, query.tangent)
+  return overlapAt(data, point, tangent)
 }
 
 function trajectoryShape(
@@ -544,16 +818,15 @@ function trajectoryShape(
     }
     let measuredLength = 0
     for (let index = 0; index < trajectory.samples.length; index += 1) {
-      const query = pointQuery(trajectory.samples[index]!)
-      if (query === null || query.sample === null) return 'invalid-input'
-      if (!sampleMatchesField(data.field, query.sample)) {
+      const sample = trajectory.samples[index]!
+      if (!sampleMatchesField(data.field, sample)) {
         return 'field-mismatch'
       }
       if (index > 0) {
         const previous = trajectory.samples[index - 1]!.point
         const segmentLength = Math.hypot(
-          query.point[0] - previous[0],
-          query.point[1] - previous[1],
+          sample.point[0] - previous[0],
+          sample.point[1] - previous[1],
         )
         if (
           !Number.isFinite(segmentLength) ||
@@ -615,10 +888,7 @@ function trajectoryShape(
       ) {
         const first = trajectory.samples[index]!.point
         const second = trajectory.samples[index + 1]!.point
-        spanLength += Math.hypot(
-          second[0] - first[0],
-          second[1] - first[1],
-        )
+        spanLength += Math.hypot(second[0] - first[0], second[1] - first[1])
       }
       if (
         !sameNumber(spanLength, span.length) ||
@@ -648,16 +918,64 @@ function trajectoryShape(
         maximumUnsupportedLength,
         trajectory.maximumUnsupportedSpanLength,
       ) ||
-      !sameNumber(
-        totalUnsupportedLength,
-        trajectory.totalUnsupportedSpanLength,
-      )
+      !sameNumber(totalUnsupportedLength, trajectory.totalUnsupportedSpanLength)
     ) {
       return 'invalid-input'
     }
     return 'valid'
   } catch {
     return 'invalid-input'
+  }
+}
+
+/**
+ * Register FC11's accepted result as a field-bound commit capability.
+ *
+ * FC14 calls this immediately after selection returns `kind: 'accepted'`.
+ * The entire external result is snapshotted through guarded own-data reads and
+ * fully validated before the opaque capability is published.
+ */
+export function registerAcceptedFlowingTrajectorySuppression(
+  state: Readonly<FlowingContoursSuppressionState>,
+  field: Readonly<FlowingContoursField>,
+  selection: Readonly<FlowingContoursSelectionResult>,
+): Readonly<RegisteredFlowingTrajectorySuppression> | null {
+  try {
+    const data = stateData(state)
+    if (
+      data === null ||
+      field !== data.field ||
+      typeof selection !== 'object' ||
+      selection === null
+    ) {
+      return null
+    }
+    const kind = ownDataValue(selection, 'kind')
+    const sourceTrajectory = ownDataValue(selection, 'trajectory')
+    const safetyTruncated = ownDataValue(selection, 'safetyTruncated')
+    if (kind !== 'accepted' || typeof safetyTruncated !== 'boolean') {
+      return null
+    }
+    const trajectory = snapshotTrajectory(sourceTrajectory)
+    if (
+      trajectory === null ||
+      trajectoryShape(data, trajectory) !== 'valid' ||
+      safetyTruncated !==
+        (trajectory.startEndpointReason === 'safety-limit' ||
+          trajectory.endEndpointReason === 'safety-limit')
+    ) {
+      return null
+    }
+    const registration: Readonly<RegisteredFlowingTrajectorySuppression> =
+      Object.freeze({
+        field,
+        trajectoryId: trajectory.id,
+        rawSampleCount: trajectory.samples.length,
+      })
+    REGISTRATION_DATA.set(registration, Object.freeze({ field, trajectory }))
+    return registration
+  } catch {
+    return null
   }
 }
 
@@ -816,16 +1134,26 @@ function newlySuppressedEvidence(
  */
 export function commitAcceptedFlowingTrajectorySuppression(
   state: Readonly<FlowingContoursSuppressionState>,
-  trajectory: Readonly<AcceptedFlowingTrajectory>,
+  registration: Readonly<RegisteredFlowingTrajectorySuppression>,
 ): FlowingContoursSuppressionCommitResult {
   const data = stateData(state)
   if (data === null) {
     return Object.freeze({ kind: 'rejected', reason: 'field-mismatch' })
   }
-  const validity = trajectoryShape(data, trajectory)
-  if (validity !== 'valid') {
-    return Object.freeze({ kind: 'rejected', reason: validity })
+  const registered = REGISTRATION_DATA.get(registration)
+  if (
+    registered === undefined ||
+    !Object.isFrozen(registration) ||
+    registration.field !== registered.field ||
+    registration.trajectoryId !== registered.trajectory.id ||
+    registration.rawSampleCount !== registered.trajectory.samples.length
+  ) {
+    return Object.freeze({ kind: 'rejected', reason: 'invalid-input' })
   }
+  if (registered.field !== data.field) {
+    return Object.freeze({ kind: 'rejected', reason: 'field-mismatch' })
+  }
+  const trajectory = registered.trajectory
   const additions = trajectoryOccupancy(trajectory, data.occupancyLimit)
   if (additions === null) {
     return Object.freeze({ kind: 'rejected', reason: 'occupancy-limit' })
@@ -862,23 +1190,31 @@ export function commitAcceptedFlowingTrajectorySuppression(
 
 /** Decide whether one exact-field anchor is already represented. */
 export function isFlowingContoursAnchorSuppressed(
-  state: Readonly<FlowingContoursSuppressionState>,
+  query: Readonly<FlowingContoursSuppressionQuery>,
   anchor: Readonly<FlowingContoursAnchor>,
 ): boolean | null {
   try {
-    const data = stateData(state)
+    const data = queryData(query)
+    if (typeof anchor !== 'object' || anchor === null) return null
+    const id = ownDataValue(anchor, 'id')
+    const fieldSampleIndex = ownDataValue(anchor, 'fieldSampleIndex')
+    const sample = snapshotSample(ownDataValue(anchor, 'sample'))
     if (
       data === null ||
-      !Number.isSafeInteger(anchor.id) ||
-      anchor.id < 0 ||
-      !Number.isSafeInteger(anchor.fieldSampleIndex) ||
-      anchor.fieldSampleIndex < 0 ||
-      anchor.fieldSampleIndex >= data.field.width * data.field.height
+      !Number.isSafeInteger(id) ||
+      (id as number) < 0 ||
+      !Number.isSafeInteger(fieldSampleIndex) ||
+      (fieldSampleIndex as number) < 0 ||
+      (fieldSampleIndex as number) >= data.field.width * data.field.height ||
+      sample === null ||
+      !sampleMatchesField(data.field, sample)
     ) {
       return null
     }
-    const overlap = queryFlowingContoursSuppression(state, anchor.sample)
-    return overlap === null ? null : overlap >= ANCHOR_SUPPRESSION_THRESHOLD
+    const tangent = unit(sample.tangent)
+    return tangent === null
+      ? null
+      : overlapAt(data, sample.point, tangent) >= ANCHOR_SUPPRESSION_THRESHOLD
   } catch {
     return null
   }
