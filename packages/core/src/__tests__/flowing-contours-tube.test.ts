@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { sampleFlowingContoursField } from '../sketches/flowing-contours/field'
+import { createFlowingContoursTestLimits } from '../sketches/flowing-contours/limits'
+import { searchFlowingContoursCandidate } from '../sketches/flowing-contours/search'
 import {
   FLOWING_CONTOURS_EVIDENCE_TUBE_HARD_MAX_RADIUS,
   createFlowingContoursEvidenceTube,
@@ -152,6 +154,36 @@ function trajectory(
 
 function allIndices(count: number): readonly number[] {
   return Array.from({ length: count }, (_value, index) => index)
+}
+
+function gaussian(distance: number, width = 0.65): number {
+  return Math.exp(-(distance * distance) / (2 * width * width))
+}
+
+function canonicalGapAlignment(
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+  span: Readonly<FlowingContoursSpanSupportProvenance>,
+): number {
+  const entry = samples[span.startSampleIndex]!
+  let result = 1
+  for (
+    let index = span.startSampleIndex + 1;
+    index <= span.endSampleIndex;
+    index += 1
+  ) {
+    const sample = samples[index]!
+    const dx = sample.point[0] - entry.point[0]
+    const dy = sample.point[1] - entry.point[1]
+    const distance = Math.hypot(dx, dy)
+    result = Math.min(
+      result,
+      entry.tangent[0] * sample.tangent[0] +
+        entry.tangent[1] * sample.tangent[1],
+      (entry.tangent[0] * dx + entry.tangent[1] * dy) / distance,
+      (sample.tangent[0] * dx + sample.tangent[1] * dy) / distance,
+    )
+  }
+  return result
 }
 
 describe('Flowing Contours corrected-trajectory evidence tube', () => {
@@ -404,14 +436,24 @@ describe('Flowing Contours corrected-trajectory evidence tube', () => {
       }),
     ).toMatchObject({ supportKind: 'bounded-gap' })
 
-    const fabricatedGap = {
+    const asymmetricButStrongGap = {
       ...spans[1],
       directionalAlignment: 0.8,
     } as const
     expect(
       createFlowingContoursEvidenceTube(source, {
         ...raw,
-        spanSupport: [spans[0], fabricatedGap, spans[2]],
+        spanSupport: [spans[0], asymmetricButStrongGap, spans[2]],
+      }),
+    ).not.toBeNull()
+    expect(
+      createFlowingContoursEvidenceTube(source, {
+        ...raw,
+        spanSupport: [
+          spans[0],
+          { ...spans[1], directionalAlignment: 0.7 },
+          spans[2],
+        ],
       }),
     ).toBeNull()
     expect(
@@ -462,6 +504,79 @@ describe('Flowing Contours corrected-trajectory evidence tube', () => {
     ).toBeNull()
   })
 
+  it('accepts an asymmetric curved gap reversed from real backward search', () => {
+    const source = field(25, 15, (x, y) => {
+      const offset = x - 12
+      const curveY = 6 + 0.018 * offset * offset
+      const slope = 0.036 * offset
+      const tangentLength = Math.hypot(1, slope)
+      return {
+        evidence:
+          (x === 6 || x === 7 ? 0.01 : 1) *
+          gaussian(y - curveY),
+        tangent: [1 / tangentLength, slope / tangentLength],
+      }
+    })
+    const anchorSample = sampled(source, [12, 6])
+    const candidate = searchFlowingContoursCandidate(
+      source,
+      {
+        id: 9,
+        fieldSampleIndex: 6 * source.width + 12,
+        sample: anchorSample,
+      },
+      {
+        continuity: 1,
+        flowSmoothing: 0.7,
+        ridgeStepOptions: { stepLength: 1 },
+      },
+      createFlowingContoursTestLimits({
+        'search-step-count': 64,
+        'raw-trajectory-point-count': 128,
+      })!,
+    )
+
+    expect(candidate).not.toBeNull()
+    const gaps = candidate!.spanSupport.filter(
+      (span) => span.kind === 'bounded-gap',
+    )
+    expect(gaps.length).toBeGreaterThan(0)
+    const recomputed = gaps.map((gap) =>
+      canonicalGapAlignment(candidate!.samples, gap),
+    )
+    expect(
+      gaps.every((gap) => gap.directionalAlignment >= 0.75),
+    ).toBe(true)
+    expect(recomputed.every((alignment) => alignment >= 0.75)).toBe(true)
+    const anchorIndex = candidate!.backward.samples.length - 1
+    expect(
+      gaps.some(
+        (gap, index) =>
+          gap.endSampleIndex <= anchorIndex &&
+          Math.abs(gap.directionalAlignment - recomputed[index]!) > 1e-10,
+      ),
+    ).toBe(true)
+
+    const raw: AcceptedFlowingTrajectory = Object.freeze({
+      id: 44,
+      anchorId: candidate!.anchor.id,
+      samples: candidate!.samples,
+      spanSupport: candidate!.spanSupport,
+      startEndpointReason: candidate!.backward.endpointReason,
+      endEndpointReason: candidate!.forward.endpointReason,
+      length: candidate!.length,
+      maximumUnsupportedSpanLength: Math.max(
+        ...gaps.map((gap) => gap.length),
+      ),
+      totalUnsupportedSpanLength: gaps.reduce(
+        (sum, gap) => sum + gap.length,
+        0,
+      ),
+      score: candidate!.score,
+    })
+    expect(createFlowingContoursEvidenceTube(source, raw)).not.toBeNull()
+  })
+
   it('uses true stable global sample provenance on a nonlocal loop', () => {
     const source = field(8, 8, () => ({ scale: 4 }))
     const points = [
@@ -510,6 +625,42 @@ describe('Flowing Contours corrected-trajectory evidence tube', () => {
         sourceSampleIndices: [0, points.length - 1],
       }),
     ).toBeNull()
+  })
+
+  it('rejects micro-backtracking hidden inside a straight fitted chord', () => {
+    const source = field(8, 7, () => ({ scale: 4 }))
+    const points = [
+      [1, 2],
+      [1.2, 2.05],
+      [1.1, 1.95],
+      [1.4, 2],
+    ] as const
+    const raw = trajectory(source, points)
+    const tube = createFlowingContoursEvidenceTube(source, raw)!
+
+    expect(
+      validateFlowingContoursTubeCurve(source, tube, {
+        points: [points[0], points.at(-1)!],
+        sourceSampleIndices: [0, points.length - 1],
+      }),
+    ).toBeNull()
+  })
+
+  it('validates a 1000-sample identity curve comfortably inside the work cap', () => {
+    const source = field(202, 5)
+    const points = Array.from(
+      { length: 1000 },
+      (_value, index) => [1 + index * 0.2, 2] as const,
+    )
+    const raw = trajectory(source, points)
+    const tube = createFlowingContoursEvidenceTube(source, raw)!
+    const validation = validateFlowingContoursTubeCurve(source, tube, {
+      points,
+      sourceSampleIndices: allIndices(points.length),
+    })
+
+    expect(validation).not.toBeNull()
+    expect(validation!.validationSampleCount).toBeLessThan(100_000)
   })
 
   it('caps adversarial dense-segment work and fails closed before sampling', () => {

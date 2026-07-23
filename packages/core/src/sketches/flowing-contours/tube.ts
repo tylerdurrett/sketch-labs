@@ -34,14 +34,17 @@ const MINIMUM_TUBE_RADIUS = 0.25
 const DIRECT_MINIMUM_EVIDENCE = 0.04
 const DIRECT_MINIMUM_COHERENCE = 0.25
 const DIRECT_MAXIMUM_AMBIGUITY = 0.7
-const MINIMUM_DIRECTIONAL_ALIGNMENT = 0.5
 const ARC_COORDINATE_TOLERANCE = 1e-8
+const NEAREST_SAMPLE_CELL_SIZE = MINIMUM_TUBE_RADIUS
 
 /** A fit can never move farther than this many analysis-lattice pixels. */
 export const FLOWING_CONTOURS_EVIDENCE_TUBE_HARD_MAX_RADIUS = 1.5
 
 /** Hard directional proof floor for every retained bounded-gap span. */
 export const FLOWING_CONTOURS_BOUNDED_GAP_ALIGNMENT_FLOOR = 0.75
+
+/** Signed raw-segment progress floor relative to one proposed fit segment. */
+export const FLOWING_CONTOURS_TUBE_DIRECTIONAL_ALIGNMENT_FLOOR = 0.5
 
 /**
  * Explicit ceiling across raw-corridor preparation or one validation call.
@@ -105,6 +108,14 @@ interface TubeData {
     readonly Readonly<FlowingContoursSpanSupportProvenance>[]
   readonly cumulativeLength: readonly number[]
   readonly segmentRadii: readonly number[]
+  readonly nearestSamples: Readonly<NearestSampleIndex>
+}
+
+interface NearestSampleIndex {
+  readonly width: number
+  readonly height: number
+  readonly cellSize: number
+  readonly buckets: ReadonlyMap<number, readonly number[]>
 }
 
 interface LocatedArc {
@@ -466,8 +477,7 @@ function snapshotSupport(
           measuredAlignment <
             FLOWING_CONTOURS_BOUNDED_GAP_ALIGNMENT_FLOOR ||
           source.directionalAlignment <
-            FLOWING_CONTOURS_BOUNDED_GAP_ALIGNMENT_FLOOR ||
-          !nearlyEqual(source.directionalAlignment, measuredAlignment)
+            FLOWING_CONTOURS_BOUNDED_GAP_ALIGNMENT_FLOOR
         ) {
           return null
         }
@@ -575,6 +585,50 @@ function verifyRawCorridor(
   return true
 }
 
+function buildNearestSampleIndex(
+  field: Readonly<FlowingContoursField>,
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+  budget: MutableBudget,
+): Readonly<NearestSampleIndex> | null {
+  const width = Math.floor((field.width - 1) / NEAREST_SAMPLE_CELL_SIZE) + 1
+  const height = Math.floor((field.height - 1) / NEAREST_SAMPLE_CELL_SIZE) + 1
+  if (
+    !Number.isSafeInteger(width) ||
+    width < 1 ||
+    !Number.isSafeInteger(height) ||
+    height < 1 ||
+    !consume(budget, samples.length)
+  ) {
+    return null
+  }
+  const mutable = new Map<number, number[]>()
+  for (let index = 0; index < samples.length; index += 1) {
+    const point = samples[index]!.point
+    const x = Math.max(
+      0,
+      Math.min(width - 1, Math.floor(point[0] / NEAREST_SAMPLE_CELL_SIZE)),
+    )
+    const y = Math.max(
+      0,
+      Math.min(height - 1, Math.floor(point[1] / NEAREST_SAMPLE_CELL_SIZE)),
+    )
+    const cell = y * width + x
+    const bucket = mutable.get(cell)
+    if (bucket === undefined) mutable.set(cell, [index])
+    else bucket.push(index)
+  }
+  const buckets = new Map<number, readonly number[]>()
+  for (const [cell, indices] of mutable) {
+    buckets.set(cell, Object.freeze(indices))
+  }
+  return Object.freeze({
+    width,
+    height,
+    cellSize: NEAREST_SAMPLE_CELL_SIZE,
+    buckets,
+  })
+}
+
 function prepareTubeData(
   field: Readonly<FlowingContoursField>,
   trajectory: Readonly<AcceptedFlowingTrajectory>,
@@ -606,6 +660,12 @@ function prepareTubeData(
     const frozenSamples = Object.freeze(samples)
     const support = snapshotSupport(trajectory, frozenSamples)
     if (support === null) return null
+    const nearestSamples = buildNearestSampleIndex(
+      field,
+      frozenSamples,
+      budget,
+    )
+    if (nearestSamples === null) return null
 
     const cumulativeLength = new Array<number>(samples.length)
     const segmentRadii = new Array<number>(samples.length - 1)
@@ -639,6 +699,7 @@ function prepareTubeData(
       segmentSupport: support.segmentSupport,
       cumulativeLength: Object.freeze(cumulativeLength),
       segmentRadii: Object.freeze(segmentRadii),
+      nearestSamples,
     })
   } catch {
     return null
@@ -809,24 +870,122 @@ function nearestSourceSampleIndex(
   data: Readonly<TubeData>,
   budget: MutableBudget,
 ): number | null {
-  if (!consume(budget, data.samples.length)) return null
+  if (
+    point[0] < 0 ||
+    point[1] < 0 ||
+    point[0] > data.field.width - 1 ||
+    point[1] > data.field.height - 1
+  ) {
+    return null
+  }
+  const spatial = data.nearestSamples
+  const centerX = Math.max(
+    0,
+    Math.min(
+      spatial.width - 1,
+      Math.floor(point[0] / spatial.cellSize),
+    ),
+  )
+  const centerY = Math.max(
+    0,
+    Math.min(
+      spatial.height - 1,
+      Math.floor(point[1] / spatial.cellSize),
+    ),
+  )
   let nearestIndex = -1
   let nearestDistance = Infinity
-  for (let index = 0; index < data.samples.length; index += 1) {
-    const candidate = data.samples[index]!.point
-    const distance = Math.hypot(
-      point[0] - candidate[0],
-      point[1] - candidate[1],
-    )
-    if (
-      distance < nearestDistance ||
-      (distance === nearestDistance && index < nearestIndex)
-    ) {
-      nearestIndex = index
-      nearestDistance = distance
+  const maximumRing = Math.max(spatial.width, spatial.height)
+  for (let ring = 0; ring < maximumRing; ring += 1) {
+    const minimumX = Math.max(0, centerX - ring)
+    const maximumX = Math.min(spatial.width - 1, centerX + ring)
+    const minimumY = Math.max(0, centerY - ring)
+    const maximumY = Math.min(spatial.height - 1, centerY + ring)
+    for (let y = minimumY; y <= maximumY; y += 1) {
+      for (let x = minimumX; x <= maximumX; x += 1) {
+        if (
+          ring > 0 &&
+          x !== minimumX &&
+          x !== maximumX &&
+          y !== minimumY &&
+          y !== maximumY
+        ) {
+          continue
+        }
+        if (!consume(budget)) return null
+        const bucket = spatial.buckets.get(y * spatial.width + x)
+        if (bucket === undefined) continue
+        if (!consume(budget, bucket.length)) return null
+        for (const index of bucket) {
+          const candidate = data.samples[index]!.point
+          const distance = Math.hypot(
+            point[0] - candidate[0],
+            point[1] - candidate[1],
+          )
+          if (
+            distance < nearestDistance ||
+            (distance === nearestDistance && index < nearestIndex)
+          ) {
+            nearestIndex = index
+            nearestDistance = distance
+          }
+        }
+      }
     }
+
+    const outsideDistances = [
+      minimumX > 0
+        ? point[0] - minimumX * spatial.cellSize
+        : Infinity,
+      maximumX < spatial.width - 1
+        ? (maximumX + 1) * spatial.cellSize - point[0]
+        : Infinity,
+      minimumY > 0
+        ? point[1] - minimumY * spatial.cellSize
+        : Infinity,
+      maximumY < spatial.height - 1
+        ? (maximumY + 1) * spatial.cellSize - point[1]
+        : Infinity,
+    ]
+    const outsideLowerBound = Math.min(...outsideDistances)
+    if (
+      nearestIndex >= 0 &&
+      outsideLowerBound > nearestDistance
+    ) {
+      return nearestIndex
+    }
+    if (!Number.isFinite(outsideLowerBound)) break
   }
   return nearestIndex >= 0 ? nearestIndex : null
+}
+
+function proveSignedRawProgress(
+  data: Readonly<TubeData>,
+  startSampleIndex: number,
+  endSampleIndex: number,
+  direction: Readonly<Point>,
+  budget: MutableBudget,
+): boolean {
+  const segmentCount = endSampleIndex - startSampleIndex
+  if (segmentCount < 0 || !consume(budget, segmentCount)) return false
+  for (
+    let index = startSampleIndex;
+    index < endSampleIndex;
+    index += 1
+  ) {
+    const start = data.samples[index]!.point
+    const end = data.samples[index + 1]!.point
+    const rawDirection = unit(end[0] - start[0], end[1] - start[1])
+    if (
+      rawDirection === null ||
+      rawDirection[0] * direction[0] +
+        rawDirection[1] * direction[1] <
+        FLOWING_CONTOURS_TUBE_DIRECTIONAL_ALIGNMENT_FLOOR
+    ) {
+      return false
+    }
+  }
+  return true
 }
 
 function latticeTraversalParameters(
@@ -1242,6 +1401,7 @@ function validateSegment(
   data: Readonly<TubeData>,
   segment: Readonly<FlowingContoursTubeSegment>,
   budget: MutableBudget,
+  endpointsCertified = false,
 ): Readonly<FlowingContoursTubeSegmentValidation> | null {
   const start = finitePoint(segment.start.point)
   const end = finitePoint(segment.end.point)
@@ -1253,8 +1413,10 @@ function validateSegment(
     !validSourceIndex(startIndex, data) ||
     !validSourceIndex(endIndex, data) ||
     startIndex > endIndex ||
-    nearestSourceSampleIndex(start, data, budget) !== startIndex ||
-    nearestSourceSampleIndex(end, data, budget) !== endIndex ||
+    (!endpointsCertified &&
+      nearestSourceSampleIndex(start, data, budget) !== startIndex) ||
+    (!endpointsCertified &&
+      nearestSourceSampleIndex(end, data, budget) !== endIndex) ||
     (startIndex === 0 &&
       !samePoint(start, data.samples[0]!.point, ENDPOINT_TOLERANCE)) ||
     (endIndex === data.samples.length - 1 &&
@@ -1275,6 +1437,17 @@ function validateSegment(
   if (direction === null || !Number.isFinite(length) || minimumRadius === null) {
     return null
   }
+  if (
+    !proveSignedRawProgress(
+      data,
+      startIndex,
+      endIndex,
+      direction,
+      budget,
+    )
+  ) {
+    return null
+  }
 
   let maximumDeviation = 0
   const cache = new Map<number, Readonly<SegmentEvaluation>>()
@@ -1291,11 +1464,9 @@ function validateSegment(
       sampled === null ||
       located === null ||
       located.deviation > located.radius + VALUE_TOLERANCE ||
-      Math.abs(
-        direction[0] * located.tangent[0] +
-          direction[1] * located.tangent[1],
-      ) <
-        MINIMUM_DIRECTIONAL_ALIGNMENT ||
+      direction[0] * located.tangent[0] +
+          direction[1] * located.tangent[1] <
+        FLOWING_CONTOURS_TUBE_DIRECTIONAL_ALIGNMENT_FLOOR ||
       (located.support.kind === 'direct-evidence' &&
         !isResolvedEvidence(sampled))
     ) {
@@ -1481,6 +1652,7 @@ export function validateFlowingContoursTubeCurve(
           },
         },
         budget,
+        true,
       )
       if (validation === null) return null
       maximumDeviation = Math.max(
