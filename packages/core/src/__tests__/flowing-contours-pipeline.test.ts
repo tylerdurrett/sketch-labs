@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
+import { createFlowingContoursAccounting } from '../sketches/flowing-contours/accounting'
+import {
+  admitFlowingContoursAnchors,
+  buildFlowingContoursAnchorInventory,
+} from '../sketches/flowing-contours/anchors'
 import {
   createFlowingContoursTestLimits,
   type FlowingContoursLimits,
 } from '../sketches/flowing-contours/limits'
 import { runFlowingContoursPipeline } from '../sketches/flowing-contours/pipeline'
+import { searchFlowingContoursCandidate } from '../sketches/flowing-contours/search'
+import { selectFlowingContoursCandidate } from '../sketches/flowing-contours/selection'
 import {
   FLOWING_CONTOURS_ENDPOINT_REASONS,
   type FlowingContoursField,
@@ -249,6 +256,45 @@ describe('Flowing Contours pipeline', () => {
         ),
       ).toBe(true)
     }
+  })
+
+  it('documents the upstream FC10→FC11 rejection of an authentic open curved path', () => {
+    const source = centerlineField(
+      40,
+      20,
+      (x) => 10 + 2.5 * Math.sin(x / 7),
+      (x) => (2.5 / 7) * Math.cos(x / 7),
+    )
+    const accounting = createFlowingContoursAccounting()
+    const inventory = buildFlowingContoursAnchorInventory(source, accounting)
+    const admission = admitFlowingContoursAnchors(inventory, 1, accounting)
+    const anchor = admission.anchors[0]
+    if (anchor === undefined) throw new Error('expected a curved-ridge anchor')
+    const candidate = searchFlowingContoursCandidate(source, anchor, {
+      continuity: 0.5,
+      flowSmoothing: 0.8,
+    })
+
+    expect(candidate).not.toBeNull()
+    expect(candidate!.length).toBeGreaterThan(30)
+    expect(
+      candidate!.spanSupport.some((span) => span.kind === 'bounded-gap'),
+    ).toBe(true)
+    const selection = selectFlowingContoursCandidate(
+      candidate!,
+      {
+        analysisWidth: source.width,
+        analysisHeight: source.height,
+        minimumStrokeLength: 0.1,
+      },
+      accounting,
+    )
+    // Release blocker outside FC14 ownership: FC10 brands this candidate with
+    // the exact source field, yet FC11 currently rejects its curved support.
+    expect(selection).toEqual({
+      kind: 'rejected',
+      reason: 'invalid-input',
+    })
   })
 
   it('returns complete empty output for a flat valid field', () => {
