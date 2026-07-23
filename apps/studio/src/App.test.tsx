@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PENCIL_CONTOUR_DEFAULT_IMAGE_ASSET_ID,
   PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+  WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID,
+  watercolorForms,
+  type Preset,
 } from "@harness/core";
 
 import { App } from "./App";
@@ -36,6 +39,14 @@ const appImageResolution = vi.hoisted(() => ({
   failure: null as null | "missing",
 }));
 const appNormalization = vi.hoisted(() => ({ caps: [] as number[] }));
+const appCanvas = vi.hoisted(() => ({ captureCalls: 0 }));
+const appPresetClient = vi.hoisted(() => ({
+  list: vi
+    .fn<[string], Promise<string[]>>()
+    .mockImplementation(() => new Promise(() => {})),
+  load: vi.fn<[string, string], Promise<Preset>>(),
+  save: vi.fn<[Preset], Promise<void>>().mockResolvedValue(undefined),
+}));
 
 vi.mock("./imageAssetNormalization", async (importActual) => {
   const actual =
@@ -85,6 +96,13 @@ vi.mock("./imageAssetResolver", async (importActual) => {
   };
 });
 
+vi.mock("./presetsClient", () => ({
+  listPresets: (sketchId: string) => appPresetClient.list(sketchId),
+  loadPreset: (sketchId: string, name: string) =>
+    appPresetClient.load(sketchId, name),
+  savePreset: (preset: Preset) => appPresetClient.save(preset),
+}));
+
 vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
     params,
@@ -103,8 +121,12 @@ vi.mock("./LiveCanvas", () => ({
       getCanvas: () => null,
       getCurrentT: () => 0,
       getDisplayedScene: () => null,
-      captureDisplayedFillFrame: () => null,
+      captureDisplayedFillFrame: () => {
+        appCanvas.captureCalls += 1;
+        return null;
+      },
       captureDisplayedFrame: () => {
+        appCanvas.captureCalls += 1;
         const scene = { space: { width: 100, height: 100 }, primitives: [] };
         return {
           scene,
@@ -133,6 +155,7 @@ vi.mock("./LiveCanvas", () => ({
 }));
 
 const exportJob = vi.hoisted(() => ({
+  starts: 0,
   resolve: null as null | ((result: {
     status: "cancelled";
     jobId: number;
@@ -142,6 +165,7 @@ const exportJob = vi.hoisted(() => ({
 vi.mock("./hiddenLineCoordinator", () => ({
   HiddenLineCoordinator: class {
     startExport() {
+      exportJob.starts += 1;
       return new Promise((resolve) => {
         exportJob.resolve = resolve;
       });
@@ -181,6 +205,13 @@ afterEach(() => {
   appImageResolution.ids = [];
   appImageResolution.failure = null;
   appNormalization.caps = [];
+  appCanvas.captureCalls = 0;
+  appPresetClient.list
+    .mockReset()
+    .mockImplementation(() => new Promise(() => {}));
+  appPresetClient.load.mockReset();
+  appPresetClient.save.mockReset().mockResolvedValue(undefined);
+  exportJob.starts = 0;
   exportJob.resolve = null;
 });
 
@@ -233,6 +264,36 @@ function setNumberInput(input: HTMLInputElement, value: string): void {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
   act(() => input.blur());
+}
+
+function setTextInput(input: HTMLInputElement, value: string): void {
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+function setSelectValue(select: HTMLSelectElement, value: string): void {
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLSelectElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+function button(label: string): HTMLButtonElement {
+  const match = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+    (candidate) => candidate.textContent === label,
+  );
+  if (match === undefined) throw new Error(`no button labelled ${label}`);
+  return match;
 }
 
 function pressUndo(): KeyboardEvent {
@@ -489,15 +550,205 @@ describe("App — Photo Scribble integration (#333)", () => {
   });
 });
 
-describe("App — Pencil Contour integration (#396)", () => {
-  it("opens the newest Sketch on its bundled source with reusable controls and an ordinary preview", async () => {
+describe("App — Watercolor Forms integration (#402 WF10)", () => {
+  it("opens as the newest Sketch with its managed source, authored controls, and a live ordinary preview", async () => {
     mountApp();
     await act(async () => Promise.resolve());
 
-    expect(trigger().textContent).toBe("Pencil Contour");
+    expect(trigger().textContent).toBe("Watercolor Forms");
     expect(appImageResolution.ids).toEqual([
-      PENCIL_CONTOUR_DEFAULT_IMAGE_ASSET_ID,
+      WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID,
     ]);
+    expect(
+      document.querySelector(
+        '[aria-label="imageAsset image asset identity"]',
+      )?.textContent,
+    ).toBe(WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID);
+    expect(
+      [...document.querySelectorAll('#inspector input[id^="control-"]')].map(
+        (input) => input.id,
+      ),
+    ).toEqual([
+      "control-gamma",
+      "control-contrast",
+      "control-pivot",
+      "control-formDetail",
+      "control-colorSensitivity",
+      "control-boundaryStrength",
+      "control-boundarySmoothing",
+    ]);
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-params"),
+    ).toBe(
+      JSON.stringify({
+        imageAsset: WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID,
+        gamma: 0.5,
+        contrast: 0.5,
+        pivot: 0.5,
+        formDetail: 0.5,
+        colorSensitivity: 0.5,
+        boundaryStrength: 0.5,
+        boundarySmoothing: 1,
+      }),
+    );
+    expect(
+      document
+        .querySelector('[data-testid="canvas"]')
+        ?.getAttribute("data-render-state"),
+    ).toBe("fill-live");
+
+    setNumberInput(
+      document.querySelector<HTMLInputElement>("#control-formDetail")!,
+      "0.73",
+    );
+    expect(
+      JSON.parse(
+        document
+          .querySelector('[data-testid="canvas"]')!
+          .getAttribute("data-params")!,
+      ),
+    ).toMatchObject({ formDetail: 0.73 });
+    expect(
+      ["Save", "Reload", "Export PNG", "Export SVG", "Export Hidden-line SVG"].map(
+        (label) => button(label).textContent,
+      ),
+    ).toEqual([
+      "Save",
+      "Reload",
+      "Export PNG",
+      "Export SVG",
+      "Export Hidden-line SVG",
+    ]);
+  });
+
+  it("round-trips its independent controls through the ordinary Preset surface", async () => {
+    appPresetClient.list
+      .mockResolvedValueOnce([])
+      .mockResolvedValue(["watercolor-authored"]);
+    mountApp();
+    await act(async () => Promise.resolve());
+
+    setNumberInput(
+      document.querySelector<HTMLInputElement>("#control-boundaryStrength")!,
+      "0.81",
+    );
+    setTextInput(
+      document.querySelector<HTMLInputElement>(
+        'input[aria-label="preset name"]',
+      )!,
+      "watercolor-authored",
+    );
+    act(() => button("Save").click());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(appPresetClient.save).toHaveBeenCalledOnce();
+    const saved = appPresetClient.save.mock.calls[0]![0];
+    expect(saved).toMatchObject({
+      sketch: "watercolor-forms",
+      name: "watercolor-authored",
+      params: {
+        imageAsset: WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID,
+        gamma: 0.5,
+        contrast: 0.5,
+        pivot: 0.5,
+        formDetail: 0.5,
+        colorSensitivity: 0.5,
+        boundaryStrength: 0.81,
+        boundarySmoothing: 1,
+      },
+    });
+
+    setNumberInput(
+      document.querySelector<HTMLInputElement>("#control-boundaryStrength")!,
+      "0.22",
+    );
+    appPresetClient.load.mockResolvedValue(saved);
+    setSelectValue(
+      document.querySelector<HTMLSelectElement>(
+        'select[aria-label="saved presets"]',
+      )!,
+      "watercolor-authored",
+    );
+    act(() => button("Reload").click());
+    await act(async () => Promise.resolve());
+
+    expect(appPresetClient.load).toHaveBeenCalledWith(
+      "watercolor-forms",
+      "watercolor-authored",
+    );
+    expect(
+      document.querySelector<HTMLInputElement>("#control-boundaryStrength")
+        ?.value,
+    ).toBe("0.81");
+    expect(
+      JSON.parse(
+        document
+          .querySelector('[data-testid="canvas"]')!
+          .getAttribute("data-params")!,
+      ),
+    ).toMatchObject({ boundaryStrength: 0.81 });
+  });
+
+  it("keeps a missing managed source unresolved without launching work or enabling output actions", async () => {
+    appImageResolution.failure = "missing";
+    const generate = vi.spyOn(watercolorForms, "generate");
+    mountApp();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const canvas = document.querySelector<HTMLElement>(
+      '[data-testid="canvas"]',
+    )!;
+    expect(trigger().textContent).toBe("Watercolor Forms");
+    expect(appImageResolution.ids).toEqual([
+      WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID,
+    ]);
+    expect(
+      document.querySelector(
+        '[aria-label="imageAsset image asset identity"]',
+      )?.textContent,
+    ).toBe(WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID);
+    expect(JSON.parse(canvas.dataset.params!)).toMatchObject({
+      imageAsset: WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID,
+    });
+    expect(canvas.dataset.renderState).toBe("unavailable");
+    expect(canvas.dataset.unavailableStatus).toBe("missing");
+    expect(canvas.dataset.unresolvedAssetIds).toBe(
+      WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID,
+    );
+    expect(document.body.textContent).toContain("Image Asset is missing");
+    for (const label of [
+      "Fill",
+      "Export PNG",
+      "Export SVG",
+      "Export Hidden-line SVG",
+    ]) {
+      expect(button(label).disabled).toBe(true);
+      act(() => button(label).click());
+    }
+    expect(generate).not.toHaveBeenCalled();
+    expect(appCanvas.captureCalls).toBe(0);
+    expect(exportJob.starts).toBe(0);
+    expect(appImageResolution.ids).toEqual([
+      WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID,
+    ]);
+    generate.mockRestore();
+  });
+
+  it("still navigates to Pencil Contour with its unchanged identity and five-control schema", async () => {
+    mountApp();
+    await act(async () => Promise.resolve());
+    selectOption("Pencil Contour");
+    await act(async () => Promise.resolve());
+
+    expect(trigger().textContent).toBe("Pencil Contour");
     expect(
       document.querySelector(
         '[aria-label="imageAsset image asset identity"]',
@@ -528,53 +779,6 @@ describe("App — Pencil Contour integration (#396)", () => {
         contourSmoothing: 0.5,
       }),
     );
-    expect(
-      document
-        .querySelector('[data-testid="canvas"]')
-        ?.getAttribute("data-render-state"),
-    ).toBe("fill-live");
-
-    const buttonLabels = [...document.querySelectorAll("button")].map(
-      (button) => button.textContent,
-    );
-    expect(buttonLabels).toEqual(
-      expect.arrayContaining([
-        "Export PNG",
-        "Export SVG",
-        "Export Hidden-line SVG",
-      ]),
-    );
-  });
-
-  it("uses the generic managed-asset unavailable state and disables every output action", async () => {
-    appImageResolution.failure = "missing";
-    mountApp();
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    const canvas = document.querySelector<HTMLElement>(
-      '[data-testid="canvas"]',
-    )!;
-    expect(trigger().textContent).toBe("Pencil Contour");
-    expect(canvas.dataset.renderState).toBe("unavailable");
-    expect(canvas.dataset.unavailableStatus).toBe("missing");
-    expect(canvas.dataset.unresolvedAssetIds).toBe(
-      PENCIL_CONTOUR_DEFAULT_IMAGE_ASSET_ID,
-    );
-    expect(document.body.textContent).toContain("Image Asset is missing");
-    for (const label of [
-      "Export PNG",
-      "Export SVG",
-      "Export Hidden-line SVG",
-    ]) {
-      expect(
-        [...document.querySelectorAll<HTMLButtonElement>("button")].find(
-          (button) => button.textContent === label,
-        )?.disabled,
-      ).toBe(true);
-    }
   });
 });
 

@@ -1,0 +1,69 @@
+{
+  "formatVersion": 1,
+  "fixtureStatus": "provisional",
+  "preparedFromCommit": "4d6f085706350fbf03a1da6f7c00721896c72fb4",
+  "preparationVersion": "watercolor-forms-prepared-raster-v1",
+  "source": {
+    "assetId": "pinecone-4330aa0314f7",
+    "repositoryPath": "assets/image-assets/pinecone-4330aa0314f7.png",
+    "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79",
+    "decodedWidth": 512,
+    "decodedHeight": 768
+  },
+  "frame": {
+    "width": 1000,
+    "height": 1000
+  },
+  "controls": {
+    "gamma": 0.5,
+    "contrast": 0.5,
+    "pivot": 0.5,
+    "formDetail": 0.5,
+    "colorSensitivity": 0.5,
+    "boundaryStrength": 0.5,
+    "boundarySmoothing": 1
+  },
+  "analysis": {
+    "width": 171,
+    "height": 256,
+    "sampleCount": 43776
+  },
+  "encoding": {
+    "byteOrder": "little-endian",
+    "valueType": "float64",
+    "planes": [
+      {
+        "name": "linearRed",
+        "offsetBytes": 0,
+        "valueCount": 43776
+      },
+      {
+        "name": "linearGreen",
+        "offsetBytes": 350208,
+        "valueCount": 43776
+      },
+      {
+        "name": "linearBlue",
+        "offsetBytes": 700416,
+        "valueCount": 43776
+      },
+      {
+        "name": "luminance",
+        "offsetBytes": 1050624,
+        "valueCount": 43776
+      },
+      {
+        "name": "alpha",
+        "offsetBytes": 1400832,
+        "valueCount": 43776
+      },
+      {
+        "name": "positiveSupport",
+        "offsetBytes": 1751040,
+        "valueCount": 43776,
+        "values": "0=false, 1=true"
+      }
+    ]
+  },
+  "fixtureSha256": "fc5dfd6b9e2b08b7a974aa6355d65a3ed95ef3e180e5224a10d228707b7b5619"
+}

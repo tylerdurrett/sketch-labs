@@ -8,6 +8,21 @@ the binary instead of duplicated in JSON. The capture runs the real Studio
 decoder in Chromium through Vite; a plain Node image decoder is deliberately
 not a substitute.
 
+`capture-watercolor-forms-reference.mjs` captures compact, bounded preparation
+planes for the flower and pinecone through the same production Studio resolver.
+It also captures Pencil Contour's pinecone `AnalyzedRaster`; the existing
+Pencil Contour flower fixture remains its reviewed source of truth. The
+Watercolor Forms fixtures are provisional inputs for later evidence and tuning,
+not visual-quality gates or an attestation.
+
+The same CLI also captures Watercolor Forms comparison evidence. It renders the
+actual production Pencil and Watercolor `Scene`s through the production Canvas
+renderer, at the same scale in full-frame and dense-detail comparisons. The
+manifest recomputes the current reference-gate metrics and pins source, fixture,
+production-content, geometry, cap-diagnostic, crop, and PNG hashes. Generated
+evidence is not a review verdict, and the script never creates or changes a
+`review-attestation.json`.
+
 From the repository root, install the workspace and the browser tool owned by
 the checked-in Chrome DevTools skill:
 
@@ -33,6 +48,50 @@ Use `--write` only when intentionally replacing the reviewed baseline:
 ```sh
 node apps/studio/scripts/capture-pencil-contour-reference.mjs --write
 ```
+
+Capture the provisional Watercolor Forms inputs and Pencil Contour pinecone
+comparison input with an explicit full commit SHA for the production
+preparation code:
+
+```sh
+node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
+  --scope fixtures \
+  --write \
+  --provenance-commit "$(git rev-parse HEAD)"
+```
+
+The recorded `preparedFromCommit` remains stable after the fixture commit.
+Verify the committed bytes and all other metadata against the current
+production decoder and preparation functions without rewriting provenance:
+
+```sh
+node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
+  --scope fixtures
+```
+
+Capture the comparison evidence only after the tuning and fixture commits have
+been finalized. Both arguments must be lowercase full SHAs; the script verifies
+their ancestry, checks that Watercolor/Pencil production and fixture inputs are
+clean and byte-identical to the pinned commits, and refuses drift. Set
+`TUNING_COMMIT` and `FIXTURE_COMMIT` to those finalized lowercase full SHAs:
+
+```sh
+node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
+  --scope evidence \
+  --write \
+  --tuning-commit "$TUNING_COMMIT" \
+  --fixture-commit "$FIXTURE_COMMIT"
+```
+
+Recompute the complete evidence bundle, including PNG bytes, without writing:
+
+```sh
+node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
+  --scope evidence
+```
+
+With no arguments, verify fixtures and, once a committed evidence manifest is
+present, evidence as well.
 
 ## Optional weak-component replay
 

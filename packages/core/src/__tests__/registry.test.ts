@@ -10,6 +10,7 @@ import {
   registry,
   scribbleMoon,
   toneCalibration,
+  watercolorForms,
 } from '../index'
 import { circles } from '../sketches/circles'
 import type { OutlineTarget, Sketch } from '../sketch'
@@ -88,14 +89,23 @@ describe('the default registry', () => {
     ).toEqual([photoScribble])
   })
 
-  it('exports and registers Pencil Contour exactly once as the newest Sketch', () => {
+  it('exports and registers Pencil Contour exactly once', () => {
     expect(pencilContour.id).toBe('pencil-contour')
     expect(pencilContour.name).toBe('Pencil Contour')
     expect(registry.get('pencil-contour')).toBe(pencilContour)
     expect(
       registry.list().filter((sketch) => sketch === pencilContour),
     ).toEqual([pencilContour])
-    expect(registry.list().at(-1)).toBe(pencilContour)
+  })
+
+  it('exports and registers Watercolor Forms exactly once as the newest Sketch', () => {
+    expect(watercolorForms.id).toBe('watercolor-forms')
+    expect(watercolorForms.name).toBe('Watercolor Forms')
+    expect(registry.get('watercolor-forms')).toBe(watercolorForms)
+    expect(
+      registry.list().filter((sketch) => sketch === watercolorForms),
+    ).toEqual([watercolorForms])
+    expect(registry.list().at(-1)).toBe(watercolorForms)
   })
 
   it('registers every built-in under a unique id and display name', () => {
@@ -124,6 +134,7 @@ describe('the default registry', () => {
       'grass-hills',
       'scribble-moon',
       'tone-calibration',
+      'watercolor-forms',
     ])
 
     for (const sketch of optIn) {

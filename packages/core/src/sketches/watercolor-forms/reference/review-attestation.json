@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "watercolor-forms-pencil-comparison",
+  "reviewer": {
+    "identifier": "/root/review_calibrated_evidence",
+    "role": "independent boundary-smoothing calibration evidence reviewer"
+  },
+  "reviewedAt": "2026-07-23T15:00:28Z",
+  "artifactCommit": "ee97646b13f5be6012cc1d3648289a1756bc0d10",
+  "independence": "The reviewer did not implement the tuning or capture artifacts.",
+  "method": "Original-resolution visual review of all four full-frame and shared dense-detail comparisons, with direct inspection of the Watercolor panels against Pencil, the reported grid-like failure mode, and manifest geometry and coverage metrics.",
+  "pngEvidence": {
+    "flower-full-frame-comparison.png": "d1909870e072e923970681a9959ac2f417c018292202c4119b42f25662fc51c8",
+    "flower-dense-detail-comparison.png": "2eb44d3e46f800613c017820fdde14c42b2166eb0d086a8ec9013533c4079738",
+    "pinecone-full-frame-comparison.png": "d0fc699164190ccf6ab6ee6f1b60aafd32a4584ed7e43b82df184fc7a817917c",
+    "pinecone-dense-detail-comparison.png": "5e134b3e393e532b930fec0dbcce2984f11e8186946b86858963b8e2a8cec8a4"
+  },
+  "verdict": "PASS",
+  "checks": {
+    "flowerCentralDisks": {
+      "pass": true,
+      "observation": "Recognizable flower centers remain enclosed and visually distinct in both the full frame and dense crop."
+    },
+    "flowerPetalBoundaries": {
+      "pass": true,
+      "observation": "Radiating petal separations survive around the major flowers without collapsing into large blank merged fields."
+    },
+    "flowerOverlapAndWatercolorability": {
+      "pass": true,
+      "observation": "Overlapping flowers, petals, and neighboring forms remain separable as coherent regions an artist could follow and watercolor."
+    },
+    "pineconeCompleteOuterSilhouette": {
+      "pass": true,
+      "observation": "The full-frame comparison preserves the pinecone's tapered outer silhouette from crown through rounded base."
+    },
+    "pineconeLayeredScaleRows": {
+      "pass": true,
+      "observation": "Repeated overlapping scale rows remain legible across the upper, middle, and lower cone in both views."
+    },
+    "pineconeScaleTipsAndInteriorForms": {
+      "pass": true,
+      "observation": "Major pointed scale tips and enclosed interior scale forms remain readable rather than becoming sparse isolated loops."
+    },
+    "smootherThanRejectedArtifacts": {
+      "pass": true,
+      "observation": "At the calibrated maximum setting, long flower-petal diagonals and pinecone scale arcs read as continuous, gentler boundaries rather than lattice stair steps; localized angularities remain only around tight tips, junctions, and small source details."
+    },
+    "noFalseFrameOrGrossClipping": {
+      "pass": true,
+      "observation": "Neither case emits a false fitted-image rectangle, and the subject geometry remains inside the intended composition without gross clipping."
+    },
+    "shortStrokesDescribeFormsOrJunctions": {
+      "pass": true,
+      "observation": "The few visually short marks occur at small flower-center details, scale features, or boundary junctions rather than as residual texture."
+    }
+  },
+  "visualJudgmentStatement": "Metrics did not substitute for visual judgment; the PASS verdict depends on the calibrated maximum-smoothing render being visibly cleaner while preserving the named forms in the committed PNG evidence."
+}
