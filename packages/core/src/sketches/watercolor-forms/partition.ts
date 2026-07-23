@@ -21,7 +21,7 @@ const INITIAL_REGION_MAX_AREA = 64
 // OKLab-like distance occupies only part of the unit interval for ordinary
 // photographs. Calibrate it before authored Boundary strength compares unit
 // evidence, while still reserving one for the strongest visible transitions.
-const PERCEPTUAL_BOUNDARY_DISTANCE_SCALE = 0.5
+const PERCEPTUAL_BOUNDARY_DISTANCE_SCALE = 0.3
 const NO_COLOR_REGION = -1
 
 type PerceptualColor = readonly [number, number, number]

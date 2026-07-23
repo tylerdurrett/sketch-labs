@@ -23,14 +23,19 @@ import type {
   WatercolorRegionSummary,
 } from "./types";
 
-const VISIBLE_SIMILARITY_WEIGHT = 0.45;
-const BOUNDARY_WEAKNESS_WEIGHT = 0.25;
-const REGION_SIZE_PRESSURE_WEIGHT = 0.2;
+const VISIBLE_SIMILARITY_WEIGHT = 0.3;
+const BOUNDARY_WEAKNESS_WEIGHT = 0.15;
+const REGION_SIZE_PRESSURE_WEIGHT = 0.45;
 const MERGE_STABILITY_WEIGHT = 0.1;
 
 const DEFAULT_COLOR_SENSITIVITY = 0.5;
 const MIN_COLOR_DISTANCE_SCALE = 0.75;
 const COLOR_SENSITIVITY_DISTANCE_SCALE = 1.25;
+// Size affinity must taper on the scale of a drawable form rather than the
+// whole image, or one background-like component percolates through interiors.
+const REGION_SIZE_PRESSURE_FULL_AREA_SHARE = 0.1;
+// Preserve the same ordering signal in tiny contract fixtures.
+const MINIMUM_REGION_SIZE_PRESSURE_AREA = 4;
 
 interface BoundaryEvidence {
   readonly strengthLengthSum: number;
@@ -273,7 +278,14 @@ function mergeScore(
   const regionSizePressure =
     totalSampleCount <= 0
       ? 0
-      : 1 - clampUnit(combinedSampleCount / totalSampleCount);
+      : 1 -
+        clampUnit(
+          combinedSampleCount /
+            Math.max(
+              MINIMUM_REGION_SIZE_PRESSURE_AREA,
+              totalSampleCount * REGION_SIZE_PRESSURE_FULL_AREA_SHARE,
+            ),
+        );
   const sizeBalance =
     combinedSampleCount <= 0
       ? 0
