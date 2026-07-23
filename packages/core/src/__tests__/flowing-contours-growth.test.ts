@@ -429,6 +429,42 @@ describe('Flowing Contours directional growth', () => {
     expect(perpendicular.samples.at(-1)!.point[1]).toBeGreaterThan(10)
   })
 
+  it('uses segment travel rather than the corrected field tangent for overlap', () => {
+    const source = field(13, 13, (_x, y) => ({
+      evidence: gaussian(y - 6),
+      tangent: [1, 0],
+    }))
+    const sampledTangents: Readonly<Point>[] = []
+    const trace = growFlowingContoursDirection(
+      source,
+      at(source, [2, 5.55]),
+      [1, 0],
+      'forward',
+      {
+        ...OPTIONS,
+        ridgeStepOptions: { stepLength: 0.125 },
+        representedOverlapSampler(point, travelTangent) {
+          if (point[0] > 2) sampledTangents.push(travelTangent)
+          return 0
+        },
+      },
+      createFlowingContoursTestLimits({ 'search-step-count': 1 })!,
+    )
+
+    expect(
+      sampledTangents,
+      JSON.stringify({
+        endpointReason: trace.endpointReason,
+        searchStepCount: trace.searchStepCount,
+        samples: trace.samples.map((sample) => sample.point),
+      }),
+    ).not.toHaveLength(0)
+    expect(Math.abs(sampledTangents[0]![0])).toBeLessThan(0.3)
+    expect(Math.abs(sampledTangents[0]![1])).toBeGreaterThan(0.9)
+    expect(source.tangentX.every((value) => value === 1)).toBe(true)
+    expect(source.tangentY.every((value) => value === 0)).toBe(true)
+  })
+
   it('enforces exact search-step, breadth, and weak-step caps', () => {
     const straight = field(15, 9, (_x, y) => ({
       evidence: gaussian(y - 4),

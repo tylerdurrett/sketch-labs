@@ -32,13 +32,12 @@ import {
   fitFlowingContoursCurve,
   fitFlowingContoursCurves,
 } from './curves'
-import { sampleFlowingContoursField } from './field'
 import {
   FLOWING_CONTOURS_LIMITS,
   isWithinFlowingContoursLimit,
   type FlowingContoursLimits,
 } from './limits'
-import { searchFlowingContoursCandidate } from './search'
+import { searchFlowingContoursCandidateDetailed } from './search'
 import { selectFlowingContoursCandidate } from './selection'
 import {
   commitAcceptedFlowingTrajectorySuppression,
@@ -204,19 +203,18 @@ function recomputeAcceptedAggregates(
 }
 
 function suppressionSampler(
-  field: Readonly<FlowingContoursField>,
   query: Readonly<FlowingContoursSuppressionQuery>,
-): (point: Readonly<Point>) => number {
-  return (point: Readonly<Point>): number => {
-    const sampled = sampleFlowingContoursField(field, point)
-    if (sampled !== null) {
-      const tangentAware = queryFlowingContoursSuppressionAlongTangent(
-        query,
-        point,
-        sampled.tangent,
-      )
-      if (tangentAware !== null) return tangentAware
-    }
+): (point: Readonly<Point>, travelTangent: Readonly<Point>) => number {
+  return (
+    point: Readonly<Point>,
+    travelTangent: Readonly<Point>,
+  ): number => {
+    const tangentAware = queryFlowingContoursSuppressionAlongTangent(
+      query,
+      point,
+      travelTangent,
+    )
+    if (tangentAware !== null) return tangentAware
     // This conservative fallback is capped by FC12 below growth's hard
     // collision threshold, so missing direction cannot stop a crossing.
     return queryFlowingContoursSuppression(query, point) ?? Number.NaN
@@ -250,6 +248,48 @@ function terminate(
 
 function isInvalid(accounting: FlowingContoursAccounting): boolean {
   return accounting.termination === 'invalid-input'
+}
+
+function applyPriorSearchExhaustion(
+  accounting: FlowingContoursAccounting,
+  exhausted: boolean,
+): void {
+  if (!exhausted || accounting.termination === 'invalid-input') return
+  // Search happened before FC11 selection and fitting. It is therefore the
+  // first exhausted cap for this attempt even when a later transaction also
+  // discovers an output cap.
+  accounting.termination = 'limit-reached'
+  accounting.limitedBy = 'search-step-count'
+}
+
+function sameFittedCurve(
+  first: Readonly<FittedFlowingCurve>,
+  second: Readonly<FittedFlowingCurve>,
+): boolean {
+  return (
+    first.points.length === second.points.length &&
+    first.points.every(
+      (point, index) =>
+        Object.is(point[0], second.points[index]![0]) &&
+        Object.is(point[1], second.points[index]![1]),
+    ) &&
+    first.provenance.sourceTrajectoryId ===
+      second.provenance.sourceTrajectoryId &&
+    first.provenance.sourceSampleIndices.length ===
+      second.provenance.sourceSampleIndices.length &&
+    first.provenance.sourceSampleIndices.every(
+      (sampleIndex, index) =>
+        sampleIndex === second.provenance.sourceSampleIndices[index],
+    ) &&
+    Object.is(
+      first.provenance.evidenceTubeRadius,
+      second.provenance.evidenceTubeRadius,
+    ) &&
+    Object.is(
+      first.provenance.maximumDeviation,
+      second.provenance.maximumDeviation,
+    )
+  )
 }
 
 /**
@@ -336,6 +376,7 @@ export function runFlowingContoursPipeline(
     }
 
     const accepted: Readonly<AcceptedFlowingTrajectory>[] = []
+    const previewCurves: Readonly<FittedFlowingCurve>[] = []
     let fittedPointCount = 0
     let suppressionState: Readonly<FlowingContoursSuppressionState> =
       initialState
@@ -370,25 +411,39 @@ export function runFlowingContoursPipeline(
         break
       }
 
-      const candidate = searchFlowingContoursCandidate(
+      const search = searchFlowingContoursCandidateDetailed(
         field,
         anchor,
         {
           continuity: controls.continuity,
           flowSmoothing: controls.flowSmoothing,
-          representedOverlapSampler: suppressionSampler(field, query),
+          representedOverlapSampler: suppressionSampler(query),
         },
         withSearchStepLimit(limits, remainingSearchSteps),
       )
-      // A valid ridge maximum need not yield a complete two-sided candidate;
-      // it is processed but never promoted to FC11's candidate inventory.
-      if (candidate === null) continue
-
-      const candidateSearchSteps =
-        candidate.backward.searchStepCount +
-        candidate.forward.searchStepCount
-      accounting.directionalTraceCount += 2
-      accounting.searchStepCount += candidateSearchSteps
+      if (
+        search === null ||
+        !Number.isSafeInteger(search.directionalTraceCount) ||
+        search.directionalTraceCount < 0 ||
+        search.directionalTraceCount > 2 ||
+        !Number.isSafeInteger(search.searchStepCount) ||
+        search.searchStepCount < 0 ||
+        search.searchStepCount > remainingSearchSteps ||
+        search.searchCapExhausted !==
+          (search.searchStepCount >= remainingSearchSteps)
+      ) {
+        return invalidResult()
+      }
+      accounting.directionalTraceCount += search.directionalTraceCount
+      accounting.searchStepCount += search.searchStepCount
+      const searchCapExhausted = search.searchCapExhausted
+      const candidate = search.candidate
+      // A valid ridge maximum need not yield a complete two-sided candidate,
+      // but all work from that attempt is already retained above.
+      if (candidate === null) {
+        applyPriorSearchExhaustion(accounting, searchCapExhausted)
+        continue
+      }
 
       const selection = selectFlowingContoursCandidate(
         candidate,
@@ -402,6 +457,7 @@ export function runFlowingContoursPipeline(
       )
       if (selection.kind === 'rejected') {
         if (selection.reason === 'invalid-input') return invalidResult()
+        applyPriorSearchExhaustion(accounting, searchCapExhausted)
         continue
       }
 
@@ -430,6 +486,7 @@ export function runFlowingContoursPipeline(
         if (!recomputeAcceptedAggregates(accounting, accepted)) {
           return invalidResult()
         }
+        applyPriorSearchExhaustion(accounting, searchCapExhausted)
         terminate(accounting, provisionalFit.limitedBy)
         break
       }
@@ -441,6 +498,7 @@ export function runFlowingContoursPipeline(
         if (!recomputeAcceptedAggregates(accounting, accepted)) {
           return invalidResult()
         }
+        applyPriorSearchExhaustion(accounting, searchCapExhausted)
         continue
       }
 
@@ -453,12 +511,14 @@ export function runFlowingContoursPipeline(
           if (!recomputeAcceptedAggregates(accounting, accepted)) {
             return invalidResult()
           }
+          applyPriorSearchExhaustion(accounting, searchCapExhausted)
           terminate(accounting, 'analysis-sample-count')
           break
         }
         return invalidResult()
       }
       accepted.push(selection.trajectory)
+      previewCurves.push(provisionalFit.curve)
       fittedPointCount += provisionalFit.fittedPointCount
       suppressionState = committed.state
       accounting.suppressedEvidenceSampleCount +=
@@ -469,11 +529,7 @@ export function runFlowingContoursPipeline(
       )
       if (query === null) return invalidResult()
 
-      const exhaustedSearch =
-        accounting.searchStepCount >= limits['search-step-count'] &&
-        (candidate.backward.endpointReason === 'safety-limit' ||
-          candidate.forward.endpointReason === 'safety-limit')
-      if (exhaustedSearch) terminate(accounting, 'search-step-count')
+      applyPriorSearchExhaustion(accounting, searchCapExhausted)
     }
 
     const fitted = fitFlowingContoursCurves(
@@ -488,6 +544,14 @@ export function runFlowingContoursPipeline(
       return invalidResult()
     }
     if (fitted.fittedPointCount !== fittedPointCount) return invalidResult()
+    if (
+      fitted.curves.length !== previewCurves.length ||
+      fitted.curves.some(
+        (curve, index) => !sameFittedCurve(curve, previewCurves[index]!),
+      )
+    ) {
+      return invalidResult()
+    }
 
     accounting.fittedCurveCount = fitted.curves.length
     accounting.fittedCurvePointCount = fitted.fittedPointCount

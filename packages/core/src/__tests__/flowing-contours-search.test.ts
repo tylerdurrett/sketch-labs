@@ -636,6 +636,47 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     expect(result!.searchCapExhausted).toBe(false)
   })
 
+  it('returns accounted null for an anchor-only two-sided assembly', () => {
+    const source = field(17, 9, (_x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+    const sampledHeadings: number[] = []
+    const searchOptions = {
+      ...OPTIONS,
+      representedOverlapSampler(
+        _point: Readonly<Point>,
+        travelTangent: Readonly<Point>,
+      ) {
+        sampledHeadings.push(Math.sign(travelTangent[0]))
+        return travelTangent[0] < 0 ? 0.8 : 0
+      },
+    }
+    const searchLimits = limits({ 'search-step-count': 24 })
+    const result = searchFlowingContoursCandidateDetailed(
+      source,
+      anchor(source, [16, 4]),
+      searchOptions,
+      searchLimits,
+    )
+
+    expect(result).not.toBeNull()
+    expect(result!.candidate).toBeNull()
+    expect(result!.directionalTraceCount).toBe(2)
+    expect(result!.searchStepCount).toBe(1)
+    expect(result!.searchCapExhausted).toBe(false)
+    expect(sampledHeadings).toContain(1)
+    expect(sampledHeadings).toContain(-1)
+    expect(
+      searchFlowingContoursCandidate(
+        source,
+        anchor(source, [16, 4]),
+        searchOptions,
+        searchLimits,
+      ),
+    ).toBeNull()
+  })
+
   it('leaves only invalid preflight unaccounted by the detailed API', () => {
     const source = field(17, 9, (_x, y) => ({
       evidence: gaussian(y - 4),
@@ -675,25 +716,24 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     ).toHaveLength(1)
   })
 
-  it('returns a frozen anchor-only safety candidate at an exact zero budget', () => {
+  it('returns accounted null for anchor-only safety work at a zero budget', () => {
     const source = field(11, 7, (_x, y) => ({
       evidence: gaussian(y - 3),
       tangent: [1, 0],
     }))
-    const candidate = searchFlowingContoursCandidate(
+    const result = searchFlowingContoursCandidateDetailed(
       source,
       anchor(source, [5, 3]),
       OPTIONS,
       limits({ 'search-step-count': 0 }),
-    )!
+    )
 
-    expect(candidate.samples).toHaveLength(1)
-    expect(candidate.forward.searchStepCount).toBe(0)
-    expect(candidate.backward.searchStepCount).toBe(0)
-    expect(candidate.forward.endpointReason).toBe('safety-limit')
-    expect(candidate.backward.endpointReason).toBe('safety-limit')
-    expect(candidate.length).toBe(0)
-    expect(Object.isFrozen(candidate)).toBe(true)
+    expect(result).not.toBeNull()
+    expect(result!.candidate).toBeNull()
+    expect(result!.directionalTraceCount).toBe(2)
+    expect(result!.searchStepCount).toBe(0)
+    expect(result!.searchCapExhausted).toBe(true)
+    expect(Object.isFrozen(result)).toBe(true)
   })
 
   it('measures whole length and every explicit score term including overlap', () => {

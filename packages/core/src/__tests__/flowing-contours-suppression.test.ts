@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { createFlowingContoursAccounting } from '../sketches/flowing-contours/accounting'
 import { sampleFlowingContoursField } from '../sketches/flowing-contours/field'
+import { growFlowingContoursDirection } from '../sketches/flowing-contours/growth'
 import { createFlowingContoursTestLimits } from '../sketches/flowing-contours/limits'
 import { searchFlowingContoursCandidate } from '../sketches/flowing-contours/search'
 import {
@@ -23,6 +24,7 @@ import type {
   FlowingContoursAnchor,
   FlowingContoursCandidate,
   FlowingContoursField,
+  Point,
 } from '../sketches/flowing-contours/types'
 
 const SCORE = Object.freeze({
@@ -256,6 +258,56 @@ describe('Flowing Contours accepted-geometry suppression', () => {
       queryFlowingContoursSuppressionAlongTangent(query, [5, 7], [0, 1]),
     ).toBe(0)
     expect(queryFlowingContoursSuppression(query, [5, 2])).toBeLessThan(0.7)
+  })
+
+  it('integrates growth segment direction with crossing-aware occupancy', () => {
+    const source = field(13, 9)
+    const { result } = commit(source, authenticSelection(source, [5, 2]))
+    const query = queryFor(result.state, source)
+    const sampler = (
+      point: Readonly<Point>,
+      travelTangent: Readonly<Point>,
+    ): number =>
+      queryFlowingContoursSuppressionAlongTangent(
+        query,
+        point,
+        travelTangent,
+      ) ?? Number.NaN
+    const limits = createFlowingContoursTestLimits({
+      'search-step-count': 1,
+    })!
+    const crossing = growFlowingContoursDirection(
+      source,
+      sample(source, [5, 1.55]),
+      [1, 0],
+      'forward',
+      {
+        continuity: 0,
+        flowSmoothing: 0.5,
+        ridgeStepOptions: { stepLength: 0.125 },
+        representedOverlapSampler: sampler,
+      },
+      limits,
+    )
+    const duplicate = growFlowingContoursDirection(
+      source,
+      sample(source, [5, 2]),
+      [1, 0],
+      'forward',
+      {
+        continuity: 0,
+        flowSmoothing: 0.5,
+        ridgeStepOptions: { stepLength: 0.125 },
+        representedOverlapSampler: sampler,
+      },
+      limits,
+    )
+
+    expect(crossing.samples).toHaveLength(2)
+    expect(crossing.samples.at(-1)!.point[1]).toBeGreaterThan(1.9)
+    expect(crossing.endpointReason).toBe('safety-limit')
+    expect(duplicate.samples).toHaveLength(1)
+    expect(duplicate.endpointReason).toBe('represented-collision')
   })
 
   it('can only be committed through the accepted-trajectory contract', () => {

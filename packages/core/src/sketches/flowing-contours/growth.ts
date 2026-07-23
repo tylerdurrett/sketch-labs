@@ -412,8 +412,6 @@ function overlapAlongSegment(
   sampler: FlowingContoursRepresentedOverlapSampler | null,
   start: Readonly<Point>,
   end: Readonly<Point>,
-  startTangent: Readonly<Point>,
-  endTangent: Readonly<Point>,
 ): Readonly<OverlapMeasurement> | null {
   if (sampler === null) return Object.freeze({ maximum: 0, sum: 0, count: 0 })
   const dx = end[0] - start[0]
@@ -422,6 +420,7 @@ function overlapAlongSegment(
   if (!Number.isFinite(segmentLength) || segmentLength <= VECTOR_EPSILON) {
     return null
   }
+  const travelTangent = frozenPoint(dx / segmentLength, dy / segmentLength)
 
   const parameters: number[] = []
   const intervalCount = Math.max(
@@ -466,17 +465,6 @@ function overlapAlongSegment(
       continue
     }
     previous = parameter
-    const tangentSign =
-      startTangent[0] * endTangent[0] + startTangent[1] * endTangent[1] < 0
-        ? -1
-        : 1
-    const travelTangent = unit([
-      startTangent[0] * (1 - parameter) +
-        endTangent[0] * tangentSign * parameter,
-      startTangent[1] * (1 - parameter) +
-        endTangent[1] * tangentSign * parameter,
-    ])
-    if (travelTangent === null) return null
     const value = sampleOverlap(
       sampler,
       frozenPoint(start[0] + dx * parameter, start[1] + dy * parameter),
@@ -1013,12 +1001,14 @@ export function growFlowingContoursDirection(
       return freezeTrace(direction, null, 0, fallbackSamples)
     }
 
-    const anchorOverlap = sampleOverlap(
-      resolved.representedOverlapSampler,
-      anchor.point,
-      anchor.tangent,
+    const anchorOverlaps = resolved.directions.map((travelDirection) =>
+      sampleOverlap(
+        resolved.representedOverlapSampler,
+        anchor.point,
+        travelDirection,
+      ),
     )
-    if (anchorOverlap === null) {
+    if (anchorOverlaps.some((overlap) => overlap === null)) {
       return freezeTrace(direction, null, 0, fallbackSamples)
     }
     const anchorNode: Readonly<PathNode> = Object.freeze({
@@ -1030,6 +1020,7 @@ export function growFlowingContoursDirection(
     const initialState = (
       travelDirection: Readonly<Point>,
       stableId: number,
+      anchorOverlap: number,
       endpointReason: FlowingContoursEndpointReason | null,
     ): SearchState => ({
       stableId,
@@ -1052,19 +1043,6 @@ export function growFlowingContoursDirection(
       directStepsSinceGap: 0,
       supportedSelfLoop: false,
     })
-    if (anchorOverlap >= resolved.representedCollisionThreshold) {
-      return freezeTrace(
-        direction,
-        initialState(
-          resolved.directions[0]!,
-          0,
-          'represented-collision',
-        ),
-        0,
-        fallbackSamples,
-      )
-    }
-
     const allowedWeakSteps = Math.min(
       weakStepLimit,
       Math.floor(
@@ -1078,10 +1056,30 @@ export function growFlowingContoursDirection(
         FLOWING_CONTOURS_LIMITS['weak-span-distance'],
     )
     const breadth = limitValue('search-breadth', limits)!
-    let active = resolved.directions.map((travelDirection, stableId) =>
-      initialState(travelDirection, stableId, null),
-    )
     const terminal: SearchState[] = []
+    const activeStates: SearchState[] = []
+    for (
+      let stableId = 0;
+      stableId < resolved.directions.length;
+      stableId += 1
+    ) {
+      const travelDirection = resolved.directions[stableId]!
+      const anchorOverlap = anchorOverlaps[stableId]!
+      const state = initialState(
+        travelDirection,
+        stableId,
+        anchorOverlap,
+        anchorOverlap >= resolved.representedCollisionThreshold
+          ? 'represented-collision'
+          : null,
+      )
+      if (state.endpointReason === null) {
+        activeStates.push(state)
+      } else {
+        terminal.push(state)
+      }
+    }
+    let active = activeStates
     let searchStepCount = 0
 
     while (active.length > 0) {
@@ -1154,8 +1152,6 @@ export function growFlowingContoursDirection(
           resolved.representedOverlapSampler,
           previousSample.point,
           sample.point,
-          previousSample.tangent,
-          sample.tangent,
         )
         if (overlap === null) {
           terminal.push(stopped(state, 'safety-limit'))

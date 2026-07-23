@@ -9,6 +9,7 @@ import {
   createFlowingContoursTestLimits,
   type FlowingContoursLimits,
 } from '../sketches/flowing-contours/limits'
+import { fitFlowingContoursCurve } from '../sketches/flowing-contours/curves'
 import { runFlowingContoursPipeline } from '../sketches/flowing-contours/pipeline'
 import { searchFlowingContoursCandidate } from '../sketches/flowing-contours/search'
 import { selectFlowingContoursCandidate } from '../sketches/flowing-contours/selection'
@@ -106,6 +107,58 @@ function shortRidgeField(): Readonly<FlowingContoursField> {
   return Object.freeze({
     ...source,
     contourEvidence: Object.freeze(contourEvidence),
+  })
+}
+
+function crossingField(centerX = 15): Readonly<FlowingContoursField> {
+  const width = 31
+  const height = 31
+  const centerY = 15
+  const count = width * height
+  const contourEvidence: number[] = []
+  const tangentX: number[] = []
+  const tangentY: number[] = []
+  const crossingSlope = 1
+  const crossingTangentLength = Math.hypot(1, crossingSlope)
+  for (let index = 0; index < count; index += 1) {
+    const x = index % width
+    const y = Math.floor(index / width)
+    const horizontalDistance = Math.abs(y - centerY)
+    const crossingDistance =
+      Math.abs(y - centerY - crossingSlope * (x - centerX)) /
+      crossingTangentLength
+    const horizontal = Math.exp(
+      -(horizontalDistance * horizontalDistance) / (2 * 0.55 * 0.55),
+    )
+    const crossing =
+      0.95 *
+      Math.exp(
+        -(crossingDistance * crossingDistance) / (2 * 0.55 * 0.55),
+      )
+    const crossingCore = false
+    contourEvidence.push(
+      crossingCore
+        ? 0.02 * Math.max(horizontal, crossing / 0.95)
+        : Math.max(horizontal, crossing),
+    )
+    const isHorizontal = horizontal >= crossing
+    tangentX.push(isHorizontal ? 1 : 1 / crossingTangentLength)
+    tangentY.push(isHorizontal ? 0 : crossingSlope / crossingTangentLength)
+  }
+  return Object.freeze({
+    sourceWidth: width,
+    sourceHeight: height,
+    width,
+    height,
+    luminance: Object.freeze(new Array<number>(count).fill(0.5)),
+    alpha: Object.freeze(new Array<number>(count).fill(1)),
+    positiveSupport: Object.freeze(new Array<boolean>(count).fill(true)),
+    contourEvidence: Object.freeze(contourEvidence),
+    tangentX: Object.freeze(tangentX),
+    tangentY: Object.freeze(tangentY),
+    tangentCoherence: Object.freeze(new Array<number>(count).fill(1)),
+    ambiguity: Object.freeze(new Array<number>(count).fill(0)),
+    ridgeScale: Object.freeze(new Array<number>(count).fill(1)),
   })
 }
 
@@ -215,6 +268,120 @@ describe('Flowing Contours pipeline', () => {
     expect(output.diagnostics.termination).toBe('complete')
     expect(meanRows.some((row) => Math.abs(row - 5) < 0.6)).toBe(true)
     expect(meanRows.some((row) => Math.abs(row - 11) < 0.6)).toBe(true)
+    expect(output.diagnostics.suppressedAnchorCount).toBeGreaterThan(0)
+  })
+
+  it('keeps the dominant crossing gesture whole without a short-stroke flood', () => {
+    const source = crossingField()
+    const firstAccounting = createFlowingContoursAccounting()
+    const firstInventory = buildFlowingContoursAnchorInventory(
+      source,
+      firstAccounting,
+    )
+    const firstAdmission = admitFlowingContoursAnchors(
+      firstInventory,
+      1,
+      firstAccounting,
+    )
+    const firstCandidate = searchFlowingContoursCandidate(
+      source,
+      firstAdmission.anchors[0]!,
+      { continuity: 1, flowSmoothing: 0.8 },
+    )
+    expect(firstCandidate).not.toBeNull()
+    const firstSelection = selectFlowingContoursCandidate(
+      firstCandidate!,
+      {
+        analysisWidth: source.width,
+        analysisHeight: source.height,
+        minimumStrokeLength: 0.1,
+      },
+      firstAccounting,
+    )
+    expect(firstSelection.kind).toBe('accepted')
+    if (firstSelection.kind !== 'accepted') {
+      throw new Error('expected accepted crossing fixture')
+    }
+    expect(
+      fitFlowingContoursCurve(
+        source,
+        firstSelection.trajectory,
+        0.8,
+      ).status,
+    ).toBe('fitted')
+
+    const output = runFlowingContoursPipeline(
+      source,
+      controls({
+        continuity: 1,
+        minimumStrokeLength: 0.1,
+      }),
+    )
+    const traversals = output.acceptedTrajectories.map((trajectory) => {
+      const first = trajectory.samples[0]!.point
+      const last = trajectory.samples.at(-1)!.point
+      return {
+        horizontal:
+          Math.abs(last[0] - first[0]) > 20 &&
+          Math.abs(last[1] - first[1]) < 6,
+        transverse:
+          Math.abs(last[0] - first[0]) > 20 &&
+          Math.abs(last[1] - first[1]) > 15,
+        ambiguityOwned:
+          trajectory.startEndpointReason === 'ambiguity' ||
+          trajectory.endEndpointReason === 'ambiguity' ||
+          trajectory.startEndpointReason === 'evidence-exhausted' ||
+          trajectory.endEndpointReason === 'evidence-exhausted',
+        crossesCore:
+          trajectory.samples.some(
+            (sample) =>
+              Math.abs(sample.point[0] - 15) <= 1.5 &&
+              Math.abs(sample.point[1] - 15) <= 1.5,
+          ),
+      }
+    })
+
+    expect(
+      traversals.some(
+        (traversal) => traversal.horizontal && traversal.crossesCore,
+      ),
+      JSON.stringify({
+        diagnostics: output.diagnostics,
+        traversals,
+        trajectories: output.acceptedTrajectories.map((trajectory) => ({
+          first: trajectory.samples[0]!.point,
+          last: trajectory.samples.at(-1)!.point,
+          length: trajectory.length,
+          spans: trajectory.spanSupport.map((span) => span.kind),
+        })),
+      }),
+    ).toBe(true)
+    // FC07 owns the secondary ridge's deterministic ambiguity stop. FC12
+    // must not fragment the dominant gesture merely because it shares the
+    // crossing neighborhood, and later same-ridge work remains suppressible.
+    expect(
+      traversals.some(
+        (traversal) =>
+          !traversal.horizontal &&
+          traversal.ambiguityOwned &&
+          traversal.crossesCore,
+      ),
+    ).toBe(true)
+    expect(
+      output.diagnostics.endpointReasonCounts.ambiguity +
+        output.diagnostics.endpointReasonCounts['evidence-exhausted'],
+    ).toBeGreaterThan(0)
+    expect(output.acceptedTrajectories.length).toBeLessThanOrEqual(3)
+    expect(
+      output.acceptedTrajectories.every(
+        (trajectory) =>
+          trajectory.length >=
+          0.1 * Math.hypot(source.width, source.height),
+      ),
+    ).toBe(true)
+    expect(output.fittedCurves).toHaveLength(
+      output.acceptedTrajectories.length,
+    )
     expect(output.diagnostics.suppressedAnchorCount).toBeGreaterThan(0)
   })
 
@@ -350,6 +517,42 @@ describe('Flowing Contours pipeline', () => {
     expect(output.diagnostics.suppressedEvidenceSampleCount).toBe(0)
     expect(output.diagnostics.suppressedAnchorCount).toBe(0)
     expect(endpointTotal(output.diagnostics.endpointReasonCounts)).toBe(0)
+  })
+
+  it('retains exhausted search work when the candidate is rejected', () => {
+    const output = runFlowingContoursPipeline(
+      field(),
+      controls({ minimumStrokeLength: 1 }),
+      limits({ 'search-step-count': 2 }),
+    )
+
+    expect(output.diagnostics.searchStepCount).toBe(2)
+    expect(output.diagnostics.candidateCount).toBe(1)
+    expect(output.diagnostics.acceptedCandidateCount).toBe(0)
+    expect(output.diagnostics.rejectedCandidateCount).toBe(1)
+    expect(output.diagnostics.termination).toBe('limit-reached')
+    expect(output.diagnostics.limitedBy).toBe('search-step-count')
+    expect(output.acceptedTrajectories).toEqual([])
+    expect(output.fittedCurves).toEqual([])
+  })
+
+  it('attributes the first exhausted cap to search before later output caps', () => {
+    const output = runFlowingContoursPipeline(
+      field(),
+      controls({ minimumStrokeLength: 0 }),
+      limits({
+        'search-step-count': 2,
+        'accepted-curve-count': 0,
+        'fitted-curve-point-count': 0,
+      }),
+    )
+
+    expect(output.diagnostics.searchStepCount).toBe(2)
+    expect(output.diagnostics.candidateCount).toBe(1)
+    expect(output.diagnostics.termination).toBe('limit-reached')
+    expect(output.diagnostics.limitedBy).toBe('search-step-count')
+    expect(output.acceptedTrajectories).toEqual([])
+    expect(output.fittedCurves).toEqual([])
   })
 
   it.each([

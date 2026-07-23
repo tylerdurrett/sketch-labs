@@ -1078,7 +1078,9 @@ export function searchFlowingContoursCandidateDetailed(
       samples.push(duplicate)
       spanSupport.push(closure)
     }
-    if (samples.length > globalRawPointLimit) return finish(null)
+    if (samples.length < 2 || samples.length > globalRawPointLimit) {
+      return finish(null)
+    }
     const frozenSamples = Object.freeze(samples)
     const frozenSupport = Object.freeze(spanSupport)
     const length = polylineLength(frozenSamples)
@@ -1086,7 +1088,13 @@ export function searchFlowingContoursCandidateDetailed(
       options.representedOverlapSampler,
       frozenSamples,
     )
-    if (length === null || representedOverlap === null) return finish(null)
+    if (
+      length === null ||
+      length <= 0 ||
+      representedOverlap === null
+    ) {
+      return finish(null)
+    }
     if (options.overlapSamplerInvalid()) return finish(null)
 
     const sampleCount = frozenSamples.length
