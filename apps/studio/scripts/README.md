@@ -108,12 +108,12 @@ Frame, authored Flowing Contours controls, full-frame and dense-detail crops,
 named regions, topology checks, and Pencil Contour and Watercolor Forms
 comparator revisions. Every run also refuses dirty or commit-divergent
 Flowing production, comparator, FC23 test-contract, Studio decoder, preparation
-tool, Vite package/lock, and browser-pin inventories. Installed Vite and
-Puppeteer must match those protected locks. Chrome is resolved from the exact
-Puppeteer build ID in its package-managed cache; environment executable
-overrides are ignored, and the launched executable and product version must
-match that pin. Its JSON result reports the SHA-256 of every protected file and
-each aggregate inventory.
+tool, Vite package/lock, and browser-pin inventories. Installed Vite,
+Puppeteer, and `@puppeteer/browsers` must match those protected locks. Chrome
+is resolved from the exact Puppeteer build ID in its package-managed cache;
+environment executable overrides are ignored, and the launched executable and
+product version must match that pin. Its JSON result reports the SHA-256 of
+every protected file and each aggregate inventory.
 
 The command is deliberately input-only. It does not import the Flowing Contours
 generator, produce a `Scene`, compute quality metrics, render or compose PNGs,

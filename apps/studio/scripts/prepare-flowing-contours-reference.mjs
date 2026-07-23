@@ -270,18 +270,30 @@ async function browserDependencies(primaryRoot) {
       'Pinned browser tools are unavailable; follow apps/studio/scripts/README.md',
     )
   }
-  const [lock, installedPackage] = await Promise.all([
-    readFile(`${directory}/package-lock.json`, 'utf8').then(JSON.parse),
-    readFile(`${directory}/node_modules/puppeteer/package.json`, 'utf8').then(
-      JSON.parse,
-    ),
-  ])
+  const [lock, installedPackage, installedBrowsersPackage] =
+    await Promise.all([
+      readFile(`${directory}/package-lock.json`, 'utf8').then(JSON.parse),
+      readFile(
+        `${directory}/node_modules/puppeteer/package.json`,
+        'utf8',
+      ).then(JSON.parse),
+      readFile(
+        `${directory}/node_modules/@puppeteer/browsers/package.json`,
+        'utf8',
+      ).then(JSON.parse),
+    ])
   const lockedVersion = lock.packages?.['node_modules/puppeteer']?.version
+  const lockedBrowsersVersion =
+    lock.packages?.['node_modules/@puppeteer/browsers']?.version
   if (
     typeof lockedVersion !== 'string' ||
-    installedPackage.version !== lockedVersion
+    installedPackage.version !== lockedVersion ||
+    typeof lockedBrowsersVersion !== 'string' ||
+    installedBrowsersPackage.version !== lockedBrowsersVersion
   ) {
-    throw new Error('Installed Puppeteer differs from its protected lock')
+    throw new Error(
+      'Installed Puppeteer browser packages differ from their protected lock',
+    )
   }
   const pinnedChromeRevision = puppeteer.PUPPETEER_REVISIONS.chrome
   const cacheDirectory = join(homedir(), '.cache', 'puppeteer')
@@ -305,6 +317,7 @@ async function browserDependencies(primaryRoot) {
     executablePath: await realpath(computedPath),
     pinnedChromeRevision,
     puppeteer,
+    browsersVersion: installedBrowsersPackage.version,
     version: installedPackage.version,
   })
 }
@@ -581,7 +594,7 @@ async function stageReplacement(target, bytes, token) {
   return staged
 }
 
-async function transactionallyReplace(replacements, failAfterInstall) {
+async function transactionallyReplace(replacements, testFaults = {}) {
   if (replacements.length === 0) return
   const directory = dirname(replacements[0].target)
   if (
@@ -624,7 +637,7 @@ async function transactionallyReplace(replacements, failAfterInstall) {
       await rename(record.staged, record.target)
       record.installed = true
       installedCount += 1
-      if (installedCount === failAfterInstall) {
+      if (installedCount === testFaults.failAfterInstall) {
         throw new Error('injected transactional replacement failure')
       }
     }
@@ -648,20 +661,28 @@ async function transactionallyReplace(replacements, failAfterInstall) {
   } catch (primaryError) {
     if (committed) throw primaryError
     const rollbackErrors = []
+    const manualRecoveryBackups = []
     for (const record of records.slice().reverse()) {
       if (!record.installed && !record.moved) continue
       try {
         if (record.installed) await unlinkIfPresent(record.target)
-        if (record.moved) await rename(record.backup, record.target)
+        if (record.moved) {
+          if (record.target === testFaults.failRestoreTarget) {
+            throw new Error(
+              `injected rollback restore failure: ${record.backup}`,
+            )
+          }
+          await rename(record.backup, record.target)
+        }
       } catch (error) {
         rollbackErrors.push(error)
+        if (record.moved && (await pathExists(record.backup))) {
+          manualRecoveryBackups.push(record.backup)
+        }
       }
     }
     const cleanup = await Promise.allSettled(
-      records.flatMap((record) => [
-        unlinkIfPresent(record.staged),
-        unlinkIfPresent(record.backup),
-      ]),
+      records.map((record) => unlinkIfPresent(record.staged)),
     )
     rollbackErrors.push(
       ...cleanup
@@ -676,17 +697,17 @@ async function transactionallyReplace(replacements, failAfterInstall) {
     if (rollbackErrors.length > 0) {
       throw new AggregateError(
         [primaryError, ...rollbackErrors],
-        'Fixture transaction failed and rollback was incomplete',
+        [
+          'Fixture transaction failed and rollback was incomplete.',
+          `Manual recovery backups: ${manualRecoveryBackups.join(', ')}`,
+        ].join('\n'),
         { cause: primaryError },
       )
     }
     throw primaryError
   } finally {
     await Promise.allSettled(
-      records.flatMap((record) => [
-        unlinkIfPresent(record.staged),
-        unlinkIfPresent(record.backup),
-      ]),
+      records.map((record) => unlinkIfPresent(record.staged)),
     )
   }
 }
@@ -766,7 +787,9 @@ async function transactionSelfTest() {
       target,
       bytes: Buffer.from(`replacement-${index}`),
     }))
-    await transactionallyReplace(replacements, 3).then(
+    await transactionallyReplace(replacements, {
+      failAfterInstall: 3,
+    }).then(
       () => {
         throw new Error('injected transaction unexpectedly succeeded')
       },
@@ -788,6 +811,27 @@ async function transactionSelfTest() {
     ) {
       throw new Error('transaction rollback left a mixed fixture set')
     }
+    let recoveryError
+    await transactionallyReplace(replacements, {
+      failAfterInstall: 3,
+      failRestoreTarget: targets[0],
+    }).catch((error) => {
+      recoveryError = error
+    })
+    const recoveryBackups = (await readdir(directory))
+      .filter((name) => name.endsWith('.rollback'))
+      .map((name) => join(directory, name))
+    if (
+      !(recoveryError instanceof AggregateError) ||
+      recoveryBackups.length !== 1 ||
+      !recoveryError.message.includes(recoveryBackups[0]) ||
+      !(await readFile(recoveryBackups[0])).equals(originals[0])
+    ) {
+      throw new Error(
+        'failed restore did not preserve and report its recovery backup',
+      )
+    }
+    await rename(recoveryBackups[0], targets[0])
     await transactionallyReplace(replacements)
     const replaced = await Promise.all(targets.map((path) => readFile(path)))
     if (
@@ -873,19 +917,28 @@ async function closeRuntime(
   runtimeDirectory,
   primaryError,
 ) {
-  const results = await Promise.allSettled([
+  const shutdownResults = await Promise.allSettled([
     Promise.resolve().then(() => browser?.close()),
     Promise.resolve().then(() => server?.close()),
+  ])
+  const removalResults = await Promise.allSettled([
     Promise.resolve().then(() =>
       runtimeDirectory === undefined
         ? undefined
         : rm(runtimeDirectory, { recursive: true, force: true }),
     ),
   ])
-  if (primaryError !== undefined) throw primaryError
-  const failures = results
+  const failures = [...shutdownResults, ...removalResults]
     .filter((result) => result.status === 'rejected')
     .map((result) => result.reason)
+  if (primaryError !== undefined && failures.length > 0) {
+    throw new AggregateError(
+      [primaryError, ...failures],
+      'Reference capture failed and runtime cleanup was incomplete',
+      { cause: primaryError },
+    )
+  }
+  if (primaryError !== undefined) throw primaryError
   if (failures.length > 0) {
     throw new AggregateError(failures, 'Reference runtime cleanup failed')
   }
@@ -1004,6 +1057,7 @@ async function runCapture(options) {
         chrome: launchedProduct,
         chromeRevision: browserTools.pinnedChromeRevision,
         puppeteer: browserTools.version,
+        puppeteerBrowsers: browserTools.browsersVersion,
         vite: vite.version,
       },
       provenance,
