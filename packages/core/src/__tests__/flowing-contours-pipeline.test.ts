@@ -15,9 +15,11 @@ import { searchFlowingContoursCandidate } from '../sketches/flowing-contours/sea
 import { selectFlowingContoursCandidate } from '../sketches/flowing-contours/selection'
 import {
   FLOWING_CONTOURS_ENDPOINT_REASONS,
+  type AcceptedFlowingTrajectory,
   type FlowingContoursField,
   type FlowingContoursLimitName,
 } from '../sketches/flowing-contours/types'
+import type { Point } from '../types'
 
 function field(
   width = 32,
@@ -179,6 +181,60 @@ function endpointTotal(
   )
 }
 
+function segmentDirection(
+  first: Readonly<Point>,
+  second: Readonly<Point>,
+): Readonly<Point> {
+  const dx = second[0] - first[0]
+  const dy = second[1] - first[1]
+  const length = Math.hypot(dx, dy)
+  if (!Number.isFinite(length) || length <= 0) {
+    throw new Error('fixture segment must be nondegenerate')
+  }
+  return Object.freeze([dx / length, dy / length])
+}
+
+function endpointDirection(
+  trajectory: Readonly<AcceptedFlowingTrajectory>,
+  endpoint: 'start' | 'end',
+): Readonly<Point> {
+  const samples = trajectory.samples
+  return endpoint === 'start'
+    ? segmentDirection(samples[1]!.point, samples[0]!.point)
+    : segmentDirection(samples.at(-2)!.point, samples.at(-1)!.point)
+}
+
+function endpointDistance(
+  point: Readonly<Point>,
+  trajectory: Readonly<AcceptedFlowingTrajectory>,
+): number {
+  const first = trajectory.samples[0]!.point
+  const last = trajectory.samples.at(-1)!.point
+  return Math.min(
+    Math.hypot(point[0] - first[0], point[1] - first[1]),
+    Math.hypot(point[0] - last[0], point[1] - last[1]),
+  )
+}
+
+function nearestEndpoint(
+  point: Readonly<Point>,
+  trajectory: Readonly<AcceptedFlowingTrajectory>,
+): 'start' | 'end' {
+  const first = trajectory.samples[0]!.point
+  const last = trajectory.samples.at(-1)!.point
+  return Math.hypot(point[0] - first[0], point[1] - first[1]) <=
+    Math.hypot(point[0] - last[0], point[1] - last[1])
+    ? 'start'
+    : 'end'
+}
+
+function absoluteAlignment(
+  first: Readonly<Point>,
+  second: Readonly<Point>,
+): number {
+  return Math.abs(first[0] * second[0] + first[1] * second[1])
+}
+
 describe('Flowing Contours pipeline', () => {
   it('composes stable whole trajectories, fitting, suppression, and exact diagnostics', () => {
     const source = field()
@@ -317,34 +373,40 @@ describe('Flowing Contours pipeline', () => {
         minimumStrokeLength: 0.1,
       }),
     )
-    const traversals = output.acceptedTrajectories.map((trajectory) => {
-      const first = trajectory.samples[0]!.point
-      const last = trajectory.samples.at(-1)!.point
-      return {
-        horizontal:
-          Math.abs(last[0] - first[0]) > 20 &&
-          Math.abs(last[1] - first[1]) < 6,
-        transverse:
-          Math.abs(last[0] - first[0]) > 20 &&
-          Math.abs(last[1] - first[1]) > 15,
-        ambiguityOwned:
-          trajectory.startEndpointReason === 'ambiguity' ||
-          trajectory.endEndpointReason === 'ambiguity' ||
-          trajectory.startEndpointReason === 'evidence-exhausted' ||
-          trajectory.endEndpointReason === 'evidence-exhausted',
-        crossesCore:
-          trajectory.samples.some(
-            (sample) =>
-              Math.abs(sample.point[0] - 15) <= 1.5 &&
-              Math.abs(sample.point[1] - 15) <= 1.5,
-          ),
-      }
-    })
+    const diagonal = Math.hypot(source.width, source.height)
+    const traversals = output.acceptedTrajectories.map(
+      (trajectory, index) => {
+        const first = trajectory.samples[0]!.point
+        const last = trajectory.samples.at(-1)!.point
+        const direction = segmentDirection(first, last)
+        return {
+          index,
+          trajectory,
+          direction,
+          horizontal:
+            Math.abs(last[0] - first[0]) > 20 &&
+            Math.abs(last[1] - first[1]) < 6,
+          ambiguityOwned:
+            trajectory.startEndpointReason === 'ambiguity' ||
+            trajectory.endEndpointReason === 'ambiguity' ||
+            trajectory.startEndpointReason === 'evidence-exhausted' ||
+            trajectory.endEndpointReason === 'evidence-exhausted',
+          crossesCore:
+            trajectory.samples.some(
+              (sample) =>
+                Math.abs(sample.point[0] - 15) <= 1.5 &&
+                Math.abs(sample.point[1] - 15) <= 1.5,
+            ),
+        }
+      },
+    )
+    const dominant = traversals.filter((traversal) => traversal.horizontal)
+    const transverse = traversals.filter(
+      (traversal) => !traversal.horizontal,
+    )
 
     expect(
-      traversals.some(
-        (traversal) => traversal.horizontal && traversal.crossesCore,
-      ),
+      dominant,
       JSON.stringify({
         diagnostics: output.diagnostics,
         traversals,
@@ -355,30 +417,78 @@ describe('Flowing Contours pipeline', () => {
           spans: trajectory.spanSupport.map((span) => span.kind),
         })),
       }),
-    ).toBe(true)
+    ).toHaveLength(1)
+    expect(dominant[0]!.crossesCore).toBe(true)
+    expect(dominant[0]!.trajectory.length).toBeGreaterThanOrEqual(
+      0.6 * diagonal,
+    )
     // FC07 owns the secondary ridge's deterministic ambiguity stop. FC12
     // must not fragment the dominant gesture merely because it shares the
     // crossing neighborhood, and later same-ridge work remains suppressible.
+    expect(transverse.length).toBeGreaterThanOrEqual(1)
+    expect(transverse.length).toBeLessThanOrEqual(2)
     expect(
-      traversals.some(
-        (traversal) =>
-          !traversal.horizontal &&
-          traversal.ambiguityOwned &&
-          traversal.crossesCore,
+      transverse.every(
+        (traversal) => traversal.trajectory.length >= 0.4 * diagonal,
       ),
     ).toBe(true)
     expect(
-      output.diagnostics.endpointReasonCounts.ambiguity +
-        output.diagnostics.endpointReasonCounts['evidence-exhausted'],
-    ).toBeGreaterThan(0)
-    expect(output.acceptedTrajectories.length).toBeLessThanOrEqual(3)
+      transverse.filter(
+        (traversal) =>
+          traversal.ambiguityOwned && traversal.crossesCore,
+      ),
+    ).toHaveLength(1)
     expect(
       output.acceptedTrajectories.every(
-        (trajectory) =>
-          trajectory.length >=
-          0.1 * Math.hypot(source.width, source.height),
+        (trajectory) => trajectory.length >= 0.4 * diagonal,
       ),
     ).toBe(true)
+
+    const coreCollisions = transverse.flatMap((traversal) =>
+      (['start', 'end'] as const).flatMap((endpoint) => {
+        const reason =
+          endpoint === 'start'
+            ? traversal.trajectory.startEndpointReason
+            : traversal.trajectory.endEndpointReason
+        const point =
+          endpoint === 'start'
+            ? traversal.trajectory.samples[0]!.point
+            : traversal.trajectory.samples.at(-1)!.point
+        return reason === 'represented-collision' &&
+          Math.abs(point[0] - 15) <= 1.5 &&
+          Math.abs(point[1] - 15) <= 1.5
+          ? [{ ...traversal, endpoint, point }]
+          : []
+      }),
+    )
+    expect(coreCollisions.length).toBeGreaterThan(0)
+    for (const collision of coreCollisions) {
+      const collisionDirection = endpointDirection(
+        collision.trajectory,
+        collision.endpoint,
+      )
+      const priorMatch = transverse
+        .filter((candidate) => candidate.index < collision.index)
+        .find((candidate) => {
+          const endpoint = nearestEndpoint(
+            collision.point,
+            candidate.trajectory,
+          )
+          return (
+            endpointDistance(collision.point, candidate.trajectory) <=
+              0.1 * diagonal &&
+            absoluteAlignment(
+              collisionDirection,
+              endpointDirection(candidate.trajectory, endpoint),
+            ) >= 0.8
+          )
+        })
+
+      expect(priorMatch).toBeDefined()
+      expect(
+        absoluteAlignment(collisionDirection, dominant[0]!.direction),
+      ).toBeLessThan(0.8)
+    }
     expect(output.fittedCurves).toHaveLength(
       output.acceptedTrajectories.length,
     )

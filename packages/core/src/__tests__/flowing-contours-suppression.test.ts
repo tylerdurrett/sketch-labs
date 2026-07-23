@@ -24,8 +24,8 @@ import type {
   FlowingContoursAnchor,
   FlowingContoursCandidate,
   FlowingContoursField,
-  Point,
 } from '../sketches/flowing-contours/types'
+import type { Point } from '../types'
 
 const SCORE = Object.freeze({
   accumulatedEvidence: 1,
