@@ -148,6 +148,57 @@ describe('Flowing Contours anchor inventory', () => {
     expect(result.anchors[0]!.sample.tangent[1]).toBeCloseTo(1, 12)
   })
 
+  it('preflights the exact three-sample normal-correction budget', () => {
+    const field = manualField(11, 7, (x, y) => ({
+      evidence: x === 5 && y === 3 ? 0.8 : 0,
+    }))
+    const exactAccounting = createFlowingContoursAccounting()
+    const exact = buildFlowingContoursAnchorInventory(
+      field,
+      exactAccounting,
+      createFlowingContoursTestLimits({
+        'normal-search-sample-count': 3,
+      })!,
+    )
+    const shortAccounting = createFlowingContoursAccounting()
+    const short = buildFlowingContoursAnchorInventory(
+      field,
+      shortAccounting,
+      createFlowingContoursTestLimits({
+        'normal-search-sample-count': 2,
+      })!,
+    )
+
+    expect(exact.anchors).toHaveLength(1)
+    expect(exactAccounting.termination).toBe('complete')
+    expect(exactAccounting.limitedBy).toBeNull()
+    expect(short.anchors).toEqual([])
+    expect(short.correctedRidgeSampleCount).toBe(0)
+    expect(shortAccounting.correctedRidgeSampleCount).toBe(0)
+    expect(shortAccounting.eligibleAnchorCount).toBe(0)
+    expect(shortAccounting.termination).toBe('limit-reached')
+    expect(shortAccounting.limitedBy).toBe('normal-search-sample-count')
+  })
+
+  it('rejects non-finite tangents even where no evidence is present', () => {
+    for (const evidence of [0, 0.8]) {
+      const accounting = createFlowingContoursAccounting()
+      const field = manualField(7, 7, (x, y) => ({
+        evidence: x === 3 && y === 3 ? evidence : 0,
+        tangent: x === 3 && y === 3 ? [Number.NaN, 0] : [0, 1],
+      }))
+
+      const result = buildFlowingContoursAnchorInventory(field, accounting)
+
+      expect(result.anchors).toEqual([])
+      expect(result.correctedRidgeSampleCount).toBe(0)
+      expect(accounting.termination).toBe('invalid-input')
+      expect(accounting.limitedBy).toBeNull()
+      expect(accounting.correctedRidgeSampleCount).toBe(0)
+      expect(accounting.eligibleAnchorCount).toBe(0)
+    }
+  })
+
   it('uses stable lexicographic ties and enforces corrected-point separation', () => {
     const peaks = new Set(['3,3', '6,3', '9,3', '3,9', '9,9'])
     const field = manualField(13, 13, (x, y) => ({

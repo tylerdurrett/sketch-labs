@@ -34,6 +34,7 @@ const MAXIMUM_AMBIGUITY = 0.82
 const MINIMUM_SEPARATION = 3
 const MAXIMUM_SEPARATION = 8
 const SEPARATION_DIAGONAL_DIVISOR = 48
+const NORMAL_CORRECTION_SAMPLE_COUNT = 3
 
 export type FlowingContoursAnchorStrength = 'strong' | 'secondary'
 
@@ -154,10 +155,9 @@ function hasValidFieldShape(field: Readonly<FlowingContoursField>): boolean {
   }
 
   for (let index = 0; index < sampleCount; index += 1) {
-    const tangentLength = Math.hypot(
-      field.tangentX[index]!,
-      field.tangentY[index]!,
-    )
+    const tangentX = field.tangentX[index]!
+    const tangentY = field.tangentY[index]!
+    const tangentLength = Math.hypot(tangentX, tangentY)
     const values = [
       field.luminance[index]!,
       field.alpha[index]!,
@@ -167,6 +167,9 @@ function hasValidFieldShape(field: Readonly<FlowingContoursField>): boolean {
       field.ridgeScale[index]!,
     ]
     if (
+      !Number.isFinite(tangentX) ||
+      !Number.isFinite(tangentY) ||
+      !Number.isFinite(tangentLength) ||
       values.some((value) => !Number.isFinite(value)) ||
       values[0]! < 0 ||
       values[0]! > 1 ||
@@ -381,6 +384,19 @@ export function buildFlowingContoursAnchorInventory(
       !isWithinFlowingContoursLimit('anchor-count', 0, limits)
     ) {
       invalidate(accounting)
+      return EMPTY_INVENTORY
+    }
+    if (
+      !isWithinFlowingContoursLimit(
+        'normal-search-sample-count',
+        NORMAL_CORRECTION_SAMPLE_COUNT,
+        limits,
+      )
+    ) {
+      terminateFlowingContoursAtSafetyLimit(
+        accounting,
+        'normal-search-sample-count',
+      )
       return EMPTY_INVENTORY
     }
 
