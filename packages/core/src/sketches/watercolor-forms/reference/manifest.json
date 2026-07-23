@@ -3,8 +3,8 @@
   "referenceId": "watercolor-forms-pencil-comparison",
   "status": "generated-comparison-evidence-awaiting-independent-review",
   "provenance": {
-    "tuningCommit": "d904e4eb4a1c89deafba50e3b840db15c6938ae6",
-    "fixtureCommit": "abe44d81178aacd427f1b3c1b3986e8eb56509b3",
+    "tuningCommit": "f567708cd04b2771bdcccde9965fc738d63bf1d4",
+    "fixtureCommit": "c793c507359373262dc87aae301d0b4efe554515",
     "watercolorProduction": {
       "algorithm": "sha256(path + NUL + bytes + NUL), paths sorted",
       "paths": [
@@ -21,7 +21,7 @@
         "packages/core/src/sketches/watercolor-forms/tracing.ts",
         "packages/core/src/sketches/watercolor-forms/types.ts"
       ],
-      "sha256": "f5939e9e2d74d07e36b8108f57e1b3d5a742e06dc489d6f9f5da2ffaa77a5ae1"
+      "sha256": "a7df972f6da99bacdf87dff48fe28ca6876589cd8201a138a9a94db1ff8b368c"
     },
     "pencilProduction": {
       "revision": "b6147366448d37021e20d48326045a6cba3039ca",
@@ -52,7 +52,7 @@
         "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.f64le",
         "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.json"
       ],
-      "sha256": "32120a296b0baeb3a93b5515b22438508b143cd6953b3fff6b6b327f1d1330e3"
+      "sha256": "9525d28ae232f9dcac8ef93d8226997f92a5ba068d8e4971a4a5d04dd0107901"
     }
   },
   "pencilComparison": {
@@ -97,8 +97,8 @@
           "file": "packages/core/src/__tests__/fixtures/watercolor-forms/flower-prepared.f64le",
           "metadataFile": "packages/core/src/__tests__/fixtures/watercolor-forms/flower-prepared.json",
           "fixtureSha256": "96566d85d6f3deb1775359a1cf5d702f00b32e83e34ede933090af9f74c35b29",
-          "metadataSha256": "febe80a7b9d23f66f9cbf1c1f7747a75aaf88f7fbb63aa54a1bd6721f12d5ccf",
-          "preparedFromCommit": "d904e4eb4a1c89deafba50e3b840db15c6938ae6",
+          "metadataSha256": "6f9d2a99632a39bb2c7945e8a03414b6cb163887009f33835f82d9b59a7538fd",
+          "preparedFromCommit": "f567708cd04b2771bdcccde9965fc738d63bf1d4",
           "preparationVersion": "watercolor-forms-prepared-raster-v1",
           "analysis": {
             "width": 192,
@@ -174,12 +174,12 @@
             "shortPathMaximumNormalizedLength": 0.01,
             "longPathMinimumNormalizedLength": 0.05
           },
-          "pathCount": 22,
-          "shortPathShare": 0.045454545454545456,
-          "medianNormalizedPathLength": 0.12409409574976824,
-          "longPathShareOfTotalGeometry": 0.987100821987869,
-          "closedFormCount": 10,
-          "totalPlottedLength": 9164.34512513034
+          "pathCount": 71,
+          "shortPathShare": 0.028169014084507043,
+          "medianNormalizedPathLength": 0.13927131275073823,
+          "longPathShareOfTotalGeometry": 0.9741779913809943,
+          "closedFormCount": 12,
+          "totalPlottedLength": 18890.36591942375
         },
         "pencil": {
           "definitions": {
@@ -198,9 +198,9 @@
       },
       "geometry": {
         "watercolor": {
-          "sha256": "02836cb211f819baa322dd389b3605d8038af6b9d76d11df8fd355ae8b03ff6b",
-          "primitiveCount": 22,
-          "pointCount": 2358
+          "sha256": "4ad95eff80fdb55f5d1b94785f30fe8f84405ce599a4de35b99203fe454c2e8b",
+          "primitiveCount": 71,
+          "pointCount": 4991
         },
         "pencil": {
           "sha256": "d50eff09aa829042df2b1aa5bc7e9bb2df35d27bbad67e3acbb176a024f71bec",
@@ -211,6 +211,7 @@
       "watercolorCoverage": {
         "occupiedBins": [
           "0,0",
+          "0,1",
           "0,2",
           "0,3",
           "1,0",
@@ -220,12 +221,13 @@
           "2,0",
           "2,1",
           "2,2",
+          "2,3",
           "3,0",
           "3,1",
           "3,2",
           "3,3"
         ],
-        "occupiedBinCount": 14,
+        "occupiedBinCount": 16,
         "centralBinCount": 4,
         "occupiedColumnCount": 4,
         "occupiedRowCount": 4
@@ -239,13 +241,13 @@
         "initialRegionCount": 4368,
         "gridAdjacencyCount": 97856,
         "mergeCount": 4367,
-        "mergeQueueEntryCount": 365786,
-        "regionUpdateCount": 355433,
-        "selectedRegionCount": 30,
-        "retainedBoundarySegmentCount": 2916,
-        "boundaryPathCount": 22,
-        "curvePointCount": 2358,
-        "primitiveCount": 22
+        "mergeQueueEntryCount": 99267,
+        "regionUpdateCount": 88914,
+        "selectedRegionCount": 49,
+        "retainedBoundarySegmentCount": 6055,
+        "boundaryPathCount": 71,
+        "curvePointCount": 4991,
+        "primitiveCount": 71
       },
       "cropRects": {
         "fullFrame": {
@@ -266,15 +268,15 @@
           "file": "flower-full-frame-comparison.png",
           "width": 2160,
           "height": 1120,
-          "bytes": 225886,
-          "sha256": "17f8c0299e58fe160a8d1ec1a26a8e76ef3fd660b8fd56e289dbfcdb1be57690"
+          "bytes": 263735,
+          "sha256": "916014a0836f16d8b68c461b4ee1b275db70dd349abad30075ec6f240375c6f0"
         },
         "denseDetail": {
           "file": "flower-dense-detail-comparison.png",
           "width": 2160,
           "height": 1120,
-          "bytes": 214785,
-          "sha256": "5ca4d9d6101656b8c0cf8c98348d0fd27e0d2010699c3335b83bfa1307963eba"
+          "bytes": 240106,
+          "sha256": "771c6caeef0a79566d91e3cb79ed17fde91d8d8b06fcc1272bac9867c9900496"
         }
       }
     },
@@ -291,8 +293,8 @@
           "file": "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.f64le",
           "metadataFile": "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.json",
           "fixtureSha256": "fc5dfd6b9e2b08b7a974aa6355d65a3ed95ef3e180e5224a10d228707b7b5619",
-          "metadataSha256": "149513dc6e82abe2702a8978ec416dc7affd756e89216e9c40b0d07b997239cc",
-          "preparedFromCommit": "d904e4eb4a1c89deafba50e3b840db15c6938ae6",
+          "metadataSha256": "f04f4daf34ce89ec3e395d3d945dda2b744460e4f271663a0884d5933c3c70df",
+          "preparedFromCommit": "f567708cd04b2771bdcccde9965fc738d63bf1d4",
           "preparationVersion": "watercolor-forms-prepared-raster-v1",
           "analysis": {
             "width": 171,
@@ -368,12 +370,12 @@
             "shortPathMaximumNormalizedLength": 0.01,
             "longPathMinimumNormalizedLength": 0.05
           },
-          "pathCount": 33,
+          "pathCount": 68,
           "shortPathShare": 0,
-          "medianNormalizedPathLength": 0.097006360841654,
-          "longPathShareOfTotalGeometry": 0.9528625029223684,
-          "closedFormCount": 9,
-          "totalPlottedLength": 5627.557103834549
+          "medianNormalizedPathLength": 0.09078809714301755,
+          "longPathShareOfTotalGeometry": 0.929853979156977,
+          "closedFormCount": 2,
+          "totalPlottedLength": 9712.03916037171
         },
         "pencil": {
           "definitions": {
@@ -392,9 +394,9 @@
       },
       "geometry": {
         "watercolor": {
-          "sha256": "61ae5270421997b81cef6156940bcbffe40f06a008a64e33a6f5dddc1efe2594",
-          "primitiveCount": 33,
-          "pointCount": 1380
+          "sha256": "ff682cf4c9449714844f51591b3db7a05c3ebd19f81c06aae330f9245ef59d6c",
+          "primitiveCount": 68,
+          "pointCount": 2621
         },
         "pencil": {
           "sha256": "8f23638a1a24f600590d360b4ebca3d710a59ad45d3bd7a5334434a2e33a42cb",
@@ -431,13 +433,13 @@
         "initialRegionCount": 2294,
         "gridAdjacencyCount": 87125,
         "mergeCount": 2293,
-        "mergeQueueEntryCount": 83215,
-        "regionUpdateCount": 78101,
-        "selectedRegionCount": 20,
-        "retainedBoundarySegmentCount": 1711,
-        "boundaryPathCount": 33,
-        "curvePointCount": 1380,
-        "primitiveCount": 33
+        "mergeQueueEntryCount": 30748,
+        "regionUpdateCount": 25634,
+        "selectedRegionCount": 28,
+        "retainedBoundarySegmentCount": 3095,
+        "boundaryPathCount": 68,
+        "curvePointCount": 2621,
+        "primitiveCount": 68
       },
       "cropRects": {
         "fullFrame": {
@@ -458,15 +460,15 @@
           "file": "pinecone-full-frame-comparison.png",
           "width": 2160,
           "height": 1120,
-          "bytes": 163146,
-          "sha256": "2e1cbf3bd145f4d1b74c57fb0f253d4b9d0df0134b247cdad6ca382822359524"
+          "bytes": 181269,
+          "sha256": "90e76499046a1f0740b0e1159726efc5f929a4706b6bef1ebb4fe08ed8872686"
         },
         "denseDetail": {
           "file": "pinecone-dense-detail-comparison.png",
           "width": 2160,
           "height": 1120,
-          "bytes": 221667,
-          "sha256": "d157d9d7ae125eacf1e36eed97911b397d32927cf1e526b7ace14116d021fa39"
+          "bytes": 257067,
+          "sha256": "55c90f63c8298ee057bdfee4ed18fb47a2ec9cd19451dbb6e38d5bdf4e4d9469"
         }
       }
     }
