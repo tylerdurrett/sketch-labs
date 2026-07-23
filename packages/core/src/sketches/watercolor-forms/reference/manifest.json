@@ -3,8 +3,8 @@
   "referenceId": "watercolor-forms-pencil-comparison",
   "status": "generated-comparison-evidence-awaiting-independent-review",
   "provenance": {
-    "tuningCommit": "f567708cd04b2771bdcccde9965fc738d63bf1d4",
-    "fixtureCommit": "c793c507359373262dc87aae301d0b4efe554515",
+    "tuningCommit": "b2624401209581d26ebee20a4896fce822ea4fc4",
+    "fixtureCommit": "844de023fca256f6a0381f8b572037d55b144000",
     "watercolorProduction": {
       "algorithm": "sha256(path + NUL + bytes + NUL), paths sorted",
       "paths": [
@@ -21,7 +21,7 @@
         "packages/core/src/sketches/watercolor-forms/tracing.ts",
         "packages/core/src/sketches/watercolor-forms/types.ts"
       ],
-      "sha256": "a7df972f6da99bacdf87dff48fe28ca6876589cd8201a138a9a94db1ff8b368c"
+      "sha256": "f012e59459d0da90b780477a036216d6fb0cf16c35af132000795a3f9240c773"
     },
     "pencilProduction": {
       "revision": "b6147366448d37021e20d48326045a6cba3039ca",
@@ -52,7 +52,7 @@
         "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.f64le",
         "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.json"
       ],
-      "sha256": "9525d28ae232f9dcac8ef93d8226997f92a5ba068d8e4971a4a5d04dd0107901"
+      "sha256": "569e09f953d317df9c3af3a50f808b213144af00232c4cb31fb0e37c8168f093"
     }
   },
   "pencilComparison": {
@@ -97,8 +97,8 @@
           "file": "packages/core/src/__tests__/fixtures/watercolor-forms/flower-prepared.f64le",
           "metadataFile": "packages/core/src/__tests__/fixtures/watercolor-forms/flower-prepared.json",
           "fixtureSha256": "96566d85d6f3deb1775359a1cf5d702f00b32e83e34ede933090af9f74c35b29",
-          "metadataSha256": "6f9d2a99632a39bb2c7945e8a03414b6cb163887009f33835f82d9b59a7538fd",
-          "preparedFromCommit": "f567708cd04b2771bdcccde9965fc738d63bf1d4",
+          "metadataSha256": "8ed802b255213da92dc285366150281e162ff90b139beb40b0410ba2507a2385",
+          "preparedFromCommit": "b2624401209581d26ebee20a4896fce822ea4fc4",
           "preparationVersion": "watercolor-forms-prepared-raster-v1",
           "analysis": {
             "width": 192,
@@ -113,6 +113,9 @@
             "decodedHeight": 2048
           },
           "controls": {
+            "gamma": 0.5,
+            "contrast": 0.5,
+            "pivot": 0.5,
             "formDetail": 0.5,
             "colorSensitivity": 0.5,
             "boundaryStrength": 0.5,
@@ -153,6 +156,9 @@
       },
       "controls": {
         "watercolor": {
+          "gamma": 0.5,
+          "contrast": 0.5,
+          "pivot": 0.5,
           "formDetail": 0.5,
           "colorSensitivity": 0.5,
           "boundaryStrength": 0.5,
@@ -176,10 +182,10 @@
           },
           "pathCount": 71,
           "shortPathShare": 0.028169014084507043,
-          "medianNormalizedPathLength": 0.13927131275073823,
-          "longPathShareOfTotalGeometry": 0.9741779913809943,
+          "medianNormalizedPathLength": 0.13195544713194007,
+          "longPathShareOfTotalGeometry": 0.9744731064576307,
           "closedFormCount": 12,
-          "totalPlottedLength": 18890.36591942375
+          "totalPlottedLength": 17913.975928860924
         },
         "pencil": {
           "definitions": {
@@ -198,7 +204,7 @@
       },
       "geometry": {
         "watercolor": {
-          "sha256": "4ad95eff80fdb55f5d1b94785f30fe8f84405ce599a4de35b99203fe454c2e8b",
+          "sha256": "7ca1c9043f9172e7ab9de03d873c749e2a97a370fde70a630027b6352b5c002e",
           "primitiveCount": 71,
           "pointCount": 4991
         },
@@ -268,15 +274,15 @@
           "file": "flower-full-frame-comparison.png",
           "width": 2160,
           "height": 1120,
-          "bytes": 263735,
-          "sha256": "916014a0836f16d8b68c461b4ee1b275db70dd349abad30075ec6f240375c6f0"
+          "bytes": 264110,
+          "sha256": "fc2ed66b3d10cd6f9d4d01963b8bfff9c99a593e239ac74ce1723a548e8e817f"
         },
         "denseDetail": {
           "file": "flower-dense-detail-comparison.png",
           "width": 2160,
           "height": 1120,
-          "bytes": 240106,
-          "sha256": "771c6caeef0a79566d91e3cb79ed17fde91d8d8b06fcc1272bac9867c9900496"
+          "bytes": 240274,
+          "sha256": "f9f2472a6c2965ae199d208d4693475a7a28560aec393786bf9ae7bb096243f3"
         }
       }
     },
@@ -293,8 +299,8 @@
           "file": "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.f64le",
           "metadataFile": "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.json",
           "fixtureSha256": "fc5dfd6b9e2b08b7a974aa6355d65a3ed95ef3e180e5224a10d228707b7b5619",
-          "metadataSha256": "f04f4daf34ce89ec3e395d3d945dda2b744460e4f271663a0884d5933c3c70df",
-          "preparedFromCommit": "f567708cd04b2771bdcccde9965fc738d63bf1d4",
+          "metadataSha256": "a2aef1699c6779c87a26762f3416070678b50b7d59096a9cae627ef01a376dfd",
+          "preparedFromCommit": "b2624401209581d26ebee20a4896fce822ea4fc4",
           "preparationVersion": "watercolor-forms-prepared-raster-v1",
           "analysis": {
             "width": 171,
@@ -309,6 +315,9 @@
             "decodedHeight": 768
           },
           "controls": {
+            "gamma": 0.5,
+            "contrast": 0.5,
+            "pivot": 0.5,
             "formDetail": 0.5,
             "colorSensitivity": 0.5,
             "boundaryStrength": 0.5,
@@ -319,8 +328,8 @@
           "file": "packages/core/src/__tests__/fixtures/pencil-contour/pinecone-analysis.f64le",
           "metadataFile": "packages/core/src/__tests__/fixtures/pencil-contour/pinecone-analysis.json",
           "fixtureSha256": "6fce17db851aebe835316e6c898f035070a0ebcd3e8dcc12a000c163b0eab004",
-          "metadataSha256": "f5b8f502a7c352e1eea1fc81973354a512ba2a830153589e4a8127395d4cc716",
-          "preparedFromCommit": "d4c3c05c0ea0574e0f17677f7db471c34942ae24",
+          "metadataSha256": "c92d4cc038b00548b5efb979cbe2671cd0467dcc81152523df284da2492cd47c",
+          "preparedFromCommit": "b2624401209581d26ebee20a4896fce822ea4fc4",
           "preparationVersion": "pencil-contour-analyzed-raster-v1",
           "analysis": {
             "width": 171,
@@ -349,6 +358,9 @@
       },
       "controls": {
         "watercolor": {
+          "gamma": 0.5,
+          "contrast": 0.5,
+          "pivot": 0.5,
           "formDetail": 0.5,
           "colorSensitivity": 0.5,
           "boundaryStrength": 0.5,
@@ -371,11 +383,11 @@
             "longPathMinimumNormalizedLength": 0.05
           },
           "pathCount": 68,
-          "shortPathShare": 0,
-          "medianNormalizedPathLength": 0.09078809714301755,
-          "longPathShareOfTotalGeometry": 0.929853979156977,
+          "shortPathShare": 0.029411764705882353,
+          "medianNormalizedPathLength": 0.08711247241300456,
+          "longPathShareOfTotalGeometry": 0.9299960584070851,
           "closedFormCount": 2,
-          "totalPlottedLength": 9712.03916037171
+          "totalPlottedLength": 9241.777373774881
         },
         "pencil": {
           "definitions": {
@@ -394,7 +406,7 @@
       },
       "geometry": {
         "watercolor": {
-          "sha256": "ff682cf4c9449714844f51591b3db7a05c3ebd19f81c06aae330f9245ef59d6c",
+          "sha256": "1e7e21560f302690c8a08905906467a5b2e34e2a02789f4f3dc0f5df8abc6b95",
           "primitiveCount": 68,
           "pointCount": 2621
         },
@@ -460,15 +472,15 @@
           "file": "pinecone-full-frame-comparison.png",
           "width": 2160,
           "height": 1120,
-          "bytes": 181269,
-          "sha256": "90e76499046a1f0740b0e1159726efc5f929a4706b6bef1ebb4fe08ed8872686"
+          "bytes": 181522,
+          "sha256": "e859a9871909804f54db02aeb0c297d6899a2e8d6740969a1c2b7c1c2d0230c2"
         },
         "denseDetail": {
           "file": "pinecone-dense-detail-comparison.png",
           "width": 2160,
           "height": 1120,
-          "bytes": 257067,
-          "sha256": "55c90f63c8298ee057bdfee4ed18fb47a2ec9cd19451dbb6e38d5bdf4e4d9469"
+          "bytes": 256767,
+          "sha256": "6778d14d04dd80749d2ce8163d3e99d1e55d198cf9c101e6221ee3db1eb9b75b"
         }
       }
     }

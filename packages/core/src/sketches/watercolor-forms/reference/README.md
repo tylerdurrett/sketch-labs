@@ -25,8 +25,8 @@ Run from the repository root with the pinned production browser:
 node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
   --scope evidence \
   --write \
-  --tuning-commit f567708cd04b2771bdcccde9965fc738d63bf1d4 \
-  --fixture-commit c793c507359373262dc87aae301d0b4efe554515
+  --tuning-commit b2624401209581d26ebee20a4896fce822ea4fc4 \
+  --fixture-commit 844de023fca256f6a0381f8b572037d55b144000
 
 node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
   --scope evidence
