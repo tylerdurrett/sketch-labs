@@ -1,0 +1,621 @@
+/**
+ * Bounded multiscale contour evidence for Flowing Contours.
+ *
+ * Visible luminance and alpha are analysed independently and combined only as
+ * structure-tensor evidence. This keeps an internal alpha transition useful
+ * without allowing RGB hidden behind exact-zero alpha to enter the field.
+ * Gaussian scale-space and Scharr derivatives are rotationally symmetric
+ * enough for diagonal and curved evidence to retain continuous, non-lattice
+ * tangents. Convolution is renormalized over in-raster samples and derivatives
+ * are evaluated only where their complete stencil exists, so the fitted-image
+ * perimeter is never compared with an invented outside value.
+ */
+
+import type { Point } from '../../types'
+import {
+  terminateFlowingContoursAtSafetyLimit,
+  type FlowingContoursAccounting,
+} from './accounting'
+import {
+  FLOWING_CONTOURS_LIMITS,
+  isWithinFlowingContoursLimit,
+  type FlowingContoursLimits,
+} from './limits'
+import type { PreparedFlowingContoursRaster } from './raster'
+import type { CorrectedFlowingRidgeSample, FlowingContoursField } from './types'
+
+const SCHARR_AXIS_WEIGHT = 10
+const SCHARR_DIAGONAL_WEIGHT = 3
+const SCHARR_NORMALIZATION = 32
+const GAUSSIAN_TRUNCATION_SIGMAS = 3
+const ALPHA_TENSOR_WEIGHT = 0.8
+const EVIDENCE_GAIN = 2
+const EVIDENCE_EPSILON = 1e-10
+const ORIENTATION_EPSILON = 1e-12
+
+/**
+ * Fixed logarithmic analysis policy in lattice pixels.
+ *
+ * Four bands leave one plane of headroom under the FC03 safety ceiling.
+ * Scale-normalized gradients make responses comparable; the mild fine-scale
+ * preference breaks near-ties without preventing a broad transition from
+ * selecting a larger band.
+ */
+const SCALE_POLICY = Object.freeze([
+  Object.freeze({ sigma: 1, preference: 1 }),
+  Object.freeze({ sigma: 2, preference: 0.96 }),
+  Object.freeze({ sigma: 4, preference: 0.9 }),
+  Object.freeze({ sigma: 8, preference: 0.82 }),
+] as const)
+
+const EMPTY_VALUES = Object.freeze([]) as readonly number[]
+const EMPTY_SUPPORT = Object.freeze([]) as readonly boolean[]
+
+const EMPTY_FLOWING_CONTOURS_FIELD: FlowingContoursField = Object.freeze({
+  sourceWidth: 0,
+  sourceHeight: 0,
+  width: 0,
+  height: 0,
+  luminance: EMPTY_VALUES,
+  alpha: EMPTY_VALUES,
+  positiveSupport: EMPTY_SUPPORT,
+  contourEvidence: EMPTY_VALUES,
+  tangentX: EMPTY_VALUES,
+  tangentY: EMPTY_VALUES,
+  tangentCoherence: EMPTY_VALUES,
+  ambiguity: EMPTY_VALUES,
+  ridgeScale: EMPTY_VALUES,
+})
+
+interface GradientPlane {
+  readonly x: readonly number[]
+  readonly y: readonly number[]
+}
+
+function clampUnit(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0
+  if (value >= 1) return 1
+  return value
+}
+
+function invalidate(accounting: FlowingContoursAccounting): void {
+  accounting.termination = 'invalid-input'
+  accounting.limitedBy = null
+  accounting.contourEvidenceSampleCount = 0
+}
+
+function isValidPreparedRaster(
+  raster: Readonly<PreparedFlowingContoursRaster>,
+): boolean {
+  if (
+    typeof raster !== 'object' ||
+    raster === null ||
+    !Number.isSafeInteger(raster.sourceWidth) ||
+    raster.sourceWidth <= 0 ||
+    !Number.isSafeInteger(raster.sourceHeight) ||
+    raster.sourceHeight <= 0 ||
+    !Number.isSafeInteger(raster.width) ||
+    raster.width <= 0 ||
+    !Number.isSafeInteger(raster.height) ||
+    raster.height <= 0
+  ) {
+    return false
+  }
+
+  const sampleCount = raster.width * raster.height
+  if (
+    !Number.isSafeInteger(sampleCount) ||
+    raster.luminance.length !== sampleCount ||
+    raster.alpha.length !== sampleCount ||
+    raster.positiveSupport.length !== sampleCount
+  ) {
+    return false
+  }
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const luminance = raster.luminance[index]
+    const alpha = raster.alpha[index]
+    const positiveSupport = raster.positiveSupport[index]
+    if (
+      typeof luminance !== 'number' ||
+      !Number.isFinite(luminance) ||
+      luminance < 0 ||
+      luminance > 1 ||
+      typeof alpha !== 'number' ||
+      !Number.isFinite(alpha) ||
+      alpha < 0 ||
+      alpha > 1 ||
+      typeof positiveSupport !== 'boolean' ||
+      positiveSupport !== alpha > 0 ||
+      (alpha === 0 && luminance !== 0)
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function gaussianKernel(sigma: number): readonly number[] {
+  const radius = Math.ceil(sigma * GAUSSIAN_TRUNCATION_SIGMAS)
+  const weights = new Array<number>(radius * 2 + 1)
+  for (let offset = -radius; offset <= radius; offset += 1) {
+    weights[offset + radius] = Math.exp(
+      -(offset * offset) / (2 * sigma * sigma),
+    )
+  }
+  return weights
+}
+
+/**
+ * Separable convolution using only real in-raster samples.
+ *
+ * Renormalizing each truncated kernel preserves a constant field exactly,
+ * including corners, without reflection or clamping that could turn the
+ * source perimeter into a synthetic transition.
+ */
+function gaussianSmooth(
+  values: readonly number[],
+  width: number,
+  height: number,
+  sigma: number,
+): readonly number[] {
+  const kernel = gaussianKernel(sigma)
+  const radius = (kernel.length - 1) / 2
+  const horizontal = new Array<number>(values.length)
+  const output = new Array<number>(values.length)
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let weighted = 0
+      let weightTotal = 0
+      for (let offset = -radius; offset <= radius; offset += 1) {
+        const sourceX = x + offset
+        if (sourceX < 0 || sourceX >= width) continue
+        const weight = kernel[offset + radius]!
+        weighted += values[y * width + sourceX]! * weight
+        weightTotal += weight
+      }
+      horizontal[y * width + x] = weightTotal > 0 ? weighted / weightTotal : 0
+    }
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let weighted = 0
+      let weightTotal = 0
+      for (let offset = -radius; offset <= radius; offset += 1) {
+        const sourceY = y + offset
+        if (sourceY < 0 || sourceY >= height) continue
+        const weight = kernel[offset + radius]!
+        weighted += horizontal[sourceY * width + x]! * weight
+        weightTotal += weight
+      }
+      output[y * width + x] = weightTotal > 0 ? weighted / weightTotal : 0
+    }
+  }
+  return output
+}
+
+function scharrGradients(
+  values: readonly number[],
+  width: number,
+  height: number,
+  scale: number,
+): GradientPlane {
+  const xGradient = new Array<number>(values.length).fill(0)
+  const yGradient = new Array<number>(values.length).fill(0)
+  if (width < 3 || height < 3) {
+    return { x: xGradient, y: yGradient }
+  }
+
+  const at = (x: number, y: number) => values[y * width + x]!
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const upperLeft = at(x - 1, y - 1)
+      const upperMiddle = at(x, y - 1)
+      const upperRight = at(x + 1, y - 1)
+      const middleLeft = at(x - 1, y)
+      const middleRight = at(x + 1, y)
+      const lowerLeft = at(x - 1, y + 1)
+      const lowerMiddle = at(x, y + 1)
+      const lowerRight = at(x + 1, y + 1)
+      const index = y * width + x
+      xGradient[index] =
+        (scale *
+          (SCHARR_DIAGONAL_WEIGHT * (upperRight - upperLeft) +
+            SCHARR_AXIS_WEIGHT * (middleRight - middleLeft) +
+            SCHARR_DIAGONAL_WEIGHT * (lowerRight - lowerLeft))) /
+        SCHARR_NORMALIZATION
+      yGradient[index] =
+        (scale *
+          (SCHARR_DIAGONAL_WEIGHT * (lowerLeft - upperLeft) +
+            SCHARR_AXIS_WEIGHT * (lowerMiddle - upperMiddle) +
+            SCHARR_DIAGONAL_WEIGHT * (lowerRight - upperRight))) /
+        SCHARR_NORMALIZATION
+    }
+  }
+  return { x: xGradient, y: yGradient }
+}
+
+function canonicalTangent(
+  tangentX: number,
+  tangentY: number,
+): readonly [number, number] {
+  const length = Math.hypot(tangentX, tangentY)
+  if (!Number.isFinite(length) || length <= ORIENTATION_EPSILON) {
+    return [1, 0]
+  }
+
+  let x = tangentX / length
+  let y = tangentY / length
+  // This sign is only a stable representation of an undirected axis.
+  if (y < 0 || (Math.abs(y) <= ORIENTATION_EPSILON && x < 0)) {
+    x = -x
+    y = -y
+  }
+  return [x, y]
+}
+
+function updateFromScale(
+  raster: Readonly<PreparedFlowingContoursRaster>,
+  scale: (typeof SCALE_POLICY)[number],
+  contourEvidence: number[],
+  tangentX: number[],
+  tangentY: number[],
+  tangentCoherence: number[],
+  ambiguity: number[],
+  ridgeScale: number[],
+): void {
+  const { width, height } = raster
+  const luminance = gaussianSmooth(raster.luminance, width, height, scale.sigma)
+  const alpha = gaussianSmooth(raster.alpha, width, height, scale.sigma)
+  const luminanceGradient = scharrGradients(
+    luminance,
+    width,
+    height,
+    scale.sigma,
+  )
+  const alphaGradient = scharrGradients(alpha, width, height, scale.sigma)
+
+  const tensorXX = new Array<number>(luminance.length)
+  const tensorXY = new Array<number>(luminance.length)
+  const tensorYY = new Array<number>(luminance.length)
+  const alphaWeightSquared = ALPHA_TENSOR_WEIGHT * ALPHA_TENSOR_WEIGHT
+  for (let index = 0; index < luminance.length; index += 1) {
+    const luminanceX = luminanceGradient.x[index]!
+    const luminanceY = luminanceGradient.y[index]!
+    const alphaX = alphaGradient.x[index]!
+    const alphaY = alphaGradient.y[index]!
+    tensorXX[index] =
+      luminanceX * luminanceX + alphaWeightSquared * alphaX * alphaX
+    tensorXY[index] =
+      luminanceX * luminanceY + alphaWeightSquared * alphaX * alphaY
+    tensorYY[index] =
+      luminanceY * luminanceY + alphaWeightSquared * alphaY * alphaY
+  }
+
+  const aggregationSigma = Math.max(0.75, scale.sigma * 0.5)
+  const aggregateXX = gaussianSmooth(tensorXX, width, height, aggregationSigma)
+  const aggregateXY = gaussianSmooth(tensorXY, width, height, aggregationSigma)
+  const aggregateYY = gaussianSmooth(tensorYY, width, height, aggregationSigma)
+
+  for (let index = 0; index < contourEvidence.length; index += 1) {
+    if (!raster.positiveSupport[index]) continue
+    const xx = Math.max(0, aggregateXX[index]!)
+    const xy = aggregateXY[index]!
+    const yy = Math.max(0, aggregateYY[index]!)
+    const trace = xx + yy
+    if (!Number.isFinite(trace) || trace <= EVIDENCE_EPSILON) continue
+
+    const anisotropy = Math.hypot(xx - yy, 2 * xy)
+    const coherence = clampUnit(anisotropy / trace)
+    const response =
+      clampUnit(1 - Math.exp(-EVIDENCE_GAIN * Math.sqrt(trace))) *
+      scale.preference
+    if (response <= contourEvidence[index]!) continue
+
+    // Principal tensor direction is the contour normal; rotate by 90°.
+    const normalAngle = 0.5 * Math.atan2(2 * xy, xx - yy)
+    const tangent = canonicalTangent(
+      -Math.sin(normalAngle),
+      Math.cos(normalAngle),
+    )
+    contourEvidence[index] = response
+    tangentX[index] = tangent[0]
+    tangentY[index] = tangent[1]
+    tangentCoherence[index] = coherence
+    ambiguity[index] = clampUnit(1 - coherence)
+    ridgeScale[index] = scale.sigma
+  }
+}
+
+/**
+ * Build one immutable, bounded contour field from FC04's prepared raster.
+ *
+ * Production always uses the four fixed scale bands. A lowered FC03 scale cap
+ * fails before allocating scale planes. Exact positive-alpha permission is
+ * retained independently from interpolated alpha and contour evidence.
+ */
+export function buildFlowingContoursField(
+  raster: Readonly<PreparedFlowingContoursRaster>,
+  accounting: FlowingContoursAccounting,
+  limits: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
+): FlowingContoursField {
+  try {
+    if (
+      raster.width === 0 &&
+      raster.height === 0 &&
+      raster.sourceWidth === 0 &&
+      raster.sourceHeight === 0
+    ) {
+      accounting.contourEvidenceSampleCount = 0
+      return EMPTY_FLOWING_CONTOURS_FIELD
+    }
+    if (!isValidPreparedRaster(raster)) {
+      invalidate(accounting)
+      return EMPTY_FLOWING_CONTOURS_FIELD
+    }
+
+    const sampleCount = raster.width * raster.height
+    if (
+      !isWithinFlowingContoursLimit(
+        'analysis-dimension',
+        Math.max(raster.width, raster.height),
+        limits,
+      )
+    ) {
+      terminateFlowingContoursAtSafetyLimit(accounting, 'analysis-dimension')
+      accounting.contourEvidenceSampleCount = 0
+      return EMPTY_FLOWING_CONTOURS_FIELD
+    }
+    if (
+      !isWithinFlowingContoursLimit(
+        'analysis-sample-count',
+        sampleCount,
+        limits,
+      )
+    ) {
+      terminateFlowingContoursAtSafetyLimit(accounting, 'analysis-sample-count')
+      accounting.contourEvidenceSampleCount = 0
+      return EMPTY_FLOWING_CONTOURS_FIELD
+    }
+    if (
+      !isWithinFlowingContoursLimit(
+        'scale-plane-count',
+        SCALE_POLICY.length,
+        limits,
+      )
+    ) {
+      terminateFlowingContoursAtSafetyLimit(accounting, 'scale-plane-count')
+      accounting.contourEvidenceSampleCount = 0
+      return EMPTY_FLOWING_CONTOURS_FIELD
+    }
+
+    const contourEvidence = new Array<number>(sampleCount).fill(0)
+    const tangentX = new Array<number>(sampleCount).fill(1)
+    const tangentY = new Array<number>(sampleCount).fill(0)
+    const tangentCoherence = new Array<number>(sampleCount).fill(0)
+    const ambiguity = new Array<number>(sampleCount).fill(0)
+    const ridgeScale = new Array<number>(sampleCount).fill(0)
+
+    for (const scale of SCALE_POLICY) {
+      updateFromScale(
+        raster,
+        scale,
+        contourEvidence,
+        tangentX,
+        tangentY,
+        tangentCoherence,
+        ambiguity,
+        ridgeScale,
+      )
+    }
+
+    accounting.contourEvidenceSampleCount = contourEvidence.reduce(
+      (count, evidence) => count + (evidence > 0 ? 1 : 0),
+      0,
+    )
+    return Object.freeze({
+      sourceWidth: raster.sourceWidth,
+      sourceHeight: raster.sourceHeight,
+      width: raster.width,
+      height: raster.height,
+      luminance: Object.freeze(Array.from(raster.luminance)),
+      alpha: Object.freeze(Array.from(raster.alpha)),
+      positiveSupport: Object.freeze(Array.from(raster.positiveSupport)),
+      contourEvidence: Object.freeze(contourEvidence),
+      tangentX: Object.freeze(tangentX),
+      tangentY: Object.freeze(tangentY),
+      tangentCoherence: Object.freeze(tangentCoherence),
+      ambiguity: Object.freeze(ambiguity),
+      ridgeScale: Object.freeze(ridgeScale),
+    })
+  } catch {
+    invalidate(accounting)
+    return EMPTY_FLOWING_CONTOURS_FIELD
+  }
+}
+
+function hasSampleShape(field: Readonly<FlowingContoursField>): boolean {
+  const sampleCount = field.width * field.height
+  return (
+    Number.isSafeInteger(field.width) &&
+    field.width > 0 &&
+    Number.isSafeInteger(field.height) &&
+    field.height > 0 &&
+    Number.isSafeInteger(sampleCount) &&
+    field.luminance.length === sampleCount &&
+    field.alpha.length === sampleCount &&
+    field.positiveSupport.length === sampleCount &&
+    field.contourEvidence.length === sampleCount &&
+    field.tangentX.length === sampleCount &&
+    field.tangentY.length === sampleCount &&
+    field.tangentCoherence.length === sampleCount &&
+    field.ambiguity.length === sampleCount &&
+    field.ridgeScale.length === sampleCount
+  )
+}
+
+function bilinearFieldValue(
+  values: readonly number[],
+  width: number,
+  height: number,
+  point: Readonly<Point>,
+): number | null {
+  return bilinearDerivedValue(width, height, point, (index) => values[index]!)
+}
+
+function bilinearDerivedValue(
+  width: number,
+  height: number,
+  point: Readonly<Point>,
+  valueAt: (index: number) => number,
+): number | null {
+  const x = point[0]
+  const y = point[1]
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    x < 0 ||
+    y < 0 ||
+    x > width - 1 ||
+    y > height - 1
+  ) {
+    return null
+  }
+  const left = Math.floor(x)
+  const top = Math.floor(y)
+  const right = Math.min(left + 1, width - 1)
+  const bottom = Math.min(top + 1, height - 1)
+  const horizontal = x - left
+  const vertical = y - top
+  const topValue =
+    valueAt(top * width + left) * (1 - horizontal) +
+    valueAt(top * width + right) * horizontal
+  const bottomValue =
+    valueAt(bottom * width + left) * (1 - horizontal) +
+    valueAt(bottom * width + right) * horizontal
+  const value = topValue * (1 - vertical) + bottomValue * vertical
+  return Number.isFinite(value) ? value : null
+}
+
+function supportValue(
+  field: Readonly<FlowingContoursField>,
+  point: Readonly<Point>,
+): number | null {
+  return bilinearDerivedValue(field.width, field.height, point, (index) =>
+    field.positiveSupport[index] ? 1 : 0,
+  )
+}
+
+/**
+ * Bilinearly sample an undirected tangent without signed-vector cancellation.
+ *
+ * Interpolation occurs in doubled-angle space, where `t` and `-t` are the
+ * same value, then returns one canonical unit-vector representative.
+ */
+export function sampleFlowingContoursTangent(
+  field: Readonly<FlowingContoursField>,
+  point: Readonly<Point>,
+): Readonly<Point> | null {
+  try {
+    if (!hasSampleShape(field)) return null
+    const sampledCosine = bilinearDerivedValue(
+      field.width,
+      field.height,
+      point,
+      (index) => {
+        const x = field.tangentX[index]!
+        const y = field.tangentY[index]!
+        return x * x - y * y
+      },
+    )
+    const sampledSine = bilinearDerivedValue(
+      field.width,
+      field.height,
+      point,
+      (index) => 2 * field.tangentX[index]! * field.tangentY[index]!,
+    )
+    if (sampledCosine === null || sampledSine === null) return null
+    if (Math.hypot(sampledCosine, sampledSine) <= ORIENTATION_EPSILON) {
+      return Object.freeze([1, 0] as Point)
+    }
+    const angle = 0.5 * Math.atan2(sampledSine, sampledCosine)
+    return Object.freeze(
+      canonicalTangent(Math.cos(angle), Math.sin(angle)).slice() as Point,
+    )
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Sample every tracing-relevant field channel at one continuous lattice point.
+ *
+ * Outside points and exact-zero-alpha permission fail closed. Scalars are
+ * bilinear; tangent interpolation is sign-invariant in doubled-angle space.
+ */
+export function sampleFlowingContoursField(
+  field: Readonly<FlowingContoursField>,
+  point: Readonly<Point>,
+): Readonly<CorrectedFlowingRidgeSample> | null {
+  try {
+    if (!hasSampleShape(field)) return null
+    const alpha = bilinearFieldValue(
+      field.alpha,
+      field.width,
+      field.height,
+      point,
+    )
+    const support = supportValue(field, point)
+    if (alpha === null || support === null || alpha <= 0 || support <= 0) {
+      return null
+    }
+    const evidence = bilinearFieldValue(
+      field.contourEvidence,
+      field.width,
+      field.height,
+      point,
+    )
+    const coherence = bilinearFieldValue(
+      field.tangentCoherence,
+      field.width,
+      field.height,
+      point,
+    )
+    const sampledAmbiguity = bilinearFieldValue(
+      field.ambiguity,
+      field.width,
+      field.height,
+      point,
+    )
+    const scale = bilinearFieldValue(
+      field.ridgeScale,
+      field.width,
+      field.height,
+      point,
+    )
+    const tangent = sampleFlowingContoursTangent(field, point)
+    if (
+      evidence === null ||
+      coherence === null ||
+      sampledAmbiguity === null ||
+      scale === null ||
+      tangent === null
+    ) {
+      return null
+    }
+    const sampledPoint = Object.freeze([point[0], point[1]] as Point)
+    return Object.freeze({
+      point: sampledPoint,
+      tangent,
+      evidence: clampUnit(evidence),
+      coherence: clampUnit(coherence),
+      ambiguity: clampUnit(sampledAmbiguity),
+      scale: Math.max(0, scale),
+      alpha: clampUnit(alpha),
+    })
+  } catch {
+    return null
+  }
+}
