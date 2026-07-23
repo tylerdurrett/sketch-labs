@@ -11,9 +11,17 @@ import {
   generateFlowingContours,
   type FlowingContoursGeneratorInput,
 } from '../sketches/flowing-contours/generator'
-import { FLOWING_CONTOURS_LIMITS } from '../sketches/flowing-contours/limits'
 import {
+  createFlowingContoursTestLimits,
+  FLOWING_CONTOURS_LIMITS,
+  type FlowingContoursLimits,
+} from '../sketches/flowing-contours/limits'
+import { runFlowingContoursPipeline } from '../sketches/flowing-contours/pipeline'
+import {
+  FLOWING_CONTOURS_ENDPOINT_REASONS,
   FLOWING_CONTOURS_LIMIT_NAMES,
+  type FlowingContoursDiagnostics,
+  type FlowingContoursField,
   type FlowingContoursGeneratorResult,
   type FlowingContoursLimitName,
 } from '../sketches/flowing-contours/types'
@@ -40,6 +48,45 @@ const PRESSURE_LIMITS = Object.freeze({
   'fitted-curve-point-count': 512,
 })
 
+const DISCRETE_DIAGNOSTIC_NAMES = Object.freeze([
+  'analysisWidth',
+  'analysisHeight',
+  'analysisSampleCount',
+  'contourEvidenceSampleCount',
+  'correctedRidgeSampleCount',
+  'eligibleAnchorCount',
+  'processedAnchorCount',
+  'directionalTraceCount',
+  'searchStepCount',
+  'candidateCount',
+  'acceptedCandidateCount',
+  'rejectedCandidateCount',
+  'suppressedAnchorCount',
+  'suppressedEvidenceSampleCount',
+  'rawTrajectoryCount',
+  'rawTrajectoryPointCount',
+  'fittedCurveCount',
+  'fittedCurvePointCount',
+  'primitiveCount',
+] as const satisfies readonly (keyof FlowingContoursDiagnostics)[])
+
+const MODERATE_TURN = (25 * Math.PI) / 180
+const ABRUPT_TURN = (45 * Math.PI) / 180
+const MAXIMUM_FLOWING_TURN = (110 * Math.PI) / 180
+const AXIS_ALIGNMENT_COSINE = Math.cos((10 * Math.PI) / 180)
+const ORTHOGONAL_TURN_FLOOR = (60 * Math.PI) / 180
+const METRIC_SPACINGS = Object.freeze([2, 4] as const)
+
+interface FixedSpacingFlowMetrics {
+  readonly turnCount: number
+  readonly turnEnergy: number
+  readonly maximumTurn: number
+  readonly moderateTurnCount: number
+  readonly abruptTurnCount: number
+  readonly repeatedAbruptAlternationCount: number
+  readonly maximumAxisToggleRun: number
+}
+
 function raster(
   width: number,
   height: number,
@@ -62,6 +109,34 @@ function boundaryRaster(
   return raster(width, height, (x, y) =>
     x < boundaryX(y) ? [18, 18, 18, 255] : [238, 238, 238, 255],
   )
+}
+
+function opaqueLowEvidenceGapField(): Readonly<FlowingContoursField> {
+  const width = 28
+  const height = 13
+  const count = width * height
+  const contourEvidence = Array.from({ length: count }, (_value, index) => {
+    const x = index % width
+    const y = Math.floor(index / width)
+    const distance = y - 6
+    const ridge = Math.exp(-(distance * distance) / (2 * 0.55 * 0.55))
+    return (x >= 13 && x <= 14 ? 0.01 : 1) * ridge
+  })
+  return Object.freeze({
+    sourceWidth: width,
+    sourceHeight: height,
+    width,
+    height,
+    luminance: Object.freeze(new Array<number>(count).fill(0.5)),
+    alpha: Object.freeze(new Array<number>(count).fill(1)),
+    positiveSupport: Object.freeze(new Array<boolean>(count).fill(true)),
+    contourEvidence: Object.freeze(contourEvidence),
+    tangentX: Object.freeze(new Array<number>(count).fill(1)),
+    tangentY: Object.freeze(new Array<number>(count).fill(0)),
+    tangentCoherence: Object.freeze(new Array<number>(count).fill(1)),
+    ambiguity: Object.freeze(new Array<number>(count).fill(0)),
+    ridgeScale: Object.freeze(new Array<number>(count).fill(1)),
+  })
 }
 
 function generate(
@@ -100,48 +175,120 @@ function pathLength(
   return length
 }
 
+function effectiveLimits(
+  overrides: Readonly<Partial<FlowingContoursLimits>> = {},
+): Readonly<FlowingContoursLimits> {
+  return Object.freeze({ ...FLOWING_CONTOURS_LIMITS, ...overrides })
+}
+
+function expectSafeDiagnostics(
+  diagnostics: Readonly<FlowingContoursDiagnostics>,
+  overrides: Readonly<Partial<FlowingContoursLimits>> = {},
+): void {
+  const limits = effectiveLimits(overrides)
+
+  expect(FLOWING_CONTOURS_LIMIT_NAMES).toHaveLength(14)
+  for (const name of DISCRETE_DIAGNOSTIC_NAMES) {
+    expect(
+      Number.isSafeInteger(diagnostics[name]) && diagnostics[name] >= 0,
+      `${name} must be a nonnegative safe integer`,
+    ).toBe(true)
+  }
+  for (const name of [
+    'acceptedMaximumUnsupportedSpanLength',
+    'acceptedTotalUnsupportedSpanLength',
+  ] as const) {
+    expect(
+      Number.isFinite(diagnostics[name]) && diagnostics[name] >= 0,
+      `${name} must be finite and nonnegative`,
+    ).toBe(true)
+  }
+  expect(Object.keys(diagnostics.endpointReasonCounts).sort()).toEqual(
+    [...FLOWING_CONTOURS_ENDPOINT_REASONS].sort(),
+  )
+  for (const reason of FLOWING_CONTOURS_ENDPOINT_REASONS) {
+    const count = diagnostics.endpointReasonCounts[reason]
+    expect(
+      Number.isSafeInteger(count) && count >= 0,
+      `${reason} endpoint count must be a nonnegative safe integer`,
+    ).toBe(true)
+  }
+
+  expect(diagnostics.analysisWidth).toBeLessThanOrEqual(
+    limits['analysis-dimension'],
+  )
+  expect(diagnostics.analysisHeight).toBeLessThanOrEqual(
+    limits['analysis-dimension'],
+  )
+  expect(diagnostics.analysisSampleCount).toBeLessThanOrEqual(
+    limits['analysis-sample-count'],
+  )
+  expect(diagnostics.contourEvidenceSampleCount).toBeLessThanOrEqual(
+    diagnostics.analysisSampleCount,
+  )
+  expect(diagnostics.correctedRidgeSampleCount).toBeLessThanOrEqual(
+    diagnostics.analysisSampleCount,
+  )
+  expect(diagnostics.eligibleAnchorCount).toBeLessThanOrEqual(
+    limits['anchor-count'],
+  )
+  expect(diagnostics.processedAnchorCount).toBeLessThanOrEqual(
+    diagnostics.eligibleAnchorCount,
+  )
+  expect(diagnostics.directionalTraceCount).toBeLessThanOrEqual(
+    diagnostics.processedAnchorCount * 2,
+  )
+  expect(diagnostics.searchStepCount).toBeLessThanOrEqual(
+    limits['search-step-count'],
+  )
+  expect(diagnostics.candidateCount).toBeLessThanOrEqual(
+    limits['candidate-count'],
+  )
+  expect(diagnostics.candidateCount).toBeLessThanOrEqual(
+    diagnostics.processedAnchorCount,
+  )
+  expect(diagnostics.acceptedCandidateCount).toBeLessThanOrEqual(
+    limits['accepted-curve-count'],
+  )
+  expect(diagnostics.acceptedCandidateCount).toBeLessThanOrEqual(
+    diagnostics.candidateCount,
+  )
+  expect(diagnostics.rejectedCandidateCount).toBe(
+    diagnostics.candidateCount - diagnostics.acceptedCandidateCount,
+  )
+  expect(diagnostics.suppressedAnchorCount).toBeLessThanOrEqual(
+    diagnostics.processedAnchorCount,
+  )
+  expect(diagnostics.suppressedEvidenceSampleCount).toBeLessThanOrEqual(
+    diagnostics.analysisSampleCount,
+  )
+  expect(diagnostics.rawTrajectoryPointCount).toBeLessThanOrEqual(
+    limits['raw-trajectory-point-count'],
+  )
+  expect(diagnostics.fittedCurvePointCount).toBeLessThanOrEqual(
+    limits['fitted-curve-point-count'],
+  )
+  expect(diagnostics.primitiveCount).toBeLessThanOrEqual(
+    limits['primitive-count'],
+  )
+  expect(
+    FLOWING_CONTOURS_ENDPOINT_REASONS.reduce(
+      (total, reason) => total + diagnostics.endpointReasonCounts[reason],
+      0,
+    ),
+  ).toBe(diagnostics.acceptedCandidateCount * 2)
+  expect(Object.isFrozen(diagnostics)).toBe(true)
+  expect(Object.isFrozen(diagnostics.endpointReasonCounts)).toBe(true)
+}
+
 function expectSafeResult(
   result: Readonly<FlowingContoursGeneratorResult>,
+  overrides: Readonly<Partial<FlowingContoursLimits>> = {},
   frame: Readonly<CoordinateSpace> = FRAME,
 ): void {
   const diagnostics = result.diagnostics
 
-  expect(FLOWING_CONTOURS_LIMIT_NAMES).toHaveLength(14)
-  expect(
-    Object.values(diagnostics).every(
-      (value) => typeof value !== 'number' || Number.isFinite(value),
-    ),
-  ).toBe(true)
-  expect(diagnostics.analysisWidth).toBeLessThanOrEqual(
-    FLOWING_CONTOURS_LIMITS['analysis-dimension'],
-  )
-  expect(diagnostics.analysisHeight).toBeLessThanOrEqual(
-    FLOWING_CONTOURS_LIMITS['analysis-dimension'],
-  )
-  expect(diagnostics.analysisSampleCount).toBeLessThanOrEqual(
-    FLOWING_CONTOURS_LIMITS['analysis-sample-count'],
-  )
-  expect(diagnostics.eligibleAnchorCount).toBeLessThanOrEqual(
-    FLOWING_CONTOURS_LIMITS['anchor-count'],
-  )
-  expect(diagnostics.searchStepCount).toBeLessThanOrEqual(
-    FLOWING_CONTOURS_LIMITS['search-step-count'],
-  )
-  expect(diagnostics.candidateCount).toBeLessThanOrEqual(
-    FLOWING_CONTOURS_LIMITS['candidate-count'],
-  )
-  expect(diagnostics.acceptedCandidateCount).toBeLessThanOrEqual(
-    FLOWING_CONTOURS_LIMITS['accepted-curve-count'],
-  )
-  expect(diagnostics.rawTrajectoryPointCount).toBeLessThanOrEqual(
-    FLOWING_CONTOURS_LIMITS['raw-trajectory-point-count'],
-  )
-  expect(diagnostics.fittedCurvePointCount).toBeLessThanOrEqual(
-    FLOWING_CONTOURS_LIMITS['fitted-curve-point-count'],
-  )
-  expect(diagnostics.primitiveCount).toBeLessThanOrEqual(
-    FLOWING_CONTOURS_LIMITS['primitive-count'],
-  )
+  expectSafeDiagnostics(diagnostics, overrides)
 
   expect(diagnostics.acceptedCandidateCount).toBe(
     diagnostics.rawTrajectoryCount,
@@ -154,8 +301,6 @@ function expectSafeResult(
   expect(Object.isFrozen(result.scene)).toBe(true)
   expect(Object.isFrozen(result.scene.space)).toBe(true)
   expect(Object.isFrozen(result.scene.primitives)).toBe(true)
-  expect(Object.isFrozen(diagnostics)).toBe(true)
-  expect(Object.isFrozen(diagnostics.endpointReasonCounts)).toBe(true)
 
   for (const primitive of result.scene.primitives) {
     expect(Object.isFrozen(primitive)).toBe(true)
@@ -173,6 +318,160 @@ function expectSafeResult(
       expect(point[1]).toBeLessThanOrEqual(frame.height)
     }
   }
+}
+
+function fixedSpacingPoints(
+  points: readonly Readonly<Point>[],
+  closed: boolean,
+  spacing: number,
+): readonly Readonly<Point>[] {
+  if (points.length < 2) return Object.freeze([...points])
+  const source = [...points]
+  if (
+    closed &&
+    (source[0]![0] !== source.at(-1)![0] || source[0]![1] !== source.at(-1)![1])
+  ) {
+    source.push(source[0]!)
+  }
+  const cumulative = [0]
+  for (let index = 1; index < source.length; index += 1) {
+    cumulative.push(
+      cumulative[index - 1]! +
+        Math.hypot(
+          source[index]![0] - source[index - 1]![0],
+          source[index]![1] - source[index - 1]![1],
+        ),
+    )
+  }
+  const total = cumulative.at(-1)!
+  if (!(total > 0)) return Object.freeze([source[0]!])
+
+  const sampled: Readonly<Point>[] = []
+  let segment = 1
+  for (let distance = 0; distance < total; distance += spacing) {
+    while (segment < cumulative.length - 1 && cumulative[segment]! < distance) {
+      segment += 1
+    }
+    const startDistance = cumulative[segment - 1]!
+    const endDistance = cumulative[segment]!
+    const ratio =
+      endDistance > startDistance
+        ? (distance - startDistance) / (endDistance - startDistance)
+        : 0
+    const start = source[segment - 1]!
+    const end = source[segment]!
+    sampled.push(
+      Object.freeze([
+        start[0] + (end[0] - start[0]) * ratio,
+        start[1] + (end[1] - start[1]) * ratio,
+      ] as Point),
+    )
+  }
+  if (!closed) sampled.push(Object.freeze([...source.at(-1)!] as Point))
+  return Object.freeze(sampled)
+}
+
+function fixedSpacingFlowMetrics(
+  points: readonly Readonly<Point>[],
+  closed: boolean,
+  spacing: number,
+): Readonly<FixedSpacingFlowMetrics> {
+  const sampled = fixedSpacingPoints(points, closed, spacing)
+  const directions: Readonly<Point>[] = []
+  for (let index = 1; index < sampled.length; index += 1) {
+    const x = sampled[index]![0] - sampled[index - 1]![0]
+    const y = sampled[index]![1] - sampled[index - 1]![1]
+    const length = Math.hypot(x, y)
+    if (length > 1e-9) {
+      directions.push(Object.freeze([x / length, y / length] as Point))
+    }
+  }
+
+  let turnEnergy = 0
+  let maximumTurn = 0
+  let moderateTurnCount = 0
+  let abruptTurnCount = 0
+  let repeatedAbruptAlternationCount = 0
+  let maximumAxisToggleRun = 0
+  let axisToggleRun = 0
+  let previousAbruptSign = 0
+
+  for (let index = 1; index < directions.length; index += 1) {
+    const previous = directions[index - 1]!
+    const current = directions[index]!
+    const cross = previous[0] * current[1] - previous[1] * current[0]
+    const dot = previous[0] * current[0] + previous[1] * current[1]
+    const signedTurn = Math.atan2(cross, dot)
+    const turn = Math.abs(signedTurn)
+    turnEnergy += turn * turn
+    maximumTurn = Math.max(maximumTurn, turn)
+    if (turn > MODERATE_TURN) moderateTurnCount += 1
+    if (turn > ABRUPT_TURN) {
+      abruptTurnCount += 1
+      const sign = Math.sign(signedTurn)
+      if (previousAbruptSign !== 0 && sign !== previousAbruptSign) {
+        repeatedAbruptAlternationCount += 1
+      }
+      previousAbruptSign = sign
+    }
+
+    const previousAxis =
+      Math.abs(previous[0]) >= AXIS_ALIGNMENT_COSINE
+        ? 'horizontal'
+        : Math.abs(previous[1]) >= AXIS_ALIGNMENT_COSINE
+          ? 'vertical'
+          : null
+    const currentAxis =
+      Math.abs(current[0]) >= AXIS_ALIGNMENT_COSINE
+        ? 'horizontal'
+        : Math.abs(current[1]) >= AXIS_ALIGNMENT_COSINE
+          ? 'vertical'
+          : null
+    if (
+      previousAxis !== null &&
+      currentAxis !== null &&
+      previousAxis !== currentAxis &&
+      turn >= ORTHOGONAL_TURN_FLOOR
+    ) {
+      axisToggleRun += 1
+      maximumAxisToggleRun = Math.max(maximumAxisToggleRun, axisToggleRun)
+    } else if (previousAxis === null || currentAxis === null) {
+      axisToggleRun = 0
+    }
+  }
+
+  return Object.freeze({
+    turnCount: Math.max(0, directions.length - 1),
+    turnEnergy,
+    maximumTurn,
+    moderateTurnCount,
+    abruptTurnCount,
+    repeatedAbruptAlternationCount,
+    maximumAxisToggleRun,
+  })
+}
+
+function passesFlowingMetricGate(
+  points: readonly Readonly<Point>[],
+  closed: boolean,
+): boolean {
+  return METRIC_SPACINGS.every((spacing) => {
+    const metrics = fixedSpacingFlowMetrics(points, closed, spacing)
+    return (
+      Number.isFinite(metrics.turnEnergy) &&
+      Number.isFinite(metrics.maximumTurn) &&
+      metrics.maximumTurn <= MAXIMUM_FLOWING_TURN &&
+      metrics.moderateTurnCount <=
+        Math.max(2, Math.ceil(metrics.turnCount * 0.2)) &&
+      metrics.abruptTurnCount <=
+        Math.max(1, Math.ceil(metrics.turnCount * 0.08)) &&
+      metrics.turnEnergy <=
+        MAXIMUM_FLOWING_TURN ** 2 +
+          metrics.turnCount * ((20 * Math.PI) / 180) ** 2 &&
+      metrics.repeatedAbruptAlternationCount === 0 &&
+      metrics.maximumAxisToggleRun <= 1
+    )
+  })
 }
 
 function expectEmptyInvalid(
@@ -197,6 +496,59 @@ function expectWholeOutput(
     result.scene.primitives.length,
   )
   expect(result.diagnostics.primitiveCount).toBe(result.scene.primitives.length)
+}
+
+function expectLimitAttemptSemantics(
+  name: FlowingContoursLimitName,
+  diagnostics: Readonly<FlowingContoursDiagnostics>,
+): void {
+  switch (name) {
+    case 'analysis-dimension':
+    case 'analysis-sample-count':
+      expect(diagnostics.analysisSampleCount).toBe(0)
+      expect(diagnostics.eligibleAnchorCount).toBe(0)
+      expect(diagnostics.processedAnchorCount).toBe(0)
+      break
+    case 'scale-plane-count':
+      expect(diagnostics.analysisSampleCount).toBe(64 * 48)
+      expect(diagnostics.eligibleAnchorCount).toBe(0)
+      expect(diagnostics.processedAnchorCount).toBe(0)
+      break
+    case 'anchor-count':
+    case 'normal-search-sample-count':
+      expect(diagnostics.analysisSampleCount).toBe(64 * 48)
+      expect(diagnostics.processedAnchorCount).toBe(0)
+      expect(diagnostics.candidateCount).toBe(0)
+      break
+    case 'search-breadth':
+    case 'search-step-count':
+    case 'raw-trajectory-point-count':
+      expect(diagnostics.eligibleAnchorCount).toBeGreaterThan(0)
+      expect(diagnostics.processedAnchorCount).toBe(0)
+      expect(diagnostics.directionalTraceCount).toBe(0)
+      expect(diagnostics.candidateCount).toBe(0)
+      break
+    case 'candidate-count':
+    case 'primitive-count':
+      expect(diagnostics.eligibleAnchorCount).toBeGreaterThan(0)
+      expect(diagnostics.processedAnchorCount).toBe(1)
+      expect(diagnostics.directionalTraceCount).toBe(0)
+      expect(diagnostics.searchStepCount).toBe(0)
+      expect(diagnostics.candidateCount).toBe(0)
+      break
+    case 'accepted-curve-count':
+    case 'fitted-curve-point-count':
+      expect(diagnostics.processedAnchorCount).toBe(1)
+      expect(diagnostics.directionalTraceCount).toBe(2)
+      expect(diagnostics.searchStepCount).toBeGreaterThan(0)
+      expect(diagnostics.candidateCount).toBe(1)
+      expect(diagnostics.acceptedCandidateCount).toBe(0)
+      expect(diagnostics.rejectedCandidateCount).toBe(1)
+      break
+    case 'weak-span-step-count':
+    case 'weak-span-distance':
+      throw new Error('weak-span caps are non-terminating local policy')
+  }
 }
 
 describe('Flowing Contours adversarial input safety', () => {
@@ -487,7 +839,7 @@ describe('Flowing Contours bounded adversarial completion', () => {
     expect(['complete', 'limit-reached']).toContain(
       first.diagnostics.termination,
     )
-    expectSafeResult(first)
+    expectSafeResult(first, PRESSURE_LIMITS)
   })
 
   it('makes alpha-hole geometry invariant to every hidden-RGB variation', () => {
@@ -527,7 +879,7 @@ describe('Flowing Contours bounded adversarial completion', () => {
 
     expect(magenta).toEqual(black)
     expect(noise).toEqual(black)
-    expectSafeResult(black)
+    expectSafeResult(black, PRESSURE_LIMITS)
   })
 
   it.each([
@@ -590,6 +942,12 @@ describe('Flowing Contours bounded adversarial completion', () => {
       expect(lengths.every((length) => length + 1e-8 >= minimumLength)).toBe(
         true,
       )
+      for (const primitive of first.scene.primitives) {
+        expect(
+          passesFlowingMetricGate(primitive.points, primitive.closed),
+          `${_name} emitted grid-like turn metrics`,
+        ).toBe(true)
+      }
       if (expectLongGesture) {
         expect(lengths.length).toBeGreaterThan(0)
         expect(Math.max(...lengths)).toBeGreaterThan(
@@ -597,29 +955,103 @@ describe('Flowing Contours bounded adversarial completion', () => {
         )
       }
       expectWholeOutput(first)
-      expectSafeResult(first)
+      expectSafeResult(first, PRESSURE_LIMITS)
     },
     30_000,
   )
 
-  it('uses zero weak-travel policy without leaking across alpha holes', () => {
-    const source = raster(80, 52, (x, y) => {
-      const boundary = 38 + 5 * Math.sin(y / 7)
-      const hole = y >= 21 && y <= 29 && x >= 34 && x <= 45
-      if (hole) return [255, 0, 255, 0]
-      return x < boundary ? [18, 18, 18, 255] : [238, 238, 238, 255]
-    })
-    const result = generate(source, {
-      limits: {
-        'weak-span-step-count': 0,
-        'weak-span-distance': 0,
-      },
-    })
+  it('rejects a synthetic axis staircase that the multiscale gate can detect', () => {
+    const staircase = Object.freeze(
+      Array.from({ length: 13 }, (_value, index) =>
+        Object.freeze([
+          Math.ceil(index / 2) * 6,
+          Math.floor(index / 2) * 6,
+        ] as Point),
+      ),
+    )
 
-    expect(result.diagnostics.acceptedMaximumUnsupportedSpanLength).toBe(0)
-    expect(result.diagnostics.acceptedTotalUnsupportedSpanLength).toBe(0)
-    expectWholeOutput(result)
-    expectSafeResult(result)
+    const profiles = METRIC_SPACINGS.map((spacing) =>
+      fixedSpacingFlowMetrics(staircase, false, spacing),
+    )
+    for (const metrics of profiles) {
+      expect(metrics.turnEnergy).toBeGreaterThan(0)
+      expect(metrics.maximumTurn).toBeGreaterThan(ABRUPT_TURN)
+      expect(metrics.moderateTurnCount).toBeGreaterThan(2)
+      expect(metrics.abruptTurnCount).toBeGreaterThan(2)
+    }
+    expect(
+      profiles.some((metrics) => metrics.repeatedAbruptAlternationCount > 0),
+    ).toBe(true)
+    expect(profiles.some((metrics) => metrics.maximumAxisToggleRun > 1)).toBe(
+      true,
+    )
+    expect(passesFlowingMetricGate(staircase, false)).toBe(false)
+  })
+
+  it('proves weak-span step and distance caps on an opaque low-evidence gap', () => {
+    const field = opaqueLowEvidenceGapField()
+    const controls = Object.freeze({
+      ...CONTROLS,
+      continuity: 1,
+      minimumStrokeLength: 0.005,
+    })
+    const permissive = runFlowingContoursPipeline(field, controls)
+    const stepLimits = createFlowingContoursTestLimits({
+      'weak-span-step-count': 0,
+    })!
+    const distanceLimits = createFlowingContoursTestLimits({
+      'weak-span-distance': 0.5,
+    })!
+    const stepLimited = runFlowingContoursPipeline(field, controls, stepLimits)
+    const distanceLimited = runFlowingContoursPipeline(
+      field,
+      controls,
+      distanceLimits,
+    )
+    const permissiveGaps = permissive.acceptedTrajectories.flatMap(
+      (trajectory) =>
+        trajectory.spanSupport.filter((span) => span.kind === 'bounded-gap'),
+    )
+
+    expect(permissive.acceptedTrajectories.length).toBeGreaterThan(0)
+    expect(permissiveGaps.length).toBeGreaterThan(0)
+    expect(
+      permissiveGaps.every(
+        (gap) =>
+          gap.length > 0 &&
+          gap.entryEvidence > 0 &&
+          gap.exitEvidence > 0 &&
+          gap.directionalAlignment >= 0.75,
+      ),
+    ).toBe(true)
+    expect(Math.max(...permissiveGaps.map((gap) => gap.length))).toBe(
+      permissive.diagnostics.acceptedMaximumUnsupportedSpanLength,
+    )
+    expect(permissiveGaps.reduce((total, gap) => total + gap.length, 0)).toBe(
+      permissive.diagnostics.acceptedTotalUnsupportedSpanLength,
+    )
+
+    for (const [output, limits, cap] of [
+      [stepLimited, stepLimits, 0],
+      [distanceLimited, distanceLimits, 0.5],
+    ] as const) {
+      const gaps = output.acceptedTrajectories.flatMap((trajectory) =>
+        trajectory.spanSupport.filter((span) => span.kind === 'bounded-gap'),
+      )
+      expect(
+        output.diagnostics.acceptedMaximumUnsupportedSpanLength,
+      ).toBeLessThan(
+        permissive.diagnostics.acceptedMaximumUnsupportedSpanLength,
+      )
+      expect(
+        output.diagnostics.acceptedTotalUnsupportedSpanLength,
+      ).toBeLessThan(permissive.diagnostics.acceptedTotalUnsupportedSpanLength)
+      expect(gaps.every((gap) => gap.length <= cap)).toBe(true)
+      expect(output.fittedCurves).toHaveLength(
+        output.acceptedTrajectories.length,
+      )
+      expectSafeDiagnostics(output.diagnostics, limits)
+    }
   })
 })
 
@@ -648,18 +1080,20 @@ describe('Flowing Contours exact safety-limit accounting', () => {
       expect(result.diagnostics.limitedBy).toBe(
         limitedBy satisfies FlowingContoursLimitName,
       )
+      expectLimitAttemptSemantics(limitedBy, result.diagnostics)
       expectWholeOutput(result)
-      expectSafeResult(result)
+      expectSafeResult(result, limits)
     },
   )
 
   it('keeps the chronologically first limit when later caps are also zero', () => {
+    const limits = Object.freeze({
+      'search-step-count': 2,
+      'accepted-curve-count': 0,
+      'fitted-curve-point-count': 0,
+    })
     const result = generate(source, {
-      limits: {
-        'search-step-count': 2,
-        'accepted-curve-count': 0,
-        'fitted-curve-point-count': 0,
-      },
+      limits,
     })
 
     expect(result.diagnostics.termination).toBe('limit-reached')
@@ -667,7 +1101,7 @@ describe('Flowing Contours exact safety-limit accounting', () => {
     expect(result.diagnostics.searchStepCount).toBe(2)
     expect(result.scene.primitives).toEqual([])
     expectWholeOutput(result)
-    expectSafeResult(result)
+    expectSafeResult(result, limits)
   })
 
   it('does not turn a high-detail minimum-stroke rejection into a short-curve flood', () => {
@@ -710,6 +1144,6 @@ describe('Flowing Contours exact safety-limit accounting', () => {
         result.diagnostics.acceptedCandidateCount,
     )
     expectWholeOutput(result)
-    expectSafeResult(result)
+    expectSafeResult(result, limits)
   })
 })
