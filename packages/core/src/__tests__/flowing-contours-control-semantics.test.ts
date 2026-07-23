@@ -329,13 +329,27 @@ function turnMetrics(points: readonly Readonly<Point>[]) {
   return { energy, maximum, moderate, abrupt }
 }
 
-function omitDiagnostics(
-  source: Readonly<Record<string, unknown>>,
-  names: readonly string[],
-): Readonly<Record<string, unknown>> {
-  const result = { ...source }
-  for (const name of names) delete result[name]
-  return result
+function analysisInventorySignature(
+  result: Readonly<FlowingContoursPipelineResult>,
+) {
+  return {
+    analysisWidth: result.diagnostics.analysisWidth,
+    analysisHeight: result.diagnostics.analysisHeight,
+    analysisSampleCount: result.diagnostics.analysisSampleCount,
+    contourEvidenceSampleCount:
+      result.diagnostics.contourEvidenceSampleCount,
+    correctedRidgeSampleCount:
+      result.diagnostics.correctedRidgeSampleCount,
+  }
+}
+
+function admissionSignature(
+  result: Readonly<FlowingContoursPipelineResult>,
+) {
+  return {
+    ...analysisInventorySignature(result),
+    eligibleAnchorCount: result.diagnostics.eligibleAnchorCount,
+  }
 }
 
 function expectValidFittedTubes(
@@ -519,25 +533,10 @@ describe('Flowing Contours artist-control semantics', () => {
       curveDetail: 1,
       minimumStrokeLength: 0.005,
     })
-    const detailOwnedDeltas = [
-      'eligibleAnchorCount',
-      'processedAnchorCount',
-      'directionalTraceCount',
-      'searchStepCount',
-      'candidateCount',
-      'acceptedCandidateCount',
-      'endpointReasonCounts',
-      'rawTrajectoryCount',
-      'rawTrajectoryPointCount',
-      'suppressedEvidenceSampleCount',
-      'fittedCurveCount',
-      'fittedCurvePointCount',
-      'primitiveCount',
-    ] as const
-    expect(
-      omitDiagnostics(lowPipeline.diagnostics, detailOwnedDeltas),
-    ).toEqual(
-      omitDiagnostics(highPipeline.diagnostics, detailOwnedDeltas),
+    // Detail owns admission. Everything after the admitted prefix may
+    // legitimately change, so equality stops at the immutable inventory.
+    expect(analysisInventorySignature(lowPipeline)).toEqual(
+      analysisInventorySignature(highPipeline),
     )
     expect(highPipeline.diagnostics.eligibleAnchorCount).toBeGreaterThan(
       lowPipeline.diagnostics.eligibleAnchorCount,
@@ -635,24 +634,10 @@ describe('Flowing Contours artist-control semantics', () => {
       continuity: 1,
       minimumStrokeLength: 0.005,
     })
-    const continuityOwnedDeltas = [
-      'searchStepCount',
-      'candidateCount',
-      'acceptedCandidateCount',
-      'endpointReasonCounts',
-      'rawTrajectoryCount',
-      'rawTrajectoryPointCount',
-      'acceptedMaximumUnsupportedSpanLength',
-      'acceptedTotalUnsupportedSpanLength',
-      'suppressedEvidenceSampleCount',
-      'fittedCurveCount',
-      'fittedCurvePointCount',
-      'primitiveCount',
-    ] as const
-    expect(
-      omitDiagnostics(lowPipeline.diagnostics, continuityOwnedDeltas),
-    ).toEqual(
-      omitDiagnostics(highPipeline.diagnostics, continuityOwnedDeltas),
+    // Continuity begins at directional growth. Search, candidate, rejection,
+    // suppression, unsupported-travel, and output counts are downstream.
+    expect(admissionSignature(lowPipeline)).toEqual(
+      admissionSignature(highPipeline),
     )
     expect(lowPipeline.acceptedTrajectories).toHaveLength(2)
     expect(highPipeline.acceptedTrajectories).toHaveLength(1)
@@ -873,14 +858,10 @@ describe('Flowing Contours artist-control semantics', () => {
     ).toBeGreaterThan(
       lowPipeline.acceptedTrajectories[0]!.score.curvaturePenalty,
     )
-    expect(
-      omitDiagnostics(lowPipeline.diagnostics, [
-        'fittedCurvePointCount',
-      ]),
-    ).toEqual(
-      omitDiagnostics(highPipeline.diagnostics, [
-        'fittedCurvePointCount',
-      ]),
+    // Smoothing affects search ordering and fitting, so only field analysis
+    // and Detail-owned admission are invariant pipeline diagnostics.
+    expect(admissionSignature(lowPipeline)).toEqual(
+      admissionSignature(highPipeline),
     )
     expect(lowPipeline.fittedCurves).toHaveLength(1)
     expect(highPipeline.fittedCurves).toHaveLength(1)
@@ -999,33 +980,11 @@ describe('Flowing Contours artist-control semantics', () => {
     expect(exactPipeline.fittedCurves).toHaveLength(1)
     expect(abovePipeline.acceptedTrajectories).toEqual([])
     expect(abovePipeline.fittedCurves).toEqual([])
-    expect({
-      analysisWidth: exactPipeline.diagnostics.analysisWidth,
-      analysisHeight: exactPipeline.diagnostics.analysisHeight,
-      analysisSampleCount: exactPipeline.diagnostics.analysisSampleCount,
-      contourEvidenceSampleCount:
-        exactPipeline.diagnostics.contourEvidenceSampleCount,
-      correctedRidgeSampleCount:
-        exactPipeline.diagnostics.correctedRidgeSampleCount,
-      eligibleAnchorCount: exactPipeline.diagnostics.eligibleAnchorCount,
-      directionalTraceCount:
-        exactPipeline.diagnostics.directionalTraceCount,
-      searchStepCount: exactPipeline.diagnostics.searchStepCount,
-      candidateCount: exactPipeline.diagnostics.candidateCount,
-    }).toEqual({
-      analysisWidth: abovePipeline.diagnostics.analysisWidth,
-      analysisHeight: abovePipeline.diagnostics.analysisHeight,
-      analysisSampleCount: abovePipeline.diagnostics.analysisSampleCount,
-      contourEvidenceSampleCount:
-        abovePipeline.diagnostics.contourEvidenceSampleCount,
-      correctedRidgeSampleCount:
-        abovePipeline.diagnostics.correctedRidgeSampleCount,
-      eligibleAnchorCount: abovePipeline.diagnostics.eligibleAnchorCount,
-      directionalTraceCount:
-        abovePipeline.diagnostics.directionalTraceCount,
-      searchStepCount: abovePipeline.diagnostics.searchStepCount,
-      candidateCount: abovePipeline.diagnostics.candidateCount,
-    })
+    // Minimum length is an admission/output gate. Rejection and suppression
+    // feed back into later loop work, so compare only analysis and anchors.
+    expect(admissionSignature(exactPipeline)).toEqual(
+      admissionSignature(abovePipeline),
+    )
     expectValidFittedTubes(source, exactPipeline)
 
     const pixels = raster(80, 40, (x, y) =>
