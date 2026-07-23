@@ -72,6 +72,14 @@ interface GradientPlane {
   readonly y: readonly number[]
 }
 
+interface SampledOrientation {
+  readonly tangent: Readonly<Point>
+  /** Resultant length of the locally weighted doubled-angle axes. */
+  readonly concentration: number
+  readonly coherence: number
+  readonly ambiguity: number
+}
+
 function clampUnit(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0
   if (value >= 1) return 1
@@ -508,11 +516,108 @@ function supportValue(
   )
 }
 
+function sampledOrientation(
+  field: Readonly<FlowingContoursField>,
+  point: Readonly<Point>,
+): SampledOrientation | null {
+  const evidenceMass = bilinearFieldValue(
+    field.contourEvidence,
+    field.width,
+    field.height,
+    point,
+  )
+  const orientationMass = bilinearDerivedValue(
+    field.width,
+    field.height,
+    point,
+    (index) => field.contourEvidence[index]! * field.tangentCoherence[index]!,
+  )
+  const cosine = bilinearDerivedValue(
+    field.width,
+    field.height,
+    point,
+    (index) => {
+      const tangentX = field.tangentX[index]!
+      const tangentY = field.tangentY[index]!
+      const confidence =
+        field.contourEvidence[index]! * field.tangentCoherence[index]!
+      return confidence * (tangentX * tangentX - tangentY * tangentY)
+    },
+  )
+  const sine = bilinearDerivedValue(
+    field.width,
+    field.height,
+    point,
+    (index) => {
+      const confidence =
+        field.contourEvidence[index]! * field.tangentCoherence[index]!
+      return confidence * 2 * field.tangentX[index]! * field.tangentY[index]!
+    },
+  )
+  const ambiguityMass = bilinearDerivedValue(
+    field.width,
+    field.height,
+    point,
+    (index) => field.contourEvidence[index]! * field.ambiguity[index]!,
+  )
+  if (
+    evidenceMass === null ||
+    orientationMass === null ||
+    cosine === null ||
+    sine === null ||
+    ambiguityMass === null
+  ) {
+    return null
+  }
+
+  const resultant = Math.hypot(cosine, sine)
+  const concentration =
+    orientationMass > ORIENTATION_EPSILON
+      ? clampUnit(resultant / orientationMass)
+      : 0
+  const localCoherence =
+    evidenceMass > EVIDENCE_EPSILON
+      ? clampUnit(orientationMass / evidenceMass)
+      : 0
+  const coherence = clampUnit(localCoherence * concentration)
+  const localAmbiguity =
+    evidenceMass > EVIDENCE_EPSILON
+      ? clampUnit(ambiguityMass / evidenceMass)
+      : 1
+  const ambiguity = clampUnit(Math.max(localAmbiguity, 1 - coherence))
+
+  if (
+    orientationMass <= ORIENTATION_EPSILON ||
+    resultant <= ORIENTATION_EPSILON
+  ) {
+    return {
+      // A zero vector carries no accidental axis confidence. Callers must use
+      // coherence/ambiguity to decide whether a sampled tangent is usable.
+      tangent: Object.freeze([0, 0] as Point),
+      concentration: 0,
+      coherence: 0,
+      ambiguity: 1,
+    }
+  }
+
+  const angle = 0.5 * Math.atan2(sine, cosine)
+  return {
+    tangent: Object.freeze(
+      canonicalTangent(Math.cos(angle), Math.sin(angle)).slice() as Point,
+    ),
+    concentration,
+    coherence,
+    ambiguity,
+  }
+}
+
 /**
- * Bilinearly sample an undirected tangent without signed-vector cancellation.
+ * Sample an evidence-weighted undirected tangent without sign cancellation.
  *
- * Interpolation occurs in doubled-angle space, where `t` and `-t` are the
- * same value, then returns one canonical unit-vector representative.
+ * Interpolation occurs in confidence-weighted doubled-angle space, where `t`
+ * and `-t` are the same value. An unresolved or evidence-free neighborhood
+ * returns the finite zero vector rather than inventing a horizontal axis;
+ * consumers needing confidence should use `sampleFlowingContoursField`.
  */
 export function sampleFlowingContoursTangent(
   field: Readonly<FlowingContoursField>,
@@ -520,30 +625,7 @@ export function sampleFlowingContoursTangent(
 ): Readonly<Point> | null {
   try {
     if (!hasSampleShape(field)) return null
-    const sampledCosine = bilinearDerivedValue(
-      field.width,
-      field.height,
-      point,
-      (index) => {
-        const x = field.tangentX[index]!
-        const y = field.tangentY[index]!
-        return x * x - y * y
-      },
-    )
-    const sampledSine = bilinearDerivedValue(
-      field.width,
-      field.height,
-      point,
-      (index) => 2 * field.tangentX[index]! * field.tangentY[index]!,
-    )
-    if (sampledCosine === null || sampledSine === null) return null
-    if (Math.hypot(sampledCosine, sampledSine) <= ORIENTATION_EPSILON) {
-      return Object.freeze([1, 0] as Point)
-    }
-    const angle = 0.5 * Math.atan2(sampledSine, sampledCosine)
-    return Object.freeze(
-      canonicalTangent(Math.cos(angle), Math.sin(angle)).slice() as Point,
-    )
+    return sampledOrientation(field, point)?.tangent ?? null
   } catch {
     return null
   }
@@ -577,41 +659,23 @@ export function sampleFlowingContoursField(
       field.height,
       point,
     )
-    const coherence = bilinearFieldValue(
-      field.tangentCoherence,
-      field.width,
-      field.height,
-      point,
-    )
-    const sampledAmbiguity = bilinearFieldValue(
-      field.ambiguity,
-      field.width,
-      field.height,
-      point,
-    )
     const scale = bilinearFieldValue(
       field.ridgeScale,
       field.width,
       field.height,
       point,
     )
-    const tangent = sampleFlowingContoursTangent(field, point)
-    if (
-      evidence === null ||
-      coherence === null ||
-      sampledAmbiguity === null ||
-      scale === null ||
-      tangent === null
-    ) {
+    const orientation = sampledOrientation(field, point)
+    if (evidence === null || scale === null || orientation === null) {
       return null
     }
     const sampledPoint = Object.freeze([point[0], point[1]] as Point)
     return Object.freeze({
       point: sampledPoint,
-      tangent,
+      tangent: orientation.tangent,
       evidence: clampUnit(evidence),
-      coherence: clampUnit(coherence),
-      ambiguity: clampUnit(sampledAmbiguity),
+      coherence: orientation.coherence,
+      ambiguity: orientation.ambiguity,
       scale: Math.max(0, scale),
       alpha: clampUnit(alpha),
     })

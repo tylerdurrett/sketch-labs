@@ -63,6 +63,31 @@ function axisAlignment(
   )
 }
 
+function orientationPair(overrides: {
+  readonly evidence: readonly [number, number]
+  readonly tangentX: readonly [number, number]
+  readonly tangentY: readonly [number, number]
+  readonly coherence?: readonly [number, number]
+  readonly ambiguity?: readonly [number, number]
+  readonly scale?: readonly [number, number]
+}): FlowingContoursField {
+  return Object.freeze({
+    sourceWidth: 2,
+    sourceHeight: 1,
+    width: 2,
+    height: 1,
+    luminance: Object.freeze([0.5, 0.5]),
+    alpha: Object.freeze([1, 1]),
+    positiveSupport: Object.freeze([true, true]),
+    contourEvidence: Object.freeze(Array.from(overrides.evidence)),
+    tangentX: Object.freeze(Array.from(overrides.tangentX)),
+    tangentY: Object.freeze(Array.from(overrides.tangentY)),
+    tangentCoherence: Object.freeze(Array.from(overrides.coherence ?? [1, 1])),
+    ambiguity: Object.freeze(Array.from(overrides.ambiguity ?? [0, 0])),
+    ridgeScale: Object.freeze(Array.from(overrides.scale ?? [1, 1])),
+  })
+}
+
 describe('Flowing Contours multiscale field', () => {
   it('keeps flat opaque and fully transparent inputs evidence-free', () => {
     const opaque = build(preparedRaster(25, 21, () => 0.42))
@@ -236,8 +261,8 @@ describe('Flowing Contours multiscale field', () => {
       [0.25, 0.5, 0.75],
     )
     expect(half).toMatchObject({
-      coherence: 0.9,
-      ambiguity: 0.1,
+      coherence: 1,
+      ambiguity: 0,
       scale: 1.5,
       alpha: 1,
     })
@@ -245,6 +270,60 @@ describe('Flowing Contours multiscale field', () => {
     expect(Math.abs(tangent![1])).toBeCloseTo(Math.SQRT1_2, 12)
     expect(Math.hypot(tangent![0], tangent![1])).toBeCloseTo(1, 12)
     expect(sampleFlowingContoursField(manual, [-0.01, 0])).toBeNull()
+  })
+
+  it('makes an orthogonal coherent midpoint explicitly unresolved', () => {
+    const orthogonal = orientationPair({
+      evidence: [1, 1],
+      tangentX: [1, 0],
+      tangentY: [0, 1],
+    })
+
+    const sample = sampleFlowingContoursField(orthogonal, [0.5, 0])
+
+    expect(sample).not.toBeNull()
+    expect(sample!.tangent).toEqual([0, 0])
+    expect(sample!.coherence).toBe(0)
+    expect(sample!.ambiguity).toBe(1)
+    expect(sampleFlowingContoursTangent(orthogonal, [0.5, 0])).toEqual([0, 0])
+  })
+
+  it('does not let a zero-evidence default axis bleed into a neighbor', () => {
+    const supportedDiagonal = orientationPair({
+      evidence: [1, 0],
+      tangentX: [Math.SQRT1_2, 1],
+      tangentY: [Math.SQRT1_2, 0],
+      coherence: [1, 0],
+      ambiguity: [0, 0],
+      scale: [2, 0],
+    })
+
+    const sample = sampleFlowingContoursField(supportedDiagonal, [0.5, 0])
+
+    expect(sample).not.toBeNull()
+    expect(sample!.evidence).toBe(0.5)
+    expect(Math.abs(sample!.tangent[0])).toBeCloseTo(Math.SQRT1_2, 12)
+    expect(Math.abs(sample!.tangent[1])).toBeCloseTo(Math.SQRT1_2, 12)
+    expect(sample!.coherence).toBe(1)
+    expect(sample!.ambiguity).toBe(0)
+  })
+
+  it('favors stronger evidence at a dominant-scale orientation transition', () => {
+    const scaleTransition = orientationPair({
+      evidence: [0.9, 0.3],
+      tangentX: [0, 1],
+      tangentY: [1, 0],
+      scale: [1, 8],
+    })
+
+    const sample = sampleFlowingContoursField(scaleTransition, [0.5, 0])
+
+    expect(sample).not.toBeNull()
+    expect(Math.abs(sample!.tangent[0])).toBeCloseTo(0, 12)
+    expect(Math.abs(sample!.tangent[1])).toBeCloseTo(1, 12)
+    expect(sample!.coherence).toBeCloseTo(0.5, 12)
+    expect(sample!.ambiguity).toBeCloseTo(0.5, 12)
+    expect(sample!.scale).toBe(4.5)
   })
 
   it('returns null when continuous sampling reaches zero-alpha permission', () => {
