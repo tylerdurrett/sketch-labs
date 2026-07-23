@@ -32,6 +32,7 @@ const PENCIL_PLANES = Object.freeze([
   'alpha',
   'positiveSupport',
 ])
+const LOWERCASE_COMMIT_SHA = /^[0-9a-f]{40}$/
 const REFERENCE_IDENTITIES = Object.freeze({
   flower: Object.freeze({
     source: Object.freeze({
@@ -47,7 +48,6 @@ const REFERENCE_IDENTITIES = Object.freeze({
       height: 256,
       sampleCount: 49_152,
     }),
-    watercolorBaseline: 'd4c3c05c0ea0574e0f17677f7db471c34942ae24',
     pencilBaseline: '85b4d854d29ec2ac27bf1b8016bc263fec3ccd43',
   }),
   pinecone: Object.freeze({
@@ -64,7 +64,6 @@ const REFERENCE_IDENTITIES = Object.freeze({
       height: 256,
       sampleCount: 43_776,
     }),
-    watercolorBaseline: 'd4c3c05c0ea0574e0f17677f7db471c34942ae24',
     pencilBaseline: 'd4c3c05c0ea0574e0f17677f7db471c34942ae24',
   }),
 })
@@ -342,6 +341,18 @@ describe('Watercolor Forms shared reference metric definitions', () => {
 describe('Watercolor Forms flower and pinecone reference fixtures', () => {
   const references = (['flower', 'pinecone'] as const).map(loadReference)
 
+  it('records one valid shared Watercolor preparation lineage', () => {
+    const first = references[0]!.watercolor
+    expect(first.preparedFromCommit).toMatch(LOWERCASE_COMMIT_SHA)
+    expect(first.preparationVersion).toBe(
+      'watercolor-forms-prepared-raster-v1',
+    )
+    for (const { watercolor } of references.slice(1)) {
+      expect(watercolor.preparedFromCommit).toBe(first.preparedFromCommit)
+      expect(watercolor.preparationVersion).toBe(first.preparationVersion)
+    }
+  })
+
   it.each(references)(
     '$name pins matching source, frame, analysis, encoding, and finite planes',
     ({ name, watercolor, watercolorRaster, pencil, pencilRaster }) => {
@@ -349,7 +360,6 @@ describe('Watercolor Forms flower and pinecone reference fixtures', () => {
       expect(watercolor).toMatchObject({
         formatVersion: 1,
         fixtureStatus: 'provisional',
-        preparedFromCommit: identity.watercolorBaseline,
         preparationVersion: 'watercolor-forms-prepared-raster-v1',
         source: identity.source,
         frame: { width: 1000, height: 1000 },
