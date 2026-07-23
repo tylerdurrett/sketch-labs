@@ -1,0 +1,479 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "watercolor-forms-pencil-comparison",
+  "status": "generated-comparison-evidence-awaiting-independent-review",
+  "provenance": {
+    "tuningCommit": "d904e4eb4a1c89deafba50e3b840db15c6938ae6",
+    "fixtureCommit": "abe44d81178aacd427f1b3c1b3986e8eb56509b3",
+    "watercolorProduction": {
+      "algorithm": "sha256(path + NUL + bytes + NUL), paths sorted",
+      "paths": [
+        "packages/core/src/sketches/watercolor-forms/analysis.ts",
+        "packages/core/src/sketches/watercolor-forms/boundaries.ts",
+        "packages/core/src/sketches/watercolor-forms/controls.ts",
+        "packages/core/src/sketches/watercolor-forms/curves.ts",
+        "packages/core/src/sketches/watercolor-forms/forms.ts",
+        "packages/core/src/sketches/watercolor-forms/generator.ts",
+        "packages/core/src/sketches/watercolor-forms/hierarchy.ts",
+        "packages/core/src/sketches/watercolor-forms/index.ts",
+        "packages/core/src/sketches/watercolor-forms/limits.ts",
+        "packages/core/src/sketches/watercolor-forms/partition.ts",
+        "packages/core/src/sketches/watercolor-forms/tracing.ts",
+        "packages/core/src/sketches/watercolor-forms/types.ts"
+      ],
+      "sha256": "f5939e9e2d74d07e36b8108f57e1b3d5a742e06dc489d6f9f5da2ffaa77a5ae1"
+    },
+    "pencilProduction": {
+      "revision": "b6147366448d37021e20d48326045a6cba3039ca",
+      "algorithm": "sha256(path + NUL + bytes + NUL), paths sorted",
+      "paths": [
+        "packages/core/src/sketches/pencil-contour/analysis.ts",
+        "packages/core/src/sketches/pencil-contour/cleanup.ts",
+        "packages/core/src/sketches/pencil-contour/controls.ts",
+        "packages/core/src/sketches/pencil-contour/curve-refinement.ts",
+        "packages/core/src/sketches/pencil-contour/edges.ts",
+        "packages/core/src/sketches/pencil-contour/fragment-pruning.ts",
+        "packages/core/src/sketches/pencil-contour/generator.ts",
+        "packages/core/src/sketches/pencil-contour/index.ts",
+        "packages/core/src/sketches/pencil-contour/topology.ts",
+        "packages/core/src/sketches/pencil-contour/tracing.ts",
+        "packages/core/src/sketches/pencil-contour/types.ts"
+      ],
+      "sha256": "136cb6800aef6c31bcc7a8422568cb61dc9db7c235986fa60bed85c7a103e5f5"
+    },
+    "fixtures": {
+      "paths": [
+        "packages/core/src/__tests__/fixtures/pencil-contour/flower-analysis.f64le",
+        "packages/core/src/__tests__/fixtures/pencil-contour/flower-analysis.json",
+        "packages/core/src/__tests__/fixtures/pencil-contour/pinecone-analysis.f64le",
+        "packages/core/src/__tests__/fixtures/pencil-contour/pinecone-analysis.json",
+        "packages/core/src/__tests__/fixtures/watercolor-forms/flower-prepared.f64le",
+        "packages/core/src/__tests__/fixtures/watercolor-forms/flower-prepared.json",
+        "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.f64le",
+        "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.json"
+      ],
+      "sha256": "32120a296b0baeb3a93b5515b22438508b143cd6953b3fff6b6b327f1d1330e3"
+    }
+  },
+  "pencilComparison": {
+    "revision": "b6147366448d37021e20d48326045a6cba3039ca",
+    "settings": {
+      "gamma": 0.5,
+      "contrast": 0.5,
+      "pivot": 0.5,
+      "contourDetail": 0.5,
+      "contourSmoothing": 1
+    }
+  },
+  "metricDefinitions": {
+    "lengthNormalization": "fitted-image-diagonal",
+    "shortPathMaximumNormalizedLength": 0.01,
+    "longPathMinimumNormalizedLength": 0.05
+  },
+  "safetyCaps": {
+    "analysisMaxDimension": 256,
+    "maxSampleCount": 65536,
+    "maxInitialRegionCount": 65536,
+    "maxGridAdjacencyCount": 130560,
+    "maxMergeCount": 65535,
+    "maxMergeQueueEntryCount": 1044480,
+    "maxRegionUpdateCount": 1044480,
+    "maxRetainedBoundarySegmentCount": 130560,
+    "maxBoundaryPathCount": 130560,
+    "maxCurvePointCount": 261120,
+    "maxPrimitiveCount": 130560
+  },
+  "cases": {
+    "flower": {
+      "source": {
+        "assetId": "img-0672-79d639daec62",
+        "repositoryPath": "assets/image-assets/img-0672-79d639daec62.png",
+        "sha256": "79d639daec62a2af4a59954b9d102e51ff30d11cd14246fffc52a53250858a7d",
+        "decodedWidth": 1536,
+        "decodedHeight": 2048
+      },
+      "fixtures": {
+        "watercolor": {
+          "file": "packages/core/src/__tests__/fixtures/watercolor-forms/flower-prepared.f64le",
+          "metadataFile": "packages/core/src/__tests__/fixtures/watercolor-forms/flower-prepared.json",
+          "fixtureSha256": "96566d85d6f3deb1775359a1cf5d702f00b32e83e34ede933090af9f74c35b29",
+          "metadataSha256": "febe80a7b9d23f66f9cbf1c1f7747a75aaf88f7fbb63aa54a1bd6721f12d5ccf",
+          "preparedFromCommit": "d904e4eb4a1c89deafba50e3b840db15c6938ae6",
+          "preparationVersion": "watercolor-forms-prepared-raster-v1",
+          "analysis": {
+            "width": 192,
+            "height": 256,
+            "sampleCount": 49152
+          },
+          "source": {
+            "assetId": "img-0672-79d639daec62",
+            "repositoryPath": "assets/image-assets/img-0672-79d639daec62.png",
+            "sha256": "79d639daec62a2af4a59954b9d102e51ff30d11cd14246fffc52a53250858a7d",
+            "decodedWidth": 1536,
+            "decodedHeight": 2048
+          },
+          "controls": {
+            "formDetail": 0.5,
+            "colorSensitivity": 0.5,
+            "boundaryStrength": 0.5,
+            "boundarySmoothing": 0.5
+          }
+        },
+        "pencil": {
+          "file": "packages/core/src/__tests__/fixtures/pencil-contour/flower-analysis.f64le",
+          "metadataFile": "packages/core/src/__tests__/fixtures/pencil-contour/flower-analysis.json",
+          "fixtureSha256": "4f5b3585da7214c2ac1ab848f094e0c155f1dbed96430128a4a1cc0a6a7c13b5",
+          "metadataSha256": "7da9a8b51935d948ae3007f3cedf0ea1ab2edb1fdafdcbfd0899766bd073a087",
+          "preparedFromCommit": "85b4d854d29ec2ac27bf1b8016bc263fec3ccd43",
+          "preparationVersion": "pencil-contour-v2",
+          "analysis": {
+            "width": 192,
+            "height": 256,
+            "sampleCount": 49152
+          },
+          "source": {
+            "assetId": "img-0672-79d639daec62",
+            "repositoryPath": "assets/image-assets/img-0672-79d639daec62.png",
+            "sha256": "79d639daec62a2af4a59954b9d102e51ff30d11cd14246fffc52a53250858a7d",
+            "decodedWidth": 1536,
+            "decodedHeight": 2048
+          },
+          "controls": {
+            "gamma": 0.5,
+            "contrast": 0.5,
+            "pivot": 0.5,
+            "contourDetail": 0.5,
+            "contourSmoothing": 1
+          }
+        }
+      },
+      "frame": {
+        "width": 1000,
+        "height": 1000
+      },
+      "controls": {
+        "watercolor": {
+          "formDetail": 0.5,
+          "colorSensitivity": 0.5,
+          "boundaryStrength": 0.5,
+          "boundarySmoothing": 0.5
+        },
+        "pencil": {
+          "gamma": 0.5,
+          "contrast": 0.5,
+          "pivot": 0.5,
+          "contourDetail": 0.5,
+          "contourSmoothing": 1
+        }
+      },
+      "metrics": {
+        "watercolor": {
+          "definitions": {
+            "lengthNormalization": "fitted-image-diagonal",
+            "fittedImageDiagonal": 1250,
+            "shortPathMaximumNormalizedLength": 0.01,
+            "longPathMinimumNormalizedLength": 0.05
+          },
+          "pathCount": 22,
+          "shortPathShare": 0.045454545454545456,
+          "medianNormalizedPathLength": 0.12409409574976824,
+          "longPathShareOfTotalGeometry": 0.987100821987869,
+          "closedFormCount": 10,
+          "totalPlottedLength": 9164.34512513034
+        },
+        "pencil": {
+          "definitions": {
+            "lengthNormalization": "fitted-image-diagonal",
+            "fittedImageDiagonal": 1250,
+            "shortPathMaximumNormalizedLength": 0.01,
+            "longPathMinimumNormalizedLength": 0.05
+          },
+          "pathCount": 1327,
+          "shortPathShare": 0.6895252449133383,
+          "medianNormalizedPathLength": 0.0069085260523610754,
+          "longPathShareOfTotalGeometry": 0.06562188625245037,
+          "closedFormCount": 0,
+          "totalPlottedLength": 16289.761382705694
+        }
+      },
+      "geometry": {
+        "watercolor": {
+          "sha256": "02836cb211f819baa322dd389b3605d8038af6b9d76d11df8fd355ae8b03ff6b",
+          "primitiveCount": 22,
+          "pointCount": 2358
+        },
+        "pencil": {
+          "sha256": "d50eff09aa829042df2b1aa5bc7e9bb2df35d27bbad67e3acbb176a024f71bec",
+          "primitiveCount": 1327,
+          "pointCount": 12095
+        }
+      },
+      "watercolorCoverage": {
+        "occupiedBins": [
+          "0,0",
+          "0,2",
+          "0,3",
+          "1,0",
+          "1,1",
+          "1,2",
+          "1,3",
+          "2,0",
+          "2,1",
+          "2,2",
+          "3,0",
+          "3,1",
+          "3,2",
+          "3,3"
+        ],
+        "occupiedBinCount": 14,
+        "centralBinCount": 4,
+        "occupiedColumnCount": 4,
+        "occupiedRowCount": 4
+      },
+      "watercolorDiagnostics": {
+        "termination": "complete",
+        "limitedBy": null,
+        "analysisWidth": 192,
+        "analysisHeight": 256,
+        "sampleCount": 49152,
+        "initialRegionCount": 4368,
+        "gridAdjacencyCount": 97856,
+        "mergeCount": 4367,
+        "mergeQueueEntryCount": 365786,
+        "regionUpdateCount": 355433,
+        "selectedRegionCount": 30,
+        "retainedBoundarySegmentCount": 2916,
+        "boundaryPathCount": 22,
+        "curvePointCount": 2358,
+        "primitiveCount": 22
+      },
+      "cropRects": {
+        "fullFrame": {
+          "x": 0,
+          "y": 0,
+          "width": 1000,
+          "height": 1000
+        },
+        "denseDetail": {
+          "x": 250,
+          "y": 40,
+          "width": 500,
+          "height": 500
+        }
+      },
+      "artifacts": {
+        "fullFrame": {
+          "file": "flower-full-frame-comparison.png",
+          "width": 2160,
+          "height": 1120,
+          "bytes": 225886,
+          "sha256": "17f8c0299e58fe160a8d1ec1a26a8e76ef3fd660b8fd56e289dbfcdb1be57690"
+        },
+        "denseDetail": {
+          "file": "flower-dense-detail-comparison.png",
+          "width": 2160,
+          "height": 1120,
+          "bytes": 214785,
+          "sha256": "5ca4d9d6101656b8c0cf8c98348d0fd27e0d2010699c3335b83bfa1307963eba"
+        }
+      }
+    },
+    "pinecone": {
+      "source": {
+        "assetId": "pinecone-4330aa0314f7",
+        "repositoryPath": "assets/image-assets/pinecone-4330aa0314f7.png",
+        "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79",
+        "decodedWidth": 512,
+        "decodedHeight": 768
+      },
+      "fixtures": {
+        "watercolor": {
+          "file": "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.f64le",
+          "metadataFile": "packages/core/src/__tests__/fixtures/watercolor-forms/pinecone-prepared.json",
+          "fixtureSha256": "fc5dfd6b9e2b08b7a974aa6355d65a3ed95ef3e180e5224a10d228707b7b5619",
+          "metadataSha256": "149513dc6e82abe2702a8978ec416dc7affd756e89216e9c40b0d07b997239cc",
+          "preparedFromCommit": "d904e4eb4a1c89deafba50e3b840db15c6938ae6",
+          "preparationVersion": "watercolor-forms-prepared-raster-v1",
+          "analysis": {
+            "width": 171,
+            "height": 256,
+            "sampleCount": 43776
+          },
+          "source": {
+            "assetId": "pinecone-4330aa0314f7",
+            "repositoryPath": "assets/image-assets/pinecone-4330aa0314f7.png",
+            "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79",
+            "decodedWidth": 512,
+            "decodedHeight": 768
+          },
+          "controls": {
+            "formDetail": 0.5,
+            "colorSensitivity": 0.5,
+            "boundaryStrength": 0.5,
+            "boundarySmoothing": 0.5
+          }
+        },
+        "pencil": {
+          "file": "packages/core/src/__tests__/fixtures/pencil-contour/pinecone-analysis.f64le",
+          "metadataFile": "packages/core/src/__tests__/fixtures/pencil-contour/pinecone-analysis.json",
+          "fixtureSha256": "6fce17db851aebe835316e6c898f035070a0ebcd3e8dcc12a000c163b0eab004",
+          "metadataSha256": "f5b8f502a7c352e1eea1fc81973354a512ba2a830153589e4a8127395d4cc716",
+          "preparedFromCommit": "d4c3c05c0ea0574e0f17677f7db471c34942ae24",
+          "preparationVersion": "pencil-contour-analyzed-raster-v1",
+          "analysis": {
+            "width": 171,
+            "height": 256,
+            "sampleCount": 43776
+          },
+          "source": {
+            "assetId": "pinecone-4330aa0314f7",
+            "repositoryPath": "assets/image-assets/pinecone-4330aa0314f7.png",
+            "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79",
+            "decodedWidth": 512,
+            "decodedHeight": 768
+          },
+          "controls": {
+            "gamma": 0.5,
+            "contrast": 0.5,
+            "pivot": 0.5,
+            "contourDetail": 0.5,
+            "contourSmoothing": 1
+          }
+        }
+      },
+      "frame": {
+        "width": 1000,
+        "height": 1000
+      },
+      "controls": {
+        "watercolor": {
+          "formDetail": 0.5,
+          "colorSensitivity": 0.5,
+          "boundaryStrength": 0.5,
+          "boundarySmoothing": 0.5
+        },
+        "pencil": {
+          "gamma": 0.5,
+          "contrast": 0.5,
+          "pivot": 0.5,
+          "contourDetail": 0.5,
+          "contourSmoothing": 1
+        }
+      },
+      "metrics": {
+        "watercolor": {
+          "definitions": {
+            "lengthNormalization": "fitted-image-diagonal",
+            "fittedImageDiagonal": 1201.850425154663,
+            "shortPathMaximumNormalizedLength": 0.01,
+            "longPathMinimumNormalizedLength": 0.05
+          },
+          "pathCount": 33,
+          "shortPathShare": 0,
+          "medianNormalizedPathLength": 0.097006360841654,
+          "longPathShareOfTotalGeometry": 0.9528625029223684,
+          "closedFormCount": 9,
+          "totalPlottedLength": 5627.557103834549
+        },
+        "pencil": {
+          "definitions": {
+            "lengthNormalization": "fitted-image-diagonal",
+            "fittedImageDiagonal": 1201.850425154663,
+            "shortPathMaximumNormalizedLength": 0.01,
+            "longPathMinimumNormalizedLength": 0.05
+          },
+          "pathCount": 647,
+          "shortPathShare": 0.7635239567233385,
+          "medianNormalizedPathLength": 0.006560128825432782,
+          "longPathShareOfTotalGeometry": 0.2674611114308508,
+          "closedFormCount": 1,
+          "totalPlottedLength": 8577.345466355253
+        }
+      },
+      "geometry": {
+        "watercolor": {
+          "sha256": "61ae5270421997b81cef6156940bcbffe40f06a008a64e33a6f5dddc1efe2594",
+          "primitiveCount": 33,
+          "pointCount": 1380
+        },
+        "pencil": {
+          "sha256": "8f23638a1a24f600590d360b4ebca3d710a59ad45d3bd7a5334434a2e33a42cb",
+          "primitiveCount": 647,
+          "pointCount": 6988
+        }
+      },
+      "watercolorCoverage": {
+        "occupiedBins": [
+          "0,1",
+          "0,2",
+          "1,0",
+          "1,1",
+          "1,2",
+          "1,3",
+          "2,0",
+          "2,1",
+          "2,2",
+          "2,3",
+          "3,1",
+          "3,2"
+        ],
+        "occupiedBinCount": 12,
+        "centralBinCount": 4,
+        "occupiedColumnCount": 4,
+        "occupiedRowCount": 4
+      },
+      "watercolorDiagnostics": {
+        "termination": "complete",
+        "limitedBy": null,
+        "analysisWidth": 171,
+        "analysisHeight": 256,
+        "sampleCount": 43776,
+        "initialRegionCount": 2294,
+        "gridAdjacencyCount": 87125,
+        "mergeCount": 2293,
+        "mergeQueueEntryCount": 83215,
+        "regionUpdateCount": 78101,
+        "selectedRegionCount": 20,
+        "retainedBoundarySegmentCount": 1711,
+        "boundaryPathCount": 33,
+        "curvePointCount": 1380,
+        "primitiveCount": 33
+      },
+      "cropRects": {
+        "fullFrame": {
+          "x": 0,
+          "y": 0,
+          "width": 1000,
+          "height": 1000
+        },
+        "denseDetail": {
+          "x": 200,
+          "y": 180,
+          "width": 600,
+          "height": 600
+        }
+      },
+      "artifacts": {
+        "fullFrame": {
+          "file": "pinecone-full-frame-comparison.png",
+          "width": 2160,
+          "height": 1120,
+          "bytes": 163146,
+          "sha256": "2e1cbf3bd145f4d1b74c57fb0f253d4b9d0df0134b247cdad6ca382822359524"
+        },
+        "denseDetail": {
+          "file": "pinecone-dense-detail-comparison.png",
+          "width": 2160,
+          "height": 1120,
+          "bytes": 221667,
+          "sha256": "d157d9d7ae125eacf1e36eed97911b397d32927cf1e526b7ace14116d021fa39"
+        }
+      }
+    }
+  },
+  "review": {
+    "verdict": "NOT-RECORDED",
+    "generatedAttestation": false,
+    "note": "Generated evidence is not an independent visual-review verdict."
+  }
+}
