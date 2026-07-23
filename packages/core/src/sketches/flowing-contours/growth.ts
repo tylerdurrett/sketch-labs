@@ -699,17 +699,97 @@ function stopped(
   }
 }
 
-function stateKey(state: Readonly<SearchState>): string {
-  const sample = state.currentTail.sample
-  return [
-    sample.point[0],
-    sample.point[1],
-    sample.tangent[0],
-    sample.tangent[1],
-    state.currentTail.sampleIndex,
-    state.committedTail.sampleIndex,
-    state.weakStepCount,
-  ].join('|')
+function samePoint(
+  first: Readonly<Point> | null,
+  second: Readonly<Point> | null,
+): boolean {
+  if (first === null || second === null) return first === second
+  return Object.is(first[0], second[0]) && Object.is(first[1], second[1])
+}
+
+function sameSample(
+  first: Readonly<CorrectedFlowingRidgeSample>,
+  second: Readonly<CorrectedFlowingRidgeSample>,
+): boolean {
+  return (
+    samePoint(first.point, second.point) &&
+    samePoint(first.tangent, second.tangent) &&
+    Object.is(first.evidence, second.evidence) &&
+    Object.is(first.coherence, second.coherence) &&
+    Object.is(first.ambiguity, second.ambiguity) &&
+    Object.is(first.scale, second.scale) &&
+    Object.is(first.alpha, second.alpha)
+  )
+}
+
+function sameMetrics(
+  first: Readonly<IncrementalMetrics>,
+  second: Readonly<IncrementalMetrics>,
+): boolean {
+  return (
+    first.sampleCount === second.sampleCount &&
+    first.segmentCount === second.segmentCount &&
+    Object.is(first.evidenceSum, second.evidenceSum) &&
+    Object.is(first.ambiguitySum, second.ambiguitySum) &&
+    Object.is(first.coherenceSum, second.coherenceSum) &&
+    Object.is(first.curvatureChangeSum, second.curvatureChangeSum) &&
+    samePoint(first.lastSegmentDirection, second.lastSegmentDirection) &&
+    Object.is(first.lastSignedTurn, second.lastSignedTurn)
+  )
+}
+
+function sameSupportTail(
+  first: Readonly<SupportNode> | null,
+  second: Readonly<SupportNode> | null,
+): boolean {
+  if (first === null || second === null) return first === second
+  const firstSpan = first.span
+  const secondSpan = second.span
+  return (
+    first.previous === second.previous &&
+    first.count === second.count &&
+    firstSpan.kind === secondSpan.kind &&
+    firstSpan.startSampleIndex === secondSpan.startSampleIndex &&
+    firstSpan.endSampleIndex === secondSpan.endSampleIndex &&
+    Object.is(firstSpan.length, secondSpan.length) &&
+    Object.is(firstSpan.entryEvidence, secondSpan.entryEvidence) &&
+    Object.is(firstSpan.exitEvidence, secondSpan.exitEvidence) &&
+    Object.is(
+      firstSpan.directionalAlignment,
+      secondSpan.directionalAlignment,
+    )
+  )
+}
+
+function areEquivalentSiblingSuccessors(
+  first: Readonly<SearchState>,
+  second: Readonly<SearchState>,
+): boolean {
+  const firstCommitted = first.committedTail === first.currentTail
+  const secondCommitted = second.committedTail === second.currentTail
+  return (
+    first.currentTail.previous === second.currentTail.previous &&
+    firstCommitted === secondCommitted &&
+    (firstCommitted || first.committedTail === second.committedTail) &&
+    first.currentTail.sampleIndex === second.currentTail.sampleIndex &&
+    sameSample(first.currentTail.sample, second.currentTail.sample) &&
+    sameSupportTail(first.supportTail, second.supportTail) &&
+    sameMetrics(first.committedMetrics, second.committedMetrics) &&
+    sameMetrics(first.currentMetrics, second.currentMetrics) &&
+    samePoint(first.travelDirection, second.travelDirection) &&
+    Object.is(first.provisionalLength, second.provisionalLength) &&
+    Object.is(
+      first.provisionalMinimumAlignment,
+      second.provisionalMinimumAlignment,
+    ) &&
+    first.weakStepCount === second.weakStepCount &&
+    Object.is(first.committedLength, second.committedLength) &&
+    Object.is(first.committedOverlapSum, second.committedOverlapSum) &&
+    first.committedOverlapCount === second.committedOverlapCount &&
+    Object.is(first.provisionalOverlapSum, second.provisionalOverlapSum) &&
+    first.provisionalOverlapCount === second.provisionalOverlapCount &&
+    first.endpointReason === second.endpointReason
+  )
 }
 
 function dedupeStates(
@@ -717,18 +797,36 @@ function dedupeStates(
   field: Readonly<FlowingContoursField>,
   flowSmoothing: number,
 ): SearchState[] {
-  const unique = new Map<string, SearchState>()
+  const siblingGroups = new Map<
+    Readonly<PathNode>,
+    SearchState[]
+  >()
   for (const state of states) {
-    const key = stateKey(state)
-    const previous = unique.get(key)
-    if (
-      previous === undefined ||
-      orderStates(state, previous, field, flowSmoothing) < 0
-    ) {
-      unique.set(key, state)
+    const predecessor = state.currentTail.previous
+    if (predecessor === null) {
+      // Successful successors always have a predecessor. Preserve an
+      // unexpected root defensively rather than merging unrelated history.
+      siblingGroups.set(state.currentTail, [state])
+      continue
+    }
+    const siblings = siblingGroups.get(predecessor)
+    if (siblings === undefined) {
+      siblingGroups.set(predecessor, [state])
+      continue
+    }
+    const equivalentIndex = siblings.findIndex((candidate) =>
+      areEquivalentSiblingSuccessors(candidate, state),
+    )
+    if (equivalentIndex < 0) {
+      siblings.push(state)
+      continue
+    }
+    const equivalent = siblings[equivalentIndex]!
+    if (orderStates(state, equivalent, field, flowSmoothing) < 0) {
+      siblings[equivalentIndex] = state
     }
   }
-  return [...unique.values()]
+  return [...siblingGroups.values()].flat()
 }
 
 function materializeSamples(

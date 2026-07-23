@@ -586,6 +586,66 @@ describe('Flowing Contours directional growth', () => {
     expect(trace.endpointReason).toBe('safety-limit')
   })
 
+  it('keeps reconverged weak histories until the compatible entry can commit', () => {
+    const branchX = Math.cos((25 * Math.PI) / 180)
+    const branchY = Math.sin((25 * Math.PI) / 180)
+    const funnel = field(13, 9, (x, y) => {
+      if (x <= 4) {
+        return {
+          evidence: Math.max(gaussian(y - 3, 0.4), gaussian(y - 5, 0.4)),
+          tangent:
+            y < 4
+              ? ([branchX, branchY] as const)
+              : ([branchX, -branchY] as const),
+        }
+      }
+      if (x <= 6) {
+        return {
+          evidence: 0.01 * gaussian(y - 4, 0.8),
+          tangent: [1, 0],
+        }
+      }
+      return {
+        evidence: gaussian(y - 4, 0.8),
+        // Only the lower entry has this far-side orientation.
+        tangent: [branchX, branchY],
+      }
+    })
+    const anchor = {
+      ...at(funnel, [3, 4]),
+      tangent: [1, 0] as Point,
+    }
+    const trace = growFlowingContoursDirection(
+      funnel,
+      anchor,
+      [1, 0],
+      'forward',
+      {
+        ...OPTIONS,
+        continuity: 1,
+        ridgeStepOptions: {
+          stepLength: 1.3,
+          ambiguityMargin: 0.01,
+        },
+        directionAlternatives: [
+          [1, 0.6],
+          [1, -0.6],
+        ],
+      },
+      createFlowingContoursTestLimits({
+        'search-breadth': 3,
+        'search-step-count': 24,
+        'normal-search-sample-count': 1,
+      })!,
+    )
+
+    const gap = trace.spanSupport.find((span) => span.kind === 'bounded-gap')
+    expect(gap).toBeDefined()
+    expect(gap!.directionalAlignment).toBeGreaterThanOrEqual(0.75)
+    expect(trace.samples.some((sample) => sample.point[0] > 7)).toBe(true)
+    expect(gap!.exitEvidence).toBeGreaterThan(gap!.entryEvidence)
+  })
+
   it('bounds a long smooth loop by raw points with linear attempted work', () => {
     const center = [16, 16] as const
     const radius = 9
