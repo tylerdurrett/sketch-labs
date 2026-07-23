@@ -6,6 +6,10 @@ disable-model-invocation: true
 
 I will provide a GitHub issue. It may be slice sized or task sized. You will act as orchestrator, preserving your own context window by delegating all planning and decomposition, plan review, plan revision, coding, code review, and code revision to sub agents. You'll use worktrees and parallel sub agents where possible.
 
+## Triage
+
+First check if the item needs to be triaged and possibly triage it with the triage skill using a sub agent, but only if the issue has a `needs-triage` label.
+
 ## Planning
 
 ### Slice Sized Issues: Full Decomposition Plan
