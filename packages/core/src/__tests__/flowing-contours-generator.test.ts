@@ -399,18 +399,26 @@ describe('Flowing Contours generator', () => {
       fittedCurveCount: 0,
     })
 
-    // FC15 must never leak a mismatched prefix even if an upstream fitting
-    // failure is reported as invalid rather than as its intended first cap.
     const fittedLimited = generate(source, {
       limits: { 'fitted-curve-point-count': 1 },
     })
     expect(fittedLimited.scene.primitives).toEqual([])
     expect(fittedLimited.diagnostics).toMatchObject({
-      termination: 'invalid-input',
+      termination: 'limit-reached',
+      limitedBy: 'fitted-curve-point-count',
+      analysisWidth: 72,
+      analysisHeight: 52,
+      analysisSampleCount: 72 * 52,
       primitiveCount: 0,
       rawTrajectoryCount: 0,
       fittedCurveCount: 0,
+      fittedCurvePointCount: 0,
     })
+    expect(fittedLimited.diagnostics.eligibleAnchorCount).toBeGreaterThan(0)
+    expect(fittedLimited.diagnostics.processedAnchorCount).toBeGreaterThan(0)
+    expect(fittedLimited.diagnostics.directionalTraceCount).toBeGreaterThan(0)
+    expect(fittedLimited.diagnostics.searchStepCount).toBeGreaterThan(0)
+    expect(fittedLimited.diagnostics.candidateCount).toBeGreaterThan(0)
   })
 
   it('rejects malformed or raised limit policies instead of falling back', () => {
