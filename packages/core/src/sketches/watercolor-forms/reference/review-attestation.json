@@ -2,18 +2,18 @@
   "schemaVersion": 1,
   "referenceId": "watercolor-forms-pencil-comparison",
   "reviewer": {
-    "identifier": "/root/attest_wf18",
-    "role": "independent WF18 artistic reviewer"
+    "identifier": "/root/visual_evidence_review",
+    "role": "independent post-smoothing artistic reviewer"
   },
-  "reviewedAt": "2026-07-23T06:07:54Z",
-  "artifactCommit": "f6b6e5c7353d703be3491b44c746c2a9622abf5e",
+  "reviewedAt": "2026-07-23T12:29:15Z",
+  "artifactCommit": "4b5324cd8ca3a33f180cc7c476e4b03988882b7c",
   "independence": "The reviewer did not implement the tuning or capture artifacts.",
-  "method": "Original-resolution visual review of both full-frame and shared dense-detail comparisons, including comparison with the prior failed evidence and rejected stair-stepped previews.",
+  "method": "Original-resolution visual review of all four full-frame and shared dense-detail comparisons, including isolated Watercolor panels and direct comparison with the prior committed evidence.",
   "pngEvidence": {
-    "flower-full-frame-comparison.png": "916014a0836f16d8b68c461b4ee1b275db70dd349abad30075ec6f240375c6f0",
-    "flower-dense-detail-comparison.png": "771c6caeef0a79566d91e3cb79ed17fde91d8d8b06fcc1272bac9867c9900496",
-    "pinecone-full-frame-comparison.png": "90e76499046a1f0740b0e1159726efc5f929a4706b6bef1ebb4fe08ed8872686",
-    "pinecone-dense-detail-comparison.png": "55c90f63c8298ee057bdfee4ed18fb47a2ec9cd19451dbb6e38d5bdf4e4d9469"
+    "flower-full-frame-comparison.png": "fc2ed66b3d10cd6f9d4d01963b8bfff9c99a593e239ac74ce1723a548e8e817f",
+    "flower-dense-detail-comparison.png": "f9f2472a6c2965ae199d208d4693475a7a28560aec393786bf9ae7bb096243f3",
+    "pinecone-full-frame-comparison.png": "e859a9871909804f54db02aeb0c297d6899a2e8d6740969a1c2b7c1c2d0230c2",
+    "pinecone-dense-detail-comparison.png": "6778d14d04dd80749d2ce8163d3e99d1e55d198cf9c101e6221ee3db1eb9b75b"
   },
   "verdict": "PASS",
   "checks": {
@@ -23,7 +23,7 @@
     },
     "flowerPetalBoundaries": {
       "pass": true,
-      "observation": "Radiating petal separations survive around the major flowers without collapsing into the prior large blank merged fields."
+      "observation": "Radiating petal separations survive around the major flowers without collapsing into large blank merged fields."
     },
     "flowerOverlapAndWatercolorability": {
       "pass": true,
@@ -31,23 +31,23 @@
     },
     "pineconeCompleteOuterSilhouette": {
       "pass": true,
-      "observation": "The full-frame comparison preserves the pinecone's complete tapered outer silhouette from crown through rounded base."
+      "observation": "The full-frame comparison preserves the pinecone's tapered outer silhouette from crown through rounded base."
     },
     "pineconeLayeredScaleRows": {
       "pass": true,
-      "observation": "Repeated overlapping scale rows are legible across the upper, middle, and lower cone in both views."
+      "observation": "Repeated overlapping scale rows remain legible across the upper, middle, and lower cone in both views."
     },
     "pineconeScaleTipsAndInteriorForms": {
       "pass": true,
-      "observation": "Major pointed scale tips and enclosed interior scale forms remain readable instead of being reduced to sparse isolated loops."
+      "observation": "Major pointed scale tips and enclosed interior scale forms remain readable rather than becoming sparse isolated loops."
     },
     "smootherThanRejectedArtifacts": {
       "pass": true,
-      "observation": "Long diagonals and curved boundaries are materially smoother than the rejected stair-stepped lattice artifacts while retaining useful form detail."
+      "observation": "Long flower-petal diagonals and pinecone scale arcs now use materially longer directional runs and gentler turns than the prior lattice-stair-step evidence, without deleting named forms."
     },
     "noFalseFrameOrGrossClipping": {
       "pass": true,
-      "observation": "Neither case emits a false fitted-image rectangle, and the subject geometry remains within the intended composition without gross clipping."
+      "observation": "Neither case emits a false fitted-image rectangle, and the subject geometry remains inside the intended composition without gross clipping."
     },
     "shortStrokesDescribeFormsOrJunctions": {
       "pass": true,
