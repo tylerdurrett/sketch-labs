@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
+import { finalizeOutlineScene } from '../../../../apps/studio/src/outlineScene'
+import { clipSceneToBounds } from '../clipToBounds'
 import type { DecodedPixels } from '../imageAssets'
-import { frameScene } from '../frameScene'
 import { hiddenLinePass } from '../hiddenLine'
 import type { PageFrame } from '../pageFrame'
 import { derivePageFramePlotProfile } from '../pageFramePlotProfile'
@@ -24,7 +25,8 @@ import { generateWatercolorForms } from '../sketches/watercolor-forms/generator'
 import type { Point } from '../types'
 
 const FRAME = Object.freeze({ width: 100, height: 100 })
-const TOOL_WIDTH_MILLIMETERS = 0.4
+const MILLIMETERS_PER_SCENE_UNIT = 0.4
+const TOOL_WIDTH_MILLIMETERS = 0.8
 const PROFILE: PlotProfile = Object.freeze({
   width: 48,
   height: 48,
@@ -282,11 +284,6 @@ describe('Watercolor Forms output contract', () => {
     expect(svgPathElements(plotterSVG)).toHaveLength(
       outlined.primitives.length,
     )
-    expect(
-      svgPathElements(plotterSVG).every((path) =>
-        path.includes(`stroke-width="${TOOL_WIDTH_MILLIMETERS}"`),
-      ),
-    ).toBe(true)
     expect(plotterSVG).not.toMatch(
       /<(?:rect|g|polyline|circle|clipPath)\b|\b(?:transform|clip-path)=|\sZ(?="|\s)/,
     )
@@ -298,13 +295,14 @@ describe('Watercolor Forms output contract', () => {
   it('uses existing Page Frame clipping, rebasing, and physical mapping unchanged', () => {
     const scene = generate(twoBlocks())
     const outlined = hiddenLinePass(scene)
+    const sceneJson = JSON.stringify(scene)
+    const outlinedJson = JSON.stringify(outlined)
     const page: PageFrame = {
       x: 40,
       y: 35,
       width: 20,
       height: 30,
     }
-    const framed = frameScene(outlined, page)
 
     expect(outlined.primitives).toHaveLength(1)
     expect(outlined.primitives[0]!.points).toEqual([
@@ -312,19 +310,6 @@ describe('Watercolor Forms output contract', () => {
       [50, 50],
       [50, 75],
     ])
-    expect(framed).toEqual({
-      space: { width: 20, height: 30 },
-      primitives: [
-        {
-          points: [
-            [10, -0.5],
-            [10, 15],
-            [10, 30.5],
-          ],
-          stroke: { color: 'black', width: 1 },
-        },
-      ],
-    })
 
     const pageProfile = derivePageFramePlotProfile(
       PROFILE,
@@ -338,14 +323,70 @@ describe('Watercolor Forms output contract', () => {
       insets: { top: 4, right: 4, bottom: 4, left: 4 },
     })
     expect(pageProfile.toolWidthMillimeters).toBe(TOOL_WIDTH_MILLIMETERS)
+    const mapping = computePlotMapping(
+      { width: page.width, height: page.height },
+      pageProfile,
+    )
+    expect(mapping.scale).toBe(MILLIMETERS_PER_SCENE_UNIT)
 
-    const plotterSVG = renderPlotterSVG(framed, pageProfile)
+    const physicalToolPolicy = {
+      kind: 'physical-tool' as const,
+      target: {
+        toolWidthMillimeters: pageProfile.toolWidthMillimeters,
+        millimetersPerSceneUnit: mapping.scale,
+      },
+    }
+    const finalized = finalizeOutlineScene(
+      outlined,
+      page,
+      false,
+      physicalToolPolicy,
+    )
+    expect(finalized).toEqual({
+      space: { width: 20, height: 30 },
+      primitives: [
+        {
+          points: [
+            [10, -1],
+            [10, 15],
+            [10, 31],
+          ],
+          stroke: { color: 'black', width: 2 },
+        },
+      ],
+    })
+    const clipped = clipSceneToBounds(finalized)
+    expect(clipped).toEqual({
+      space: { width: 20, height: 30 },
+      primitives: [
+        {
+          points: [
+            [10, 0],
+            [10, 15],
+            [10, 30],
+          ],
+          stroke: { color: 'black', width: 2 },
+        },
+      ],
+    })
+
+    const plotterSVG = renderPlotterSVG(clipped, pageProfile)
     expect(svgPathElements(plotterSVG)).toEqual([
-      '<path d="M8 3.8 L8 10 L8 16.2" fill="none" stroke="black" stroke-width="0.4" stroke-linecap="round" />',
+      '<path d="M8 4 L8 10 L8 16" fill="none" stroke="black" stroke-width="0.8" stroke-linecap="round" />',
     ])
     expect(plotterSVG).toMatch(
       /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="16mm" height="20mm" viewBox="0 0 16 20" data-paper-extent="paper">/,
     )
+
+    const legacyFinalized = finalizeOutlineScene(outlined, page, false, {
+      ...physicalToolPolicy,
+      kind: 'legacy-scene',
+    })
+    expect(
+      clipSceneToBounds(legacyFinalized).primitives[0]?.stroke?.width,
+    ).toBe(1)
+    expect(JSON.stringify(scene)).toBe(sceneJson)
+    expect(JSON.stringify(outlined)).toBe(outlinedJson)
   })
 
   it('shares the photo-backed raster contain fit without a perimeter mark or private transform', () => {
