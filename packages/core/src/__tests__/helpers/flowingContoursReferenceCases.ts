@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import type { CoordinateSpace } from '../../scene'
+import type { CoordinateSpace, Scene } from '../../scene'
 import {
   defaultFlowingContoursControls,
   type FlowingContoursControls,
@@ -9,6 +9,9 @@ import { FLOWING_CONTOURS_LIMITS } from '../../sketches/flowing-contours/limits'
 import type {
   PreparedFlowingContoursRaster,
 } from '../../sketches/flowing-contours/raster'
+import {
+  FLOWING_CONTOURS_ENDPOINT_REASONS,
+} from '../../sketches/flowing-contours/types'
 import type { PencilContourControls } from '../../sketches/pencil-contour/controls'
 import type { WatercolorFormsControls } from '../../sketches/watercolor-forms/controls'
 import type {
@@ -105,6 +108,11 @@ export interface FlowingContoursReferenceCase {
   }
   /** Normalized Scene rectangles sampled from long geometry. */
   readonly regions: readonly Readonly<FlowingContoursReferenceRegion>[]
+  /**
+   * Case-specific review questions. A passing artifact must explicitly verify
+   * source-supported connection and absence of the named shortcut.
+   */
+  readonly topologyChecks: readonly string[]
 }
 
 function region(
@@ -163,6 +171,10 @@ export const FLOWING_CONTOURS_REFERENCE_CASES: Readonly<
       region('right-petals', 0.54, 0.05, 0.8, 0.36),
       region('lower-gesture', 0.3, 0.36, 0.7, 0.78),
     ]),
+    topologyChecks: Object.freeze([
+      'petal-center-supported-connections',
+      'center-lower-gesture-no-background-shortcut',
+    ]),
   }),
   pinecone: Object.freeze({
     name: 'pinecone',
@@ -196,6 +208,10 @@ export const FLOWING_CONTOURS_REFERENCE_CASES: Readonly<
       region('left-interior', 0.23, 0.22, 0.5, 0.78),
       region('right-interior', 0.5, 0.22, 0.77, 0.78),
     ]),
+    topologyChecks: Object.freeze([
+      'scale-row-supported-connections',
+      'opposite-sides-no-interior-shortcut',
+    ]),
   }),
 })
 
@@ -216,6 +232,7 @@ export interface FlowingContoursFixtureMetadata {
   readonly controls: Readonly<FlowingContoursControls>
   readonly crops: FlowingContoursReferenceCase['crops']
   readonly regions: readonly Readonly<FlowingContoursReferenceRegion>[]
+  readonly topologyChecks: readonly string[]
   readonly comparators: typeof FLOWING_CONTOURS_REFERENCE_COMPARATORS
   readonly analysis: {
     readonly width: number
@@ -388,6 +405,7 @@ export function createFlowingContoursFixtureMetadata(
     controls: FLOWING_CONTOURS_REFERENCE_CONTROLS,
     crops: reference.crops,
     regions: reference.regions,
+    topologyChecks: reference.topologyChecks,
     comparators: FLOWING_CONTOURS_REFERENCE_COMPARATORS,
     analysis: Object.freeze({
       width: raster.width,
@@ -411,10 +429,53 @@ function sameJson(first: unknown, second: unknown): boolean {
   }
 }
 
+const FIXTURE_METADATA_KEYS = Object.freeze([
+  'formatVersion',
+  'fixtureStatus',
+  'preparationVersion',
+  'preparedFromCommit',
+  'source',
+  'frame',
+  'controls',
+  'crops',
+  'regions',
+  'topologyChecks',
+  'comparators',
+  'analysis',
+  'encoding',
+  'fixtureSha256',
+])
+
+function hasExactOwnDataKeys(
+  value: unknown,
+  expectedKeys: readonly string[],
+): value is Readonly<Record<string, unknown>> {
+  try {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return false
+    }
+    const keys = Reflect.ownKeys(value)
+    if (
+      keys.length !== expectedKeys.length ||
+      keys.some((key) => typeof key !== 'string') ||
+      !expectedKeys.every((key) => keys.includes(key))
+    ) {
+      return false
+    }
+    return expectedKeys.every((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      return descriptor !== undefined && 'value' in descriptor
+    })
+  } catch {
+    return false
+  }
+}
+
 function validMetadata(
   metadata: Readonly<FlowingContoursFixtureMetadata>,
 ): boolean {
   try {
+    if (!hasExactOwnDataKeys(metadata, FIXTURE_METADATA_KEYS)) return false
     const matchingCase = Object.values(
       FLOWING_CONTOURS_REFERENCE_CASES,
     ).find(({ source }) => source.assetId === metadata.source?.assetId)
@@ -432,6 +493,7 @@ function validMetadata(
       !sameJson(metadata.controls, FLOWING_CONTOURS_REFERENCE_CONTROLS) ||
       !sameJson(metadata.crops, matchingCase.crops) ||
       !sameJson(metadata.regions, matchingCase.regions) ||
+      !sameJson(metadata.topologyChecks, matchingCase.topologyChecks) ||
       !sameJson(
         metadata.comparators,
         FLOWING_CONTOURS_REFERENCE_COMPARATORS,
@@ -544,7 +606,12 @@ export interface FlowingContoursReferenceGate {
   readonly maximumOrthogonalStaircaseSignature: number
   readonly minimumOccupiedCoverageBinCount: number
   readonly maximumUnsupportedSpanLength: number
+  readonly maximumTotalUnsupportedSpanLength: number
+  readonly maximumUnsupportedTravelRatio: number
+  readonly gridAxisPathCountFloor: number
+  readonly minimumGridAxisLengthShare: number
   readonly minimumRegionSampledPointCount: Readonly<Record<string, number>>
+  readonly topologyCheckNames: readonly string[]
 }
 
 const COMMON_REFERENCE_GATE = Object.freeze({
@@ -564,6 +631,11 @@ const COMMON_REFERENCE_GATE = Object.freeze({
   minimumOccupiedCoverageBinCount: 8,
   maximumUnsupportedSpanLength:
     FLOWING_CONTOURS_LIMITS['weak-span-distance'],
+  maximumTotalUnsupportedSpanLength:
+    FLOWING_CONTOURS_LIMITS['weak-span-distance'] * 4,
+  maximumUnsupportedTravelRatio: 0.08,
+  gridAxisPathCountFloor: 2,
+  minimumGridAxisLengthShare: 0.18,
 })
 
 export const FLOWING_CONTOURS_REFERENCE_GATES: Readonly<
@@ -577,6 +649,8 @@ export const FLOWING_CONTOURS_REFERENCE_GATES: Readonly<
       'right-petals': 2,
       'lower-gesture': 2,
     }),
+    topologyCheckNames:
+      FLOWING_CONTOURS_REFERENCE_CASES.flower.topologyChecks,
   }),
   pinecone: Object.freeze({
     ...COMMON_REFERENCE_GATE,
@@ -587,10 +661,229 @@ export const FLOWING_CONTOURS_REFERENCE_GATES: Readonly<
       'left-interior': 3,
       'right-interior': 3,
     }),
+    topologyCheckNames:
+      FLOWING_CONTOURS_REFERENCE_CASES.pinecone.topologyChecks,
   }),
 })
 
+export interface FlowingContoursReferenceGeometryEvidence {
+  readonly pathCount: number
+  readonly segmentCount: number
+  readonly totalSegmentLength: number
+  /** Fraction of length in the first best-fit unoriented axis. */
+  readonly primaryAxisLengthShare: number
+  /** Fraction of length in the best-fit perpendicular axis. */
+  readonly perpendicularAxisLengthShare: number
+  /** Paths with at least 85% of their length in the first axis. */
+  readonly primaryAxisPathCount: number
+  /** Paths with at least 85% of their length in the perpendicular axis. */
+  readonly perpendicularAxisPathCount: number
+}
+
+export interface FlowingContoursReferenceTopologyCheck {
+  readonly name: string
+  readonly sourceConnectionVerified: boolean
+  readonly forbiddenBridgeObserved: boolean
+}
+
+export interface FlowingContoursReferenceGateEvidence {
+  readonly geometry: Readonly<FlowingContoursReferenceGeometryEvidence>
+  readonly topology: readonly Readonly<FlowingContoursReferenceTopologyCheck>[]
+}
+
+const ORIENTATION_TOLERANCE_RADIANS = (7.5 * Math.PI) / 180
+const ORIENTATION_FAMILY_PATH_SHARE = 0.85
+const ORIENTATION_AXIS_CANDIDATE_COUNT = 24
+
+function normalizedOrientation(angle: number): number {
+  const normalized = angle % Math.PI
+  return normalized < 0 ? normalized + Math.PI : normalized
+}
+
+function unorientedDistance(first: number, second: number): number {
+  const difference = Math.abs(
+    normalizedOrientation(first) - normalizedOrientation(second),
+  )
+  return Math.min(difference, Math.PI - difference)
+}
+
+/**
+ * Inspect collection-level orientation without treating one straight source
+ * contour as a grid. A lattice requires both concentrated orthogonal geometry
+ * and a repeated family of independently emitted paths.
+ */
+export function measureFlowingContoursReferenceGeometryEvidence(
+  scene: Readonly<Scene>,
+): Readonly<FlowingContoursReferenceGeometryEvidence> | null {
+  try {
+    if (
+      scene === null ||
+      typeof scene !== 'object' ||
+      !Array.isArray(scene.primitives)
+    ) {
+      return null
+    }
+    const segments: Array<{
+      readonly pathIndex: number
+      readonly angle: number
+      readonly length: number
+    }> = []
+    const pathLengths = new Array<number>(scene.primitives.length).fill(0)
+    for (
+      let pathIndex = 0;
+      pathIndex < scene.primitives.length;
+      pathIndex += 1
+    ) {
+      const primitive = scene.primitives[pathIndex]
+      if (
+        primitive === null ||
+        typeof primitive !== 'object' ||
+        !Array.isArray(primitive.points) ||
+        primitive.points.length < 2
+      ) {
+        return null
+      }
+      const segmentCount =
+        primitive.points.length - 1 + (primitive.closed ? 1 : 0)
+      for (let index = 0; index < segmentCount; index += 1) {
+        const first = primitive.points[index]!
+        const second =
+          primitive.points[(index + 1) % primitive.points.length]!
+        if (
+          !Array.isArray(first) ||
+          first.length !== 2 ||
+          !Array.isArray(second) ||
+          second.length !== 2 ||
+          !Number.isFinite(first[0]) ||
+          !Number.isFinite(first[1]) ||
+          !Number.isFinite(second[0]) ||
+          !Number.isFinite(second[1])
+        ) {
+          return null
+        }
+        const dx = second[0] - first[0]
+        const dy = second[1] - first[1]
+        const length = Math.hypot(dx, dy)
+        if (!Number.isFinite(length)) return null
+        if (length === 0) continue
+        pathLengths[pathIndex]! += length
+        segments.push({
+          pathIndex,
+          angle: normalizedOrientation(Math.atan2(dy, dx)),
+          length,
+        })
+      }
+      if (!(pathLengths[pathIndex]! > 0)) return null
+    }
+    const totalSegmentLength = pathLengths.reduce(
+      (total, length) => total + length,
+      0,
+    )
+    if (segments.length === 0) {
+      return Object.freeze({
+        pathCount: scene.primitives.length,
+        segmentCount: 0,
+        totalSegmentLength: 0,
+        primaryAxisLengthShare: 0,
+        perpendicularAxisLengthShare: 0,
+        primaryAxisPathCount: 0,
+        perpendicularAxisPathCount: 0,
+      })
+    }
+    let bestAxis = 0
+    let bestPrimaryLength = 0
+    let bestPerpendicularLength = 0
+    let bestBalancedLength = -1
+    let bestCombinedLength = -1
+    for (
+      let candidateIndex = 0;
+      candidateIndex < ORIENTATION_AXIS_CANDIDATE_COUNT;
+      candidateIndex += 1
+    ) {
+      const candidateAxis =
+        (candidateIndex * (Math.PI / 2)) /
+        ORIENTATION_AXIS_CANDIDATE_COUNT
+      const primaryLength = segments.reduce(
+        (total, segment) =>
+          total +
+          (unorientedDistance(segment.angle, candidateAxis) <=
+          ORIENTATION_TOLERANCE_RADIANS
+            ? segment.length
+            : 0),
+        0,
+      )
+      const perpendicularLength = segments.reduce(
+        (total, segment) =>
+          total +
+          (unorientedDistance(
+            segment.angle,
+            candidateAxis + Math.PI / 2,
+          ) <= ORIENTATION_TOLERANCE_RADIANS
+            ? segment.length
+            : 0),
+        0,
+      )
+      const balancedLength = Math.min(
+        primaryLength,
+        perpendicularLength,
+      )
+      const combinedLength = primaryLength + perpendicularLength
+      if (
+        balancedLength > bestBalancedLength ||
+        (balancedLength === bestBalancedLength &&
+          combinedLength > bestCombinedLength)
+      ) {
+        bestBalancedLength = balancedLength
+        bestCombinedLength = combinedLength
+        bestAxis = candidateAxis
+        bestPrimaryLength = primaryLength
+        bestPerpendicularLength = perpendicularLength
+      }
+    }
+    const primaryByPath = new Array<number>(pathLengths.length).fill(0)
+    const perpendicularByPath = new Array<number>(
+      pathLengths.length,
+    ).fill(0)
+    for (const segment of segments) {
+      if (
+        unorientedDistance(segment.angle, bestAxis) <=
+        ORIENTATION_TOLERANCE_RADIANS
+      ) {
+        primaryByPath[segment.pathIndex]! += segment.length
+      }
+      if (
+        unorientedDistance(
+          segment.angle,
+          bestAxis + Math.PI / 2,
+        ) <= ORIENTATION_TOLERANCE_RADIANS
+      ) {
+        perpendicularByPath[segment.pathIndex]! += segment.length
+      }
+    }
+    return Object.freeze({
+      pathCount: scene.primitives.length,
+      segmentCount: segments.length,
+      totalSegmentLength,
+      primaryAxisLengthShare: bestPrimaryLength / totalSegmentLength,
+      perpendicularAxisLengthShare:
+        bestPerpendicularLength / totalSegmentLength,
+      primaryAxisPathCount: primaryByPath.filter(
+        (length, index) =>
+          length / pathLengths[index]! >= ORIENTATION_FAMILY_PATH_SHARE,
+      ).length,
+      perpendicularAxisPathCount: perpendicularByPath.filter(
+        (length, index) =>
+          length / pathLengths[index]! >= ORIENTATION_FAMILY_PATH_SHARE,
+      ).length,
+    })
+  } catch {
+    return null
+  }
+}
+
 export type FlowingContoursReferenceGateFinding =
+  | 'invalid-metrics'
+  | 'invalid-evidence'
   | 'path-count'
   | 'short-path-share'
   | 'median-path-length'
@@ -605,9 +898,14 @@ export type FlowingContoursReferenceGateFinding =
   | 'orthogonal-staircase'
   | 'coverage'
   | 'unsupported-span'
+  | 'total-unsupported-span'
+  | 'unsupported-travel-ratio'
+  | 'orthogonal-grid-family'
   | `region:${string}`
+  | `topology:${string}`
 
 export type FlowingContoursPencilComparisonFinding =
+  | 'invalid-comparison-metrics'
   | 'pencil-short-path-share'
   | 'pencil-median-path-length'
   | 'pencil-upper-quartile-path-length'
@@ -630,20 +928,313 @@ export function flowingContoursPencilComparisonFindings(
   flowing: Readonly<FlowingContoursLengthComparisonMetrics>,
   pencil: Readonly<FlowingContoursLengthComparisonMetrics>,
 ): readonly FlowingContoursPencilComparisonFinding[] {
-  const findings: FlowingContoursPencilComparisonFinding[] = []
-  if (flowing.shortPathShare >= pencil.shortPathShare) {
-    findings.push('pencil-short-path-share')
+  try {
+    const values = [flowing, pencil].flatMap((metrics) => [
+      metrics.shortPathShare,
+      metrics.medianPathLength,
+      metrics.upperQuartilePathLength,
+      metrics.longestPathLength,
+    ])
+    if (
+      values.some((value) => !Number.isFinite(value) || value < 0) ||
+      flowing.shortPathShare > 1 ||
+      pencil.shortPathShare > 1 ||
+      flowing.medianPathLength > flowing.upperQuartilePathLength ||
+      flowing.upperQuartilePathLength > flowing.longestPathLength ||
+      pencil.medianPathLength > pencil.upperQuartilePathLength ||
+      pencil.upperQuartilePathLength > pencil.longestPathLength
+    ) {
+      return Object.freeze(['invalid-comparison-metrics'])
+    }
+    const findings: FlowingContoursPencilComparisonFinding[] = []
+    if (flowing.shortPathShare >= pencil.shortPathShare) {
+      findings.push('pencil-short-path-share')
+    }
+    if (flowing.medianPathLength <= pencil.medianPathLength) {
+      findings.push('pencil-median-path-length')
+    }
+    if (
+      flowing.upperQuartilePathLength <= pencil.upperQuartilePathLength
+    ) {
+      findings.push('pencil-upper-quartile-path-length')
+    }
+    if (flowing.longestPathLength <= pencil.longestPathLength) {
+      findings.push('pencil-longest-path-length')
+    }
+    return Object.freeze(findings)
+  } catch {
+    return Object.freeze(['invalid-comparison-metrics'])
   }
-  if (flowing.medianPathLength <= pencil.medianPathLength) {
-    findings.push('pencil-median-path-length')
+}
+
+function finiteNonNegative(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+function safeNonNegativeInteger(value: unknown): value is number {
+  return finiteNonNegative(value) && Number.isSafeInteger(value)
+}
+
+function unitShare(value: unknown): value is number {
+  return finiteNonNegative(value) && value <= 1
+}
+
+function nearlyEqual(first: number, second: number): boolean {
+  return (
+    Math.abs(first - second) <=
+    1e-10 * Math.max(1, Math.abs(first), Math.abs(second))
+  )
+}
+
+function ratioIs(
+  share: number,
+  numerator: number,
+  denominator: number,
+): boolean {
+  return nearlyEqual(share, denominator === 0 ? 0 : numerator / denominator)
+}
+
+function hasFiniteMetricInventory(
+  metrics: Readonly<FlowingContoursReferenceMetrics>,
+): boolean {
+  try {
+    if (metrics === null || typeof metrics !== 'object') return false
+    const counts = [
+      metrics.pathCount,
+      metrics.shortPathCount,
+      metrics.longPathCount,
+      metrics.visibleEndpointCount,
+      metrics.endpointCount,
+      metrics.sampledPathCount,
+      metrics.sampledPointCount,
+      metrics.turnCount,
+      metrics.turnsOver25DegreesCount,
+      metrics.turnsOver45DegreesCount,
+      metrics.orthogonalTurnCount,
+      metrics.staircasePairCount,
+      metrics.coverageColumns,
+      metrics.coverageRows,
+      metrics.occupiedCoverageBinCount,
+    ]
+    const quantities = [
+      metrics.medianPathLength,
+      metrics.upperQuartilePathLength,
+      metrics.longestPathLength,
+      metrics.totalPathLength,
+      metrics.longGeometryLength,
+      metrics.maximumUnsupportedSpanLength,
+      metrics.totalUnsupportedSpanLength,
+      metrics.totalAcceptedTrajectoryLength,
+      metrics.turnEnergy,
+      metrics.maximumTurnDegrees,
+      metrics.sampleSpacing,
+      metrics.shortPathLength,
+      metrics.longPathLength,
+      metrics.numericTolerance,
+    ]
+    const shares = [
+      metrics.shortPathShare,
+      metrics.longGeometryShare,
+      metrics.turnsOver25DegreesShare,
+      metrics.turnsOver45DegreesShare,
+      metrics.orthogonalStaircaseSignature,
+      metrics.occupiedCoverageBinShare,
+    ]
+    if (
+      counts.some((value) => !safeNonNegativeInteger(value)) ||
+      quantities.some((value) => !finiteNonNegative(value)) ||
+      shares.some((value) => !unitShare(value)) ||
+      metrics.coverageColumns < 1 ||
+      metrics.coverageRows < 1 ||
+      metrics.sampleSpacing <= 0 ||
+      metrics.shortPathLength <= 0 ||
+      metrics.longPathLength <= metrics.shortPathLength ||
+      metrics.numericTolerance <= 0
+    ) {
+      return false
+    }
+    if (
+      metrics.shortPathCount > metrics.pathCount ||
+      metrics.longPathCount > metrics.pathCount ||
+      metrics.shortPathCount + metrics.longPathCount >
+        metrics.pathCount ||
+      metrics.sampledPathCount !== metrics.pathCount ||
+      metrics.sampledPointCount < metrics.sampledPathCount ||
+      metrics.visibleEndpointCount % 2 !== 0 ||
+      metrics.visibleEndpointCount > metrics.pathCount * 2 ||
+      metrics.endpointCount !== metrics.pathCount * 2 ||
+      metrics.orthogonalTurnCount > metrics.turnCount ||
+      metrics.staircasePairCount > metrics.turnCount ||
+      metrics.turnsOver25DegreesCount > metrics.turnCount ||
+      metrics.turnsOver45DegreesCount >
+        metrics.turnsOver25DegreesCount ||
+      metrics.longGeometryLength > metrics.totalPathLength ||
+      (metrics.longPathCount === 0) !==
+        (metrics.longGeometryLength === 0) ||
+      metrics.maximumUnsupportedSpanLength >
+        metrics.totalUnsupportedSpanLength ||
+      (metrics.totalUnsupportedSpanLength === 0) !==
+        (metrics.maximumUnsupportedSpanLength === 0) ||
+      metrics.totalUnsupportedSpanLength >
+        metrics.totalAcceptedTrajectoryLength ||
+      (metrics.turnCount === 0 &&
+        (metrics.turnEnergy !== 0 ||
+          metrics.maximumTurnDegrees !== 0 ||
+          metrics.orthogonalTurnCount !== 0 ||
+          metrics.staircasePairCount !== 0 ||
+          metrics.orthogonalStaircaseSignature !== 0)) ||
+      (metrics.staircasePairCount === 0 &&
+        metrics.orthogonalStaircaseSignature !== 0) ||
+      metrics.medianPathLength > metrics.upperQuartilePathLength ||
+      metrics.upperQuartilePathLength > metrics.longestPathLength ||
+      metrics.longestPathLength > metrics.totalPathLength ||
+      !ratioIs(
+        metrics.shortPathShare,
+        metrics.shortPathCount,
+        metrics.pathCount,
+      ) ||
+      !ratioIs(
+        metrics.longGeometryShare,
+        metrics.longGeometryLength,
+        metrics.totalPathLength,
+      ) ||
+      !ratioIs(
+        metrics.turnsOver25DegreesShare,
+        metrics.turnsOver25DegreesCount,
+        metrics.turnCount,
+      ) ||
+      !ratioIs(
+        metrics.turnsOver45DegreesShare,
+        metrics.turnsOver45DegreesCount,
+        metrics.turnCount,
+      )
+    ) {
+      return false
+    }
+    if (
+      metrics.pathCount === 0
+        ? metrics.totalPathLength !== 0
+        : metrics.totalPathLength <= 0
+    ) {
+      return false
+    }
+    const endpointCounts = metrics.endpointReasonCounts
+    if (
+      !hasExactOwnDataKeys(
+        endpointCounts,
+        FLOWING_CONTOURS_ENDPOINT_REASONS,
+      )
+    ) {
+      return false
+    }
+    const endpointTotal = FLOWING_CONTOURS_ENDPOINT_REASONS.reduce(
+      (total, reason) => {
+        const count = endpointCounts[reason]
+        return safeNonNegativeInteger(count)
+          ? total + count
+          : Number.NaN
+      },
+      0,
+    )
+    if (endpointTotal !== metrics.endpointCount) return false
+    if (
+      !Array.isArray(metrics.occupiedCoverageBins) ||
+      metrics.occupiedCoverageBins.length !==
+        metrics.occupiedCoverageBinCount ||
+      new Set(metrics.occupiedCoverageBins).size !==
+        metrics.occupiedCoverageBinCount ||
+      !ratioIs(
+        metrics.occupiedCoverageBinShare,
+        metrics.occupiedCoverageBinCount,
+        metrics.coverageColumns * metrics.coverageRows,
+      )
+    ) {
+      return false
+    }
+    for (const key of metrics.occupiedCoverageBins) {
+      if (typeof key !== 'string') return false
+      const match = /^(\d+),(\d+)$/.exec(key)
+      if (
+        match === null ||
+        Number(match[1]) >= metrics.coverageRows ||
+        Number(match[2]) >= metrics.coverageColumns
+      ) {
+        return false
+      }
+    }
+    if (!Array.isArray(metrics.regions)) return false
+    const regionNames = new Set<string>()
+    for (const region of metrics.regions) {
+      if (
+        region === null ||
+        typeof region !== 'object' ||
+        typeof region.name !== 'string' ||
+        region.name.length === 0 ||
+        regionNames.has(region.name) ||
+        typeof region.occupied !== 'boolean' ||
+        !safeNonNegativeInteger(region.sampledPointCount) ||
+        region.occupied !== (region.sampledPointCount > 0)
+      ) {
+        return false
+      }
+      regionNames.add(region.name)
+    }
+    return true
+  } catch {
+    return false
   }
-  if (flowing.upperQuartilePathLength <= pencil.upperQuartilePathLength) {
-    findings.push('pencil-upper-quartile-path-length')
+}
+
+function validGateEvidence(
+  gate: Readonly<FlowingContoursReferenceGate>,
+  metrics: Readonly<FlowingContoursReferenceMetrics>,
+  evidence: Readonly<FlowingContoursReferenceGateEvidence>,
+): boolean {
+  try {
+    if (evidence === null || typeof evidence !== 'object') return false
+    const geometry = evidence.geometry
+    if (
+      geometry === null ||
+      typeof geometry !== 'object' ||
+      !safeNonNegativeInteger(geometry.pathCount) ||
+      !safeNonNegativeInteger(geometry.segmentCount) ||
+      !finiteNonNegative(geometry.totalSegmentLength) ||
+      !unitShare(geometry.primaryAxisLengthShare) ||
+      !unitShare(geometry.perpendicularAxisLengthShare) ||
+      geometry.primaryAxisLengthShare +
+        geometry.perpendicularAxisLengthShare >
+        1 + 1e-10 ||
+      !safeNonNegativeInteger(geometry.primaryAxisPathCount) ||
+      !safeNonNegativeInteger(geometry.perpendicularAxisPathCount) ||
+      geometry.pathCount !== metrics.pathCount ||
+      geometry.primaryAxisPathCount > geometry.pathCount ||
+      geometry.perpendicularAxisPathCount > geometry.pathCount ||
+      !nearlyEqual(geometry.totalSegmentLength, metrics.totalPathLength) ||
+      !Array.isArray(evidence.topology)
+    ) {
+      return false
+    }
+    const names = new Set<string>()
+    for (const check of evidence.topology) {
+      if (
+        check === null ||
+        typeof check !== 'object' ||
+        typeof check.name !== 'string' ||
+        names.has(check.name) ||
+        typeof check.sourceConnectionVerified !== 'boolean' ||
+        typeof check.forbiddenBridgeObserved !== 'boolean'
+      ) {
+        return false
+      }
+      names.add(check.name)
+    }
+    return (
+      names.size === gate.topologyCheckNames.length &&
+      gate.topologyCheckNames.every((name) => names.has(name))
+    )
+  } catch {
+    return false
   }
-  if (flowing.longestPathLength <= pencil.longestPathLength) {
-    findings.push('pencil-longest-path-length')
-  }
-  return Object.freeze(findings)
 }
 
 /**
@@ -655,8 +1246,15 @@ export function flowingContoursPencilComparisonFindings(
 export function flowingContoursReferenceGateFindings(
   name: FlowingContoursReferenceCaseName,
   metrics: Readonly<FlowingContoursReferenceMetrics>,
+  evidence: Readonly<FlowingContoursReferenceGateEvidence>,
 ): readonly FlowingContoursReferenceGateFinding[] {
   const gate = FLOWING_CONTOURS_REFERENCE_GATES[name]
+  if (gate === undefined || !hasFiniteMetricInventory(metrics)) {
+    return Object.freeze(['invalid-metrics'])
+  }
+  if (!validGateEvidence(gate, metrics, evidence)) {
+    return Object.freeze(['invalid-evidence'])
+  }
   const diagonal = Math.hypot(
     FLOWING_CONTOURS_REFERENCE_FRAME.width,
     FLOWING_CONTOURS_REFERENCE_FRAME.height,
@@ -714,6 +1312,26 @@ export function flowingContoursReferenceGateFindings(
     metrics.maximumUnsupportedSpanLength >
     gate.maximumUnsupportedSpanLength
   ) findings.push('unsupported-span')
+  if (
+    metrics.totalUnsupportedSpanLength >
+    gate.maximumTotalUnsupportedSpanLength
+  ) findings.push('total-unsupported-span')
+  if (
+    metrics.totalAcceptedTrajectoryLength > 0 &&
+    metrics.totalUnsupportedSpanLength /
+      metrics.totalAcceptedTrajectoryLength >
+      gate.maximumUnsupportedTravelRatio
+  ) findings.push('unsupported-travel-ratio')
+  if (
+    evidence.geometry.primaryAxisPathCount >=
+      gate.gridAxisPathCountFloor &&
+    evidence.geometry.perpendicularAxisPathCount >=
+      gate.gridAxisPathCountFloor &&
+    evidence.geometry.primaryAxisLengthShare >=
+      gate.minimumGridAxisLengthShare &&
+    evidence.geometry.perpendicularAxisLengthShare >=
+      gate.minimumGridAxisLengthShare
+  ) findings.push('orthogonal-grid-family')
   const regions = new Map(
     metrics.regions.map((region) => [region.name, region.sampledPointCount]),
   )
@@ -722,6 +1340,18 @@ export function flowingContoursReferenceGateFindings(
   )) {
     if ((regions.get(regionName) ?? 0) < minimum) {
       findings.push(`region:${regionName}`)
+    }
+  }
+  const topology = new Map(
+    evidence.topology.map((check) => [check.name, check]),
+  )
+  for (const checkName of gate.topologyCheckNames) {
+    const check = topology.get(checkName)!
+    if (
+      !check.sourceConnectionVerified ||
+      check.forbiddenBridgeObserved
+    ) {
+      findings.push(`topology:${checkName}`)
     }
   }
   return Object.freeze(findings)

@@ -148,6 +148,8 @@ describe('Flowing Contours prepared reference fixtures', () => {
         controls: FLOWING_CONTOURS_REFERENCE_CONTROLS,
         crops: FLOWING_CONTOURS_REFERENCE_CASES[name].crops,
         regions: FLOWING_CONTOURS_REFERENCE_CASES[name].regions,
+        topologyChecks:
+          FLOWING_CONTOURS_REFERENCE_CASES[name].topologyChecks,
         comparators: FLOWING_CONTOURS_REFERENCE_COMPARATORS,
         analysis: FLOWING_CONTOURS_REFERENCE_CASES[name].analysis,
         encoding: {
@@ -302,6 +304,17 @@ describe('Flowing Contours prepared reference fixtures', () => {
     }
   })
 
+  it('accepts a later valid preparation commit without changing the codec', () => {
+    const { bytes, metadata } = encodedFixture()
+    const laterPreparation = withMetadata(metadata, {
+      preparedFromCommit:
+        FLOWING_CONTOURS_REFERENCE_REVISIONS.pencilContour,
+    })
+    expect(
+      decodeFlowingContoursPreparedRaster(bytes, laterPreparation),
+    ).not.toBeNull()
+  })
+
   it('keeps output evidence out of the prepared-input schema', () => {
     const { metadata } = encodedFixture()
     expect(Object.keys(metadata).sort()).toEqual([
@@ -318,6 +331,7 @@ describe('Flowing Contours prepared reference fixtures', () => {
       'preparedFromCommit',
       'regions',
       'source',
+      'topologyChecks',
     ])
     for (const forbidden of [
       'acceptedTrajectories',
@@ -329,5 +343,39 @@ describe('Flowing Contours prepared reference fixtures', () => {
     ]) {
       expect(metadata).not.toHaveProperty(forbidden)
     }
+  })
+
+  it('rejects unknown top-level input and output evidence fields', () => {
+    const { bytes, metadata } = encodedFixture()
+    for (const forbidden of [
+      'rgba',
+      'scene',
+      'metrics',
+      'diagnostics',
+      'unknown',
+    ]) {
+      expect(
+        decodeFlowingContoursPreparedRaster(
+          bytes,
+          {
+            ...metadata,
+            [forbidden]: Object.freeze({}),
+          } as Readonly<FlowingContoursFixtureMetadata>,
+        ),
+      ).toBeNull()
+    }
+
+    const hostile = { ...metadata }
+    Object.defineProperty(hostile, 'rgba', {
+      get() {
+        throw new Error('hostile output evidence')
+      },
+    })
+    expect(
+      decodeFlowingContoursPreparedRaster(
+        bytes,
+        hostile as Readonly<FlowingContoursFixtureMetadata>,
+      ),
+    ).toBeNull()
   })
 })
