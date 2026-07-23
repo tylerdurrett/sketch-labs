@@ -93,6 +93,65 @@ node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
 With no arguments, verify fixtures and, once a committed evidence manifest is
 present, evidence as well.
 
+## Flowing Contours prepared inputs
+
+`prepare-flowing-contours-reference.mjs` creates or verifies only the canonical
+FC23 prepared-input fixtures for the flower and pinecone references. It starts
+Studio through Vite, uses the Chrome revision pinned by the checked-in browser
+skill, decodes each production Image Asset through `decodeImageAsset`, and runs
+`prepareFlowingContoursRaster`. The FC23 helper performs the canonical
+three-plane Float64LE encoding and strict metadata round-trip.
+
+The fixture metadata pins the exact source bytes and dimensions, Composition
+Frame, authored Flowing Contours controls, full-frame and dense-detail crops,
+named regions, topology checks, and Pencil Contour and Watercolor Forms
+comparator revisions. Every run also refuses dirty or commit-divergent
+Flowing production, comparator, FC23 test-contract, Studio decoder, preparation
+tool, and browser-pin inventories. Its JSON result reports the SHA-256 of every
+protected file and each aggregate inventory.
+
+The command is deliberately input-only. It does not import the Flowing Contours
+generator, produce a `Scene`, compute quality metrics, render or compose PNGs,
+or create review evidence.
+
+Exercise the non-browser guards:
+
+```sh
+node apps/studio/scripts/prepare-flowing-contours-reference.mjs --help
+node apps/studio/scripts/prepare-flowing-contours-reference.mjs --self-test
+```
+
+Use `--dry-run` with an exact clean commit to exercise the complete pinned
+browser decode and canonical preparation twice without reading or writing any
+fixture:
+
+```sh
+node apps/studio/scripts/prepare-flowing-contours-reference.mjs \
+  --dry-run \
+  --provenance-commit "$(git rev-parse HEAD)"
+```
+
+After the Flowing Contours production implementation is calibrated and
+committed, write both provisional prepared inputs with that exact full commit
+SHA:
+
+```sh
+node apps/studio/scripts/prepare-flowing-contours-reference.mjs \
+  --write \
+  --provenance-commit "$(git rev-parse HEAD)"
+```
+
+The production tree must be byte-identical to the supplied commit. The script
+captures each input twice and refuses nondeterministic browser decoding or
+preparation. Fixture bytes are committed only in the later freeze step.
+
+Once the two `.f64le` files and their JSON sidecars are committed, verify them
+without changing their recorded preparation commit:
+
+```sh
+node apps/studio/scripts/prepare-flowing-contours-reference.mjs
+```
+
 ## Optional weak-component replay
 
 The expensive counterfactual weak-evidence replay is an offline diagnostic,
