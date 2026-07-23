@@ -40,18 +40,18 @@ const REPOSITORY_ROOT = fileURLToPath(
 const REFERENCE_ROOT =
   'packages/core/src/sketches/watercolor-forms/reference'
 const FIXTURE_ROOT = 'packages/core/src/__tests__/fixtures'
-const TUNING_COMMIT = 'f567708cd04b2771bdcccde9965fc738d63bf1d4'
-const FIXTURE_COMMIT = 'c793c507359373262dc87aae301d0b4efe554515'
-const ARTIFACT_COMMIT = 'f6b6e5c7353d703be3491b44c746c2a9622abf5e'
+const TUNING_COMMIT = 'b2624401209581d26ebee20a4896fce822ea4fc4'
+const FIXTURE_COMMIT = '844de023fca256f6a0381f8b572037d55b144000'
+const ARTIFACT_COMMIT = '4b5324cd8ca3a33f180cc7c476e4b03988882b7c'
 const ATTESTATION_COMMIT =
-  'f67c2b3dbe95900e2663efc83f52b8f80a8ab1fc'
+  '89dd3a86dae22cfd62025eb4487ca2c063b59029'
 const PENCIL_REVISION = 'b6147366448d37021e20d48326045a6cba3039ca'
 const README_SHA256 =
-  '05d443161b52be1fb8429e7bc562c581a7fc98deb675d89ef78f968425c05744'
+  'fdea45e48212a86f3a6b13d0c831bd333a77663176a57fab2557106d317937a5'
 const FIXTURE_BUNDLE_SHA256 =
-  '9525d28ae232f9dcac8ef93d8226997f92a5ba068d8e4971a4a5d04dd0107901'
+  '569e09f953d317df9c3af3a50f808b213144af00232c4cb31fb0e37c8168f093'
 const WATERCOLOR_PRODUCTION_SHA256 =
-  'a7df972f6da99bacdf87dff48fe28ca6876589cd8201a138a9a94db1ff8b368c'
+  'f012e59459d0da90b780477a036216d6fb0cf16c35af132000795a3f9240c773'
 const PENCIL_PRODUCTION_SHA256 =
   '136cb6800aef6c31bcc7a8422568cb61dc9db7c235986fa60bed85c7a103e5f5'
 const SHA256_ALGORITHM = 'sha256(path + NUL + bytes + NUL), paths sorted'
@@ -61,6 +61,9 @@ const ISO_UTC_PATTERN = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/
 
 const FRAME = Object.freeze({ width: 1000, height: 1000 })
 const WATERCOLOR_CONTROLS = Object.freeze({
+  gamma: 0.5,
+  contrast: 0.5,
+  pivot: 0.5,
   formDetail: 0.5,
   colorSensitivity: 0.5,
   boundaryStrength: 0.5,
@@ -154,7 +157,7 @@ const CASE_IDENTITIES = Object.freeze({
     watercolorBinarySha256:
       '96566d85d6f3deb1775359a1cf5d702f00b32e83e34ede933090af9f74c35b29',
     watercolorMetadataSha256:
-      '6f9d2a99632a39bb2c7945e8a03414b6cb163887009f33835f82d9b59a7538fd',
+      '8ed802b255213da92dc285366150281e162ff90b139beb40b0410ba2507a2385',
     pencilBinarySha256:
       '4f5b3585da7214c2ac1ab848f094e0c155f1dbed96430128a4a1cc0a6a7c13b5',
     pencilMetadataSha256:
@@ -164,9 +167,9 @@ const CASE_IDENTITIES = Object.freeze({
       'd50eff09aa829042df2b1aa5bc7e9bb2df35d27bbad67e3acbb176a024f71bec',
     pngs: Object.freeze({
       'flower-full-frame-comparison.png':
-        '916014a0836f16d8b68c461b4ee1b275db70dd349abad30075ec6f240375c6f0',
+        'fc2ed66b3d10cd6f9d4d01963b8bfff9c99a593e239ac74ce1723a548e8e817f',
       'flower-dense-detail-comparison.png':
-        '771c6caeef0a79566d91e3cb79ed17fde91d8d8b06fcc1272bac9867c9900496',
+        'f9f2472a6c2965ae199d208d4693475a7a28560aec393786bf9ae7bb096243f3',
     }),
   }),
   pinecone: Object.freeze({
@@ -187,19 +190,19 @@ const CASE_IDENTITIES = Object.freeze({
     watercolorBinarySha256:
       'fc5dfd6b9e2b08b7a974aa6355d65a3ed95ef3e180e5224a10d228707b7b5619',
     watercolorMetadataSha256:
-      'f04f4daf34ce89ec3e395d3d945dda2b744460e4f271663a0884d5933c3c70df',
+      'a2aef1699c6779c87a26762f3416070678b50b7d59096a9cae627ef01a376dfd',
     pencilBinarySha256:
       '6fce17db851aebe835316e6c898f035070a0ebcd3e8dcc12a000c163b0eab004',
     pencilMetadataSha256:
-      'f5b8f502a7c352e1eea1fc81973354a512ba2a830153589e4a8127395d4cc716',
-    pencilFixtureRevision: 'd4c3c05c0ea0574e0f17677f7db471c34942ae24',
+      'c92d4cc038b00548b5efb979cbe2671cd0467dcc81152523df284da2492cd47c',
+    pencilFixtureRevision: 'b2624401209581d26ebee20a4896fce822ea4fc4',
     pencilGeometrySha256:
       '8f23638a1a24f600590d360b4ebca3d710a59ad45d3bd7a5334434a2e33a42cb',
     pngs: Object.freeze({
       'pinecone-full-frame-comparison.png':
-        '90e76499046a1f0740b0e1159726efc5f929a4706b6bef1ebb4fe08ed8872686',
+        'e859a9871909804f54db02aeb0c297d6899a2e8d6740969a1c2b7c1c2d0230c2',
       'pinecone-dense-detail-comparison.png':
-        '55c90f63c8298ee057bdfee4ed18fb47a2ec9cd19451dbb6e38d5bdf4e4d9469',
+        '6778d14d04dd80749d2ce8163d3e99d1e55d198cf9c101e6221ee3db1eb9b75b',
     }),
   }),
 })
@@ -1051,10 +1054,10 @@ describe('Watercolor Forms exact reference evidence', () => {
       schemaVersion: 1,
       referenceId: 'watercolor-forms-pencil-comparison',
       reviewer: {
-        identifier: '/root/attest_wf18',
-        role: 'independent WF18 artistic reviewer',
+        identifier: '/root/visual_evidence_review',
+        role: 'independent post-smoothing artistic reviewer',
       },
-      reviewedAt: '2026-07-23T06:07:54Z',
+      reviewedAt: '2026-07-23T12:29:15Z',
       artifactCommit: ARTIFACT_COMMIT,
       independence:
         'The reviewer did not implement the tuning or capture artifacts.',
