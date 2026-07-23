@@ -40,6 +40,12 @@ const MAXIMUM_OVERLAP_SAMPLES_PER_SEGMENT = 64
 const DEFAULT_MINIMUM_EVIDENCE = 0.04
 const DEFAULT_MINIMUM_COHERENCE = 0.25
 const DEFAULT_MAXIMUM_AMBIGUITY = 0.7
+const HARD_RESOLVED_AMBIGUITY_MAXIMUM = 1 - 1e-9
+const ANCHOR_EVIDENCE_EPSILON = 1e-12
+const ANCHOR_MATCH_TOLERANCE = 1e-10
+const ANCHOR_MINIMUM_COHERENCE = 0.2
+const ANCHOR_MAXIMUM_AMBIGUITY = 0.82
+const ANCHOR_MINIMUM_SELECTION_SCORE = 0.04
 
 export interface FlowingContoursSearchOptions
   extends FlowingContoursDirectionalGrowthOptions {}
@@ -51,6 +57,7 @@ interface ResolvedSearchOptions {
   readonly representedOverlapSampler:
     | FlowingContoursRepresentedOverlapSampler
     | null
+  readonly overlapSamplerInvalid: () => boolean
   readonly minimumEvidence: number
   readonly minimumCoherence: number
   readonly maximumAmbiguity: number
@@ -86,8 +93,11 @@ function snapshotSample(
   try {
     const point = frozenPoint(source.point[0], source.point[1])
     const tangent = unit(source.tangent)
+    const tangentLength = Math.hypot(source.tangent[0], source.tangent[1])
     if (
       tangent === null ||
+      !Number.isFinite(tangentLength) ||
+      Math.abs(tangentLength - 1) > 1e-8 ||
       !Number.isFinite(point[0]) ||
       !Number.isFinite(point[1]) ||
       !Number.isFinite(source.evidence) ||
@@ -124,9 +134,130 @@ function snapshotSample(
   }
 }
 
+function bilinearEvidence(
+  field: Readonly<FlowingContoursField>,
+  point: Readonly<Point>,
+): number | null {
+  const x = point[0]
+  const y = point[1]
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    x < 0 ||
+    y < 0 ||
+    x > field.width - 1 ||
+    y > field.height - 1
+  ) {
+    return null
+  }
+  const left = Math.floor(x)
+  const top = Math.floor(y)
+  const right = Math.min(left + 1, field.width - 1)
+  const bottom = Math.min(top + 1, field.height - 1)
+  const horizontal = x - left
+  const vertical = y - top
+  const topValue =
+    field.contourEvidence[top * field.width + left]! * (1 - horizontal) +
+    field.contourEvidence[top * field.width + right]! * horizontal
+  const bottomValue =
+    field.contourEvidence[bottom * field.width + left]! * (1 - horizontal) +
+    field.contourEvidence[bottom * field.width + right]! * horizontal
+  const value = topValue * (1 - vertical) + bottomValue * vertical
+  return Number.isFinite(value) ? value : null
+}
+
+function nearlyEqual(first: number, second: number): boolean {
+  return (
+    Number.isFinite(first) &&
+    Number.isFinite(second) &&
+    Math.abs(first - second) <= ANCHOR_MATCH_TOLERANCE
+  )
+}
+
+function matchesSample(
+  supplied: Readonly<CorrectedFlowingRidgeSample>,
+  expected: Readonly<CorrectedFlowingRidgeSample>,
+): boolean {
+  return (
+    nearlyEqual(supplied.point[0], expected.point[0]) &&
+    nearlyEqual(supplied.point[1], expected.point[1]) &&
+    nearlyEqual(supplied.tangent[0], expected.tangent[0]) &&
+    nearlyEqual(supplied.tangent[1], expected.tangent[1]) &&
+    nearlyEqual(supplied.evidence, expected.evidence) &&
+    nearlyEqual(supplied.coherence, expected.coherence) &&
+    nearlyEqual(supplied.ambiguity, expected.ambiguity) &&
+    nearlyEqual(supplied.scale, expected.scale) &&
+    nearlyEqual(supplied.alpha, expected.alpha)
+  )
+}
+
+function ownedAnchorSample(
+  field: Readonly<FlowingContoursField>,
+  fieldSampleIndex: number,
+): Readonly<CorrectedFlowingRidgeSample> | null {
+  if (
+    !field.positiveSupport[fieldSampleIndex] ||
+    field.contourEvidence[fieldSampleIndex]! <= ANCHOR_EVIDENCE_EPSILON
+  ) {
+    return null
+  }
+  const x = fieldSampleIndex % field.width
+  const y = Math.floor(fieldSampleIndex / field.width)
+  const tangentX = field.tangentX[fieldSampleIndex]!
+  const tangentY = field.tangentY[fieldSampleIndex]!
+  const normalX = -tangentY
+  const normalY = tangentX
+  const centerEvidence = field.contourEvidence[fieldSampleIndex]!
+  const minusEvidence = bilinearEvidence(field, [
+    x - normalX,
+    y - normalY,
+  ])
+  const plusEvidence = bilinearEvidence(field, [
+    x + normalX,
+    y + normalY,
+  ])
+  if (
+    minusEvidence === null ||
+    plusEvidence === null ||
+    centerEvidence + ANCHOR_EVIDENCE_EPSILON < minusEvidence ||
+    centerEvidence + ANCHOR_EVIDENCE_EPSILON < plusEvidence
+  ) {
+    return null
+  }
+  const denominator = minusEvidence - 2 * centerEvidence + plusEvidence
+  const correction =
+    denominator < -ANCHOR_EVIDENCE_EPSILON
+      ? Math.max(
+          -0.5,
+          Math.min(
+            0.5,
+            (0.5 * (minusEvidence - plusEvidence)) / denominator,
+          ),
+        )
+      : 0
+  const expected = sampleFlowingContoursField(field, [
+    x + normalX * correction,
+    y + normalY * correction,
+  ])
+  if (
+    expected === null ||
+    expected.evidence <= ANCHOR_EVIDENCE_EPSILON ||
+    expected.coherence < ANCHOR_MINIMUM_COHERENCE ||
+    expected.ambiguity > ANCHOR_MAXIMUM_AMBIGUITY ||
+    expected.evidence *
+      (0.45 + 0.55 * expected.coherence) *
+      (1 - 0.7 * expected.ambiguity) +
+      ANCHOR_EVIDENCE_EPSILON <
+      ANCHOR_MINIMUM_SELECTION_SCORE
+  ) {
+    return null
+  }
+  return expected
+}
+
 function snapshotAnchor(
   source: Readonly<FlowingContoursAnchor>,
-  fieldSampleCount: number,
+  field: Readonly<FlowingContoursField>,
 ): Readonly<FlowingContoursAnchor> | null {
   try {
     const sample = snapshotSample(source.sample)
@@ -136,10 +267,12 @@ function snapshotAnchor(
       source.id < 0 ||
       !Number.isSafeInteger(source.fieldSampleIndex) ||
       source.fieldSampleIndex < 0 ||
-      source.fieldSampleIndex >= fieldSampleCount
+      source.fieldSampleIndex >= field.width * field.height
     ) {
       return null
     }
+    const expected = ownedAnchorSample(field, source.fieldSampleIndex)
+    if (expected === null || !matchesSample(sample, expected)) return null
     return Object.freeze({
       id: source.id,
       fieldSampleIndex: source.fieldSampleIndex,
@@ -189,7 +322,12 @@ function resolveOptions(
     }
 
     const suppliedAlternatives = source.directionAlternatives ?? []
-    if (!Array.isArray(suppliedAlternatives)) return null
+    if (
+      !Array.isArray(suppliedAlternatives) ||
+      suppliedAlternatives.length + 1 > breadth
+    ) {
+      return null
+    }
     const forwardAlternatives: Readonly<Point>[] = []
     const backwardAlternatives: Readonly<Point>[] = []
     for (const alternative of suppliedAlternatives) {
@@ -205,7 +343,6 @@ function resolveOptions(
       forwardAlternatives.push(direction)
       backwardAlternatives.push(frozenPoint(-direction[0], -direction[1]))
     }
-    if (forwardAlternatives.length + 1 > breadth) return null
 
     const ridgeSource = (source.ridgeStepOptions ?? {}) as Readonly<
       Record<string, unknown>
@@ -278,15 +415,33 @@ function resolveOptions(
         : { predictorHeadingInfluence }),
     })
 
-    const sampler = source.representedOverlapSampler ?? null
+    const sourceSampler = source.representedOverlapSampler ?? null
     const collisionThreshold =
       source.representedCollisionThreshold ?? 0.7
     if (
-      (sampler !== null && typeof sampler !== 'function') ||
+      (sourceSampler !== null && typeof sourceSampler !== 'function') ||
       !isUnitInterval(collisionThreshold)
     ) {
       return null
     }
+    let invalidOverlapSample = false
+    const sampler =
+      sourceSampler === null
+        ? null
+        : (point: Readonly<Point>): number => {
+            if (invalidOverlapSample) return Number.NaN
+            try {
+              const value = sourceSampler(point)
+              if (!isUnitInterval(value)) {
+                invalidOverlapSample = true
+                return Number.NaN
+              }
+              return value
+            } catch {
+              invalidOverlapSample = true
+              return Number.NaN
+            }
+          }
     const common: FlowingContoursDirectionalGrowthOptions = {
       continuity: source.continuity,
       flowSmoothing: source.flowSmoothing,
@@ -305,6 +460,7 @@ function resolveOptions(
       }),
       flowSmoothing: source.flowSmoothing,
       representedOverlapSampler: sampler,
+      overlapSamplerInvalid: () => invalidOverlapSample,
       minimumEvidence: minimumEvidence ?? DEFAULT_MINIMUM_EVIDENCE,
       minimumCoherence: minimumCoherence ?? DEFAULT_MINIMUM_COHERENCE,
       maximumAmbiguity: maximumAmbiguity ?? DEFAULT_MAXIMUM_AMBIGUITY,
@@ -338,13 +494,15 @@ function snapshotLimits(
   }
 }
 
-function withStepLimit(
+function withGrowthLimits(
   limits: Readonly<FlowingContoursLimits>,
   searchStepCount: number,
+  rawTrajectoryPointCount: number,
 ): Readonly<FlowingContoursLimits> {
   return Object.freeze({
     ...limits,
     'search-step-count': searchStepCount,
+    'raw-trajectory-point-count': rawTrajectoryPointCount,
   })
 }
 
@@ -631,9 +789,15 @@ function supportedLoopClosure(
         last.point[1] + dy * parameter,
       ),
     )
+    const sampledTangent =
+      sampled === null ? null : unit(sampled.tangent)
     if (
       sampled === null ||
+      sampledTangent === null ||
       sampled.alpha <= 0 ||
+      sampled.evidence <= 0 ||
+      sampled.coherence <= 0 ||
+      sampled.ambiguity >= HARD_RESOLVED_AMBIGUITY_MAXIMUM ||
       sampled.evidence < options.minimumEvidence ||
       sampled.coherence < options.minimumCoherence ||
       sampled.ambiguity > options.maximumAmbiguity
@@ -641,7 +805,7 @@ function supportedLoopClosure(
       return null
     }
     const sampledAlignment = Math.abs(
-      alignment(sampled.tangent, closureDirection),
+      alignment(sampledTangent, closureDirection),
     )
     if (sampledAlignment < LOOP_ALIGNMENT_FLOOR) return null
     minimumAlignment = Math.min(minimumAlignment, sampledAlignment)
@@ -736,7 +900,7 @@ export function searchFlowingContoursCandidate(
   try {
     const limits = snapshotLimits(limitsSource)
     if (limits === null || !hasValidField(field, limits)) return null
-    const anchor = snapshotAnchor(anchorSource, field.width * field.height)
+    const anchor = snapshotAnchor(anchorSource, field)
     if (
       anchor === null ||
       anchor.sample.point[0] < 0 ||
@@ -753,14 +917,22 @@ export function searchFlowingContoursCandidate(
     if (options === null) return null
 
     const globalStepLimit = limits['search-step-count']
+    const globalRawPointLimit = limits['raw-trajectory-point-count']
+    if (globalRawPointLimit < 1) return null
     const forwardStepLimit = Math.ceil(globalStepLimit / 2)
+    const forwardRawPointLimit =
+      1 + Math.ceil((globalRawPointLimit - 1) / 2)
     const forward = growFlowingContoursDirection(
       field,
       anchor.sample,
       forwardDirection,
       'forward',
       options.forward,
-      withStepLimit(limits, forwardStepLimit),
+      withGrowthLimits(
+        limits,
+        forwardStepLimit,
+        forwardRawPointLimit,
+      ),
     )
     if (
       !isValidTrace(
@@ -768,11 +940,15 @@ export function searchFlowingContoursCandidate(
         'forward',
         anchor.sample.point,
         forwardStepLimit,
-      )
+      ) ||
+      options.overlapSamplerInvalid()
     ) {
       return null
     }
     const backwardStepLimit = globalStepLimit - forward.searchStepCount
+    const backwardRawPointLimit =
+      globalRawPointLimit - (forward.samples.length - 1)
+    if (backwardRawPointLimit < 1) return null
     const backwardDirection = frozenPoint(
       -forwardDirection[0],
       -forwardDirection[1],
@@ -783,7 +959,11 @@ export function searchFlowingContoursCandidate(
       backwardDirection,
       'backward',
       options.backward,
-      withStepLimit(limits, backwardStepLimit),
+      withGrowthLimits(
+        limits,
+        backwardStepLimit,
+        backwardRawPointLimit,
+      ),
     )
     if (
       !isValidTrace(
@@ -792,7 +972,8 @@ export function searchFlowingContoursCandidate(
         anchor.sample.point,
         backwardStepLimit,
       ) ||
-      forward.searchStepCount + backward.searchStepCount > globalStepLimit
+      forward.searchStepCount + backward.searchStepCount > globalStepLimit ||
+      options.overlapSamplerInvalid()
     ) {
       return null
     }
@@ -821,13 +1002,17 @@ export function searchFlowingContoursCandidate(
       ...forwardSupport,
     ]
 
-    const closure = supportedLoopClosure(field, samples, options)
-    if (closure !== null) {
+    const closure =
+      samples.length < globalRawPointLimit
+        ? supportedLoopClosure(field, samples, options)
+        : null
+    if (closure !== null && samples.length + 1 <= globalRawPointLimit) {
       const duplicate = snapshotSample(samples[0]!)
       if (duplicate === null) return null
       samples.push(duplicate)
       spanSupport.push(closure)
     }
+    if (samples.length > globalRawPointLimit) return null
     const frozenSamples = Object.freeze(samples)
     const frozenSupport = Object.freeze(spanSupport)
     const length = polylineLength(frozenSamples)
@@ -836,6 +1021,7 @@ export function searchFlowingContoursCandidate(
       frozenSamples,
     )
     if (length === null || representedOverlap === null) return null
+    if (options.overlapSamplerInvalid()) return null
 
     const sampleCount = frozenSamples.length
     const segmentCount = Math.max(1, sampleCount - 1)

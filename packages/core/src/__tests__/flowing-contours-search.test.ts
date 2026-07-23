@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { createFlowingContoursAccounting } from '../sketches/flowing-contours/accounting'
+import { buildFlowingContoursAnchorInventory } from '../sketches/flowing-contours/anchors'
 import { sampleFlowingContoursField } from '../sketches/flowing-contours/field'
 import { createFlowingContoursTestLimits } from '../sketches/flowing-contours/limits'
 import {
@@ -205,6 +207,29 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     ])
   })
 
+  it('accepts an off-lattice anchor produced by FC06 ownership correction', () => {
+    const source = field(17, 11, (_x, y) => ({
+      evidence: gaussian(y - 5.3),
+      tangent: [1, 0],
+    }))
+    const inventory = buildFlowingContoursAnchorInventory(
+      source,
+      createFlowingContoursAccounting(),
+    )
+    const owned = inventory.anchors[0]
+
+    expect(owned).toBeDefined()
+    expect(owned!.sample.point[1]).not.toBe(Math.round(owned!.sample.point[1]))
+    expect(
+      searchFlowingContoursCandidate(
+        source,
+        owned!,
+        OPTIONS,
+        limits(),
+      ),
+    ).not.toBeNull()
+  })
+
   it('preserves interrupted supported-gap provenance after reversal', () => {
     const source = field(23, 9, (x, y) => ({
       evidence:
@@ -278,17 +303,84 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
       anchor(source, [19, 12]),
       OPTIONS,
       limits({
-        'search-step-count': 64,
-        'raw-trajectory-point-count': 22,
+        'search-step-count': 42,
+        'raw-trajectory-point-count': 44,
       }),
     )!
 
     expect(candidate.samples.at(-1)!.point).toEqual(candidate.samples[0]!.point)
+    expect(candidate.samples.length).toBeLessThanOrEqual(44)
     expect(candidate.spanSupport.at(-1)).toMatchObject({
       kind: 'direct-evidence',
       startSampleIndex: candidate.samples.length - 2,
       endSampleIndex: candidate.samples.length - 1,
     })
+  })
+
+  it('does not close across a zero-evidence unresolved bridge even with permissive ridge options', () => {
+    const source = field(25, 25, (x, y) => {
+      const dx = x - 12
+      const dy = y - 12
+      const radius = Math.hypot(dx, dy)
+      const unresolved = (x === 5 || x === 6) && y === 12
+      return {
+        evidence: unresolved ? 0 : gaussian(radius - 7, 0.7),
+        tangent:
+          unresolved || radius === 0
+            ? ([0, 0] as const)
+            : ([-dy / radius, dx / radius] as const),
+        coherence: unresolved ? 0 : 1,
+        ambiguity: unresolved ? 1 : 0,
+      }
+    })
+    const candidate = searchFlowingContoursCandidate(
+      source,
+      anchor(source, [19, 12]),
+      {
+        ...OPTIONS,
+        ridgeStepOptions: {
+          ...OPTIONS.ridgeStepOptions,
+          minimumEvidence: 0,
+          minimumCoherence: 0,
+          maximumAmbiguity: 1,
+        },
+      },
+      limits({
+        'search-step-count': 42,
+        'raw-trajectory-point-count': 44,
+      }),
+    )!
+
+    expect(candidate.samples.at(-1)!.point).not.toEqual(
+      candidate.samples[0]!.point,
+    )
+  })
+
+  it('keeps a supported closure inside the shared raw-point cap', () => {
+    const source = field(25, 25, (x, y) => {
+      const dx = x - 12
+      const dy = y - 12
+      const radius = Math.hypot(dx, dy)
+      return {
+        evidence: gaussian(radius - 7, 0.7),
+        tangent:
+          radius === 0
+            ? ([1, 0] as const)
+            : ([-dy / radius, dx / radius] as const),
+      }
+    })
+    const capped = searchFlowingContoursCandidate(
+      source,
+      anchor(source, [19, 12]),
+      OPTIONS,
+      limits({
+        'search-step-count': 42,
+        'raw-trajectory-point-count': 43,
+      }),
+    )!
+
+    expect(capped.samples.length).toBeLessThanOrEqual(43)
+    expect(capped.samples.at(-1)!.point).not.toEqual(capped.samples[0]!.point)
   })
 
   it.each([
@@ -318,8 +410,8 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
         anchor(source, [19, 12]),
         OPTIONS,
         limits({
-          'search-step-count': 64,
-          'raw-trajectory-point-count': 24,
+          'search-step-count': 42,
+          'raw-trajectory-point-count': 44,
         }),
       )!
 
@@ -348,6 +440,29 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     ).toBe(5)
     expect(candidate.forward.endpointReason).toBe('safety-limit')
     expect(candidate.backward.endpointReason).toBe('safety-limit')
+  })
+
+  it('shares a three-point raw trajectory cap across both directions', () => {
+    const source = field(101, 9, (_x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+    const candidate = searchFlowingContoursCandidate(
+      source,
+      anchor(source, [50, 4]),
+      OPTIONS,
+      limits({
+        'search-step-count': 20,
+        'raw-trajectory-point-count': 3,
+      }),
+    )!
+
+    expect(candidate.samples).toHaveLength(3)
+    expect(candidate.forward.samples).toHaveLength(2)
+    expect(candidate.backward.samples).toHaveLength(2)
+    expect(
+      candidate.samples.filter((sample) => sample.point[0] === 50),
+    ).toHaveLength(1)
   })
 
   it('returns a frozen anchor-only safety candidate at an exact zero budget', () => {
@@ -475,6 +590,86 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
         limits(),
       ),
     ).toBeNull()
+    expect(
+      searchFlowingContoursCandidate(
+        source,
+        { ...start, fieldSampleIndex: start.fieldSampleIndex + 1 },
+        OPTIONS,
+        limits(),
+      ),
+    ).toBeNull()
+    expect(
+      searchFlowingContoursCandidate(
+        source,
+        {
+          ...start,
+          sample: {
+            ...start.sample,
+            evidence: start.sample.evidence * 0.5,
+          },
+        },
+        OPTIONS,
+        limits(),
+      ),
+    ).toBeNull()
+  })
+
+  it.each([
+    {
+      name: 'one-shot throw',
+      sampler: (() => {
+        let first = true
+        return () => {
+          if (first) {
+            first = false
+            throw new Error('one shot')
+          }
+          return 0
+        }
+      })(),
+    },
+    { name: 'NaN', sampler: () => Number.NaN },
+    { name: 'negative', sampler: () => -0.1 },
+    { name: 'above one', sampler: () => 1.1 },
+  ])('remembers an invalid overlap sample after $name', ({ sampler }) => {
+    const source = field(13, 9, (_x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+
+    expect(
+      searchFlowingContoursCandidate(
+        source,
+        anchor(source, [6, 4]),
+        { ...OPTIONS, representedOverlapSampler: sampler },
+        limits(),
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects oversized alternatives before reading hostile elements', () => {
+    const source = field(13, 9, (_x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+    let elementRead = false
+    const oversized = new Array<Readonly<Point>>(4)
+    Object.defineProperty(oversized, 0, {
+      get() {
+        elementRead = true
+        throw new Error('must not read')
+      },
+    })
+
+    expect(
+      searchFlowingContoursCandidate(
+        source,
+        anchor(source, [6, 4]),
+        { ...OPTIONS, directionAlternatives: oversized },
+        limits(),
+      ),
+    ).toBeNull()
+    expect(elementRead).toBe(false)
   })
 
   it('exposes no endpoint-joining or nearest-endpoint API', async () => {
