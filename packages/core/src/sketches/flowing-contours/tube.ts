@@ -186,6 +186,16 @@ function samePoint(
   )
 }
 
+function sameExactPoint(
+  first: Readonly<Point>,
+  second: Readonly<Point>,
+): boolean {
+  return (
+    Object.is(first[0], second[0]) &&
+    Object.is(first[1], second[1])
+  )
+}
+
 function resolveMaximumSamples(
   options: Readonly<FlowingContoursTubeValidationOptions>,
 ): number | null {
@@ -971,10 +981,9 @@ function matchesNearestSourceSample(
   return (
     (sourceIndex === 0 || sourceIndex === lastIndex) &&
     (nearestIndex === 0 || nearestIndex === lastIndex) &&
-    samePoint(
+    sameExactPoint(
       data.samples[0]!.point,
       data.samples[lastIndex]!.point,
-      ENDPOINT_TOLERANCE,
     ) &&
     samePoint(
       point,

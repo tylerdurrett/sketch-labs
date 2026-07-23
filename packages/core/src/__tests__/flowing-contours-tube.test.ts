@@ -223,6 +223,41 @@ describe('Flowing Contours corrected-trajectory evidence tube', () => {
     })
   })
 
+  it('does not alias a merely near-closed endpoint to the loop origin', () => {
+    const source = field(12, 12)
+    const raw = trajectory(source, [
+      [3, 3],
+      [7, 3],
+      [7, 7],
+      [3, 7],
+      [3 + 5e-10, 3],
+    ])
+    const tube = createFlowingContoursEvidenceTube(source, raw)
+    const identity = raw.samples.map((sample) => sample.point)
+    const snapped = [...identity]
+    snapped[snapped.length - 1] = raw.samples[0]!.point
+
+    expect(tube).not.toBeNull()
+    expect(
+      validateFlowingContoursTubeCurve(source, tube!, {
+        points: identity,
+        sourceSampleIndices: allIndices(raw.samples.length),
+      }),
+    ).not.toBeNull()
+    expect(
+      validateFlowingContoursTubePoint(source, tube!, {
+        point: raw.samples[0]!.point,
+        sourceSampleIndex: raw.samples.length - 1,
+      }),
+    ).toBeNull()
+    expect(
+      validateFlowingContoursTubeCurve(source, tube!, {
+        points: snapped,
+        sourceSampleIndices: allIndices(raw.samples.length),
+      }),
+    ).toBeNull()
+  })
+
   it('accepts points on the local scale tube and rejects points outside it', () => {
     const source = field(12, 9)
     const raw = trajectory(source, [

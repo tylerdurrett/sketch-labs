@@ -31,6 +31,7 @@ import type {
 } from './types'
 
 const VECTOR_EPSILON = 1e-12
+const UNIT_TANGENT_PRESERVATION_TOLERANCE = 8 * Number.EPSILON
 const GAP_ALIGNMENT_FLOOR = 0.75
 const MINIMUM_GROWTH_STEP_LENGTH = 0.125
 const DEFAULT_RIDGE_STEP_LENGTH = 0.75
@@ -214,7 +215,8 @@ function snapshotSample(
     const tangent =
       alignment === null
         ? null
-        : Math.abs(tangentLength - 1) <= 1e-8
+        : Math.abs(tangentLength - 1) <=
+            UNIT_TANGENT_PRESERVATION_TOLERANCE
           ? frozenPoint(
               source.tangent[0] * tangentSign,
               source.tangent[1] * tangentSign,

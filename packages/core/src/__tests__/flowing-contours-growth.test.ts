@@ -146,8 +146,8 @@ describe('Flowing Contours directional growth', () => {
   })
 
   it('preserves the corrected anchor tangent components exactly', () => {
-    const length = Math.hypot(7, 3)
-    const tangent = [7 / length, 3 / length] as const
+    const angle = 0.37
+    const tangent = [Math.cos(angle), Math.sin(angle)] as const
     const source = field(9, 9, () => ({
       evidence: 1,
       tangent,
@@ -168,6 +168,36 @@ describe('Flowing Contours directional growth', () => {
     expect(
       Object.is(trace.samples[0]!.tangent[1], anchor.tangent[1]),
     ).toBe(true)
+  })
+
+  it('normalizes a crafted near-unit tangent outside ulp-scale provenance', () => {
+    const angle = 0.37
+    const source = field(9, 9, () => ({
+      evidence: 1,
+      tangent: [Math.cos(angle), Math.sin(angle)],
+    }))
+    const anchor = at(source, [4, 4])
+    const craftedLength = 1 + 5e-9
+    const crafted = Object.freeze({
+      ...anchor,
+      tangent: Object.freeze([
+        anchor.tangent[0] * craftedLength,
+        anchor.tangent[1] * craftedLength,
+      ] as Point),
+    })
+    const trace = growFlowingContoursDirection(
+      source,
+      crafted,
+      crafted.tangent,
+      'forward',
+      OPTIONS,
+      createFlowingContoursTestLimits({ 'search-step-count': 1 })!,
+    )
+    const result = trace.samples[0]!.tangent
+
+    expect(Object.is(result[0], crafted.tangent[0])).toBe(false)
+    expect(Object.is(result[1], crafted.tangent[1])).toBe(false)
+    expect(Math.hypot(result[0], result[1])).toBeCloseTo(1, 15)
   })
 
   it('follows a smooth curve without quantizing it into lattice turns', () => {
