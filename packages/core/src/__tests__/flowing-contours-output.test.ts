@@ -15,7 +15,7 @@ import {
   renderToSVG,
   type Canvas2DContext,
 } from '../renderer'
-import type { Scene } from '../scene'
+import type { Primitive, Scene } from '../scene'
 import {
   createFlowingContours,
   defaultFlowingContoursControls,
@@ -26,6 +26,9 @@ const FRAME = Object.freeze({ width: 100, height: 100 })
 const ASSET_ID = 'flowing-output-fixture'
 const TOOL_WIDTH_MILLIMETERS = 0.8
 const MILLIMETERS_PER_SCENE_UNIT = 0.4
+// Noncommensurate fixed distances at the same relative scale as the reference
+// suite's 7/11/17 samples in its 1000-unit Composition Frame.
+const FIXED_ARC_SPACINGS = Object.freeze([0.7, 1.1, 1.7])
 const PROFILE: PlotProfile = Object.freeze({
   width: 48,
   height: 48,
@@ -180,28 +183,138 @@ function pathLength(
   return length
 }
 
-function abruptOrthogonalTurnShare(scene: Readonly<Scene>): number {
-  let turns = 0
-  let abruptOrthogonalTurns = 0
-  for (const primitive of scene.primitives) {
-    for (let index = 1; index < primitive.points.length - 1; index += 1) {
-      const previous = primitive.points[index - 1]!
-      const current = primitive.points[index]!
-      const next = primitive.points[index + 1]!
-      const incoming = [current[0] - previous[0], current[1] - previous[1]]
-      const outgoing = [next[0] - current[0], next[1] - current[1]]
-      const denominator =
-        Math.hypot(incoming[0]!, incoming[1]!) *
-        Math.hypot(outgoing[0]!, outgoing[1]!)
-      if (denominator === 0) continue
-      turns += 1
-      const cosine =
-        (incoming[0]! * outgoing[0]! + incoming[1]! * outgoing[1]!) /
-        denominator
-      if (Math.abs(cosine) < 0.2) abruptOrthogonalTurns += 1
+function distance(
+  first: Readonly<Point>,
+  second: Readonly<Point>,
+): number {
+  return Math.hypot(second[0] - first[0], second[1] - first[1])
+}
+
+function resampleByArcLength(
+  primitive: Readonly<Primitive>,
+  spacing: number,
+): readonly Readonly<Point>[] {
+  const source = [...primitive.points]
+  if (
+    primitive.closed &&
+    source.length > 1 &&
+    distance(source[0]!, source.at(-1)!) > 1e-9
+  ) {
+    source.push(source[0]!)
+  }
+  if (source.length < 2) return source
+
+  const result: Point[] = [[source[0]![0], source[0]![1]]]
+  let remaining = spacing
+  let segmentStart = source[0]!
+  for (let index = 1; index < source.length; index += 1) {
+    const segmentEnd = source[index]!
+    let segmentLength = distance(segmentStart, segmentEnd)
+    while (segmentLength + 1e-9 >= remaining) {
+      const fraction = remaining / segmentLength
+      const point: Point = [
+        segmentStart[0] + (segmentEnd[0] - segmentStart[0]) * fraction,
+        segmentStart[1] + (segmentEnd[1] - segmentStart[1]) * fraction,
+      ]
+      result.push(point)
+      segmentStart = point
+      segmentLength = distance(segmentStart, segmentEnd)
+      remaining = spacing
+    }
+    remaining -= segmentLength
+    segmentStart = segmentEnd
+  }
+  const last = source.at(-1)!
+  if (!primitive.closed && distance(result.at(-1)!, last) > spacing * 0.25) {
+    result.push([last[0], last[1]])
+  }
+  return result
+}
+
+interface TurnMetrics {
+  readonly sampleCount: number
+  readonly energyPerTurn: number
+  readonly maximum: number
+  readonly over25Share: number
+  readonly over45Share: number
+  readonly orthogonalAlternationShare: number
+}
+
+function measureTurns(
+  points: readonly Readonly<Point>[],
+  closed: boolean,
+): TurnMetrics {
+  const turns: number[] = []
+  const signedTurns: number[] = []
+  const lastIndex = closed ? points.length : points.length - 1
+  for (let index = closed ? 0 : 1; index < lastIndex; index += 1) {
+    const previous = points[(index - 1 + points.length) % points.length]!
+    const current = points[index]!
+    const next = points[(index + 1) % points.length]!
+    const incomingX = current[0] - previous[0]
+    const incomingY = current[1] - previous[1]
+    const outgoingX = next[0] - current[0]
+    const outgoingY = next[1] - current[1]
+    if (
+      Math.hypot(incomingX, incomingY) <= 1e-9 ||
+      Math.hypot(outgoingX, outgoingY) <= 1e-9
+    ) {
+      continue
+    }
+    const signed = Math.atan2(
+      incomingX * outgoingY - incomingY * outgoingX,
+      incomingX * outgoingX + incomingY * outgoingY,
+    )
+    signedTurns.push(signed)
+    turns.push(Math.abs(signed))
+  }
+
+  let orthogonalAlternations = 0
+  for (let index = 1; index < signedTurns.length; index += 1) {
+    const previous = signedTurns[index - 1]!
+    const current = signedTurns[index]!
+    if (
+      Math.abs(previous) > Math.PI / 4 &&
+      Math.abs(current) > Math.PI / 4 &&
+      Math.sign(previous) !== Math.sign(current)
+    ) {
+      orthogonalAlternations += 1
     }
   }
-  return turns === 0 ? 0 : abruptOrthogonalTurns / turns
+  const turnCount = Math.max(1, turns.length)
+  return {
+    sampleCount: points.length,
+    energyPerTurn:
+      turns.reduce((sum, turn) => sum + turn * turn, 0) / turnCount,
+    maximum: Math.max(0, ...turns),
+    over25Share:
+      turns.filter((turn) => turn > (25 * Math.PI) / 180).length / turnCount,
+    over45Share:
+      turns.filter((turn) => turn > Math.PI / 4).length / turnCount,
+    orthogonalAlternationShare:
+      orthogonalAlternations / Math.max(1, signedTurns.length - 1),
+  }
+}
+
+function expectFlowyPath(primitive: Readonly<Primitive>): void {
+  const raw = measureTurns(primitive.points, Boolean(primitive.closed))
+  expect(raw.over45Share).toBeLessThan(0.15)
+  expect(raw.orthogonalAlternationShare).toBeLessThan(0.05)
+
+  // The three noncommensurate spacings prevent a regular staircase from
+  // disappearing merely because one sample interval aliases its step period.
+  for (const spacing of FIXED_ARC_SPACINGS) {
+    const metrics = measureTurns(
+      resampleByArcLength(primitive, spacing),
+      Boolean(primitive.closed),
+    )
+    expect(metrics.sampleCount).toBeGreaterThanOrEqual(2)
+    expect(metrics.maximum).toBeLessThan(Math.PI / 3)
+    expect(metrics.over25Share).toBeLessThan(0.1)
+    expect(metrics.over45Share).toBeLessThan(0.025)
+    expect(metrics.orthogonalAlternationShare).toBe(0)
+    expect(metrics.energyPerTurn).toBeLessThan(0.1)
+  }
 }
 
 function expectFlowingGeometry(
@@ -212,17 +325,22 @@ function expectFlowingGeometry(
     pathLength(primitive.points, primitive.closed),
   )
   const total = lengths.reduce((sum, length) => sum + length, 0)
-  const shortTotal = lengths
-    .filter((length) => length < 20)
+  const shortIndices = lengths.flatMap((length, index) =>
+    length < 20 ? [index] : [],
+  )
+  const longGeometryLength = lengths
+    .filter((length) => length >= 20)
     .reduce((sum, length) => sum + length, 0)
 
   expect(lengths.length).toBeGreaterThan(0)
+  expect(lengths.length).toBeLessThanOrEqual(8)
   expect(Math.max(...lengths)).toBeGreaterThan(minimumLongestPath)
-  expect(shortTotal / total).toBeLessThan(0.1)
+  expect(shortIndices.length / lengths.length).toBeLessThan(0.25)
+  expect(longGeometryLength / total).toBeGreaterThan(0.85)
   expect(
     scene.primitives.every((primitive) => primitive.points.length >= 4),
   ).toBe(true)
-  expect(abruptOrthogonalTurnShare(scene)).toBeLessThan(0.05)
+  for (const primitive of scene.primitives) expectFlowyPath(primitive)
 }
 
 function expectedCanvasPaths(scene: Readonly<Scene>): RecordedPath[] {
@@ -313,16 +431,34 @@ describe('Flowing Contours output contract', () => {
     const outlineSource = sketch.deriveOutlineSource!(scene, target)
     const outlined = hiddenLinePass(outlineSource)
     expectFlowingGeometry(outlined)
-    expect(outlineSource.primitives.map(({ points }) => points)).toEqual(
-      scene.primitives.map(({ points }) => points),
-    )
-    expect(
-      outlineSource.primitives.every(
-        (primitive) =>
-          primitive.stroke?.width ===
+    expect(outlineSource.primitives).toHaveLength(scene.primitives.length)
+    expect(outlined.primitives).toHaveLength(scene.primitives.length)
+    scene.primitives.forEach((completedPrimitive, index) => {
+      const sourcePrimitive = outlineSource.primitives[index]!
+      const outlinedPrimitive = outlined.primitives[index]!
+      expect(sourcePrimitive.points).toEqual(completedPrimitive.points)
+      expect(outlinedPrimitive.points).toEqual(completedPrimitive.points)
+      expect(Boolean(sourcePrimitive.closed)).toBe(
+        Boolean(completedPrimitive.closed),
+      )
+      expect(Boolean(outlinedPrimitive.closed)).toBe(
+        Boolean(completedPrimitive.closed),
+      )
+      expect(completedPrimitive.stroke).toEqual({
+        color: 'black',
+        width: 1,
+      })
+      expect(sourcePrimitive.stroke).toEqual({
+        color: 'black',
+        width:
           TOOL_WIDTH_MILLIMETERS / MILLIMETERS_PER_SCENE_UNIT,
-      ),
-    ).toBe(true)
+      })
+      expect(outlinedPrimitive.stroke).toEqual(sourcePrimitive.stroke)
+      expect(sourcePrimitive.fill).toBeUndefined()
+      expect(outlinedPrimitive.fill).toBeUndefined()
+      expect(sourcePrimitive.hiddenLineRole).toBe('source')
+      expect(outlinedPrimitive.hiddenLineRole).toBeUndefined()
+    })
 
     const outlineCanvas = recordingContext()
     drawSceneFitted(outlineCanvas, outlined, 300, 200, 'transparent')
@@ -338,6 +474,91 @@ describe('Flowing Contours output contract', () => {
       /<(?:rect|g|polyline|circle|clipPath)\b|\b(?:transform|clip-path)=/,
     )
     expect(JSON.stringify(scene)).toBe(originalJson)
+  })
+
+  it('rejects representative lattice and one-long-plus-many-stumps output', () => {
+    const staircaseVertices: Point[] = []
+    for (let index = 0; index <= 18; index += 1) {
+      const step = Math.floor(index / 2) * 6
+      staircaseVertices.push(
+        index % 2 === 0 ? [step, step] : [step + 6, step],
+      )
+    }
+    const staircasePoints: Point[] = [staircaseVertices[0]!]
+    for (let index = 1; index < staircaseVertices.length; index += 1) {
+      const start = staircaseVertices[index - 1]!
+      const end = staircaseVertices[index]!
+      for (let subdivision = 1; subdivision <= 20; subdivision += 1) {
+        staircasePoints.push([
+          start[0] + ((end[0] - start[0]) * subdivision) / 20,
+          start[1] + ((end[1] - start[1]) * subdivision) / 20,
+        ])
+      }
+    }
+    const staircase: Scene = {
+      space: { width: 120, height: 120 },
+      primitives: [
+        {
+          points: staircasePoints,
+          stroke: { color: 'black', width: 1 },
+        },
+      ],
+    }
+    // A commensurate 12-unit sample aliases this six-unit staircase into a
+    // straight diagonal. Its dense collinear vertices also dilute a raw
+    // per-vertex turn share. Fixed noncommensurate arc samples still reject it.
+    const rawStaircase = measureTurns(staircasePoints, false)
+    expect(rawStaircase.over45Share).toBeLessThan(0.15)
+    expect(rawStaircase.orthogonalAlternationShare).toBe(0)
+    expect(
+      measureTurns(
+        resampleByArcLength(staircase.primitives[0]!, 12),
+        false,
+      ).maximum,
+    ).toBeLessThan(1e-9)
+    expect(
+      FIXED_ARC_SPACINGS.some(
+        (spacing) =>
+          measureTurns(
+            resampleByArcLength(staircase.primitives[0]!, spacing),
+            false,
+          ).over45Share >= 0.025,
+      ),
+    ).toBe(true)
+    expect(() => expectFlowingGeometry(staircase, 60)).toThrow()
+
+    const longWithStumps: Scene = {
+      space: { width: 1_100, height: 100 },
+      primitives: [
+        {
+          points: [
+            [0, 10],
+            [330, 10],
+            [660, 10],
+            [1_000, 10],
+          ],
+          stroke: { color: 'black', width: 1 },
+        },
+        ...Array.from({ length: 7 }, (_, index) => ({
+          points: [
+            [index * 120, 40] as Point,
+            [index * 120 + 8, 40] as Point,
+            [index * 120 + 16, 40] as Point,
+            [index * 120 + 17, 40] as Point,
+          ],
+          stroke: { color: 'black', width: 1 },
+        })),
+      ],
+    }
+    const lengths = longWithStumps.primitives.map((primitive) =>
+      pathLength(primitive.points),
+    )
+    expect(Math.max(...lengths)).toBeGreaterThan(900)
+    expect(
+      Math.max(...lengths) /
+        lengths.reduce((sum, length) => sum + length, 0),
+    ).toBeGreaterThan(0.89)
+    expect(() => expectFlowingGeometry(longWithStumps, 60)).toThrow()
   })
 
   it('retargets only tool width, then uses generic Page clipping, rebasing, margins, and physical mapping', () => {
