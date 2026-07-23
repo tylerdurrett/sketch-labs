@@ -18,6 +18,10 @@ import type {
 
 const LOCAL_COHESION_THRESHOLD = 0.08
 const INITIAL_REGION_MAX_AREA = 64
+// OKLab-like distance occupies only part of the unit interval for ordinary
+// photographs. Calibrate it before authored Boundary strength compares unit
+// evidence, while still reserving one for the strongest visible transitions.
+const PERCEPTUAL_BOUNDARY_DISTANCE_SCALE = 0.5
 const NO_COLOR_REGION = -1
 
 type PerceptualColor = readonly [number, number, number]
@@ -425,7 +429,12 @@ function collectSharedBoundaries(
         regionIds,
         start,
         end,
-        strength: clampUnit(edge.dissimilarity),
+        strength: clampUnit(
+          Math.max(
+            edge.colorDistance / PERCEPTUAL_BOUNDARY_DISTANCE_SCALE,
+            edge.alphaDistance,
+          ),
+        ),
         provenance:
           hasSupportBoundary ||
           edge.alphaDistance > edge.colorDistance
