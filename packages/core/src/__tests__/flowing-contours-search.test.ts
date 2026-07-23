@@ -5,6 +5,7 @@ import { buildFlowingContoursAnchorInventory } from '../sketches/flowing-contour
 import { sampleFlowingContoursField } from '../sketches/flowing-contours/field'
 import { createFlowingContoursTestLimits } from '../sketches/flowing-contours/limits'
 import {
+  flowingContoursCandidateSourceField,
   searchFlowingContoursCandidate,
   type FlowingContoursSearchOptions,
 } from '../sketches/flowing-contours/search'
@@ -111,6 +112,30 @@ function limits(overrides: Record<string, number> = {}) {
 }
 
 describe('Flowing Contours bidirectional whole-candidate search', () => {
+  it('brands only the exact FC10 return with its exact field identity', () => {
+    const source = field(21, 11, (_x, y) => ({
+      evidence: gaussian(y - 5),
+      tangent: [1, 0],
+    }))
+    const equivalentField = field(21, 11, (_x, y) => ({
+      evidence: gaussian(y - 5),
+      tangent: [1, 0],
+    }))
+    const candidate = searchFlowingContoursCandidate(
+      source,
+      anchor(source, [10, 5]),
+      OPTIONS,
+      limits(),
+    )
+
+    expect(candidate).not.toBeNull()
+    expect(flowingContoursCandidateSourceField(candidate!)).toBe(source)
+    expect(flowingContoursCandidateSourceField({ ...candidate! })).toBeNull()
+    expect(flowingContoursCandidateSourceField(candidate!)).not.toBe(
+      equivalentField,
+    )
+  })
+
   it.each([
     {
       name: 'straight',
@@ -221,12 +246,7 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     expect(owned).toBeDefined()
     expect(owned!.sample.point[1]).not.toBe(Math.round(owned!.sample.point[1]))
     expect(
-      searchFlowingContoursCandidate(
-        source,
-        owned!,
-        OPTIONS,
-        limits(),
-      ),
+      searchFlowingContoursCandidate(source, owned!, OPTIONS, limits()),
     ).not.toBeNull()
   })
 
@@ -249,14 +269,10 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     )
 
     expect(gaps).toHaveLength(2)
-    expect(gaps[0]!.startSampleIndex).toBeLessThan(
-      gaps[0]!.endSampleIndex,
-    )
+    expect(gaps[0]!.startSampleIndex).toBeLessThan(gaps[0]!.endSampleIndex)
     expect(gaps[0]!.entryEvidence).toBeGreaterThan(0.04)
     expect(gaps[0]!.exitEvidence).toBeGreaterThan(0.04)
-    expect(gaps[1]!.startSampleIndex).toBeLessThan(
-      gaps[1]!.endSampleIndex,
-    )
+    expect(gaps[1]!.startSampleIndex).toBeLessThan(gaps[1]!.endSampleIndex)
   })
 
   it('preserves crossing and branch endpoint reasons without repair', () => {
@@ -562,12 +578,7 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
 
     expect(second).toEqual(first)
     expect(
-      searchFlowingContoursCandidate(
-        malformed,
-        start,
-        OPTIONS,
-        limits(),
-      ),
+      searchFlowingContoursCandidate(malformed, start, OPTIONS, limits()),
     ).toBeNull()
     expect(
       searchFlowingContoursCandidate(
@@ -674,6 +685,9 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
 
   it('exposes no endpoint-joining or nearest-endpoint API', async () => {
     const module = await import('../sketches/flowing-contours/search')
-    expect(Object.keys(module)).toEqual(['searchFlowingContoursCandidate'])
+    expect(Object.keys(module)).toEqual([
+      'flowingContoursCandidateSourceField',
+      'searchFlowingContoursCandidate',
+    ])
   })
 })

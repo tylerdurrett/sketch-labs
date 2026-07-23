@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
+import { createFlowingContoursAccounting } from '../sketches/flowing-contours/accounting'
 import { sampleFlowingContoursField } from '../sketches/flowing-contours/field'
 import { createFlowingContoursTestLimits } from '../sketches/flowing-contours/limits'
+import { searchFlowingContoursCandidate } from '../sketches/flowing-contours/search'
+import {
+  selectFlowingContoursCandidate,
+  type FlowingContoursSelectionResult,
+} from '../sketches/flowing-contours/selection'
 import {
   commitAcceptedFlowingTrajectorySuppression,
   createFlowingContoursSuppressionQuery,
@@ -36,6 +42,12 @@ function field(
   tangent: readonly [number, number] = [1, 0],
 ): FlowingContoursField {
   const count = width * height
+  const ridgeRows = [2, Math.max(2, height - 3)]
+  const contourEvidence = Array.from({ length: count }, (_value, index) => {
+    const y = Math.floor(index / width)
+    const distance = Math.min(...ridgeRows.map((ridge) => Math.abs(y - ridge)))
+    return Math.exp(-(distance * distance) / (2 * 0.55 * 0.55))
+  })
   return Object.freeze({
     sourceWidth: width,
     sourceHeight: height,
@@ -44,7 +56,7 @@ function field(
     luminance: Object.freeze(new Array<number>(count).fill(0.5)),
     alpha: Object.freeze(new Array<number>(count).fill(1)),
     positiveSupport: Object.freeze(new Array<boolean>(count).fill(true)),
-    contourEvidence: Object.freeze(new Array<number>(count).fill(1)),
+    contourEvidence: Object.freeze(contourEvidence),
     tangentX: Object.freeze(new Array<number>(count).fill(tangent[0])),
     tangentY: Object.freeze(new Array<number>(count).fill(tangent[1])),
     tangentCoherence: Object.freeze(new Array<number>(count).fill(1)),
@@ -114,18 +126,14 @@ function anchor(
 
 function commit(
   source: FlowingContoursField,
-  accepted: AcceptedFlowingTrajectory,
+  selection: Extract<FlowingContoursSelectionResult, { kind: 'accepted' }>,
 ) {
   const initial = createFlowingContoursSuppressionState({ field: source })
   if (initial === null) throw new Error('fixture field must be valid')
   const registration = registerAcceptedFlowingTrajectorySuppression(
     initial,
     source,
-    Object.freeze({
-      kind: 'accepted',
-      trajectory: accepted,
-      safetyTruncated: false,
-    }),
+    selection,
   )
   if (registration === null) throw new Error('fixture registration failed')
   const result = commitAcceptedFlowingTrajectorySuppression(
@@ -150,52 +158,64 @@ function queryFor(
 function register(
   state: Parameters<typeof registerAcceptedFlowingTrajectorySuppression>[0],
   source: FlowingContoursField,
-  accepted: AcceptedFlowingTrajectory,
+  selection: Extract<FlowingContoursSelectionResult, { kind: 'accepted' }>,
 ) {
   const registration = registerAcceptedFlowingTrajectorySuppression(
     state,
     source,
-    Object.freeze({
-      kind: 'accepted' as const,
-      trajectory: accepted,
-      safetyTruncated: false,
-    }),
+    selection,
   )
   if (registration === null) throw new Error('fixture registration failed')
   return registration
 }
 
+function authenticSelection(
+  source: FlowingContoursField,
+  point: readonly [number, number],
+): Extract<FlowingContoursSelectionResult, { kind: 'accepted' }> {
+  const candidate = searchFlowingContoursCandidate(
+    source,
+    anchor(source, point),
+    {
+      continuity: 0,
+      flowSmoothing: 0.5,
+    },
+  )
+  if (candidate === null) throw new Error('fixture search failed')
+  const result = selectFlowingContoursCandidate(
+    candidate,
+    {
+      analysisWidth: source.width,
+      analysisHeight: source.height,
+      minimumStrokeLength: 0,
+    },
+    createFlowingContoursAccounting(),
+  )
+  if (result.kind !== 'accepted') {
+    throw new Error(`fixture selection rejected: ${result.reason}`)
+  }
+  return result
+}
+
 describe('Flowing Contours accepted-geometry suppression', () => {
   it('represents a duplicate on the same continuous ridge', () => {
     const source = field()
-    const accepted = trajectory(source, [
-      [1, 4],
-      [5, 4],
-      [10, 4],
-    ])
+    const accepted = authenticSelection(source, [5, 2])
     const { result } = commit(source, accepted)
     const query = queryFor(result.state, source)
 
-    expect(queryFlowingContoursSuppression(query, [5.375, 4])).toBe(0.65)
+    expect(queryFlowingContoursSuppression(query, [5.375, 2])).toBe(0.65)
     expect(
-      queryFlowingContoursSuppressionAlongTangent(query, [5.375, 4], [1, 0]),
+      queryFlowingContoursSuppressionAlongTangent(query, [5.375, 2], [1, 0]),
     ).toBeGreaterThanOrEqual(0.7)
     expect(
-      isFlowingContoursAnchorSuppressed(query, anchor(source, [5, 4])),
+      isFlowingContoursAnchorSuppressed(query, anchor(source, [5, 2])),
     ).toBe(true)
 
-    const duplicateTrajectory = trajectory(
-      source,
-      [
-        [1, 4],
-        [5, 4],
-        [10, 4],
-      ],
-      1,
-    )
+    const duplicateSelection = authenticSelection(source, [5, 2])
     const duplicate = commitAcceptedFlowingTrajectorySuppression(
       result.state,
-      register(result.state, source, duplicateTrajectory),
+      register(result.state, source, duplicateSelection),
     )
     expect(duplicate.kind).toBe('committed')
     if (duplicate.kind !== 'committed') return
@@ -207,47 +227,35 @@ describe('Flowing Contours accepted-geometry suppression', () => {
 
   it('preserves a close distinct parallel ridge beyond the ownership tube', () => {
     const source = field()
-    const { result } = commit(
-      source,
-      trajectory(source, [
-        [1, 4],
-        [10, 4],
-      ]),
-    )
+    const { result } = commit(source, authenticSelection(source, [5, 2]))
     const query = queryFor(result.state, source)
 
     expect(
-      queryFlowingContoursSuppressionAlongTangent(query, [5, 4.8], [1, 0]),
+      queryFlowingContoursSuppressionAlongTangent(query, [5, 2.8], [1, 0]),
     ).toBe(0)
     expect(
-      isFlowingContoursAnchorSuppressed(query, anchor(source, [5, 5])),
+      isFlowingContoursAnchorSuppressed(query, anchor(source, [5, 3])),
     ).toBe(false)
   })
 
   it('lets a perpendicular contour traverse a represented crossing', () => {
     const source = field()
-    const { result } = commit(
-      source,
-      trajectory(source, [
-        [1, 4],
-        [10, 4],
-      ]),
-    )
+    const { result } = commit(source, authenticSelection(source, [5, 2]))
     const query = queryFor(result.state, source)
 
     expect(
-      queryFlowingContoursSuppressionAlongTangent(query, [5, 4], [0, 1]),
+      queryFlowingContoursSuppressionAlongTangent(query, [5, 2], [0, 1]),
     ).toBeLessThan(0.7)
     expect(
-      queryFlowingContoursSuppressionAlongTangent(query, [5, 4], [1, 0]),
+      queryFlowingContoursSuppressionAlongTangent(query, [5, 2], [1, 0]),
     ).toBeGreaterThanOrEqual(0.7)
     expect(
-      queryFlowingContoursSuppressionAlongTangent(query, [5, 4.3], [0, 1]),
+      queryFlowingContoursSuppressionAlongTangent(query, [5, 2.3], [0, 1]),
     ).toBe(0)
     expect(
       queryFlowingContoursSuppressionAlongTangent(query, [5, 7], [0, 1]),
     ).toBe(0)
-    expect(queryFlowingContoursSuppression(query, [5, 4])).toBeLessThan(0.7)
+    expect(queryFlowingContoursSuppression(query, [5, 2])).toBeLessThan(0.7)
   })
 
   it('can only be committed through the accepted-trajectory contract', () => {
@@ -303,6 +311,17 @@ describe('Flowing Contours accepted-geometry suppression', () => {
       registerAcceptedFlowingTrajectorySuppression(
         initial,
         source,
+        Object.freeze({
+          kind: 'accepted',
+          trajectory: plausibleButUnregistered,
+          safetyTruncated: false,
+        }),
+      ),
+    ).toBeNull()
+    expect(
+      registerAcceptedFlowingTrajectorySuppression(
+        initial,
+        source,
         // @ts-expect-error rejected results cannot be registered
         rejected,
       ),
@@ -313,16 +332,10 @@ describe('Flowing Contours accepted-geometry suppression', () => {
 
   it('provides bounded scalar collision queries for growth and search', () => {
     const source = field()
-    const { result } = commit(
-      source,
-      trajectory(source, [
-        [1, 4],
-        [10, 4],
-      ]),
-    )
+    const { result } = commit(source, authenticSelection(source, [5, 2]))
     const query = queryFor(result.state, source)
-    const center = queryFlowingContoursSuppression(query, [5, 4.2])
-    const edge = queryFlowingContoursSuppression(query, [5, 4.5])
+    const center = queryFlowingContoursSuppression(query, [5, 2.2])
+    const edge = queryFlowingContoursSuppression(query, [5, 2.5])
 
     expect(center).toBeGreaterThan(0)
     expect(center).toBeLessThanOrEqual(1)
@@ -333,18 +346,8 @@ describe('Flowing Contours accepted-geometry suppression', () => {
 
   it('composes occupancy as a stable union regardless of accepted order', () => {
     const source = field()
-    const horizontal = trajectory(source, [
-      [1, 3],
-      [10, 3],
-    ])
-    const lower = trajectory(
-      source,
-      [
-        [1, 6],
-        [10, 6],
-      ],
-      1,
-    )
+    const horizontal = authenticSelection(source, [5, 2])
+    const lower = authenticSelection(source, [5, 6])
     const startA = createFlowingContoursSuppressionState({ field: source })!
     const firstA = commitAcceptedFlowingTrajectorySuppression(
       startA,
@@ -396,30 +399,24 @@ describe('Flowing Contours accepted-geometry suppression', () => {
     const secondState = createFlowingContoursSuppressionState({
       field: secondField,
     })!
-    const firstTrajectory = trajectory(firstField, [
-      [1, 4],
-      [10, 4],
-    ])
+    const firstSelection = authenticSelection(firstField, [5, 2])
     const committed = commitAcceptedFlowingTrajectorySuppression(
       firstState,
-      register(firstState, firstField, firstTrajectory),
+      register(firstState, firstField, firstSelection),
     )
     if (committed.kind !== 'committed') throw new Error('fixture commit failed')
     const secondRegistration = register(
       secondState,
       secondField,
-      trajectory(secondField, [
-        [1, 4],
-        [10, 4],
-      ]),
+      authenticSelection(secondField, [5, 2]),
     )
     const firstQuery = queryFor(committed.state, firstField)
     const secondQuery = queryFor(secondState, secondField)
 
     expect(committed.state.field).toBe(firstField)
     expect(secondState.field).toBe(secondField)
-    expect(queryFlowingContoursSuppression(firstQuery, [5, 4])).toBe(0.65)
-    expect(queryFlowingContoursSuppression(secondQuery, [5, 4])).toBe(0)
+    expect(queryFlowingContoursSuppression(firstQuery, [5, 2])).toBe(0.65)
+    expect(queryFlowingContoursSuppression(secondQuery, [5, 2])).toBe(0)
     expect(
       createFlowingContoursSuppressionQuery(committed.state, secondField),
     ).toBeNull()
@@ -430,7 +427,7 @@ describe('Flowing Contours accepted-geometry suppression', () => {
       ),
     ).toEqual({ kind: 'rejected', reason: 'field-mismatch' })
     expect(
-      queryFlowingContoursSuppression({ ...firstQuery }, [5, 4]),
+      queryFlowingContoursSuppression({ ...firstQuery }, [5, 2]),
     ).toBeNull()
   })
 
@@ -487,7 +484,7 @@ describe('Flowing Contours accepted-geometry suppression', () => {
         },
       },
     )
-    const registration = registerAcceptedFlowingTrajectorySuppression(
+    const hostileRegistration = registerAcceptedFlowingTrajectorySuppression(
       initial,
       source,
       Object.freeze({
@@ -496,11 +493,9 @@ describe('Flowing Contours accepted-geometry suppression', () => {
         safetyTruncated: false,
       }),
     )
-    expect(registration).not.toBeNull()
+    expect(hostileRegistration).toBeNull()
     revocable.revoke()
-    expect(
-      commitAcceptedFlowingTrajectorySuppression(initial, registration!),
-    ).toMatchObject({ kind: 'committed' })
+    expect(initial).toEqual(before)
   })
 
   it('enforces occupancy and raw-point caps transactionally', () => {
@@ -512,13 +507,10 @@ describe('Flowing Contours accepted-geometry suppression', () => {
       field: source,
       limits: occupancyLimits,
     })!
-    const occupancyTrajectory = trajectory(source, [
-      [1, 4],
-      [3, 4],
-    ])
+    const occupancySelection = authenticSelection(source, [5, 2])
     const occupancyResult = commitAcceptedFlowingTrajectorySuppression(
       occupancyState,
-      register(occupancyState, source, occupancyTrajectory),
+      register(occupancyState, source, occupancySelection),
     )
     const rawLimits = createFlowingContoursTestLimits({
       'raw-trajectory-point-count': 2,
@@ -530,15 +522,7 @@ describe('Flowing Contours accepted-geometry suppression', () => {
     const rawRegistration = registerAcceptedFlowingTrajectorySuppression(
       rawState,
       source,
-      Object.freeze({
-        kind: 'accepted',
-        trajectory: trajectory(source, [
-          [1, 4],
-          [2, 4],
-          [3, 4],
-        ]),
-        safetyTruncated: false,
-      }),
+      authenticSelection(source, [5, 2]),
     )
 
     expect(occupancyResult).toEqual({
@@ -554,10 +538,7 @@ describe('Flowing Contours accepted-geometry suppression', () => {
     const source = field()
     const { initial, result } = commit(
       source,
-      trajectory(source, [
-        [1, 4],
-        [10, 4],
-      ]),
+      authenticSelection(source, [5, 2]),
     )
 
     expect(Object.isFrozen(initial)).toBe(true)
@@ -565,8 +546,8 @@ describe('Flowing Contours accepted-geometry suppression', () => {
     expect(Object.isFrozen(result.state)).toBe(true)
     expect(initial.occupancySampleCount).toBe(0)
     expect(initial.suppressedEvidenceSampleCount).toBe(0)
-    expect(result.suppressedEvidenceSampleCount).toBe(10)
-    expect(result.state.suppressedEvidenceSampleCount).toBe(10)
-    expect(result.state.occupancySampleCount).toBe(37)
+    expect(result.suppressedEvidenceSampleCount).toBe(11)
+    expect(result.state.suppressedEvidenceSampleCount).toBe(11)
+    expect(result.state.occupancySampleCount).toBe(43)
   })
 })

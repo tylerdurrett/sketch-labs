@@ -20,6 +20,7 @@ import {
   isWithinFlowingContoursLimit,
   type FlowingContoursLimits,
 } from './limits'
+import { flowingContoursCandidateSourceField } from './search'
 import {
   FLOWING_CONTOURS_ENDPOINT_REASONS,
   type AcceptedFlowingTrajectory,
@@ -27,6 +28,7 @@ import {
   type FlowingContoursCandidate,
   type FlowingContoursCandidateScore,
   type FlowingContoursEndpointReason,
+  type FlowingContoursField,
   type FlowingContoursLimitName,
   type FlowingContoursSpanSupportProvenance,
 } from './types'
@@ -44,6 +46,21 @@ const MAXIMUM_CURVATURE_WEIGHT = 3
 const UNSUPPORTED_TRAVEL_WEIGHT = 4.5
 const AMBIGUITY_WEIGHT = 3
 const REPRESENTED_OVERLAP_WEIGHT = 5
+
+interface AcceptedSelectionProvenance {
+  readonly field: Readonly<FlowingContoursField>
+  readonly trajectory: Readonly<AcceptedFlowingTrajectory>
+}
+
+const ACCEPTED_SELECTION_PROVENANCE = new WeakMap<
+  Readonly<object>,
+  Readonly<AcceptedSelectionProvenance>
+>()
+
+const ACCEPTED_TRAJECTORY_SOURCE_FIELDS = new WeakMap<
+  Readonly<AcceptedFlowingTrajectory>,
+  Readonly<FlowingContoursField>
+>()
 
 /**
  * Provisional internal whole-objective floor.
@@ -86,12 +103,31 @@ export type FlowingContoursSelectionResult =
       readonly reason: FlowingContoursSelectionRejectionReason
     }>
 
+/**
+ * Verify the exact FC11 result and trajectory inherited FC10's field brand.
+ *
+ * No public mint or rebinding seam exists. Structural accepted results and
+ * authentic results from an equivalent but distinct field both fail.
+ */
+export function isFlowingContoursAcceptedSelectionFromField(
+  selection: Readonly<FlowingContoursSelectionResult>,
+  field: Readonly<FlowingContoursField>,
+): boolean {
+  try {
+    const provenance = ACCEPTED_SELECTION_PROVENANCE.get(selection)
+    return (
+      provenance !== undefined &&
+      provenance.field === field &&
+      ACCEPTED_TRAJECTORY_SOURCE_FIELDS.get(provenance.trajectory) === field
+    )
+  } catch {
+    return false
+  }
+}
+
 type UnknownRecord = Readonly<Record<PropertyKey, unknown>>
 
-function ownDataValue(
-  source: unknown,
-  key: PropertyKey,
-): unknown | null {
+function ownDataValue(source: unknown, key: PropertyKey): unknown | null {
   if (source === null || typeof source !== 'object') return null
   try {
     const descriptor = Object.getOwnPropertyDescriptor(source, key)
@@ -276,10 +312,7 @@ function closeEnough(first: number, second: number): boolean {
 }
 
 function dot(first: Readonly<Point>, second: Readonly<Point>): number {
-  return Math.max(
-    -1,
-    Math.min(1, first[0] * second[0] + first[1] * second[1]),
-  )
+  return Math.max(-1, Math.min(1, first[0] * second[0] + first[1] * second[1]))
 }
 
 function displacementUnit(
@@ -346,7 +379,11 @@ function snapshotSupport(
   allowedDirectJoinIndices: ReadonlySet<number> = new Set(),
 ): Readonly<CanonicalSupport> | null {
   const segmentCount = samples.length - 1
-  const values = boundedOwnArray(source, segmentCount === 0 ? 0 : 1, segmentCount)
+  const values = boundedOwnArray(
+    source,
+    segmentCount === 0 ? 0 : 1,
+    segmentCount,
+  )
   if (values === null) return null
 
   const result: Readonly<FlowingContoursSpanSupportProvenance>[] = []
@@ -422,9 +459,7 @@ function snapshotSupport(
     }
     if (
       kind === 'direct-evidence' &&
-      samples
-        .slice(start, end + 1)
-        .some((sample) => sample.evidence <= 0)
+      samples.slice(start, end + 1).some((sample) => sample.evidence <= 0)
     ) {
       return null
     }
@@ -620,9 +655,7 @@ function snapshotAndValidateScore(
     total,
   ]
   if (
-    values.some(
-      (value) => typeof value !== 'number' || !Number.isFinite(value),
-    )
+    values.some((value) => typeof value !== 'number' || !Number.isFinite(value))
   ) {
     return null
   }
@@ -642,8 +675,7 @@ function snapshotAndValidateScore(
     }
   }
   const expectedAccumulatedEvidence =
-    ACCUMULATED_EVIDENCE_WEIGHT *
-    clampReward(evidenceSum / samples.length)
+    ACCUMULATED_EVIDENCE_WEIGHT * clampReward(evidenceSum / samples.length)
   const expectedUsefulLength =
     USEFUL_LENGTH_WEIGHT * clampReward(length / diagonal)
   const expectedDirectionalCoherence =
@@ -769,10 +801,7 @@ function snapshotCandidate(
   }
 
   const reversedBackward = reverseBackwardSamples(backward.samples)
-  const assembled = [
-    ...reversedBackward,
-    ...forward.samples.slice(1),
-  ]
+  const assembled = [...reversedBackward, ...forward.samples.slice(1)]
   const hasClosure =
     suppliedSamples.length === assembled.length + 1 &&
     sameSample(suppliedSamples[suppliedSamples.length - 1]!, assembled[0]!)
@@ -845,8 +874,7 @@ function snapshotCandidate(
     startEndpointReason: backward.endpointReason,
     endEndpointReason: forward.endpointReason,
     length,
-    maximumUnsupportedSpanLength:
-      support.maximumUnsupportedSpanLength,
+    maximumUnsupportedSpanLength: support.maximumUnsupportedSpanLength,
     totalUnsupportedSpanLength: support.totalUnsupportedSpanLength,
     score,
   })
@@ -857,8 +885,9 @@ function snapshotLimits(
 ): Readonly<FlowingContoursLimits> | null {
   try {
     const result = {} as Record<FlowingContoursLimitName, number>
-    for (const name of Object.keys(FLOWING_CONTOURS_LIMITS) as
-      FlowingContoursLimitName[]) {
+    for (const name of Object.keys(
+      FLOWING_CONTOURS_LIMITS,
+    ) as FlowingContoursLimitName[]) {
       const value = ownDataValue(source, name)
       if (
         typeof value !== 'number' ||
@@ -913,10 +942,7 @@ function snapshotOptions(
   }
   const analysisSampleCount =
     (analysisWidth as number) * (analysisHeight as number)
-  const diagonal = Math.hypot(
-    analysisWidth as number,
-    analysisHeight as number,
-  )
+  const diagonal = Math.hypot(analysisWidth as number, analysisHeight as number)
   if (
     !isWithinFlowingContoursLimit(
       'analysis-sample-count',
@@ -1078,18 +1104,13 @@ function snapshotAccounting(
     typeof acceptedTotalUnsupportedSpanLength !== 'number' ||
     !Number.isFinite(acceptedTotalUnsupportedSpanLength) ||
     acceptedTotalUnsupportedSpanLength < 0 ||
-    acceptedMaximumUnsupportedSpanLength >
-      acceptedTotalUnsupportedSpanLength ||
+    acceptedMaximumUnsupportedSpanLength > acceptedTotalUnsupportedSpanLength ||
     (acceptedMaximumUnsupportedSpanLength === 0) !==
       (acceptedTotalUnsupportedSpanLength === 0) ||
     (acceptedCandidateCount === 0 &&
       (acceptedMaximumUnsupportedSpanLength !== 0 ||
         acceptedTotalUnsupportedSpanLength !== 0)) ||
-    !isWithinFlowingContoursLimit(
-      'candidate-count',
-      candidateCount,
-      limits,
-    ) ||
+    !isWithinFlowingContoursLimit('candidate-count', candidateCount, limits) ||
     !isWithinFlowingContoursLimit(
       'accepted-curve-count',
       acceptedCandidateCount,
@@ -1138,10 +1159,7 @@ function unchangedAccounting(
     ownDataValue(accounting, 'endpointReasonCounts') !== null &&
     FLOWING_CONTOURS_ENDPOINT_REASONS.every((reason) =>
       Object.is(
-        ownDataValue(
-          ownDataValue(accounting, 'endpointReasonCounts'),
-          reason,
-        ),
+        ownDataValue(ownDataValue(accounting, 'endpointReasonCounts'), reason),
         snapshot.endpointReasonCounts[reason],
       ),
     )
@@ -1231,10 +1249,7 @@ function commitAccounting(
         value: rawTrajectoryPointCount,
       },
       endpointReasonCounts: {
-        ...Object.getOwnPropertyDescriptor(
-          accounting,
-          'endpointReasonCounts',
-        ),
+        ...Object.getOwnPropertyDescriptor(accounting, 'endpointReasonCounts'),
         value: endpointReasonCounts,
       },
       acceptedMaximumUnsupportedSpanLength: {
@@ -1299,6 +1314,8 @@ export function selectFlowingContoursCandidate(
   limitsSource: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
 ): FlowingContoursSelectionResult {
   try {
+    const candidateSourceField =
+      flowingContoursCandidateSourceField(candidateSource)
     // Candidate inspection intentionally occurs only after policy, state, and
     // the candidate-count budget are known valid.
     const limits = snapshotLimits(limitsSource)
@@ -1330,12 +1347,8 @@ export function selectFlowingContoursCandidate(
     )
     if (candidate === null) return rejected('invalid-input')
 
-    const minimumLength =
-      options.minimumStrokeLength * options.diagonal
-    if (
-      !Number.isFinite(minimumLength) ||
-      candidate.length < minimumLength
-    ) {
+    const minimumLength = options.minimumStrokeLength * options.diagonal
+    if (!Number.isFinite(minimumLength) || candidate.length < minimumLength) {
       if (
         !commitAccounting(accounting, accountingSnapshot, {
           accepted: false,
@@ -1406,8 +1419,7 @@ export function selectFlowingContoursCandidate(
       startEndpointReason: candidate.startEndpointReason,
       endEndpointReason: candidate.endEndpointReason,
       length: candidate.length,
-      maximumUnsupportedSpanLength:
-        candidate.maximumUnsupportedSpanLength,
+      maximumUnsupportedSpanLength: candidate.maximumUnsupportedSpanLength,
       totalUnsupportedSpanLength: candidate.totalUnsupportedSpanLength,
       score: candidate.score,
     })
@@ -1420,13 +1432,24 @@ export function selectFlowingContoursCandidate(
     ) {
       return rejected('invalid-input')
     }
-    return Object.freeze({
+    const result: FlowingContoursSelectionResult = Object.freeze({
       kind: 'accepted',
       trajectory,
       safetyTruncated:
         candidate.startEndpointReason === 'safety-limit' ||
         candidate.endEndpointReason === 'safety-limit',
     })
+    if (candidateSourceField !== null) {
+      ACCEPTED_TRAJECTORY_SOURCE_FIELDS.set(trajectory, candidateSourceField)
+      ACCEPTED_SELECTION_PROVENANCE.set(
+        result,
+        Object.freeze({
+          field: candidateSourceField,
+          trajectory,
+        }),
+      )
+    }
+    return result
   } catch {
     return rejected('invalid-input')
   }

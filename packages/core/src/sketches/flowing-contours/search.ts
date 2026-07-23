@@ -47,20 +47,38 @@ const ANCHOR_MINIMUM_COHERENCE = 0.2
 const ANCHOR_MAXIMUM_AMBIGUITY = 0.82
 const ANCHOR_MINIMUM_SELECTION_SCORE = 0.04
 
-export interface FlowingContoursSearchOptions
-  extends FlowingContoursDirectionalGrowthOptions {}
+const CANDIDATE_SOURCE_FIELDS = new WeakMap<
+  Readonly<FlowingContoursCandidate>,
+  Readonly<FlowingContoursField>
+>()
+
+export interface FlowingContoursSearchOptions extends FlowingContoursDirectionalGrowthOptions {}
 
 interface ResolvedSearchOptions {
   readonly forward: Readonly<FlowingContoursDirectionalGrowthOptions>
   readonly backward: Readonly<FlowingContoursDirectionalGrowthOptions>
   readonly flowSmoothing: number
-  readonly representedOverlapSampler:
-    | FlowingContoursRepresentedOverlapSampler
-    | null
+  readonly representedOverlapSampler: FlowingContoursRepresentedOverlapSampler | null
   readonly overlapSamplerInvalid: () => boolean
   readonly minimumEvidence: number
   readonly minimumCoherence: number
   readonly maximumAmbiguity: number
+}
+
+/**
+ * Read FC10 provenance without exposing a mint or rebinding seam.
+ *
+ * Only the exact candidate object returned by search has a source field.
+ * FC11 uses this once before snapshotting its structurally accepted input.
+ */
+export function flowingContoursCandidateSourceField(
+  candidate: Readonly<FlowingContoursCandidate>,
+): Readonly<FlowingContoursField> | null {
+  try {
+    return CANDIDATE_SOURCE_FIELDS.get(candidate) ?? null
+  } catch {
+    return null
+  }
 }
 
 function frozenPoint(x: number, y: number): Readonly<Point> {
@@ -119,10 +137,7 @@ function snapshotSample(
     }
     return Object.freeze({
       point,
-      tangent: frozenPoint(
-        tangent[0] * tangentSign,
-        tangent[1] * tangentSign,
-      ),
+      tangent: frozenPoint(tangent[0] * tangentSign, tangent[1] * tangentSign),
       evidence: source.evidence,
       coherence: source.coherence,
       ambiguity: source.ambiguity,
@@ -208,14 +223,8 @@ function ownedAnchorSample(
   const normalX = -tangentY
   const normalY = tangentX
   const centerEvidence = field.contourEvidence[fieldSampleIndex]!
-  const minusEvidence = bilinearEvidence(field, [
-    x - normalX,
-    y - normalY,
-  ])
-  const plusEvidence = bilinearEvidence(field, [
-    x + normalX,
-    y + normalY,
-  ])
+  const minusEvidence = bilinearEvidence(field, [x - normalX, y - normalY])
+  const plusEvidence = bilinearEvidence(field, [x + normalX, y + normalY])
   if (
     minusEvidence === null ||
     plusEvidence === null ||
@@ -229,10 +238,7 @@ function ownedAnchorSample(
     denominator < -ANCHOR_EVIDENCE_EPSILON
       ? Math.max(
           -0.5,
-          Math.min(
-            0.5,
-            (0.5 * (minusEvidence - plusEvidence)) / denominator,
-          ),
+          Math.min(0.5, (0.5 * (minusEvidence - plusEvidence)) / denominator),
         )
       : 0
   const expected = sampleFlowingContoursField(field, [
@@ -335,7 +341,7 @@ function resolveOptions(
       if (
         direction === null ||
         direction[0] * forwardDirection[0] +
-            direction[1] * forwardDirection[1] <=
+          direction[1] * forwardDirection[1] <=
           VECTOR_EPSILON
       ) {
         return null
@@ -356,10 +362,7 @@ function resolveOptions(
     }
     const stepLength = ridgeSource.stepLength
     const maximumTurnRadians = ridgeSource.maximumTurnRadians
-    const minimumEvidence = optionalUnitInterval(
-      ridgeSource,
-      'minimumEvidence',
-    )
+    const minimumEvidence = optionalUnitInterval(ridgeSource, 'minimumEvidence')
     const minimumCoherence = optionalUnitInterval(
       ridgeSource,
       'minimumCoherence',
@@ -368,10 +371,7 @@ function resolveOptions(
       ridgeSource,
       'maximumAmbiguity',
     )
-    const ambiguityMargin = optionalUnitInterval(
-      ridgeSource,
-      'ambiguityMargin',
-    )
+    const ambiguityMargin = optionalUnitInterval(ridgeSource, 'ambiguityMargin')
     const minimumTangentAlignment = optionalUnitInterval(
       ridgeSource,
       'minimumTangentAlignment',
@@ -416,8 +416,7 @@ function resolveOptions(
     })
 
     const sourceSampler = source.representedOverlapSampler ?? null
-    const collisionThreshold =
-      source.representedCollisionThreshold ?? 0.7
+    const collisionThreshold = source.representedCollisionThreshold ?? 0.7
     if (
       (sourceSampler !== null && typeof sourceSampler !== 'function') ||
       !isUnitInterval(collisionThreshold)
@@ -572,15 +571,14 @@ function hasValidField(
         typeof tangentY !== 'number' ||
         !Number.isFinite(tangentY) ||
         !Number.isFinite(tangentLength) ||
-        (evidence > VECTOR_EPSILON &&
-          Math.abs(tangentLength - 1) > 1e-8) ||
+        (evidence > VECTOR_EPSILON && Math.abs(tangentLength - 1) > 1e-8) ||
         !isUnitInterval(coherence) ||
         !isUnitInterval(ambiguity) ||
         typeof scale !== 'number' ||
         !Number.isFinite(scale) ||
         scale < 0 ||
         typeof support !== 'boolean' ||
-        support !== (alpha > 0)
+        support !== alpha > 0
       ) {
         return false
       }
@@ -742,10 +740,7 @@ function alignment(first: Readonly<Point>, second: Readonly<Point>): number {
   if (firstUnit === null || secondUnit === null) return -1
   return Math.max(
     -1,
-    Math.min(
-      1,
-      firstUnit[0] * secondUnit[0] + firstUnit[1] * secondUnit[1],
-    ),
+    Math.min(1, firstUnit[0] * secondUnit[0] + firstUnit[1] * secondUnit[1]),
   )
 }
 
@@ -789,8 +784,7 @@ function supportedLoopClosure(
         last.point[1] + dy * parameter,
       ),
     )
-    const sampledTangent =
-      sampled === null ? null : unit(sampled.tangent)
+    const sampledTangent = sampled === null ? null : unit(sampled.tangent)
     if (
       sampled === null ||
       sampledTangent === null ||
@@ -850,13 +844,14 @@ function sampleRepresentedOverlap(
         Math.ceil(length / OVERLAP_SAMPLE_SPACING),
       )
       if (intervalCount > MAXIMUM_OVERLAP_SAMPLES_PER_SEGMENT) return null
-      for (let sampleIndex = 1; sampleIndex <= intervalCount; sampleIndex += 1) {
+      for (
+        let sampleIndex = 1;
+        sampleIndex <= intervalCount;
+        sampleIndex += 1
+      ) {
         const parameter = sampleIndex / intervalCount
         const value = sampler(
-          frozenPoint(
-            start[0] + dx * parameter,
-            start[1] + dy * parameter,
-          ),
+          frozenPoint(start[0] + dx * parameter, start[1] + dy * parameter),
         )
         if (!isUnitInterval(value)) return null
         sum += value
@@ -920,19 +915,14 @@ export function searchFlowingContoursCandidate(
     const globalRawPointLimit = limits['raw-trajectory-point-count']
     if (globalRawPointLimit < 1) return null
     const forwardStepLimit = Math.ceil(globalStepLimit / 2)
-    const forwardRawPointLimit =
-      1 + Math.ceil((globalRawPointLimit - 1) / 2)
+    const forwardRawPointLimit = 1 + Math.ceil((globalRawPointLimit - 1) / 2)
     const forward = growFlowingContoursDirection(
       field,
       anchor.sample,
       forwardDirection,
       'forward',
       options.forward,
-      withGrowthLimits(
-        limits,
-        forwardStepLimit,
-        forwardRawPointLimit,
-      ),
+      withGrowthLimits(limits, forwardStepLimit, forwardRawPointLimit),
     )
     if (
       !isValidTrace(
@@ -959,11 +949,7 @@ export function searchFlowingContoursCandidate(
       backwardDirection,
       'backward',
       options.backward,
-      withGrowthLimits(
-        limits,
-        backwardStepLimit,
-        backwardRawPointLimit,
-      ),
+      withGrowthLimits(limits, backwardStepLimit, backwardRawPointLimit),
     )
     if (
       !isValidTrace(
@@ -1052,7 +1038,7 @@ export function searchFlowingContoursCandidate(
       },
       options.flowSmoothing,
     )
-    return Object.freeze({
+    const candidate: Readonly<FlowingContoursCandidate> = Object.freeze({
       anchor,
       backward,
       forward,
@@ -1061,6 +1047,8 @@ export function searchFlowingContoursCandidate(
       length,
       score,
     })
+    CANDIDATE_SOURCE_FIELDS.set(candidate, field)
+    return candidate
   } catch {
     return null
   }

@@ -15,7 +15,10 @@ import {
   isWithinFlowingContoursLimit,
   type FlowingContoursLimits,
 } from './limits'
-import type { FlowingContoursSelectionResult } from './selection'
+import {
+  isFlowingContoursAcceptedSelectionFromField,
+  type FlowingContoursSelectionResult,
+} from './selection'
 import {
   FLOWING_CONTOURS_ENDPOINT_REASONS,
   type AcceptedFlowingTrajectory,
@@ -946,7 +949,8 @@ export function registerAcceptedFlowingTrajectorySuppression(
       data === null ||
       field !== data.field ||
       typeof selection !== 'object' ||
-      selection === null
+      selection === null ||
+      !isFlowingContoursAcceptedSelectionFromField(selection, field)
     ) {
       return null
     }

@@ -15,6 +15,7 @@ import {
 import { scoreFlowingContoursCandidate } from '../sketches/flowing-contours/objective'
 import { searchFlowingContoursCandidate } from '../sketches/flowing-contours/search'
 import {
+  isFlowingContoursAcceptedSelectionFromField,
   selectFlowingContoursCandidate,
   type FlowingContoursSelectionOptions,
 } from '../sketches/flowing-contours/selection'
@@ -54,10 +55,7 @@ function lengthBetween(
   for (let index = start + 1; index <= end; index += 1) {
     const previous = samples[index - 1]!.point
     const current = samples[index]!.point
-    length += Math.hypot(
-      current[0] - previous[0],
-      current[1] - previous[1],
-    )
+    length += Math.hypot(current[0] - previous[0], current[1] - previous[1])
   }
   return length
 }
@@ -107,8 +105,7 @@ function candidateScore(
   const length = lengthBetween(samples, 0, samples.length - 1)
   const segmentCount = samples.length - 1
   const unsupportedLength = spans.reduce(
-    (sum, span) =>
-      sum + (span.kind === 'bounded-gap' ? span.length : 0),
+    (sum, span) => sum + (span.kind === 'bounded-gap' ? span.length : 0),
     0,
   )
   return scoreFlowingContoursCandidate(
@@ -124,8 +121,7 @@ function candidateScore(
             sum +
             Math.max(
               0,
-              previous[0] * value.tangent[0] +
-                previous[1] * value.tangent[1],
+              previous[0] * value.tangent[0] + previous[1] * value.tangent[1],
             )
           )
         }, 0) / segmentCount,
@@ -157,17 +153,17 @@ function candidate(
   overrides: CandidateOverrides = {},
 ): FlowingContoursCandidate {
   const samples = overrides.samples ?? points.map((point) => sample(point))
-  const spans =
-    overrides.support ??
-    [support(samples, 'direct-evidence', 0, samples.length - 1)]
+  const spans = overrides.support ?? [
+    support(samples, 'direct-evidence', 0, samples.length - 1),
+  ]
   const anchorSample = samples[0]!
   const backwardAnchor = {
     ...anchorSample,
     point: [...anchorSample.point] as [number, number],
-    tangent: [
-      -anchorSample.tangent[0],
-      -anchorSample.tangent[1],
-    ] as [number, number],
+    tangent: [-anchorSample.tangent[0], -anchorSample.tangent[1]] as [
+      number,
+      number,
+    ],
   }
   return {
     anchor: {
@@ -315,6 +311,30 @@ describe('Flowing Contours atomic candidate selection', () => {
     expect(result.trajectory.samples).toEqual(searched!.samples)
     expect(result.trajectory.length).toBe(searched!.length)
     expect(result.trajectory.anchorId).toBe(2)
+    expect(isFlowingContoursAcceptedSelectionFromField(result, field)).toBe(
+      true,
+    )
+    expect(
+      isFlowingContoursAcceptedSelectionFromField(
+        result,
+        straightField(21, 11),
+      ),
+    ).toBe(false)
+    expect(
+      isFlowingContoursAcceptedSelectionFromField({ ...result }, field),
+    ).toBe(false)
+  })
+
+  it('keeps structural-candidate acceptance unbranded', () => {
+    const result = select(candidate([0, 5, 10])).result
+
+    expect(result.kind).toBe('accepted')
+    expect(
+      isFlowingContoursAcceptedSelectionFromField(
+        result,
+        straightField(21, 11),
+      ),
+    ).toBe(false)
   })
 
   it('uses exact recomputed composition-relative length below and at the threshold', () => {
@@ -328,8 +348,7 @@ describe('Flowing Contours atomic candidate selection', () => {
     })
     expect(exact.result.kind).toBe('accepted')
     expect(
-      exact.result.kind === 'accepted' &&
-        exact.result.trajectory.length,
+      exact.result.kind === 'accepted' && exact.result.trajectory.length,
     ).toBe(10)
   })
 
@@ -382,8 +401,7 @@ describe('Flowing Contours atomic candidate selection', () => {
       source.score.curvaturePenalty -
       canonicalUnsupported -
       source.score.ambiguityPenalty
-    score.representedOverlapPenalty =
-      canonicalBeforeOverlap - canonicalTarget
+    score.representedOverlapPenalty = canonicalBeforeOverlap - canonicalTarget
     score.unsupportedTravelPenalty = canonicalUnsupported - 9e-13
     score.total =
       source.score.accumulatedEvidence +
@@ -481,30 +499,27 @@ describe('Flowing Contours atomic candidate selection', () => {
     [
       'score total',
       (value: FlowingContoursCandidate) => {
-        ;(value.score as { total: number }).total =
-          Number.POSITIVE_INFINITY
+        ;(value.score as { total: number }).total = Number.POSITIVE_INFINITY
       },
     ],
     [
       'forged reward',
       (value: FlowingContoursCandidate) => {
-        ;(value.score as { accumulatedEvidence: number })
-          .accumulatedEvidence = 4
+        ;(value.score as { accumulatedEvidence: number }).accumulatedEvidence =
+          4
         ;(value.score as { total: number }).total += 0.8
       },
     ],
     [
       'length aggregate',
       (value: FlowingContoursCandidate) => {
-        ;(value as { length: number }).length =
-          10 + Number.EPSILON * 10
+        ;(value as { length: number }).length = 10 + Number.EPSILON * 10
       },
     ],
     [
       'span aggregate',
       (value: FlowingContoursCandidate) => {
-        ;(value.spanSupport[0] as { length: number }).length =
-          Number.NaN
+        ;(value.spanSupport[0] as { length: number }).length = Number.NaN
       },
     ],
   ])(
@@ -590,9 +605,7 @@ describe('Flowing Contours atomic candidate selection', () => {
 
   it('enforces absolute weak-span distance and step caps', () => {
     const distanceSamples = [sample(0), sample(3), sample(10)]
-    const distanceSpan = [
-      support(distanceSamples, 'bounded-gap', 0, 2),
-    ]
+    const distanceSpan = [support(distanceSamples, 'bounded-gap', 0, 2)]
     const stepSamples = [sample(0), sample(1), sample(2), sample(10)]
     const stepSpan = [support(stepSamples, 'bounded-gap', 0, 3)]
 
@@ -707,9 +720,9 @@ describe('Flowing Contours atomic candidate selection', () => {
       'raw-trajectory-point-count': 5,
     })
 
-    expect(
-      select(candidate(), {}, exactAccounting, policy).result.kind,
-    ).toBe('accepted')
+    expect(select(candidate(), {}, exactAccounting, policy).result.kind).toBe(
+      'accepted',
+    )
     const over = select(candidate(), {}, overAccounting, policy)
     expect(over.result).toEqual({
       kind: 'rejected',
@@ -718,39 +731,27 @@ describe('Flowing Contours atomic candidate selection', () => {
     expect(overAccounting.rawTrajectoryPointCount).toBe(3)
     expect(overAccounting.rawTrajectoryCount).toBe(1)
     expect(overAccounting.acceptedCandidateCount).toBe(1)
-    expect(overAccounting.limitedBy).toBe(
-      'raw-trajectory-point-count',
-    )
+    expect(overAccounting.limitedBy).toBe('raw-trajectory-point-count')
   })
 
   it('derives stable IDs from accepted order and rejection consumes no ID', () => {
     const accounting = createFlowingContoursAccounting()
     const rejected = select(candidate([0, 2, 4]), {}, accounting)
-    const first = select(
-      candidate(undefined, { anchorId: 12 }),
-      {},
-      accounting,
-    )
-    const second = select(
-      candidate(undefined, { anchorId: 3 }),
-      {},
-      accounting,
-    )
+    const first = select(candidate(undefined, { anchorId: 12 }), {}, accounting)
+    const second = select(candidate(undefined, { anchorId: 3 }), {}, accounting)
 
     expect(rejected.result.kind).toBe('rejected')
-    expect(
-      first.result.kind === 'accepted' && first.result.trajectory.id,
-    ).toBe(0)
+    expect(first.result.kind === 'accepted' && first.result.trajectory.id).toBe(
+      0,
+    )
     expect(
       second.result.kind === 'accepted' && second.result.trajectory.id,
     ).toBe(1)
     expect(
-      first.result.kind === 'accepted' &&
-        first.result.trajectory.anchorId,
+      first.result.kind === 'accepted' && first.result.trajectory.anchorId,
     ).toBe(12)
     expect(
-      second.result.kind === 'accepted' &&
-        second.result.trajectory.anchorId,
+      second.result.kind === 'accepted' && second.result.trajectory.anchorId,
     ).toBe(3)
   })
 
@@ -822,8 +823,7 @@ describe('Flowing Contours atomic candidate selection', () => {
       enumerable: true,
       configurable: true,
     })
-    const beforeNonwritable =
-      snapshotFlowingContoursDiagnostics(nonwritable)
+    const beforeNonwritable = snapshotFlowingContoursDiagnostics(nonwritable)
     expect(select(candidate(), {}, nonwritable).result).toEqual({
       kind: 'rejected',
       reason: 'invalid-input',
@@ -880,16 +880,12 @@ describe('Flowing Contours atomic candidate selection', () => {
     }
     expect(evidence.result.safetyTruncated).toBe(false)
     expect(safety.result.safetyTruncated).toBe(true)
-    expect(safety.result.trajectory.startEndpointReason).toBe(
-      'safety-limit',
-    )
+    expect(safety.result.trajectory.startEndpointReason).toBe('safety-limit')
     expect(safety.result.trajectory.endEndpointReason).toBe(
       'evidence-exhausted',
     )
     expect(safety.accounting.endpointReasonCounts['safety-limit']).toBe(1)
-    expect(
-      safety.accounting.endpointReasonCounts['evidence-exhausted'],
-    ).toBe(1)
+    expect(safety.accounting.endpointReasonCounts['evidence-exhausted']).toBe(1)
   })
 
   it('never lets a safety endpoint override whole-candidate quality gates', () => {
