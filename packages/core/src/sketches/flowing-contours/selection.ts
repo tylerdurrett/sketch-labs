@@ -1,19 +1,19 @@
 /**
  * Atomic whole-candidate acceptance for Flowing Contours.
  *
- * Selection is deliberately trajectory-sized: it either snapshots the entire
- * FC10 candidate into one accepted trajectory or emits no geometry. Nearby
- * evidence and represented-curve occupancy are owned by FC12 and are never
- * touched here.
+ * FC10's complete bidirectional candidate is the sole unit of trust and
+ * acceptance. This module validates and snapshots its canonical assembly,
+ * recomputes geometry and every derivable objective term, then either commits
+ * one complete accepted trajectory or no geometry. FC12 alone owns occupancy
+ * and suppression.
  *
- * Safety-truncated candidates are conservative but not automatically useless.
- * They may be accepted only when the complete geometry still passes the same
- * score and composition-relative length gates as an evidence-complete
- * candidate. A prospective cap overrun always rejects the whole candidate.
+ * A safety-truncated candidate may be useful, but receives no quality
+ * exemption: both whole-curve gates and every prospective cap must still pass.
  */
 
 import type { Point } from '../../types'
 import type { FlowingContoursAccounting } from './accounting'
+import { measureFlowingContoursCurvatureChange } from './growth'
 import {
   canConsumeFlowingContoursLimit,
   FLOWING_CONTOURS_LIMITS,
@@ -27,18 +27,30 @@ import {
   type FlowingContoursCandidate,
   type FlowingContoursCandidateScore,
   type FlowingContoursEndpointReason,
+  type FlowingContoursLimitName,
   type FlowingContoursSpanSupportProvenance,
 } from './types'
 
-const SCORE_EPSILON = 1e-12
+const VECTOR_EPSILON = 1e-12
+const PROVENANCE_EPSILON = 1e-12
+const GAP_ALIGNMENT_FLOOR = 0.75
+const LOOP_ALIGNMENT_FLOOR = 0.75
+
+const ACCUMULATED_EVIDENCE_WEIGHT = 4
+const USEFUL_LENGTH_WEIGHT = 3
+const DIRECTIONAL_COHERENCE_WEIGHT = 2
+const MINIMUM_CURVATURE_WEIGHT = 0.5
+const MAXIMUM_CURVATURE_WEIGHT = 3
+const UNSUPPORTED_TRAVEL_WEIGHT = 4.5
+const AMBIGUITY_WEIGHT = 3
+const REPRESENTED_OVERLAP_WEIGHT = 5
 
 /**
  * Provisional internal whole-objective floor.
  *
- * FC08 totals can range from strongly negative to nine positive reward
- * points. Requiring one net point rejects candidates whose penalties erase
- * essentially all evidence, length, and coherence reward while leaving room
- * for later reference-image calibration.
+ * FC08 has nine positive reward points. One net point rejects candidates whose
+ * penalties erase essentially all evidence, length, and coherence reward,
+ * while leaving an explicit calibration seam for FC25.
  */
 const MINIMUM_WHOLE_CANDIDATE_SCORE = 1
 
@@ -52,8 +64,6 @@ export interface FlowingContoursSelectionOptions {
   readonly analysisHeight: number
   /** Authored fraction of the analysis diagonal. */
   readonly minimumStrokeLength: number
-  /** Stable ID reserved for this candidate if and only if it is accepted. */
-  readonly nextAcceptedId: number
 }
 
 export type FlowingContoursSelectionRejectionReason =
@@ -68,11 +78,7 @@ export type FlowingContoursSelectionResult =
   | Readonly<{
       readonly kind: 'accepted'
       readonly trajectory: Readonly<AcceptedFlowingTrajectory>
-      /**
-       * True when either directional search ended at a safety boundary.
-       *
-       * The exact one-or-two endpoint inventory remains on `trajectory`.
-       */
+      /** True when either exact endpoint reason is `safety-limit`. */
       readonly safetyTruncated: boolean
     }>
   | Readonly<{
@@ -80,15 +86,74 @@ export type FlowingContoursSelectionResult =
       readonly reason: FlowingContoursSelectionRejectionReason
     }>
 
-function frozenPoint(source: Readonly<Point>): Readonly<Point> | null {
+type UnknownRecord = Readonly<Record<PropertyKey, unknown>>
+
+function ownDataValue(
+  source: unknown,
+  key: PropertyKey,
+): unknown | null {
+  if (source === null || typeof source !== 'object') return null
   try {
-    const x = source[0]
-    const y = source[1]
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
-    return Object.freeze([x, y] as Point)
+    const descriptor = Object.getOwnPropertyDescriptor(source, key)
+    return descriptor !== undefined && 'value' in descriptor
+      ? descriptor.value
+      : null
   } catch {
     return null
   }
+}
+
+function hasOwnDataProperty(source: unknown, key: PropertyKey): boolean {
+  if (source === null || typeof source !== 'object') return false
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(source, key)
+    return descriptor !== undefined && 'value' in descriptor
+  } catch {
+    return false
+  }
+}
+
+function boundedOwnArray(
+  source: unknown,
+  minimumLength: number,
+  maximumLength: number,
+): readonly unknown[] | null {
+  try {
+    if (!Array.isArray(source)) return null
+    const length = ownDataValue(source, 'length')
+    if (
+      !Number.isSafeInteger(length) ||
+      (length as number) < minimumLength ||
+      (length as number) > maximumLength
+    ) {
+      return null
+    }
+    const result: unknown[] = []
+    for (let index = 0; index < (length as number); index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(source, index)
+      if (descriptor === undefined || !('value' in descriptor)) return null
+      result.push(descriptor.value)
+    }
+    return result
+  } catch {
+    return null
+  }
+}
+
+function finitePoint(source: unknown): Readonly<Point> | null {
+  const coordinates = boundedOwnArray(source, 2, 2)
+  if (coordinates === null) return null
+  const x = coordinates[0]
+  const y = coordinates[1]
+  if (
+    typeof x !== 'number' ||
+    !Number.isFinite(x) ||
+    typeof y !== 'number' ||
+    !Number.isFinite(y)
+  ) {
+    return null
+  }
+  return Object.freeze([x, y] as Point)
 }
 
 function unitInterval(value: unknown): value is number {
@@ -101,174 +166,541 @@ function unitInterval(value: unknown): value is number {
 }
 
 function snapshotSample(
-  source: Readonly<CorrectedFlowingRidgeSample>,
+  source: unknown,
 ): Readonly<CorrectedFlowingRidgeSample> | null {
-  try {
-    const point = frozenPoint(source.point)
-    const tangent = frozenPoint(source.tangent)
-    const tangentLength =
-      tangent === null ? Number.NaN : Math.hypot(tangent[0], tangent[1])
-    if (
-      point === null ||
-      tangent === null ||
-      !Number.isFinite(tangentLength) ||
-      Math.abs(tangentLength - 1) > 1e-8 ||
-      !unitInterval(source.evidence) ||
-      !unitInterval(source.coherence) ||
-      !unitInterval(source.ambiguity) ||
-      typeof source.scale !== 'number' ||
-      !Number.isFinite(source.scale) ||
-      source.scale <= 0 ||
-      !unitInterval(source.alpha) ||
-      source.alpha <= 0
-    ) {
-      return null
-    }
-    return Object.freeze({
-      point,
-      tangent,
-      evidence: source.evidence,
-      coherence: source.coherence,
-      ambiguity: source.ambiguity,
-      scale: source.scale,
-      alpha: source.alpha,
-    })
-  } catch {
+  const point = finitePoint(ownDataValue(source, 'point'))
+  const tangent = finitePoint(ownDataValue(source, 'tangent'))
+  const evidence = ownDataValue(source, 'evidence')
+  const coherence = ownDataValue(source, 'coherence')
+  const ambiguity = ownDataValue(source, 'ambiguity')
+  const scale = ownDataValue(source, 'scale')
+  const alpha = ownDataValue(source, 'alpha')
+  const tangentLength =
+    tangent === null ? Number.NaN : Math.hypot(tangent[0], tangent[1])
+  if (
+    point === null ||
+    tangent === null ||
+    !Number.isFinite(tangentLength) ||
+    Math.abs(tangentLength - 1) > 1e-8 ||
+    !unitInterval(evidence) ||
+    !unitInterval(coherence) ||
+    !unitInterval(ambiguity) ||
+    typeof scale !== 'number' ||
+    !Number.isFinite(scale) ||
+    scale <= 0 ||
+    !unitInterval(alpha) ||
+    alpha <= 0
+  ) {
     return null
   }
+  return Object.freeze({
+    point,
+    tangent,
+    evidence,
+    coherence,
+    ambiguity,
+    scale,
+    alpha,
+  })
 }
 
 function snapshotSamples(
-  source: readonly Readonly<CorrectedFlowingRidgeSample>[],
+  source: unknown,
+  minimumLength: number,
+  maximumLength: number,
 ): readonly Readonly<CorrectedFlowingRidgeSample>[] | null {
-  try {
-    if (!Array.isArray(source) || source.length < 2) return null
-    const result: Readonly<CorrectedFlowingRidgeSample>[] = []
-    for (const sample of source) {
-      const snapshot = snapshotSample(sample)
-      if (snapshot === null) return null
-      result.push(snapshot)
-    }
-    return Object.freeze(result)
-  } catch {
-    return null
+  const values = boundedOwnArray(source, minimumLength, maximumLength)
+  if (values === null) return null
+  const result: Readonly<CorrectedFlowingRidgeSample>[] = []
+  for (const value of values) {
+    const sample = snapshotSample(value)
+    if (sample === null) return null
+    result.push(sample)
   }
+  return Object.freeze(result)
 }
 
-function snapshotSpanSupport(
-  source: readonly Readonly<FlowingContoursSpanSupportProvenance>[],
-  sampleCount: number,
-): readonly Readonly<FlowingContoursSpanSupportProvenance>[] | null {
-  try {
-    if (!Array.isArray(source)) return null
-    const result: Readonly<FlowingContoursSpanSupportProvenance>[] = []
-    for (const span of source) {
-      if (
-        (span.kind !== 'direct-evidence' &&
-          span.kind !== 'bounded-gap') ||
-        !Number.isSafeInteger(span.startSampleIndex) ||
-        !Number.isSafeInteger(span.endSampleIndex) ||
-        span.startSampleIndex < 0 ||
-        span.endSampleIndex <= span.startSampleIndex ||
-        span.endSampleIndex >= sampleCount ||
-        !Number.isFinite(span.length) ||
-        span.length < 0 ||
-        !unitInterval(span.entryEvidence) ||
-        !unitInterval(span.exitEvidence) ||
-        !Number.isFinite(span.directionalAlignment) ||
-        span.directionalAlignment < -1 ||
-        span.directionalAlignment > 1
-      ) {
-        return null
-      }
-      result.push(
-        Object.freeze({
-          kind: span.kind,
-          startSampleIndex: span.startSampleIndex,
-          endSampleIndex: span.endSampleIndex,
-          length: span.length,
-          entryEvidence: span.entryEvidence,
-          exitEvidence: span.exitEvidence,
-          directionalAlignment: span.directionalAlignment,
-        }),
+function samePoint(first: Readonly<Point>, second: Readonly<Point>): boolean {
+  return Object.is(first[0], second[0]) && Object.is(first[1], second[1])
+}
+
+function sameSample(
+  first: Readonly<CorrectedFlowingRidgeSample>,
+  second: Readonly<CorrectedFlowingRidgeSample>,
+  tangentSign = 1,
+): boolean {
+  return (
+    samePoint(first.point, second.point) &&
+    Object.is(first.tangent[0], second.tangent[0] * tangentSign) &&
+    Object.is(first.tangent[1], second.tangent[1] * tangentSign) &&
+    Object.is(first.evidence, second.evidence) &&
+    Object.is(first.coherence, second.coherence) &&
+    Object.is(first.ambiguity, second.ambiguity) &&
+    Object.is(first.scale, second.scale) &&
+    Object.is(first.alpha, second.alpha)
+  )
+}
+
+function segmentLength(
+  first: Readonly<CorrectedFlowingRidgeSample>,
+  second: Readonly<CorrectedFlowingRidgeSample>,
+): number | null {
+  const length = Math.hypot(
+    second.point[0] - first.point[0],
+    second.point[1] - first.point[1],
+  )
+  return Number.isFinite(length) && length > VECTOR_EPSILON ? length : null
+}
+
+function polylineLength(
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+  start = 0,
+  end = samples.length - 1,
+): number | null {
+  let total = 0
+  for (let index = start + 1; index <= end; index += 1) {
+    const length = segmentLength(samples[index - 1]!, samples[index]!)
+    if (length === null) return null
+    total += length
+  }
+  return Number.isFinite(total) ? total : null
+}
+
+function closeEnough(first: number, second: number): boolean {
+  return (
+    Number.isFinite(first) &&
+    Number.isFinite(second) &&
+    Math.abs(first - second) <=
+      PROVENANCE_EPSILON * Math.max(1, Math.abs(second))
+  )
+}
+
+function dot(first: Readonly<Point>, second: Readonly<Point>): number {
+  return Math.max(
+    -1,
+    Math.min(1, first[0] * second[0] + first[1] * second[1]),
+  )
+}
+
+function displacementUnit(
+  first: Readonly<Point>,
+  second: Readonly<Point>,
+): Readonly<Point> | null {
+  const x = second[0] - first[0]
+  const y = second[1] - first[1]
+  const length = Math.hypot(x, y)
+  return Number.isFinite(length) && length > VECTOR_EPSILON
+    ? Object.freeze([x / length, y / length] as Point)
+    : null
+}
+
+function directAlignment(
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+  start: number,
+  end: number,
+): number {
+  let minimum = 1
+  for (let index = start + 1; index <= end; index += 1) {
+    minimum = Math.min(
+      minimum,
+      dot(samples[index - 1]!.tangent, samples[index]!.tangent),
+    )
+  }
+  return minimum
+}
+
+function gapAlignment(
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+  start: number,
+  end: number,
+): number | null {
+  const entry = samples[start]!
+  let minimum = 1
+  for (let index = start + 1; index <= end; index += 1) {
+    const previous = samples[index - 1]!
+    const sample = samples[index]!
+    const displacement = displacementUnit(entry.point, sample.point)
+    if (displacement === null) return null
+    minimum = Math.min(
+      minimum,
+      dot(previous.tangent, sample.tangent),
+      dot(entry.tangent, sample.tangent),
+      dot(entry.tangent, displacement),
+      dot(sample.tangent, displacement),
+    )
+  }
+  return minimum
+}
+
+interface CanonicalSupport {
+  readonly spans: readonly Readonly<FlowingContoursSpanSupportProvenance>[]
+  readonly maximumUnsupportedSpanLength: number
+  readonly totalUnsupportedSpanLength: number
+}
+
+function snapshotSupport(
+  source: unknown,
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+  limits: Readonly<FlowingContoursLimits>,
+  allowClosingSpan: boolean,
+  allowedDirectJoinIndices: ReadonlySet<number> = new Set(),
+): Readonly<CanonicalSupport> | null {
+  const segmentCount = samples.length - 1
+  const values = boundedOwnArray(source, segmentCount === 0 ? 0 : 1, segmentCount)
+  if (values === null) return null
+
+  const result: Readonly<FlowingContoursSpanSupportProvenance>[] = []
+  let expectedStart = 0
+  let maximumUnsupportedSpanLength = 0
+  let totalUnsupportedSpanLength = 0
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index]
+    const kind = ownDataValue(value, 'kind')
+    const startSampleIndex = ownDataValue(value, 'startSampleIndex')
+    const endSampleIndex = ownDataValue(value, 'endSampleIndex')
+    const suppliedLength = ownDataValue(value, 'length')
+    const entryEvidence = ownDataValue(value, 'entryEvidence')
+    const exitEvidence = ownDataValue(value, 'exitEvidence')
+    const suppliedAlignment = ownDataValue(value, 'directionalAlignment')
+    if (
+      (kind !== 'direct-evidence' && kind !== 'bounded-gap') ||
+      (kind === 'direct-evidence' &&
+        result[result.length - 1]?.kind === 'direct-evidence' &&
+        !allowedDirectJoinIndices.has(startSampleIndex as number)) ||
+      !Number.isSafeInteger(startSampleIndex) ||
+      !Number.isSafeInteger(endSampleIndex) ||
+      startSampleIndex !== expectedStart ||
+      (endSampleIndex as number) <= (startSampleIndex as number) ||
+      (endSampleIndex as number) > segmentCount ||
+      typeof suppliedLength !== 'number' ||
+      !Number.isFinite(suppliedLength) ||
+      !unitInterval(entryEvidence) ||
+      !unitInterval(exitEvidence) ||
+      typeof suppliedAlignment !== 'number' ||
+      !Number.isFinite(suppliedAlignment) ||
+      suppliedAlignment < -1 ||
+      suppliedAlignment > 1
+    ) {
+      return null
+    }
+
+    const start = startSampleIndex as number
+    const end = endSampleIndex as number
+    const length = polylineLength(samples, start, end)
+    const alignment =
+      kind === 'bounded-gap'
+        ? gapAlignment(samples, start, end)
+        : directAlignment(samples, start, end)
+    const closingSpan =
+      allowClosingSpan &&
+      index === values.length - 1 &&
+      end === segmentCount &&
+      sameSample(samples[end]!, samples[0]!)
+    if (
+      length === null ||
+      alignment === null ||
+      !closeEnough(suppliedLength, length) ||
+      !Object.is(entryEvidence, samples[start]!.evidence) ||
+      !Object.is(exitEvidence, samples[end]!.evidence) ||
+      (closingSpan
+        ? suppliedAlignment > alignment + PROVENANCE_EPSILON ||
+          suppliedAlignment < LOOP_ALIGNMENT_FLOOR
+        : !closeEnough(suppliedAlignment, alignment))
+    ) {
+      return null
+    }
+    if (
+      kind === 'bounded-gap' &&
+      (end - start < 2 ||
+        entryEvidence <= 0 ||
+        exitEvidence <= 0 ||
+        length > limits['weak-span-distance'] ||
+        end - start - 1 > limits['weak-span-step-count'] ||
+        alignment < GAP_ALIGNMENT_FLOOR)
+    ) {
+      return null
+    }
+    if (
+      kind === 'direct-evidence' &&
+      samples
+        .slice(start, end + 1)
+        .some((sample) => sample.evidence <= 0)
+    ) {
+      return null
+    }
+
+    const canonicalAlignment = closingSpan ? suppliedAlignment : alignment
+    result.push(
+      Object.freeze({
+        kind,
+        startSampleIndex: start,
+        endSampleIndex: end,
+        length,
+        entryEvidence,
+        exitEvidence,
+        directionalAlignment: canonicalAlignment,
+      }),
+    )
+    if (kind === 'bounded-gap') {
+      maximumUnsupportedSpanLength = Math.max(
+        maximumUnsupportedSpanLength,
+        length,
       )
+      totalUnsupportedSpanLength += length
+      if (!Number.isFinite(totalUnsupportedSpanLength)) return null
     }
-    return Object.freeze(result)
-  } catch {
-    return null
+    expectedStart = end
   }
+  if (expectedStart !== segmentCount) return null
+
+  return Object.freeze({
+    spans: Object.freeze(result),
+    maximumUnsupportedSpanLength,
+    totalUnsupportedSpanLength,
+  })
 }
 
-function snapshotScore(
-  source: Readonly<FlowingContoursCandidateScore>,
-): Readonly<FlowingContoursCandidateScore> | null {
-  try {
-    const values = [
-      source.accumulatedEvidence,
-      source.usefulLength,
-      source.directionalCoherence,
-      source.curvaturePenalty,
-      source.unsupportedTravelPenalty,
-      source.ambiguityPenalty,
-      source.representedOverlapPenalty,
-      source.total,
-    ]
-    if (
-      values.some((value) => !Number.isFinite(value)) ||
-      values.slice(0, 7).some((value) => value < 0)
-    ) {
-      return null
-    }
-    const expectedTotal =
-      source.accumulatedEvidence +
-      source.usefulLength +
-      source.directionalCoherence -
-      source.curvaturePenalty -
-      source.unsupportedTravelPenalty -
-      source.ambiguityPenalty -
-      source.representedOverlapPenalty
-    if (
-      !Number.isFinite(expectedTotal) ||
-      Math.abs(expectedTotal - source.total) >
-        SCORE_EPSILON * Math.max(1, Math.abs(expectedTotal))
-    ) {
-      return null
-    }
-    return Object.freeze({
-      accumulatedEvidence: source.accumulatedEvidence,
-      usefulLength: source.usefulLength,
-      directionalCoherence: source.directionalCoherence,
-      curvaturePenalty: source.curvaturePenalty,
-      unsupportedTravelPenalty: source.unsupportedTravelPenalty,
-      ambiguityPenalty: source.ambiguityPenalty,
-      representedOverlapPenalty: source.representedOverlapPenalty,
-      total: source.total,
-    })
-  } catch {
-    return null
-  }
+interface TraceSnapshot {
+  readonly direction: 'forward' | 'backward'
+  readonly samples: readonly Readonly<CorrectedFlowingRidgeSample>[]
+  readonly support: Readonly<CanonicalSupport>
+  readonly endpointReason: FlowingContoursEndpointReason
+  readonly searchStepCount: number
 }
 
-function endpointReason(
-  value: unknown,
-): FlowingContoursEndpointReason | null {
+function endpointReason(value: unknown): FlowingContoursEndpointReason | null {
   return typeof value === 'string' && ENDPOINT_REASON_SET.has(value)
     ? (value as FlowingContoursEndpointReason)
     : null
 }
 
-function polylineLength(
-  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
-): number | null {
-  let total = 0
-  for (let index = 1; index < samples.length; index += 1) {
-    const first = samples[index - 1]!.point
-    const second = samples[index]!.point
-    const segment = Math.hypot(second[0] - first[0], second[1] - first[1])
-    if (!Number.isFinite(segment) || segment <= 0) return null
-    total += segment
+function snapshotTrace(
+  source: unknown,
+  expectedDirection: 'forward' | 'backward',
+  limits: Readonly<FlowingContoursLimits>,
+): Readonly<TraceSnapshot> | null {
+  const direction = ownDataValue(source, 'direction')
+  const endpoint = endpointReason(ownDataValue(source, 'endpointReason'))
+  const searchStepCount = ownDataValue(source, 'searchStepCount')
+  const samples = snapshotSamples(
+    ownDataValue(source, 'samples'),
+    1,
+    limits['raw-trajectory-point-count'],
+  )
+  if (
+    direction !== expectedDirection ||
+    endpoint === null ||
+    !Number.isSafeInteger(searchStepCount) ||
+    (searchStepCount as number) < 0 ||
+    (searchStepCount as number) > limits['search-step-count'] ||
+    samples === null
+  ) {
+    return null
   }
-  return Number.isFinite(total) ? total : null
+  const support = snapshotSupport(
+    ownDataValue(source, 'spanSupport'),
+    samples,
+    limits,
+    false,
+  )
+  if (support === null) return null
+  return Object.freeze({
+    direction: expectedDirection,
+    samples,
+    support,
+    endpointReason: endpoint,
+    searchStepCount: searchStepCount as number,
+  })
+}
+
+function reverseBackwardSamples(
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+): readonly Readonly<CorrectedFlowingRidgeSample>[] {
+  return Object.freeze(
+    [...samples].reverse().map((sample) =>
+      Object.freeze({
+        ...sample,
+        tangent: Object.freeze([
+          -sample.tangent[0],
+          -sample.tangent[1],
+        ] as Point),
+      }),
+    ),
+  )
+}
+
+function reverseBackwardSupport(
+  trace: Readonly<TraceSnapshot>,
+): readonly Readonly<FlowingContoursSpanSupportProvenance>[] {
+  const lastIndex = trace.samples.length - 1
+  return Object.freeze(
+    [...trace.support.spans].reverse().map((span) =>
+      Object.freeze({
+        kind: span.kind,
+        startSampleIndex: lastIndex - span.endSampleIndex,
+        endSampleIndex: lastIndex - span.startSampleIndex,
+        length: span.length,
+        entryEvidence: span.exitEvidence,
+        exitEvidence: span.entryEvidence,
+        directionalAlignment: span.directionalAlignment,
+      }),
+    ),
+  )
+}
+
+function shiftedForwardSupport(
+  trace: Readonly<TraceSnapshot>,
+  offset: number,
+): readonly Readonly<FlowingContoursSpanSupportProvenance>[] {
+  return Object.freeze(
+    trace.support.spans.map((span) =>
+      Object.freeze({
+        ...span,
+        startSampleIndex: span.startSampleIndex + offset,
+        endSampleIndex: span.endSampleIndex + offset,
+      }),
+    ),
+  )
+}
+
+function sameSpan(
+  first: Readonly<FlowingContoursSpanSupportProvenance>,
+  second: Readonly<FlowingContoursSpanSupportProvenance>,
+): boolean {
+  return (
+    first.kind === second.kind &&
+    first.startSampleIndex === second.startSampleIndex &&
+    first.endSampleIndex === second.endSampleIndex &&
+    closeEnough(first.length, second.length) &&
+    Object.is(first.entryEvidence, second.entryEvidence) &&
+    Object.is(first.exitEvidence, second.exitEvidence) &&
+    closeEnough(first.directionalAlignment, second.directionalAlignment)
+  )
+}
+
+function clampReward(value: number): number {
+  if (value <= 0) return 0
+  return value >= 1 ? 1 : value
+}
+
+function finiteTotal(value: number): number {
+  if (!Number.isFinite(value)) return -Number.MAX_VALUE
+  return Object.is(value, -0) ? 0 : value
+}
+
+function snapshotAndValidateScore(
+  source: unknown,
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+  support: Readonly<CanonicalSupport>,
+  length: number,
+  diagonal: number,
+): Readonly<FlowingContoursCandidateScore> | null {
+  const accumulatedEvidence = ownDataValue(source, 'accumulatedEvidence')
+  const usefulLength = ownDataValue(source, 'usefulLength')
+  const directionalCoherence = ownDataValue(source, 'directionalCoherence')
+  const curvaturePenalty = ownDataValue(source, 'curvaturePenalty')
+  const unsupportedTravelPenalty = ownDataValue(
+    source,
+    'unsupportedTravelPenalty',
+  )
+  const ambiguityPenalty = ownDataValue(source, 'ambiguityPenalty')
+  const representedOverlapPenalty = ownDataValue(
+    source,
+    'representedOverlapPenalty',
+  )
+  const total = ownDataValue(source, 'total')
+  const values = [
+    accumulatedEvidence,
+    usefulLength,
+    directionalCoherence,
+    curvaturePenalty,
+    unsupportedTravelPenalty,
+    ambiguityPenalty,
+    representedOverlapPenalty,
+    total,
+  ]
+  if (
+    values.some(
+      (value) => typeof value !== 'number' || !Number.isFinite(value),
+    )
+  ) {
+    return null
+  }
+
+  let evidenceSum = 0
+  let ambiguitySum = 0
+  let coherenceSum = 0
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = samples[index]!
+    evidenceSum += sample.evidence
+    ambiguitySum += sample.ambiguity
+    if (index > 0) {
+      coherenceSum += Math.max(
+        0,
+        dot(samples[index - 1]!.tangent, sample.tangent),
+      )
+    }
+  }
+  const expectedAccumulatedEvidence =
+    ACCUMULATED_EVIDENCE_WEIGHT *
+    clampReward(evidenceSum / samples.length)
+  const expectedUsefulLength =
+    USEFUL_LENGTH_WEIGHT * clampReward(length / diagonal)
+  const expectedDirectionalCoherence =
+    DIRECTIONAL_COHERENCE_WEIGHT *
+    (samples.length < 2 ? 0 : coherenceSum / (samples.length - 1))
+  const expectedUnsupportedPenalty =
+    UNSUPPORTED_TRAVEL_WEIGHT *
+    clampReward(support.totalUnsupportedSpanLength / diagonal)
+  const expectedAmbiguityPenalty =
+    AMBIGUITY_WEIGHT * clampReward(ambiguitySum / samples.length)
+  const segmentCount = Math.max(1, samples.length - 1)
+  const curvatureChange =
+    measureFlowingContoursCurvatureChange(
+      samples.map((sample) => sample.point),
+    ) / segmentCount
+  const minimumCurvaturePenalty =
+    MINIMUM_CURVATURE_WEIGHT * clampReward(curvatureChange)
+  const maximumCurvaturePenalty =
+    MAXIMUM_CURVATURE_WEIGHT * clampReward(curvatureChange)
+
+  if (
+    !Object.is(accumulatedEvidence, expectedAccumulatedEvidence) ||
+    !Object.is(usefulLength, expectedUsefulLength) ||
+    !Object.is(directionalCoherence, expectedDirectionalCoherence) ||
+    !closeEnough(
+      unsupportedTravelPenalty as number,
+      expectedUnsupportedPenalty,
+    ) ||
+    !Object.is(ambiguityPenalty, expectedAmbiguityPenalty) ||
+    (curvaturePenalty as number) < minimumCurvaturePenalty ||
+    (curvaturePenalty as number) > maximumCurvaturePenalty ||
+    (representedOverlapPenalty as number) < 0 ||
+    (representedOverlapPenalty as number) > REPRESENTED_OVERLAP_WEIGHT
+  ) {
+    return null
+  }
+  const expectedTotal = finiteTotal(
+    (accumulatedEvidence as number) +
+      (usefulLength as number) +
+      (directionalCoherence as number) -
+      (curvaturePenalty as number) -
+      (unsupportedTravelPenalty as number) -
+      (ambiguityPenalty as number) -
+      (representedOverlapPenalty as number),
+  )
+  if (!Object.is(total, expectedTotal)) return null
+
+  return Object.freeze({
+    accumulatedEvidence: accumulatedEvidence as number,
+    usefulLength: usefulLength as number,
+    directionalCoherence: directionalCoherence as number,
+    curvaturePenalty: curvaturePenalty as number,
+    unsupportedTravelPenalty: unsupportedTravelPenalty as number,
+    ambiguityPenalty: ambiguityPenalty as number,
+    representedOverlapPenalty: representedOverlapPenalty as number,
+    total: total as number,
+  })
 }
 
 interface CandidateSnapshot {
@@ -285,79 +717,147 @@ interface CandidateSnapshot {
 
 function snapshotCandidate(
   source: Readonly<FlowingContoursCandidate>,
+  analysisWidth: number,
+  analysisHeight: number,
+  diagonal: number,
+  limits: Readonly<FlowingContoursLimits>,
 ): Readonly<CandidateSnapshot> | null {
-  try {
-    const samples = snapshotSamples(source.samples)
-    if (samples === null) return null
-    const spanSupport = snapshotSpanSupport(
-      source.spanSupport,
-      samples.length,
-    )
-    const score = snapshotScore(source.score)
-    const startReason = endpointReason(source.backward.endpointReason)
-    const endReason = endpointReason(source.forward.endpointReason)
-    const measuredLength = polylineLength(samples)
-    if (
-      spanSupport === null ||
-      score === null ||
-      startReason === null ||
-      endReason === null ||
-      measuredLength === null ||
-      !Number.isSafeInteger(source.anchor.id) ||
-      source.anchor.id < 0 ||
-      !Number.isFinite(source.length) ||
-      source.length < 0 ||
-      Math.abs(source.length - measuredLength) >
-        SCORE_EPSILON * Math.max(1, measuredLength)
-    ) {
-      return null
-    }
-
-    let maximumUnsupportedSpanLength = 0
-    let totalUnsupportedSpanLength = 0
-    for (const span of spanSupport) {
-      if (span.kind !== 'bounded-gap') continue
-      maximumUnsupportedSpanLength = Math.max(
-        maximumUnsupportedSpanLength,
-        span.length,
-      )
-      totalUnsupportedSpanLength += span.length
-    }
-    if (!Number.isFinite(totalUnsupportedSpanLength)) return null
-
-    return Object.freeze({
-      anchorId: source.anchor.id,
-      samples,
-      spanSupport,
-      startEndpointReason: startReason,
-      endEndpointReason: endReason,
-      length: source.length,
-      maximumUnsupportedSpanLength,
-      totalUnsupportedSpanLength,
-      score,
-    })
-  } catch {
+  const anchorSource = ownDataValue(source, 'anchor')
+  const anchorId = ownDataValue(anchorSource, 'id')
+  const fieldSampleIndex = ownDataValue(anchorSource, 'fieldSampleIndex')
+  const anchorSample = snapshotSample(ownDataValue(anchorSource, 'sample'))
+  const backward = snapshotTrace(
+    ownDataValue(source, 'backward'),
+    'backward',
+    limits,
+  )
+  const forward = snapshotTrace(
+    ownDataValue(source, 'forward'),
+    'forward',
+    limits,
+  )
+  const suppliedSamples = snapshotSamples(
+    ownDataValue(source, 'samples'),
+    2,
+    limits['raw-trajectory-point-count'],
+  )
+  if (
+    !Number.isSafeInteger(anchorId) ||
+    (anchorId as number) < 0 ||
+    !Number.isSafeInteger(fieldSampleIndex) ||
+    (fieldSampleIndex as number) < 0 ||
+    (fieldSampleIndex as number) >= analysisWidth * analysisHeight ||
+    anchorSample === null ||
+    backward === null ||
+    forward === null ||
+    suppliedSamples === null ||
+    backward.searchStepCount + forward.searchStepCount >
+      limits['search-step-count'] ||
+    !sameSample(forward.samples[0]!, anchorSample) ||
+    !sameSample(backward.samples[0]!, anchorSample, -1)
+  ) {
     return null
   }
+
+  const reversedBackward = reverseBackwardSamples(backward.samples)
+  const assembled = [
+    ...reversedBackward,
+    ...forward.samples.slice(1),
+  ]
+  const hasClosure =
+    suppliedSamples.length === assembled.length + 1 &&
+    sameSample(suppliedSamples[suppliedSamples.length - 1]!, assembled[0]!)
+  if (
+    (!hasClosure && suppliedSamples.length !== assembled.length) ||
+    assembled.some(
+      (sample, index) => !sameSample(sample, suppliedSamples[index]!),
+    ) ||
+    suppliedSamples.some(
+      (sample) =>
+        sample.point[0] < 0 ||
+        sample.point[1] < 0 ||
+        sample.point[0] > analysisWidth - 1 ||
+        sample.point[1] > analysisHeight - 1,
+    )
+  ) {
+    return null
+  }
+
+  const support = snapshotSupport(
+    ownDataValue(source, 'spanSupport'),
+    suppliedSamples,
+    limits,
+    hasClosure,
+    new Set([
+      backward.samples.length - 1,
+      ...(hasClosure ? [assembled.length - 1] : []),
+    ]),
+  )
+  if (support === null) return null
+  const expectedSupport = [
+    ...reverseBackwardSupport(backward),
+    ...shiftedForwardSupport(forward, backward.samples.length - 1),
+  ]
+  const expectedSupportCount = expectedSupport.length + (hasClosure ? 1 : 0)
+  if (
+    support.spans.length !== expectedSupportCount ||
+    expectedSupport.some(
+      (span, index) => !sameSpan(span, support.spans[index]!),
+    ) ||
+    (hasClosure &&
+      support.spans[support.spans.length - 1]!.startSampleIndex !==
+        assembled.length - 1)
+  ) {
+    return null
+  }
+
+  const length = polylineLength(suppliedSamples)
+  const suppliedLength = ownDataValue(source, 'length')
+  if (
+    length === null ||
+    typeof suppliedLength !== 'number' ||
+    !Object.is(suppliedLength, length)
+  ) {
+    return null
+  }
+  const score = snapshotAndValidateScore(
+    ownDataValue(source, 'score'),
+    suppliedSamples,
+    support,
+    length,
+    diagonal,
+  )
+  if (score === null) return null
+
+  return Object.freeze({
+    anchorId: anchorId as number,
+    samples: suppliedSamples,
+    spanSupport: support.spans,
+    startEndpointReason: backward.endpointReason,
+    endEndpointReason: forward.endpointReason,
+    length,
+    maximumUnsupportedSpanLength:
+      support.maximumUnsupportedSpanLength,
+    totalUnsupportedSpanLength: support.totalUnsupportedSpanLength,
+    score,
+  })
 }
 
 function snapshotLimits(
   source: Readonly<FlowingContoursLimits>,
 ): Readonly<FlowingContoursLimits> | null {
   try {
-    const result = {} as Record<keyof FlowingContoursLimits, number>
-    for (const name of Object.keys(FLOWING_CONTOURS_LIMITS) as Array<
-      keyof FlowingContoursLimits
-    >) {
-      const descriptor = Object.getOwnPropertyDescriptor(source, name)
+    const result = {} as Record<FlowingContoursLimitName, number>
+    for (const name of Object.keys(FLOWING_CONTOURS_LIMITS) as
+      FlowingContoursLimitName[]) {
+      const value = ownDataValue(source, name)
       if (
-        descriptor === undefined ||
-        !('value' in descriptor) ||
-        !isWithinFlowingContoursLimit(name, descriptor.value, source)
+        typeof value !== 'number' ||
+        !isWithinFlowingContoursLimit(name, value, source)
       ) {
         return null
       }
-      result[name] = descriptor.value
+      result[name] = value
     }
     return Object.freeze(result)
   } catch {
@@ -365,51 +865,405 @@ function snapshotLimits(
   }
 }
 
+interface SelectionOptionsSnapshot {
+  readonly analysisWidth: number
+  readonly analysisHeight: number
+  readonly analysisSampleCount: number
+  readonly diagonal: number
+  readonly minimumStrokeLength: number
+}
+
+function snapshotOptions(
+  source: Readonly<FlowingContoursSelectionOptions>,
+  limits: Readonly<FlowingContoursLimits>,
+): Readonly<SelectionOptionsSnapshot> | null {
+  const analysisWidth = ownDataValue(source, 'analysisWidth')
+  const analysisHeight = ownDataValue(source, 'analysisHeight')
+  const minimumStrokeLength = ownDataValue(source, 'minimumStrokeLength')
+  if (
+    !Number.isSafeInteger(analysisWidth) ||
+    (analysisWidth as number) <= 0 ||
+    !Number.isSafeInteger(analysisHeight) ||
+    (analysisHeight as number) <= 0 ||
+    !isWithinFlowingContoursLimit(
+      'analysis-dimension',
+      analysisWidth as number,
+      limits,
+    ) ||
+    !isWithinFlowingContoursLimit(
+      'analysis-dimension',
+      analysisHeight as number,
+      limits,
+    ) ||
+    typeof minimumStrokeLength !== 'number' ||
+    !Number.isFinite(minimumStrokeLength) ||
+    minimumStrokeLength < 0 ||
+    minimumStrokeLength > 1
+  ) {
+    return null
+  }
+  const analysisSampleCount =
+    (analysisWidth as number) * (analysisHeight as number)
+  const diagonal = Math.hypot(
+    analysisWidth as number,
+    analysisHeight as number,
+  )
+  if (
+    !isWithinFlowingContoursLimit(
+      'analysis-sample-count',
+      analysisSampleCount,
+      limits,
+    ) ||
+    !Number.isFinite(diagonal)
+  ) {
+    return null
+  }
+  return Object.freeze({
+    analysisWidth: analysisWidth as number,
+    analysisHeight: analysisHeight as number,
+    analysisSampleCount,
+    diagonal,
+    minimumStrokeLength,
+  })
+}
+
 function validCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0
 }
 
-function hasValidAccounting(
-  accounting: Readonly<FlowingContoursAccounting>,
-  limits: Readonly<FlowingContoursLimits>,
-): boolean {
+const ACCOUNTING_FIELD_NAMES = Object.freeze([
+  'termination',
+  'limitedBy',
+  'candidateCount',
+  'acceptedCandidateCount',
+  'rejectedCandidateCount',
+  'rawTrajectoryCount',
+  'rawTrajectoryPointCount',
+  'acceptedMaximumUnsupportedSpanLength',
+  'acceptedTotalUnsupportedSpanLength',
+] as const)
+
+interface AccountingSnapshot {
+  readonly termination: 'complete'
+  readonly limitedBy: null
+  readonly candidateCount: number
+  readonly acceptedCandidateCount: number
+  readonly rejectedCandidateCount: number
+  readonly rawTrajectoryCount: number
+  readonly rawTrajectoryPointCount: number
+  readonly acceptedMaximumUnsupportedSpanLength: number
+  readonly acceptedTotalUnsupportedSpanLength: number
+  readonly endpointReasonCounts: Readonly<
+    Record<FlowingContoursEndpointReason, number>
+  >
+}
+
+function plainWritableDataRecord(
+  source: unknown,
+  verifyClone = true,
+): source is UnknownRecord {
   try {
     if (
-      !validCount(accounting.candidateCount) ||
-      !validCount(accounting.acceptedCandidateCount) ||
-      !validCount(accounting.rejectedCandidateCount) ||
-      !validCount(accounting.rawTrajectoryCount) ||
-      !validCount(accounting.rawTrajectoryPointCount) ||
-      !isWithinFlowingContoursLimit(
-        'candidate-count',
-        accounting.candidateCount,
-        limits,
-      ) ||
-      !isWithinFlowingContoursLimit(
-        'accepted-curve-count',
-        accounting.acceptedCandidateCount,
-        limits,
-      ) ||
-      !isWithinFlowingContoursLimit(
-        'accepted-curve-count',
-        accounting.rawTrajectoryCount,
-        limits,
-      ) ||
-      !isWithinFlowingContoursLimit(
-        'raw-trajectory-point-count',
-        accounting.rawTrajectoryPointCount,
-        limits,
-      ) ||
-      !Number.isFinite(accounting.acceptedMaximumUnsupportedSpanLength) ||
-      accounting.acceptedMaximumUnsupportedSpanLength < 0 ||
-      !Number.isFinite(accounting.acceptedTotalUnsupportedSpanLength) ||
-      accounting.acceptedTotalUnsupportedSpanLength < 0
+      source === null ||
+      typeof source !== 'object' ||
+      Array.isArray(source) ||
+      Object.getPrototypeOf(source) !== Object.prototype
     ) {
       return false
     }
-    return FLOWING_CONTOURS_ENDPOINT_REASONS.every((reason) =>
-      validCount(accounting.endpointReasonCounts[reason]),
+    for (const key of Reflect.ownKeys(source)) {
+      const descriptor = Object.getOwnPropertyDescriptor(source, key)
+      if (
+        descriptor === undefined ||
+        !('value' in descriptor) ||
+        descriptor.writable !== true
+      ) {
+        return false
+      }
+    }
+    if (verifyClone) {
+      // Native structured cloning rejects Proxy exotics. Rejecting them keeps
+      // the later multi-field commit transactional rather than trap-dependent.
+      const clone = (
+        globalThis as unknown as {
+          readonly structuredClone?: (value: unknown) => unknown
+        }
+      ).structuredClone
+      if (typeof clone !== 'function') return false
+      clone(source)
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+function snapshotAccounting(
+  accounting: FlowingContoursAccounting,
+  limits: Readonly<FlowingContoursLimits>,
+): Readonly<AccountingSnapshot> | null {
+  if (!plainWritableDataRecord(accounting, false)) return null
+  for (const name of ACCOUNTING_FIELD_NAMES) {
+    if (!hasOwnDataProperty(accounting, name)) return null
+  }
+  if (!hasOwnDataProperty(accounting, 'endpointReasonCounts')) return null
+  const endpointSource = ownDataValue(accounting, 'endpointReasonCounts')
+  if (
+    !plainWritableDataRecord(endpointSource, false) ||
+    !plainWritableDataRecord(accounting)
+  ) {
+    return null
+  }
+  const termination = ownDataValue(accounting, 'termination')
+  const limitedBy = ownDataValue(accounting, 'limitedBy')
+  const candidateCount = ownDataValue(accounting, 'candidateCount')
+  const acceptedCandidateCount = ownDataValue(
+    accounting,
+    'acceptedCandidateCount',
+  )
+  const rejectedCandidateCount = ownDataValue(
+    accounting,
+    'rejectedCandidateCount',
+  )
+  const rawTrajectoryCount = ownDataValue(accounting, 'rawTrajectoryCount')
+  const rawTrajectoryPointCount = ownDataValue(
+    accounting,
+    'rawTrajectoryPointCount',
+  )
+  const acceptedMaximumUnsupportedSpanLength = ownDataValue(
+    accounting,
+    'acceptedMaximumUnsupportedSpanLength',
+  )
+  const acceptedTotalUnsupportedSpanLength = ownDataValue(
+    accounting,
+    'acceptedTotalUnsupportedSpanLength',
+  )
+  const endpointReasonCounts = {} as Record<
+    FlowingContoursEndpointReason,
+    number
+  >
+  let endpointCount = 0
+  for (const reason of FLOWING_CONTOURS_ENDPOINT_REASONS) {
+    const count = ownDataValue(endpointSource, reason)
+    if (!validCount(count)) return null
+    endpointReasonCounts[reason] = count
+    endpointCount += count
+  }
+  if (
+    termination !== 'complete' ||
+    limitedBy !== null ||
+    !validCount(candidateCount) ||
+    !validCount(acceptedCandidateCount) ||
+    !validCount(rejectedCandidateCount) ||
+    !validCount(rawTrajectoryCount) ||
+    !validCount(rawTrajectoryPointCount) ||
+    candidateCount !== acceptedCandidateCount + rejectedCandidateCount ||
+    rawTrajectoryCount !== acceptedCandidateCount ||
+    endpointCount !== candidateCount * 2 ||
+    (rawTrajectoryCount === 0
+      ? rawTrajectoryPointCount !== 0
+      : rawTrajectoryPointCount < rawTrajectoryCount * 2) ||
+    typeof acceptedMaximumUnsupportedSpanLength !== 'number' ||
+    !Number.isFinite(acceptedMaximumUnsupportedSpanLength) ||
+    acceptedMaximumUnsupportedSpanLength < 0 ||
+    typeof acceptedTotalUnsupportedSpanLength !== 'number' ||
+    !Number.isFinite(acceptedTotalUnsupportedSpanLength) ||
+    acceptedTotalUnsupportedSpanLength < 0 ||
+    acceptedMaximumUnsupportedSpanLength >
+      acceptedTotalUnsupportedSpanLength ||
+    (acceptedCandidateCount === 0 &&
+      (acceptedMaximumUnsupportedSpanLength !== 0 ||
+        acceptedTotalUnsupportedSpanLength !== 0)) ||
+    !isWithinFlowingContoursLimit(
+      'candidate-count',
+      candidateCount,
+      limits,
+    ) ||
+    !isWithinFlowingContoursLimit(
+      'accepted-curve-count',
+      acceptedCandidateCount,
+      limits,
+    ) ||
+    !isWithinFlowingContoursLimit(
+      'raw-trajectory-point-count',
+      rawTrajectoryPointCount,
+      limits,
     )
+  ) {
+    return null
+  }
+
+  return Object.freeze({
+    termination,
+    limitedBy,
+    candidateCount,
+    acceptedCandidateCount,
+    rejectedCandidateCount,
+    rawTrajectoryCount,
+    rawTrajectoryPointCount,
+    acceptedMaximumUnsupportedSpanLength,
+    acceptedTotalUnsupportedSpanLength,
+    endpointReasonCounts: Object.freeze(endpointReasonCounts),
+  })
+}
+
+interface AccountingPatch {
+  readonly accepted: boolean
+  readonly candidate: Readonly<CandidateSnapshot>
+  readonly limitedBy:
+    | 'accepted-curve-count'
+    | 'raw-trajectory-point-count'
+    | null
+}
+
+function unchangedAccounting(
+  accounting: FlowingContoursAccounting,
+  snapshot: Readonly<AccountingSnapshot>,
+): boolean {
+  return (
+    ACCOUNTING_FIELD_NAMES.every((name) =>
+      Object.is(ownDataValue(accounting, name), snapshot[name]),
+    ) &&
+    ownDataValue(accounting, 'endpointReasonCounts') !== null &&
+    FLOWING_CONTOURS_ENDPOINT_REASONS.every((reason) =>
+      Object.is(
+        ownDataValue(
+          ownDataValue(accounting, 'endpointReasonCounts'),
+          reason,
+        ),
+        snapshot.endpointReasonCounts[reason],
+      ),
+    )
+  )
+}
+
+function commitAccounting(
+  accounting: FlowingContoursAccounting,
+  snapshot: Readonly<AccountingSnapshot>,
+  patch: Readonly<AccountingPatch>,
+): boolean {
+  if (!unchangedAccounting(accounting, snapshot)) return false
+  const candidateCount = snapshot.candidateCount + 1
+  const acceptedCandidateCount =
+    snapshot.acceptedCandidateCount + (patch.accepted ? 1 : 0)
+  const rejectedCandidateCount =
+    snapshot.rejectedCandidateCount + (patch.accepted ? 0 : 1)
+  const rawTrajectoryCount =
+    snapshot.rawTrajectoryCount + (patch.accepted ? 1 : 0)
+  const rawTrajectoryPointCount =
+    snapshot.rawTrajectoryPointCount +
+    (patch.accepted ? patch.candidate.samples.length : 0)
+  const endpointReasonCounts = {
+    ...snapshot.endpointReasonCounts,
+  }
+  endpointReasonCounts[patch.candidate.startEndpointReason] += 1
+  endpointReasonCounts[patch.candidate.endEndpointReason] += 1
+  const maximumUnsupported = patch.accepted
+    ? Math.max(
+        snapshot.acceptedMaximumUnsupportedSpanLength,
+        patch.candidate.maximumUnsupportedSpanLength,
+      )
+    : snapshot.acceptedMaximumUnsupportedSpanLength
+  const totalUnsupported = patch.accepted
+    ? snapshot.acceptedTotalUnsupportedSpanLength +
+      patch.candidate.totalUnsupportedSpanLength
+    : snapshot.acceptedTotalUnsupportedSpanLength
+  if (
+    !validCount(candidateCount) ||
+    !validCount(acceptedCandidateCount) ||
+    !validCount(rejectedCandidateCount) ||
+    !validCount(rawTrajectoryCount) ||
+    !validCount(rawTrajectoryPointCount) ||
+    !Number.isFinite(maximumUnsupported) ||
+    !Number.isFinite(totalUnsupported)
+  ) {
+    return false
+  }
+
+  try {
+    Object.defineProperties(accounting, {
+      termination: {
+        ...Object.getOwnPropertyDescriptor(accounting, 'termination'),
+        value: patch.limitedBy === null ? 'complete' : 'limit-reached',
+      },
+      limitedBy: {
+        ...Object.getOwnPropertyDescriptor(accounting, 'limitedBy'),
+        value: patch.limitedBy,
+      },
+      candidateCount: {
+        ...Object.getOwnPropertyDescriptor(accounting, 'candidateCount'),
+        value: candidateCount,
+      },
+      acceptedCandidateCount: {
+        ...Object.getOwnPropertyDescriptor(
+          accounting,
+          'acceptedCandidateCount',
+        ),
+        value: acceptedCandidateCount,
+      },
+      rejectedCandidateCount: {
+        ...Object.getOwnPropertyDescriptor(
+          accounting,
+          'rejectedCandidateCount',
+        ),
+        value: rejectedCandidateCount,
+      },
+      rawTrajectoryCount: {
+        ...Object.getOwnPropertyDescriptor(accounting, 'rawTrajectoryCount'),
+        value: rawTrajectoryCount,
+      },
+      rawTrajectoryPointCount: {
+        ...Object.getOwnPropertyDescriptor(
+          accounting,
+          'rawTrajectoryPointCount',
+        ),
+        value: rawTrajectoryPointCount,
+      },
+      endpointReasonCounts: {
+        ...Object.getOwnPropertyDescriptor(
+          accounting,
+          'endpointReasonCounts',
+        ),
+        value: endpointReasonCounts,
+      },
+      acceptedMaximumUnsupportedSpanLength: {
+        ...Object.getOwnPropertyDescriptor(
+          accounting,
+          'acceptedMaximumUnsupportedSpanLength',
+        ),
+        value: maximumUnsupported,
+      },
+      acceptedTotalUnsupportedSpanLength: {
+        ...Object.getOwnPropertyDescriptor(
+          accounting,
+          'acceptedTotalUnsupportedSpanLength',
+        ),
+        value: totalUnsupported,
+      },
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function commitCandidateLimit(
+  accounting: FlowingContoursAccounting,
+  snapshot: Readonly<AccountingSnapshot>,
+): boolean {
+  if (!unchangedAccounting(accounting, snapshot)) return false
+  try {
+    Object.defineProperties(accounting, {
+      termination: {
+        ...Object.getOwnPropertyDescriptor(accounting, 'termination'),
+        value: 'limit-reached',
+      },
+      limitedBy: {
+        ...Object.getOwnPropertyDescriptor(accounting, 'limitedBy'),
+        value: 'candidate-count',
+      },
+    })
+    return true
   } catch {
     return false
   }
@@ -421,190 +1275,60 @@ function rejected(
   return Object.freeze({ kind: 'rejected', reason })
 }
 
-interface AccountingOutcome {
-  readonly accepted: boolean
-  readonly limitedBy:
-    | 'accepted-curve-count'
-    | 'raw-trajectory-point-count'
-    | null
-}
-
 /**
- * Commit the diagnostics for one fully decided, valid candidate.
+ * Accept or reject one canonical FC10 candidate.
  *
- * All prospective values are checked before the first write. This is the only
- * mutation point in selection.
- */
-function commitCandidateAccounting(
-  accounting: FlowingContoursAccounting,
-  candidate: Readonly<CandidateSnapshot>,
-  outcome: Readonly<AccountingOutcome>,
-): boolean {
-  try {
-    const candidateCount = accounting.candidateCount + 1
-    const acceptedCandidateCount =
-      accounting.acceptedCandidateCount + (outcome.accepted ? 1 : 0)
-    const rejectedCandidateCount =
-      accounting.rejectedCandidateCount + (outcome.accepted ? 0 : 1)
-    const rawTrajectoryCount =
-      accounting.rawTrajectoryCount + (outcome.accepted ? 1 : 0)
-    const rawTrajectoryPointCount =
-      accounting.rawTrajectoryPointCount +
-      (outcome.accepted ? candidate.samples.length : 0)
-    const endpointReasonCounts = {
-      ...accounting.endpointReasonCounts,
-    }
-    endpointReasonCounts[candidate.startEndpointReason] += 1
-    endpointReasonCounts[candidate.endEndpointReason] += 1
-    const acceptedMaximumUnsupportedSpanLength = outcome.accepted
-      ? Math.max(
-          accounting.acceptedMaximumUnsupportedSpanLength,
-          candidate.maximumUnsupportedSpanLength,
-        )
-      : accounting.acceptedMaximumUnsupportedSpanLength
-    const acceptedTotalUnsupportedSpanLength = outcome.accepted
-      ? accounting.acceptedTotalUnsupportedSpanLength +
-        candidate.totalUnsupportedSpanLength
-      : accounting.acceptedTotalUnsupportedSpanLength
-    if (
-      !validCount(candidateCount) ||
-      !validCount(acceptedCandidateCount) ||
-      !validCount(rejectedCandidateCount) ||
-      !validCount(rawTrajectoryCount) ||
-      !validCount(rawTrajectoryPointCount) ||
-      !FLOWING_CONTOURS_ENDPOINT_REASONS.every((reason) =>
-        validCount(endpointReasonCounts[reason]),
-      ) ||
-      !Number.isFinite(acceptedMaximumUnsupportedSpanLength) ||
-      !Number.isFinite(acceptedTotalUnsupportedSpanLength)
-    ) {
-      return false
-    }
-
-    accounting.candidateCount = candidateCount
-    accounting.acceptedCandidateCount = acceptedCandidateCount
-    accounting.rejectedCandidateCount = rejectedCandidateCount
-    accounting.rawTrajectoryCount = rawTrajectoryCount
-    accounting.rawTrajectoryPointCount = rawTrajectoryPointCount
-    accounting.endpointReasonCounts = endpointReasonCounts
-    accounting.acceptedMaximumUnsupportedSpanLength =
-      acceptedMaximumUnsupportedSpanLength
-    accounting.acceptedTotalUnsupportedSpanLength =
-      acceptedTotalUnsupportedSpanLength
-    if (outcome.limitedBy !== null) {
-      accounting.termination = 'limit-reached'
-      accounting.limitedBy = outcome.limitedBy
-    }
-    return true
-  } catch {
-    return false
-  }
-}
-
-function terminateAtCandidateLimit(
-  accounting: FlowingContoursAccounting,
-): boolean {
-  try {
-    if (
-      accounting.termination === 'invalid-input' ||
-      (accounting.termination === 'limit-reached' &&
-        accounting.limitedBy !== 'candidate-count')
-    ) {
-      return false
-    }
-    accounting.termination = 'limit-reached'
-    accounting.limitedBy = 'candidate-count'
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
- * Accept or reject one complete FC10 candidate.
- *
- * Minimum stroke length is evaluated against the analysis/fitted-image
- * diagonal. It is therefore independent of page, tool, and output-profile
- * dimensions. Equality at both the length and whole-score gates is accepted.
+ * Minimum stroke length uses the exact recomputed analysis-space length and
+ * analysis diagonal. Equality at both quality gates is accepted.
  */
 export function selectFlowingContoursCandidate(
   candidateSource: Readonly<FlowingContoursCandidate>,
-  options: Readonly<FlowingContoursSelectionOptions>,
+  optionsSource: Readonly<FlowingContoursSelectionOptions>,
   accounting: FlowingContoursAccounting,
   limitsSource: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
 ): FlowingContoursSelectionResult {
   try {
+    // Candidate inspection intentionally occurs only after policy, state, and
+    // the candidate-count budget are known valid.
     const limits = snapshotLimits(limitsSource)
-    const candidate = snapshotCandidate(candidateSource)
-    if (
-      limits === null ||
-      candidate === null ||
-      !Number.isSafeInteger(options.analysisWidth) ||
-      options.analysisWidth <= 0 ||
-      !Number.isSafeInteger(options.analysisHeight) ||
-      options.analysisHeight <= 0 ||
-      !isWithinFlowingContoursLimit(
-        'analysis-dimension',
-        options.analysisWidth,
-        limits,
-      ) ||
-      !isWithinFlowingContoursLimit(
-        'analysis-dimension',
-        options.analysisHeight,
-        limits,
-      ) ||
-      !isWithinFlowingContoursLimit(
-        'analysis-sample-count',
-        options.analysisWidth * options.analysisHeight,
-        limits,
-      ) ||
-      !Number.isFinite(options.minimumStrokeLength) ||
-      options.minimumStrokeLength < 0 ||
-      options.minimumStrokeLength > 1 ||
-      !Number.isSafeInteger(options.nextAcceptedId) ||
-      options.nextAcceptedId < 0 ||
-      !hasValidAccounting(accounting, limits)
-    ) {
-      return rejected('invalid-input')
-    }
-
-    if (
-      candidate.samples.some(
-        (sample) =>
-          sample.point[0] < 0 ||
-          sample.point[1] < 0 ||
-          sample.point[0] > options.analysisWidth - 1 ||
-          sample.point[1] > options.analysisHeight - 1,
-      )
-    ) {
-      return rejected('invalid-input')
-    }
-
+    if (limits === null) return rejected('invalid-input')
+    const options = snapshotOptions(optionsSource, limits)
+    if (options === null) return rejected('invalid-input')
+    const accountingSnapshot = snapshotAccounting(accounting, limits)
+    if (accountingSnapshot === null) return rejected('invalid-input')
     if (
       !canConsumeFlowingContoursLimit(
         'candidate-count',
-        accounting.candidateCount,
+        accountingSnapshot.candidateCount,
         1,
         limits,
       )
     ) {
-      terminateAtCandidateLimit(accounting)
+      if (!commitCandidateLimit(accounting, accountingSnapshot)) {
+        return rejected('invalid-input')
+      }
       return rejected('candidate-count-limit')
     }
 
-    const diagonal = Math.hypot(
+    const candidate = snapshotCandidate(
+      candidateSource,
       options.analysisWidth,
       options.analysisHeight,
+      options.diagonal,
+      limits,
     )
-    const minimumLength = options.minimumStrokeLength * diagonal
+    if (candidate === null) return rejected('invalid-input')
+
+    const minimumLength =
+      options.minimumStrokeLength * options.diagonal
     if (
-      !Number.isFinite(diagonal) ||
       !Number.isFinite(minimumLength) ||
       candidate.length < minimumLength
     ) {
       if (
-        !commitCandidateAccounting(accounting, candidate, {
+        !commitAccounting(accounting, accountingSnapshot, {
           accepted: false,
+          candidate,
           limitedBy: null,
         })
       ) {
@@ -612,11 +1336,11 @@ export function selectFlowingContoursCandidate(
       }
       return rejected('below-minimum-length')
     }
-
     if (candidate.score.total < MINIMUM_WHOLE_CANDIDATE_SCORE) {
       if (
-        !commitCandidateAccounting(accounting, candidate, {
+        !commitAccounting(accounting, accountingSnapshot, {
           accepted: false,
+          candidate,
           limitedBy: null,
         })
       ) {
@@ -624,18 +1348,18 @@ export function selectFlowingContoursCandidate(
       }
       return rejected('below-minimum-score')
     }
-
     if (
       !canConsumeFlowingContoursLimit(
         'accepted-curve-count',
-        accounting.acceptedCandidateCount,
+        accountingSnapshot.acceptedCandidateCount,
         1,
         limits,
       )
     ) {
       if (
-        !commitCandidateAccounting(accounting, candidate, {
+        !commitAccounting(accounting, accountingSnapshot, {
           accepted: false,
+          candidate,
           limitedBy: 'accepted-curve-count',
         })
       ) {
@@ -643,18 +1367,18 @@ export function selectFlowingContoursCandidate(
       }
       return rejected('accepted-curve-count-limit')
     }
-
     if (
       !canConsumeFlowingContoursLimit(
         'raw-trajectory-point-count',
-        accounting.rawTrajectoryPointCount,
+        accountingSnapshot.rawTrajectoryPointCount,
         candidate.samples.length,
         limits,
       )
     ) {
       if (
-        !commitCandidateAccounting(accounting, candidate, {
+        !commitAccounting(accounting, accountingSnapshot, {
           accepted: false,
+          candidate,
           limitedBy: 'raw-trajectory-point-count',
         })
       ) {
@@ -664,7 +1388,7 @@ export function selectFlowingContoursCandidate(
     }
 
     const trajectory: Readonly<AcceptedFlowingTrajectory> = Object.freeze({
-      id: options.nextAcceptedId,
+      id: accountingSnapshot.acceptedCandidateCount,
       anchorId: candidate.anchorId,
       samples: candidate.samples,
       spanSupport: candidate.spanSupport,
@@ -677,8 +1401,9 @@ export function selectFlowingContoursCandidate(
       score: candidate.score,
     })
     if (
-      !commitCandidateAccounting(accounting, candidate, {
+      !commitAccounting(accounting, accountingSnapshot, {
         accepted: true,
+        candidate,
         limitedBy: null,
       })
     ) {
