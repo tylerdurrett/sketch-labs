@@ -64,7 +64,7 @@ const REFERENCE_IDENTITIES = Object.freeze({
       height: 256,
       sampleCount: 43_776,
     }),
-    pencilBaseline: 'd4c3c05c0ea0574e0f17677f7db471c34942ae24',
+    pencilBaseline: 'b2624401209581d26ebee20a4896fce822ea4fc4',
   }),
 })
 
@@ -364,6 +364,9 @@ describe('Watercolor Forms flower and pinecone reference fixtures', () => {
         source: identity.source,
         frame: { width: 1000, height: 1000 },
         controls: {
+          gamma: 0.5,
+          contrast: 0.5,
+          pivot: 0.5,
           formDetail: 0.5,
           colorSensitivity: 0.5,
           boundaryStrength: 0.5,
