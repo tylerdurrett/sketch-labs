@@ -977,7 +977,13 @@ async function fixtureMetadata(reference, pipeline) {
   }
 }
 
-function evidenceReadme() {
+function evidenceReadme(tuningCommit, fixtureCommit) {
+  if (
+    !COMMIT_PATTERN.test(tuningCommit) ||
+    !COMMIT_PATTERN.test(fixtureCommit)
+  ) {
+    throw new Error('Evidence README requires exact validated commit SHAs')
+  }
   return `# Watercolor Forms comparison evidence
 
 These four PNGs are deterministic review inputs for issue #402. Each image
@@ -1005,8 +1011,8 @@ Run from the repository root with the pinned production browser:
 node apps/studio/scripts/capture-watercolor-forms-reference.mjs \\
   --scope evidence \\
   --write \\
-  --tuning-commit 4375a50acc29737b7719b2edcb6e6fbeee78c022 \\
-  --fixture-commit 871311f7c6caefbadb08f4853fc9f904cdff4eb4
+  --tuning-commit ${tuningCommit} \\
+  --fixture-commit ${fixtureCommit}
 
 node apps/studio/scripts/capture-watercolor-forms-reference.mjs \\
   --scope evidence
@@ -1016,6 +1022,27 @@ The verify command recomputes the decoded rasters, production Scenes, metrics,
 diagnostics, geometry hashes, and PNG bytes, then checks every committed file.
 It refuses dirty or commit-divergent Watercolor, Pencil, or fixture inputs.
 `
+}
+
+function assertEvidenceReadmeProvenance(readme, provenance) {
+  const matches = [
+    ...readme.matchAll(/--(tuning|fixture)-commit ([0-9a-f]{40})(?:\s|$)/g),
+  ]
+  const expected = [
+    ['tuning', provenance.tuningCommit],
+    ['fixture', provenance.fixtureCommit],
+  ]
+  if (
+    matches.length !== expected.length ||
+    expected.some(
+      ([kind, commit], index) =>
+        matches[index]?.[1] !== kind || matches[index]?.[2] !== commit,
+    )
+  ) {
+    throw new Error(
+      'Evidence README reproduction command does not match validated provenance',
+    )
+  }
 }
 
 async function serializedEvidence(capture, provenance) {
@@ -1109,7 +1136,12 @@ async function serializedEvidence(capture, provenance) {
       note: 'Generated evidence is not an independent visual-review verdict.',
     },
   }
-  files['README.md'] = Buffer.from(evidenceReadme())
+  const readme = evidenceReadme(
+    provenance.tuningCommit,
+    provenance.fixtureCommit,
+  )
+  assertEvidenceReadmeProvenance(readme, provenance)
+  files['README.md'] = Buffer.from(readme)
   files['manifest.json'] = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`)
   return { files, manifest }
 }

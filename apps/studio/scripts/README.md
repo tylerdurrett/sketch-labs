@@ -72,14 +72,15 @@ node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
 Capture the comparison evidence only after the tuning and fixture commits have
 been finalized. Both arguments must be lowercase full SHAs; the script verifies
 their ancestry, checks that Watercolor/Pencil production and fixture inputs are
-clean and byte-identical to the pinned commits, and refuses drift:
+clean and byte-identical to the pinned commits, and refuses drift. Set
+`TUNING_COMMIT` and `FIXTURE_COMMIT` to those finalized lowercase full SHAs:
 
 ```sh
 node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
   --scope evidence \
   --write \
-  --tuning-commit 4375a50acc29737b7719b2edcb6e6fbeee78c022 \
-  --fixture-commit 871311f7c6caefbadb08f4853fc9f904cdff4eb4
+  --tuning-commit "$TUNING_COMMIT" \
+  --fixture-commit "$FIXTURE_COMMIT"
 ```
 
 Recompute the complete evidence bundle, including PNG bytes, without writing:
