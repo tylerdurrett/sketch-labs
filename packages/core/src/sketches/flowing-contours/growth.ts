@@ -203,9 +203,26 @@ function snapshotSample(
 ): Readonly<CorrectedFlowingRidgeSample> | null {
   try {
     const point = frozenPoint(source.point[0], source.point[1])
-    const tangent = aligned(source.tangent, direction)?.tangent
+    const alignment = aligned(source.tangent, direction)
+    const tangentLength = Math.hypot(source.tangent[0], source.tangent[1])
+    const tangentSign =
+      source.tangent[0] * direction[0] +
+        source.tangent[1] * direction[1] <
+      0
+        ? -1
+        : 1
+    const tangent =
+      alignment === null
+        ? null
+        : Math.abs(tangentLength - 1) <= 1e-8
+          ? frozenPoint(
+              source.tangent[0] * tangentSign,
+              source.tangent[1] * tangentSign,
+            )
+          : alignment.tangent
     if (
       tangent == null ||
+      !Number.isFinite(tangentLength) ||
       !Number.isFinite(point[0]) ||
       !Number.isFinite(point[1]) ||
       !Number.isFinite(source.evidence) ||
@@ -227,6 +244,9 @@ function snapshotSample(
     }
     return Object.freeze({
       point,
+      // Corrected samples already carry a validated unit tangent. Preserve
+      // those exact components so FC10/FC11 provenance is not changed by a
+      // second normalization at the start of directional growth.
       tangent,
       evidence: source.evidence,
       coherence: source.coherence,

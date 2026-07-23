@@ -145,6 +145,31 @@ describe('Flowing Contours directional growth', () => {
     })
   })
 
+  it('preserves the corrected anchor tangent components exactly', () => {
+    const length = Math.hypot(7, 3)
+    const tangent = [7 / length, 3 / length] as const
+    const source = field(9, 9, () => ({
+      evidence: 1,
+      tangent,
+    }))
+    const anchor = at(source, [4, 4])
+    const trace = growFlowingContoursDirection(
+      source,
+      anchor,
+      anchor.tangent,
+      'forward',
+      OPTIONS,
+      createFlowingContoursTestLimits({ 'search-step-count': 1 })!,
+    )
+
+    expect(
+      Object.is(trace.samples[0]!.tangent[0], anchor.tangent[0]),
+    ).toBe(true)
+    expect(
+      Object.is(trace.samples[0]!.tangent[1], anchor.tangent[1]),
+    ).toBe(true)
+  })
+
   it('follows a smooth curve without quantizing it into lattice turns', () => {
     const center = [10, 10] as const
     const radius = 6

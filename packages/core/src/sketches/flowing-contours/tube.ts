@@ -959,6 +959,31 @@ function nearestSourceSampleIndex(
   return nearestIndex >= 0 ? nearestIndex : null
 }
 
+function matchesNearestSourceSample(
+  point: Readonly<Point>,
+  sourceIndex: number,
+  data: Readonly<TubeData>,
+  budget: MutableBudget,
+): boolean {
+  const nearestIndex = nearestSourceSampleIndex(point, data, budget)
+  if (nearestIndex === sourceIndex) return true
+  const lastIndex = data.samples.length - 1
+  return (
+    (sourceIndex === 0 || sourceIndex === lastIndex) &&
+    (nearestIndex === 0 || nearestIndex === lastIndex) &&
+    samePoint(
+      data.samples[0]!.point,
+      data.samples[lastIndex]!.point,
+      ENDPOINT_TOLERANCE,
+    ) &&
+    samePoint(
+      point,
+      data.samples[sourceIndex]!.point,
+      ENDPOINT_TOLERANCE,
+    )
+  )
+}
+
 function proveSignedRawProgress(
   data: Readonly<TubeData>,
   startSampleIndex: number,
@@ -1365,8 +1390,12 @@ export function validateFlowingContoursTubePoint(
       consumed: 0,
     }
     if (
-      nearestSourceSampleIndex(point, data, budget) !==
-      proposal.sourceSampleIndex
+      !matchesNearestSourceSample(
+        point,
+        proposal.sourceSampleIndex,
+        data,
+        budget,
+      )
     ) {
       return null
     }
@@ -1414,9 +1443,9 @@ function validateSegment(
     !validSourceIndex(endIndex, data) ||
     startIndex > endIndex ||
     (!endpointsCertified &&
-      nearestSourceSampleIndex(start, data, budget) !== startIndex) ||
+      !matchesNearestSourceSample(start, startIndex, data, budget)) ||
     (!endpointsCertified &&
-      nearestSourceSampleIndex(end, data, budget) !== endIndex) ||
+      !matchesNearestSourceSample(end, endIndex, data, budget)) ||
     (startIndex === 0 &&
       !samePoint(start, data.samples[0]!.point, ENDPOINT_TOLERANCE)) ||
     (endIndex === data.samples.length - 1 &&
@@ -1617,7 +1646,7 @@ export function validateFlowingContoursTubeCurve(
       if (
         point === null ||
         !validSourceIndex(sourceIndex, data) ||
-        nearestSourceSampleIndex(point, data, budget) !== sourceIndex ||
+        !matchesNearestSourceSample(point, sourceIndex, data, budget) ||
         (index > 0 && sourceIndex < indices[index - 1]!)
       ) {
         return null

@@ -446,19 +446,52 @@ function localMaxima(
   samples: readonly (StencilSample | null)[],
 ): readonly StencilSample[] {
   const maxima: StencilSample[] = []
-  for (let index = 0; index < samples.length; index += 1) {
-    const candidate = samples[index]
-    if (candidate == null) continue
+  for (let index = 0; index < samples.length; ) {
+    const first = samples[index]
+    if (first == null) {
+      index += 1
+      continue
+    }
+    let end = index
+    while (
+      end + 1 < samples.length &&
+      samples[end + 1] !== null &&
+      Math.abs(
+        samples[end + 1]!.sample.evidence -
+          first.sample.evidence,
+      ) <= EVIDENCE_EPSILON
+    ) {
+      end += 1
+    }
     const left = index > 0 ? samples[index - 1] : null
-    const right = index + 1 < samples.length ? samples[index + 1] : null
+    const right = end + 1 < samples.length ? samples[end + 1] : null
     if (
       (left == null ||
-        candidate.sample.evidence + EVIDENCE_EPSILON >= left.sample.evidence) &&
+        first.sample.evidence + EVIDENCE_EPSILON >= left.sample.evidence) &&
       (right == null ||
-        candidate.sample.evidence + EVIDENCE_EPSILON >= right.sample.evidence)
+        first.sample.evidence + EVIDENCE_EPSILON >= right.sample.evidence)
     ) {
-      maxima.push(candidate)
+      // A numerically flat ridge top is one maximum, not a set of competing
+      // grid samples. Its closest stencil member preserves the current
+      // ridge's subpixel ownership; separated peaks remain ambiguous.
+      let representative = first
+      for (
+        let candidateIndex = index + 1;
+        candidateIndex <= end;
+        candidateIndex += 1
+      ) {
+        const candidate = samples[candidateIndex]!
+        if (
+          Math.abs(candidate.offset) < Math.abs(representative.offset) ||
+          (Math.abs(candidate.offset) === Math.abs(representative.offset) &&
+            candidate.index < representative.index)
+        ) {
+          representative = candidate
+        }
+      }
+      maxima.push(representative)
     }
+    index = end + 1
   }
   return maxima
 }

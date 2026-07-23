@@ -416,6 +416,29 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
     ).toBe('ambiguity')
   })
 
+  it('treats a connected flat ridge top as one subpixel maximum', () => {
+    const plateau = field(15, 15, (_x, y) => ({
+      evidence:
+        y === 6 || y === 7
+          ? 0.8
+          : 0.8 * Math.exp(-Math.abs(y - 6.5)),
+      tangent: [1, 0],
+      scale: 2,
+    }))
+    const result = stepFlowingContoursRidge(
+      plateau,
+      at(plateau, [4, 6.5]),
+      [1, 0],
+      ONE_PIXEL_STEP,
+    )
+
+    expect(result.kind).toBe('corrected')
+    if (result.kind === 'corrected') {
+      expect(result.sample.point[0]).toBe(5)
+      expect(result.sample.point[1]).toBeCloseTo(6.5, 12)
+    }
+  })
+
   it('never hops from a weakening ridge to its stronger parallel neighbor', () => {
     const parallels = field(15, 15, (x, y) => {
       const weakening = (x < 5 ? 0.85 : 0.35) * gaussian(y - 6, 0.28)

@@ -187,6 +187,42 @@ function canonicalGapAlignment(
 }
 
 describe('Flowing Contours corrected-trajectory evidence tube', () => {
+  it('preserves the final monotonic correspondence of a repeated loop endpoint', () => {
+    const source = field(12, 12)
+    const raw = trajectory(source, [
+      [3, 3],
+      [7, 3],
+      [7, 7],
+      [3, 7],
+      [3, 3],
+    ])
+    const tube = createFlowingContoursEvidenceTube(source, raw)
+
+    expect(tube).not.toBeNull()
+    expect(
+      validateFlowingContoursTubeCurve(
+        source,
+        tube!,
+        {
+          points: raw.samples.map((sample) => sample.point),
+          sourceSampleIndices: allIndices(raw.samples.length),
+        },
+      ),
+    ).toMatchObject({
+      sourceTrajectoryId: raw.id,
+      sourceSampleIndices: [0, 1, 2, 3, 4],
+      maximumDeviation: 0,
+    })
+    expect(
+      validateFlowingContoursTubePoint(source, tube!, {
+        point: raw.samples.at(-1)!.point,
+        sourceSampleIndex: raw.samples.length - 1,
+      }),
+    ).toMatchObject({
+      sourceSampleIndex: raw.samples.length - 1,
+    })
+  })
+
   it('accepts points on the local scale tube and rejects points outside it', () => {
     const source = field(12, 9)
     const raw = trajectory(source, [
