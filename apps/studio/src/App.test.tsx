@@ -590,7 +590,7 @@ describe("App — Watercolor Forms integration (#402 WF10)", () => {
         formDetail: 0.5,
         colorSensitivity: 0.5,
         boundaryStrength: 0.5,
-        boundarySmoothing: 0.5,
+        boundarySmoothing: 1,
       }),
     );
     expect(
@@ -659,7 +659,7 @@ describe("App — Watercolor Forms integration (#402 WF10)", () => {
         formDetail: 0.5,
         colorSensitivity: 0.5,
         boundaryStrength: 0.81,
-        boundarySmoothing: 0.5,
+        boundarySmoothing: 1,
       },
     });
 

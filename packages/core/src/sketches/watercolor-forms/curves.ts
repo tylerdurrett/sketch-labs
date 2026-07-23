@@ -20,6 +20,8 @@ const COORDINATE_EPSILON = 1e-9
 const MAX_ROUNDING_PASSES = 12
 const ROUNDING_CONVERGENCE_DISTANCE = 1e-4
 const MAX_LOCAL_ROUNDING_AMOUNT = 0.5
+const MAX_EFFECTIVE_REMOVAL_AMOUNT = 0.25
+const MAX_EFFECTIVE_ROUNDING_AMOUNT = 0.275
 const BACKOFF_ATTEMPTS = 8
 const MAX_SHORTCUT_SOURCE_SEGMENTS = 32
 const REMOVAL_WORK_UNITS_PER_POINT = 128
@@ -548,24 +550,31 @@ function roundedPoints(
 function fitPath(
   source: readonly Readonly<Point>[],
   closed: boolean,
-  smoothing: number,
+  removalAmount: number,
+  roundingAmount: number,
   options: Readonly<WatercolorBoundaryCurveOptions>,
 ): readonly Readonly<Point>[] {
   if (!sourceCurveIsSafe(source, closed, options)) return []
-  if (smoothing === 0) return source
+  if (removalAmount === 0 && roundingAmount === 0) return source
 
   const removalBudget = {
     remaining: Math.max(1, source.length * REMOVAL_WORK_UNITS_PER_POINT),
   }
 
   const order = removalOrder(source, closed, options, removalBudget)
-  const removalCount = Math.floor(order.length * smoothing)
+  const removalCount = Math.floor(order.length * removalAmount)
   const removed = new Set(order.slice(0, removalCount))
   const retained = source
     .map((point, sourceIndex): CurvePoint => ({ point, sourceIndex }))
     .filter(({ sourceIndex }) => !removed.has(sourceIndex))
 
-  return roundedPoints(retained, source, closed, smoothing, options)
+  return roundedPoints(
+    retained,
+    source,
+    closed,
+    roundingAmount,
+    options,
+  )
 }
 
 function sourceCurveIsSafe(
@@ -691,9 +700,12 @@ export function fitWatercolorBoundaryCurves(
     requestedLimit,
     WATERCOLOR_FORMS_LIMITS.maxCurvePointCount,
   )
-  const fitted: Readonly<WatercolorBoundaryPath>[] = []
+  const admitted: {
+    readonly path: Readonly<WatercolorBoundaryPath>
+    readonly source: readonly Readonly<Point>[]
+    readonly explicitlyClosed: boolean
+  }[] = []
   let reservedSourcePointCount = 0
-
   for (
     let pathIndex = 0;
     pathIndex <
@@ -708,9 +720,37 @@ export function fitWatercolorBoundaryCurves(
       0,
       path.points.length - (explicitlyClosed ? 1 : 0),
     )
+    if (!sourceCurveIsSafe(source, path.closed, options)) continue
     const sourcePointCount = source.length + (explicitlyClosed ? 1 : 0)
     if (reservedSourcePointCount + sourcePointCount > pointLimit) break
-    const curve = fitPath(source, path.closed, smoothing, options)
+    admitted.push({ path, source, explicitlyClosed })
+    reservedSourcePointCount += sourcePointCount
+  }
+  const pressurePointLimit = Math.floor(
+    (options.latticeWidth * options.latticeHeight) / 4,
+  )
+  /*
+   * The calibrated range is sufficient for ordinary image seams. Dense
+   * admitted prefixes retain the authored simplification pressure needed by
+   * the point cap, while rounding always follows the calibrated response.
+   */
+  const highEntropyPressure =
+    reservedSourcePointCount > pressurePointLimit
+  const removalAmount = highEntropyPressure
+    ? smoothing
+    : smoothing * MAX_EFFECTIVE_REMOVAL_AMOUNT
+  const roundingAmount =
+    smoothing * MAX_EFFECTIVE_ROUNDING_AMOUNT
+  const fitted: Readonly<WatercolorBoundaryPath>[] = []
+
+  for (const { path, source, explicitlyClosed } of admitted) {
+    const curve = fitPath(
+      source,
+      path.closed,
+      removalAmount,
+      roundingAmount,
+      options,
+    )
     if (curve.length === 0) continue
     const points = curve.map(frozenPoint)
     if (explicitlyClosed) points.push(points[0]!)
@@ -719,7 +759,6 @@ export function fitWatercolorBoundaryCurves(
       closed: path.closed,
       boundarySegmentIds: Object.freeze([...path.boundarySegmentIds]),
     }))
-    reservedSourcePointCount += sourcePointCount
   }
   return Object.freeze(fitted)
 }

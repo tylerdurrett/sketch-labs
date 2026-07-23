@@ -25,6 +25,7 @@ import type {
   PreparedWatercolorRaster,
   WatercolorFormsDiagnostics,
 } from '../sketches/watercolor-forms/types'
+import type { Point } from '../types'
 import {
   pencilContourReferenceMetrics,
   REFERENCE_LENGTH_NORMALIZATION,
@@ -382,6 +383,88 @@ function geometryIdentity(paths: readonly Readonly<GeometryPath>[]) {
   }
 }
 
+function fixedSpacingTurnRoughness(
+  paths: readonly Readonly<{ readonly points: readonly Readonly<Point>[] }>[],
+  spacing = 0.5,
+): number {
+  let energy = 0
+  for (const path of paths) {
+    if (path.points.length < 3) continue
+    const cumulative = [0]
+    for (let index = 1; index < path.points.length; index += 1) {
+      const previous = path.points[index - 1]!
+      const point = path.points[index]!
+      cumulative.push(
+        cumulative.at(-1)! +
+          Math.hypot(point[0] - previous[0], point[1] - previous[1]),
+      )
+    }
+    const samples: Point[] = []
+    let segment = 0
+    for (let distance = 0; distance < cumulative.at(-1)!; distance += spacing) {
+      while (
+        segment + 1 < cumulative.length - 1 &&
+        cumulative[segment + 1]! < distance
+      ) {
+        segment += 1
+      }
+      const start = path.points[segment]!
+      const end = path.points[segment + 1]!
+      const length = cumulative[segment + 1]! - cumulative[segment]!
+      const amount =
+        length === 0 ? 0 : (distance - cumulative[segment]!) / length
+      samples.push([
+        start[0] + (end[0] - start[0]) * amount,
+        start[1] + (end[1] - start[1]) * amount,
+      ])
+    }
+    samples.push([...path.points.at(-1)!] as Point)
+    for (let index = 1; index + 1 < samples.length; index += 1) {
+      const previous = samples[index - 1]!
+      const point = samples[index]!
+      const next = samples[index + 1]!
+      const incoming = Math.atan2(
+        point[1] - previous[1],
+        point[0] - previous[0],
+      )
+      const outgoing = Math.atan2(
+        next[1] - point[1],
+        next[0] - point[0],
+      )
+      let turn = outgoing - incoming
+      while (turn > Math.PI) turn -= Math.PI * 2
+      while (turn < -Math.PI) turn += Math.PI * 2
+      energy += turn * turn
+    }
+  }
+  return energy
+}
+
+function watercolorCurvesAt(
+  reference: ReturnType<typeof loadCase>,
+  smoothing: number,
+) {
+  const { watercolorRaster: raster } = reference
+  const controls = reference.watercolor.metadata.controls
+  const hierarchy = buildWatercolorFormsHierarchyWithDiagnostics(
+    partitionWatercolorFormsRaster(raster),
+    controls.colorSensitivity,
+  ).hierarchy
+  const forms = selectWatercolorForms(hierarchy, controls.formDetail)
+  const boundaries = extractWatercolorSharedBoundaries(
+    forms,
+    controls.boundaryStrength,
+  )
+  const traced = traceWatercolorBoundaryNetwork(
+    boundaries.sharedBoundarySegments,
+  )
+  return fitWatercolorBoundaryCurves(traced.paths, smoothing, {
+    latticeWidth: raster.width,
+    latticeHeight: raster.height,
+    positiveSupport: raster.positiveSupport,
+  })
+}
+
 function watercolorRecomputation(reference: ReturnType<typeof loadCase>) {
   const { watercolorRaster: raster } = reference
   const controls = reference.watercolor.metadata.controls
@@ -641,6 +724,29 @@ const attestation = JSON.parse(
 )
 
 describe('Watercolor Forms exact reference evidence', () => {
+  it.each(['flower', 'pinecone'] as const)(
+    '%s fixture keeps the full authored smoothing range responsive',
+    (name) => {
+      const reference = loadCase(name)
+      const curves = [0.25, 0.5, 0.75, 1].map((smoothing) =>
+        watercolorCurvesAt(reference, smoothing),
+      )
+      const identities = curves.map((paths) =>
+        sha256(JSON.stringify(paths.map(({ points }) => points))),
+      )
+      const roughness = curves.map((paths) =>
+        fixedSpacingTurnRoughness(paths),
+      )
+
+      expect(new Set(identities).size).toBe(curves.length)
+      expect(roughness).toEqual([...roughness].sort((a, b) => b - a))
+      for (let index = 1; index < roughness.length; index += 1) {
+        expect(roughness[index]).toBeLessThan(roughness[index - 1]!)
+      }
+      expect(roughness.at(-1)).toBeLessThanOrEqual(roughness[1]! * 0.9)
+    },
+  )
+
   it('binds exact production, fixture, artifact, and attestation lineage', () => {
     for (const commit of [
       TUNING_COMMIT,

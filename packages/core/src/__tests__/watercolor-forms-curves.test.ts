@@ -217,8 +217,17 @@ function interpolateForTest(
   ]
 }
 
+function denseWavyBoundary(pointCount = 401): Readonly<WatercolorBoundaryPath> {
+  return boundaryPath(
+    Array.from({ length: pointCount }, (_, index): Point => {
+      const x = 1 + (38 * index) / (pointCount - 1)
+      return [x, 8 + Math.sin(index * 0.05) * 0.35]
+    }),
+  )
+}
+
 describe('Watercolor Forms bounded curve fitting', () => {
-  it('damps a diagonal lattice staircase at authored midpoint smoothing', () => {
+  it('damps a diagonal lattice staircase at maximum authored smoothing', () => {
     const points: Point[] = []
     for (let coordinate = 1; coordinate <= 30; coordinate += 1) {
       points.push(
@@ -236,7 +245,7 @@ describe('Watercolor Forms bounded curve fitting', () => {
 
     const [curve] = fitWatercolorBoundaryCurves(
       [staircase],
-      0.5,
+      1,
       lattice,
     )
 
@@ -258,8 +267,153 @@ describe('Watercolor Forms bounded curve fitting', () => {
       )
     }
     expect(
-      fitWatercolorBoundaryCurves([staircase], 0.5, lattice),
+      fitWatercolorBoundaryCurves([staircase], 1, lattice),
     ).toEqual([curve])
+  })
+
+  it('uses the full authored range to progressively smooth a lattice staircase', () => {
+    const points: Point[] = []
+    for (let coordinate = 1; coordinate <= 30; coordinate += 1) {
+      points.push(
+        [coordinate, coordinate],
+        [coordinate, coordinate + 1],
+      )
+    }
+    points.push([31, 31])
+    const staircase = boundaryPath(points)
+    const lattice = options({
+      latticeWidth: 40,
+      latticeHeight: 40,
+      positiveSupport: Array<boolean>(40 * 40).fill(true),
+    })
+    const curves = [0.25, 0.5, 0.75, 1].map(
+      (smoothing) =>
+        fitWatercolorBoundaryCurves([staircase], smoothing, lattice)[0]!,
+    )
+    const roughness = curves.map(({ points: curvePoints }) =>
+      fixedSpacingTurnEnergy(curvePoints, 0.5),
+    )
+
+    const identities = curves.map(({ points: curvePoints }) =>
+      JSON.stringify(curvePoints),
+    )
+    expect(new Set(identities).size).toBe(curves.length)
+    for (let index = 1; index < roughness.length; index += 1) {
+      expect(roughness[index]).toBeLessThan(roughness[index - 1]!)
+    }
+    expect(roughness.at(-1)).toBeLessThanOrEqual(roughness[1]! * 0.9)
+  })
+
+  it('does not spike maximum-pressure roughness at the authored maximum', () => {
+    const source = denseWavyBoundary()
+    const nearMaximum = fitWatercolorBoundaryCurves(
+      [source],
+      0.99,
+      options(),
+    )[0]!
+    const maximum = fitWatercolorBoundaryCurves(
+      [source],
+      1,
+      options(),
+    )[0]!
+    const nearMaximumRoughness = fixedSpacingTurnEnergy(
+      nearMaximum.points,
+      0.5,
+    )
+    const maximumRoughness = fixedSpacingTurnEnergy(maximum.points, 0.5)
+
+    expect(maximumRoughness).toBeLessThanOrEqual(
+      nearMaximumRoughness * 1.05,
+    )
+    expect(maximum.points.length).toBeLessThanOrEqual(
+      nearMaximum.points.length,
+    )
+  })
+
+  it('does not let ignored trailing paths change an admitted curve prefix', () => {
+    const admitted = boundaryPath([
+      [1, 4],
+      [2, 4.2],
+      [3, 3.8],
+      [4, 4.2],
+      [5, 3.8],
+      [6, 4.2],
+      [7, 3.8],
+      [8, 4.2],
+      [9, 3.8],
+      [10, 4.2],
+      [11, 4],
+    ])
+    const limitBreaking = boundaryPath([[12, 4], [13, 4]], 20)
+    const fitterOptions = options({ maxPointCount: admitted.points.length })
+
+    expect(
+      fitWatercolorBoundaryCurves(
+        [admitted, limitBreaking, denseWavyBoundary()],
+        1,
+        fitterOptions,
+      ),
+    ).toEqual(
+      fitWatercolorBoundaryCurves(
+        [admitted, limitBreaking],
+        1,
+        fitterOptions,
+      ),
+    )
+  })
+
+  it('does not charge unsupported paths against prefix or pressure capacity', () => {
+    const width = 8
+    const height = 8
+    const support = Array<boolean>(width * height).fill(true)
+    for (let y = 3; y <= 4; y += 1) {
+      for (let x = 3; x <= 4; x += 1) support[y * width + x] = false
+    }
+    const first = boundaryPath([
+      [1, 1],
+      [2, 1.2],
+      [3, 0.8],
+      [4, 1.2],
+      [5, 1],
+    ])
+    const unsupported = boundaryPath(
+      Array.from({ length: 8 }, (_, index): Point => [
+        3.1 + index * 0.1,
+        3.25,
+      ]),
+      20,
+    )
+    const later = boundaryPath([
+      [1, 6],
+      [2, 6.2],
+      [3, 5.8],
+      [4, 6.2],
+      [5, 6],
+    ], 40)
+    const supportedOnly = [first, later]
+    const withUnsupported = [first, unsupported, later]
+    const constrained = {
+      latticeWidth: width,
+      latticeHeight: height,
+      positiveSupport: support,
+    }
+
+    expect(
+      fitWatercolorBoundaryCurves(withUnsupported, 1, {
+        ...constrained,
+        maxPointCount: first.points.length + later.points.length,
+      }),
+    ).toEqual(
+      fitWatercolorBoundaryCurves(supportedOnly, 1, {
+        ...constrained,
+        maxPointCount: first.points.length + later.points.length,
+      }),
+    )
+    expect(
+      fitWatercolorBoundaryCurves(withUnsupported, 1, constrained),
+    ).toEqual(
+      fitWatercolorBoundaryCurves(supportedOnly, 1, constrained),
+    )
   })
 
   it(

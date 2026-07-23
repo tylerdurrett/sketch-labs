@@ -91,7 +91,7 @@ export const watercolorFormsControlSchema = Object.freeze({
     kind: 'number',
     min: UNIT_CONTROL_MIN,
     max: UNIT_CONTROL_MAX,
-    default: UNIT_CONTROL_DEFAULT,
+    default: UNIT_CONTROL_MAX,
     step: UNIT_CONTROL_STEP,
   }),
 } satisfies Record<WatercolorFormsControlName, NumberParamSpec>)

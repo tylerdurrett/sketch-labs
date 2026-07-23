@@ -40,6 +40,17 @@ describe('Watercolor Forms authored controls', () => {
 
     expect(Object.isFrozen(watercolorFormsControlSchema)).toBe(true)
     expect(Object.isFrozen(defaultWatercolorFormsControls)).toBe(true)
+    expect(watercolorFormsControlSchema.boundarySmoothing.default).toBe(1)
+    for (const name of [
+      'gamma',
+      'contrast',
+      'pivot',
+      'formDetail',
+      'colorSensitivity',
+      'boundaryStrength',
+    ] as const) {
+      expect(watercolorFormsControlSchema[name].default, name).toBe(0.5)
+    }
   })
 
   it('retains independently authored values', () => {
