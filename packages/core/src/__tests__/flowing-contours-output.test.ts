@@ -418,7 +418,7 @@ function expectFlowingGeometry(
   expect(
     scene.primitives.every((primitive) => primitive.points.length >= 4),
   ).toBe(true)
-  expect(repeatedPerpendicularLatticeShare(scene)).toBeLessThan(0.25)
+  expect(repeatedPerpendicularLatticeShare(scene)).toBe(0)
   for (const primitive of scene.primitives) expectFlowyPath(primitive)
 }
 
@@ -676,6 +676,27 @@ describe('Flowing Contours output contract', () => {
     ).toBe(true)
     expect(repeatedPerpendicularLatticeShare(disconnectedGrid)).toBe(1)
     expect(() => expectFlowingGeometry(disconnectedGrid, 60)).toThrow()
+
+    const asymmetricComb: Scene = {
+      space: disconnectedGrid.space,
+      primitives: [
+        disconnectedGrid.primitives[0]!,
+        ...disconnectedGrid.primitives.slice(4),
+      ],
+    }
+    expect(asymmetricComb.primitives).toHaveLength(5)
+    expect(repeatedPerpendicularLatticeShare(asymmetricComb)).toBe(0.2)
+    expect(() => expectFlowingGeometry(asymmetricComb, 60)).toThrow()
+
+    const isolatedCrossing: Scene = {
+      space: disconnectedGrid.space,
+      primitives: [
+        disconnectedGrid.primitives[0]!,
+        disconnectedGrid.primitives[4]!,
+      ],
+    }
+    expect(repeatedPerpendicularLatticeShare(isolatedCrossing)).toBe(0)
+    expect(() => expectFlowingGeometry(isolatedCrossing, 60)).not.toThrow()
 
     const legitimateSingleStraight: Scene = {
       space: { width: 100, height: 100 },
