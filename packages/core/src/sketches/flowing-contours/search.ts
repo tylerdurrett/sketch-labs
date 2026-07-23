@@ -853,9 +853,20 @@ function sampleRepresentedOverlap(
 ): number | null {
   if (sampler === null) return 0
   try {
+    const segmentTangents: Readonly<Point>[] = []
+    for (let index = 1; index < samples.length; index += 1) {
+      const start = samples[index - 1]!.point
+      const end = samples[index]!.point
+      const tangent = unit([end[0] - start[0], end[1] - start[1]])
+      if (tangent === null) return null
+      segmentTangents.push(tangent)
+    }
+    const initialTangent = segmentTangents[0]
+    if (initialTangent === undefined) return null
+
     let sum = 0
     let count = 0
-    const initial = sampler(samples[0]!.point, samples[0]!.tangent)
+    const initial = sampler(samples[0]!.point, initialTangent)
     if (!isUnitInterval(initial)) return null
     sum += initial
     count += 1
@@ -866,6 +877,7 @@ function sampleRepresentedOverlap(
       const dy = end[1] - start[1]
       const length = Math.hypot(dx, dy)
       if (!Number.isFinite(length) || length <= VECTOR_EPSILON) return null
+      const tangent = segmentTangents[index - 1]!
       const intervalCount = Math.max(
         1,
         Math.ceil(length / OVERLAP_SAMPLE_SPACING),
@@ -877,21 +889,6 @@ function sampleRepresentedOverlap(
         sampleIndex += 1
       ) {
         const parameter = sampleIndex / intervalCount
-        const firstTangent = samples[index - 1]!.tangent
-        const secondTangent = samples[index]!.tangent
-        const tangentSign =
-          firstTangent[0] * secondTangent[0] +
-              firstTangent[1] * secondTangent[1] <
-            0
-            ? -1
-            : 1
-        const tangent = unit([
-          firstTangent[0] * (1 - parameter) +
-            secondTangent[0] * tangentSign * parameter,
-          firstTangent[1] * (1 - parameter) +
-            secondTangent[1] * tangentSign * parameter,
-        ])
-        if (tangent === null) return null
         const value = sampler(
           frozenPoint(start[0] + dx * parameter, start[1] + dy * parameter),
           tangent,

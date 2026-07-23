@@ -783,6 +783,93 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     expect(candidate.score.representedOverlapPenalty).toBeCloseTo(1, 12)
   })
 
+  it('resamples overlap scoring with exact geometric segment directions', () => {
+    const source = field(13, 13, (x, y) => ({
+      evidence: gaussian(y - (6 + 1.2 * (x - 6))),
+      tangent: [1, 0],
+    }))
+    const start = anchor(source, [6, 6])
+    const searchOptions = {
+      ...OPTIONS,
+      ridgeStepOptions: { stepLength: 0.125 },
+    }
+    const baseline = searchFlowingContoursCandidate(
+      source,
+      start,
+      searchOptions,
+      limits(),
+    )
+    expect(baseline).not.toBeNull()
+
+    const expected: Array<{
+      readonly point: Readonly<Point>
+      readonly tangent: Readonly<Point>
+    }> = []
+    for (let index = 1; index < baseline!.samples.length; index += 1) {
+      const first = baseline!.samples[index - 1]!.point
+      const second = baseline!.samples[index]!.point
+      const dx = second[0] - first[0]
+      const dy = second[1] - first[1]
+      const length = Math.hypot(dx, dy)
+      const tangent = Object.freeze([dx / length, dy / length]) as Point
+      if (index === 1) {
+        expected.push({ point: first, tangent })
+      }
+      const intervalCount = Math.max(1, Math.ceil(length / 0.25))
+      for (
+        let sampleIndex = 1;
+        sampleIndex <= intervalCount;
+        sampleIndex += 1
+      ) {
+        const parameter = sampleIndex / intervalCount
+        expected.push({
+          point: Object.freeze([
+            first[0] + dx * parameter,
+            first[1] + dy * parameter,
+          ]),
+          tangent,
+        })
+      }
+    }
+    expect(
+      expected.some(({ tangent }) => Math.abs(tangent[1]) > 0.1),
+    ).toBe(true)
+
+    const callbacks: Array<{
+      readonly point: Readonly<Point>
+      readonly tangent: Readonly<Point>
+    }> = []
+    const candidate = searchFlowingContoursCandidate(
+      source,
+      start,
+      {
+        ...searchOptions,
+        representedOverlapSampler(point, travelTangent) {
+          callbacks.push({ point, tangent: travelTangent })
+          return 0
+        },
+      },
+      limits(),
+    )
+    expect(candidate).not.toBeNull()
+    const scoringCallbacks = callbacks.slice(-expected.length)
+
+    expect(scoringCallbacks).toHaveLength(expected.length)
+    for (let index = 0; index < expected.length; index += 1) {
+      expect(scoringCallbacks[index]!.point).toEqual(expected[index]!.point)
+      expect(scoringCallbacks[index]!.tangent).toEqual(
+        expected[index]!.tangent,
+      )
+      expect(Object.isFrozen(scoringCallbacks[index]!.tangent)).toBe(true)
+      expect(Math.hypot(...scoringCallbacks[index]!.tangent)).toBeCloseTo(
+        1,
+        12,
+      )
+    }
+    expect(candidate!.score.representedOverlapPenalty).toBe(0)
+    expect(candidate!.length).toBe(baseline!.length)
+  })
+
   it('is deterministic, fails malformed inputs and sampler traps closed', () => {
     const source = field(13, 9, (_x, y) => ({
       evidence: gaussian(y - 4),
