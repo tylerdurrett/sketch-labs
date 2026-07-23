@@ -8,6 +8,13 @@ the binary instead of duplicated in JSON. The capture runs the real Studio
 decoder in Chromium through Vite; a plain Node image decoder is deliberately
 not a substitute.
 
+`capture-watercolor-forms-reference.mjs` captures compact, bounded preparation
+planes for the flower and pinecone through the same production Studio resolver.
+It also captures Pencil Contour's pinecone `AnalyzedRaster`; the existing
+Pencil Contour flower fixture remains its reviewed source of truth. The
+Watercolor Forms fixtures are provisional inputs for later evidence and tuning,
+not visual-quality gates or an attestation.
+
 From the repository root, install the workspace and the browser tool owned by
 the checked-in Chrome DevTools skill:
 
@@ -32,6 +39,26 @@ Use `--write` only when intentionally replacing the reviewed baseline:
 
 ```sh
 node apps/studio/scripts/capture-pencil-contour-reference.mjs --write
+```
+
+Capture the provisional Watercolor Forms inputs and Pencil Contour pinecone
+comparison input with an explicit full commit SHA for the production
+preparation code:
+
+```sh
+node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
+  --scope fixtures \
+  --write \
+  --provenance-commit "$(git rev-parse HEAD)"
+```
+
+The recorded `preparedFromCommit` remains stable after the fixture commit.
+Verify the committed bytes and all other metadata against the current
+production decoder and preparation functions without rewriting provenance:
+
+```sh
+node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
+  --scope fixtures
 ```
 
 ## Optional weak-component replay

@@ -1,0 +1,51 @@
+{
+  "formatVersion": 1,
+  "preparedFromCommit": "d4c3c05c0ea0574e0f17677f7db471c34942ae24",
+  "preparationVersion": "pencil-contour-analyzed-raster-v1",
+  "source": {
+    "assetId": "pinecone-4330aa0314f7",
+    "repositoryPath": "assets/image-assets/pinecone-4330aa0314f7.png",
+    "sha256": "4330aa0314f7b0acb150c7c22eab41e2a15008a04a3a17dd54cc1df03ac32c79",
+    "decodedWidth": 512,
+    "decodedHeight": 768
+  },
+  "frame": {
+    "width": 1000,
+    "height": 1000
+  },
+  "controls": {
+    "gamma": 0.5,
+    "contrast": 0.5,
+    "pivot": 0.5,
+    "contourDetail": 0.5,
+    "contourSmoothing": 1
+  },
+  "analysis": {
+    "width": 171,
+    "height": 256,
+    "sampleCount": 43776
+  },
+  "encoding": {
+    "byteOrder": "little-endian",
+    "valueType": "float64",
+    "planes": [
+      {
+        "name": "luminance",
+        "offsetBytes": 0,
+        "valueCount": 43776
+      },
+      {
+        "name": "alpha",
+        "offsetBytes": 350208,
+        "valueCount": 43776
+      },
+      {
+        "name": "positiveSupport",
+        "offsetBytes": 700416,
+        "valueCount": 43776,
+        "values": "0=false, 1=true"
+      }
+    ]
+  },
+  "fixtureSha256": "6fce17db851aebe835316e6c898f035070a0ebcd3e8dcc12a000c163b0eab004"
+}
