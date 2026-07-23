@@ -5,9 +5,10 @@
  * shortcut hierarchy removes small lattice-scale turns, then conservative
  * Laplacian passes round the surviving polyline. Every stronger authored
  * level must enter a fixed-spacing whole-curve envelope: neither total turn
- * energy nor the sharpest turn may increase. Every shortcut and point move is
- * also proved against the accepted trajectory's FC13a evidence tube. The
- * final curve is validated again as one monotonic, endpoint-exact whole.
+ * energy, the sharpest turn, nor the counts of moderate and abrupt turns may
+ * increase. Every shortcut and point move is also proved against the accepted
+ * trajectory's FC13a evidence tube. The final curve is validated again as one
+ * monotonic, endpoint-exact whole.
  */
 
 import type { Point } from '../../types'
@@ -37,6 +38,9 @@ const REGULARIZATION_LEVEL_COUNT = 100
 const REGULARIZATION_SAMPLE_SPACING = 0.25
 const REGULARIZATION_SAMPLES_PER_SOURCE_POINT = 17
 const REGULARIZATION_COMPARISON_TOLERANCE = 1e-10
+const MODERATE_TURN_THRESHOLD = (25 * Math.PI) / 180
+const ABRUPT_TURN_THRESHOLD = (45 * Math.PI) / 180
+const TURN_THRESHOLD_TOLERANCE = 1e-9
 
 /**
  * Explicit source-size-linear ceiling for fitting and whole-output gates.
@@ -137,6 +141,8 @@ interface SimplificationHierarchy {
 interface FlowingContoursRegularizationMeasure {
   readonly turnEnergy: number
   readonly maximumTurn: number
+  readonly moderateTurnCount: number
+  readonly abruptTurnCount: number
   readonly sampleCount: number
 }
 
@@ -684,6 +690,8 @@ function measureRegularization(
 
   let turnEnergy = 0
   let maximumTurn = 0
+  let moderateTurnCount = 0
+  let abruptTurnCount = 0
   for (let index = 1; index < samples.length - 1; index += 1) {
     const previous = samples[index - 1]!
     const point = samples[index]!
@@ -704,9 +712,21 @@ function measureRegularization(
     )
     turnEnergy += turn * turn
     maximumTurn = Math.max(maximumTurn, turn)
+    if (turn > MODERATE_TURN_THRESHOLD + TURN_THRESHOLD_TOLERANCE) {
+      moderateTurnCount += 1
+    }
+    if (turn > ABRUPT_TURN_THRESHOLD + TURN_THRESHOLD_TOLERANCE) {
+      abruptTurnCount += 1
+    }
   }
   return Number.isFinite(turnEnergy) && Number.isFinite(maximumTurn)
-    ? Object.freeze({ turnEnergy, maximumTurn, sampleCount })
+    ? Object.freeze({
+        turnEnergy,
+        maximumTurn,
+        moderateTurnCount,
+        abruptTurnCount,
+        sampleCount,
+      })
     : null
 }
 
@@ -718,7 +738,9 @@ function nonWorseRegularization(
     candidate.turnEnergy <=
       baseline.turnEnergy + REGULARIZATION_COMPARISON_TOLERANCE &&
     candidate.maximumTurn <=
-      baseline.maximumTurn + REGULARIZATION_COMPARISON_TOLERANCE
+      baseline.maximumTurn + REGULARIZATION_COMPARISON_TOLERANCE &&
+    candidate.moderateTurnCount <= baseline.moderateTurnCount &&
+    candidate.abruptTurnCount <= baseline.abruptTurnCount
   )
 }
 

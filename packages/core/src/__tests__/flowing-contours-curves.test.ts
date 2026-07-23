@@ -253,6 +253,39 @@ function maximumTurn(points: readonly Readonly<Point>[]): number {
   return result
 }
 
+function turnCounts(
+  points: readonly Readonly<Point>[],
+): Readonly<{ moderate: number; abrupt: number }> {
+  const spaced = resample(points)
+  let moderate = 0
+  let abrupt = 0
+  const tolerance = 1e-9
+  const moderateThreshold = (25 * Math.PI) / 180
+  const abruptThreshold = (45 * Math.PI) / 180
+  for (let index = 1; index < spaced.length - 1; index += 1) {
+    const previous = spaced[index - 1]!
+    const point = spaced[index]!
+    const next = spaced[index + 1]!
+    const first = Math.atan2(
+      point[1] - previous[1],
+      point[0] - previous[0],
+    )
+    const second = Math.atan2(
+      next[1] - point[1],
+      next[0] - point[0],
+    )
+    const turn = Math.abs(
+      Math.atan2(
+        Math.sin(second - first),
+        Math.cos(second - first),
+      ),
+    )
+    if (turn > moderateThreshold + tolerance) moderate += 1
+    if (turn > abruptThreshold + tolerance) abrupt += 1
+  }
+  return { moderate, abrupt }
+}
+
 function coherentRandomPoints(seedValue: number): readonly Readonly<Point>[] {
   let seed = seedValue
   const random = () =>
@@ -493,6 +526,79 @@ describe('Flowing Contours evidence-preserving curve fitting', () => {
         )
       }
     }
+  })
+
+  it.each([
+    { seed: 1234567, lower: 0.29, stronger: 0.3 },
+    { seed: 1, lower: 0.17, stronger: 0.18 },
+    { seed: 9, lower: 0.16, stronger: 0.17 },
+  ])(
+    'does not add reported moderate turns for seed $seed at adjacent levels',
+    ({ seed, lower, stronger }) => {
+      const source = field(24, 40, () => ({
+        tangent: [1, 0],
+        scale: 1,
+      }))
+      const raw = trajectory(source, coherentRandomPoints(seed))
+      const lowerPoints = fittedPoints(source, raw, lower)
+      const strongerPoints = fittedPoints(source, raw, stronger)
+      const lowerCounts = turnCounts(lowerPoints)
+      const strongerCounts = turnCounts(strongerPoints)
+
+      expect(strongerCounts.moderate).toBeLessThanOrEqual(
+        lowerCounts.moderate,
+      )
+      expect(strongerCounts.abrupt).toBeLessThanOrEqual(
+        lowerCounts.abrupt,
+      )
+      expect(turnEnergy(strongerPoints)).toBeLessThanOrEqual(
+        turnEnergy(lowerPoints) + 1e-10,
+      )
+      expect(maximumTurn(strongerPoints)).toBeLessThanOrEqual(
+        maximumTurn(lowerPoints) + 1e-10,
+      )
+    },
+  )
+
+  it('keeps all fixed-spacing turn measures monotonic at every 0.01 step', () => {
+    const source = field(24, 40, () => ({
+      tangent: [1, 0],
+      scale: 1,
+    }))
+    let responsiveSeedCount = 0
+    for (const seed of [1, 9, 1234567]) {
+      const raw = trajectory(
+        source,
+        coherentRandomPoints(seed),
+        undefined,
+        seed,
+      )
+      let previous = fittedPoints(source, raw, 0)
+      const initial = previous
+      for (let level = 1; level <= 100; level += 1) {
+        const current = fittedPoints(source, raw, level / 100)
+        const previousCounts = turnCounts(previous)
+        const currentCounts = turnCounts(current)
+        expect(turnEnergy(current)).toBeLessThanOrEqual(
+          turnEnergy(previous) + 1e-10,
+        )
+        expect(maximumTurn(current)).toBeLessThanOrEqual(
+          maximumTurn(previous) + 1e-10,
+        )
+        expect(currentCounts.moderate).toBeLessThanOrEqual(
+          previousCounts.moderate,
+        )
+        expect(currentCounts.abrupt).toBeLessThanOrEqual(
+          previousCounts.abrupt,
+        )
+        expect(current.length).toBeLessThanOrEqual(previous.length)
+        previous = current
+      }
+      if (JSON.stringify(previous) !== JSON.stringify(initial)) {
+        responsiveSeedCount += 1
+      }
+    }
+    expect(responsiveSeedCount).toBeGreaterThan(0)
   })
 
   it('suppresses repeated orthogonal alternation rather than emitting stumps', () => {
