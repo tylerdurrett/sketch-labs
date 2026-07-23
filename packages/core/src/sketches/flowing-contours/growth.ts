@@ -37,9 +37,18 @@ const DEFAULT_RIDGE_STEP_LENGTH = 0.75
 const DEFAULT_REPRESENTED_COLLISION_THRESHOLD = 0.7
 const OVERLAP_TRAVERSAL_SPACING = 0.25
 const MAXIMUM_OVERLAP_SAMPLES_PER_SEGMENT = 64
+const SELF_LOOP_REENTRY_DISTANCE = 1.5
+const SELF_LOOP_MINIMUM_LENGTH = 8
+const SELF_LOOP_MINIMUM_SAMPLE_SEPARATION = 12
+const SELF_LOOP_MINIMUM_SIGNED_TURN = 1.5 * Math.PI
+const SELF_LOOP_ALIGNMENT_FLOOR = 0.75
+const SELF_LOOP_MAXIMUM_CURVATURE_CHANGE = 0.2
+const SELF_LOOP_MINIMUM_DIRECT_APPROACH_STEPS = 2
 const DEFAULT_RIDGE_OPTIONS = Object.freeze({}) as FlowingRidgeStepOptions
 const EMPTY_ALTERNATIVES =
   Object.freeze([]) as readonly Readonly<Point>[]
+
+const SUPPORTED_SELF_LOOP_TRACES = new WeakSet<Readonly<object>>()
 
 /**
  * A pure occupancy query returning represented coverage in `[0, 1]`.
@@ -50,6 +59,7 @@ const EMPTY_ALTERNATIVES =
  */
 export type FlowingContoursRepresentedOverlapSampler = (
   point: Readonly<Point>,
+  travelTangent: Readonly<Point>,
 ) => number
 
 export interface FlowingContoursDirectionalGrowthOptions {
@@ -100,6 +110,7 @@ interface IncrementalMetrics {
   readonly curvatureChangeSum: number
   readonly lastSegmentDirection: Readonly<Point> | null
   readonly lastSignedTurn: number | null
+  readonly signedTurnSum: number
 }
 
 interface SearchState {
@@ -119,6 +130,9 @@ interface SearchState {
   readonly provisionalOverlapSum: number
   readonly provisionalOverlapCount: number
   readonly endpointReason: FlowingContoursEndpointReason | null
+  readonly maximumAnchorDistance: number
+  readonly directStepsSinceGap: number
+  readonly supportedSelfLoop: boolean
 }
 
 interface OverlapMeasurement {
@@ -381,10 +395,13 @@ function resolveOptions(
 function sampleOverlap(
   sampler: FlowingContoursRepresentedOverlapSampler | null,
   point: Readonly<Point>,
+  travelTangent: Readonly<Point>,
 ): number | null {
   if (sampler === null) return 0
   try {
-    const value = sampler(point)
+    const tangent = unit(travelTangent)
+    if (tangent === null) return null
+    const value = sampler(point, tangent)
     return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null
   } catch {
     return null
@@ -395,6 +412,8 @@ function overlapAlongSegment(
   sampler: FlowingContoursRepresentedOverlapSampler | null,
   start: Readonly<Point>,
   end: Readonly<Point>,
+  startTangent: Readonly<Point>,
+  endTangent: Readonly<Point>,
 ): Readonly<OverlapMeasurement> | null {
   if (sampler === null) return Object.freeze({ maximum: 0, sum: 0, count: 0 })
   const dx = end[0] - start[0]
@@ -447,9 +466,21 @@ function overlapAlongSegment(
       continue
     }
     previous = parameter
+    const tangentSign =
+      startTangent[0] * endTangent[0] + startTangent[1] * endTangent[1] < 0
+        ? -1
+        : 1
+    const travelTangent = unit([
+      startTangent[0] * (1 - parameter) +
+        endTangent[0] * tangentSign * parameter,
+      startTangent[1] * (1 - parameter) +
+        endTangent[1] * tangentSign * parameter,
+    ])
+    if (travelTangent === null) return null
     const value = sampleOverlap(
       sampler,
       frozenPoint(start[0] + dx * parameter, start[1] + dy * parameter),
+      travelTangent,
     )
     if (value === null) return null
     maximum = Math.max(maximum, value)
@@ -488,6 +519,7 @@ function rootMetrics(
     curvatureChangeSum: 0,
     lastSegmentDirection: null,
     lastSignedTurn: null,
+    signedTurnSum: 0,
   })
 }
 
@@ -526,6 +558,7 @@ function extendMetrics(
     curvatureChangeSum: metrics.curvatureChangeSum + curvatureChange,
     lastSegmentDirection: segmentDirection,
     lastSignedTurn: turn,
+    signedTurnSum: metrics.signedTurnSum + (turn ?? 0),
   })
 }
 
@@ -699,6 +732,40 @@ function stopped(
   }
 }
 
+function coherentSupportedSelfLoop(
+  anchor: Readonly<CorrectedFlowingRidgeSample>,
+  state: Readonly<SearchState>,
+): boolean {
+  const sample = state.currentTail.sample
+  const dx = anchor.point[0] - sample.point[0]
+  const dy = anchor.point[1] - sample.point[1]
+  const reentryDistance = Math.hypot(dx, dy)
+  const closureDirection = unit([dx, dy])
+  const segmentCount = Math.max(1, state.currentMetrics.segmentCount)
+  return (
+    closureDirection !== null &&
+    state.currentTail.sampleIndex >= SELF_LOOP_MINIMUM_SAMPLE_SEPARATION &&
+    state.committedLength >= SELF_LOOP_MINIMUM_LENGTH &&
+    state.maximumAnchorDistance >= 2 * SELF_LOOP_REENTRY_DISTANCE &&
+    state.directStepsSinceGap >= SELF_LOOP_MINIMUM_DIRECT_APPROACH_STEPS &&
+    reentryDistance > VECTOR_EPSILON &&
+    reentryDistance <= SELF_LOOP_REENTRY_DISTANCE &&
+    Math.abs(state.currentMetrics.signedTurnSum) >=
+      SELF_LOOP_MINIMUM_SIGNED_TURN &&
+    state.currentMetrics.curvatureChangeSum / segmentCount <=
+      SELF_LOOP_MAXIMUM_CURVATURE_CHANGE &&
+    anchor.tangent[0] * sample.tangent[0] +
+      anchor.tangent[1] * sample.tangent[1] >=
+      SELF_LOOP_ALIGNMENT_FLOOR &&
+    sample.tangent[0] * closureDirection[0] +
+      sample.tangent[1] * closureDirection[1] >=
+      SELF_LOOP_ALIGNMENT_FLOOR &&
+    anchor.tangent[0] * closureDirection[0] +
+      anchor.tangent[1] * closureDirection[1] >=
+      SELF_LOOP_ALIGNMENT_FLOOR
+  )
+}
+
 function samePoint(
   first: Readonly<Point> | null,
   second: Readonly<Point> | null,
@@ -734,7 +801,8 @@ function sameMetrics(
     Object.is(first.coherenceSum, second.coherenceSum) &&
     Object.is(first.curvatureChangeSum, second.curvatureChangeSum) &&
     samePoint(first.lastSegmentDirection, second.lastSegmentDirection) &&
-    Object.is(first.lastSignedTurn, second.lastSignedTurn)
+    Object.is(first.lastSignedTurn, second.lastSignedTurn) &&
+    Object.is(first.signedTurnSum, second.signedTurnSum)
   )
 }
 
@@ -788,7 +856,10 @@ function areEquivalentSiblingSuccessors(
     first.committedOverlapCount === second.committedOverlapCount &&
     Object.is(first.provisionalOverlapSum, second.provisionalOverlapSum) &&
     first.provisionalOverlapCount === second.provisionalOverlapCount &&
-    first.endpointReason === second.endpointReason
+    first.endpointReason === second.endpointReason &&
+    Object.is(first.maximumAnchorDistance, second.maximumAnchorDistance) &&
+    first.directStepsSinceGap === second.directStepsSinceGap &&
+    first.supportedSelfLoop === second.supportedSelfLoop
   )
 }
 
@@ -864,7 +935,7 @@ function freezeTrace(
   searchStepCount: number,
   fallbackSamples: readonly Readonly<CorrectedFlowingRidgeSample>[],
 ): Readonly<FlowingContoursDirectionalTrace> {
-  return Object.freeze({
+  const trace = Object.freeze({
     direction: direction === 'backward' ? 'backward' : 'forward',
     samples:
       state === null
@@ -877,6 +948,24 @@ function freezeTrace(
     endpointReason: state?.endpointReason ?? 'safety-limit',
     searchStepCount,
   })
+  if (state?.supportedSelfLoop === true) {
+    SUPPORTED_SELF_LOOP_TRACES.add(trace)
+  }
+  return trace
+}
+
+/**
+ * Exact internal provenance for a directional trace that stopped by reaching
+ * its own coherent supported prefix. Structural lookalikes are never branded.
+ */
+export function isFlowingContoursSupportedSelfLoopTrace(
+  trace: Readonly<FlowingContoursDirectionalTrace>,
+): boolean {
+  try {
+    return SUPPORTED_SELF_LOOP_TRACES.has(trace)
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -927,6 +1016,7 @@ export function growFlowingContoursDirection(
     const anchorOverlap = sampleOverlap(
       resolved.representedOverlapSampler,
       anchor.point,
+      anchor.tangent,
     )
     if (anchorOverlap === null) {
       return freezeTrace(direction, null, 0, fallbackSamples)
@@ -958,6 +1048,9 @@ export function growFlowingContoursDirection(
       provisionalOverlapSum: 0,
       provisionalOverlapCount: 0,
       endpointReason,
+      maximumAnchorDistance: 0,
+      directStepsSinceGap: 0,
+      supportedSelfLoop: false,
     })
     if (anchorOverlap >= resolved.representedCollisionThreshold) {
       return freezeTrace(
@@ -1061,6 +1154,8 @@ export function growFlowingContoursDirection(
           resolved.representedOverlapSampler,
           previousSample.point,
           sample.point,
+          previousSample.tangent,
+          sample.tangent,
         )
         if (overlap === null) {
           terminal.push(stopped(state, 'safety-limit'))
@@ -1103,6 +1198,14 @@ export function growFlowingContoursDirection(
               state.provisionalOverlapSum + overlap.sum,
             provisionalOverlapCount:
               state.provisionalOverlapCount + overlap.count,
+            maximumAnchorDistance: Math.max(
+              state.maximumAnchorDistance,
+              Math.hypot(
+                sample.point[0] - anchor.point[0],
+                sample.point[1] - anchor.point[1],
+              ),
+            ),
+            directStepsSinceGap: 0,
           })
           continue
         }
@@ -1153,11 +1256,19 @@ export function growFlowingContoursDirection(
             committedOverlapCount,
             provisionalOverlapSum: 0,
             provisionalOverlapCount: 0,
+            maximumAnchorDistance: Math.max(
+              state.maximumAnchorDistance,
+              Math.hypot(
+                sample.point[0] - anchor.point[0],
+                sample.point[1] - anchor.point[1],
+              ),
+            ),
+            directStepsSinceGap: 0,
           })
           continue
         }
 
-        next.push({
+        const extended: SearchState = {
           ...state,
           committedTail: nextTail,
           currentTail: nextTail,
@@ -1176,7 +1287,25 @@ export function growFlowingContoursDirection(
           committedOverlapSum: state.committedOverlapSum + overlap.sum,
           committedOverlapCount:
             state.committedOverlapCount + overlap.count,
-        })
+          maximumAnchorDistance: Math.max(
+            state.maximumAnchorDistance,
+            Math.hypot(
+              sample.point[0] - anchor.point[0],
+              sample.point[1] - anchor.point[1],
+            ),
+          ),
+          directStepsSinceGap: state.directStepsSinceGap + 1,
+        }
+        if (coherentSupportedSelfLoop(anchor, extended)) {
+          terminal.push(
+            stopped(
+              { ...extended, supportedSelfLoop: true },
+              'represented-collision',
+            ),
+          )
+        } else {
+          next.push(extended)
+        }
       }
 
       if (searchStepCount >= searchStepLimit && next.length > 0) {

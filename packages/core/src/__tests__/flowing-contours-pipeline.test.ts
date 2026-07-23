@@ -258,7 +258,7 @@ describe('Flowing Contours pipeline', () => {
     }
   })
 
-  it('documents the upstream FC10→FC11 rejection of an authentic open curved path', () => {
+  it('accepts an authentic open curved path with reversed bounded-gap provenance', () => {
     const source = centerlineField(
       40,
       20,
@@ -289,12 +289,38 @@ describe('Flowing Contours pipeline', () => {
       },
       accounting,
     )
-    // Release blocker outside FC14 ownership: FC10 brands this candidate with
-    // the exact source field, yet FC11 currently rejects its curved support.
-    expect(selection).toEqual({
-      kind: 'rejected',
-      reason: 'invalid-input',
-    })
+    expect(selection.kind).toBe('accepted')
+    if (selection.kind !== 'accepted') {
+      throw new Error(`expected accepted selection, got ${selection.reason}`)
+    }
+    expect(selection.trajectory.samples).toHaveLength(candidate!.samples.length)
+    expect(
+      selection.trajectory.spanSupport.filter(
+        (span) => span.kind === 'bounded-gap',
+      ),
+    ).toEqual(
+      candidate!.spanSupport.filter((span) => span.kind === 'bounded-gap'),
+    )
+
+    const forgedSupport = candidate!.spanSupport.map((span) =>
+      span.kind === 'bounded-gap'
+        ? {
+            ...span,
+            directionalAlignment: span.directionalAlignment - 0.01,
+          }
+        : span,
+    )
+    expect(
+      selectFlowingContoursCandidate(
+        { ...candidate!, spanSupport: forgedSupport },
+        {
+          analysisWidth: source.width,
+          analysisHeight: source.height,
+          minimumStrokeLength: 0.1,
+        },
+        createFlowingContoursAccounting(),
+      ),
+    ).toEqual({ kind: 'rejected', reason: 'invalid-input' })
   })
 
   it('returns complete empty output for a flat valid field', () => {

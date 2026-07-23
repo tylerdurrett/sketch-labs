@@ -7,8 +7,10 @@ import { createFlowingContoursTestLimits } from '../sketches/flowing-contours/li
 import {
   flowingContoursCandidateSourceField,
   searchFlowingContoursCandidate,
+  searchFlowingContoursCandidateDetailed,
   type FlowingContoursSearchOptions,
 } from '../sketches/flowing-contours/search'
+import { selectFlowingContoursCandidate } from '../sketches/flowing-contours/selection'
 import type {
   CorrectedFlowingRidgeSample,
   FlowingContoursAnchor,
@@ -333,6 +335,135 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     })
   })
 
+  it('assembles one bounded supported loop when forward growth reaches its own prefix', () => {
+    const source = field(31, 31, (x, y) => {
+      const dx = x - 15
+      const dy = y - 15
+      const radius = Math.hypot(dx, dy)
+      return {
+        evidence: gaussian(radius - 9, 0.7),
+        tangent:
+          radius === 0
+            ? ([1, 0] as const)
+            : ([-dy / radius, dx / radius] as const),
+      }
+    })
+    const search = searchFlowingContoursCandidateDetailed(
+      source,
+      anchor(source, [24, 15]),
+      OPTIONS,
+      limits({
+        'search-step-count': 240,
+        'raw-trajectory-point-count': 241,
+      }),
+    )!
+    const candidate = search.candidate!
+
+    expect(search.directionalTraceCount).toBe(1)
+    expect(search.searchStepCount).toBe(candidate.forward.searchStepCount)
+    expect(search.searchCapExhausted).toBe(false)
+    expect(candidate.forward.endpointReason).toBe('represented-collision')
+    expect(candidate.backward.endpointReason).toBe('represented-collision')
+    expect(candidate.backward.searchStepCount).toBe(0)
+    expect(candidate.forward.searchStepCount).toBeLessThan(120)
+    expect(candidate.samples.at(-1)!.point).toEqual(candidate.samples[0]!.point)
+    expect(candidate.length).toBeGreaterThan(45)
+    expect(candidate.length).toBeLessThan(70)
+    expect(
+      candidate.forward.searchStepCount + candidate.backward.searchStepCount,
+    ).toBeLessThanOrEqual(240)
+    const loopSelection = selectFlowingContoursCandidate(
+      candidate,
+      {
+        analysisWidth: source.width,
+        analysisHeight: source.height,
+        minimumStrokeLength: 0.1,
+      },
+      createFlowingContoursAccounting(),
+      limits({
+        'search-step-count': 240,
+        'raw-trajectory-point-count': 241,
+      }),
+    )
+    expect(loopSelection.kind).toBe('accepted')
+  })
+
+  it('does not treat a nearby parallel ridge as a supported self-loop', () => {
+    const source = field(41, 13, (_x, y) => ({
+      evidence: Math.max(gaussian(y - 5), gaussian(y - 7)),
+      tangent: [1, 0],
+    }))
+    const candidate = searchFlowingContoursCandidate(
+      source,
+      anchor(source, [20, 5]),
+      OPTIONS,
+      limits({
+        'search-step-count': 240,
+        'raw-trajectory-point-count': 241,
+      }),
+    )!
+
+    expect(candidate.samples.at(-1)!.point).not.toEqual(
+      candidate.samples[0]!.point,
+    )
+    expect(candidate.forward.endpointReason).toBe('source-boundary')
+    expect(candidate.backward.endpointReason).toBe('source-boundary')
+  })
+
+  it.each([
+    {
+      name: 'ambiguous near-loop',
+      interrupted: (x: number, y: number) => x >= 22 && y <= 14,
+      evidence: 1,
+      coherence: 0,
+      ambiguity: 1,
+      continuity: 0.45,
+    },
+    {
+      name: 'weak closure approach',
+      interrupted: (x: number, y: number) => x >= 22 && y <= 14,
+      evidence: 0.01,
+      coherence: 1,
+      ambiguity: 0,
+      continuity: 1,
+    },
+  ])(
+    'rejects a $name instead of bridging it into a loop',
+    ({ interrupted, evidence, coherence, ambiguity, continuity }) => {
+      const source = field(31, 31, (x, y) => {
+        const dx = x - 15
+        const dy = y - 15
+        const radius = Math.hypot(dx, dy)
+        const blocked = interrupted(x, y)
+        return {
+          evidence: (blocked ? evidence : 1) * gaussian(radius - 9, 0.7),
+          tangent:
+            radius === 0
+              ? ([1, 0] as const)
+              : ([-dy / radius, dx / radius] as const),
+          coherence: blocked ? coherence : 1,
+          ambiguity: blocked ? ambiguity : 0,
+        }
+      })
+      const candidate = searchFlowingContoursCandidate(
+        source,
+        anchor(source, [24, 15]),
+        { ...OPTIONS, continuity },
+        limits({
+          'search-step-count': 240,
+          'raw-trajectory-point-count': 241,
+        }),
+      )!
+
+      expect(candidate.samples.at(-1)!.point).not.toEqual(
+        candidate.samples[0]!.point,
+      )
+      expect(candidate.forward.endpointReason).not.toBe(
+        'represented-collision',
+      )
+    },
+  )
+
   it('does not close across a zero-evidence unresolved bridge even with permissive ridge options', () => {
     const source = field(25, 25, (x, y) => {
       const dx = x - 12
@@ -456,6 +587,69 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     ).toBe(5)
     expect(candidate.forward.endpointReason).toBe('safety-limit')
     expect(candidate.backward.endpointReason).toBe('safety-limit')
+  })
+
+  it('reports exact work and aggregate-cap exhaustion for valid attempts', () => {
+    const source = field(101, 9, (_x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+    const result = searchFlowingContoursCandidateDetailed(
+      source,
+      anchor(source, [50, 4]),
+      OPTIONS,
+      limits({ 'search-step-count': 5 }),
+    )
+
+    expect(result).not.toBeNull()
+    expect(result!.candidate).not.toBeNull()
+    expect(result!.directionalTraceCount).toBe(2)
+    expect(result!.searchStepCount).toBe(5)
+    expect(result!.searchCapExhausted).toBe(true)
+    expect(Object.isFrozen(result)).toBe(true)
+  })
+
+  it('accounts consumed work when a valid search fails after growth', () => {
+    const source = field(31, 11, (_x, y) => ({
+      evidence: gaussian(y - 5),
+      tangent: [1, 0],
+    }))
+    let calls = 0
+    const result = searchFlowingContoursCandidateDetailed(
+      source,
+      anchor(source, [15, 5]),
+      {
+        ...OPTIONS,
+        representedOverlapSampler() {
+          calls += 1
+          return calls === 3 ? Number.NaN : 0
+        },
+      },
+      limits({ 'search-step-count': 24 }),
+    )
+
+    expect(result).not.toBeNull()
+    expect(result!.candidate).toBeNull()
+    expect(result!.directionalTraceCount).toBe(1)
+    expect(result!.searchStepCount).toBeGreaterThan(0)
+    expect(result!.searchStepCount).toBeLessThanOrEqual(24)
+    expect(result!.searchCapExhausted).toBe(false)
+  })
+
+  it('leaves only invalid preflight unaccounted by the detailed API', () => {
+    const source = field(17, 9, (_x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+
+    expect(
+      searchFlowingContoursCandidateDetailed(
+        source,
+        anchor(source, [8, 4]),
+        { ...OPTIONS, continuity: Number.NaN },
+        limits(),
+      ),
+    ).toBeNull()
   })
 
   it('shares a three-point raw trajectory cap across both directions', () => {
@@ -687,6 +881,7 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     const module = await import('../sketches/flowing-contours/search')
     expect(Object.keys(module)).toEqual([
       'flowingContoursCandidateSourceField',
+      'searchFlowingContoursCandidateDetailed',
       'searchFlowingContoursCandidate',
     ])
   })

@@ -11,6 +11,7 @@ import type { Point } from '../../types'
 import { sampleFlowingContoursField } from './field'
 import {
   growFlowingContoursDirection,
+  isFlowingContoursSupportedSelfLoopTrace,
   measureFlowingContoursCurvatureChange,
   type FlowingContoursDirectionalGrowthOptions,
   type FlowingContoursRepresentedOverlapSampler,
@@ -137,7 +138,13 @@ function snapshotSample(
     }
     return Object.freeze({
       point,
-      tangent: frozenPoint(tangent[0] * tangentSign, tangent[1] * tangentSign),
+      // Preserve the already validated trace components exactly. Repeated
+      // normalization makes long canonical assemblies drift from their own
+      // directional trace provenance by a few ulps.
+      tangent: frozenPoint(
+        source.tangent[0] * tangentSign,
+        source.tangent[1] * tangentSign,
+      ),
       evidence: source.evidence,
       coherence: source.coherence,
       ambiguity: source.ambiguity,
@@ -427,10 +434,13 @@ function resolveOptions(
     const sampler =
       sourceSampler === null
         ? null
-        : (point: Readonly<Point>): number => {
+        : (
+            point: Readonly<Point>,
+            travelTangent: Readonly<Point>,
+          ): number => {
             if (invalidOverlapSample) return Number.NaN
             try {
-              const value = sourceSampler(point)
+              const value = sourceSampler(point, travelTangent)
               if (!isUnitInterval(value)) {
                 invalidOverlapSample = true
                 return Number.NaN
@@ -814,10 +824,27 @@ function supportedLoopClosure(
     exitEvidence: first.evidence,
     directionalAlignment: Math.min(
       minimumAlignment,
+      alignment(last.tangent, first.tangent),
       alignment(last.tangent, closureDirection),
       alignment(first.tangent, closureDirection),
     ),
   })
+}
+
+function singletonBackwardLoopTrace(
+  anchor: Readonly<CorrectedFlowingRidgeSample>,
+): Readonly<FlowingContoursDirectionalTrace> | null {
+  const sample = snapshotSample(anchor, -1)
+  return sample === null
+    ? null
+    : Object.freeze({
+        direction: 'backward',
+        samples: Object.freeze([sample]),
+        spanSupport: Object.freeze([]),
+        // A proven self-loop reached geometry represented by its own prefix.
+        endpointReason: 'represented-collision',
+        searchStepCount: 0,
+      })
 }
 
 function sampleRepresentedOverlap(
@@ -828,7 +855,7 @@ function sampleRepresentedOverlap(
   try {
     let sum = 0
     let count = 0
-    const initial = sampler(samples[0]!.point)
+    const initial = sampler(samples[0]!.point, samples[0]!.tangent)
     if (!isUnitInterval(initial)) return null
     sum += initial
     count += 1
@@ -850,8 +877,24 @@ function sampleRepresentedOverlap(
         sampleIndex += 1
       ) {
         const parameter = sampleIndex / intervalCount
+        const firstTangent = samples[index - 1]!.tangent
+        const secondTangent = samples[index]!.tangent
+        const tangentSign =
+          firstTangent[0] * secondTangent[0] +
+              firstTangent[1] * secondTangent[1] <
+            0
+            ? -1
+            : 1
+        const tangent = unit([
+          firstTangent[0] * (1 - parameter) +
+            secondTangent[0] * tangentSign * parameter,
+          firstTangent[1] * (1 - parameter) +
+            secondTangent[1] * tangentSign * parameter,
+        ])
+        if (tangent === null) return null
         const value = sampler(
           frozenPoint(start[0] + dx * parameter, start[1] + dy * parameter),
+          tangent,
         )
         if (!isUnitInterval(value)) return null
         sum += value
@@ -886,12 +929,36 @@ function directionalCoherence(
  * any forward remainder, so actual FC07 invocations across both traces never
  * exceed the one global `search-step-count` policy.
  */
-export function searchFlowingContoursCandidate(
+export interface FlowingContoursSearchResult {
+  readonly candidate: Readonly<FlowingContoursCandidate> | null
+  /** Actual FC09 directional growth invocations; loop synthesis adds none. */
+  readonly directionalTraceCount: number
+  /** Exact aggregate FC07 invocations consumed by those traces. */
+  readonly searchStepCount: number
+  /** True only when the supplied aggregate search-step allowance was spent. */
+  readonly searchCapExhausted: boolean
+}
+
+export function searchFlowingContoursCandidateDetailed(
   field: Readonly<FlowingContoursField>,
   anchorSource: Readonly<FlowingContoursAnchor>,
   optionsSource: Readonly<FlowingContoursSearchOptions>,
   limitsSource: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
-): Readonly<FlowingContoursCandidate> | null {
+): Readonly<FlowingContoursSearchResult> | null {
+  let attempted = false
+  let directionalTraceCount = 0
+  let searchStepCount = 0
+  let aggregateSearchStepLimit = 0
+  const finish = (
+    candidate: Readonly<FlowingContoursCandidate> | null,
+  ): Readonly<FlowingContoursSearchResult> =>
+    Object.freeze({
+      candidate,
+      directionalTraceCount,
+      searchStepCount,
+      searchCapExhausted:
+        attempted && searchStepCount >= aggregateSearchStepLimit,
+    })
   try {
     const limits = snapshotLimits(limitsSource)
     if (limits === null || !hasValidField(field, limits)) return null
@@ -914,6 +981,8 @@ export function searchFlowingContoursCandidate(
     const globalStepLimit = limits['search-step-count']
     const globalRawPointLimit = limits['raw-trajectory-point-count']
     if (globalRawPointLimit < 1) return null
+    aggregateSearchStepLimit = globalStepLimit
+    attempted = true
     const forwardStepLimit = Math.ceil(globalStepLimit / 2)
     const forwardRawPointLimit = 1 + Math.ceil((globalRawPointLimit - 1) / 2)
     const forward = growFlowingContoursDirection(
@@ -924,6 +993,8 @@ export function searchFlowingContoursCandidate(
       options.forward,
       withGrowthLimits(limits, forwardStepLimit, forwardRawPointLimit),
     )
+    directionalTraceCount = 1
+    searchStepCount = forward.searchStepCount
     if (
       !isValidTrace(
         forward,
@@ -933,24 +1004,33 @@ export function searchFlowingContoursCandidate(
       ) ||
       options.overlapSamplerInvalid()
     ) {
-      return null
+      return finish(null)
     }
+    const forwardIsSupportedSelfLoop =
+      isFlowingContoursSupportedSelfLoopTrace(forward) &&
+      forward.endpointReason === 'represented-collision' &&
+      supportedLoopClosure(field, forward.samples, options) !== null
     const backwardStepLimit = globalStepLimit - forward.searchStepCount
     const backwardRawPointLimit =
       globalRawPointLimit - (forward.samples.length - 1)
-    if (backwardRawPointLimit < 1) return null
+    if (backwardRawPointLimit < 1) return finish(null)
     const backwardDirection = frozenPoint(
       -forwardDirection[0],
       -forwardDirection[1],
     )
-    const backward = growFlowingContoursDirection(
-      field,
-      anchor.sample,
-      backwardDirection,
-      'backward',
-      options.backward,
-      withGrowthLimits(limits, backwardStepLimit, backwardRawPointLimit),
-    )
+    const backward = forwardIsSupportedSelfLoop
+      ? singletonBackwardLoopTrace(anchor.sample)
+      : growFlowingContoursDirection(
+          field,
+          anchor.sample,
+          backwardDirection,
+          'backward',
+          options.backward,
+          withGrowthLimits(limits, backwardStepLimit, backwardRawPointLimit),
+        )
+    if (!forwardIsSupportedSelfLoop) directionalTraceCount += 1
+    if (backward === null) return finish(null)
+    searchStepCount += backward.searchStepCount
     if (
       !isValidTrace(
         backward,
@@ -961,7 +1041,7 @@ export function searchFlowingContoursCandidate(
       forward.searchStepCount + backward.searchStepCount > globalStepLimit ||
       options.overlapSamplerInvalid()
     ) {
-      return null
+      return finish(null)
     }
 
     const backwardSamples = reverseBackwardSamples(backward)
@@ -977,7 +1057,7 @@ export function searchFlowingContoursCandidate(
       backwardSupport === null ||
       forwardSupport === null
     ) {
-      return null
+      return finish(null)
     }
     const samples: Readonly<CorrectedFlowingRidgeSample>[] = [
       ...backwardSamples,
@@ -994,11 +1074,11 @@ export function searchFlowingContoursCandidate(
         : null
     if (closure !== null && samples.length + 1 <= globalRawPointLimit) {
       const duplicate = snapshotSample(samples[0]!)
-      if (duplicate === null) return null
+      if (duplicate === null) return finish(null)
       samples.push(duplicate)
       spanSupport.push(closure)
     }
-    if (samples.length > globalRawPointLimit) return null
+    if (samples.length > globalRawPointLimit) return finish(null)
     const frozenSamples = Object.freeze(samples)
     const frozenSupport = Object.freeze(spanSupport)
     const length = polylineLength(frozenSamples)
@@ -1006,8 +1086,8 @@ export function searchFlowingContoursCandidate(
       options.representedOverlapSampler,
       frozenSamples,
     )
-    if (length === null || representedOverlap === null) return null
-    if (options.overlapSamplerInvalid()) return null
+    if (length === null || representedOverlap === null) return finish(null)
+    if (options.overlapSamplerInvalid()) return finish(null)
 
     const sampleCount = frozenSamples.length
     const segmentCount = Math.max(1, sampleCount - 1)
@@ -1048,8 +1128,23 @@ export function searchFlowingContoursCandidate(
       score,
     })
     CANDIDATE_SOURCE_FIELDS.set(candidate, field)
-    return candidate
+    return finish(candidate)
   } catch {
-    return null
+    return attempted ? finish(null) : null
   }
+}
+
+/** Backward-compatible candidate-only wrapper around the accounted search. */
+export function searchFlowingContoursCandidate(
+  field: Readonly<FlowingContoursField>,
+  anchorSource: Readonly<FlowingContoursAnchor>,
+  optionsSource: Readonly<FlowingContoursSearchOptions>,
+  limitsSource: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
+): Readonly<FlowingContoursCandidate> | null {
+  return searchFlowingContoursCandidateDetailed(
+    field,
+    anchorSource,
+    optionsSource,
+    limitsSource,
+  )?.candidate ?? null
 }

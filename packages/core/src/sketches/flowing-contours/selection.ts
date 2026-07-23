@@ -377,6 +377,9 @@ function snapshotSupport(
   limits: Readonly<FlowingContoursLimits>,
   allowClosingSpan: boolean,
   allowedDirectJoinIndices: ReadonlySet<number> = new Set(),
+  expectedDirectionalSpans:
+    | readonly Readonly<FlowingContoursSpanSupportProvenance>[]
+    | null = null,
 ): Readonly<CanonicalSupport> | null {
   const segmentCount = samples.length - 1
   const values = boundedOwnArray(
@@ -433,6 +436,16 @@ function snapshotSupport(
       index === values.length - 1 &&
       end === segmentCount &&
       sameSample(samples[end]!, samples[0]!)
+    const expectedDirectionalSpan = expectedDirectionalSpans?.[index]
+    const matchesDirectionalGapProvenance =
+      kind === 'bounded-gap' &&
+      expectedDirectionalSpan?.kind === 'bounded-gap' &&
+      expectedDirectionalSpan.startSampleIndex === start &&
+      expectedDirectionalSpan.endSampleIndex === end &&
+      closeEnough(
+        suppliedAlignment,
+        expectedDirectionalSpan.directionalAlignment,
+      )
     if (
       length === null ||
       alignment === null ||
@@ -442,7 +455,8 @@ function snapshotSupport(
       (closingSpan
         ? suppliedAlignment > alignment + PROVENANCE_EPSILON ||
           suppliedAlignment < LOOP_ALIGNMENT_FLOOR
-        : !closeEnough(suppliedAlignment, alignment))
+        : !closeEnough(suppliedAlignment, alignment) &&
+          !matchesDirectionalGapProvenance)
     ) {
       return null
     }
@@ -464,7 +478,10 @@ function snapshotSupport(
       return null
     }
 
-    const canonicalAlignment = closingSpan ? suppliedAlignment : alignment
+    const canonicalAlignment =
+      closingSpan || matchesDirectionalGapProvenance
+        ? suppliedAlignment
+        : alignment
     result.push(
       Object.freeze({
         kind,
@@ -821,6 +838,10 @@ function snapshotCandidate(
     return null
   }
 
+  const expectedSupport = [
+    ...reverseBackwardSupport(backward),
+    ...shiftedForwardSupport(forward, backward.samples.length - 1),
+  ]
   const support = snapshotSupport(
     ownDataValue(source, 'spanSupport'),
     suppliedSamples,
@@ -830,12 +851,9 @@ function snapshotCandidate(
       backward.samples.length - 1,
       ...(hasClosure ? [assembled.length - 1] : []),
     ]),
+    expectedSupport,
   )
   if (support === null) return null
-  const expectedSupport = [
-    ...reverseBackwardSupport(backward),
-    ...shiftedForwardSupport(forward, backward.samples.length - 1),
-  ]
   const expectedSupportCount = expectedSupport.length + (hasClosure ? 1 : 0)
   if (
     support.spans.length !== expectedSupportCount ||

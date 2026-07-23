@@ -390,6 +390,45 @@ describe('Flowing Contours directional growth', () => {
     expect(sampledX).toContain(5)
   })
 
+  it('passes the actual continuous travel tangent to overlap queries', () => {
+    const sampler = (
+      point: Readonly<Point>,
+      travelTangent: Readonly<Point>,
+    ): number => {
+      if (Math.hypot(point[0] - 6, point[1] - 6) > 1) return 0
+      return Math.abs(travelTangent[0]) >= 0.75 ? 0.8 : 0.2
+    }
+    const horizontal = field(13, 13, (_x, y) => ({
+      evidence: gaussian(y - 6),
+      tangent: [1, 0],
+    }))
+    const vertical = field(13, 13, (x, _y) => ({
+      evidence: gaussian(x - 6),
+      tangent: [0, 1],
+    }))
+    const sameRidge = growFlowingContoursDirection(
+      horizontal,
+      at(horizontal, [2, 6]),
+      [1, 0],
+      'forward',
+      { ...OPTIONS, representedOverlapSampler: sampler },
+      createFlowingContoursTestLimits({ 'search-step-count': 32 })!,
+    )
+    const perpendicular = growFlowingContoursDirection(
+      vertical,
+      at(vertical, [6, 2]),
+      [0, 1],
+      'forward',
+      { ...OPTIONS, representedOverlapSampler: sampler },
+      createFlowingContoursTestLimits({ 'search-step-count': 32 })!,
+    )
+
+    expect(sameRidge.endpointReason).toBe('represented-collision')
+    expect(sameRidge.samples.at(-1)!.point[0]).toBeLessThan(6)
+    expect(perpendicular.endpointReason).toBe('source-boundary')
+    expect(perpendicular.samples.at(-1)!.point[1]).toBeGreaterThan(10)
+  })
+
   it('enforces exact search-step, breadth, and weak-step caps', () => {
     const straight = field(15, 9, (_x, y) => ({
       evidence: gaussian(y - 4),
@@ -684,6 +723,56 @@ describe('Flowing Contours directional growth', () => {
     expect(trace.samples).toHaveLength(8)
     expect(trace.searchStepCount).toBe(7)
     expect(overlapCalls).toBeLessThanOrEqual(1 + trace.searchStepCount * 64)
+  })
+
+  it('stops one supported circulation when it coherently re-enters its own anchor arc', () => {
+    const center = [20, 20] as const
+    const radius = 10
+    const loop = field(41, 41, (x, y) => {
+      const dx = x - center[0]
+      const dy = y - center[1]
+      const radial = Math.hypot(dx, dy)
+      return {
+        evidence: gaussian(radial - radius, 0.7),
+        tangent:
+          radial === 0
+            ? ([1, 0] as const)
+            : ([-dy / radial, dx / radial] as const),
+      }
+    })
+    const trace = growFlowingContoursDirection(
+      loop,
+      at(loop, [30, 20]),
+      [0, 1],
+      'forward',
+      OPTIONS,
+      createFlowingContoursTestLimits({
+        'search-step-count': 240,
+        'raw-trajectory-point-count': 241,
+      })!,
+    )
+
+    expect(trace.endpointReason).toBe('represented-collision')
+    expect(trace.searchStepCount).toBeLessThan(120)
+    expect(trace.samples.length).toBeGreaterThan(60)
+    expect(
+      Math.hypot(
+        trace.samples.at(-1)!.point[0] - trace.samples[0]!.point[0],
+        trace.samples.at(-1)!.point[1] - trace.samples[0]!.point[1],
+      ),
+    ).toBeLessThanOrEqual(1.5)
+    expect(trace.spanSupport[0]!.startSampleIndex).toBe(0)
+    expect(trace.spanSupport.at(-1)!.endSampleIndex).toBe(
+      trace.samples.length - 1,
+    )
+    expect(
+      trace.spanSupport.every(
+        (span, index) =>
+          index === 0 ||
+          span.startSampleIndex ===
+            trace.spanSupport[index - 1]!.endSampleIndex,
+      ),
+    ).toBe(true)
   })
 
   it('penalizes signed zigzag turn changes more than a matched smooth arc', () => {
