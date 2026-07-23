@@ -541,6 +541,7 @@ let fakeFillCaptureScene: DisplayedSceneSnapshot["scene"] | null = null;
 // busy label clears exactly as the real component clears it.
 let lastOnOutlineComputed: (() => void) | null = null;
 let autoFireOutlineComputed = true;
+let lastEnvironment: SketchEnvironment | undefined;
 let lastCompositionFrame: CoordinateSpace | null = null;
 let lastProfile: PlotProfile | null = null;
 let lastPageFrameDraft: PageFrame | null = null;
@@ -558,6 +559,7 @@ let lastOutlineFinalizationStrokePolicy:
 let autoAcknowledgeDisplayedScene = true;
 let acknowledgeDisplayedScene: (() => void) | null = null;
 let generateDuringLiveCanvasRender = false;
+let generateOrdinaryFillCapture = false;
 
 // LiveCanvas is a browser-only sink (canvas2d, ResizeObserver, matchMedia) and
 // is NOT under test here — these are wiring tests for the control state. Replace
@@ -569,6 +571,7 @@ vi.mock("./LiveCanvas", () => ({
     sketch,
     params,
     seed,
+    environment,
     renderState,
     tolerance,
     outlineFinalizationStrokePolicy,
@@ -588,6 +591,7 @@ vi.mock("./LiveCanvas", () => ({
     sketch: Parameters<typeof SketchControls>[0]["sketch"];
     params: Record<string, unknown>;
     seed: Seed;
+    environment?: SketchEnvironment;
     renderState?: {
       kind: string;
       scene?: unknown;
@@ -620,12 +624,22 @@ vi.mock("./LiveCanvas", () => ({
     onFillCaptured?: (capture: unknown) => void;
     onDisplayedSceneCommitted?: (snapshot: DisplayedSceneSnapshot) => void;
   }) => {
+    const generateOrdinaryFill = (): Scene =>
+      environment === undefined
+        ? sketch.generate(params, seed, fakeCurrentT, compositionFrame)
+        : sketch.generate(
+            params,
+            seed,
+            fakeCurrentT,
+            compositionFrame,
+            environment,
+          );
     if (
       generateDuringLiveCanvasRender &&
       renderState?.kind !== "unavailable" &&
       renderState?.scene === undefined
     ) {
-      sketch.generate(params, seed, fakeCurrentT, compositionFrame);
+      generateOrdinaryFill();
     }
     const capturedFrame = (
       retained = fakeDisplayedScene,
@@ -641,7 +655,7 @@ vi.mock("./LiveCanvas", () => ({
       }
       const scene =
         renderState?.scene === undefined
-          ? sketch.generate(params, seed, fakeCurrentT, compositionFrame)
+          ? generateOrdinaryFill()
           : (renderState.scene as Scene);
       return renderState?.scene === undefined
         ? {
@@ -704,6 +718,7 @@ vi.mock("./LiveCanvas", () => ({
         scene,
       });
     };
+    lastEnvironment = environment;
     lastCompositionFrame = compositionFrame;
     lastProfile = profile;
     lastPageFrameEditDraft = pageFrameEditDraft ?? null;
@@ -723,10 +738,10 @@ vi.mock("./LiveCanvas", () => ({
       if (fillCaptureRequest !== null && fillCaptureRequest !== undefined) {
         const sourceScene =
           fakeFillCaptureScene ??
-          (renderState?.scene as Scene | undefined) ?? {
-            space: compositionFrame,
-            primitives: [],
-          };
+          (renderState?.scene as Scene | undefined) ??
+          (generateOrdinaryFillCapture
+            ? generateOrdinaryFill()
+            : { space: compositionFrame, primitives: [] });
         onFillCaptured?.({
           ...fillCaptureRequest,
           scene: sourceScene,
@@ -965,6 +980,7 @@ beforeEach(() => {
   // #228: default to auto-firing the outline "computed" signal so the busy label
   // clears on its own; the label test opts out to observe "Computing…".
   lastOnOutlineComputed = null;
+  lastEnvironment = undefined;
   lastCompositionFrame = null;
   lastProfile = null;
   lastPageFrameDraft = null;
@@ -980,6 +996,7 @@ beforeEach(() => {
   autoAcknowledgeDisplayedScene = true;
   acknowledgeDisplayedScene = null;
   generateDuringLiveCanvasRender = false;
+  generateOrdinaryFillCapture = false;
   autoFireOutlineComputed = true;
   window.localStorage.clear();
   fakeCanvasToBlob = ((cb: BlobCallback) => {
@@ -7968,6 +7985,102 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
       await Promise.resolve();
     });
   }
+
+  it("threads the exact ready environment through ordinary Fill, SVG, and Outline", async () => {
+    const schema = {
+      image: { kind: "image-asset", default: assetA },
+    } satisfies ParamSchema;
+    const generatedScene: Scene = {
+      space: DEFAULT_COMPOSITION_FRAME,
+      primitives: [
+        {
+          points: [
+            [5, 5],
+            [10, 5],
+            [10, 10],
+            [5, 10],
+          ],
+          closed: true,
+          fill: { color: "black" },
+        },
+      ],
+    };
+    const generate = vi.fn(
+      (
+        _params: Params,
+        _seed: Seed,
+        _t: number,
+        _frame: CoordinateSpace,
+        environment?: SketchEnvironment,
+      ): Scene => environment === undefined
+        ? { space: DEFAULT_COMPOSITION_FRAME, primitives: [] }
+        : generatedScene,
+    );
+    const sketch = {
+      ...(sketchWith("ordinary-asset", schema) as unknown as Record<
+        string,
+        unknown
+      >),
+      generate,
+    } as unknown as Parameters<typeof SketchControls>[0]["sketch"];
+    const el = mount(<SketchControls sketch={sketch} />);
+    expect(lastEnvironment).toBeUndefined();
+
+    const environment = resolvedAssetEnvironment(assetA, 144);
+    await act(async () => {
+      sketchEnvironmentJob.starts[0]!.resolve(environment);
+      await Promise.resolve();
+    });
+    expect(lastEnvironment).toBe(environment);
+
+    clickButton(el, "Export SVG");
+    expect(generate).toHaveBeenCalledOnce();
+    expect(generate).toHaveBeenLastCalledWith(
+      { image: assetA },
+      Number(el.querySelector<HTMLInputElement>("#sketch-seed")!.value),
+      0,
+      lastCompositionFrame,
+      environment,
+    );
+    expect(exportSceneCapture.current).toEqual(generatedScene);
+
+    autoFireOutlineComputed = false;
+    generateOrdinaryFillCapture = true;
+    act(() =>
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Toggle outline render mode"]',
+        )!
+        .click(),
+    );
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate).toHaveBeenLastCalledWith(
+      { image: assetA },
+      Number(el.querySelector<HTMLInputElement>("#sketch-seed")!.value),
+      0,
+      lastCompositionFrame,
+      environment,
+    );
+    expect(outlineJob.starts).toBe(1);
+    const identity = outlineJob.lastIdentity;
+    expect(identity?.sourceKind).toBe("legacy-scene");
+    if (identity?.sourceKind !== "legacy-scene") {
+      throw new Error("expected ordinary completed Fill identity");
+    }
+    expect(identity.sourceScene.primitives).toHaveLength(1);
+    expect(identity.sourceScene.primitives.map(({ points }) => points)).toEqual(
+      generatedScene.primitives.map(({ points }) => points),
+    );
+
+    act(() => lastOnOutlineComputed?.());
+    await flush();
+    expect(outlineJob.lastCompletedScene?.primitives).toHaveLength(1);
+    expect(outlineJob.lastCompletedScene).toEqual(
+      outlineScene(generatedScene, 0),
+    );
+    expect(lastRenderScene).toEqual(outlineJob.lastCompletedScene);
+    expect(lastRenderScene?.primitives).toHaveLength(1);
+  });
 
   it("shows capability-based atomic modes, adding Detail only to Detail-capable Photo Scribble", async () => {
     const el = mount(

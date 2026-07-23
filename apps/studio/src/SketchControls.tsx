@@ -1721,6 +1721,7 @@ export function SketchControls({
     }
     const sampledT = retainedFill?.t ?? handle.getCurrentT();
     const t = sketch.time === undefined ? undefined : sampledT;
+    const environment = sketchEnvironmentRef.current.environment;
     // `generate` takes a concrete `t` (static Sketches conventionally get 0 and
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
@@ -1729,7 +1730,16 @@ export function SketchControls({
     const scene =
       pageFrame !== null && sourceScene !== null
         ? frameScene(sourceScene, pageFrame)
-        : sourceScene ?? sketch.generate(params, seed, t ?? 0, compositionFrame);
+        : sourceScene ??
+          (environment === undefined
+            ? sketch.generate(params, seed, t ?? 0, compositionFrame)
+            : sketch.generate(
+                params,
+                seed,
+                t ?? 0,
+                compositionFrame,
+                environment,
+              ));
     // Clip the generated geometry to the canvas rectangle so the exported plot
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
@@ -1997,6 +2007,9 @@ export function SketchControls({
             sketch={sketch}
             params={params}
             seed={seed}
+            {...(environmentReady && sketchEnvironment.environment !== undefined
+              ? { environment: sketchEnvironment.environment }
+              : {})}
             compositionFrame={compositionFrame}
             profile={
               pageFrameEditDraft === null

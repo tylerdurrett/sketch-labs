@@ -5,6 +5,7 @@ import {
   createScribbleMoonStructuralScene,
   defaultParams,
   grassHills,
+  pencilContour,
   photoScribble,
   registry,
   scribbleMoon,
@@ -78,14 +79,23 @@ describe('the default registry', () => {
     },
   )
 
-  it('exports and registers Photo Scribble exactly once as the newest Sketch', () => {
+  it('exports and registers Photo Scribble exactly once', () => {
     expect(photoScribble.id).toBe('photo-scribble')
     expect(photoScribble.name).toBe('Photo Scribble')
     expect(registry.get('photo-scribble')).toBe(photoScribble)
     expect(
       registry.list().filter((sketch) => sketch === photoScribble),
     ).toEqual([photoScribble])
-    expect(registry.list().at(-1)).toBe(photoScribble)
+  })
+
+  it('exports and registers Pencil Contour exactly once as the newest Sketch', () => {
+    expect(pencilContour.id).toBe('pencil-contour')
+    expect(pencilContour.name).toBe('Pencil Contour')
+    expect(registry.get('pencil-contour')).toBe(pencilContour)
+    expect(
+      registry.list().filter((sketch) => sketch === pencilContour),
+    ).toEqual([pencilContour])
+    expect(registry.list().at(-1)).toBe(pencilContour)
   })
 
   it('registers every built-in under a unique id and display name', () => {

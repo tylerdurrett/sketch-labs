@@ -24,6 +24,7 @@ import {
   type Scene,
   type Seed,
   type Sketch,
+  type SketchEnvironment,
   type TimeMetadata,
   type ToneSource,
 } from "@harness/core";
@@ -206,6 +207,8 @@ interface LiveCanvasBaseProps {
   params: Params;
   /** The explicit Seed all of the Sketch's randomness derives from. */
   seed: Seed;
+  /** Exact caller-resolved resources available to asset-backed Sketches. */
+  environment?: SketchEnvironment;
   /** The caller-resolved, aspect-bearing frame used by every composition path. */
   compositionFrame: CoordinateSpace;
   /** Physical sheet and inset proportions used only by the preview chrome. */
@@ -531,6 +534,7 @@ export function LiveCanvas({
   sketch,
   params,
   seed,
+  environment,
   compositionFrame,
   profile,
   inputRevision = 0,
@@ -573,10 +577,11 @@ export function LiveCanvas({
   const servedCaptureTokensRef = useRef(new Set<number>());
 
   // Caller-owned preparation is keyed by the time-invariant determinism inputs
-  // PLUS the Composition Frame. A prepared Sketch can retain immutable layout
-  // derived from `(params, seed, frame)`; an ordinary Sketch receives a zero-state
-  // adapter over its existing `generate`. Changing Sketch, params, seed, or the
-  // Composition Frame invalidates exactly this sampler without touching the single
+  // PLUS the Composition Frame and optional exact resolved environment. A
+  // prepared Sketch can retain immutable layout derived from those inputs; an
+  // ordinary Sketch receives a zero-state adapter over its existing `generate`.
+  // Changing Sketch, params, seed, environment identity, or Composition Frame
+  // invalidates exactly this sampler without touching the single
   // wall-clock `t` — the rAF baseline/`tRef` reads the sampler through
   // `preparedFrameRef`, which the post-commit effect resyncs, so the new layout is
   // sampled at the continuing `t`, not from 0 (ADR-0002/0005). Fixed-area
@@ -621,9 +626,9 @@ export function LiveCanvas({
   const preparedFrame = useMemo(
     () =>
       renderState.kind === "fill-live"
-        ? prepareSketch(sketch, params, seed, compositionFrame)
+        ? prepareSketch(sketch, params, seed, compositionFrame, environment)
         : null,
-    [sketch, params, seed, compositionAspect, renderState.kind],
+    [sketch, params, seed, environment, compositionAspect, renderState.kind],
   );
 
   // The paper's CSS-box aspect (#155): ordinary committed Fill and fixed-page
@@ -1517,6 +1522,7 @@ export function LiveCanvas({
     compositionAspect,
     compositionWidth,
     compositionHeight,
+    preparedFrame,
     renderState.kind,
     suppliedScene,
     suppliedT,
