@@ -372,6 +372,117 @@ describe('Watercolor Forms hierarchy selection and shared boundaries', () => {
     ).toEqual([2, 2, 3])
   })
 
+  it('preserves one descendant for each qualifying coarse anchor', () => {
+    const regionBySample = Array.from(
+      { length: 32 },
+      (_, sampleId) => Math.floor(sampleId / 8),
+    )
+    const firstPair = summary(4, 16)
+    const secondPair = summary(5, 16)
+    const root = summary(6, 32)
+    const source = hierarchy({
+      width: 32,
+      height: 1,
+      regionBySample,
+      regions: [
+        summary(0, 8),
+        summary(1, 8),
+        summary(2, 8),
+        summary(3, 8),
+      ],
+      segments: [
+        segment(7, [0, 1], [8, 0], [8, 1], 0.4),
+        segment(15, [1, 2], [16, 0], [16, 1], 0.4),
+        segment(23, [2, 3], [24, 0], [24, 1], 0.4),
+      ],
+      merges: [
+        merge(0, 1, firstPair, 0.8),
+        merge(2, 3, secondPair, 0.8),
+        merge(4, 5, root, 0.9),
+      ],
+    })
+
+    const coarse = selectWatercolorForms(source, 0.19)
+    const justFiner = selectWatercolorForms(source, 0.21)
+    const finer = selectWatercolorForms(source, 0.5)
+
+    expect(coarse.regionIds).toEqual([4, 5])
+    expect(justFiner.regionIds).toEqual([0, 2])
+    expect(finer.regionIds).toEqual([0, 1, 2, 3])
+    expect([
+      new Set(coarse.regionBySample).size,
+      new Set(justFiner.regionBySample).size,
+      new Set(finer.regionBySample).size,
+    ]).toEqual([2, 2, 4])
+    expect(
+      [coarse, justFiner, finer].every(
+        (selection) =>
+          selection.regionBySample.every(
+            (regionId) => regionId !== TRANSPARENT,
+          ),
+      ),
+    ).toBe(true)
+  })
+
+  it('suppresses an isolated one-pixel alpha component at low detail', () => {
+    const source = hierarchy({
+      width: 3,
+      height: 3,
+      regionBySample: [
+        TRANSPARENT,
+        TRANSPARENT,
+        TRANSPARENT,
+        TRANSPARENT,
+        0,
+        TRANSPARENT,
+        TRANSPARENT,
+        TRANSPARENT,
+        TRANSPARENT,
+      ],
+      regions: [summary(0, 1)],
+      segments: [
+        segment(
+          1,
+          [TRANSPARENT, 0],
+          [1, 1],
+          [2, 1],
+          1,
+          'alpha-boundary',
+        ),
+        segment(
+          2,
+          [TRANSPARENT, 0],
+          [1, 1],
+          [1, 2],
+          1,
+          'alpha-boundary',
+        ),
+        segment(
+          4,
+          [TRANSPARENT, 0],
+          [2, 1],
+          [2, 2],
+          1,
+          'alpha-boundary',
+        ),
+        segment(
+          5,
+          [TRANSPARENT, 0],
+          [1, 2],
+          [2, 2],
+          1,
+          'alpha-boundary',
+        ),
+      ],
+    })
+
+    const selected = selectWatercolorForms(source, 0)
+
+    expect(selected.regionIds).toEqual([])
+    expect(selected.regionBySample).toEqual(new Array(9).fill(TRANSPARENT))
+    expect(extract(selected, 0).sharedBoundarySegments).toEqual([])
+  })
+
   it('path-compresses leaf ownership in a large comb hierarchy', () => {
     const leafCount = 8_192
     const leaves = Array.from({ length: leafCount }, (_, id) => summary(id, 1))

@@ -3,8 +3,10 @@
  *
  * Form detail moves a monotonic cut through the hierarchy: higher values apply
  * a shorter merge prefix. A decreasing area and persistence floor then admits
- * progressively smaller or shorter-lived forms. Rejected forms are contracted
- * into an adjacent survivor before any boundary inventory can be constructed.
+ * progressively smaller or shorter-lived forms. Qualifying coarse nodes retain
+ * descendant coverage as the cut refines. Rejected forms are contracted into
+ * an admitted neighbor, while never-admitted components disappear before any
+ * boundary inventory can be constructed.
  */
 
 import type {
@@ -232,8 +234,10 @@ function connectedComponents(
     unseen.delete(start)
     const component: number[] = []
     const pending = [start]
-    while (pending.length > 0) {
-      const regionId = pending.shift()!
+    let pendingIndex = 0
+    while (pendingIndex < pending.length) {
+      const regionId = pending[pendingIndex]!
+      pendingIndex += 1
       component.push(regionId)
       const neighbors = [...selectedForms.get(regionId)!.neighbors.keys()].sort(
         (first, second) => first - second,
@@ -259,17 +263,44 @@ function compareFormSignificance(
   )
 }
 
-function ensureComponentSurvivors(
+function preserveQualifiedAncestorCoverage(
+  hierarchy: Readonly<RegionHierarchy>,
   selectedForms: ReadonlyMap<number, MutableSelectedForm>,
+  qualifies: (regionId: number) => boolean,
 ): void {
-  for (const component of connectedComponents(selectedForms)) {
-    if (component.some((regionId) => selectedForms.get(regionId)!.retained)) {
-      continue
+  const bestSelectedDescendant = new Map<number, MutableSelectedForm>()
+  const hasRetainedDescendant = new Map<number, boolean>()
+  for (const form of selectedForms.values()) {
+    bestSelectedDescendant.set(form.id, form)
+    hasRetainedDescendant.set(form.id, form.retained)
+  }
+
+  for (const merge of hierarchy.merges) {
+    const regionId = merge.mergedRegion.id
+    const selected = selectedForms.get(regionId)
+    const firstBest = bestSelectedDescendant.get(merge.leftRegionId)
+    const secondBest = bestSelectedDescendant.get(merge.rightRegionId)
+    const best =
+      selected ??
+      (firstBest === undefined
+        ? secondBest
+        : secondBest === undefined
+          ? firstBest
+          : compareFormSignificance(firstBest, secondBest) <= 0
+            ? firstBest
+            : secondBest)
+    if (best === undefined) continue
+
+    let retained =
+      selected?.retained === true ||
+      hasRetainedDescendant.get(merge.leftRegionId) === true ||
+      hasRetainedDescendant.get(merge.rightRegionId) === true
+    if (!retained && qualifies(regionId)) {
+      best.retained = true
+      retained = true
     }
-    const fallback = component
-      .map((regionId) => selectedForms.get(regionId)!)
-      .sort(compareFormSignificance)[0]!
-    fallback.retained = true
+    bestSelectedDescendant.set(regionId, best)
+    hasRetainedDescendant.set(regionId, retained)
   }
 }
 
@@ -407,11 +438,18 @@ class FormHeap {
 function contractRejectedForms(
   selectedForms: ReadonlyMap<number, MutableSelectedForm>,
 ): ReadonlyMap<number, number> {
-  ensureComponentSurvivors(selectedForms)
   const absorbedInto = new Map<number, number>()
+  for (const component of connectedComponents(selectedForms)) {
+    if (component.some((regionId) => selectedForms.get(regionId)!.retained)) {
+      continue
+    }
+    for (const regionId of component) {
+      absorbedInto.set(regionId, TRANSPARENT_SUPPORT_REGION_ID)
+    }
+  }
   const rejected = new Set(
     [...selectedForms.values()]
-      .filter((form) => !form.retained)
+      .filter((form) => !form.retained && !absorbedInto.has(form.id))
       .map((form) => form.id),
   )
   const queued = new Set<number>()
@@ -428,16 +466,11 @@ function contractRejectedForms(
   while (rejected.size > 0) {
     const form = candidates.pop()
     if (form === undefined) {
-      // Defensive fallback for malformed disconnected adjacency.
-      const promoted = [...rejected]
-        .map((regionId) => selectedForms.get(regionId)!)
-        .sort(compareFormSignificance)[0]!
-      promoted.retained = true
-      rejected.delete(promoted.id)
-      for (const neighborId of promoted.neighbors.keys()) {
-        enqueueIfReady(neighborId)
+      // Malformed residual topology fails closed instead of inventing a form.
+      for (const regionId of rejected) {
+        absorbedInto.set(regionId, TRANSPARENT_SUPPORT_REGION_ID)
       }
-      continue
+      break
     }
     queued.delete(form.id)
     if (!rejected.has(form.id)) continue
@@ -507,6 +540,14 @@ export function selectWatercolorForms(
     detailRemainder *
     MAX_MINIMUM_FORM_PERSISTENCE
   const selectedForms = new Map<number, MutableSelectedForm>()
+  const qualifies = (regionId: number): boolean => {
+    const summary = summaries.get(regionId)
+    return (
+      summary !== undefined &&
+      summary.sampleCount >= minimumArea &&
+      (persistences.get(regionId) ?? 0) >= minimumPersistence
+    )
+  }
   for (const regionId of selectedRegionIds) {
     const summary = summaries.get(regionId)
     if (summary === undefined) continue
@@ -515,14 +556,17 @@ export function selectWatercolorForms(
       id: regionId,
       sampleCount: summary.sampleCount,
       persistence,
-      retained:
-        summary.sampleCount >= minimumArea &&
-        persistence >= minimumPersistence,
+      retained: qualifies(regionId),
       neighbors: new Map(),
     })
   }
 
   buildSelectedAdjacency(hierarchy, regionByInitialRegion, selectedForms)
+  preserveQualifiedAncestorCoverage(
+    hierarchy,
+    selectedForms,
+    qualifies,
+  )
   const absorbedInto = contractRejectedForms(selectedForms)
   const regionBySample = hierarchy.partition.regionBySample.map(
     (initialRegionId) => {
