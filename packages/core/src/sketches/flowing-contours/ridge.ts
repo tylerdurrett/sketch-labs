@@ -30,6 +30,8 @@ const HARD_MAXIMUM_OWNERSHIP_RADIUS = 0.49
 const SUPPORT_TRAVERSAL_SPACING = 0.25
 const MAXIMUM_SUPPORT_TRAVERSAL_SAMPLE_COUNT = 64
 
+type SegmentSupport = 'supported' | 'alpha-boundary' | 'ambiguity'
+
 const DEFAULT_OPTIONS = Object.freeze({
   stepLength: 0.75,
   minimumEvidence: 0.04,
@@ -208,15 +210,15 @@ function isInsideField(
  * horizontal lattice crossings catch a one-sample transparent column or row
  * even when the uniform partition would otherwise step over its zero.
  */
-function hasPositiveSupportAlongSegment(
+function classifySupportAlongSegment(
   field: Readonly<FlowingContoursField>,
   start: Readonly<Point>,
   end: Readonly<Point>,
-): boolean {
+): SegmentSupport {
   const dx = end[0] - start[0]
   const dy = end[1] - start[1]
   const distance = Math.hypot(dx, dy)
-  if (!Number.isFinite(distance)) return false
+  if (!Number.isFinite(distance)) return 'alpha-boundary'
 
   const parameters = [0, 1]
   const intervalCount = Math.max(
@@ -240,7 +242,9 @@ function hasPositiveSupportAlongSegment(
       parameters.push((y - start[1]) / dy)
     }
   }
-  if (parameters.length > MAXIMUM_SUPPORT_TRAVERSAL_SAMPLE_COUNT) return false
+  if (parameters.length > MAXIMUM_SUPPORT_TRAVERSAL_SAMPLE_COUNT) {
+    return 'alpha-boundary'
+  }
 
   parameters.sort((left, right) => left - right)
   let previous = Number.NEGATIVE_INFINITY
@@ -258,9 +262,11 @@ function hasPositiveSupportAlongSegment(
       start[0] + dx * parameter,
       start[1] + dy * parameter,
     )
-    if (sampleFlowingContoursField(field, point) === null) return false
+    const sample = sampleFlowingContoursField(field, point)
+    if (sample === null) return 'alpha-boundary'
+    if (!hasResolvedOrientation(sample)) return 'ambiguity'
   }
-  return true
+  return 'supported'
 }
 
 function boundedOddNormalSampleCount(
@@ -318,6 +324,8 @@ function hasResolvedOrientation(
   return (
     Number.isFinite(sample.coherence) &&
     sample.coherence > ORIENTATION_COHERENCE_EPSILON &&
+    Number.isFinite(sample.ambiguity) &&
+    sample.ambiguity < 1 - ORIENTATION_COHERENCE_EPSILON &&
     finiteUnitVector(sample.tangent) !== null
   )
 }
@@ -454,7 +462,8 @@ export function stepFlowingContoursRidge(
 ): FlowingRidgeStepResult {
   let fallbackPoint = ZERO_POINT
   try {
-    const currentPoint = frozenPoint(current.point[0], current.point[1])
+    const suppliedPoint = current.point
+    const currentPoint = frozenPoint(suppliedPoint[0], suppliedPoint[1])
     if (Number.isFinite(currentPoint[0]) && Number.isFinite(currentPoint[1])) {
       fallbackPoint = currentPoint
     }
@@ -512,8 +521,13 @@ export function stepFlowingContoursRidge(
     if (predictedSample === null) {
       return stop('alpha-boundary', predictedPoint, 0)
     }
-    if (!hasPositiveSupportAlongSegment(field, currentPoint, predictedPoint)) {
-      return stop('alpha-boundary', predictedPoint, 0)
+    const predictorSupport = classifySupportAlongSegment(
+      field,
+      currentPoint,
+      predictedPoint,
+    )
+    if (predictorSupport !== 'supported') {
+      return stop(predictorSupport, predictedPoint, 0)
     }
     if (!hasResolvedOrientation(predictedSample)) {
       return stop('ambiguity', predictedPoint, 0)
@@ -608,10 +622,13 @@ export function stepFlowingContoursRidge(
       predictedPoint[0] + normal[0] * correctedOffset,
       predictedPoint[1] + normal[1] * correctedOffset,
     )
-    if (
-      !hasPositiveSupportAlongSegment(field, predictedPoint, correctedPoint)
-    ) {
-      return stop('alpha-boundary', predictedPoint, sampleCount)
+    const correctionSupport = classifySupportAlongSegment(
+      field,
+      predictedPoint,
+      correctedPoint,
+    )
+    if (correctionSupport !== 'supported') {
+      return stop(correctionSupport, predictedPoint, sampleCount)
     }
     const corrected = sampleFlowingContoursField(field, correctedPoint)
     if (corrected === null) {

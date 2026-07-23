@@ -213,9 +213,10 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
   })
 
   it('classifies an excessive tangent turn as curvature', () => {
+    const sharpTurn = (70 * Math.PI) / 180
     const corner = field(12, 11, (x, y) => ({
       evidence: gaussian(y - 5),
-      tangent: x < 5 ? [1, 0] : [0, 1],
+      tangent: x < 5 ? [1, 0] : [Math.cos(sharpTurn), Math.sin(sharpTurn)],
     }))
 
     expect(
@@ -344,6 +345,24 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
         { stepLength: 2 },
       ).kind,
     ).toBe('alpha-boundary')
+  })
+
+  it('classifies a hard-unresolved orientation crossed between valid endpoints', () => {
+    const unresolvedColumn = field(10, 7, (x, y) => ({
+      evidence: gaussian(y - 3),
+      tangent: [1, 0],
+      coherence: x === 5 ? 0 : 1,
+      ambiguity: x === 5 ? 1 : 0,
+    }))
+
+    expect(
+      stepFlowingContoursRidge(
+        unresolvedColumn,
+        at(unresolvedColumn, [4, 3]),
+        [1, 0],
+        { stepLength: 2 },
+      ).kind,
+    ).toBe('ambiguity')
   })
 
   it('returns weak for an off-ridge prediction with no compatible maximum', () => {
@@ -551,5 +570,37 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
 
     expect(result.kind).toBe('safety-limit')
     expect(result.predictedPoint).toEqual([0, 0])
+  })
+
+  it('snapshots one current-point value instead of synthesizing coordinates', () => {
+    const straight = field(9, 9, (_x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+    const current = at(straight, [3, 4])
+    let pointReads = 0
+    const alternating = new Proxy(
+      { ...current },
+      {
+        get(target, property, receiver) {
+          if (property === 'point') {
+            pointReads += 1
+            return pointReads % 2 === 1 ? [3, 4] : [3, 100]
+          }
+          return Reflect.get(target, property, receiver)
+        },
+      },
+    )
+
+    const result = stepFlowingContoursRidge(
+      straight,
+      alternating,
+      [1, 0],
+      ONE_PIXEL_STEP,
+    )
+
+    expect(pointReads).toBe(1)
+    expect(result.kind).toBe('corrected')
+    expect(result.predictedPoint).toEqual([4, 4])
   })
 })
