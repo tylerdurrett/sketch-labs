@@ -1,7 +1,7 @@
 {
   "formatVersion": 1,
   "fixtureStatus": "provisional",
-  "preparedFromCommit": "b2624401209581d26ebee20a4896fce822ea4fc4",
+  "preparedFromCommit": "4d6f085706350fbf03a1da6f7c00721896c72fb4",
   "preparationVersion": "watercolor-forms-prepared-raster-v1",
   "source": {
     "assetId": "img-0672-79d639daec62",
@@ -21,7 +21,7 @@
     "formDetail": 0.5,
     "colorSensitivity": 0.5,
     "boundaryStrength": 0.5,
-    "boundarySmoothing": 0.5
+    "boundarySmoothing": 1
   },
   "analysis": {
     "width": 192,
