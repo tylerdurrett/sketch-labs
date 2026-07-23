@@ -15,6 +15,14 @@ Pencil Contour flower fixture remains its reviewed source of truth. The
 Watercolor Forms fixtures are provisional inputs for later evidence and tuning,
 not visual-quality gates or an attestation.
 
+The same CLI also captures Watercolor Forms comparison evidence. It renders the
+actual production Pencil and Watercolor `Scene`s through the production Canvas
+renderer, at the same scale in full-frame and dense-detail comparisons. The
+manifest recomputes the current reference-gate metrics and pins source, fixture,
+production-content, geometry, cap-diagnostic, crop, and PNG hashes. Generated
+evidence is not a review verdict, and the script never creates or changes a
+`review-attestation.json`.
+
 From the repository root, install the workspace and the browser tool owned by
 the checked-in Chrome DevTools skill:
 
@@ -60,6 +68,29 @@ production decoder and preparation functions without rewriting provenance:
 node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
   --scope fixtures
 ```
+
+Capture the comparison evidence only after the tuning and fixture commits have
+been finalized. Both arguments must be lowercase full SHAs; the script verifies
+their ancestry, checks that Watercolor/Pencil production and fixture inputs are
+clean and byte-identical to the pinned commits, and refuses drift:
+
+```sh
+node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
+  --scope evidence \
+  --write \
+  --tuning-commit 4375a50acc29737b7719b2edcb6e6fbeee78c022 \
+  --fixture-commit 871311f7c6caefbadb08f4853fc9f904cdff4eb4
+```
+
+Recompute the complete evidence bundle, including PNG bytes, without writing:
+
+```sh
+node apps/studio/scripts/capture-watercolor-forms-reference.mjs \
+  --scope evidence
+```
+
+With no arguments, verify fixtures and, once a committed evidence manifest is
+present, evidence as well.
 
 ## Optional weak-component replay
 
