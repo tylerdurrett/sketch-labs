@@ -225,6 +225,49 @@ function turnEnergy(points: readonly Readonly<Point>[]): number {
   return result
 }
 
+function maximumTurn(points: readonly Readonly<Point>[]): number {
+  const spaced = resample(points)
+  let result = 0
+  for (let index = 1; index < spaced.length - 1; index += 1) {
+    const previous = spaced[index - 1]!
+    const point = spaced[index]!
+    const next = spaced[index + 1]!
+    const first = Math.atan2(
+      point[1] - previous[1],
+      point[0] - previous[0],
+    )
+    const second = Math.atan2(
+      next[1] - point[1],
+      next[0] - point[0],
+    )
+    result = Math.max(
+      result,
+      Math.abs(
+        Math.atan2(
+          Math.sin(second - first),
+          Math.cos(second - first),
+        ),
+      ),
+    )
+  }
+  return result
+}
+
+function coherentRandomPoints(seedValue: number): readonly Readonly<Point>[] {
+  let seed = seedValue
+  const random = () =>
+    ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32)
+  const points: Readonly<Point>[] = [[3, 20]]
+  for (let index = 0; index < 20; index += 1) {
+    const previous = points.at(-1)!
+    points.push([
+      previous[0] + 0.75,
+      previous[1] + (random() * 2 - 1) * 0.5,
+    ])
+  }
+  return points
+}
+
 function fittedPoints(
   source: Readonly<FlowingContoursField>,
   raw: Readonly<AcceptedFlowingTrajectory>,
@@ -255,7 +298,10 @@ describe('Flowing Contours evidence-preserving curve fitting', () => {
     ] as const
     const fitted = fittedPoints(source, trajectory(source, points), 1)
 
-    expect(fitted.length).toBeLessThan(points.length)
+    expect(fitted.length).toBeLessThanOrEqual(points.length)
+    expect(turnEnergy(fitted)).toBeLessThanOrEqual(
+      turnEnergy(points) + 1e-10,
+    )
     expect(turnEnergy(fitted)).toBeLessThan(turnEnergy(points) * 0.35)
     expect(fitted[0]).toEqual(points[0])
     expect(fitted.at(-1)).toEqual(points.at(-1))
@@ -273,7 +319,7 @@ describe('Flowing Contours evidence-preserving curve fitting', () => {
     expect(turnEnergy(fitted)).toBeCloseTo(0)
   })
 
-  it('rounds a sampled arc but refuses the unsupported endpoint chord', () => {
+  it('preserves sampled arc flow and refuses the unsupported endpoint chord', () => {
     const center = [10, 10] as const
     const points = Array.from({ length: 13 }, (_value, index) => {
       const angle = Math.PI + (index * Math.PI) / 24
@@ -292,7 +338,10 @@ describe('Flowing Contours evidence-preserving curve fitting', () => {
     const fitted = fittedPoints(source, trajectory(source, points), 1)
 
     expect(fitted.length).toBeGreaterThan(2)
-    expect(fitted.length).toBeLessThan(points.length)
+    expect(fitted.length).toBeLessThanOrEqual(points.length)
+    expect(turnEnergy(fitted)).toBeLessThanOrEqual(
+      turnEnergy(points) + 1e-10,
+    )
     expect(fitted[0]).toEqual(points[0])
     expect(fitted.at(-1)).toEqual(points.at(-1))
   })
@@ -395,6 +444,54 @@ describe('Flowing Contours evidence-preserving curve fitting', () => {
       expect(turnEnergy(outputs[index]!)).toBeLessThanOrEqual(
         turnEnergy(outputs[index - 1]!) + 1e-8,
       )
+    }
+  })
+
+  it('does not regress whole-output turns at the exact production-scale seed', () => {
+    const source = field(24, 40, () => ({
+      tangent: [1, 0],
+      scale: 4,
+    }))
+    const raw = trajectory(source, coherentRandomPoints(1234567))
+    const lower = fittedPoints(source, raw, 0.9)
+    const stronger = fittedPoints(source, raw, 1)
+
+    expect(turnEnergy(stronger)).toBeLessThanOrEqual(
+      turnEnergy(lower) + 1e-10,
+    )
+    expect(maximumTurn(stronger)).toBeLessThanOrEqual(
+      maximumTurn(lower) + 1e-10,
+    )
+    expect(stronger.length).toBeLessThanOrEqual(lower.length)
+  })
+
+  it('keeps energy and abrupt turns monotonic across a bounded coherent family', () => {
+    const source = field(24, 40, () => ({
+      tangent: [1, 0],
+      scale: 4,
+    }))
+    const smoothings = [0.7, 0.8, 0.9, 1] as const
+    for (let seed = 1; seed <= 24; seed += 1) {
+      const raw = trajectory(
+        source,
+        coherentRandomPoints(seed * 7919),
+        undefined,
+        seed,
+      )
+      const outputs = smoothings.map((smoothing) =>
+        fittedPoints(source, raw, smoothing),
+      )
+      for (let index = 1; index < outputs.length; index += 1) {
+        expect(turnEnergy(outputs[index]!)).toBeLessThanOrEqual(
+          turnEnergy(outputs[index - 1]!) + 1e-10,
+        )
+        expect(maximumTurn(outputs[index]!)).toBeLessThanOrEqual(
+          maximumTurn(outputs[index - 1]!) + 1e-10,
+        )
+        expect(outputs[index]!.length).toBeLessThanOrEqual(
+          outputs[index - 1]!.length,
+        )
+      }
     }
   })
 

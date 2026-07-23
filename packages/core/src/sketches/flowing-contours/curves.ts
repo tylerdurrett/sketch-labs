@@ -2,11 +2,12 @@
  * Bounded, evidence-preserving fitting for accepted Flowing Contours paths.
  *
  * Fitting is deliberately approximating rather than interpolating. A nested
- * shortcut hierarchy removes small lattice-scale turns, then a fixed number
- * of conservative Laplacian passes rounds the surviving polyline. Every
- * shortcut and every point move is proved against the accepted trajectory's
- * FC13a evidence tube before it can become current geometry. The final curve
- * is validated again as one monotonic, endpoint-exact whole.
+ * shortcut hierarchy removes small lattice-scale turns, then conservative
+ * Laplacian passes round the surviving polyline. Every stronger authored
+ * level must enter a fixed-spacing whole-curve envelope: neither total turn
+ * energy nor the sharpest turn may increase. Every shortcut and point move is
+ * also proved against the accepted trajectory's FC13a evidence tube. The
+ * final curve is validated again as one monotonic, endpoint-exact whole.
  */
 
 import type { Point } from '../../types'
@@ -32,11 +33,24 @@ const MAX_SIMPLIFICATION_ATTEMPTS_PER_SOURCE_POINT = 12
 const MAX_SIMPLIFICATION_DEVIATION_FRACTION = 0.9
 const GEOMETRY_EPSILON = 1e-12
 const ROUGHNESS_TOLERANCE = 1e-12
+const REGULARIZATION_LEVEL_COUNT = 100
+const REGULARIZATION_SAMPLE_SPACING = 0.25
+const REGULARIZATION_SAMPLES_PER_SOURCE_POINT = 17
+const REGULARIZATION_COMPARISON_TOLERANCE = 1e-10
 
-/** Explicit, source-size-linear ceiling for local fitting proposals. */
+/**
+ * Explicit source-size-linear ceiling for fitting and whole-output gates.
+ *
+ * The 100 levels match the authored control's 0.01 step. Each candidate is
+ * resampled at fixed 0.25-lattice spacing before it can enter the monotonic
+ * regularization envelope.
+ */
 export const FLOWING_CONTOURS_CURVE_MAX_WORK_PER_SOURCE_POINT =
   MAX_SIMPLIFICATION_ATTEMPTS_PER_SOURCE_POINT +
-  MAX_FAIRING_PASSES * (FAIRING_BACKOFF_ATTEMPTS + 2)
+  REGULARIZATION_LEVEL_COUNT *
+    (MAX_FAIRING_PASSES * (FAIRING_BACKOFF_ATTEMPTS + 2) +
+      REGULARIZATION_SAMPLES_PER_SOURCE_POINT +
+      2)
 
 export interface FlowingContoursCurveFittingOptions {
   /** A complete lower-only policy, normally the production limits. */
@@ -113,6 +127,17 @@ interface FittingPolicy {
   readonly fittedPointLimit: number
   readonly currentFittedPointCount: number
   readonly maximumValidationSamples: number
+}
+
+interface SimplificationHierarchy {
+  readonly removalThresholds: readonly number[]
+  readonly workCount: number
+}
+
+interface FlowingContoursRegularizationMeasure {
+  readonly turnEnergy: number
+  readonly maximumTurn: number
+  readonly sampleCount: number
 }
 
 function frozenPoint(point: Readonly<Point>): Readonly<Point> {
@@ -326,18 +351,14 @@ function candidateFor(
     : null
 }
 
-function simplificationSurvivors(
+function buildSimplificationHierarchy(
   field: Readonly<FlowingContoursField>,
   tube: NonNullable<
     ReturnType<typeof createFlowingContoursEvidenceTube>
   >,
   source: readonly Readonly<Point>[],
-  flowSmoothing: number,
   maximumValidationSamples: number,
-): {
-  readonly points: readonly MutableCurvePoint[]
-  readonly workCount: number
-} | null {
+): Readonly<SimplificationHierarchy> | null {
   const nodes = source.map(
     (_point, sourceSampleIndex): SimplificationNode => ({
       sourceSampleIndex,
@@ -440,18 +461,27 @@ function simplificationSurvivors(
     }
   }
 
+  return Object.freeze({
+    removalThresholds: Object.freeze(removalThresholds),
+    workCount,
+  })
+}
+
+function hierarchyPoints(
+  source: readonly Readonly<Point>[],
+  hierarchy: Readonly<SimplificationHierarchy>,
+  smoothing: number,
+): readonly MutableCurvePoint[] {
   const points: MutableCurvePoint[] = []
   for (let index = 0; index < source.length; index += 1) {
-    if (removalThresholds[index]! > flowSmoothing) {
+    if (hierarchy.removalThresholds[index]! > smoothing) {
       points.push({
         point: frozenPoint(source[index]!),
         sourceSampleIndex: index,
       })
     }
   }
-  return points.length >= 2
-    ? { points: Object.freeze(points), workCount }
-    : null
+  return Object.freeze(points)
 }
 
 function localRoughness(
@@ -471,7 +501,7 @@ function fairCurve(
     ReturnType<typeof createFlowingContoursEvidenceTube>
   >,
   source: readonly MutableCurvePoint[],
-  flowSmoothing: number,
+  passCount: number,
   maximumValidationSamples: number,
 ): {
   readonly points: readonly MutableCurvePoint[]
@@ -482,11 +512,6 @@ function fairCurve(
     sourceSampleIndex: entry.sourceSampleIndex,
   }))
   let workCount = 0
-  const passCount = Math.min(
-    MAX_FAIRING_PASSES,
-    Math.floor(flowSmoothing * MAX_FAIRING_PASSES + GEOMETRY_EPSILON),
-  )
-
   for (let pass = 0; pass < passCount; pass += 1) {
     for (let index = 1; index < current.length - 1; index += 1) {
       const previous = current[index - 1]!
@@ -581,6 +606,236 @@ function fairCurve(
   return { points: Object.freeze(current), workCount }
 }
 
+function measureRegularization(
+  points: readonly Readonly<Point>[],
+  sourcePointCount: number,
+): Readonly<FlowingContoursRegularizationMeasure> | null {
+  if (
+    points.length < 2 ||
+    !Number.isSafeInteger(sourcePointCount) ||
+    sourcePointCount < 2
+  ) {
+    return null
+  }
+  const cumulative = new Array<number>(points.length)
+  cumulative[0] = 0
+  for (let index = 1; index < points.length; index += 1) {
+    const segmentLength = Math.hypot(
+      points[index]![0] - points[index - 1]![0],
+      points[index]![1] - points[index - 1]![1],
+    )
+    if (
+      !Number.isFinite(segmentLength) ||
+      segmentLength <= GEOMETRY_EPSILON
+    ) {
+      return null
+    }
+    cumulative[index] = cumulative[index - 1]! + segmentLength
+  }
+  const totalLength = cumulative.at(-1)!
+  const intervalCount = Math.floor(
+    totalLength / REGULARIZATION_SAMPLE_SPACING,
+  )
+  const includeEndpoint =
+    totalLength -
+      intervalCount * REGULARIZATION_SAMPLE_SPACING >=
+    GEOMETRY_EPSILON
+  const sampleCount =
+    intervalCount + 1 + (includeEndpoint ? 1 : 0)
+  if (
+    !Number.isSafeInteger(sampleCount) ||
+    sampleCount < 2 ||
+    sampleCount >
+      sourcePointCount * REGULARIZATION_SAMPLES_PER_SOURCE_POINT
+  ) {
+    return null
+  }
+
+  const samples: Readonly<Point>[] = []
+  let segmentIndex = 0
+  for (let index = 0; index <= intervalCount; index += 1) {
+    const distance = Math.min(
+      totalLength,
+      index * REGULARIZATION_SAMPLE_SPACING,
+    )
+    while (
+      segmentIndex + 1 < cumulative.length - 1 &&
+      cumulative[segmentIndex + 1]! < distance
+    ) {
+      segmentIndex += 1
+    }
+    const startDistance = cumulative[segmentIndex]!
+    const endDistance = cumulative[segmentIndex + 1]!
+    const amount =
+      endDistance - startDistance <= GEOMETRY_EPSILON
+        ? 0
+        : (distance - startDistance) /
+          (endDistance - startDistance)
+    const start = points[segmentIndex]!
+    const end = points[segmentIndex + 1]!
+    samples.push(
+      frozenPoint([
+        start[0] + (end[0] - start[0]) * amount,
+        start[1] + (end[1] - start[1]) * amount,
+      ]),
+    )
+  }
+  if (includeEndpoint) samples.push(frozenPoint(points.at(-1)!))
+
+  let turnEnergy = 0
+  let maximumTurn = 0
+  for (let index = 1; index < samples.length - 1; index += 1) {
+    const previous = samples[index - 1]!
+    const point = samples[index]!
+    const next = samples[index + 1]!
+    const firstHeading = Math.atan2(
+      point[1] - previous[1],
+      point[0] - previous[0],
+    )
+    const secondHeading = Math.atan2(
+      next[1] - point[1],
+      next[0] - point[0],
+    )
+    const turn = Math.abs(
+      Math.atan2(
+        Math.sin(secondHeading - firstHeading),
+        Math.cos(secondHeading - firstHeading),
+      ),
+    )
+    turnEnergy += turn * turn
+    maximumTurn = Math.max(maximumTurn, turn)
+  }
+  return Number.isFinite(turnEnergy) && Number.isFinite(maximumTurn)
+    ? Object.freeze({ turnEnergy, maximumTurn, sampleCount })
+    : null
+}
+
+function nonWorseRegularization(
+  candidate: Readonly<FlowingContoursRegularizationMeasure>,
+  baseline: Readonly<FlowingContoursRegularizationMeasure>,
+): boolean {
+  return (
+    candidate.turnEnergy <=
+      baseline.turnEnergy + REGULARIZATION_COMPARISON_TOLERANCE &&
+    candidate.maximumTurn <=
+      baseline.maximumTurn + REGULARIZATION_COMPARISON_TOLERANCE
+  )
+}
+
+function regularizationLevel(smoothing: number): number {
+  return Math.max(
+    0,
+    Math.min(
+      REGULARIZATION_LEVEL_COUNT,
+      Math.floor(
+        smoothing * REGULARIZATION_LEVEL_COUNT +
+          GEOMETRY_EPSILON,
+      ),
+    ),
+  )
+}
+
+function hierarchyEventLevels(
+  hierarchy: Readonly<SimplificationHierarchy>,
+  maximumLevel: number,
+): readonly number[] {
+  const levels = new Set<number>()
+  for (const threshold of hierarchy.removalThresholds) {
+    if (!Number.isFinite(threshold)) continue
+    const level = Math.max(
+      1,
+      Math.min(
+        REGULARIZATION_LEVEL_COUNT,
+        Math.ceil(
+          threshold * REGULARIZATION_LEVEL_COUNT -
+            GEOMETRY_EPSILON,
+        ),
+      ),
+    )
+    if (level <= maximumLevel) levels.add(level)
+  }
+  for (
+    let pass = 1;
+    pass <= MAX_FAIRING_PASSES;
+    pass += 1
+  ) {
+    const level =
+      (pass * REGULARIZATION_LEVEL_COUNT) /
+      MAX_FAIRING_PASSES
+    if (level <= maximumLevel) levels.add(level)
+  }
+  return Object.freeze([...levels].sort((first, second) => first - second))
+}
+
+function regularizeCurve(
+  field: Readonly<FlowingContoursField>,
+  tube: NonNullable<
+    ReturnType<typeof createFlowingContoursEvidenceTube>
+  >,
+  source: readonly Readonly<Point>[],
+  hierarchy: Readonly<SimplificationHierarchy>,
+  flowSmoothing: number,
+  maximumValidationSamples: number,
+): {
+  readonly points: readonly MutableCurvePoint[]
+  readonly measure: Readonly<FlowingContoursRegularizationMeasure>
+  readonly workCount: number
+} | null {
+  let accepted = hierarchyPoints(source, hierarchy, 0)
+  let acceptedMeasure = measureRegularization(
+    accepted.map((entry) => entry.point),
+    source.length,
+  )
+  if (acceptedMeasure === null) return null
+  let workCount = acceptedMeasure.sampleCount + accepted.length
+  const maximumLevel = regularizationLevel(flowSmoothing)
+  workCount += hierarchy.removalThresholds.length
+
+  for (const level of hierarchyEventLevels(hierarchy, maximumLevel)) {
+    const smoothing = level / REGULARIZATION_LEVEL_COUNT
+    const simplified = hierarchyPoints(source, hierarchy, smoothing)
+    const passCount = Math.floor(
+      (level * MAX_FAIRING_PASSES) /
+        REGULARIZATION_LEVEL_COUNT,
+    )
+    const candidate = fairCurve(
+      field,
+      tube,
+      simplified,
+      passCount,
+      maximumValidationSamples,
+    )
+    workCount += simplified.length + (candidate?.workCount ?? 0)
+    if (candidate === null) continue
+    const points = candidate.points.map((entry) => entry.point)
+    const proof = validateFlowingContoursTubeCurve(
+      field,
+      tube,
+      {
+        points,
+        sourceSampleIndices: candidate.points.map(
+          (entry) => entry.sourceSampleIndex,
+        ),
+      },
+      { maximumValidationSamples },
+    )
+    workCount += 1
+    if (proof === null) continue
+    const measure = measureRegularization(points, source.length)
+    if (measure === null) continue
+    workCount += measure.sampleCount
+    if (nonWorseRegularization(measure, acceptedMeasure)) {
+      accepted = candidate.points
+      acceptedMeasure = measure
+    }
+  }
+  return {
+    points: accepted,
+    measure: acceptedMeasure,
+    workCount,
+  }
+}
+
 /**
  * Fit one accepted trajectory transactionally.
  *
@@ -613,32 +868,32 @@ function fitFlowingContoursCurveUnsafe(
   })
   if (tube === null) return invalid()
   const source = trajectory.samples.map((sample) => sample.point)
-  const simplified = simplificationSurvivors(
+  const hierarchy = buildSimplificationHierarchy(
     field,
     tube,
     source,
-    flowSmoothing,
     policy.maximumValidationSamples,
   )
-  if (simplified === null) return invalid()
+  if (hierarchy === null) return invalid()
   if (
-    simplified.workCount >
+    hierarchy.workCount >
       source.length *
         MAX_SIMPLIFICATION_ATTEMPTS_PER_SOURCE_POINT
   ) {
-    return invalid(simplified.workCount)
+    return invalid(hierarchy.workCount)
   }
-  const faired = fairCurve(
+  const regularized = regularizeCurve(
     field,
     tube,
-    simplified.points,
+    source,
+    hierarchy,
     flowSmoothing,
     policy.maximumValidationSamples,
   )
   const workCount =
-    simplified.workCount + (faired?.workCount ?? 0)
+    hierarchy.workCount + (regularized?.workCount ?? 0)
   if (
-    faired === null ||
+    regularized === null ||
     workCount >
       source.length *
         FLOWING_CONTOURS_CURVE_MAX_WORK_PER_SOURCE_POINT
@@ -647,7 +902,7 @@ function fitFlowingContoursCurveUnsafe(
   }
 
   const points = Object.freeze(
-    faired.points.map((entry) => frozenPoint(entry.point)),
+    regularized.points.map((entry) => frozenPoint(entry.point)),
   )
   if (
     policy.currentFittedPointCount + points.length >
@@ -660,7 +915,7 @@ function fitFlowingContoursCurveUnsafe(
     tube,
     {
       points,
-      sourceSampleIndices: faired.points.map(
+      sourceSampleIndices: regularized.points.map(
         (entry) => entry.sourceSampleIndex,
       ),
     },
