@@ -96,19 +96,24 @@ present, evidence as well.
 ## Flowing Contours prepared inputs
 
 `prepare-flowing-contours-reference.mjs` creates or verifies only the canonical
-FC23 prepared-input fixtures for the flower and pinecone references. It starts
-Studio through Vite, uses the Chrome revision pinned by the checked-in browser
-skill, decodes each production Image Asset through `decodeImageAsset`, and runs
-`prepareFlowingContoursRaster`. The FC23 helper performs the canonical
-three-plane Float64LE encoding and strict metadata round-trip.
+FC23 prepared-input fixtures for the flower and pinecone references. It uses a
+script-owned, inert Vite harness that never boots Studio's App or registry,
+serves only the two exact source assets, decodes them through
+`decodeImageAsset`, and runs `prepareFlowingContoursRaster`. The FC23 helper
+performs the canonical three-plane Float64LE encoding and strict metadata
+round-trip.
 
 The fixture metadata pins the exact source bytes and dimensions, Composition
 Frame, authored Flowing Contours controls, full-frame and dense-detail crops,
 named regions, topology checks, and Pencil Contour and Watercolor Forms
 comparator revisions. Every run also refuses dirty or commit-divergent
 Flowing production, comparator, FC23 test-contract, Studio decoder, preparation
-tool, and browser-pin inventories. Its JSON result reports the SHA-256 of every
-protected file and each aggregate inventory.
+tool, Vite package/lock, and browser-pin inventories. Installed Vite and
+Puppeteer must match those protected locks. Chrome is resolved from the exact
+Puppeteer build ID in its package-managed cache; environment executable
+overrides are ignored, and the launched executable and product version must
+match that pin. Its JSON result reports the SHA-256 of every protected file and
+each aggregate inventory.
 
 The command is deliberately input-only. It does not import the Flowing Contours
 generator, produce a `Scene`, compute quality metrics, render or compose PNGs,
@@ -142,8 +147,11 @@ node apps/studio/scripts/prepare-flowing-contours-reference.mjs \
 ```
 
 The production tree must be byte-identical to the supplied commit. The script
-captures each input twice and refuses nondeterministic browser decoding or
-preparation. Fixture bytes are committed only in the later freeze step.
+captures each input in two fresh browser contexts and refuses nondeterministic
+browser decoding or preparation. A write stages and fsyncs all four files in
+the fixture directory, then replaces them as one rollback-protected
+transaction; a failed replacement cannot leave a mixed fixture set. Fixture
+bytes are committed only in the later freeze step.
 
 Once the two `.f64le` files and their JSON sidecars are committed, verify them
 without changing their recorded preparation commit:

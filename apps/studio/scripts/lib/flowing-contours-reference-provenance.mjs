@@ -19,6 +19,8 @@ export const workspaceRoot = fileURLToPath(
 const GROUPS = Object.freeze({
   flowingContoursProduction: Object.freeze({
     roots: Object.freeze([
+      'packages/core/src/imageAssets.ts',
+      'packages/core/src/rasterSampling.ts',
       'packages/core/src/sketches/flowing-contours',
     ]),
     include: (path) => path.endsWith('.ts'),
@@ -59,6 +61,13 @@ const GROUPS = Object.freeze({
     roots: Object.freeze([
       '.agents/skills/chrome-devtools/scripts/package.json',
       '.agents/skills/chrome-devtools/scripts/package-lock.json',
+    ]),
+    include: () => true,
+  }),
+  vitePin: Object.freeze({
+    roots: Object.freeze([
+      'apps/studio/package.json',
+      'pnpm-lock.yaml',
     ]),
     include: () => true,
   }),
@@ -218,10 +227,15 @@ export async function flowingContoursReferenceProvenance(
     studioDecoder: await cleanSnapshot('studioDecoder', head),
     preparationTool: await cleanSnapshot('preparationTool', head),
     browserPin: await cleanSnapshot('browserPin', head),
+    vitePin: await cleanSnapshot('vitePin', head),
   })
 }
 
 export async function primaryCheckoutRoot() {
-  const commonDirectory = await git(['rev-parse', '--path-format=absolute', '--git-common-dir'])
+  const commonDirectory = await git([
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-common-dir',
+  ])
   return commonDirectory.replace(/\/\.git\/?$/, '')
 }
