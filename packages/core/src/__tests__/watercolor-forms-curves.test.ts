@@ -168,6 +168,55 @@ function sampledCurvePoints(
   return sampled
 }
 
+function pathEntersCellInterior(
+  points: readonly Readonly<Point>[],
+  cellX: number,
+  cellY: number,
+): boolean {
+  for (let index = 1; index < points.length; index += 1) {
+    const start = points[index - 1]!
+    const end = points[index]!
+    const amounts = [0, 1]
+    for (const boundary of [cellX, cellX + 1]) {
+      if (end[0] !== start[0]) {
+        const amount = (boundary - start[0]) / (end[0] - start[0])
+        if (amount > 0 && amount < 1) amounts.push(amount)
+      }
+    }
+    for (const boundary of [cellY, cellY + 1]) {
+      if (end[1] !== start[1]) {
+        const amount = (boundary - start[1]) / (end[1] - start[1])
+        if (amount > 0 && amount < 1) amounts.push(amount)
+      }
+    }
+    amounts.sort((first, second) => first - second)
+    for (let amountIndex = 1; amountIndex < amounts.length; amountIndex += 1) {
+      const amount = (amounts[amountIndex - 1]! + amounts[amountIndex]!) / 2
+      const point = interpolateForTest(start, end, amount)
+      if (
+        point[0] > cellX &&
+        point[0] < cellX + 1 &&
+        point[1] > cellY &&
+        point[1] < cellY + 1
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+function interpolateForTest(
+  start: Readonly<Point>,
+  end: Readonly<Point>,
+  amount: number,
+): Point {
+  return [
+    start[0] + (end[0] - start[0]) * amount,
+    start[1] + (end[1] - start[1]) * amount,
+  ]
+}
+
 describe('Watercolor Forms bounded curve fitting', () => {
   it(
     'strictly simplifies and lowers roughness on a multiperiod wavy path',
@@ -297,6 +346,80 @@ describe('Watercolor Forms bounded curve fitting', () => {
     expect(curves[0]!.closed).toBe(true)
     expect(curves[0]!.points).toEqual(holeBoundary.points)
     expect(unconstrained[0]!.points).not.toEqual(holeBoundary.points)
+  })
+
+  it('detects even a short segment clip through an unsupported cell', () => {
+    const support = Array<boolean>(9).fill(true)
+    support[4] = false
+    const crossing = boundaryPath([
+      [0, 2.01],
+      [2.01, 0],
+    ])
+
+    expect(
+      fitWatercolorBoundaryCurves(
+        [crossing],
+        0,
+        options({
+          latticeWidth: 3,
+          latticeHeight: 3,
+          positiveSupport: support,
+        }),
+      ),
+    ).toEqual([])
+  })
+
+  it('does not round a lattice staircase through unsupported corner support', () => {
+    const width = 35
+    const height = 35
+    const support = Array<boolean>(width * height).fill(true)
+    support[3 * width + 1] = false
+    const staircase = boundaryPath([
+      [1, 1],
+      [1, 2],
+      [2, 2],
+      [2, 3],
+      [2, 4],
+      [3, 4],
+      [3, 5],
+      [3, 6],
+      [4, 6],
+      [4, 7],
+    ])
+
+    const [curve] = fitWatercolorBoundaryCurves(
+      [staircase],
+      1,
+      options({
+        latticeWidth: width,
+        latticeHeight: height,
+        positiveSupport: support,
+      }),
+    )
+
+    expect(pathEntersCellInterior(curve!.points, 1, 3)).toBe(false)
+    expect(curve!.points[0]).toEqual(staircase.points[0])
+    expect(curve!.points.at(-1)).toEqual(staircase.points.at(-1))
+  })
+
+  it('retains a valid maximum-width path before following short paths', () => {
+    const long = boundaryPath([
+      [0, 0],
+      [256, 0],
+    ])
+    const short = boundaryPath([
+      [1, 1],
+      [2, 1],
+    ], 10)
+    const curves = fitWatercolorBoundaryCurves(
+      [long, short],
+      0,
+      options({ latticeWidth: 256, latticeHeight: 256 }),
+    )
+
+    expect(curves).toHaveLength(2)
+    expect(curves[0]!.points).toEqual(long.points)
+    expect(curves[1]!.points).toEqual(short.points)
   })
 
   it('emits only a complete deterministic path prefix at the point cap', () => {

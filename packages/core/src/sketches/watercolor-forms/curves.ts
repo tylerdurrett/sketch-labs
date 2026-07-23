@@ -17,7 +17,6 @@ import type { WatercolorBoundaryPath } from './types'
 export const WATERCOLOR_BOUNDARY_MAX_DEVIATION = 0.45
 
 const COORDINATE_EPSILON = 1e-9
-const SUPPORT_SAMPLE_SPACING = 0.125
 const ROUNDING_PASSES = 2
 const ROUNDING_AMOUNT = 0.2
 const BACKOFF_ATTEMPTS = 8
@@ -138,14 +137,12 @@ function pointHasPositiveSupport(
 ): boolean {
   const support = options.positiveSupport
   if (support === undefined) return true
-  const xCandidates = [
-    Math.floor(point[0] - COORDINATE_EPSILON),
-    Math.floor(point[0] + COORDINATE_EPSILON),
-  ]
-  const yCandidates = [
-    Math.floor(point[1] - COORDINATE_EPSILON),
-    Math.floor(point[1] + COORDINATE_EPSILON),
-  ]
+  const adjacentSamples = (coordinate: number) =>
+    Number.isInteger(coordinate)
+      ? [coordinate - 1, coordinate]
+      : [Math.floor(coordinate)]
+  const xCandidates = adjacentSamples(point[0])
+  const yCandidates = adjacentSamples(point[1])
   for (const y of yCandidates) {
     if (y < 0 || y >= options.latticeHeight) continue
     for (const x of xCandidates) {
@@ -160,25 +157,57 @@ function segmentHasPositiveSupport(
   start: Readonly<Point>,
   end: Readonly<Point>,
   options: Readonly<WatercolorBoundaryCurveOptions>,
-  budget: GeometryBudget,
+  budget?: GeometryBudget,
 ): boolean {
   if (options.positiveSupport === undefined) return true
-  const sampleCount = Math.max(
-    1,
-    Math.ceil(
-      Math.max(Math.abs(end[0] - start[0]), Math.abs(end[1] - start[1])) /
-        SUPPORT_SAMPLE_SPACING,
-    ),
+
+  /*
+   * Between consecutive lattice-line crossings, the set of sample cells
+   * adjacent to the segment is constant. Checking every such open interval is
+   * therefore complete, including arbitrarily short clips through a cell that
+   * fixed-distance sampling can miss.
+   */
+  const crossings = [0, 1]
+  const addCrossings = (
+    startCoordinate: number,
+    endCoordinate: number,
+    dimension: number,
+  ) => {
+    const delta = endCoordinate - startCoordinate
+    if (Math.abs(delta) <= COORDINATE_EPSILON) return
+    for (let line = 1; line < dimension; line += 1) {
+      const amount = (line - startCoordinate) / delta
+      if (
+        amount > COORDINATE_EPSILON &&
+        amount < 1 - COORDINATE_EPSILON
+      ) {
+        crossings.push(amount)
+      }
+    }
+  }
+  addCrossings(start[0], end[0], options.latticeWidth)
+  addCrossings(start[1], end[1], options.latticeHeight)
+  crossings.sort((first, second) => first - second)
+  const distinctCrossings = crossings.filter(
+    (amount, index) =>
+      index === 0 ||
+      amount !== crossings[index - 1],
   )
-  if (budget.remaining < sampleCount + 1) return false
-  budget.remaining -= sampleCount + 1
-  for (let sample = 0; sample <= sampleCount; sample += 1) {
-    if (
-      !pointHasPositiveSupport(
-        interpolate(start, end, sample / sampleCount),
-        options,
-      )
-    ) {
+  const requiredWork = distinctCrossings.length + 1
+  if (budget !== undefined) {
+    if (budget.remaining < requiredWork) return false
+    budget.remaining -= requiredWork
+  }
+  if (
+    !pointHasPositiveSupport(start, options) ||
+    !pointHasPositiveSupport(end, options)
+  ) {
+    return false
+  }
+  for (let index = 1; index < distinctCrossings.length; index += 1) {
+    const amount =
+      (distinctCrossings[index - 1]! + distinctCrossings[index]!) / 2
+    if (!pointHasPositiveSupport(interpolate(start, end, amount), options)) {
       return false
     }
   }
@@ -479,22 +508,12 @@ function fitPath(
   smoothing: number,
   options: Readonly<WatercolorBoundaryCurveOptions>,
 ): readonly Readonly<Point>[] {
+  if (!sourceCurveIsSafe(source, closed, options)) return []
+  if (smoothing === 0) return source
+
   const budget = {
     remaining: Math.max(1, source.length * WORK_UNITS_PER_POINT),
   }
-  if (
-    !curveIsSafe(
-      source,
-      source.map((point, sourceIndex) => ({ point, sourceIndex })),
-      source,
-      closed,
-      options,
-      budget,
-    )
-  ) {
-    return []
-  }
-  if (smoothing === 0) return source
 
   const order = removalOrder(source, closed, options, budget)
   const removalCount = Math.floor(order.length * smoothing)
@@ -511,6 +530,27 @@ function fitPath(
     }
   }
   return retained.map(({ point }) => point)
+}
+
+function sourceCurveIsSafe(
+  source: readonly Readonly<Point>[],
+  closed: boolean,
+  options: Readonly<WatercolorBoundaryCurveOptions>,
+): boolean {
+  const segmentCount = closed ? source.length : source.length - 1
+  for (let index = 0; index < segmentCount; index += 1) {
+    const start = source[index]!
+    const end = source[(index + 1) % source.length]!
+    if (
+      !inLattice(start, options) ||
+      !inLattice(end, options) ||
+      samePoint(start, end) ||
+      !segmentHasPositiveSupport(start, end, options)
+    ) {
+      return false
+    }
+  }
+  return true
 }
 
 function validOptions(
