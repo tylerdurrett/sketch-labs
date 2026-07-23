@@ -4,6 +4,7 @@ import {
   createRegistry,
   createScribbleMoonStructuralScene,
   defaultParams,
+  flowingContours,
   grassHills,
   pencilContour,
   photoScribble,
@@ -98,14 +99,23 @@ describe('the default registry', () => {
     ).toEqual([pencilContour])
   })
 
-  it('exports and registers Watercolor Forms exactly once as the newest Sketch', () => {
+  it('exports and registers Watercolor Forms exactly once', () => {
     expect(watercolorForms.id).toBe('watercolor-forms')
     expect(watercolorForms.name).toBe('Watercolor Forms')
     expect(registry.get('watercolor-forms')).toBe(watercolorForms)
     expect(
       registry.list().filter((sketch) => sketch === watercolorForms),
     ).toEqual([watercolorForms])
-    expect(registry.list().at(-1)).toBe(watercolorForms)
+  })
+
+  it('exports and registers Flowing Contours exactly once as the newest Sketch', () => {
+    expect(flowingContours.id).toBe('flowing-contours')
+    expect(flowingContours.name).toBe('Flowing Contours')
+    expect(registry.get('flowing-contours')).toBe(flowingContours)
+    expect(
+      registry.list().filter((sketch) => sketch === flowingContours),
+    ).toEqual([flowingContours])
+    expect(registry.list().at(-1)).toBe(flowingContours)
   })
 
   it('registers every built-in under a unique id and display name', () => {
@@ -135,6 +145,7 @@ describe('the default registry', () => {
       'scribble-moon',
       'tone-calibration',
       'watercolor-forms',
+      'flowing-contours',
     ])
 
     for (const sketch of optIn) {

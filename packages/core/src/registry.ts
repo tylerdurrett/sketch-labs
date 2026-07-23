@@ -23,6 +23,7 @@ import { toneCalibration } from './sketches/tone-calibration'
 import { photoScribble } from './sketches/photo-scribble'
 import { pencilContour } from './sketches/pencil-contour'
 import { watercolorForms } from './sketches/watercolor-forms'
+import { flowingContours } from './sketches/flowing-contours'
 
 /** A read-only index of Sketches keyed by their stable {@link Sketch.id}. */
 export interface SketchRegistry {
@@ -74,9 +75,10 @@ export function createRegistry(sketches: readonly Sketch[]): SketchRegistry {
  * The default registry of built-in Sketches — what the Studio navigates over.
  * Holds {@link circles}, {@link scatter}, {@link flowField}, {@link leafField},
  * {@link grassHills}, {@link scribbleMoon}, {@link toneCalibration}, and
- * {@link photoScribble}, {@link pencilContour}, and {@link watercolorForms};
- * new Sketches join this list as they land. Watercolor Forms is intentionally
- * last: the Studio treats the newest registered Sketch as its default selection.
+ * {@link photoScribble}, {@link pencilContour}, {@link watercolorForms}, and
+ * {@link flowingContours}; new Sketches join this list as they land. Flowing
+ * Contours is intentionally last: the Studio treats the newest registered
+ * Sketch as its default selection.
  */
 export const registry: SketchRegistry = createRegistry([
   circles,
@@ -89,4 +91,5 @@ export const registry: SketchRegistry = createRegistry([
   photoScribble,
   pencilContour,
   watercolorForms,
+  flowingContours,
 ])
