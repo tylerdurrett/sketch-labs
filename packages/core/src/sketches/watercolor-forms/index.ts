@@ -7,8 +7,18 @@
  */
 
 import type { SketchEnvironment } from '../../imageAssets'
-import { createScene, type CoordinateSpace } from '../../scene'
-import type { ParamSpec, Params, StatelessSketch } from '../../sketch'
+import {
+  createScene,
+  type CoordinateSpace,
+  type Primitive,
+  type Scene,
+} from '../../scene'
+import type {
+  OutlineTarget,
+  ParamSpec,
+  Params,
+  StatelessSketch,
+} from '../../sketch'
 import { imageAssetParam, numberParam } from '../sketch-util'
 import { PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID } from '../photo-scribble'
 import {
@@ -60,6 +70,49 @@ function emptyScene(frame: CoordinateSpace) {
   return createScene(frame).build()
 }
 
+function validateOutlineTarget(target: OutlineTarget): void {
+  if (
+    !Number.isFinite(target.toolWidthMillimeters) ||
+    target.toolWidthMillimeters <= 0
+  ) {
+    throw new RangeError('toolWidthMillimeters must be finite and positive')
+  }
+  if (
+    !Number.isFinite(target.millimetersPerSceneUnit) ||
+    target.millimetersPerSceneUnit <= 0
+  ) {
+    throw new RangeError(
+      'millimetersPerSceneUnit must be finite and positive',
+    )
+  }
+}
+
+/** Retarget an exact completed Watercolor Forms Scene to the physical tool. */
+function deriveWatercolorFormsOutlineSource(
+  completedScene: Readonly<Scene>,
+  target: OutlineTarget,
+): Scene {
+  validateOutlineTarget(target)
+  const width =
+    target.toolWidthMillimeters / target.millimetersPerSceneUnit
+
+  return {
+    space: { ...completedScene.space },
+    primitives: completedScene.primitives.map(
+      (primitive): Primitive => ({
+        ...primitive,
+        points: primitive.points.map(([x, y]) => [x, y]),
+        ...(primitive.stroke === undefined
+          ? {}
+          : { stroke: { ...primitive.stroke, width } }),
+      }),
+    ),
+    ...(completedScene.background === undefined
+      ? {}
+      : { background: { ...completedScene.background } }),
+  }
+}
+
 /** Construct an unregistered Watercolor Forms Sketch with a caller-owned default. */
 export function createWatercolorForms(
   defaultImageAssetId: string,
@@ -69,6 +122,7 @@ export function createWatercolorForms(
     id: 'watercolor-forms',
     name: 'Watercolor Forms',
     schema,
+    deriveOutlineSource: deriveWatercolorFormsOutlineSource,
     generate(params, _seed, _t, frame, environment?: SketchEnvironment) {
       const imageAssetId = imageAssetParam(
         params,

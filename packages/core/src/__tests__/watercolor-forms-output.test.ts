@@ -9,6 +9,7 @@ import { derivePageFramePlotProfile } from '../pageFramePlotProfile'
 import { computePlotMapping } from '../plotMapping'
 import type { PlotProfile } from '../plotProfile'
 import { renderPlotterSVG } from '../plotterSvg'
+import { registry } from '../registry'
 import { createRasterContainFit } from '../rasterSampling'
 import { createRasterToneSource } from '../rasterToneSource'
 import {
@@ -17,11 +18,14 @@ import {
   type Canvas2DContext,
 } from '../renderer'
 import type { Primitive, Scene } from '../scene'
+import { defaultParams } from '../sketch'
+import { circles } from '../sketches/circles'
 import {
   defaultWatercolorFormsControls,
   type WatercolorFormsControls,
 } from '../sketches/watercolor-forms/controls'
 import { generateWatercolorForms } from '../sketches/watercolor-forms/generator'
+import { watercolorForms } from '../sketches/watercolor-forms/index'
 import type { Point } from '../types'
 
 const FRAME = Object.freeze({ width: 100, height: 100 })
@@ -294,22 +298,13 @@ describe('Watercolor Forms output contract', () => {
 
   it('uses existing Page Frame clipping, rebasing, and physical mapping unchanged', () => {
     const scene = generate(twoBlocks())
-    const outlined = hiddenLinePass(scene)
     const sceneJson = JSON.stringify(scene)
-    const outlinedJson = JSON.stringify(outlined)
     const page: PageFrame = {
       x: 40,
       y: 35,
       width: 20,
       height: 30,
     }
-
-    expect(outlined.primitives).toHaveLength(1)
-    expect(outlined.primitives[0]!.points).toEqual([
-      [50, 25],
-      [50, 50],
-      [50, 75],
-    ])
 
     const pageProfile = derivePageFramePlotProfile(
       PROFILE,
@@ -336,6 +331,39 @@ describe('Watercolor Forms output contract', () => {
         millimetersPerSceneUnit: mapping.scale,
       },
     }
+    const registered = registry.get('watercolor-forms')
+    expect(registered).toBe(watercolorForms)
+    expect(registered.generateOutlineSource).toBeUndefined()
+    expect(registered.deriveOutlineSource).toBeTypeOf('function')
+    const outlineSource = registered.deriveOutlineSource!(
+      scene,
+      physicalToolPolicy.target,
+    )
+    expect(outlineSource).toEqual({
+      space: FRAME,
+      primitives: [
+        {
+          points: [
+            [50, 25],
+            [50, 50],
+            [50, 75],
+          ],
+          closed: false,
+          stroke: { color: 'black', width: 2 },
+          hiddenLineRole: 'source',
+        },
+      ],
+    })
+    const outlineSourceJson = JSON.stringify(outlineSource)
+    const outlined = hiddenLinePass(outlineSource)
+    const outlinedJson = JSON.stringify(outlined)
+    expect(outlined.primitives).toHaveLength(1)
+    expect(outlined.primitives[0]!.points).toEqual([
+      [50, 25],
+      [50, 50],
+      [50, 75],
+    ])
+
     const finalized = finalizeOutlineScene(
       outlined,
       page,
@@ -378,14 +406,24 @@ describe('Watercolor Forms output contract', () => {
       /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="16mm" height="20mm" viewBox="0 0 16 20" data-paper-extent="paper">/,
     )
 
-    const legacyFinalized = finalizeOutlineScene(outlined, page, false, {
+    const legacy = registry.get('circles')
+    expect(legacy).toBe(circles)
+    expect(legacy.generateOutlineSource).toBeUndefined()
+    expect(legacy.deriveOutlineSource).toBeUndefined()
+    const legacyScene = circles.generate(
+      defaultParams(circles.schema),
+      'legacy-width',
+      0,
+      FRAME,
+    )
+    const legacyFinalized = finalizeOutlineScene(legacyScene, null, false, {
       ...physicalToolPolicy,
       kind: 'legacy-scene',
     })
-    expect(
-      clipSceneToBounds(legacyFinalized).primitives[0]?.stroke?.width,
-    ).toBe(1)
+    expect(legacyFinalized).toBe(legacyScene)
+    expect(legacyFinalized.primitives[0]?.stroke?.width).toBe(1)
     expect(JSON.stringify(scene)).toBe(sceneJson)
+    expect(JSON.stringify(outlineSource)).toBe(outlineSourceJson)
     expect(JSON.stringify(outlined)).toBe(outlinedJson)
   })
 

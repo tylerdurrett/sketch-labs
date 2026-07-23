@@ -134,6 +134,7 @@ describe('the default registry', () => {
       'grass-hills',
       'scribble-moon',
       'tone-calibration',
+      'watercolor-forms',
     ])
 
     for (const sketch of optIn) {
