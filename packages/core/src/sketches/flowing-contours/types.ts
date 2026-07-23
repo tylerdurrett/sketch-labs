@@ -33,16 +33,29 @@ export type FlowingContoursEndpointReasonCounts = Readonly<
   Record<FlowingContoursEndpointReason, number>
 >
 
-/** Deterministic caps that can stop an otherwise valid pipeline prefix. */
+/**
+ * Stable inventory of deterministic caps that can stop an otherwise valid
+ * pipeline prefix.
+ */
+export const FLOWING_CONTOURS_LIMIT_NAMES = Object.freeze([
+  'analysis-dimension',
+  'analysis-sample-count',
+  'scale-plane-count',
+  'anchor-count',
+  'normal-search-sample-count',
+  'search-breadth',
+  'search-step-count',
+  'candidate-count',
+  'weak-span-step-count',
+  'weak-span-distance',
+  'accepted-curve-count',
+  'raw-trajectory-point-count',
+  'fitted-curve-point-count',
+  'primitive-count',
+] as const)
+
 export type FlowingContoursLimitName =
-  | 'analysis-dimension'
-  | 'analysis-sample-count'
-  | 'anchor-count'
-  | 'search-breadth'
-  | 'search-step-count'
-  | 'candidate-count'
-  | 'curve-point-count'
-  | 'primitive-count'
+  (typeof FLOWING_CONTOURS_LIMIT_NAMES)[number]
 
 /** Why generation stopped; empty valid inputs still report `complete`. */
 export type FlowingContoursTermination =

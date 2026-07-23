@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest'
 import type { Scene } from '../scene'
 import {
   FLOWING_CONTOURS_ENDPOINT_REASONS,
+  FLOWING_CONTOURS_LIMIT_NAMES,
   type AcceptedFlowingTrajectory,
   type CorrectedFlowingRidgeSample,
   type FittedFlowingCurve,
@@ -14,6 +15,7 @@ import {
   type FlowingContoursEndpointReasonCounts,
   type FlowingContoursField,
   type FlowingContoursGeneratorResult,
+  type FlowingContoursLimitName,
   type FlowingContoursPipelineResult,
   type FlowingContoursSpanSupportProvenance,
 } from '../sketches/flowing-contours/types'
@@ -105,6 +107,30 @@ describe('Flowing Contours contracts', () => {
     expectTypeOf<
       (typeof FLOWING_CONTOURS_ENDPOINT_REASONS)[number]
     >().toEqualTypeOf<FlowingContoursEndpointReason>()
+  })
+
+  it('publishes the exact complete deterministic-cap inventory', () => {
+    expect(FLOWING_CONTOURS_LIMIT_NAMES).toEqual([
+      'analysis-dimension',
+      'analysis-sample-count',
+      'scale-plane-count',
+      'anchor-count',
+      'normal-search-sample-count',
+      'search-breadth',
+      'search-step-count',
+      'candidate-count',
+      'weak-span-step-count',
+      'weak-span-distance',
+      'accepted-curve-count',
+      'raw-trajectory-point-count',
+      'fitted-curve-point-count',
+      'primitive-count',
+    ])
+    expect(new Set(FLOWING_CONTOURS_LIMIT_NAMES).size).toBe(14)
+    expect(Object.isFrozen(FLOWING_CONTOURS_LIMIT_NAMES)).toBe(true)
+    expectTypeOf<
+      (typeof FLOWING_CONTOURS_LIMIT_NAMES)[number]
+    >().toEqualTypeOf<FlowingContoursLimitName>()
   })
 
   it('keeps continuous field, directional search, and whole-candidate records distinct', () => {
