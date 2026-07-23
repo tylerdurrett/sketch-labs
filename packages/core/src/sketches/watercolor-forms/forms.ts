@@ -30,6 +30,10 @@ interface MutableSelectedForm {
   readonly neighbors: Map<number, AdjacencyEvidence>
 }
 
+interface AncestorResolutionMetrics {
+  ancestorTraversalCount: number
+}
+
 /**
  * The fully selected and suppressed form state consumed by boundary extraction.
  *
@@ -89,6 +93,7 @@ function addEvidence(
 function selectedAncestors(
   hierarchy: Readonly<RegionHierarchy>,
   cutHeight: number,
+  metrics?: AncestorResolutionMetrics,
 ): Readonly<{
   regionByInitialRegion: ReadonlyMap<number, number>
   selectedRegionIds: readonly number[]
@@ -115,9 +120,15 @@ function selectedAncestors(
 
   const regionByInitialRegion = new Map<number, number>()
   for (const region of hierarchy.partition.regions) {
+    const path: number[] = []
     let selectedRegionId = region.id
     while (parentByRegion.has(selectedRegionId)) {
+      path.push(selectedRegionId)
       selectedRegionId = parentByRegion.get(selectedRegionId)!
+      if (metrics !== undefined) metrics.ancestorTraversalCount += 1
+    }
+    for (const regionId of path) {
+      parentByRegion.set(regionId, selectedRegionId)
     }
     regionByInitialRegion.set(region.id, selectedRegionId)
   }
@@ -160,14 +171,14 @@ function buildSelectedAdjacency(
 ): void {
   const evidenceByPair = new Map<string, AdjacencyEvidence>()
   for (const segment of hierarchy.partition.sharedBoundarySegments) {
-    const firstRegionId =
-      segment.regionIds[0] === TRANSPARENT_SUPPORT_REGION_ID
-        ? TRANSPARENT_SUPPORT_REGION_ID
-        : regionByInitialRegion.get(segment.regionIds[0])
-    const secondRegionId =
+    if (
+      segment.regionIds[0] === TRANSPARENT_SUPPORT_REGION_ID ||
       segment.regionIds[1] === TRANSPARENT_SUPPORT_REGION_ID
-        ? TRANSPARENT_SUPPORT_REGION_ID
-        : regionByInitialRegion.get(segment.regionIds[1])
+    ) {
+      continue
+    }
+    const firstRegionId = regionByInitialRegion.get(segment.regionIds[0])
+    const secondRegionId = regionByInitialRegion.get(segment.regionIds[1])
     if (
       firstRegionId === undefined ||
       secondRegionId === undefined ||
@@ -198,20 +209,16 @@ function buildSelectedAdjacency(
     const [firstRegionId, secondRegionId] = key
       .split(':')
       .map((value) => Number(value)) as [number, number]
-    if (firstRegionId !== TRANSPARENT_SUPPORT_REGION_ID) {
-      addEvidence(
-        selectedForms.get(firstRegionId)!.neighbors,
-        secondRegionId,
-        evidence,
-      )
-    }
-    if (secondRegionId !== TRANSPARENT_SUPPORT_REGION_ID) {
-      addEvidence(
-        selectedForms.get(secondRegionId)!.neighbors,
-        firstRegionId,
-        evidence,
-      )
-    }
+    addEvidence(
+      selectedForms.get(firstRegionId)!.neighbors,
+      secondRegionId,
+      evidence,
+    )
+    addEvidence(
+      selectedForms.get(secondRegionId)!.neighbors,
+      firstRegionId,
+      evidence,
+    )
   }
 }
 
@@ -232,7 +239,6 @@ function connectedComponents(
         (first, second) => first - second,
       )
       for (const neighborId of neighbors) {
-        if (neighborId === TRANSPARENT_SUPPORT_REGION_ID) continue
         if (!unseen.delete(neighborId)) continue
         pending.push(neighborId)
       }
@@ -257,15 +263,7 @@ function ensureComponentSurvivors(
   selectedForms: ReadonlyMap<number, MutableSelectedForm>,
 ): void {
   for (const component of connectedComponents(selectedForms)) {
-    if (
-      component.some((regionId) => {
-        const form = selectedForms.get(regionId)!
-        return (
-          form.retained ||
-          form.neighbors.has(TRANSPARENT_SUPPORT_REGION_ID)
-        )
-      })
-    ) {
+    if (component.some((regionId) => selectedForms.get(regionId)!.retained)) {
       continue
     }
     const fallback = component
@@ -277,7 +275,7 @@ function ensureComponentSurvivors(
 
 interface AbsorptionTarget {
   readonly regionId: number
-  readonly survivor?: MutableSelectedForm
+  readonly survivor: MutableSelectedForm
   readonly evidence: Readonly<AdjacencyEvidence>
 }
 
@@ -293,15 +291,11 @@ function compareAbsorptionTargets(
   if (first.evidence.length !== second.evidence.length) {
     return second.evidence.length - first.evidence.length
   }
-  if (first.survivor !== undefined && second.survivor !== undefined) {
-    const significance = compareFormSignificance(
-      first.survivor,
-      second.survivor,
-    )
-    if (significance !== 0) return significance
-  } else if (first.survivor !== second.survivor) {
-    return first.survivor === undefined ? 1 : -1
-  }
+  const significance = compareFormSignificance(
+    first.survivor,
+    second.survivor,
+  )
+  if (significance !== 0) return significance
   return first.regionId - second.regionId
 }
 
@@ -311,10 +305,6 @@ function bestAdjacentSurvivor(
 ): AbsorptionTarget | undefined {
   const candidates: AbsorptionTarget[] = []
   for (const [neighborId, evidence] of form.neighbors) {
-    if (neighborId === TRANSPARENT_SUPPORT_REGION_ID) {
-      candidates.push({ regionId: neighborId, evidence })
-      continue
-    }
     const neighbor = selectedForms.get(neighborId)
     if (neighbor?.retained === true) {
       candidates.push({
@@ -334,22 +324,16 @@ function absorbForm(
   absorbedInto: Map<number, number>,
 ): void {
   absorbedInto.set(form.id, target.regionId)
-  if (target.survivor !== undefined) {
-    target.survivor.sampleCount += form.sampleCount
-  }
+  target.survivor.sampleCount += form.sampleCount
   for (const [neighborId, evidence] of form.neighbors) {
     if (neighborId === target.regionId) continue
     const neighbor = selectedForms.get(neighborId)
     if (neighbor === undefined) continue
     neighbor.neighbors.delete(form.id)
     addEvidence(neighbor.neighbors, target.regionId, evidence)
-    if (target.survivor !== undefined) {
-      addEvidence(target.survivor.neighbors, neighborId, evidence)
-    }
+    addEvidence(target.survivor.neighbors, neighborId, evidence)
   }
-  if (target.survivor !== undefined) {
-    target.survivor.neighbors.delete(form.id)
-  }
+  target.survivor.neighbors.delete(form.id)
   form.neighbors.clear()
 }
 
@@ -560,4 +544,19 @@ export function selectWatercolorForms(
     regionIds: Object.freeze(regionIds),
     regionBySample: Object.freeze(regionBySample),
   })
+}
+
+/**
+ * @internal Operation-count seam proving that hierarchy-cut leaf ownership is
+ * path-compressed rather than repeatedly walking a deep comb.
+ */
+export function watercolorFormCutAncestorTraversalsForTest(
+  hierarchy: Readonly<RegionHierarchy>,
+  formDetailInput: number,
+): number {
+  const metrics: AncestorResolutionMetrics = {
+    ancestorTraversalCount: 0,
+  }
+  selectedAncestors(hierarchy, 1 - clampUnit(formDetailInput), metrics)
+  return metrics.ancestorTraversalCount
 }

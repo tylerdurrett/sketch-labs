@@ -6,6 +6,7 @@ import {
 import {
   selectWatercolorForms,
   type WatercolorFormSelection,
+  watercolorFormCutAncestorTraversalsForTest,
 } from '../sketches/watercolor-forms/forms'
 import { traceWatercolorBoundaryNetwork } from '../sketches/watercolor-forms/tracing'
 import type {
@@ -23,14 +24,15 @@ function summary(
   id: number,
   sampleCount: number,
 ): Readonly<WatercolorRegionSummary> {
+  const value = (id % 10) / 10
   return Object.freeze({
     id,
     sampleCount,
     visibleSampleCount: sampleCount,
-    meanLinearRed: id / 10,
-    meanLinearGreen: id / 10,
-    meanLinearBlue: id / 10,
-    meanLuminance: id / 10,
+    meanLinearRed: value,
+    meanLinearGreen: value,
+    meanLinearBlue: value,
+    meanLuminance: value,
     meanAlpha: 1,
   })
 }
@@ -320,63 +322,85 @@ describe('Watercolor Forms hierarchy selection and shared boundaries', () => {
     ).toBe(true)
   })
 
-  it('suppresses a low-detail alpha speck into adjacent transparent support', () => {
+  it('never drains visible forms into transparency across detail refinement', () => {
     const source = hierarchy({
-      width: 3,
-      height: 3,
-      regionBySample: [
-        TRANSPARENT,
-        TRANSPARENT,
-        TRANSPARENT,
-        TRANSPARENT,
-        0,
-        TRANSPARENT,
-        TRANSPARENT,
-        TRANSPARENT,
-        TRANSPARENT,
-      ],
-      regions: [summary(0, 1)],
+      width: 6,
+      height: 1,
+      regionBySample: [TRANSPARENT, 0, 0, 1, 1, TRANSPARENT],
+      regions: [summary(0, 2), summary(1, 2)],
       segments: [
         segment(
-          1,
+          0,
           [TRANSPARENT, 0],
+          [1, 0],
           [1, 1],
-          [2, 1],
           1,
           'alpha-boundary',
         ),
-        segment(
-          2,
-          [TRANSPARENT, 0],
-          [1, 1],
-          [1, 2],
-          1,
-          'alpha-boundary',
-        ),
+        segment(2, [0, 1], [3, 0], [3, 1], 0.4),
         segment(
           4,
-          [TRANSPARENT, 0],
-          [2, 1],
-          [2, 2],
-          1,
-          'alpha-boundary',
-        ),
-        segment(
-          5,
-          [TRANSPARENT, 0],
-          [1, 2],
-          [2, 2],
+          [TRANSPARENT, 1],
+          [5, 0],
+          [5, 1],
           1,
           'alpha-boundary',
         ),
       ],
+      merges: [merge(0, 1, summary(2, 4), 0.8)],
     })
 
+    const coarse = selectWatercolorForms(source, 0.19)
+    const justFiner = selectWatercolorForms(source, 0.21)
+    const finer = selectWatercolorForms(source, 0.5)
+
+    expect(coarse.regionIds).toEqual([2])
+    expect(justFiner.regionIds).toEqual([0])
+    expect(finer.regionIds).toEqual([0, 1])
+    expect(
+      [coarse, justFiner, finer].map(
+        (selection) =>
+          selection.regionBySample.filter(
+            (regionId) => regionId !== TRANSPARENT,
+          ).length,
+      ),
+    ).toEqual([4, 4, 4])
+    expect(
+      [coarse, justFiner, finer].map(
+        (selection) => extract(selection, 0).sharedBoundarySegments.length,
+      ),
+    ).toEqual([2, 2, 3])
+  })
+
+  it('path-compresses leaf ownership in a large comb hierarchy', () => {
+    const leafCount = 8_192
+    const leaves = Array.from({ length: leafCount }, (_, id) => summary(id, 1))
+    const merges: Readonly<WatercolorRegionMerge>[] = []
+    let activeRegionId = 0
+    for (let leafId = 1; leafId < leafCount; leafId += 1) {
+      const mergedRegion = summary(
+        leafCount + leafId - 1,
+        leafId + 1,
+      )
+      merges.push(merge(activeRegionId, leafId, mergedRegion, 0.25))
+      activeRegionId = mergedRegion.id
+    }
+    const source = hierarchy({
+      width: leafCount,
+      height: 1,
+      regionBySample: Array.from({ length: leafCount }, (_, id) => id),
+      regions: leaves,
+      merges,
+    })
+
+    const traversals = watercolorFormCutAncestorTraversalsForTest(source, 0)
     const selected = selectWatercolorForms(source, 0)
 
-    expect(selected.regionIds).toEqual([])
-    expect(selected.regionBySample).toEqual(new Array(9).fill(TRANSPARENT))
-    expect(extract(selected, 0).sharedBoundarySegments).toEqual([])
+    expect(selected.regionIds).toEqual([activeRegionId])
+    expect(new Set(selected.regionBySample)).toEqual(
+      new Set([activeRegionId]),
+    )
+    expect(traversals).toBeLessThan(4 * leafCount)
   })
 
   it('caps by interface significance and then a canonical segment prefix', () => {
