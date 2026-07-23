@@ -17,8 +17,14 @@ import {
   registerAcceptedFlowingTrajectorySuppression,
 } from '../sketches/flowing-contours/suppression'
 import {
+  createFlowingContoursEvidenceTube,
+  validateFlowingContoursTubeCurve,
+  type FlowingContoursTubeCurveValidation,
+} from '../sketches/flowing-contours/tube'
+import {
   FLOWING_CONTOURS_ENDPOINT_REASONS,
   type AcceptedFlowingTrajectory,
+  type FittedFlowingCurve,
   type FlowingContoursAnchor,
   type FlowingContoursField,
   type FlowingContoursPipelineResult,
@@ -129,6 +135,40 @@ function endpointCounts(
   return counts
 }
 
+function auditFittedProvenance(
+  field: Readonly<FlowingContoursField>,
+  trajectory: Readonly<AcceptedFlowingTrajectory>,
+  curve: Readonly<FittedFlowingCurve>,
+): Readonly<FlowingContoursTubeCurveValidation> | null {
+  const tube = createFlowingContoursEvidenceTube(field, trajectory)
+  if (tube === null) return null
+  // This is the canonical auditable proof for both correspondence layers:
+  // nearest raw-sample identity (lower index wins ties) and nearest raw-arc
+  // validation within each monotonic source-index interval.
+  const proof = validateFlowingContoursTubeCurve(field, tube, {
+    points: curve.points,
+    sourceSampleIndices: curve.provenance.sourceSampleIndices,
+  })
+  if (
+    proof === null ||
+    proof.sourceTrajectoryId !== curve.provenance.sourceTrajectoryId ||
+    !Object.is(
+      proof.evidenceTubeRadius,
+      curve.provenance.evidenceTubeRadius,
+    ) ||
+    !Object.is(proof.maximumDeviation, curve.provenance.maximumDeviation) ||
+    proof.sourceSampleIndices.length !==
+      curve.provenance.sourceSampleIndices.length ||
+    !proof.sourceSampleIndices.every(
+      (sourceIndex, index) =>
+        sourceIndex === curve.provenance.sourceSampleIndices[index],
+    )
+  ) {
+    return null
+  }
+  return proof
+}
+
 function expectExactPipelineProvenance(
   field: Readonly<FlowingContoursField>,
   output: Readonly<FlowingContoursPipelineResult>,
@@ -227,10 +267,20 @@ function expectExactPipelineProvenance(
     )
     totalUnsupported += trajectoryTotalUnsupported
 
-    expect(curve.provenance.sourceTrajectoryId).toBe(trajectory.id)
-    expect(curve.provenance.sourceSampleIndices).toHaveLength(
-      curve.points.length,
+    const proof = auditFittedProvenance(field, trajectory, curve)
+    expect(proof).not.toBeNull()
+    if (proof === null) throw new Error('fitted provenance audit failed')
+    expect(proof.sourceTrajectoryId).toBe(trajectory.id)
+    expect(proof.sourceSampleIndices).toEqual(
+      curve.provenance.sourceSampleIndices,
     )
+    expect(curve.provenance.sourceSampleIndices).toHaveLength(curve.points.length)
+    expect(curve.provenance.sourceSampleIndices[0]).toBe(0)
+    expect(curve.provenance.sourceSampleIndices.at(-1)).toBe(
+      trajectory.samples.length - 1,
+    )
+    expect(curve.points[0]).toEqual(trajectory.samples[0]!.point)
+    expect(curve.points.at(-1)).toEqual(trajectory.samples.at(-1)!.point)
     for (
       let index = 0;
       index < curve.provenance.sourceSampleIndices.length;
@@ -486,6 +536,54 @@ function prescribedFlatFlowField(): Readonly<FlowingContoursField> {
   })
 }
 
+function prescribedInterruptedLoopField(): Readonly<FlowingContoursField> {
+  const size = 49
+  const center = 24
+  const radius = 15
+  const count = size * size
+  const alpha: number[] = []
+  const contourEvidence: number[] = []
+  const tangentX: number[] = []
+  const tangentY: number[] = []
+  for (let index = 0; index < count; index += 1) {
+    const x = index % size
+    const y = Math.floor(index / size)
+    const dx = x - center
+    const dy = y - center
+    const distance = Math.hypot(dx, dy)
+    const angle = Math.atan2(dy, dx)
+    const angleFromTop = Math.atan2(
+      Math.sin(angle + Math.PI / 2),
+      Math.cos(angle + Math.PI / 2),
+    )
+    const supported = Math.abs(angleFromTop) >= 0.34
+    const tangentLength = distance > 0 ? distance : 1
+    alpha.push(supported ? 1 : 0)
+    contourEvidence.push(
+      supported
+        ? Math.exp(-((distance - radius) ** 2) / (2 * 0.5 ** 2))
+        : 0,
+    )
+    tangentX.push(distance > 0 ? -dy / tangentLength : 1)
+    tangentY.push(distance > 0 ? dx / tangentLength : 0)
+  }
+  return Object.freeze({
+    sourceWidth: size,
+    sourceHeight: size,
+    width: size,
+    height: size,
+    luminance: Object.freeze(new Array<number>(count).fill(0.5)),
+    alpha: Object.freeze(alpha),
+    positiveSupport: Object.freeze(alpha.map((value) => value > 0)),
+    contourEvidence: Object.freeze(contourEvidence),
+    tangentX: Object.freeze(tangentX),
+    tangentY: Object.freeze(tangentY),
+    tangentCoherence: Object.freeze(new Array<number>(count).fill(1)),
+    ambiguity: Object.freeze(new Array<number>(count).fill(0)),
+    ridgeScale: Object.freeze(new Array<number>(count).fill(1)),
+  })
+}
+
 function acceptedFlowSelection(
   field: Readonly<FlowingContoursField>,
   y: number,
@@ -564,6 +662,20 @@ describe('Flowing Contours synthetic ambiguity and gap integration', () => {
       trajectory.startEndpointReason,
       trajectory.endEndpointReason,
     ]).toEqual(['source-boundary', 'source-boundary'])
+
+    const curve = output.fittedCurves[0]!
+    const allZeroMapping: Readonly<FittedFlowingCurve> = Object.freeze({
+      points: curve.points,
+      provenance: Object.freeze({
+        ...curve.provenance,
+        sourceSampleIndices: Object.freeze(
+          new Array<number>(curve.points.length).fill(0),
+        ),
+      }),
+    })
+    expect(
+      auditFittedProvenance(compatible, trajectory, allZeroMapping),
+    ).toBeNull()
   })
 
   it('keeps both opaque sides of a long unsupported gap and rolls back provisional travel', () => {
@@ -931,51 +1043,37 @@ describe('Flowing Contours synthetic ambiguity and gap integration', () => {
     ).toBe(true)
   })
 
-  it('leaves a raster near-loop open without an endpoint chord', () => {
-    const pixels = raster(72, 72, (x, y) => {
-      const dx = x - 35.5
-      const dy = y - 35.5
-      const angle = Math.atan2(dy, dx)
-      const angleFromTop = Math.atan2(
-        Math.sin(angle + Math.PI / 2),
-        Math.cos(angle + Math.PI / 2),
-      )
-      const distanceFromGap = Math.abs(angleFromTop)
-      const amplitude =
-        distanceFromGap < 0.24
-          ? 0
-          : Math.min(1, (distanceFromGap - 0.24) / 0.12)
-      const side =
-        1 / (1 + Math.exp(-(Math.hypot(dx, dy) - 22) / 0.6))
-      const byte = clampByte(128 + (side - 0.5) * 210 * amplitude)
-      return [byte, byte, byte, 255]
-    })
-    const controls = Object.freeze({
-      ...GENERATOR_CONTROLS,
-      curveDetail: 0.6,
-    })
-    const result = generateFlowingContours({
-      pixels,
-      frame: FRAME,
-      controls,
-    })
-    expectExactGeneratorAccounting(pixels, controls, result)
-    const primitive = result.scene.primitives[0]!
-    const first = primitive.points[0]!
-    const last = primitive.points.at(-1)!
+  it('leaves a prescribed interrupted loop open without an endpoint chord', () => {
+    const field = prescribedInterruptedLoopField()
+    const output = runExactPipeline(field)
+    const trajectory = output.acceptedTrajectories[0]!
+    const curve = output.fittedCurves[0]!
+    const first = curve.points[0]!
+    const last = curve.points.at(-1)!
     const endpointDistance = Math.hypot(
       last[0] - first[0],
       last[1] - first[1],
     )
 
-    expect(result.scene.primitives).toHaveLength(1)
-    expect(primitive.closed).toBe(false)
-    expect(pathLength(primitive.points)).toBeGreaterThan(endpointDistance * 5)
-    expect(maximumSegmentLength(primitive.points)).toBeLessThan(
-      FRAME.width * 0.12,
-    )
-    expect(result.diagnostics.endpointReasonCounts['evidence-exhausted']).toBe(
-      2,
-    )
+    expect(output.acceptedTrajectories).toHaveLength(1)
+    expect(output.fittedCurves).toHaveLength(1)
+    expect(output.diagnostics.rejectedCandidateCount).toBe(1)
+    expect([
+      trajectory.samples[0]!.point,
+      trajectory.samples.at(-1)!.point,
+      trajectory.startEndpointReason,
+      trajectory.endEndpointReason,
+    ]).toEqual([
+      [19.30664497196662, 9.924925841745436],
+      [28.621636822565044, 9.914943750184856],
+      'alpha-boundary',
+      'alpha-boundary',
+    ])
+    expect(curve.points[0]).toEqual(trajectory.samples[0]!.point)
+    expect(curve.points.at(-1)).toEqual(trajectory.samples.at(-1)!.point)
+    expect(trajectory.samples.every((sample) => sample.alpha > 0)).toBe(true)
+    expect(pathLength(curve.points)).toBeGreaterThan(endpointDistance * 7)
+    expect(maximumSegmentLength(curve.points)).toBeLessThan(6)
+    expect(first).not.toEqual(last)
   })
 })
