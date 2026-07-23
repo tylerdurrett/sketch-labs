@@ -569,6 +569,9 @@ describe("App — Watercolor Forms integration (#402 WF10)", () => {
         (input) => input.id,
       ),
     ).toEqual([
+      "control-gamma",
+      "control-contrast",
+      "control-pivot",
       "control-formDetail",
       "control-colorSensitivity",
       "control-boundaryStrength",
@@ -581,6 +584,9 @@ describe("App — Watercolor Forms integration (#402 WF10)", () => {
     ).toBe(
       JSON.stringify({
         imageAsset: WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID,
+        gamma: 0.5,
+        contrast: 0.5,
+        pivot: 0.5,
         formDetail: 0.5,
         colorSensitivity: 0.5,
         boundaryStrength: 0.5,
@@ -647,6 +653,9 @@ describe("App — Watercolor Forms integration (#402 WF10)", () => {
       name: "watercolor-authored",
       params: {
         imageAsset: WATERCOLOR_FORMS_DEFAULT_IMAGE_ASSET_ID,
+        gamma: 0.5,
+        contrast: 0.5,
+        pivot: 0.5,
         formDetail: 0.5,
         colorSensitivity: 0.5,
         boundaryStrength: 0.81,

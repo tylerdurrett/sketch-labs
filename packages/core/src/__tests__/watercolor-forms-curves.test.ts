@@ -218,6 +218,50 @@ function interpolateForTest(
 }
 
 describe('Watercolor Forms bounded curve fitting', () => {
+  it('damps a diagonal lattice staircase at authored midpoint smoothing', () => {
+    const points: Point[] = []
+    for (let coordinate = 1; coordinate <= 30; coordinate += 1) {
+      points.push(
+        [coordinate, coordinate],
+        [coordinate, coordinate + 1],
+      )
+    }
+    points.push([31, 31])
+    const staircase = boundaryPath(points)
+    const lattice = options({
+      latticeWidth: 40,
+      latticeHeight: 40,
+      positiveSupport: Array<boolean>(40 * 40).fill(true),
+    })
+
+    const [curve] = fitWatercolorBoundaryCurves(
+      [staircase],
+      0.5,
+      lattice,
+    )
+
+    expect(curve!.closed).toBe(false)
+    expect(curve!.boundarySegmentIds).toEqual(
+      staircase.boundarySegmentIds,
+    )
+    expect(curve!.points[0]).toEqual(staircase.points[0])
+    expect(curve!.points.at(-1)).toEqual(staircase.points.at(-1))
+    // A straight line has zero turn energy. A quarter radian-squared permits
+    // the two bounded endpoint transitions while rejecting the visible
+    // periodic left-right heading oscillation of the two-pass lattice fit.
+    expect(fixedSpacingTurnEnergy(curve!.points, 0.5)).toBeLessThanOrEqual(
+      0.25,
+    )
+    for (const point of sampledCurvePoints(curve!.points)) {
+      expect(distanceToPath(point, staircase.points)).toBeLessThanOrEqual(
+        WATERCOLOR_BOUNDARY_MAX_DEVIATION + 1e-9,
+      )
+    }
+    expect(
+      fitWatercolorBoundaryCurves([staircase], 0.5, lattice),
+    ).toEqual([curve])
+  })
+
   it(
     'strictly simplifies and lowers roughness on a multiperiod wavy path',
     () => {

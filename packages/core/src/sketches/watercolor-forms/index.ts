@@ -59,6 +59,9 @@ function controlsFromParams(
   schema: WatercolorFormsSchema,
 ): WatercolorFormsControls {
   return {
+    gamma: numberParam(params, schema, 'gamma'),
+    contrast: numberParam(params, schema, 'contrast'),
+    pivot: numberParam(params, schema, 'pivot'),
     formDetail: numberParam(params, schema, 'formDetail'),
     colorSensitivity: numberParam(params, schema, 'colorSensitivity'),
     boundaryStrength: numberParam(params, schema, 'boundaryStrength'),

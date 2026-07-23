@@ -4,6 +4,10 @@ import type { DecodedPixels } from '../imageAssets'
 import { srgbByteToLinear } from '../rasterSampling'
 import type { CoordinateSpace } from '../scene'
 import { prepareWatercolorFormsRaster } from '../sketches/watercolor-forms/analysis'
+import {
+  createWatercolorFormsToneTransform,
+  defaultWatercolorFormsControls,
+} from '../sketches/watercolor-forms/controls'
 import { WATERCOLOR_FORMS_LIMITS } from '../sketches/watercolor-forms/limits'
 
 const FRAME: CoordinateSpace = { width: 320, height: 180 }
@@ -75,6 +79,83 @@ describe('prepareWatercolorFormsRaster', () => {
     for (const green of result.linearGreen.slice(2)) {
       expect(green).toBeCloseTo(srgbByteToLinear(148), 15)
     }
+  })
+
+  it('applies gamma then pivoted contrast after denoising and preserves chromaticity and alpha', () => {
+    const source = solidPixels(1, 1, [128, 64, 32, 153])
+    const identity = prepare(source)
+    const controls = {
+      ...defaultWatercolorFormsControls,
+      gamma: 0.73,
+      contrast: 0.29,
+      pivot: 0.41,
+    }
+    const adjusted = prepareWatercolorFormsRaster(source, FRAME, controls)
+    const expectedLuminance = createWatercolorFormsToneTransform(controls)(
+      identity.luminance[0]!,
+    )
+
+    expect(adjusted.luminance[0]).toBeCloseTo(expectedLuminance, 14)
+    expect(adjusted.linearRed[0]! / adjusted.linearGreen[0]!).toBeCloseTo(
+      identity.linearRed[0]! / identity.linearGreen[0]!,
+      14,
+    )
+    expect(adjusted.linearGreen[0]! / adjusted.linearBlue[0]!).toBeCloseTo(
+      identity.linearGreen[0]! / identity.linearBlue[0]!,
+      14,
+    )
+    expect(adjusted.alpha).toEqual(identity.alpha)
+    expect(adjusted.positiveSupport).toEqual(identity.positiveSupport)
+  })
+
+  it('keeps identity preparation exactly equal and retains equal-luminance chromatic boundaries after tone shaping', () => {
+    const source = pixels(4, 1, [
+      255, 0, 0, 255, 255, 0, 0, 255, 0, 148, 0, 255, 0, 148, 0, 255,
+    ])
+    const implicitIdentity = prepare(source)
+    const explicitIdentity = prepareWatercolorFormsRaster(
+      source,
+      FRAME,
+      defaultWatercolorFormsControls,
+    )
+    const adjusted = prepareWatercolorFormsRaster(source, FRAME, {
+      ...defaultWatercolorFormsControls,
+      gamma: 0.7,
+      contrast: 0.35,
+      pivot: 0.4,
+    })
+
+    expect(explicitIdentity).toEqual(implicitIdentity)
+    expect(adjusted.linearRed.slice(0, 2).every((value) => value > 0)).toBe(
+      true,
+    )
+    expect(adjusted.linearGreen.slice(0, 2)).toEqual([0, 0])
+    expect(adjusted.linearRed.slice(2)).toEqual([0, 0])
+    expect(
+      adjusted.linearGreen.slice(2).every((value) => value > 0),
+    ).toBe(true)
+    expect(adjusted.alpha).toEqual(implicitIdentity.alpha)
+  })
+
+  it('lifts visible black continuously while keeping transparent black colorless', () => {
+    const source = pixels(3, 1, [
+      0, 0, 0, 255,
+      1, 1, 1, 255,
+      0, 0, 0, 0,
+    ])
+    const adjusted = prepareWatercolorFormsRaster(source, FRAME, {
+      ...defaultWatercolorFormsControls,
+      contrast: 0,
+      pivot: 0.5,
+    })
+
+    expect(adjusted.linearRed[0]).toBeCloseTo(0.475, 4)
+    expect(adjusted.linearRed[1]).toBeCloseTo(adjusted.linearRed[0]!, 4)
+    expect(adjusted.linearRed[2]).toBe(0)
+    expect(adjusted.linearGreen[2]).toBe(0)
+    expect(adjusted.linearBlue[2]).toBe(0)
+    expect(adjusted.luminance[2]).toBe(0)
+    expect(adjusted.positiveSupport).toEqual([true, true, false])
   })
 
   it('preserves meaningful alpha transitions and exact-zero support', () => {

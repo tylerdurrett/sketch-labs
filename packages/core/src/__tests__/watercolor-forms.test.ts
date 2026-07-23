@@ -44,13 +44,16 @@ function environmentFor(
 }
 
 describe('Watercolor Forms registered Sketch', () => {
-  it('publishes stable metadata and the managed asset plus four controls in authored order', () => {
+  it('publishes stable metadata and the managed asset plus seven controls in authored order', () => {
     const sketch = createWatercolorForms(SELECTED_ID)
 
     expect(sketch.id).toBe('watercolor-forms')
     expect(sketch.name).toBe('Watercolor Forms')
     expect(Object.keys(sketch.schema)).toEqual([
       'imageAsset',
+      'gamma',
+      'contrast',
+      'pivot',
       'formDetail',
       'colorSensitivity',
       'boundaryStrength',
@@ -136,6 +139,9 @@ describe('Watercolor Forms registered Sketch', () => {
       pixels,
       frame: FRAME,
       controls: {
+        gamma: 0.5,
+        contrast: 0.5,
+        pivot: 0.5,
         formDetail: 1,
         colorSensitivity: 0.7,
         boundaryStrength: 0,
@@ -152,10 +158,13 @@ describe('Watercolor Forms registered Sketch', () => {
     expect(direct.primitives.length).toBeGreaterThan(0)
   })
 
-  it('round-trips the asset ID and all four controls through the Preset spine', () => {
+  it('round-trips the asset ID and all seven controls through the Preset spine', () => {
     const schema = createWatercolorFormsSchema(DEFAULT_ID)
     const params = {
       imageAsset: SELECTED_ID,
+      gamma: 0.23,
+      contrast: 0.47,
+      pivot: 0.61,
       formDetail: 0.17,
       colorSensitivity: 0.31,
       boundaryStrength: 0.53,
@@ -176,5 +185,33 @@ describe('Watercolor Forms registered Sketch', () => {
     expect(applied.params).toEqual(params)
     expect(applied.seed).toBe('ignored-by-v1-geometry')
     expect(applied.locks).toEqual(['boundarySmoothing', 'formDetail'])
+  })
+
+  it('loads legacy four-control Presets with identity tone defaults', () => {
+    const schema = createWatercolorFormsSchema(DEFAULT_ID)
+    const legacy = makePreset(
+      'watercolor-forms',
+      'legacy',
+      {
+        imageAsset: SELECTED_ID,
+        formDetail: 0.17,
+        colorSensitivity: 0.31,
+        boundaryStrength: 0.53,
+        boundarySmoothing: 0.79,
+      },
+      'legacy-seed',
+      new Set(),
+    )
+
+    expect(applyPreset(schema, legacy).params).toEqual({
+      imageAsset: SELECTED_ID,
+      gamma: 0.5,
+      contrast: 0.5,
+      pivot: 0.5,
+      formDetail: 0.17,
+      colorSensitivity: 0.31,
+      boundaryStrength: 0.53,
+      boundarySmoothing: 0.79,
+    })
   })
 })

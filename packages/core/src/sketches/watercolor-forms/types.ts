@@ -22,11 +22,11 @@ export interface PreparedWatercolorRaster {
   /** Dimensions of the bounded row-major analysis lattice. */
   readonly width: number
   readonly height: number
-  /** Visible, unassociated linear-sRGB channels in `[0, 1]`. */
+  /** Tone-shaped visible, unassociated linear-sRGB channels in `[0, 1]`. */
   readonly linearRed: readonly number[]
   readonly linearGreen: readonly number[]
   readonly linearBlue: readonly number[]
-  /** Visible linear luminance in `[0, 1]`, retained as independent evidence. */
+  /** Tone-shaped visible linear luminance in `[0, 1]`. */
   readonly luminance: readonly number[]
   /** Sampled straight-alpha coverage in `[0, 1]`. */
   readonly alpha: readonly number[]

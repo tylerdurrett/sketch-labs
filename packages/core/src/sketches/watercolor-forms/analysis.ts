@@ -6,6 +6,9 @@
  * perceptual OKLab distance and alpha distance as hard range barriers. This
  * smooths small within-form raster noise without allowing either strong color
  * boundaries or meaningful alpha boundaries to bleed into their neighbors.
+ * Authored gamma and pivoted contrast are then applied to visible luminance by
+ * scaling the denoised RGB together, retaining chromaticity until gamut
+ * clipping is required and leaving alpha untouched.
  */
 
 import type { DecodedPixels, Rgba8Bytes } from '../../imageAssets'
@@ -18,6 +21,11 @@ import {
   type LatticeSample,
 } from '../../rasterSampling'
 import type { CoordinateSpace } from '../../scene'
+import {
+  createNormalizedWatercolorFormsToneTransform,
+  defaultWatercolorFormsControls,
+  type WatercolorFormsControls,
+} from './controls'
 import { WATERCOLOR_FORMS_LIMITS } from './limits'
 import type { PreparedWatercolorRaster } from './types'
 
@@ -305,6 +313,7 @@ function edgePreservingPreparation(
 export function prepareWatercolorFormsRaster(
   pixels: Readonly<DecodedPixels>,
   frame: Readonly<CoordinateSpace>,
+  controls: Readonly<WatercolorFormsControls> = defaultWatercolorFormsControls,
 ): PreparedWatercolorRaster {
   const raster = validateDecodedRaster(pixels)
   if (raster === null || createRasterContainFit(raster, frame) === null) {
@@ -353,21 +362,67 @@ export function prepareWatercolorFormsRaster(
     alpha: rawAlpha,
     positiveSupport,
   })
-  const luminance = prepared.linearRed.map(
+  const rawLuminance = prepared.linearRed.map(
     (red, index) =>
       RED_LUMINANCE * red +
       GREEN_LUMINANCE * prepared.linearGreen[index]! +
       BLUE_LUMINANCE * prepared.linearBlue[index]!,
   )
+  const toneIsIdentity =
+    controls.gamma === defaultWatercolorFormsControls.gamma &&
+    controls.contrast === defaultWatercolorFormsControls.contrast
+  let linearRed = prepared.linearRed
+  let linearGreen = prepared.linearGreen
+  let linearBlue = prepared.linearBlue
+  let luminance = rawLuminance
+
+  if (!toneIsIdentity) {
+    const applyTone = createNormalizedWatercolorFormsToneTransform(controls)
+    linearRed = new Array<number>(length)
+    linearGreen = new Array<number>(length)
+    linearBlue = new Array<number>(length)
+    luminance = new Array<number>(length)
+
+    for (let index = 0; index < length; index += 1) {
+      const sourceLuminance = rawLuminance[index]!
+      const targetLuminance = applyTone(sourceLuminance)
+      const supported = positiveSupport[index]!
+      const scale =
+        supported && sourceLuminance > 0
+          ? targetLuminance / sourceLuminance
+          : 0
+      const red =
+        supported && sourceLuminance === 0
+          ? targetLuminance
+          : clampUnit(prepared.linearRed[index]! * scale)
+      const green =
+        supported && sourceLuminance === 0
+          ? targetLuminance
+          : clampUnit(prepared.linearGreen[index]! * scale)
+      const blue =
+        supported && sourceLuminance === 0
+          ? targetLuminance
+          : clampUnit(prepared.linearBlue[index]! * scale)
+      linearRed[index] = red
+      linearGreen[index] = green
+      linearBlue[index] = blue
+      // Clipping may make the requested tone unreachable. Record the
+      // luminance of the actual visible RGB that downstream stages receive.
+      luminance[index] =
+        RED_LUMINANCE * red +
+        GREEN_LUMINANCE * green +
+        BLUE_LUMINANCE * blue
+    }
+  }
 
   return Object.freeze({
     sourceWidth: raster.width,
     sourceHeight: raster.height,
     width,
     height,
-    linearRed: Object.freeze(prepared.linearRed),
-    linearGreen: Object.freeze(prepared.linearGreen),
-    linearBlue: Object.freeze(prepared.linearBlue),
+    linearRed: Object.freeze(linearRed),
+    linearGreen: Object.freeze(linearGreen),
+    linearBlue: Object.freeze(linearBlue),
     luminance: Object.freeze(luminance),
     alpha: Object.freeze(prepared.alpha),
     positiveSupport: Object.freeze(positiveSupport),

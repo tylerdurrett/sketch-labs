@@ -409,7 +409,11 @@ export function generateWatercolorForms(
   const frame = frameFrom(input)
   const diagnostics = initialDiagnostics()
   const controls = normalizeWatercolorFormsControls(controlsFrom(input))
-  const raster = prepareWatercolorFormsRaster(pixelsFrom(input), frame)
+  const raster = prepareWatercolorFormsRaster(
+    pixelsFrom(input),
+    frame,
+    controls,
+  )
   if (!validPreparedRaster(raster)) return invalidResult(frame, diagnostics)
 
   diagnostics.analysisWidth = raster.width

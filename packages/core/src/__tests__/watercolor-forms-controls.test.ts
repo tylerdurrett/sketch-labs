@@ -1,15 +1,24 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  createWatercolorFormsToneTransform,
   defaultWatercolorFormsControls,
   normalizeWatercolorFormsControls,
   watercolorFormsControlSchema,
 } from '../sketches/watercolor-forms/controls'
+import {
+  applyPhotoToneControls,
+  applyToneContrast,
+  applyToneGamma,
+} from '../sketches/photo-scribble/tone'
 import { WATERCOLOR_FORMS_LIMITS } from '../sketches/watercolor-forms/limits'
 
 describe('Watercolor Forms authored controls', () => {
-  it('declares four independent frozen controls in authored order', () => {
+  it('declares seven independent frozen controls in authored order', () => {
     expect(Object.keys(watercolorFormsControlSchema)).toEqual([
+      'gamma',
+      'contrast',
+      'pivot',
       'formDetail',
       'colorSensitivity',
       'boundaryStrength',
@@ -36,12 +45,18 @@ describe('Watercolor Forms authored controls', () => {
   it('retains independently authored values', () => {
     expect(
       normalizeWatercolorFormsControls({
+        gamma: 0.7,
+        contrast: 0.6,
+        pivot: 0.8,
         formDetail: 0.1,
         colorSensitivity: 0.2,
         boundaryStrength: 0.3,
         boundarySmoothing: 0.4,
       }),
     ).toEqual({
+      gamma: 0.7,
+      contrast: 0.6,
+      pivot: 0.8,
       formDetail: 0.1,
       colorSensitivity: 0.2,
       boundaryStrength: 0.3,
@@ -49,15 +64,23 @@ describe('Watercolor Forms authored controls', () => {
     })
   })
 
-  it('fills missing values from declarations', () => {
-    expect(normalizeWatercolorFormsControls({ formDetail: 0.75 })).toEqual({
+  it('defaults legacy missing tone keys to exact identity', () => {
+    const normalized = normalizeWatercolorFormsControls({ formDetail: 0.75 })
+
+    expect(normalized).toEqual({
       ...defaultWatercolorFormsControls,
       formDetail: 0.75,
     })
+    expect(normalized.gamma).toBe(0.5)
+    expect(normalized.contrast).toBe(0.5)
+    expect(normalized.pivot).toBe(0.5)
   })
 
   it('defaults non-finite inputs, clamps finite bounds, and freezes output', () => {
     const normalized = normalizeWatercolorFormsControls({
+      gamma: Number.NaN,
+      contrast: Number.POSITIVE_INFINITY,
+      pivot: Number.NEGATIVE_INFINITY,
       formDetail: Number.NaN,
       colorSensitivity: Number.POSITIVE_INFINITY,
       boundaryStrength: -20,
@@ -65,12 +88,55 @@ describe('Watercolor Forms authored controls', () => {
     })
 
     expect(normalized).toEqual({
+      gamma: defaultWatercolorFormsControls.gamma,
+      contrast: defaultWatercolorFormsControls.contrast,
+      pivot: defaultWatercolorFormsControls.pivot,
       formDetail: defaultWatercolorFormsControls.formDetail,
       colorSensitivity: defaultWatercolorFormsControls.colorSensitivity,
       boundaryStrength: watercolorFormsControlSchema.boundaryStrength.min,
       boundarySmoothing: watercolorFormsControlSchema.boundarySmoothing.max,
     })
     expect(Object.isFrozen(normalized)).toBe(true)
+  })
+
+  it('adapts independent values to exact gamma-then-contrast math', () => {
+    const controls = {
+      ...defaultWatercolorFormsControls,
+      gamma: 0.79,
+      contrast: 0.18,
+      pivot: 0.37,
+    }
+    const applyTone = createWatercolorFormsToneTransform(controls)
+    const gammaAdjusted = applyToneGamma(0.68, controls.gamma)
+
+    expect(applyTone(0.68)).toBe(
+      applyPhotoToneControls(0.68, {
+        toneGamma: controls.gamma,
+        toneContrast: controls.contrast,
+        tonePivot: controls.pivot,
+      }),
+    )
+    expect(applyTone(0.68)).toBe(
+      applyToneContrast(
+        gammaAdjusted,
+        controls.contrast,
+        controls.pivot,
+      ),
+    )
+    expect(createWatercolorFormsToneTransform()(0.68)).toBe(0.68)
+  })
+
+  it('keeps low-contrast interpretation continuous through black', () => {
+    const applyTone = createWatercolorFormsToneTransform({
+      contrast: 0,
+      pivot: 0.5,
+    })
+    const black = applyTone(0)
+    const nearBlack = applyTone(1e-12)
+
+    expect(black).toBeCloseTo(0.475, 15)
+    expect(nearBlack).toBeGreaterThanOrEqual(black)
+    expect(nearBlack - black).toBeLessThan(1e-10)
   })
 })
 

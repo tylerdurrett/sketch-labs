@@ -141,6 +141,9 @@ function visibleDifference(
   first: Readonly<WatercolorRegionSummary>,
   second: Readonly<WatercolorRegionSummary>,
 ): number {
+  // Both the region RGB means and mean luminance come from the tone-shaped
+  // prepared raster. Full OKLab keeps chromatic evidence while its lightness
+  // component and the explicit luminance term both respect the authored tone.
   const firstColor = linearRgbToPerceptual(
     first.meanLinearRed,
     first.meanLinearGreen,

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { WATERCOLOR_FORMS_LIMITS } from '../sketches/watercolor-forms/limits'
+import { prepareWatercolorFormsRaster } from '../sketches/watercolor-forms/analysis'
+import { defaultWatercolorFormsControls } from '../sketches/watercolor-forms/controls'
 import {
   partitionWatercolorFormsRaster,
   partitionWatercolorFormsRasterWithEdgeOrderForTest,
@@ -126,6 +128,37 @@ describe('partitionWatercolorFormsRaster', () => {
 
     expect(source.luminance[0]).toBeCloseTo(source.luminance[1]!, 12)
     expect(result.regionBySample).toEqual([0, 1])
+  })
+
+  it('lets post-denoise tone shaping change the fine partition', () => {
+    const width = 8
+    const height = 6
+    const pixels = {
+      width,
+      height,
+      data: Uint8Array.from(
+        Array.from({ length: width * height }, (_, index) => {
+          const value = index % width < width / 2 ? 96 : 128
+          return [value, value, value, 255]
+        }).flat(),
+      ),
+    }
+    const prepare = (contrast: number) =>
+      prepareWatercolorFormsRaster(
+        pixels,
+        { width: 80, height: 60 },
+        {
+          ...defaultWatercolorFormsControls,
+          contrast,
+          pivot: 0.16,
+        },
+      )
+    const compressed = partitionWatercolorFormsRaster(prepare(0))
+    const separated = partitionWatercolorFormsRaster(prepare(1))
+
+    expect(compressed.regions).toHaveLength(1)
+    expect(separated.regions).toHaveLength(2)
+    expect(separated.sharedBoundarySegments).not.toEqual([])
   })
 
   it('caps a flat initial region at a fixed fine-partition area', () => {

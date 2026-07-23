@@ -17,11 +17,13 @@ import type { WatercolorBoundaryPath } from './types'
 export const WATERCOLOR_BOUNDARY_MAX_DEVIATION = 0.45
 
 const COORDINATE_EPSILON = 1e-9
-const ROUNDING_PASSES = 2
+const MAX_ROUNDING_PASSES = 12
+const ROUNDING_CONVERGENCE_DISTANCE = 1e-4
 const MAX_LOCAL_ROUNDING_AMOUNT = 0.5
 const BACKOFF_ATTEMPTS = 8
 const MAX_SHORTCUT_SOURCE_SEGMENTS = 32
-const WORK_UNITS_PER_POINT = 128
+const REMOVAL_WORK_UNITS_PER_POINT = 128
+const ROUNDING_WORK_UNITS_PER_POINT_PER_PASS = 64
 
 export interface WatercolorBoundaryCurveOptions {
   /**
@@ -452,7 +454,12 @@ function roundedPoints(
 ): readonly Readonly<Point>[] {
   const current = points.map(({ point }): Readonly<Point> => point)
   const budget = {
-    remaining: Math.max(1, source.length * WORK_UNITS_PER_POINT),
+    remaining: Math.max(
+      1,
+      source.length *
+        MAX_ROUNDING_PASSES *
+        ROUNDING_WORK_UNITS_PER_POINT_PER_PASS,
+    ),
   }
   /*
    * Back off each vertex independently. One tight junction or alpha-support
@@ -461,7 +468,8 @@ function roundedPoints(
    * validating both incident source sub-arcs keeps every accepted move inside
    * the same global tube and positive-support contract.
    */
-  for (let pass = 0; pass < ROUNDING_PASSES; pass += 1) {
+  for (let pass = 0; pass < MAX_ROUNDING_PASSES; pass += 1) {
+    let maximumMovementSquared = 0
     for (let index = 0; index < current.length; index += 1) {
       if (
         budget.remaining <= 0 ||
@@ -517,10 +525,21 @@ function roundedPoints(
             budget,
           )
         ) {
+          maximumMovementSquared = Math.max(
+            maximumMovementSquared,
+            squaredDistance(point, candidate),
+          )
           current[index] = candidate
           break
         }
       }
+    }
+    if (
+      budget.remaining <= 0 ||
+      maximumMovementSquared <=
+        ROUNDING_CONVERGENCE_DISTANCE * ROUNDING_CONVERGENCE_DISTANCE
+    ) {
+      break
     }
   }
   return current
@@ -536,7 +555,7 @@ function fitPath(
   if (smoothing === 0) return source
 
   const removalBudget = {
-    remaining: Math.max(1, source.length * WORK_UNITS_PER_POINT),
+    remaining: Math.max(1, source.length * REMOVAL_WORK_UNITS_PER_POINT),
   }
 
   const order = removalOrder(source, closed, options, removalBudget)

@@ -162,6 +162,9 @@ function perceptualDistance(
 function buildCanonicalEdges(
   raster: Readonly<PreparedWatercolorRaster>,
 ): readonly LatticeEdge[] {
+  // Preparation has already tone-shaped these visible RGB channels. Keeping
+  // the full OKLab distance therefore combines their transformed lightness
+  // with chromatic evidence without a second, raw-lightness bypass.
   const perceptual = raster.linearRed.map((red, sampleId) =>
     linearRgbToPerceptual(
       red,

@@ -271,6 +271,34 @@ describe('generateWatercolorForms', () => {
     ).toBe(true)
   })
 
+  it('lets tone interpretation move partition and hierarchy boundaries', () => {
+    const source = twoBlocks(8, 6, 96, 128)
+    const compressed = generate(source, {
+      contrast: 0,
+      pivot: 0.16,
+      formDetail: 1,
+      colorSensitivity: 1,
+      boundaryStrength: 0,
+      boundarySmoothing: 0,
+    })
+    const separated = generate(source, {
+      contrast: 1,
+      pivot: 0.16,
+      formDetail: 1,
+      colorSensitivity: 1,
+      boundaryStrength: 0,
+      boundarySmoothing: 0,
+    })
+
+    expect(separated.diagnostics.initialRegionCount).toBeGreaterThan(
+      compressed.diagnostics.initialRegionCount,
+    )
+    expect(separated.diagnostics.selectedRegionCount).toBeGreaterThan(
+      compressed.diagnostics.selectedRegionCount,
+    )
+    expect(separated.scene).not.toEqual(compressed.scene)
+  })
+
   it('uses smoothing without increasing emitted point complexity', () => {
     const source = alphaBox(17)
     const unsmoothed = generate(source, {
@@ -299,6 +327,9 @@ describe('generateWatercolorForms', () => {
       pixels: source,
       frame: FRAME,
       controls: {
+        gamma: Number.NaN,
+        contrast: Number.POSITIVE_INFINITY,
+        pivot: Number.NEGATIVE_INFINITY,
         formDetail: Number.NaN,
         colorSensitivity: Number.POSITIVE_INFINITY,
         boundaryStrength: Number.NEGATIVE_INFINITY,

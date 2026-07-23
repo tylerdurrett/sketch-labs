@@ -352,6 +352,24 @@ describe("buildWatercolorFormsHierarchy", () => {
     expect(weakScore).toBeGreaterThan(differentScore);
   });
 
+  it("uses tone-shaped region means in hierarchy similarity", () => {
+    const boundary = [segment(0, 0, 1, 0.1)];
+    const compressed = contractPartition(
+      [region(0, 1, [0.15, 0.15, 0.15]), region(1, 1, [0.16, 0.16, 0.16])],
+      boundary,
+    );
+    const separated = contractPartition(
+      [region(0, 1, [0, 0, 0]), region(1, 1, [1, 1, 1])],
+      boundary,
+    );
+
+    expect(
+      buildWatercolorFormsHierarchy(compressed, 0.5).merges[0]!.similarity,
+    ).toBeGreaterThan(
+      buildWatercolorFormsHierarchy(separated, 0.5).merges[0]!.similarity,
+    );
+  });
+
   it("includes small-region pressure independently of pair balance", () => {
     const source = (
       firstCount: number,

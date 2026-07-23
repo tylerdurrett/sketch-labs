@@ -28,6 +28,11 @@ import type { Point } from '../types'
 
 const FRAME: CoordinateSpace = Object.freeze({ width: 160, height: 100 })
 const MAX_CONTROLS: WatercolorFormsControls = Object.freeze({
+  // Identity tone preserves the adversarial raster's full entropy while the
+  // topology controls apply maximum admitted region pressure.
+  gamma: 0.5,
+  contrast: 0.5,
+  pivot: 0.5,
   formDetail: 1,
   colorSensitivity: 1,
   boundaryStrength: 0,
@@ -575,6 +580,9 @@ describe('Watercolor Forms useful deterministic cap prefixes', () => {
     const { generateWatercolorForms: generateWithPrimitiveLimit } =
       await import('../sketches/watercolor-forms/generator')
     const controls: WatercolorFormsControls = {
+      gamma: 0.5,
+      contrast: 0.5,
+      pivot: 0.5,
       formDetail: 1,
       colorSensitivity: 1,
       boundaryStrength: 0,
