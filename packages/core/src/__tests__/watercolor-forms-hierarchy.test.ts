@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildWatercolorFormsHierarchy,
+  buildWatercolorFormsHierarchyWithDiagnostics,
+  buildWatercolorFormsHierarchyWithLimitsAndDiagnosticsForTest,
   buildWatercolorFormsHierarchyWithLimitsForTest,
 } from "../sketches/watercolor-forms/hierarchy";
 import { partitionWatercolorFormsRaster } from "../sketches/watercolor-forms/partition";
@@ -530,6 +532,67 @@ describe("buildWatercolorFormsHierarchy", () => {
       ),
     ).toBe(true);
   });
+
+  it("reports exact deterministic queue and region-update accounting", () => {
+    const partition = contractPartition(
+      [0, 1, 2].map((id) => region(id, 1, [id / 3, id / 3, id / 3])),
+      [segment(0, 0, 1, 0.2), segment(1, 1, 2, 0.2)],
+    );
+
+    const first = buildWatercolorFormsHierarchyWithDiagnostics(
+      partition,
+      0.5,
+    );
+    const second = buildWatercolorFormsHierarchyWithDiagnostics(
+      partition,
+      0.5,
+    );
+
+    expect(first).toEqual(second);
+    expect(first.hierarchy.complete).toBe(true);
+    expect(first.diagnostics).toEqual({
+      limitedBy: null,
+      mergeQueueEntryCount: 3,
+      regionUpdateCount: 1,
+    });
+    expect(Object.isFrozen(first.diagnostics)).toBe(true);
+  });
+
+  it.each([
+    [
+      "maxMergeCount",
+      { maxMergeCount: 0 },
+      { mergeQueueEntryCount: 2, regionUpdateCount: 0 },
+    ],
+    [
+      "maxMergeQueueEntryCount",
+      { maxMergeQueueEntryCount: 0 },
+      { mergeQueueEntryCount: 0, regionUpdateCount: 0 },
+    ],
+    [
+      "maxRegionUpdateCount",
+      { maxRegionUpdateCount: 0 },
+      { mergeQueueEntryCount: 2, regionUpdateCount: 0 },
+    ],
+  ] as const)(
+    "names the %s cap without fabricating work counters",
+    (limitedBy, limits, counts) => {
+      const partition = contractPartition(
+        [0, 1, 2].map((id) => region(id, 1, [id / 3, id / 3, id / 3])),
+        [segment(0, 0, 1, 0.2), segment(1, 1, 2, 0.2)],
+      );
+
+      const result =
+        buildWatercolorFormsHierarchyWithLimitsAndDiagnosticsForTest(
+          partition,
+          0.5,
+          limits,
+        );
+
+      expect(result.hierarchy.complete).toBe(false);
+      expect(result.diagnostics).toEqual({ limitedBy, ...counts });
+    },
+  );
 
   it.each([
     ["queue initialization", { maxMergeQueueEntryCount: 0 }],

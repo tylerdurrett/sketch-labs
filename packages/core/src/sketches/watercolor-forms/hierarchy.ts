@@ -14,6 +14,7 @@
  */
 
 import { WATERCOLOR_FORMS_LIMITS } from "./limits";
+import type { WatercolorFormsLimitName } from "./limits";
 import type {
   InitialRegionPartition,
   RegionHierarchy,
@@ -68,6 +69,17 @@ interface HierarchyWorkLimits {
 
 interface HierarchyBuildOptions {
   readonly limits: Readonly<HierarchyWorkLimits>;
+}
+
+export interface WatercolorFormsHierarchyBuildDiagnostics {
+  readonly limitedBy: WatercolorFormsLimitName | null;
+  readonly mergeQueueEntryCount: number;
+  readonly regionUpdateCount: number;
+}
+
+export interface WatercolorFormsHierarchyBuildResult {
+  readonly hierarchy: Readonly<RegionHierarchy>;
+  readonly diagnostics: Readonly<WatercolorFormsHierarchyBuildDiagnostics>;
 }
 
 const DEFAULT_WORK_LIMITS: Readonly<HierarchyWorkLimits> = Object.freeze({
@@ -451,7 +463,7 @@ function buildHierarchy(
   partition: Readonly<InitialRegionPartition>,
   colorSensitivityInput: number,
   options: Readonly<HierarchyBuildOptions>,
-): RegionHierarchy {
+): WatercolorFormsHierarchyBuildResult {
   const initialRegions = [...partition.regions].sort(
     (first, second) => first.id - second.id,
   );
@@ -485,8 +497,10 @@ function buildHierarchy(
   let mergeQueueEntryCount = 0;
   let regionUpdateCount = 0;
   let complete = true;
+  let limitedBy: WatercolorFormsLimitName | null = null;
   if (initialEdges.length > options.limits.maxMergeQueueEntryCount) {
     complete = false;
+    limitedBy = "maxMergeQueueEntryCount";
   } else {
     for (const [firstRegionId, secondRegionId, boundary] of initialEdges) {
       queue.push(
@@ -533,13 +547,25 @@ function buildHierarchy(
         );
       });
     const requiredWork = neighborIds.length;
+    if (merges.length >= options.limits.maxMergeCount) {
+      complete = false;
+      limitedBy = "maxMergeCount";
+      break;
+    }
     if (
-      merges.length >= options.limits.maxMergeCount ||
       mergeQueueEntryCount + requiredWork >
-        options.limits.maxMergeQueueEntryCount ||
-      regionUpdateCount + requiredWork > options.limits.maxRegionUpdateCount
+      options.limits.maxMergeQueueEntryCount
     ) {
       complete = false;
+      limitedBy = "maxMergeQueueEntryCount";
+      break;
+    }
+    if (
+      regionUpdateCount + requiredWork >
+      options.limits.maxRegionUpdateCount
+    ) {
+      complete = false;
+      limitedBy = "maxRegionUpdateCount";
       break;
     }
 
@@ -605,11 +631,19 @@ function buildHierarchy(
     }
   }
 
-  return Object.freeze({
+  const hierarchy = Object.freeze({
     partition,
     regions: Object.freeze(regions),
     merges: Object.freeze(merges),
     complete,
+  });
+  return Object.freeze({
+    hierarchy,
+    diagnostics: Object.freeze({
+      limitedBy,
+      mergeQueueEntryCount,
+      regionUpdateCount,
+    }),
   });
 }
 
@@ -618,6 +652,19 @@ export function buildWatercolorFormsHierarchy(
   partition: Readonly<InitialRegionPartition>,
   colorSensitivity: number,
 ): RegionHierarchy {
+  return buildHierarchy(partition, colorSensitivity, EMPTY_OPTIONS).hierarchy;
+}
+
+/**
+ * Build the production hierarchy with exact bounded-work accounting.
+ *
+ * The ordinary builder remains the convenient stage API; orchestration uses
+ * this narrow result seam so generator diagnostics never infer internal work.
+ */
+export function buildWatercolorFormsHierarchyWithDiagnostics(
+  partition: Readonly<InitialRegionPartition>,
+  colorSensitivity: number,
+): WatercolorFormsHierarchyBuildResult {
   return buildHierarchy(partition, colorSensitivity, EMPTY_OPTIONS);
 }
 
@@ -630,6 +677,19 @@ export function buildWatercolorFormsHierarchyWithLimitsForTest(
   colorSensitivity: number,
   limits: Partial<HierarchyWorkLimits>,
 ): RegionHierarchy {
+  return buildWatercolorFormsHierarchyWithLimitsAndDiagnosticsForTest(
+    partition,
+    colorSensitivity,
+    limits,
+  ).hierarchy;
+}
+
+/** @internal Exact accounting seam for focused safety-limit tests. */
+export function buildWatercolorFormsHierarchyWithLimitsAndDiagnosticsForTest(
+  partition: Readonly<InitialRegionPartition>,
+  colorSensitivity: number,
+  limits: Partial<HierarchyWorkLimits>,
+): WatercolorFormsHierarchyBuildResult {
   return buildHierarchy(partition, colorSensitivity, {
     limits: Object.freeze({
       maxMergeCount: finiteLimit(
