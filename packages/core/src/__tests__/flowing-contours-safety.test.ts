@@ -378,9 +378,14 @@ function fixedSpacingFlowMetrics(
 ): Readonly<FixedSpacingFlowMetrics> {
   const sampled = fixedSpacingPoints(points, closed, spacing)
   const directions: Readonly<Point>[] = []
-  for (let index = 1; index < sampled.length; index += 1) {
-    const x = sampled[index]![0] - sampled[index - 1]![0]
-    const y = sampled[index]![1] - sampled[index - 1]![1]
+  const segmentCount = closed ? sampled.length : Math.max(0, sampled.length - 1)
+  for (let index = 0; index < segmentCount; index += 1) {
+    const start = sampled[index]!
+    const end = closed
+      ? sampled[(index + 1) % sampled.length]!
+      : sampled[index + 1]!
+    const x = end[0] - start[0]
+    const y = end[1] - start[1]
     const length = Math.hypot(x, y)
     if (length > 1e-9) {
       directions.push(Object.freeze([x / length, y / length] as Point))
@@ -391,13 +396,18 @@ function fixedSpacingFlowMetrics(
   let maximumTurn = 0
   let moderateTurnCount = 0
   let abruptTurnCount = 0
-  let repeatedAbruptAlternationCount = 0
-  let maximumAxisToggleRun = 0
-  let axisToggleRun = 0
-  let previousAbruptSign = 0
+  const abruptSigns: number[] = []
+  const axisRecords: { readonly known: boolean; readonly toggle: boolean }[] =
+    []
+  const turnCount = closed
+    ? directions.length
+    : Math.max(0, directions.length - 1)
 
-  for (let index = 1; index < directions.length; index += 1) {
-    const previous = directions[index - 1]!
+  for (let offset = 0; offset < turnCount; offset += 1) {
+    const index = closed ? offset : offset + 1
+    const previous = closed
+      ? directions[(index - 1 + directions.length) % directions.length]!
+      : directions[index - 1]!
     const current = directions[index]!
     const cross = previous[0] * current[1] - previous[1] * current[0]
     const dot = previous[0] * current[0] + previous[1] * current[1]
@@ -408,11 +418,7 @@ function fixedSpacingFlowMetrics(
     if (turn > MODERATE_TURN) moderateTurnCount += 1
     if (turn > ABRUPT_TURN) {
       abruptTurnCount += 1
-      const sign = Math.sign(signedTurn)
-      if (previousAbruptSign !== 0 && sign !== previousAbruptSign) {
-        repeatedAbruptAlternationCount += 1
-      }
-      previousAbruptSign = sign
+      abruptSigns.push(Math.sign(signedTurn))
     }
 
     const previousAxis =
@@ -427,21 +433,52 @@ function fixedSpacingFlowMetrics(
         : Math.abs(current[1]) >= AXIS_ALIGNMENT_COSINE
           ? 'vertical'
           : null
+    axisRecords.push(
+      Object.freeze({
+        known: previousAxis !== null && currentAxis !== null,
+        toggle:
+          previousAxis !== null &&
+          currentAxis !== null &&
+          previousAxis !== currentAxis &&
+          turn >= ORTHOGONAL_TURN_FLOOR,
+      }),
+    )
+  }
+
+  let repeatedAbruptAlternationCount = 0
+  const abruptPairCount =
+    abruptSigns.length < 2
+      ? 0
+      : closed
+        ? abruptSigns.length
+        : abruptSigns.length - 1
+  for (let index = 0; index < abruptPairCount; index += 1) {
     if (
-      previousAxis !== null &&
-      currentAxis !== null &&
-      previousAxis !== currentAxis &&
-      turn >= ORTHOGONAL_TURN_FLOOR
+      abruptSigns[index]! !== abruptSigns[(index + 1) % abruptSigns.length]!
     ) {
-      axisToggleRun += 1
-      maximumAxisToggleRun = Math.max(maximumAxisToggleRun, axisToggleRun)
-    } else if (previousAxis === null || currentAxis === null) {
-      axisToggleRun = 0
+      repeatedAbruptAlternationCount += 1
     }
   }
 
+  let maximumAxisToggleRun = 0
+  let axisToggleRun = 0
+  const hasUnknownAxis = axisRecords.some((record) => !record.known)
+  const scannedAxisRecords =
+    closed && hasUnknownAxis ? [...axisRecords, ...axisRecords] : axisRecords
+  for (const record of scannedAxisRecords) {
+    if (!record.known) {
+      axisToggleRun = 0
+      continue
+    }
+    if (record.toggle) axisToggleRun += 1
+    maximumAxisToggleRun = Math.max(
+      maximumAxisToggleRun,
+      Math.min(axisToggleRun, axisRecords.length),
+    )
+  }
+
   return Object.freeze({
-    turnCount: Math.max(0, directions.length - 1),
+    turnCount,
     turnEnergy,
     maximumTurn,
     moderateTurnCount,
@@ -986,6 +1023,86 @@ describe('Flowing Contours bounded adversarial completion', () => {
       true,
     )
     expect(passesFlowingMetricGate(staircase, false)).toBe(false)
+  })
+
+  it('includes the closing segment and seam turn without duplicate-endpoint bias', () => {
+    const seamCusp = Object.freeze([
+      Object.freeze([0, 0] as Point),
+      Object.freeze([8, 0] as Point),
+      Object.freeze([16, 0] as Point),
+      Object.freeze([24, 0] as Point),
+      Object.freeze([32, 0] as Point),
+      Object.freeze([32, 4] as Point),
+    ])
+    expect(passesFlowingMetricGate(seamCusp, false)).toBe(true)
+    expect(passesFlowingMetricGate(seamCusp, true)).toBe(false)
+    for (const spacing of METRIC_SPACINGS) {
+      const open = fixedSpacingFlowMetrics(seamCusp, false, spacing)
+      const closed = fixedSpacingFlowMetrics(seamCusp, true, spacing)
+      expect(closed.turnCount).toBeGreaterThan(open.turnCount)
+      expect(closed.maximumTurn).toBeGreaterThan(MAXIMUM_FLOWING_TURN)
+    }
+
+    const circle = Object.freeze(
+      Array.from({ length: 64 }, (_value, index) => {
+        const angle = (index / 64) * Math.PI * 2
+        return Object.freeze([
+          40 + 30 * Math.cos(angle),
+          40 + 30 * Math.sin(angle),
+        ] as Point)
+      }),
+    )
+    const repeatedEndpointCircle = Object.freeze([
+      ...circle,
+      Object.freeze([...circle[0]!] as Point),
+    ])
+    expect(passesFlowingMetricGate(circle, true)).toBe(true)
+    expect(passesFlowingMetricGate(repeatedEndpointCircle, true)).toBe(true)
+    for (const spacing of METRIC_SPACINGS) {
+      expect(
+        fixedSpacingFlowMetrics(repeatedEndpointCircle, true, spacing),
+      ).toEqual(fixedSpacingFlowMetrics(circle, true, spacing))
+    }
+  })
+
+  it('rejects a closed staircase while admitting a smooth closed circle', () => {
+    const closedStaircase = Object.freeze([
+      Object.freeze([0, 0] as Point),
+      Object.freeze([8, 0] as Point),
+      Object.freeze([8, 8] as Point),
+      Object.freeze([16, 8] as Point),
+      Object.freeze([16, 16] as Point),
+      Object.freeze([8, 16] as Point),
+      Object.freeze([8, 24] as Point),
+      Object.freeze([0, 24] as Point),
+    ])
+    const smoothCircle = Object.freeze(
+      Array.from({ length: 48 }, (_value, index) => {
+        const angle = (index / 48) * Math.PI * 2
+        return Object.freeze([
+          30 + 20 * Math.cos(angle),
+          30 + 20 * Math.sin(angle),
+        ] as Point)
+      }),
+    )
+
+    expect(passesFlowingMetricGate(closedStaircase, true)).toBe(false)
+    expect(passesFlowingMetricGate(smoothCircle, true)).toBe(true)
+    for (const spacing of METRIC_SPACINGS) {
+      const staircaseMetrics = fixedSpacingFlowMetrics(
+        closedStaircase,
+        true,
+        spacing,
+      )
+      const circleMetrics = fixedSpacingFlowMetrics(smoothCircle, true, spacing)
+      expect(staircaseMetrics.maximumAxisToggleRun).toBeGreaterThan(1)
+      expect(staircaseMetrics.abruptTurnCount).toBeGreaterThan(
+        circleMetrics.abruptTurnCount,
+      )
+      expect(staircaseMetrics.turnEnergy).toBeGreaterThan(
+        circleMetrics.turnEnergy,
+      )
+    }
   })
 
   it('proves weak-span step and distance caps on an opaque low-evidence gap', () => {
