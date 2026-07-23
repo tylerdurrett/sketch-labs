@@ -265,7 +265,7 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
 
     const vanished = field(15, 15, (x, y) => ({
       evidence:
-        x < 5 ? 0.85 * gaussian(y - 6, 0.28) : 0.95 * gaussian(y - 8, 0.28),
+        x < 5 ? 0.85 * gaussian(y - 6, 0.28) : 0.95 * gaussian(y - 7, 0.28),
       tangent: [1, 0],
       scale: 3,
     }))
@@ -277,6 +277,27 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
     )
 
     expect(loneNeighbor.kind).toBe('weak')
+  })
+
+  it('rejects an outward parabolic refinement beyond the ownership tube', () => {
+    const ridge = field(12, 12, (_x, y) => ({
+      evidence: y === 6 ? 1 : 0,
+      tangent: [1, 0],
+    }))
+    const limits = createFlowingContoursTestLimits({
+      'normal-search-sample-count': 5,
+    })
+    expect(limits).not.toBeNull()
+
+    const result = stepFlowingContoursRidge(
+      ridge,
+      at(ridge, [4, 5.45]),
+      [1, 0],
+      ONE_PIXEL_STEP,
+      limits!,
+    )
+
+    expect(result.kind).toBe('weak')
   })
 
   it('classifies source and exact alpha boundaries separately', () => {
@@ -304,6 +325,23 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
         at(alphaEdge, [4, 3]),
         [1, 0],
         ONE_PIXEL_STEP,
+      ).kind,
+    ).toBe('alpha-boundary')
+  })
+
+  it('stops when supported endpoints cross a transparent lattice column', () => {
+    const transparentColumn = field(10, 7, (x, y) => ({
+      evidence: gaussian(y - 3),
+      tangent: [1, 0],
+      alpha: x === 5 ? 0 : 1,
+    }))
+
+    expect(
+      stepFlowingContoursRidge(
+        transparentColumn,
+        at(transparentColumn, [4, 3]),
+        [1, 0],
+        { stepLength: 2 },
       ).kind,
     ).toBe('alpha-boundary')
   })
@@ -371,6 +409,69 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
     ).toBe('ambiguity')
   })
 
+  it('treats hard-zero orientation confidence as ambiguity at every stage', () => {
+    const straight = field(12, 9, (_x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+    const current = {
+      ...at(straight, [4, 4]),
+      tangent: [1, 0] as Point,
+      coherence: 0,
+      ambiguity: 0,
+    }
+    expect(
+      stepFlowingContoursRidge(straight, current, [1, 0], {
+        ...ONE_PIXEL_STEP,
+        minimumCoherence: 0,
+        maximumAmbiguity: 1,
+      }).kind,
+    ).toBe('ambiguity')
+
+    const unresolvedPrediction = field(12, 9, (x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+      coherence: x < 5 ? 1 : 0,
+      ambiguity: 0,
+    }))
+    expect(
+      stepFlowingContoursRidge(
+        unresolvedPrediction,
+        at(unresolvedPrediction, [4, 4]),
+        [1, 0],
+        {
+          ...ONE_PIXEL_STEP,
+          minimumCoherence: 0,
+          maximumAmbiguity: 1,
+        },
+      ).kind,
+    ).toBe('ambiguity')
+
+    const unresolvedCorrection = field(12, 12, (_x, y) => ({
+      evidence: y === 6 ? 1 : 0.2,
+      tangent: [1, 0],
+      coherence: y === 6 ? 0 : 1,
+      ambiguity: 0,
+    }))
+    const fiveSamples = createFlowingContoursTestLimits({
+      'normal-search-sample-count': 5,
+    })
+    expect(fiveSamples).not.toBeNull()
+    expect(
+      stepFlowingContoursRidge(
+        unresolvedCorrection,
+        at(unresolvedCorrection, [4, 5.625]),
+        [1, 0],
+        {
+          ...ONE_PIXEL_STEP,
+          minimumCoherence: 0,
+          maximumAmbiguity: 1,
+        },
+        fiveSamples!,
+      ).kind,
+    ).toBe('ambiguity')
+  })
+
   it('honors an exact lowered odd stencil cap and reproduces byte-for-byte values', () => {
     const straight = field(15, 13, (_x, y) => ({
       evidence: gaussian(y - 6),
@@ -431,5 +532,24 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
         noSamples!,
       ).kind,
     ).toBe('safety-limit')
+  })
+
+  it('fails closed without escaping a hostile current-point getter', () => {
+    const straight = field(9, 9, (_x, y) => ({
+      evidence: gaussian(y - 4),
+      tangent: [1, 0],
+    }))
+    const current = at(straight, [3, 4])
+    const hostile = new Proxy(current, {
+      get(target, property, receiver) {
+        if (property === 'point') throw new Error('hostile point')
+        return Reflect.get(target, property, receiver)
+      },
+    })
+
+    const result = stepFlowingContoursRidge(straight, hostile, [1, 0])
+
+    expect(result.kind).toBe('safety-limit')
+    expect(result.predictedPoint).toEqual([0, 0])
   })
 })

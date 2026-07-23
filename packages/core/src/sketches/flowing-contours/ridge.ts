@@ -18,13 +18,17 @@ import type { CorrectedFlowingRidgeSample, FlowingContoursField } from './types'
 
 const VECTOR_EPSILON = 1e-12
 const EVIDENCE_EPSILON = 1e-12
+const ORIENTATION_COHERENCE_EPSILON = 1e-9
 const SCALE_EPSILON = 1e-9
 const HARD_MAXIMUM_STEP_LENGTH = 4
 const HARD_MAXIMUM_NORMAL_RADIUS = 3
 const NORMAL_RADIUS_SCALE_FACTOR = 0.75
 const MINIMUM_NORMAL_RADIUS = 0.5
 const MAXIMUM_ADJACENT_SCALE_RATIO = 2 + 1e-6
-const RIDGE_OWNERSHIP_RADIUS_FRACTION = 0.5
+/** Correction ownership is always narrower than half an analysis pixel. */
+const HARD_MAXIMUM_OWNERSHIP_RADIUS = 0.49
+const SUPPORT_TRAVERSAL_SPACING = 0.25
+const MAXIMUM_SUPPORT_TRAVERSAL_SAMPLE_COUNT = 64
 
 const DEFAULT_OPTIONS = Object.freeze({
   stepLength: 0.75,
@@ -102,12 +106,13 @@ interface StencilSample {
   readonly index: number
   readonly offset: number
   readonly sample: Readonly<CorrectedFlowingRidgeSample>
-  readonly tangent: Readonly<Point>
 }
 
 function frozenPoint(x: number, y: number): Readonly<Point> {
   return Object.freeze([x, y] as Point)
 }
+
+const ZERO_POINT = frozenPoint(0, 0)
 
 function finiteUnitVector(vector: Readonly<Point>): Readonly<Point> | null {
   const x = vector[0]
@@ -196,6 +201,68 @@ function isInsideField(
   )
 }
 
+/**
+ * Check every bounded subpixel interval and lattice-line intersection.
+ *
+ * Uniform quarter-pixel probes catch positive-width holes; exact vertical and
+ * horizontal lattice crossings catch a one-sample transparent column or row
+ * even when the uniform partition would otherwise step over its zero.
+ */
+function hasPositiveSupportAlongSegment(
+  field: Readonly<FlowingContoursField>,
+  start: Readonly<Point>,
+  end: Readonly<Point>,
+): boolean {
+  const dx = end[0] - start[0]
+  const dy = end[1] - start[1]
+  const distance = Math.hypot(dx, dy)
+  if (!Number.isFinite(distance)) return false
+
+  const parameters = [0, 1]
+  const intervalCount = Math.max(
+    1,
+    Math.ceil(distance / SUPPORT_TRAVERSAL_SPACING),
+  )
+  for (let index = 1; index < intervalCount; index += 1) {
+    parameters.push(index / intervalCount)
+  }
+  if (Math.abs(dx) > VECTOR_EPSILON) {
+    const minimumX = Math.min(start[0], end[0])
+    const maximumX = Math.max(start[0], end[0])
+    for (let x = Math.ceil(minimumX); x <= Math.floor(maximumX); x += 1) {
+      parameters.push((x - start[0]) / dx)
+    }
+  }
+  if (Math.abs(dy) > VECTOR_EPSILON) {
+    const minimumY = Math.min(start[1], end[1])
+    const maximumY = Math.max(start[1], end[1])
+    for (let y = Math.ceil(minimumY); y <= Math.floor(maximumY); y += 1) {
+      parameters.push((y - start[1]) / dy)
+    }
+  }
+  if (parameters.length > MAXIMUM_SUPPORT_TRAVERSAL_SAMPLE_COUNT) return false
+
+  parameters.sort((left, right) => left - right)
+  let previous = Number.NEGATIVE_INFINITY
+  for (const parameter of parameters) {
+    if (
+      !Number.isFinite(parameter) ||
+      parameter < 0 ||
+      parameter > 1 ||
+      Math.abs(parameter - previous) <= VECTOR_EPSILON
+    ) {
+      continue
+    }
+    previous = parameter
+    const point = frozenPoint(
+      start[0] + dx * parameter,
+      start[1] + dy * parameter,
+    )
+    if (sampleFlowingContoursField(field, point) === null) return false
+  }
+  return true
+}
+
 function boundedOddNormalSampleCount(
   limits: Readonly<FlowingContoursLimits>,
 ): number | null {
@@ -223,10 +290,11 @@ function boundedOddNormalSampleCount(
 
 function isFiniteCurrentSample(
   sample: Readonly<CorrectedFlowingRidgeSample>,
+  point: Readonly<Point>,
 ): boolean {
   return (
-    Number.isFinite(sample.point[0]) &&
-    Number.isFinite(sample.point[1]) &&
+    Number.isFinite(point[0]) &&
+    Number.isFinite(point[1]) &&
     Number.isFinite(sample.evidence) &&
     sample.evidence >= 0 &&
     sample.evidence <= 1 &&
@@ -241,6 +309,16 @@ function isFiniteCurrentSample(
     Number.isFinite(sample.alpha) &&
     sample.alpha > 0 &&
     sample.alpha <= 1
+  )
+}
+
+function hasResolvedOrientation(
+  sample: Readonly<CorrectedFlowingRidgeSample>,
+): boolean {
+  return (
+    Number.isFinite(sample.coherence) &&
+    sample.coherence > ORIENTATION_COHERENCE_EPSILON &&
+    finiteUnitVector(sample.tangent) !== null
   )
 }
 
@@ -264,9 +342,10 @@ function compatibleSample(
   predictedDirection: Readonly<Point>,
   currentScale: number,
   options: Readonly<ResolvedFlowingRidgeStepOptions>,
-): StencilSample['tangent'] | null {
+): Readonly<Point> | null {
   if (
     sample.alpha <= 0 ||
+    !hasResolvedOrientation(sample) ||
     sample.evidence + EVIDENCE_EPSILON < options.minimumEvidence ||
     sample.coherence < options.minimumCoherence ||
     sample.ambiguity > options.maximumAmbiguity ||
@@ -373,11 +452,12 @@ export function stepFlowingContoursRidge(
   options: Readonly<FlowingRidgeStepOptions> = DEFAULT_OPTIONS,
   limits: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
 ): FlowingRidgeStepResult {
-  const fallbackPoint = frozenPoint(
-    Number.isFinite(current?.point?.[0]) ? current.point[0] : 0,
-    Number.isFinite(current?.point?.[1]) ? current.point[1] : 0,
-  )
+  let fallbackPoint = ZERO_POINT
   try {
+    const currentPoint = frozenPoint(current.point[0], current.point[1])
+    if (Number.isFinite(currentPoint[0]) && Number.isFinite(currentPoint[1])) {
+      fallbackPoint = currentPoint
+    }
     const resolved = resolveOptions(options)
     const direction = finiteUnitVector(requestedDirection)
     const sampleCount = boundedOddNormalSampleCount(limits)
@@ -386,15 +466,22 @@ export function stepFlowingContoursRidge(
       direction === null ||
       sampleCount === null ||
       !hasFieldShape(field) ||
-      !isFiniteCurrentSample(current)
+      !isFiniteCurrentSample(current, currentPoint)
     ) {
       return stop('safety-limit', fallbackPoint, 0)
     }
-    if (!isInsideField(field, current.point)) {
+    if (!isInsideField(field, currentPoint)) {
       return stop('source-boundary', fallbackPoint, 0)
     }
-    if (sampleFlowingContoursField(field, current.point) === null) {
+    const sampledCurrent = sampleFlowingContoursField(field, currentPoint)
+    if (sampledCurrent === null) {
       return stop('alpha-boundary', fallbackPoint, 0)
+    }
+    if (
+      !hasResolvedOrientation(current) ||
+      !hasResolvedOrientation(sampledCurrent)
+    ) {
+      return stop('ambiguity', fallbackPoint, 0)
     }
 
     const currentTangent = signAlignedUnitVector(current.tangent, direction)
@@ -415,8 +502,8 @@ export function stepFlowingContoursRidge(
     }
 
     const predictedPoint = frozenPoint(
-      current.point[0] + currentTangent[0] * resolved.stepLength,
-      current.point[1] + currentTangent[1] * resolved.stepLength,
+      currentPoint[0] + currentTangent[0] * resolved.stepLength,
+      currentPoint[1] + currentTangent[1] * resolved.stepLength,
     )
     if (!isInsideField(field, predictedPoint)) {
       return stop('source-boundary', predictedPoint, 0)
@@ -425,19 +512,25 @@ export function stepFlowingContoursRidge(
     if (predictedSample === null) {
       return stop('alpha-boundary', predictedPoint, 0)
     }
+    if (!hasPositiveSupportAlongSegment(field, currentPoint, predictedPoint)) {
+      return stop('alpha-boundary', predictedPoint, 0)
+    }
+    if (!hasResolvedOrientation(predictedSample)) {
+      return stop('ambiguity', predictedPoint, 0)
+    }
 
     const normal = frozenPoint(-currentTangent[1], currentTangent[0])
-    const radius = Math.min(
+    const searchRadius = Math.min(
       HARD_MAXIMUM_NORMAL_RADIUS,
       Math.max(
         MINIMUM_NORMAL_RADIUS,
         current.scale * NORMAL_RADIUS_SCALE_FACTOR,
       ),
     )
-    const spacing = sampleCount > 1 ? (2 * radius) / (sampleCount - 1) : 0
+    const spacing = sampleCount > 1 ? (2 * searchRadius) / (sampleCount - 1) : 0
     const stencil: Array<StencilSample | null> = []
     for (let index = 0; index < sampleCount; index += 1) {
-      const offset = sampleCount === 1 ? 0 : -radius + index * spacing
+      const offset = sampleCount === 1 ? 0 : -searchRadius + index * spacing
       const point = frozenPoint(
         predictedPoint[0] + normal[0] * offset,
         predictedPoint[1] + normal[1] * offset,
@@ -447,17 +540,14 @@ export function stepFlowingContoursRidge(
         stencil.push(null)
         continue
       }
-      const tangent = compatibleSample(
-        sample,
-        currentTangent,
-        current.scale,
-        resolved,
-      )
-      stencil.push(
-        tangent === null
-          ? null
-          : Object.freeze({ index, offset, sample, tangent }),
-      )
+      if (
+        sample.evidence + EVIDENCE_EPSILON < resolved.minimumEvidence ||
+        !adjacentScale(current.scale, sample.scale)
+      ) {
+        stencil.push(null)
+        continue
+      }
+      stencil.push(Object.freeze({ index, offset, sample }))
     }
 
     const maxima = localMaxima(stencil)
@@ -498,7 +588,7 @@ export function stepFlowingContoursRidge(
     // The outer stencil is detection space, not automatic ownership space.
     // A sole strong maximum out there is exactly how a fading ridge can hop
     // to a close parallel ridge; leave it to FC09 as weak travel instead.
-    if (Math.abs(strongest.offset) > radius * RIDGE_OWNERSHIP_RADIUS_FRACTION) {
+    if (Math.abs(strongest.offset) > HARD_MAXIMUM_OWNERSHIP_RADIUS) {
       return weak(
         predictedPoint,
         sampleCount,
@@ -507,13 +597,28 @@ export function stepFlowingContoursRidge(
     }
 
     const correctedOffset = parabolicPeakOffset(stencil, strongest, spacing)
+    if (Math.abs(correctedOffset) > HARD_MAXIMUM_OWNERSHIP_RADIUS) {
+      return weak(
+        predictedPoint,
+        sampleCount,
+        alignedWeakSample(predictedSample, currentTangent),
+      )
+    }
     const correctedPoint = frozenPoint(
       predictedPoint[0] + normal[0] * correctedOffset,
       predictedPoint[1] + normal[1] * correctedOffset,
     )
+    if (
+      !hasPositiveSupportAlongSegment(field, predictedPoint, correctedPoint)
+    ) {
+      return stop('alpha-boundary', predictedPoint, sampleCount)
+    }
     const corrected = sampleFlowingContoursField(field, correctedPoint)
     if (corrected === null) {
       return stop('alpha-boundary', predictedPoint, sampleCount)
+    }
+    if (!hasResolvedOrientation(corrected)) {
+      return stop('ambiguity', predictedPoint, sampleCount)
     }
     const correctedTangent = compatibleSample(
       corrected,
