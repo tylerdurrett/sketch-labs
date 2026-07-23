@@ -92,8 +92,16 @@ function boundedLimit(
   name: FlowingContoursLimitName,
   limits: Readonly<FlowingContoursLimits>,
 ): number | null {
-  const value = limits[name]
-  return isValidLimitValue(name, value) ? value : null
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(limits, name)
+    if (descriptor === undefined || !('value' in descriptor)) return null
+    return isValidLimitValue(name, descriptor.value)
+      ? descriptor.value
+      : null
+  } catch {
+    // Proxy descriptor traps and other hostile policies fail closed.
+    return null
+  }
 }
 
 /**

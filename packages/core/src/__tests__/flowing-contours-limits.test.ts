@@ -41,6 +41,8 @@ describe('Flowing Contours limits', () => {
 
   it('makes the derived work and output relationships explicit', () => {
     const limits = FLOWING_CONTOURS_LIMITS
+    expect(limits['analysis-dimension']).toBe(256)
+    expect(limits['analysis-sample-count']).toBe(65_536)
     expect(limits['analysis-sample-count']).toBe(
       limits['analysis-dimension'] ** 2,
     )
@@ -136,6 +138,43 @@ describe('Flowing Contours limits', () => {
     expect(
       isWithinFlowingContoursLimit('candidate-count', 1, unchecked),
     ).toBe(false)
+  })
+
+  it('never invokes hostile policy accessors and fails descriptor traps closed', () => {
+    let statefulAccessCount = 0
+    const statefulAccessor = {
+      get ['candidate-count']() {
+        statefulAccessCount += 1
+        return statefulAccessCount === 1 ? 2 : Infinity
+      },
+    } as unknown as typeof FLOWING_CONTOURS_LIMITS
+    const throwingAccessor = {
+      get ['candidate-count'](): number {
+        throw new Error('must not execute')
+      },
+    } as unknown as typeof FLOWING_CONTOURS_LIMITS
+    const descriptorTrap = new Proxy(
+      { ...FLOWING_CONTOURS_LIMITS },
+      {
+        getOwnPropertyDescriptor() {
+          throw new Error('hostile descriptor trap')
+        },
+      },
+    )
+
+    for (const policy of [
+      statefulAccessor,
+      throwingAccessor,
+      descriptorTrap,
+    ]) {
+      expect(
+        isWithinFlowingContoursLimit('candidate-count', 1, policy),
+      ).toBe(false)
+      expect(
+        canConsumeFlowingContoursLimit('candidate-count', 0, 1, policy),
+      ).toBe(false)
+    }
+    expect(statefulAccessCount).toBe(0)
   })
 })
 
