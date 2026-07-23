@@ -680,7 +680,7 @@ function snapshotAndValidateScore(
   ) {
     return null
   }
-  const expectedTotal = finiteTotal(
+  const suppliedTotal = finiteTotal(
     (accumulatedEvidence as number) +
       (usefulLength as number) +
       (directionalCoherence as number) -
@@ -689,17 +689,26 @@ function snapshotAndValidateScore(
       (ambiguityPenalty as number) -
       (representedOverlapPenalty as number),
   )
-  if (!Object.is(total, expectedTotal)) return null
+  if (!Object.is(total, suppliedTotal)) return null
+  const canonicalTotal = finiteTotal(
+    (accumulatedEvidence as number) +
+      (usefulLength as number) +
+      (directionalCoherence as number) -
+      (curvaturePenalty as number) -
+      expectedUnsupportedPenalty -
+      (ambiguityPenalty as number) -
+      (representedOverlapPenalty as number),
+  )
 
   return Object.freeze({
     accumulatedEvidence: accumulatedEvidence as number,
     usefulLength: usefulLength as number,
     directionalCoherence: directionalCoherence as number,
     curvaturePenalty: curvaturePenalty as number,
-    unsupportedTravelPenalty: unsupportedTravelPenalty as number,
+    unsupportedTravelPenalty: expectedUnsupportedPenalty,
     ambiguityPenalty: ambiguityPenalty as number,
     representedOverlapPenalty: representedOverlapPenalty as number,
-    total: total as number,
+    total: canonicalTotal,
   })
 }
 
@@ -1071,6 +1080,8 @@ function snapshotAccounting(
     acceptedTotalUnsupportedSpanLength < 0 ||
     acceptedMaximumUnsupportedSpanLength >
       acceptedTotalUnsupportedSpanLength ||
+    (acceptedMaximumUnsupportedSpanLength === 0) !==
+      (acceptedTotalUnsupportedSpanLength === 0) ||
     (acceptedCandidateCount === 0 &&
       (acceptedMaximumUnsupportedSpanLength !== 0 ||
         acceptedTotalUnsupportedSpanLength !== 0)) ||

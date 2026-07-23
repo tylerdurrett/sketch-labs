@@ -364,6 +364,44 @@ describe('Flowing Contours atomic candidate selection', () => {
     expect(select(exactCandidate).result.kind).toBe('accepted')
   })
 
+  it('gates on canonical unsupported penalty after a tolerance-only comparison', () => {
+    const samples = [sample(0), sample(5), sample(10)]
+    const spans = [support(samples, 'bounded-gap', 0, 2)]
+    const source = candidate(undefined, { samples, support: spans })
+    const score = source.score as {
+      unsupportedTravelPenalty: number
+      representedOverlapPenalty: number
+      total: number
+    }
+    const canonicalTarget = 1 - 5e-13
+    const canonicalUnsupported = score.unsupportedTravelPenalty
+    const canonicalBeforeOverlap =
+      source.score.accumulatedEvidence +
+      source.score.usefulLength +
+      source.score.directionalCoherence -
+      source.score.curvaturePenalty -
+      canonicalUnsupported -
+      source.score.ambiguityPenalty
+    score.representedOverlapPenalty =
+      canonicalBeforeOverlap - canonicalTarget
+    score.unsupportedTravelPenalty = canonicalUnsupported - 9e-13
+    score.total =
+      source.score.accumulatedEvidence +
+      source.score.usefulLength +
+      source.score.directionalCoherence -
+      source.score.curvaturePenalty -
+      score.unsupportedTravelPenalty -
+      source.score.ambiguityPenalty -
+      score.representedOverlapPenalty
+
+    expect(canonicalTarget).toBeLessThan(1)
+    expect(score.total).toBeGreaterThan(1)
+    expect(select(source).result).toEqual({
+      kind: 'rejected',
+      reason: 'below-minimum-score',
+    })
+  })
+
   it('never emits a partial trajectory or touches suppression-shaped counts', () => {
     const { result, accounting } = select(candidate([0, 2, 4]))
 
@@ -735,6 +773,14 @@ describe('Flowing Contours atomic candidate selection', () => {
       (accounting: FlowingContoursAccounting) => {
         accounting.termination = 'limit-reached'
         accounting.limitedBy = null
+      },
+    ],
+    [
+      'unsupported aggregate mismatch',
+      (accounting: FlowingContoursAccounting) => {
+        seedAccepted(accounting, 2)
+        accounting.acceptedTotalUnsupportedSpanLength = 1
+        accounting.acceptedMaximumUnsupportedSpanLength = 0
       },
     ],
   ])('fails closed on %s accounting', (_name, corrupt) => {
