@@ -18,7 +18,7 @@ export const WATERCOLOR_BOUNDARY_MAX_DEVIATION = 0.45
 
 const COORDINATE_EPSILON = 1e-9
 const ROUNDING_PASSES = 2
-const ROUNDING_AMOUNT = 0.2
+const MAX_LOCAL_ROUNDING_AMOUNT = 0.5
 const BACKOFF_ATTEMPTS = 8
 const MAX_SHORTCUT_SOURCE_SEGMENTS = 32
 const WORK_UNITS_PER_POINT = 128
@@ -445,61 +445,85 @@ function removalOrder(
 
 function roundedPoints(
   points: readonly Readonly<CurvePoint>[],
-  closed: boolean,
-  weight: number,
-): readonly Readonly<Point>[] {
-  let current = points.map(({ point }): Readonly<Point> => point)
-  for (let pass = 0; pass < ROUNDING_PASSES; pass += 1) {
-    current = current.map((point, index): Readonly<Point> => {
-      if (!closed && (index === 0 || index + 1 === current.length)) {
-        return point
-      }
-      const previous = current[(index - 1 + current.length) % current.length]!
-      const next = current[(index + 1) % current.length]!
-      return interpolate(
-        point,
-        [
-          (previous[0] + next[0]) / 2,
-          (previous[1] + next[1]) / 2,
-        ],
-        ROUNDING_AMOUNT * weight,
-      )
-    })
-  }
-  return current
-}
-
-function curveIsSafe(
-  candidate: readonly Readonly<Point>[],
-  points: readonly Readonly<CurvePoint>[],
   source: readonly Readonly<Point>[],
   closed: boolean,
+  smoothing: number,
   options: Readonly<WatercolorBoundaryCurveOptions>,
-  budget: GeometryBudget,
-): boolean {
-  const segmentCount = closed ? candidate.length : candidate.length - 1
-  for (let index = 0; index < segmentCount; index += 1) {
-    const next = (index + 1) % candidate.length
-    const chain = sourceChain(
-      points[index]!.sourceIndex,
-      points[next]!.sourceIndex,
-      source.length,
-      closed,
-    )
-    if (
-      !replacementIsSafe(
-        candidate[index]!,
-        candidate[next]!,
-        chain,
-        source,
-        options,
-        budget,
+): readonly Readonly<Point>[] {
+  const current = points.map(({ point }): Readonly<Point> => point)
+  const budget = {
+    remaining: Math.max(1, source.length * WORK_UNITS_PER_POINT),
+  }
+  /*
+   * Back off each vertex independently. One tight junction or alpha-support
+   * corner must not force a thousand-point organic boundary back onto integer
+   * lattice vertices. Canonical traversal makes the local updates stable, and
+   * validating both incident source sub-arcs keeps every accepted move inside
+   * the same global tube and positive-support contract.
+   */
+  for (let pass = 0; pass < ROUNDING_PASSES; pass += 1) {
+    for (let index = 0; index < current.length; index += 1) {
+      if (
+        budget.remaining <= 0 ||
+        (!closed && (index === 0 || index + 1 === current.length))
+      ) {
+        continue
+      }
+      const previousIndex =
+        (index - 1 + current.length) % current.length
+      const nextIndex = (index + 1) % current.length
+      const previous = current[previousIndex]!
+      const point = current[index]!
+      const next = current[nextIndex]!
+      const previousChain = sourceChain(
+        points[previousIndex]!.sourceIndex,
+        points[index]!.sourceIndex,
+        source.length,
+        closed,
       )
-    ) {
-      return false
+      const nextChain = sourceChain(
+        points[index]!.sourceIndex,
+        points[nextIndex]!.sourceIndex,
+        source.length,
+        closed,
+      )
+      if (previousChain.length < 2 || nextChain.length < 2) continue
+      const target: Point = [
+        (previous[0] + next[0]) / 2,
+        (previous[1] + next[1]) / 2,
+      ]
+
+      for (let attempt = 0; attempt <= BACKOFF_ATTEMPTS; attempt += 1) {
+        const candidate = interpolate(
+          point,
+          target,
+          (MAX_LOCAL_ROUNDING_AMOUNT * smoothing) / 2 ** attempt,
+        )
+        if (
+          replacementIsSafe(
+            previous,
+            candidate,
+            previousChain,
+            source,
+            options,
+            budget,
+          ) &&
+          replacementIsSafe(
+            candidate,
+            next,
+            nextChain,
+            source,
+            options,
+            budget,
+          )
+        ) {
+          current[index] = candidate
+          break
+        }
+      }
     }
   }
-  return true
+  return current
 }
 
 function fitPath(
@@ -511,25 +535,18 @@ function fitPath(
   if (!sourceCurveIsSafe(source, closed, options)) return []
   if (smoothing === 0) return source
 
-  const budget = {
+  const removalBudget = {
     remaining: Math.max(1, source.length * WORK_UNITS_PER_POINT),
   }
 
-  const order = removalOrder(source, closed, options, budget)
+  const order = removalOrder(source, closed, options, removalBudget)
   const removalCount = Math.floor(order.length * smoothing)
   const removed = new Set(order.slice(0, removalCount))
   const retained = source
     .map((point, sourceIndex): CurvePoint => ({ point, sourceIndex }))
     .filter(({ sourceIndex }) => !removed.has(sourceIndex))
 
-  for (let attempt = 0; attempt <= BACKOFF_ATTEMPTS; attempt += 1) {
-    const weight = smoothing / 2 ** attempt
-    const candidate = roundedPoints(retained, closed, weight)
-    if (curveIsSafe(candidate, retained, source, closed, options, budget)) {
-      return candidate
-    }
-  }
-  return retained.map(({ point }) => point)
+  return roundedPoints(retained, source, closed, smoothing, options)
 }
 
 function sourceCurveIsSafe(

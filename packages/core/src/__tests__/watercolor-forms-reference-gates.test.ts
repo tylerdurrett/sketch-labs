@@ -185,6 +185,30 @@ function watercolorCoverage(
       }),
     ),
   )
+  let totalLength = 0
+  let axisAlignedLength = 0
+  for (const curve of curves) {
+    const explicitlyClosed =
+      curve.closed &&
+      curve.points.length > 1 &&
+      curve.points[0]![0] === curve.points.at(-1)![0] &&
+      curve.points[0]![1] === curve.points.at(-1)![1]
+    const points = explicitlyClosed
+      ? curve.points.slice(0, -1)
+      : curve.points
+    const segmentCount = curve.closed
+      ? points.length
+      : Math.max(0, points.length - 1)
+    for (let index = 0; index < segmentCount; index += 1) {
+      const first = points[index]!
+      const second = points[(index + 1) % points.length]!
+      const dx = second[0] - first[0]
+      const dy = second[1] - first[1]
+      const length = Math.hypot(dx, dy)
+      totalLength += length
+      if (dx === 0 || dy === 0) axisAlignedLength += length
+    }
+  }
 
   return {
     selectedFormCount: forms.regionIds.length,
@@ -202,6 +226,8 @@ function watercolorCoverage(
     occupiedRowCount: new Set(
       [...occupiedBins].map((bin) => bin.split(',')[1]),
     ).size,
+    axisAlignedLengthShare:
+      totalLength === 0 ? 1 : axisAlignedLength / totalLength,
   }
 }
 
@@ -240,6 +266,9 @@ describe('Watercolor Forms directional reference gates', () => {
         watercolor.definitions.fittedImageDiagonal * 2,
       )
       expect(coverage.occupiedBinCount).toBeGreaterThanOrEqual(8)
+      // Organic source boundaries must not fall back to an orthogonal
+      // analysis-lattice staircase after bounded curve fitting.
+      expect(coverage.axisAlignedLengthShare).toBeLessThan(0.1)
 
       if (name === 'flower') {
         // The prominent central flower must remain represented in every
