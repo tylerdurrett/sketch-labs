@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, useImperativeHandle, type Ref } from "react";
+import { act, useImperativeHandle } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -14,7 +14,7 @@ import {
 } from "@harness/core";
 
 import { App } from "./App";
-import type { LiveCanvasHandle } from "./LiveCanvas";
+import type { LiveCanvasProps } from "./LiveCanvas";
 
 /**
  * Focus-retention coverage for the App-owned Sketch switcher (#165).
@@ -107,18 +107,21 @@ vi.mock("./presetsClient", () => ({
 
 vi.mock("./LiveCanvas", () => ({
   LiveCanvas: ({
+    sketch,
     params,
+    seed,
+    environment,
+    compositionFrame,
     renderState,
     handleRef,
-  }: {
-    params: Readonly<Record<string, unknown>>;
-    renderState?: {
-      kind: string;
-      status?: string;
-      unresolvedAssetIds?: readonly string[];
-    };
-    handleRef?: Ref<LiveCanvasHandle>;
-  }) => {
+  }: LiveCanvasProps) => {
+    if (renderState?.kind === "fill-live") {
+      if (environment === undefined) {
+        sketch.generate(params, seed, 0, compositionFrame);
+      } else {
+        sketch.generate(params, seed, 0, compositionFrame, environment);
+      }
+    }
     useImperativeHandle(handleRef, () => ({
       getCanvas: () => null,
       getCurrentT: () => 0,
@@ -147,9 +150,13 @@ vi.mock("./LiveCanvas", () => ({
         data-testid="canvas"
         data-params={JSON.stringify(params)}
         data-render-state={renderState?.kind ?? "fill-live"}
-        data-unavailable-status={renderState?.status ?? ""}
+        data-unavailable-status={
+          renderState?.kind === "unavailable" ? renderState.status : ""
+        }
         data-unresolved-asset-ids={
-          renderState?.unresolvedAssetIds?.join(",") ?? ""
+          renderState?.kind === "unavailable"
+            ? renderState.unresolvedAssetIds.join(",")
+            : ""
         }
       />
     );
@@ -554,6 +561,7 @@ describe("App — Photo Scribble integration (#333)", () => {
 
 describe("App — Flowing Contours integration (#403 FC21)", () => {
   it("opens as the newest Sketch with its managed source, exact four controls, and an ordinary live preview", async () => {
+    const generate = vi.spyOn(flowingContours, "generate");
     mountApp();
     await act(async () => Promise.resolve());
 
@@ -594,6 +602,7 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
         .querySelector('[data-testid="canvas"]')
         ?.getAttribute("data-render-state"),
     ).toBe("fill-live");
+    expect(generate).toHaveBeenCalled();
 
     setNumberInput(
       document.querySelector<HTMLInputElement>("#control-continuity")!,
@@ -617,6 +626,7 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
       "Export SVG",
       "Export Hidden-line SVG",
     ]);
+    generate.mockRestore();
   });
 
   it("round-trips all four independent controls through Presets and honors locks when Randomizing", async () => {
@@ -662,6 +672,7 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
     expect(flowSmoothing.value).toBe("0.2");
     expect(Number(minimumStrokeLength.value)).toBeCloseTo(0.054);
     expect(random).toHaveBeenCalledTimes(3);
+    random.mockRestore();
 
     setTextInput(
       document.querySelector<HTMLInputElement>(
@@ -692,6 +703,22 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
 
     setNumberInput(curveDetail, "0.12");
     setNumberInput(continuity, "0.13");
+    setNumberInput(flowSmoothing, "0.14");
+    setNumberInput(minimumStrokeLength, "0.015");
+    act(() =>
+      document
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="curveDetail lock"]',
+        )!
+        .click(),
+    );
+    expect(
+      document
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="curveDetail lock"]',
+        )
+        ?.getAttribute("aria-pressed"),
+    ).toBe("false");
     appPresetClient.load.mockResolvedValue(saved);
     setSelectValue(
       document.querySelector<HTMLSelectElement>(
