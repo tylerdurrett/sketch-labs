@@ -25,6 +25,8 @@ const HARD_MAXIMUM_NORMAL_RADIUS = 3
 const NORMAL_RADIUS_SCALE_FACTOR = 0.75
 const MINIMUM_NORMAL_RADIUS = 0.5
 const MAXIMUM_ADJACENT_SCALE_RATIO = 2 + 1e-6
+/** Beam headings may bias prediction, but never by more than 25 degrees. */
+const HARD_MAXIMUM_PREDICTOR_HEADING_RADIANS = (25 * Math.PI) / 180
 /** Correction ownership is always narrower than half an analysis pixel. */
 const HARD_MAXIMUM_OWNERSHIP_RADIUS = 0.49
 const SUPPORT_TRAVERSAL_SPACING = 0.25
@@ -40,6 +42,7 @@ const DEFAULT_OPTIONS = Object.freeze({
   maximumTurnRadians: Math.PI / 3,
   ambiguityMargin: 0.04,
   minimumTangentAlignment: 0,
+  predictorHeadingInfluence: 0,
 })
 
 /**
@@ -56,6 +59,13 @@ export interface FlowingRidgeStepOptions {
   readonly maximumTurnRadians?: number
   readonly ambiguityMargin?: number
   readonly minimumTangentAlignment?: number
+  /**
+   * Fraction of the private heading cone used to steer toward the request.
+   *
+   * Zero preserves tangent-only prediction; one uses at most the full bounded
+   * 25-degree cone. It cannot expand search radius or ridge ownership.
+   */
+  readonly predictorHeadingInfluence?: number
 }
 
 interface ResolvedFlowingRidgeStepOptions {
@@ -66,6 +76,7 @@ interface ResolvedFlowingRidgeStepOptions {
   readonly maximumTurnRadians: number
   readonly ambiguityMargin: number
   readonly minimumTangentAlignment: number
+  readonly predictorHeadingInfluence: number
 }
 
 interface RidgeStepBase {
@@ -135,6 +146,31 @@ function signAlignedUnitVector(
   return frozenPoint(unit[0] * sign, unit[1] * sign)
 }
 
+function steeredPredictionDirection(
+  localTangent: Readonly<Point>,
+  requestedDirection: Readonly<Point>,
+  influence: number,
+): Readonly<Point> {
+  if (influence <= 0) return localTangent
+  const signedAngle = Math.atan2(
+    localTangent[0] * requestedDirection[1] -
+      localTangent[1] * requestedDirection[0],
+    localTangent[0] * requestedDirection[0] +
+      localTangent[1] * requestedDirection[1],
+  )
+  const boundedAngle =
+    Math.max(
+      -HARD_MAXIMUM_PREDICTOR_HEADING_RADIANS,
+      Math.min(HARD_MAXIMUM_PREDICTOR_HEADING_RADIANS, signedAngle),
+    ) * influence
+  const cosine = Math.cos(boundedAngle)
+  const sine = Math.sin(boundedAngle)
+  return frozenPoint(
+    localTangent[0] * cosine - localTangent[1] * sine,
+    localTangent[0] * sine + localTangent[1] * cosine,
+  )
+}
+
 function isUnitInterval(value: number): boolean {
   return Number.isFinite(value) && value >= 0 && value <= 1
 }
@@ -155,7 +191,8 @@ function resolveOptions(
       resolved.maximumTurnRadians <= 0 ||
       resolved.maximumTurnRadians > Math.PI / 2 ||
       !isUnitInterval(resolved.ambiguityMargin) ||
-      !isUnitInterval(resolved.minimumTangentAlignment)
+      !isUnitInterval(resolved.minimumTangentAlignment) ||
+      !isUnitInterval(resolved.predictorHeadingInfluence)
     ) {
       return null
     }
@@ -501,8 +538,16 @@ export function stepFlowingContoursRidge(
     ) {
       return stop('ambiguity', fallbackPoint, 0)
     }
+    const predictionDirection = steeredPredictionDirection(
+      currentTangent,
+      direction,
+      resolved.predictorHeadingInfluence,
+    )
+    const curvatureHeading =
+      resolved.predictorHeadingInfluence > 0 ? predictionDirection : direction
     const currentAlignment =
-      currentTangent[0] * direction[0] + currentTangent[1] * direction[1]
+      currentTangent[0] * curvatureHeading[0] +
+      currentTangent[1] * curvatureHeading[1]
     if (
       Math.acos(Math.max(-1, Math.min(1, currentAlignment))) >
       resolved.maximumTurnRadians
@@ -511,8 +556,8 @@ export function stepFlowingContoursRidge(
     }
 
     const predictedPoint = frozenPoint(
-      currentPoint[0] + currentTangent[0] * resolved.stepLength,
-      currentPoint[1] + currentTangent[1] * resolved.stepLength,
+      currentPoint[0] + predictionDirection[0] * resolved.stepLength,
+      currentPoint[1] + predictionDirection[1] * resolved.stepLength,
     )
     if (!isInsideField(field, predictedPoint)) {
       return stop('source-boundary', predictedPoint, 0)
@@ -533,7 +578,7 @@ export function stepFlowingContoursRidge(
       return stop('ambiguity', predictedPoint, 0)
     }
 
-    const normal = frozenPoint(-currentTangent[1], currentTangent[0])
+    const normal = frozenPoint(-predictionDirection[1], predictionDirection[0])
     const searchRadius = Math.min(
       HARD_MAXIMUM_NORMAL_RADIUS,
       Math.max(
@@ -569,7 +614,7 @@ export function stepFlowingContoursRidge(
       return weak(
         predictedPoint,
         sampleCount,
-        alignedWeakSample(predictedSample, currentTangent),
+        alignedWeakSample(predictedSample, predictionDirection),
       )
     }
     const orderedByEvidence = [...maxima].sort(
@@ -606,7 +651,7 @@ export function stepFlowingContoursRidge(
       return weak(
         predictedPoint,
         sampleCount,
-        alignedWeakSample(predictedSample, currentTangent),
+        alignedWeakSample(predictedSample, predictionDirection),
       )
     }
 
@@ -615,7 +660,7 @@ export function stepFlowingContoursRidge(
       return weak(
         predictedPoint,
         sampleCount,
-        alignedWeakSample(predictedSample, currentTangent),
+        alignedWeakSample(predictedSample, predictionDirection),
       )
     }
     const correctedPoint = frozenPoint(
@@ -639,7 +684,7 @@ export function stepFlowingContoursRidge(
     }
     const correctedTangent = compatibleSample(
       corrected,
-      currentTangent,
+      predictionDirection,
       current.scale,
       resolved,
     )
@@ -647,7 +692,7 @@ export function stepFlowingContoursRidge(
       return weak(
         predictedPoint,
         sampleCount,
-        alignedWeakSample(predictedSample, currentTangent),
+        alignedWeakSample(predictedSample, predictionDirection),
       )
     }
     const turnCosine =

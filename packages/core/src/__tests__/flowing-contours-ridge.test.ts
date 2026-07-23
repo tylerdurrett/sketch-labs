@@ -134,6 +134,102 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
     expect(result.sample.tangent[1]).toBeCloseTo(Math.SQRT1_2, 12)
   })
 
+  it('produces distinct bounded hypotheses for distinct same-sign headings', () => {
+    const smooth = field(25, 25, (_x, y) => ({
+      evidence: gaussian(y - 12, 2),
+      tangent: [1, 0],
+    }))
+    const current = at(smooth, [10, 12])
+    const heading = (degrees: number): Point => {
+      const radians = (degrees * Math.PI) / 180
+      return [Math.cos(radians), Math.sin(radians)]
+    }
+    const upward = corrected(
+      stepFlowingContoursRidge(smooth, current, heading(-15), {
+        ...ONE_PIXEL_STEP,
+        predictorHeadingInfluence: 1,
+      }),
+    )
+    const downward = corrected(
+      stepFlowingContoursRidge(smooth, current, heading(15), {
+        ...ONE_PIXEL_STEP,
+        predictorHeadingInfluence: 1,
+      }),
+    )
+
+    expect(upward.predictedPoint[0]).toBeCloseTo(downward.predictedPoint[0], 12)
+    expect(upward.predictedPoint[1]).toBeLessThan(12)
+    expect(downward.predictedPoint[1]).toBeGreaterThan(12)
+    expect(upward.predictedPoint).not.toEqual(downward.predictedPoint)
+  })
+
+  it('preserves tangent-only prediction when heading influence is omitted or zero', () => {
+    const smooth = field(15, 15, (_x, y) => ({
+      evidence: gaussian(y - 7, 2),
+      tangent: [1, 0],
+    }))
+    const current = at(smooth, [5, 7])
+    const requested = [Math.cos(Math.PI / 9), Math.sin(Math.PI / 9)] as Point
+    const omitted = stepFlowingContoursRidge(
+      smooth,
+      current,
+      requested,
+      ONE_PIXEL_STEP,
+    )
+    const zero = stepFlowingContoursRidge(smooth, current, requested, {
+      ...ONE_PIXEL_STEP,
+      predictorHeadingInfluence: 0,
+    })
+
+    expect(omitted.predictedPoint).toEqual([6, 7])
+    expect(zero).toEqual(omitted)
+  })
+
+  it('clamps excessive headings to the cone without crossing the aligned tangent', () => {
+    const smooth = field(25, 25, (_x, y) => ({
+      evidence: gaussian(y - 12, 2),
+      tangent: [1, 0],
+    }))
+    const current = at(smooth, [12, 12])
+    const perpendicular = stepFlowingContoursRidge(smooth, current, [0, 1], {
+      ...ONE_PIXEL_STEP,
+      predictorHeadingInfluence: 1,
+    })
+    const perpendicularDelta: Point = [
+      perpendicular.predictedPoint[0] - 12,
+      perpendicular.predictedPoint[1] - 12,
+    ]
+
+    expect(
+      Math.atan2(perpendicularDelta[1], perpendicularDelta[0]),
+    ).toBeCloseTo((25 * Math.PI) / 180, 12)
+    expect(perpendicularDelta[0]).toBeGreaterThan(0)
+
+    const oppositeHeading = [
+      Math.cos((140 * Math.PI) / 180),
+      Math.sin((140 * Math.PI) / 180),
+    ] as Point
+    const opposite = stepFlowingContoursRidge(
+      smooth,
+      current,
+      oppositeHeading,
+      { ...ONE_PIXEL_STEP, predictorHeadingInfluence: 1 },
+    )
+    const oppositeDelta: Point = [
+      opposite.predictedPoint[0] - 12,
+      opposite.predictedPoint[1] - 12,
+    ]
+    const alignedBackward: Point = [-1, 0]
+    const alignedDot =
+      oppositeDelta[0] * alignedBackward[0] +
+      oppositeDelta[1] * alignedBackward[1]
+
+    expect(alignedDot).toBeGreaterThan(0)
+    expect(
+      Math.acos(Math.max(-1, Math.min(1, alignedDot))),
+    ).toBeLessThanOrEqual((25 * Math.PI) / 180 + 1e-12)
+  })
+
   it('follows a smooth curved ridge with a subpixel normal correction', () => {
     const center = [9, 9] as const
     const radius = 5
@@ -550,6 +646,11 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
         ONE_PIXEL_STEP,
         noSamples!,
       ).kind,
+    ).toBe('safety-limit')
+    expect(
+      stepFlowingContoursRidge(straight, current, [1, 0], {
+        predictorHeadingInfluence: 1.01,
+      }).kind,
     ).toBe('safety-limit')
   })
 
