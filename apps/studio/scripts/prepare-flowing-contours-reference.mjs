@@ -855,11 +855,13 @@ async function selfTest() {
 
 function assertInertRequests(requestedPaths) {
   for (const forbidden of [
-    '/src/main.tsx',
-    '/src/App.tsx',
-    '/@fs/packages/core/src/registry.ts',
+    'main.tsx',
+    'App.tsx',
+    'registry.ts',
+    'generator.ts',
+    'scene.ts',
   ]) {
-    if ([...requestedPaths].some((path) => path.endsWith(forbidden))) {
+    if ([...requestedPaths].some((path) => path.includes(forbidden))) {
       throw new Error(`inert harness loaded forbidden application path: ${forbidden}`)
     }
   }
