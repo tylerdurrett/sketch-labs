@@ -376,6 +376,41 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
     expect(loneNeighbor.kind).toBe('weak')
   })
 
+  it('does not let a headed predictor claim a vanished ridge one pixel away', () => {
+    const vanished = field(18, 15, (x, y) => ({
+      evidence:
+        x < 5 ? 0.85 * gaussian(y - 6, 0.3) : 0.95 * gaussian(y - 7, 0.5),
+      tangent: [1, 0],
+    }))
+    const heading = (25 * Math.PI) / 180
+    const result = stepFlowingContoursRidge(
+      vanished,
+      at(vanished, [4, 6]),
+      [Math.cos(heading), Math.sin(heading)],
+      { stepLength: 1.4, predictorHeadingInfluence: 1 },
+    )
+
+    expect(result.kind).toBe('weak')
+  })
+
+  it('rejects a legal normal correction that reverses a small headed step', () => {
+    const straight = field(15, 13, (_x, y) => ({
+      evidence: gaussian(y - 6, 0.6),
+      tangent: [1, 0],
+    }))
+    const heading = (25 * Math.PI) / 180
+    const result = stepFlowingContoursRidge(
+      straight,
+      at(straight, [4, 5.6]),
+      [Math.cos(heading), Math.sin(heading)],
+      { stepLength: 0.1, predictorHeadingInfluence: 1 },
+    )
+
+    // Returning to y=6 needs about 0.39 px of normal correction, inside the
+    // ownership tube, but its x component would move behind the current point.
+    expect(result.kind).toBe('curvature')
+  })
+
   it('rejects an outward parabolic refinement beyond the ownership tube', () => {
     const ridge = field(12, 12, (_x, y) => ({
       evidence: y === 6 ? 1 : 0,

@@ -555,6 +555,10 @@ export function stepFlowingContoursRidge(
       return stop('curvature', fallbackPoint, 0)
     }
 
+    const tangentOnlyPredictedPoint = frozenPoint(
+      currentPoint[0] + currentTangent[0] * resolved.stepLength,
+      currentPoint[1] + currentTangent[1] * resolved.stepLength,
+    )
     const predictedPoint = frozenPoint(
       currentPoint[0] + predictionDirection[0] * resolved.stepLength,
       currentPoint[1] + predictionDirection[1] * resolved.stepLength,
@@ -667,6 +671,32 @@ export function stepFlowingContoursRidge(
       predictedPoint[0] + normal[0] * correctedOffset,
       predictedPoint[1] + normal[1] * correctedOffset,
     )
+    const currentNormal = frozenPoint(-currentTangent[1], currentTangent[0])
+    const baselineX = correctedPoint[0] - tangentOnlyPredictedPoint[0]
+    const baselineY = correctedPoint[1] - tangentOnlyPredictedPoint[1]
+    const tangentBaselineNormalDisplacement = Math.abs(
+      baselineX * currentNormal[0] + baselineY * currentNormal[1],
+    )
+    if (
+      !Number.isFinite(tangentBaselineNormalDisplacement) ||
+      tangentBaselineNormalDisplacement > HARD_MAXIMUM_OWNERSHIP_RADIUS
+    ) {
+      return weak(
+        predictedPoint,
+        sampleCount,
+        alignedWeakSample(predictedSample, predictionDirection),
+      )
+    }
+    const travelX = correctedPoint[0] - currentPoint[0]
+    const travelY = correctedPoint[1] - currentPoint[1]
+    const forwardProgress =
+      travelX * currentTangent[0] + travelY * currentTangent[1]
+    if (
+      !Number.isFinite(forwardProgress) ||
+      forwardProgress <= VECTOR_EPSILON
+    ) {
+      return stop('curvature', predictedPoint, sampleCount)
+    }
     const correctionSupport = classifySupportAlongSegment(
       field,
       predictedPoint,
