@@ -142,20 +142,32 @@ The one target-specific artifact description active in a Sketch session and capt
 _Avoid_: render target (the target is only one field), export options, last-used settings
 
 **Plot Tool**:
-The physical mark-making instrument assigned to one **Plot Stage**, represented initially by its Tool width while reusable named tools, selectable colors, and further machine-facing properties remain additive.
+The physical mark-making instrument assigned to one **Plot Stage**, represented initially by its Tool width while reusable named tools and further machine-facing properties remain additive.
 _Avoid_: stroke style (Scene appearance), pen layer (artifact routing)
 
 **Tool width**:
 The fixed physical width of a **Plot Tool** rather than unitless Scene styling, stored on the ordinary plot **Output Profile** for a one-stage Sketch and independently assignable per **Plot Stage** in a Sequence, so enlarging artwork does not enlarge the real nib.
 _Avoid_: stroke width (a Scene-space style that scales with the artwork), line weight (ambiguous between the two)
 
+**Stage color**:
+The persisted operator-facing color applied consistently to one **Plot Stage** in Studio and its SVG artifact without claiming that the same physical media is loaded in the plotter.
+_Avoid_: Plot Tool color, physical pen color, preview tint
+
+**Occlusion composition**:
+An optional authored relationship that combines unfinalized Stage Scenes before the **Hidden-line pass** so geometry from one Stage may hide another without borrowing physical execution or temporary preview order.
+_Avoid_: Combined stacking, Plot Sequence order, Stage dependency graph
+
 **Plot Sequence**:
-An ordered, Sketch-authored set of plotter assets that gives multiple **Plot Stages** exact digital registration on one final page.
+An execution-ordered, Sketch-authored set of plotter assets that gives multiple **Plot Stages** exact digital registration on one final page.
 _Avoid_: layer stack, multi-pen layer file
 
 **Plot Stage**:
-One named plot-ready artifact in a **Plot Sequence**, generated for a particular tool and artistic purpose at a defined position in the workflow.
+One uniquely identified named plot-ready artifact in a **Plot Sequence**, generated for a particular tool and artistic purpose at a defined position in the workflow; multiple Stages may use the same **Stage generator** while retaining independent identity and authored state.
 _Avoid_: layer (ambiguous with Primitive routing inside one artifact), pass (ambiguous with Scene-to-Scene processing)
+
+**Stage generator**:
+A reusable headless Scene-producing capability that may back multiple **Plot Stages** or an independent **Sketch** without itself owning Stage identity or session state.
+_Avoid_: nested Sketch, Plot Stage type, Stage ID
 
 **Primary Plot Stage**:
 The **Plot Stage** that remains its Sketch's ordinary output and default authoring view when the optional Sequence capability is not being inspected.
@@ -164,6 +176,10 @@ _Avoid_: combined output, active layer
 **Pencil Contour**:
 Sparse line artwork derived from a photograph's strongest structural boundaries—its subject silhouette and major internal landmarks—with noisy fragments removed and paths simplified.
 _Avoid_: edge-filter preview, full-detail tracing, pencil shading
+
+**Watercolor Forms**:
+Sparse line artwork derived from a photograph's coherent color-and-tone regions, expressing shared form boundaries as smooth curves suitable for guiding hand-applied watercolor.
+_Avoid_: semantic segmentation, Pencil Contour, filled posterization
 
 **Sketch contract**:
 What a Sketch file exports: a **Parameter Schema** plus its frame logic. A *stateless* Sketch exports a pure generation function of params, seed, time, and **Composition Frame**, returning a Scene in that exact frame space. It may additionally expose a pure, on-demand Outline-source generator for a physical tool profile; this returns only generic role-annotated Scene geometry and never enters live Fill sampling. A *stateful* (simulation) Sketch instead exports an `initial` + **Step** + **Draw** triple that the Harness folds into the same deterministic behaviour and frame-space invariant. Either way the author writes only the schema and the frame logic; all chrome (canvas, controls, timeline, presets, navigation, export) is Harness-provided, and the author never owns the animation loop.
@@ -262,23 +278,37 @@ _Avoid_: config, params, options, export options
 - A Scene-authored background retains ADR-0009 precedence under Page Framing: it fills the whole output surface, including padded Page Frame extent; when absent, the caller's Page ground shows through, while a background intended to stop at the Composition Frame edge is bounded Primitive geometry instead.
 - Scene geometry and Scene stroke widths scale through the output mapping; a plotter's physical **Tool width** remains fixed in millimeters and can drive a plot preview independently.
 - A **Sketch** authors a fixed **Plot Sequence** rather than asking the artist to assemble arbitrary Stages in the Harness; its two or more ordered **Plot Stages** share the Sketch's authored inputs, Seed, time, Composition Frame, Page Frame, the Output Profile's physical page and margins, and exact digital coordinate mapping while allowing each Stage to project different plot geometry for its own tool and artistic purpose.
-- A **Plot Stage** reuses a headless artwork generator that may also back an independent **Sketch**; a Sequence composes that generator rather than embedding one registered Sketch inside another.
-- Photo Scribble's first **Plot Stage** and an independent Pencil Contour **Sketch** reuse the same headless **Pencil Contour** generator.
-- One Photo Scribble **Preset** reproduces the complete **Plot Sequence**: it captures the shared image, Seed, Output Profile, Composition Frame, and Page Frame together with each Stage's own controls, Tool width, and Page-outline choice; the independent Pencil Contour Sketch keeps separate Presets rather than linking them into a Sequence.
+- Every **Plot Stage** has a stable instance identity distinct from its **Stage generator** identity; version one exposes only the Sketch-authored instances, while generic runtime, preparation, and output state remain keyed by Stage identity so later duplication does not require conflating instances with generators.
+- A **Plot Stage** reuses a **Stage generator** that may also back an independent **Sketch**; a Sequence composes that generator rather than embedding one registered Sketch inside another.
+- The owning **Sketch** retains one **Parameter Schema** as the control, Randomize, Lock, and Preset spine; each Plot Stage receives only an isolated projection of shared and Stage-owned values, so the flat owning document does not become the Stage runtime contract.
+- A **Stage color** styles both Studio presentation and exported SVG paths as one reproducible operator cue; Ink defaults to black and Watercolor Forms to bright pink, while actual physical color remains determined by the instrument the operator loads.
+- Photo Scribble's first supporting **Plot Stage** and the independent **Watercolor Forms** Sketch reuse the same headless Watercolor Forms **Stage generator**.
+- One Photo Scribble **Preset** reproduces the complete **Plot Sequence**: it captures the shared image, Seed, Output Profile, Composition Frame, and Page Frame together with each Stage's own controls, Locks, Stage color, Tool width, and Page-outline choice; temporary view and Combined stacking remain presentation state, while the independent Watercolor Forms Sketch keeps separate Presets rather than linking them into a Sequence.
 - Studio may inspect a **Plot Sequence** as one isolated Stage or as a registered Combined overlay; an isolated view shows shared controls plus that Stage's controls, while Combined shows shared controls plus every Stage's separately identified controls so their relationship can be tuned in place. The view selection is temporary Studio state, defaults to the Primary Plot Stage on reload, and never creates another Stage or export artifact.
+- A **Plot Sequence**'s authored order governs physical execution and ordered export identity; Combined preview stacking is a separate transient presentation input and first presents Watercolor Forms above Ink so the supporting geometry remains inspectable, without making that default its only future source.
+- Plot Stage preparation is demand-driven and retained: opening the Primary Ink view does not start Watercolor Forms, while selecting Watercolor Forms, entering Combined, or requesting its export prepares only missing or stale Stage results.
+- While Plot Stage preparation updates, Studio may retain the last coherent isolated or Combined snapshot with an updating state, but it never combines Stage results from different shared-input revisions; export remains disabled until the requested Stage result is current.
+- A Plot Stage's registration identity is distinct from its preparation identity: shared source and coordinate inputs determine which retained Stage results may be presented together, while only that Stage generator's projected inputs and declared Seed/time participation determine whether its Scene must be recomputed.
+- A Plot Stage preparation failure is isolated to that Stage: its unavailable or stale artifact cannot be exported, but other current Stages remain viewable, editable, and exportable; a failed shared input instead affects every Stage whose preparation identity depends on it.
+- Plot Stage preparation progress and errors remain attached to individual Stage identities because generators have different work and completion semantics; Combined may summarize those statuses but does not invent a Sequence-wide percentage.
+- Background preparation scheduling is independent of authored Plot Sequence order and transient Combined stacking; demanded Stages may prepare independently, while concurrency and priority remain Harness implementation policy rather than reproducible artwork state.
+- Once a demanded Plot Stage begins preparing, leaving its isolated or Combined view does not by itself cancel current work; the retained job finishes unless its preparation identity is superseded, it is explicitly cancelled or retried, the owning Sketch changes, or the session is disposed.
+- Plot Stage preparation may deepen the Studio's repeated one-worker-per-job lifecycle into a small shared transport module, while Stage protocols, progress, result validation, retained session state, and the Stage-ID-keyed scheduler remain domain-specific rather than forming a general worker framework.
+- Version one retains each Plot Stage's ordinary unfinalized Scene before Page and SVG finalization, preserving a future **Occlusion composition** seam without adding cross-Stage Hidden-line work, persisted occlusion state, or a dependency graph.
 - A **Plot Sequence** guarantees digital registration only: reinserting a shifted, rotated, stretched, or water-warped physical sheet remains operator-owned, with a repeatable corner jig or equivalent setup assumed in the first version and no fiducial, camera-alignment, or distortion-compensation feature implied.
 - The first **Plot Sequence** export downloads one explicitly selected Plot Stage as its own ordered, plotter-ready SVG; every Stage artifact has the same physical page extent and coordinate mapping, while Combined is preview-only.
 - A single portable SVG containing the Sequence's Stages as artifact-internal layers remains a compatible future export, but is not required by the first version.
 - A **Plot Sequence** describes and produces plotter assets only; manual artwork, drying, paper handling, and other operator actions between Stages are neither Sequence steps nor Studio instructions.
 - Every **Plot Stage** receives the unchanged Sequence Seed when reproducing the Sketch's underlying generated geometry, so a Seed-dependent subject such as hills or a leaf field remains identical across Stages; a Stage may derive a namespaced sub-seed only for additional Stage-local effects that must not perturb that shared geometry.
 - The Sketch contract exposes **Plot Sequence** as an optional generic capability; Photo Scribble is its only first-version consumer, while Seed-dependent geometry Sketches adopt it later when each has a concrete tonal Stage design.
-- Ink Scribble is Photo Scribble's **Primary Plot Stage**, preserving its existing generated Scene, Preset reproduction, ordinary output, and default creative surface; Pencil Contour is a supporting Stage and Combined is an opt-in inspection view.
+- Ink Scribble is Photo Scribble's **Primary Plot Stage**, preserving its existing generated Scene, Preset reproduction, ordinary output, and default creative surface; Watercolor Forms is the sole first-version supporting Stage and Combined is an opt-in inspection view.
 - The Harness treats each **Plot Stage** as opaque Sketch-authored Scene output and does not encode what it derives from; a Sketch may derive a Stage from source data, its Primary Scene, or private intermediate geometry without changing the generic Sequence contract.
-- Photo Scribble initially derives **Pencil Contour** from the photograph's original luminance and alpha structure after its own gamma, contrast, and pivot shaping, using the same control vocabulary and transformation implementation as Ink Scribble but independent Stage-scoped values; a later authored source choice may add an ink-derived alternative while defaulting older Presets to this original behavior.
+- Photo Scribble derives its supporting **Watercolor Forms** Stage from the same selected photograph and Composition Frame through the reusable headless generator while retaining independent Stage-owned Gamma, Contrast, Pivot, Form detail, Color sensitivity, Boundary strength, and Boundary smoothing values.
 - The first **Pencil Contour** analyzes the entire contain-fitted photograph, treats alpha transitions as structural boundaries, and strictly excludes zero-alpha regions; an opaque image provides no semantic subject distinction, and subject detection, a second mask asset, and in-Studio segmentation remain outside version one.
 - **Pencil Contour** never treats the contain-fitted source image's rectangular perimeter as image-derived structure; an intentional outer border reuses the Harness's existing optional final-Page outline after framing and clipping.
-- Photo Scribble's first **Pencil Contour** receives the Sequence Seed through the generic Stage contract but uses no seeded variation: its geometry is determined by the image, Composition Frame, and independent gamma, contrast, pivot, Contour detail, and Contour smoothing controls, so re-seeding Ink Scribble does not invalidate the pencil asset.
-- Each **Plot Stage** has an independent **Plot Tool** assignment and optional final-Page outline while the Sequence's physical paper dimensions and margins remain shared; version one authors only per-Stage Tool width and Page-outline inclusion, leaving named tool libraries, color selection, and authored-versus-Studio tool assignment for later additive work.
+- Photo Scribble's **Watercolor Forms** Stage receives the Sequence Seed through the generic Stage contract but uses no seeded variation: its geometry is determined by the image, Composition Frame, and its own controls, so re-seeding Ink Scribble does not invalidate the supporting asset.
+- Pencil Contour, Flowing Contours, and Luminance Isophotes remain independent candidate **Stage generators** rather than rejected alternatives; Photo Scribble may add any artistically useful subset as later curated Stage instances without exposing an arbitrary registered-Sketch compositor.
+- Each **Plot Stage** has an independent **Stage color**, **Plot Tool** assignment, and optional final-Page outline while the Sequence's physical paper dimensions and margins remain shared; version one authors per-Stage color, Tool width, and Page-outline inclusion, leaving named tool libraries and further machine-facing tool properties for later additive work.
 - **New seed** changes the one Sequence Seed consumed by every **Plot Stage**, while parameter **Randomize** is exposed per Stage and changes only that Stage's eligible unlocked numeric controls; version one has no whole-Sequence parameter randomization action.
 - The Studio exposes the active plot Output Profile in a Paper section near the top of the inspector; it is collapsible and collapsed by default, with its active dimensions retained in the summary.
 - A plotter-ready SVG maps artwork into the profile's physical paper and margins but emits only plot paths; paper edges, margin guides, and backgrounds are preview chrome rather than drawable geometry, while the Output Profile remains available as metadata.
@@ -390,8 +420,12 @@ These are intentionally **not** pinned here — they are implementation specific
 - "shading region" implied ink was either allowed or forbidden. Resolved: a **Shading Mask** carries soft permission above zero and reserves exact zero for a hard prohibition.
 - "crop" named only shrinking the output boundary even though the same mechanism can enlarge it with padding. Resolved: **Page Frame** is the persisted domain concept and **Crop** remains the familiar Studio action that enters Page Frame edit mode.
 - "layer" conflated an ordered physical workflow with Primitive routing inside one SVG artifact. Resolved: **Plot Sequence** and **Plot Stage** name the physical workflow; layer remains available for artifact-internal routing.
+- "Stage order" conflated physical plot execution with Combined preview stacking. Resolved: authored **Plot Sequence** order governs execution and export identity, while Combined stacking is an independent transient presentation choice even when version one exposes only its default.
+- "on top" conflated temporary Combined visibility with geometry-changing occlusion. Resolved: **Occlusion composition** is an explicit authored relationship applied before the Hidden-line pass; version one preserves the unfinalized-Scene seam but does not implement that relationship.
+- "multiple copies of the same Sketch" conflated registered Sketch identity, reusable generation policy, and membership in one Sequence. Resolved: each **Plot Stage** is an independently identified instance backed by a **Stage generator**; version one preserves that distinction without exposing artist-created duplication.
+- "Plot Tool color" implied that SVG styling could identify or control the physical instrument. Resolved: **Stage color** is a persisted Studio-and-SVG operator cue, while the loaded instrument alone determines the physical mark color.
 - "Pencil Contour" could mean a dense pixel-edge rendering. Resolved: it means sparse structural linework for guiding later hand-applied media.
-- Reusing Photo Scribble's tone controls could mean one linked value set or duplicated UI. Resolved: Pencil and Ink use the same tone vocabulary and math with independent persisted values, shown in separately identified Stage sections and both available in Combined view.
+- Reusing the independent Watercolor Forms capability inside Photo Scribble could mean linked authored state or a reduced embedded control set. Resolved: the supporting Stage exposes its complete seven-control surface with independent persisted values, while the standalone Sketch keeps separate Presets and authored state.
 
 ## Build strategy (decided)
 
