@@ -204,9 +204,10 @@ oracle:
 
 ## Final retained core
 
-Revision `42f1966` includes field authentication, fused tube sampling, and the
-Studio worker integration. The final Node run used one warmup and n=5 measured
-samples:
+The final measurements were taken at campaign revision `42f1966`, whose landed
+equivalent on the issue branch is `658b610`. That state includes field
+authentication, fused tube sampling, and the Studio worker integration. The
+final Node run used one warmup and n=5 measured samples:
 
 | Workload / phase | median | p95 | change from baseline median | change from baseline p95 |
 | --- | ---: | ---: | ---: | ---: |
