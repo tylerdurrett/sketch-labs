@@ -5,7 +5,11 @@ import {
   type PreparedImageDetailAnalysis,
 } from "@harness/core";
 
-import { DetailCoordinator, type DetailWorkerPort } from "./detailCoordinator";
+import {
+  DetailCoordinator,
+  type DetailPreparationResult,
+  type DetailWorkerPort,
+} from "./detailCoordinator";
 import {
   createDetailPreparationIdentity,
   type DetailPreparationRequest,
@@ -34,16 +38,20 @@ function prepared(): PreparedImageDetailAnalysis {
 class FakeWorker implements DetailWorkerPort {
   request: DetailPreparationRequest | null = null;
   readonly terminate = vi.fn(() => {
+    this.onTerminate?.();
     if (this.terminateError !== undefined) throw this.terminateError;
   });
   postError: unknown;
   listenError: unknown;
   terminateError: unknown;
+  onPost: (() => void) | undefined;
+  onTerminate: (() => void) | undefined;
   private readonly listeners = new Map<string, Array<(event: any) => void>>();
 
   postMessage(message: DetailPreparationRequest): void {
     this.request = message;
     if (this.postError !== undefined) throw this.postError;
+    this.onPost?.();
   }
 
   addEventListener(type: string, listener: (event: any) => void): void {
@@ -53,8 +61,22 @@ class FakeWorker implements DetailWorkerPort {
     this.listeners.set(type, listeners);
   }
 
+  removeEventListener(type: string, listener: (event: any) => void): void {
+    const listeners = this.listeners.get(type);
+    if (listeners === undefined) return;
+    this.listeners.set(
+      type,
+      listeners.filter((candidate) => candidate !== listener),
+    );
+  }
+
   emit(type: "message" | "error" | "messageerror", value: unknown): void {
-    const event = type === "message" ? { data: value } : value;
+    const event =
+      type === "message"
+        ? { data: value }
+        : value instanceof Event
+          ? value
+          : Object.assign(new Event(type), value);
     for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
 }
@@ -105,6 +127,26 @@ describe("DetailCoordinator", () => {
     expect(factory).toHaveBeenCalledOnce();
   });
 
+  it("preserves the validated transferable result and copied latest identity", async () => {
+    const worker = new FakeWorker();
+    const coordinator = new DetailCoordinator(() => worker);
+    const candidate = { ...identity };
+    const result = coordinator.start(candidate);
+    const response = success(worker);
+
+    candidate.imageAssetId = otherIdentity.imageAssetId;
+    worker.emit("message", response);
+
+    const outcome = await result;
+    expect(outcome).toMatchObject({
+      status: "success",
+      identity,
+    });
+    if (outcome.status !== "success") throw new Error("expected success");
+    expect(outcome.identity).not.toBe(candidate);
+    expect(outcome.prepared).toBe(response.prepared);
+  });
+
   it("ignores foreign job and identity responses, then accepts the current one", async () => {
     const worker = new FakeWorker();
     const coordinator = new DetailCoordinator(() => worker);
@@ -124,6 +166,17 @@ describe("DetailCoordinator", () => {
 
   it.each([
     ["invalid response", "message", { nope: true }, "invalid response"],
+    [
+      "unsupported progress response",
+      "message",
+      {
+        type: "progress",
+        jobId: 1,
+        completedWorkUnits: 1,
+        totalWorkUnits: 2,
+      },
+      "invalid response",
+    ],
     ["malformed prepared success", "message", null, "invalid response"],
     [
       "worker error",
@@ -167,6 +220,132 @@ describe("DetailCoordinator", () => {
       jobId: 1,
       error: "x".repeat(500),
     });
+  });
+
+  it.each([
+    {
+      name: "success",
+      emit: (worker: FakeWorker) =>
+        worker.emit("message", success(worker)),
+      expected: { status: "success", jobId: 1 },
+    },
+    {
+      name: "protocol failure",
+      emit: (worker: FakeWorker) =>
+        worker.emit("message", failure(worker, "analysis failed")),
+      expected: {
+        status: "failure",
+        jobId: 1,
+        error: "analysis failed",
+      },
+    },
+    {
+      name: "worker failure",
+      emit: (worker: FakeWorker) =>
+        worker.emit("error", { message: "worker exploded" }),
+      expected: {
+        status: "failure",
+        jobId: 1,
+        error: "worker exploded",
+      },
+    },
+  ])(
+    "settles a synchronous $name during boundary creation",
+    async ({ emit, expected }) => {
+      const worker = new FakeWorker();
+      worker.onPost = () => emit(worker);
+      const coordinator = new DetailCoordinator(() => worker);
+
+      const result = coordinator.start(identity);
+
+      expect(coordinator.busy).toBe(false);
+      await expect(result).resolves.toMatchObject(expected);
+      expect(worker.terminate).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("honors cancellation and replacement requested by a reentrant worker factory", async () => {
+    const firstWorker = new FakeWorker();
+    const secondWorker = new FakeWorker();
+    let factoryCall = 0;
+    let replacement: Promise<DetailPreparationResult> | undefined;
+    let coordinator!: DetailCoordinator;
+    const cancel = vi.fn(() => coordinator.cancel());
+    coordinator = new DetailCoordinator(() => {
+      factoryCall++;
+      if (factoryCall === 1) {
+        expect(cancel()).toBe(true);
+        replacement = coordinator.start(otherIdentity);
+        return firstWorker;
+      }
+      return secondWorker;
+    });
+
+    const first = coordinator.start(identity);
+
+    await expect(first).resolves.toEqual({ status: "cancelled", jobId: 1 });
+    expect(firstWorker.terminate).toHaveBeenCalledOnce();
+    expect(coordinator.busy).toBe(true);
+    firstWorker.emit("message", success(firstWorker));
+    secondWorker.emit("message", success(secondWorker));
+    if (replacement === undefined) {
+      throw new Error("expected reentrant replacement");
+    }
+    await expect(replacement).resolves.toMatchObject({
+      status: "success",
+      jobId: 2,
+      identity: otherIdentity,
+    });
+    expect(secondWorker.terminate).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a synchronous transport failure terminal during cleanup reentrancy", async () => {
+    const firstWorker = new FakeWorker();
+    const secondWorker = new FakeWorker();
+    firstWorker.postError = new Error("clone failed");
+    const workers = [firstWorker, secondWorker];
+    let replacement: Promise<DetailPreparationResult> | undefined;
+    const coordinator = new DetailCoordinator(() => workers.shift()!);
+    firstWorker.onTerminate = () => {
+      replacement = coordinator.start(otherIdentity);
+    };
+
+    const first = coordinator.start(identity);
+
+    await expect(first).resolves.toEqual({
+      status: "failure",
+      jobId: 1,
+      error: "clone failed",
+    });
+    expect(coordinator.busy).toBe(true);
+    secondWorker.emit("message", success(secondWorker));
+    if (replacement === undefined) {
+      throw new Error("expected cleanup replacement");
+    }
+    await expect(replacement).resolves.toMatchObject({
+      status: "success",
+      jobId: 2,
+    });
+    expect(firstWorker.terminate).toHaveBeenCalledOnce();
+    expect(secondWorker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it("does not let disposal during terminal cleanup replace synchronous success", async () => {
+    const worker = new FakeWorker();
+    const coordinator = new DetailCoordinator(() => worker);
+    worker.onPost = () => worker.emit("message", success(worker));
+    worker.onTerminate = () => coordinator.dispose();
+
+    const result = coordinator.start(identity);
+
+    await expect(result).resolves.toMatchObject({
+      status: "success",
+      jobId: 1,
+    });
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(coordinator.busy).toBe(false);
+    await expect(coordinator.start(otherIdentity)).rejects.toThrow("disposed");
   });
 
   it("cancels, disposes, and ignores stale callbacks while terminating once", async () => {
