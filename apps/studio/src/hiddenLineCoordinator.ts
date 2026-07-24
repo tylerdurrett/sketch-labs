@@ -20,9 +20,10 @@ import {
   type RollingEtaEstimator,
 } from "./rollingEta";
 import {
-  terminateWorkerOnce,
-  workerErrorDetail,
-  workerEventDetail,
+  createWorkerBoundary,
+  type WorkerBoundaryControls,
+  type WorkerBoundaryFailure,
+  type WorkerBoundarySession,
   type WorkerFactory,
   type WorkerPort,
 } from "./workerBoundary";
@@ -92,13 +93,12 @@ interface ActiveJob {
   readonly jobKind: HiddenLineJobKind;
   readonly owner: HiddenLineJobOwner;
   readonly identity: OutlineComputeIdentity;
-  readonly terminateWorker: () => void;
-  readonly resolve: (result: HiddenLineJobResult) => void;
   readonly observeProgress:
     | HiddenLineProgressObserver
     | HiddenLineExportProgressObserver
     | undefined;
   readonly eta: RollingEtaEstimator;
+  boundary: WorkerBoundarySession<HiddenLineJobResult> | null;
   lastProgress: HiddenLineProgress | null;
   finalizing: boolean;
 }
@@ -107,6 +107,41 @@ const defaultClock: MonotonicClock = () => performance.now();
 
 function ownerFor(jobKind: HiddenLineJobKind): HiddenLineJobOwner {
   return jobKind === "preview" ? "outline-preview" : "hidden-line-export";
+}
+
+const SHARED_FAILURE_FALLBACKS: Readonly<
+  Partial<Record<WorkerBoundaryFailure["kind"], string>>
+> = {
+  construction: "Worker construction failed",
+  listener: "Worker listener registration failed",
+  "post-message": "Worker request could not be posted",
+  "worker-error": "Worker failed",
+  "message-error": "Worker response could not be decoded",
+};
+
+const OUTLINE_FAILURE_FALLBACKS: Readonly<
+  Partial<Record<WorkerBoundaryFailure["kind"], string>>
+> = {
+  construction: "Outline worker failed",
+  listener: "Outline worker could not start",
+  "post-message": "Outline worker could not start",
+  "worker-error": "Outline worker failed",
+  "message-error": "Outline worker response could not be decoded",
+};
+
+function outlineBoundaryError(failure: WorkerBoundaryFailure): string {
+  return failure.detail === SHARED_FAILURE_FALLBACKS[failure.kind]
+    ? (OUTLINE_FAILURE_FALLBACKS[failure.kind] ?? failure.detail)
+    : failure.detail;
+}
+
+function failureResult(jobId: number, error: string): FailureResult {
+  return {
+    status: "failure",
+    jobId,
+    error:
+      error.trim() === "" ? "Outline computation failed" : error.slice(0, 500),
+  };
 }
 
 export class HiddenLineCoordinator {
@@ -120,7 +155,7 @@ export class HiddenLineCoordinator {
   ) {}
 
   get busy(): boolean {
-    return this.active !== null;
+    return this.currentActive() !== null;
   }
 
   /** Compatibility entry point for the existing Outline preview session. */
@@ -168,10 +203,11 @@ export class HiddenLineCoordinator {
   }
 
   cancel(): boolean {
-    const active = this.active;
+    const active = this.currentActive();
     if (active === null) return false;
-    this.finish(active, { status: "cancelled", jobId: active.jobId });
-    return true;
+    const cancelled = active.boundary?.cancel() ?? false;
+    if (cancelled) this.release(active);
+    return cancelled;
   }
 
   dispose(): void {
@@ -194,149 +230,139 @@ export class HiddenLineCoordinator {
     if (this.disposed) {
       return Promise.reject(new Error("Hidden-line coordinator is disposed"));
     }
-    if (this.active !== null) {
+    if (this.currentActive() !== null) {
       return Promise.reject(new Error("A hidden-line job is already active"));
     }
 
     const jobId = this.nextJobId++;
-    let worker: OutlineWorkerPort;
-    try {
-      worker = this.workerFactory();
-    } catch (error) {
-      return Promise.resolve({
-        status: "failure",
-        jobId,
-        error: workerErrorDetail(error, "Outline worker failed"),
-      });
-    }
+    const active: ActiveJob = {
+      jobId,
+      jobKind,
+      owner: ownerFor(jobKind),
+      identity,
+      observeProgress,
+      eta: createRollingEtaEstimator(),
+      boundary: null,
+      lastProgress: null,
+      finalizing: false,
+    };
+    this.active = active;
 
-    return new Promise((resolve) => {
-      const active: ActiveJob = {
-        jobId,
-        jobKind,
-        owner: ownerFor(jobKind),
-        identity,
-        terminateWorker: terminateWorkerOnce(worker),
-        resolve,
-        observeProgress,
-        eta: createRollingEtaEstimator(),
-        lastProgress: null,
-        finalizing: false,
-      };
-      this.active = active;
+    const boundary = createWorkerBoundary<
+      HiddenLineWorkerRequest | OutlineComputeRequest,
+      HiddenLineJobResult
+    >({
+      createWorker: this.workerFactory,
+      request: createRequest(jobId),
+      onMessage: (message, controls) => {
+        this.handleMessage(active, message, controls);
+      },
+    });
+    active.boundary = boundary;
+    if (!boundary.active) this.release(active);
 
-      worker.addEventListener("message", (event) => {
-        if (this.active !== active) return;
-        if (active.jobKind === "preview") {
-          if (isOutlineComputeProgress(event.data)) {
-            if (event.data.jobId === active.jobId) {
-              this.reportProgress(active, event.data.snapshot);
-            }
-            return;
-          }
-          if (isOutlineComputeResponse(event.data)) {
-            if (
-              event.data.jobId !== active.jobId ||
-              !outlineComputeIdentitiesEqual(
-                event.data.identity,
-                active.identity,
-              )
-            ) {
-              return;
-            }
-            if (event.data.type === "failure") {
-              this.fail(active, event.data.error);
-            } else {
-              this.finish(active, {
-                status: "success",
-                jobId,
-                identity,
-                scene: event.data.scene,
-              });
-            }
-            return;
-          }
-        }
-        if (!isHiddenLineWorkerMessage(event.data)) {
-          this.fail(active, "Outline worker returned an invalid response");
-          return;
-        }
-        if (
-          event.data.jobId !== active.jobId ||
-          event.data.jobKind !== active.jobKind ||
-          event.data.owner !== active.owner
-        ) {
-          return;
-        }
-        if (event.data.type === "derivation-progress") {
-          this.reportProgress(active, event.data.snapshot);
-          return;
-        }
-        if (event.data.type === "finalizing") {
-          this.reportFinalizing(active);
-          return;
-        }
-        if (
-          !outlineComputeIdentitiesEqual(event.data.identity, active.identity)
-        ) {
-          return;
-        }
-        if (event.data.type === "failure") {
-          this.fail(active, event.data.error);
-          return;
-        }
-        if (event.data.jobKind === "preview") {
-          this.finish(active, {
-            status: "success",
-            jobId,
-            identity,
-            scene: event.data.scene,
-          });
-          return;
-        }
-        this.finish(active, {
-          status: "success",
-          jobId,
-          identity,
-          svg: event.data.svg,
-          filename: event.data.filename,
-          completedOutline: event.data.completedOutline,
-        });
-      });
-      worker.addEventListener("error", (event) => {
-        if (this.active === active) {
-          this.fail(active, workerEventDetail(event, "Outline worker failed"));
-        }
-      });
-      worker.addEventListener("messageerror", () => {
-        if (this.active === active) {
-          this.fail(active, "Outline worker response could not be decoded");
-        }
-      });
-
-      try {
-        worker.postMessage(createRequest(jobId));
-      } catch (error) {
-        this.fail(
-          active,
-          workerErrorDetail(error, "Outline worker could not start"),
-        );
+    return boundary.outcome.then((outcome) => {
+      this.release(active);
+      if (outcome.status === "completed") return outcome.value;
+      if (outcome.status === "cancelled") {
+        return { status: "cancelled", jobId };
       }
+      return failureResult(jobId, outlineBoundaryError(outcome.failure));
     });
   }
 
-  private fail(active: ActiveJob, error: string): void {
-    this.finish(active, {
-      status: "failure",
+  private handleMessage(
+    active: ActiveJob,
+    message: unknown,
+    controls: WorkerBoundaryControls<HiddenLineJobResult>,
+  ): void {
+    if (this.active !== active) return;
+    if (active.jobKind === "preview") {
+      if (isOutlineComputeProgress(message)) {
+        if (message.jobId === active.jobId) {
+          this.reportProgress(active, message.snapshot, controls);
+        }
+        return;
+      }
+      if (isOutlineComputeResponse(message)) {
+        if (
+          message.jobId !== active.jobId ||
+          !outlineComputeIdentitiesEqual(message.identity, active.identity)
+        ) {
+          return;
+        }
+        if (message.type === "failure") {
+          this.complete(
+            active,
+            controls,
+            failureResult(active.jobId, message.error),
+          );
+        } else {
+          this.complete(active, controls, {
+            status: "success",
+            jobId: active.jobId,
+            identity: active.identity,
+            scene: message.scene,
+          });
+        }
+        return;
+      }
+    }
+    if (!isHiddenLineWorkerMessage(message)) {
+      controls.rejectMessage("Outline worker returned an invalid response");
+      this.release(active);
+      return;
+    }
+    if (
+      message.jobId !== active.jobId ||
+      message.jobKind !== active.jobKind ||
+      message.owner !== active.owner
+    ) {
+      return;
+    }
+    if (message.type === "derivation-progress") {
+      this.reportProgress(active, message.snapshot, controls);
+      return;
+    }
+    if (message.type === "finalizing") {
+      this.reportFinalizing(active, controls);
+      return;
+    }
+    if (!outlineComputeIdentitiesEqual(message.identity, active.identity)) {
+      return;
+    }
+    if (message.type === "failure") {
+      this.complete(
+        active,
+        controls,
+        failureResult(active.jobId, message.error),
+      );
+      return;
+    }
+    if (message.jobKind === "preview") {
+      this.complete(active, controls, {
+        status: "success",
+        jobId: active.jobId,
+        identity: active.identity,
+        scene: message.scene,
+      });
+      return;
+    }
+    this.complete(active, controls, {
+      status: "success",
       jobId: active.jobId,
-      error:
-        error.trim() === ""
-          ? "Outline computation failed"
-          : error.slice(0, 500),
+      identity: active.identity,
+      svg: message.svg,
+      filename: message.filename,
+      completedOutline: message.completedOutline,
     });
   }
 
-  private reportProgress(active: ActiveJob, candidate: HiddenLineProgress): void {
+  private reportProgress(
+    active: ActiveJob,
+    candidate: HiddenLineProgress,
+    controls: WorkerBoundaryControls<HiddenLineJobResult>,
+  ): void {
     const previous = active.lastProgress;
     if (
       active.finalizing ||
@@ -355,33 +381,58 @@ export class HiddenLineCoordinator {
       totalWork: snapshot.totalWorkUnits,
     });
     if (active.jobKind === "preview") {
-      (active.observeProgress as HiddenLineProgressObserver | undefined)?.({
-        snapshot,
-        eta,
-      });
+      const observer = active.observeProgress as
+        | HiddenLineProgressObserver
+        | undefined;
+      controls.observe(() => observer?.({ snapshot, eta }));
     } else {
-      (
-        active.observeProgress as HiddenLineExportProgressObserver | undefined
-      )?.({
-        phase: "derivation",
-        snapshot,
-        eta,
-      });
+      const observer = active.observeProgress as
+        | HiddenLineExportProgressObserver
+        | undefined;
+      controls.observe(() =>
+        observer?.({
+          phase: "derivation",
+          snapshot,
+          eta,
+        }),
+      );
     }
   }
 
-  private reportFinalizing(active: ActiveJob): void {
+  private reportFinalizing(
+    active: ActiveJob,
+    controls: WorkerBoundaryControls<HiddenLineJobResult>,
+  ): void {
     if (active.jobKind !== "export" || active.finalizing) return;
     active.finalizing = true;
-    (active.observeProgress as HiddenLineExportProgressObserver | undefined)?.({
-      phase: "finalizing",
-    });
+    const observer = active.observeProgress as
+      | HiddenLineExportProgressObserver
+      | undefined;
+    controls.observe(() => observer?.({ phase: "finalizing" }));
   }
 
-  private finish(active: ActiveJob, result: HiddenLineJobResult): void {
-    if (this.active !== active) return;
-    this.active = null;
-    active.terminateWorker();
-    active.resolve(result);
+  private complete(
+    active: ActiveJob,
+    controls: WorkerBoundaryControls<HiddenLineJobResult>,
+    result: HiddenLineJobResult,
+  ): void {
+    if (controls.complete(result)) this.release(active);
+  }
+
+  private currentActive(): ActiveJob | null {
+    const active = this.active;
+    if (
+      active !== null &&
+      active.boundary !== null &&
+      active.boundary.active === false
+    ) {
+      this.release(active);
+      return null;
+    }
+    return active;
+  }
+
+  private release(active: ActiveJob): void {
+    if (this.active === active) this.active = null;
   }
 }

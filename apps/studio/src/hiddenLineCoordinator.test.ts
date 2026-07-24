@@ -274,6 +274,22 @@ describe("HiddenLineCoordinator", () => {
     await expect(result).resolves.toMatchObject({ status: "success" });
   });
 
+  it("keeps progress observation from owning the Outline worker lifecycle", async () => {
+    const worker = new FakeWorker();
+    const coordinator = new HiddenLineCoordinator(() => worker);
+    const result = coordinator.start(identity(), () => {
+      throw new Error("observer failed");
+    });
+
+    worker.emit("message", progressResponse(worker, 10));
+    expect(coordinator.busy).toBe(true);
+    expect(worker.terminate).not.toHaveBeenCalled();
+
+    worker.emit("message", successfulResponse(worker));
+    await expect(result).resolves.toMatchObject({ status: "success" });
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
   it("ignores foreign, duplicate, regressive, and unstable-total progress", async () => {
     const worker = new FakeWorker();
     const clock = vi.fn(() => 1_000);
@@ -532,8 +548,12 @@ describe("HiddenLineCoordinator", () => {
     if (mismatchedIdentity.sourceKind !== "legacy-scene") {
       throw new Error("expected legacy identity");
     }
-    (mismatchedIdentity.sourceScene.primitives[0]!.points[0] as [number, number])[0] =
-      999;
+    (
+      mismatchedIdentity.sourceScene.primitives[0]!.points[0] as [
+        number,
+        number,
+      ]
+    )[0] = 999;
     worker.emit("message", {
       ...terminal,
       identity: mismatchedIdentity,
@@ -573,7 +593,10 @@ describe("HiddenLineCoordinator", () => {
     const second = coordinator.startOutline(identity(2));
     secondWorker.emit("message", successfulResponse(secondWorker));
     secondWorker.emit("message", successfulResponse(secondWorker));
-    await expect(second).resolves.toMatchObject({ status: "success", jobId: 2 });
+    await expect(second).resolves.toMatchObject({
+      status: "success",
+      jobId: 2,
+    });
     expect(secondWorker.terminate).toHaveBeenCalledOnce();
   });
 
