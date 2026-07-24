@@ -28,8 +28,16 @@ import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
  * remounting that wrapper — not by anything in here.
  */
 export interface ControlPanelProps {
-  /** The Sketch's Parameter Schema — one control is rendered per active entry. */
+  /** The complete owning Sketch Parameter Schema. */
   schema: ParamSchema;
+  /**
+   * Optional ordered rendering projection over `schema`.
+   *
+   * Only these keys render, in this exact order. Schema validation,
+   * applicability, values, Locks, and edit callbacks still use the complete
+   * owning schema and params; this seam changes presentation only.
+   */
+  orderedKeys?: readonly string[] | undefined;
   /** The current value of every param, keyed as in `schema`. */
   params: Params;
   /**
@@ -183,15 +191,18 @@ function renderControl(
  * derived ENTIRELY from the Sketch's {@link ParamSchema} and complete current
  * Params — no bespoke per-Sketch UI.
  *
- * It iterates the schema entries in declaration order and delegates each to
- * {@link renderControl}, which switches on `spec.kind`. Applicability affects
- * presentation only: an inactive row is omitted without changing its value,
- * default, or Lock state, so it reappears with prior tuning when its controller
- * switches back. Every active param therefore gets a working control (or a loud
- * fallback for an unsupported kind) with zero per-Sketch code.
+ * It iterates schema entries in declaration order by default; an `orderedKeys`
+ * projection may instead select and order rendered rows without replacing the
+ * owning schema. Each row delegates to {@link renderControl}, which switches on
+ * `spec.kind`. Applicability affects presentation only: an inactive row is
+ * omitted without changing its value, default, or Lock state, so it reappears
+ * with prior tuning when its controller switches back. Every rendered active
+ * param therefore gets a working control (or a loud fallback for an unsupported
+ * kind) with zero per-Sketch control code.
  */
 export function ControlPanel({
   schema,
+  orderedKeys,
   params,
   locks,
   onChange,
@@ -204,6 +215,27 @@ export function ControlPanel({
   onParamEditBegin,
 }: ControlPanelProps) {
   validateParamSchema(schema);
+  const entries =
+    orderedKeys === undefined
+      ? Object.entries(schema)
+      : orderedKeys.map((key, index) => {
+          if (typeof key !== "string" || key.length === 0) {
+            throw new TypeError(
+              `ControlPanel: orderedKeys[${index}] must be a nonempty string`,
+            );
+          }
+          if (orderedKeys.indexOf(key) !== index) {
+            throw new TypeError(
+              `ControlPanel: duplicate ordered key \`${key}\``,
+            );
+          }
+          if (!Object.prototype.hasOwnProperty.call(schema, key)) {
+            throw new TypeError(
+              `ControlPanel: ordered key \`${key}\` is not in the owning schema`,
+            );
+          }
+          return [key, schema[key]!] as const;
+        });
   const choiceValues = new Map<string, string>();
   for (const [key, spec] of Object.entries(schema)) {
     if (spec.kind !== "choice") continue;
@@ -217,7 +249,7 @@ export function ControlPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      {Object.entries(schema).map(([key, spec]) => {
+      {entries.map(([key, spec]) => {
         if (!isParamActive(schema, params, key)) return null;
         return renderControl(
           key,

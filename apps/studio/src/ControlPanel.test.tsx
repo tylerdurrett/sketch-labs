@@ -84,6 +84,79 @@ describe("ControlPanel", () => {
     },
   } as const satisfies ParamSchema;
 
+  it("renders an ordered key projection without changing owning-schema applicability", () => {
+    const schema = {
+      "2": numberSpec({ default: 2 }),
+      "10": numberSpec({ default: 10 }),
+      mode: {
+        kind: "choice",
+        options: [
+          { value: "show", label: "Show" },
+          { value: "hide", label: "Hide" },
+        ],
+        default: "show",
+      },
+      dependent: {
+        ...numberSpec({ default: 25 }),
+        activeWhen: { key: "mode", equals: "show" },
+      },
+    } as const satisfies ParamSchema;
+    const props = {
+      schema,
+      locks: new Set<string>(),
+      onChange: () => {},
+      onToggleLock: () => {},
+    };
+
+    const shown = renderToStaticMarkup(
+      <ControlPanel
+        {...props}
+        orderedKeys={["10", "dependent", "2"]}
+        params={{ "2": 2, "10": 10, mode: "show", dependent: 25 }}
+      />,
+    );
+    expect(shown.indexOf('id="control-10"')).toBeLessThan(
+      shown.indexOf('id="control-dependent"'),
+    );
+    expect(shown.indexOf('id="control-dependent"')).toBeLessThan(
+      shown.indexOf('id="control-2"'),
+    );
+    expect(shown).not.toContain('id="control-mode"');
+
+    const hidden = renderToStaticMarkup(
+      <ControlPanel
+        {...props}
+        orderedKeys={["dependent"]}
+        params={{ "2": 2, "10": 10, mode: "hide", dependent: 25 }}
+      />,
+    );
+    expect(hidden).not.toContain('id="control-dependent"');
+  });
+
+  it("rejects invalid ordered key projections", () => {
+    const props = {
+      schema: conditionalSchema,
+      params: defaultParams(conditionalSchema),
+      locks: new Set<string>(),
+      onChange: () => {},
+      onToggleLock: () => {},
+    };
+
+    expect(() =>
+      renderToStaticMarkup(
+        <ControlPanel
+          {...props}
+          orderedKeys={["strategy", "strategy"]}
+        />,
+      ),
+    ).toThrow("duplicate ordered key `strategy`");
+    expect(() =>
+      renderToStaticMarkup(
+        <ControlPanel {...props} orderedKeys={["missing"]} />,
+      ),
+    ).toThrow("ordered key `missing` is not in the owning schema");
+  });
+
   it("renders Choice as a lock-free schema-derived control", () => {
     const html = renderToStaticMarkup(
       <ControlPanel
