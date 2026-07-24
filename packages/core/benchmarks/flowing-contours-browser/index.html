@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flowing Contours browser performance probe</title>
+  </head>
+  <body>
+    <label>
+      Curve detail
+      <input id="curve-detail" type="number" min="0" max="2" step="0.01" value="1" />
+    </label>
+    <canvas id="surface" width="1000" height="1000"></canvas>
+    <pre id="status">Loading fixtures…</pre>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

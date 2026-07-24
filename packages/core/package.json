@@ -9,6 +9,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
+    "benchmark:flowing-contours": "vitest run --config vitest.flowing-contours-benchmark.config.ts",
     "benchmark:grass-hills-density": "vitest run --config vitest.grass-hills-density-benchmark.config.ts",
     "benchmark:hidden-line": "vitest run --config vitest.hidden-line-benchmark.config.ts",
     "benchmark:leaf-field": "vitest run --config vitest.leaf-field-benchmark.config.ts",
