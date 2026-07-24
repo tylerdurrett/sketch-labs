@@ -151,6 +151,21 @@ import {
 
 type DiagnosticSelection = null | "tone" | "detail";
 
+function presentationIsIsolatedPrimary(
+  declaration: PlotSequenceDeclaration | undefined,
+  presentation: PlotSequencePresentation,
+): boolean {
+  if (declaration === undefined) return true;
+  const primary = declaration.stages.find(
+    (stage) => stage.source.kind === "primary",
+  );
+  return (
+    primary !== undefined &&
+    presentation.kind === "isolated" &&
+    presentation.stageId === primary.id
+  );
+}
+
 type DetailReferenceDerivation =
   | { readonly kind: "ready"; readonly field: DetailField }
   | { readonly kind: "loading" }
@@ -681,6 +696,23 @@ export function SketchControls({
       ? {}
       : { initialPresentation: initialPlotSequencePresentation }),
   });
+  // Plot Stage selection is transient presentation state, but legacy actions
+  // need an imperative authority just like authored history. A Stage-button
+  // click updates this mirror before React renders so another click in the same
+  // batch cannot capture, generate, launch, or download Primary Ink output.
+  const plotSequencePresentationRef = useRef(
+    plotSequencePresentation.presentation,
+  );
+  plotSequencePresentationRef.current = plotSequencePresentation.presentation;
+  const primaryLegacyActionsAvailable = presentationIsIsolatedPrimary(
+    plotSequence,
+    plotSequencePresentation.presentation,
+  );
+  const primaryLegacyActionsAvailableNow = (): boolean =>
+    presentationIsIsolatedPrimary(
+      plotSequence,
+      plotSequencePresentationRef.current,
+    );
   const primaryShadingPreparation = hasPlotSequence
     ? registeredStagePreparation.primaryShadingPreparation
     : shadingPreparation;
@@ -759,7 +791,7 @@ export function SketchControls({
   // and the Outline session are absent from this capability seam.
   const toneSource = useMemo(
     () =>
-      toneReferenceActive
+      toneReferenceActive && primaryLegacyActionsAvailable
         ? environmentReady
           ? sketch.generateToneSource?.(
               params,
@@ -770,6 +802,7 @@ export function SketchControls({
         : undefined,
     [
       toneReferenceActive,
+      primaryLegacyActionsAvailable,
       sketch,
       params,
       compositionFrame,
@@ -783,7 +816,12 @@ export function SketchControls({
   // a malformed prepared record or binding assertion becomes an honest Detail
   // failure instead of escaping through React or silently substituting zero.
   const detailReferenceDerivation: DetailReferenceDerivation | null = (() => {
-    if (diagnosticSelection !== "detail") return null;
+    if (
+      diagnosticSelection !== "detail" ||
+      !primaryLegacyActionsAvailable
+    ) {
+      return null;
+    }
     if (!environmentReady || detailIdentity === null) {
       return { kind: "loading" };
     }
@@ -965,7 +1003,7 @@ export function SketchControls({
   }, [environmentReady]);
 
   const requestOutlineForCurrentInputs = (): void => {
-    if (!environmentReadyNow()) return;
+    if (!primaryLegacyActionsAvailableNow() || !environmentReadyNow()) return;
     dispatchOutline({
       type: "request-outline",
       launch: !hasShadingCapability || shadingPaintIsCurrent,
@@ -1410,6 +1448,7 @@ export function SketchControls({
   // exact displayed Fill, then the session's worker coordinator derives geometry;
   // LiveCanvas only paints the held Fill or atomically completed Outline.
   const toggleRenderMode = () => {
+    if (!primaryLegacyActionsAvailableNow()) return;
     if (outlineSessionRef.current.desired === "outline") {
       cancelOutlineCoordinator();
       dispatchOutline({ type: "request-fill" });
@@ -1432,6 +1471,7 @@ export function SketchControls({
   };
 
   const selectFill = (): void => {
+    if (!primaryLegacyActionsAvailableNow()) return;
     leaveDetailFor(null);
     if (outlineSessionRef.current.desired === "outline") {
       cancelOutlineCoordinator();
@@ -1440,6 +1480,7 @@ export function SketchControls({
   };
 
   const selectOutline = (): void => {
+    if (!primaryLegacyActionsAvailableNow()) return;
     leaveDetailFor(null);
     if (!environmentReadyNow()) return;
     if (outlineSessionRef.current.desired !== "outline") {
@@ -1448,7 +1489,12 @@ export function SketchControls({
   };
 
   const selectToneReference = (): void => {
-    if (sketch.generateToneSource === undefined) return;
+    if (
+      !primaryLegacyActionsAvailableNow() ||
+      sketch.generateToneSource === undefined
+    ) {
+      return;
+    }
     // Tone has no Outline phase of its own. Relinquish preview ownership and
     // reset intent to Fill before switching LiveCanvas to the pixel source.
     cancelOutlineCoordinator();
@@ -1458,6 +1504,7 @@ export function SketchControls({
 
   const selectDetailReference = (): void => {
     if (
+      !primaryLegacyActionsAvailableNow() ||
       sketch.generateDetailField === undefined ||
       !environmentReadyNow() ||
       detailIdentity === null ||
@@ -1476,7 +1523,44 @@ export function SketchControls({
     detailPreparation.request(detailIdentity);
   };
 
+  const retirePrimaryLegacyActions = (): void => {
+    const current = outlineSessionRef.current;
+    if (current.slot !== null) cancelCoordinator();
+    if (current.exportActive !== null) {
+      dispatchOutline({
+        type: "export-cancelled",
+        token: current.exportActive.token,
+      });
+    }
+    // Resetting to Fill clears capture, active work, deferred intent, and any
+    // retained Outline phase before the supporting/Combined Scene can paint.
+    dispatchOutline({ type: "request-fill" });
+
+    const previousDiagnostic = diagnosticSelectionRef.current;
+    if (previousDiagnostic === "detail") detailPreparation.unrequest();
+    diagnosticSelectionRef.current = null;
+    setDiagnosticSelection(null);
+    if (previousDiagnostic === "detail" && hasShadingCapability) {
+      primaryShadingPreparation.resumeLatest();
+    }
+  };
+
+  const setPlotSequencePresentation = (
+    next: PlotSequencePresentation,
+  ): void => {
+    const leavingPrimary =
+      primaryLegacyActionsAvailableNow() &&
+      !presentationIsIsolatedPrimary(plotSequence, next);
+    // Establish the transient authority before teardown or React state. Any
+    // already-queued worker/export callback therefore observes non-Primary and
+    // fails closed even if it runs in this event batch.
+    plotSequencePresentationRef.current = next;
+    if (leavingPrimary) retirePrimaryLegacyActions();
+    plotSequencePresentation.setPresentation(next);
+  };
+
   const onFillCaptured = (capture: FillCapture): void => {
+    if (!primaryLegacyActionsAvailableNow()) return;
     if (!environmentReadyNow()) {
       cancelUnavailableEnvironmentWork();
       return;
@@ -1525,13 +1609,23 @@ export function SketchControls({
       });
     };
     const coordinator = coordinatorRef.current;
-    if (coordinator === null) return;
+    if (
+      coordinator === null ||
+      !primaryLegacyActionsAvailableNow()
+    ) {
+      return;
+    }
     void coordinator
       .start(identity, (update) => {
         // Worker callbacks can already be queued when a job is replaced. The
         // session token, rather than coordinator/job identity alone, owns UI
         // progress so an old worker can never repaint a newer request.
-        if (outlineSessionRef.current.active?.token !== capture.token) return;
+        if (
+          !primaryLegacyActionsAvailableNow() ||
+          outlineSessionRef.current.active?.token !== capture.token
+        ) {
+          return;
+        }
         if (!environmentReadyNow()) {
           cancelUnavailableEnvironmentWork();
           return;
@@ -1539,7 +1633,12 @@ export function SketchControls({
         setOutlineProgress({ token: capture.token, update });
       })
       .then((result) => {
-        if (coordinatorRef.current !== coordinator) return;
+        if (
+          coordinatorRef.current !== coordinator ||
+          !primaryLegacyActionsAvailableNow()
+        ) {
+          return;
+        }
         if (!environmentReadyNow()) {
           cancelUnavailableEnvironmentWork();
           return;
@@ -1556,7 +1655,12 @@ export function SketchControls({
         }
       })
       .catch((error: unknown) => {
-        if (coordinatorRef.current !== coordinator) return;
+        if (
+          coordinatorRef.current !== coordinator ||
+          !primaryLegacyActionsAvailableNow()
+        ) {
+          return;
+        }
         if (!environmentReadyNow()) {
           cancelUnavailableEnvironmentWork();
           return;
@@ -1568,7 +1672,12 @@ export function SketchControls({
   const onDisplayedSceneCommitted = (
     snapshot: DisplayedSceneSnapshot,
   ): void => {
-    if (!environmentReadyNow()) return;
+    if (
+      !primaryLegacyActionsAvailableNow() ||
+      !environmentReadyNow()
+    ) {
+      return;
+    }
     const latestShading = selectCurrentShadingResult(
       primaryShadingPreparation.getSessionSnapshot(),
     );
@@ -1763,7 +1872,9 @@ export function SketchControls({
 
   /** Re-prove Shading session and canvas provenance at an export side effect. */
   const captureCurrentShadingExport = () => {
-    if (!hasShadingCapability) return null;
+    if (!primaryLegacyActionsAvailableNow() || !hasShadingCapability) {
+      return null;
+    }
     const displayed = canvasHandle.current?.captureDisplayedFrame() ?? null;
     const result = acknowledgedCurrentShading(
       primaryShadingPreparation.getSessionSnapshot(),
@@ -1776,7 +1887,12 @@ export function SketchControls({
   const sameShadingExportRevision = (
     expected: ReturnType<typeof captureCurrentShadingExport>,
   ): boolean => {
-    if (!environmentReadyNow()) return false;
+    if (
+      !primaryLegacyActionsAvailableNow() ||
+      !environmentReadyNow()
+    ) {
+      return false;
+    }
     if (!hasShadingCapability) return true;
     if (expected === null) return false;
     const current = captureCurrentShadingExport();
@@ -1802,6 +1918,7 @@ export function SketchControls({
       // LiveCanvas stays mounted in Detail mode, so this handler gate is the
       // final authority preventing its diagnostic backing pixels from escaping.
       diagnosticSelectionRef.current !== null ||
+      !primaryLegacyActionsAvailableNow() ||
       !environmentReadyNow()
     ) return;
     const handle = canvasHandle.current;
@@ -1842,6 +1959,7 @@ export function SketchControls({
         const withMeta = insertPngMetadata(new Uint8Array(buffer), metadata);
         // `withMeta` spans its whole backing buffer (core's `concat` allocates a
         // fresh, offset-0 array), so `.buffer` is exactly these bytes.
+        if (!primaryLegacyActionsAvailableNow()) return;
         downloadBlob(
           new Blob([withMeta.buffer as ArrayBuffer], { type: "image/png" }),
           filename,
@@ -1867,6 +1985,7 @@ export function SketchControls({
   const exportSvg = () => {
     if (
       diagnosticSelectionRef.current !== null ||
+      !primaryLegacyActionsAvailableNow() ||
       !environmentReadyNow()
     ) return;
     const handle = canvasHandle.current;
@@ -1891,19 +2010,26 @@ export function SketchControls({
     // filename's time-segment source, so both reflect the same displayed moment.
     const sourceScene =
       shadingExport?.result.scene ?? retainedFill?.sourceScene ?? null;
-    const scene =
-      pageFrame !== null && sourceScene !== null
-        ? frameScene(sourceScene, pageFrame)
-        : sourceScene ??
-          (environment === undefined
-            ? sketch.generate(params, seed, t ?? 0, compositionFrame)
-            : sketch.generate(
-                params,
-                seed,
-                t ?? 0,
-                compositionFrame,
-                environment,
-              ));
+    let scene: Scene;
+    if (pageFrame !== null && sourceScene !== null) {
+      scene = frameScene(sourceScene, pageFrame);
+    } else if (sourceScene !== null) {
+      scene = sourceScene;
+    } else {
+      // Cold generation is a legacy Primary Ink fallback. Re-prove the
+      // transient view at the exact side-effect boundary.
+      if (!primaryLegacyActionsAvailableNow()) return;
+      scene =
+        environment === undefined
+          ? sketch.generate(params, seed, t ?? 0, compositionFrame)
+          : sketch.generate(
+              params,
+              seed,
+              t ?? 0,
+              compositionFrame,
+              environment,
+            );
+    }
     // Clip the generated geometry to the canvas rectangle so the exported plot
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
@@ -1927,6 +2053,7 @@ export function SketchControls({
     const svg = renderToSVG(exportScene, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     if (!sameShadingExportRevision(shadingExport)) return;
+    if (!primaryLegacyActionsAvailableNow()) return;
     downloadBlob(
       blob,
       exportFilename(
@@ -1946,6 +2073,7 @@ export function SketchControls({
   const exportHiddenLineSvg = () => {
     if (
       diagnosticSelectionRef.current !== null ||
+      !primaryLegacyActionsAvailableNow() ||
       hiddenLineBusy ||
       !environmentReadyNow()
     ) {
@@ -2042,7 +2170,10 @@ export function SketchControls({
     const active = requested.exportActive;
     if (active === null || active.snapshot !== snapshot) return;
     const coordinator = coordinatorRef.current;
-    if (coordinator === null) {
+    if (
+      coordinator === null ||
+      !primaryLegacyActionsAvailableNow()
+    ) {
       console.error(
         "Hidden-line export failed",
         "Hidden-line export is unavailable",
@@ -2060,6 +2191,7 @@ export function SketchControls({
         if (outlineSessionRef.current.exportActive?.token !== active.token) {
           return;
         }
+        if (!primaryLegacyActionsAvailableNow()) return;
         if (!environmentReadyNow()) {
           cancelUnavailableEnvironmentWork();
           return;
@@ -2073,6 +2205,7 @@ export function SketchControls({
       .then((result) => {
         if (
           coordinatorRef.current !== coordinator ||
+          !primaryLegacyActionsAvailableNow() ||
           outlineSessionRef.current.exportActive?.token !== active.token
         ) {
           return;
@@ -2088,6 +2221,7 @@ export function SketchControls({
             completedOutline: result.completedOutline,
           });
           if (!sameShadingExportRevision(shadingExport)) return;
+          if (!primaryLegacyActionsAvailableNow()) return;
           downloadBlob(
             new Blob([result.svg], { type: "image/svg+xml" }),
             result.filename,
@@ -2106,6 +2240,7 @@ export function SketchControls({
       .catch((error: unknown) => {
         if (
           coordinatorRef.current !== coordinator ||
+          !primaryLegacyActionsAvailableNow() ||
           outlineSessionRef.current.exportActive?.token !== active.token
         ) {
           return;
@@ -2287,7 +2422,7 @@ export function SketchControls({
             declaration={plotSequence}
             presentation={plotSequencePresentation.presentation}
             records={registeredStagePreparation.records}
-            onPresentationChange={plotSequencePresentation.setPresentation}
+            onPresentationChange={setPlotSequencePresentation}
             onCancelStage={registeredStagePreparation.cancel}
             onRetryStage={registeredStagePreparation.retry}
           />
@@ -2357,7 +2492,25 @@ export function SketchControls({
          * `aria-busy` covers capture plus worker compute, while the toggle remains
          * usable as the immediate cancel/back-to-Fill action.
          */}
-        <div className="mt-auto flex items-center gap-2">
+        {hasPlotSequence ? (
+          <p
+            className="mt-auto text-xs text-muted-foreground"
+            data-primary-ink-actions={
+              primaryLegacyActionsAvailable ? "available" : "unavailable"
+            }
+          >
+            {primaryLegacyActionsAvailable
+              ? "Primary Ink render actions"
+              : "Primary Ink actions are available only in the isolated Primary Ink view."}
+          </p>
+        ) : null}
+        <div
+          hidden={!primaryLegacyActionsAvailable}
+          aria-label={hasPlotSequence ? "Primary Ink render actions" : undefined}
+        >
+        <div
+          className={`${hasPlotSequence ? "" : "mt-auto "}flex items-center gap-2`}
+        >
           <span className="flex-none min-w-16 text-sm text-muted-foreground">
             render
           </span>
@@ -2541,6 +2694,7 @@ export function SketchControls({
             onCancel: cancelTransaction,
           }}
         />
+        </div>
         {/*
          * Export controls — the shared home for every export path (PNG snapshots
          * the live canvas frame; SVG serializes ordinary cold geometry or the
@@ -2549,14 +2703,24 @@ export function SketchControls({
          * buttons split the row
          * (`flex-1`) and wrap as the group grows.
          */}
-        <div className="flex flex-wrap gap-2">
+        <div
+          className="flex flex-wrap gap-2"
+          role="group"
+          aria-label={hasPlotSequence ? "Primary Ink legacy exports" : "Exports"}
+        >
           <Button
             type="button"
             variant="outline"
             size="sm"
             className="flex-1"
             onClick={exportPng}
+            title={
+              hasPlotSequence && !primaryLegacyActionsAvailable
+                ? "Export PNG is available only in the isolated Primary Ink view."
+                : undefined
+            }
             disabled={
+              !primaryLegacyActionsAvailable ||
               diagnosticReferenceActive ||
               !environmentReady ||
               (!shadingPaintIsCurrent && hasShadingCapability)
@@ -2570,7 +2734,13 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportSvg}
+            title={
+              hasPlotSequence && !primaryLegacyActionsAvailable
+                ? "Export SVG is available only in the isolated Primary Ink view."
+                : undefined
+            }
             disabled={
+              !primaryLegacyActionsAvailable ||
               diagnosticReferenceActive ||
               !environmentReady ||
               (!shadingPaintIsCurrent && hasShadingCapability)
@@ -2586,7 +2756,13 @@ export function SketchControls({
                 size="sm"
                 className="flex-1"
                 onClick={exportHiddenLineSvg}
+                title={
+                  hasPlotSequence && !primaryLegacyActionsAvailable
+                    ? "Hidden-line export is available only in the isolated Primary Ink view."
+                    : undefined
+                }
                 disabled={
+                  !primaryLegacyActionsAvailable ||
                   diagnosticReferenceActive ||
                   !environmentReady ||
                   hiddenLineBusy ||

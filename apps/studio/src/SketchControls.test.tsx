@@ -599,6 +599,7 @@ let autoAcknowledgeDisplayedScene = true;
 let acknowledgeDisplayedScene: (() => void) | null = null;
 let generateDuringLiveCanvasRender = false;
 let generateOrdinaryFillCapture = false;
+let displayedFrameCaptures = 0;
 
 // LiveCanvas is a browser-only sink (canvas2d, ResizeObserver, matchMedia) and
 // is NOT under test here — these are wiring tests for the control state. Replace
@@ -732,9 +733,14 @@ vi.mock("./LiveCanvas", () => ({
       getCurrentT: () => fakeCurrentT,
       getDisplayedScene: () =>
         fakeDisplayedScene === null ? null : capturedFrame(),
-      captureDisplayedFrame: capturedFrame,
-      captureDisplayedFillFrame: () =>
-        capturedFrame(fakeDisplayedFillScene ?? fakeDisplayedScene),
+      captureDisplayedFrame: () => {
+        displayedFrameCaptures += 1;
+        return capturedFrame();
+      },
+      captureDisplayedFillFrame: () => {
+        displayedFrameCaptures += 1;
+        return capturedFrame(fakeDisplayedFillScene ?? fakeDisplayedScene);
+      },
     }));
     lastOnOutlineComputed = () => {
       const active = outlineJob.active;
@@ -1040,6 +1046,7 @@ beforeEach(() => {
   acknowledgeDisplayedScene = null;
   generateDuringLiveCanvasRender = false;
   generateOrdinaryFillCapture = false;
+  displayedFrameCaptures = 0;
   autoFireOutlineComputed = true;
   window.localStorage.clear();
   fakeCanvasToBlob = ((cb: BlobCallback) => {
@@ -8288,6 +8295,264 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
       watercolor.primitives[0],
     ]);
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("exposes and labels legacy actions only for isolated Primary Ink", async () => {
+    const generate = vi.fn(photoScribble.generate);
+    const generateToneSource = vi.fn(photoScribble.generateToneSource!);
+    const toBlob = vi.fn(fakeCanvasToBlob);
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls
+        sketch={{
+          ...managedPhotoScribble(generateToneSource),
+          generate,
+        }}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await completeShading(0, preparedScene(51));
+
+    const actionStatus = () =>
+      el.querySelector<HTMLElement>("[data-primary-ink-actions]")!;
+    const renderActions = () =>
+      el.querySelector<HTMLElement>(
+        '[aria-label="Primary Ink render actions"]',
+      )!;
+    const exports = [
+      "Export PNG",
+      "Export SVG",
+      "Export Hidden-line SVG",
+    ].map((label) => exportButton(el, label));
+
+    expect(actionStatus().dataset.primaryInkActions).toBe("available");
+    expect(actionStatus().textContent).toContain("Primary Ink");
+    expect(renderActions().hidden).toBe(false);
+    expect(exports.map(({ disabled }) => disabled)).toEqual([
+      false,
+      false,
+      false,
+    ]);
+
+    clickButton(el, "Watercolor Forms");
+    expect(actionStatus().dataset.primaryInkActions).toBe("unavailable");
+    expect(renderActions().hidden).toBe(true);
+    expect(exports.map(({ disabled }) => disabled)).toEqual([true, true, true]);
+    expect(exports.every(({ title }) => title.includes("Primary Ink"))).toBe(
+      true,
+    );
+
+    const capturesBefore = displayedFrameCaptures;
+    act(() => {
+      for (const button of [...renderModeButtons(el), ...exports]) {
+        button.disabled = false;
+        button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(displayedFrameCaptures).toBe(capturesBefore);
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+    expect(generateToneSource).not.toHaveBeenCalled();
+    expect(detailJob.starts).toHaveLength(0);
+    expect(outlineJob.starts).toBe(0);
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(exportSceneCapture.current).toBeNull();
+    expect(downloadBlob).not.toHaveBeenCalled();
+    for (const action of exports) action.disabled = true;
+
+    clickButton(el, "Combined");
+    expect(actionStatus().dataset.primaryInkActions).toBe("unavailable");
+    expect(renderActions().hidden).toBe(true);
+    expect(exports.map(({ disabled }) => disabled)).toEqual([true, true, true]);
+    act(() => {
+      for (const button of [...renderModeButtons(el), ...exports]) {
+        button.disabled = false;
+        button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(displayedFrameCaptures).toBe(capturesBefore);
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+    expect(generateToneSource).not.toHaveBeenCalled();
+    expect(detailJob.starts).toHaveLength(0);
+    expect(outlineJob.starts).toBe(0);
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(exportSceneCapture.current).toBeNull();
+    expect(downloadBlob).not.toHaveBeenCalled();
+
+    clickButton(el, "Ink Scribble");
+    expect(actionStatus().dataset.primaryInkActions).toBe("available");
+    expect(renderActions().hidden).toBe(false);
+    expect(exports.map(({ disabled }) => disabled)).toEqual([
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("fails same-batch stale Primary handlers closed after a Stage view click", async () => {
+    const generate = vi.fn(photoScribble.generate);
+    const generateToneSource = vi.fn(photoScribble.generateToneSource!);
+    const toBlob = vi.fn(fakeCanvasToBlob);
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls
+        sketch={{
+          ...managedPhotoScribble(generateToneSource),
+          generate,
+        }}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await completeShading(0, preparedScene(52));
+
+    const supporting = exportButton(el, "Watercolor Forms");
+    const staleActions = [
+      ...renderModeButtons(el),
+      exportButton(el, "Export PNG"),
+      exportButton(el, "Export SVG"),
+      exportButton(el, "Export Hidden-line SVG"),
+    ];
+    const capturesBefore = displayedFrameCaptures;
+    act(() => {
+      supporting.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      for (const action of staleActions) {
+        action.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+
+    expect(
+      el.querySelector("[data-primary-ink-actions]")?.getAttribute(
+        "data-primary-ink-actions",
+      ),
+    ).toBe("unavailable");
+    expect(displayedFrameCaptures).toBe(capturesBefore);
+    expect(toBlob).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+    expect(generateToneSource).not.toHaveBeenCalled();
+    expect(detailJob.starts).toHaveLength(0);
+    expect(outlineJob.starts).toBe(0);
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(exportSceneCapture.current).toBeNull();
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("drops an already-captured Primary PNG callback after leaving Primary", async () => {
+    let returnPng: BlobCallback | null = null;
+    fakeCanvasToBlob = ((callback: BlobCallback) => {
+      returnPng = callback;
+    }) as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await completeShading(0, preparedScene(56));
+
+    clickButton(el, "Export PNG");
+    expect(returnPng).not.toBeNull();
+    clickButton(el, "Watercolor Forms");
+    await act(async () => {
+      const callback = returnPng as BlobCallback | null;
+      callback?.(new Blob([MINIMAL_PNG], { type: "image/png" }));
+      await Promise.resolve();
+    });
+
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("tears down Primary diagnostics and Outline ownership before supporting paint", async () => {
+    autoFireOutlineComputed = false;
+    const supportingScene = preparedScene(53);
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await completeShading(0, preparedScene(54));
+
+    clickButton(el, "Tone");
+    expect(renderState(el)).toBe("tone-reference");
+    clickButton(el, "Watercolor Forms");
+    expect(lastToneSource).toBeNull();
+    await completePlotStage(0, supportingScene);
+    expect(lastRenderScene).toBe(supportingScene);
+
+    clickButton(el, "Ink Scribble");
+    clickButton(el, "Detail");
+    expect(detailJob.starts).toHaveLength(1);
+    clickButton(el, "Combined");
+    expect(detailJob.cancelCount).toBe(1);
+    expect(lastDetailField).toBeNull();
+    clickButton(el, "Ink Scribble");
+    expect(
+      renderModeButtons(el)
+        .filter(({ ariaPressed }) => ariaPressed === "true")
+        .map(({ textContent }) => textContent),
+    ).toEqual(["Fill"]);
+
+    clickButton(el, "Outline");
+    await flush();
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.active).not.toBeNull();
+    clickButton(el, "Watercolor Forms");
+    await flush();
+    expect(outlineJob.active).toBeNull();
+    expect(lastRenderScene).toBe(supportingScene);
+
+    clickButton(el, "Ink Scribble");
+    outlineJob.exportMode = "pending";
+    clickButton(el, "Export Hidden-line SVG");
+    expect(outlineJob.pendingExport).not.toBeNull();
+    clickButton(el, "Combined");
+    await flush();
+    expect(outlineJob.pendingExport).toBeNull();
+    expect(exportButton(el, "Export Hidden-line SVG").disabled).toBe(true);
+  });
+
+  it("restores every Primary Ink action after the first Watercolor failure", async () => {
+    const toBlob = vi.fn(fakeCanvasToBlob);
+    fakeCanvasToBlob = toBlob as HTMLCanvasElement["toBlob"];
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+      />,
+    );
+    await resolveManagedEnvironment();
+    clickButton(el, "Watercolor Forms");
+    const supporting = plotStageJob.starts[0]!;
+    await act(async () => {
+      supporting.resolve({
+        status: "failure",
+        jobId: 1,
+        error: "first Watercolor preparation failed",
+      });
+      await Promise.resolve();
+    });
+    expect(el.textContent).toContain("first Watercolor preparation failed");
+
+    clickButton(el, "Ink Scribble");
+    await completeShading(0, preparedScene(55));
+    expect(
+      renderModeButtons(el).map(({ textContent }) => textContent),
+    ).toEqual(["Fill", "Outline", "Tone", "Detail"]);
+    expect(
+      [
+        "Export PNG",
+        "Export SVG",
+        "Export Hidden-line SVG",
+      ].map((label) => exportButton(el, label).disabled),
+    ).toEqual([false, false, false]);
+
+    clickButton(el, "Export PNG");
+    await flush();
+    expect(toBlob).toHaveBeenCalledOnce();
+    expect(downloadBlob).toHaveBeenCalledOnce();
   });
 
   it("threads the exact ready environment through ordinary Fill, SVG, and Outline", async () => {
