@@ -8066,6 +8066,7 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     ).toBe(false);
     expect(canvas.dataset.sourceInputRevision).toBe("0");
 
+    clickButton(el, "Watercolor Forms");
     const watercolor = paramInput(el, "watercolorGamma");
     act(() => watercolor.focus());
     setInput(
@@ -8076,9 +8077,13 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
 
     expect(shadingJob.cancelCount).toBe(0);
     expect(shadingJob.starts).toHaveLength(1);
-    expect(plotStageJob.starts).toHaveLength(0);
-    expect(canvas.dataset.sourceInputRevision).toBe("0");
+    expect(plotStageJob.starts).toHaveLength(2);
+    expect(plotStageJob.starts[1]!.input.identity.stageId).toBe(
+      "watercolor-forms",
+    );
 
+    clickButton(el, "Ink Scribble");
+    expect(canvas.dataset.sourceInputRevision).toBe("0");
     const ink = paramInput(el, "pathDensity");
     act(() => ink.focus());
     setInput(ink, String(Number(ink.value) + 0.25));
@@ -8089,6 +8094,38 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
       key: "pathDensity",
       value: Number(ink.value),
     });
+  });
+
+  it("defaults and keyed reloads to transient Ink without entering authored history", () => {
+    const sketch = managedPhotoScribble(photoScribble.generateToneSource!);
+    const el = mount(<SketchControls key="first" sketch={sketch} />);
+    const view = () =>
+      el.querySelector('[role="group"][aria-label="Plot Stage view"]')!;
+    const selectedView = () =>
+      view().querySelector('button[aria-pressed="true"]')?.textContent;
+
+    expect(selectedView()).toBe("Ink Scribble");
+    expect(plotStageJob.starts).toHaveLength(0);
+    expect(
+      [...el.querySelectorAll("button")].filter(
+        (button) => button.textContent === "Crop",
+      ),
+    ).toHaveLength(1);
+
+    clickButton(el, "Watercolor Forms");
+    expect(selectedView()).toBe("Watercolor Forms");
+    expect(plotStageJob.starts).toHaveLength(1);
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(historyCapture.transactionCommits).toHaveLength(0);
+
+    act(() => {
+      root!.render(<SketchControls key="reload" sketch={sketch} />);
+    });
+
+    expect(selectedView()).toBe("Ink Scribble");
+    expect(plotStageJob.starts).toHaveLength(1);
+    expect(historyCapture.atomic).toHaveLength(0);
+    expect(historyCapture.transactionCommits).toHaveLength(0);
   });
 
   it("keeps demanded Watercolor untouched through an Ink-only numeric transaction", async () => {
@@ -8106,6 +8143,7 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     await completePlotStage(0, preparedScene(46));
     const supportingIdentity = plotStageJob.starts[0]!.input.identity;
 
+    clickButton(el, "Ink Scribble");
     const ink = paramInput(el, "pathDensity");
     act(() => ink.focus());
     setInput(ink, String(Number(ink.value) + 0.25));

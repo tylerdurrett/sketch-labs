@@ -420,14 +420,12 @@ describe("App — Photo Scribble integration (#333)", () => {
       "control-chaos",
       "control-toneFidelity",
       "control-stopPoint",
-      "control-watercolorGamma",
-      "control-watercolorContrast",
-      "control-watercolorPivot",
-      "control-watercolorFormDetail",
-      "control-watercolorColorSensitivity",
-      "control-watercolorBoundaryStrength",
-      "control-watercolorBoundarySmoothing",
     ]);
+    expect(
+      document.querySelector(
+        '[role="group"][aria-label="Plot Stage view"] button[aria-pressed="true"]',
+      )?.textContent,
+    ).toBe("Ink Scribble");
     expect(
       document
         .querySelector('[data-testid="canvas"]')
@@ -467,6 +465,9 @@ describe("App — Photo Scribble integration (#333)", () => {
     );
     expect(buttonLabels).toEqual(
       expect.arrayContaining([
+        "Ink Scribble",
+        "Watercolor Forms",
+        "Combined",
         "New seed",
         "Randomize",
         "Export PNG",
@@ -475,6 +476,21 @@ describe("App — Photo Scribble integration (#333)", () => {
       ]),
     );
 
+    const combined = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "Combined")!;
+    act(() => combined.click());
+    expect(
+      document.querySelectorAll('#inspector input[id^="control-"]'),
+    ).toHaveLength(18);
+    expect(
+      document.querySelectorAll(
+        '[aria-label="imageAsset image asset identity"]',
+      ),
+    ).toHaveLength(1);
+
+    const ink = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "Ink Scribble")!;
+    act(() => ink.click());
     const tone = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent === "Tone",
     )!;
@@ -501,7 +517,12 @@ describe("App — Photo Scribble integration (#333)", () => {
     ).toBe("fill-held");
     expect(
       document.querySelectorAll('#inspector input[id^="control-"]'),
-    ).toHaveLength(18);
+    ).toHaveLength(11);
+    expect(
+      document.querySelector(
+        '[role="group"][aria-label="Plot Stage view"] button[aria-pressed="true"]',
+      )?.textContent,
+    ).toBe("Ink Scribble");
     expect(
       document.querySelector(
         '[aria-label="imageAsset image asset identity"]',

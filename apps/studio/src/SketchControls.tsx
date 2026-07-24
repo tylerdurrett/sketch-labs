@@ -36,7 +36,7 @@ import {
   type SketchEnvironment,
 } from "@harness/core";
 
-import { ControlPanel } from "./ControlPanel";
+import { ControlPanel, type ControlPanelProps } from "./ControlPanel";
 import type { ImageAssetControlRecomposeRequest } from "./ImageAssetControl";
 import { Button } from "./components/ui/button";
 import { downloadBlob } from "./downloadBlob";
@@ -115,6 +115,7 @@ import {
 import { readPaperDisplayUnit } from "./paperDisplayUnit";
 import { PageFrameEditor } from "./PageFrameEditor";
 import type { PageFrameAspectConstraint } from "./pageFrameManipulation";
+import { PlotSequenceStageControls } from "./PlotSequenceStageControls";
 import {
   readPlotterSvgIncludePaperMargins,
   writePlotterSvgIncludePaperMargins,
@@ -2131,6 +2132,36 @@ export function SketchControls({
     dispatchOutline({ type: "export-cancelled", token: active.token });
   };
 
+  const controlPanelProps = {
+    schema: sketch.schema,
+    params,
+    locks,
+    onChange: setParam,
+    editHistory: {
+      onBegin: beginTransaction,
+      onPreview: (next) => previewLeaf("params", next),
+      onCommit: commitTransaction,
+      onCancel: cancelTransaction,
+    },
+    onParamEditBegin: beginParamTransaction,
+    onToggleLock: toggleLock,
+    imageAssetLongEdgeCap,
+    imageAssetResolution: {
+      status: sketchEnvironment.status,
+      failedId: sketchEnvironment.failedId,
+      retry: sketchEnvironment.retry,
+    },
+    getImageAssetDimensions: (imageAssetId: string) => {
+      if (!environmentReadyNow()) return undefined;
+      const record =
+        sketchEnvironmentRef.current.environment?.imageAssets(imageAssetId);
+      return record === undefined
+        ? undefined
+        : { width: record.width, height: record.height };
+    },
+    onRecomposeToImageAspect: recomposeToImageAspect,
+  } satisfies ControlPanelProps;
+
   // TWO-REGION SHELL (#154): the canvas region (left) fills the remaining space
   // and centers the live canvas; the fixed-width inspector sidebar (right,
   // vertically scrollable) houses EVERY per-sketch control. This is a re-housing
@@ -2248,36 +2279,19 @@ export function SketchControls({
           includePaperMargins={includePaperMargins}
           onIncludePaperMarginsChange={commitIncludePaperMargins}
         />
-        <ControlPanel
-          schema={sketch.schema}
-          params={params}
-          locks={locks}
-          onChange={setParam}
-          editHistory={{
-            onBegin: beginTransaction,
-            onPreview: (next) => previewLeaf("params", next),
-            onCommit: commitTransaction,
-            onCancel: cancelTransaction,
-          }}
-          onParamEditBegin={beginParamTransaction}
-          onToggleLock={toggleLock}
-          imageAssetLongEdgeCap={imageAssetLongEdgeCap}
-          imageAssetResolution={{
-            status: sketchEnvironment.status,
-            failedId: sketchEnvironment.failedId,
-            retry: sketchEnvironment.retry,
-          }}
-          getImageAssetDimensions={(imageAssetId) => {
-            if (!environmentReadyNow()) return undefined;
-            const record = sketchEnvironmentRef.current.environment?.imageAssets(
-              imageAssetId,
-            );
-            return record === undefined
-              ? undefined
-              : { width: record.width, height: record.height };
-          }}
-          onRecomposeToImageAspect={recomposeToImageAspect}
-        />
+        {plotSequence === undefined ? (
+          <ControlPanel {...controlPanelProps} />
+        ) : (
+          <PlotSequenceStageControls
+            {...controlPanelProps}
+            declaration={plotSequence}
+            presentation={plotSequencePresentation.presentation}
+            records={registeredStagePreparation.records}
+            onPresentationChange={plotSequencePresentation.setPresentation}
+            onCancelStage={registeredStagePreparation.cancel}
+            onRetryStage={registeredStagePreparation.retry}
+          />
+        )}
         <Button
           ref={cropButtonRef}
           type="button"
