@@ -3,12 +3,31 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+const PROFILE_FUNCTIONS = new Set([
+  'hasValidField',
+  'searchFlowingContoursCandidateDetailed',
+  'certifyFlowingContoursCandidateAgainstField',
+  'gaussianSmooth',
+  'evaluate',
+  'sampleFlowingContoursEvidenceInto',
+  'locateArc',
+  'segmentDistance',
+  'validateSegment',
+  'canonicalNumber',
+  'occupancyKey',
+  'mergeOccupancy',
+  'buildSpatialIndex',
+  'fieldsShareAnalysisSupport',
+  'projectAcceptedFlowingTrajectorySuppression',
+])
+
 const samplesArgument = process.argv.find((argument) =>
   argument.startsWith('--samples='),
 )
 const profileArgument = process.argv.find((argument) =>
   argument.startsWith('--profile='),
 )
+const preciseCallCoverage = process.argv.includes('--precise-call-coverage')
 const profileCase =
   profileArgument === undefined
     ? null
@@ -19,6 +38,9 @@ if (
   profileCase !== 'pinecone'
 ) {
   throw new Error('--profile must be flower or pinecone')
+}
+if (preciseCallCoverage && profileCase === null) {
+  throw new Error('--precise-call-coverage requires --profile')
 }
 const samples =
   samplesArgument === undefined
@@ -112,8 +134,16 @@ try {
     )
   } else {
     const session = await page.createCDPSession()
+    if (preciseCallCoverage) await session.send('Debugger.enable')
     await session.send('Profiler.enable')
     await session.send('Profiler.setSamplingInterval', { interval: 1000 })
+    if (preciseCallCoverage) {
+      await session.send('Profiler.startPreciseCoverage', {
+        callCount: true,
+        detailed: true,
+        allowTriggeredUpdates: false,
+      })
+    }
     await session.send('Profiler.start')
     const observation = await page.evaluate(
       async (caseName) =>
@@ -121,6 +151,15 @@ try {
       profileCase,
     )
     const { profile } = await session.send('Profiler.stop')
+    let callCoverage
+    if (preciseCallCoverage) {
+      const { result: coverage } = await session.send(
+        'Profiler.takePreciseCoverage',
+      )
+      await session.send('Profiler.stopPreciseCoverage')
+      callCoverage = await summarizeCallCoverage(session, coverage)
+      await session.send('Debugger.disable')
+    }
     await session.detach()
     evidence = {
       machine: await page.evaluate(
@@ -129,6 +168,7 @@ try {
       profileCase,
       observation,
       cpuProfile: summarizeCpuProfile(profile),
+      ...(callCoverage === undefined ? {} : { callCoverage }),
     }
   }
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`)
@@ -200,4 +240,48 @@ function summarizeCpuProfile(profile) {
       .sort((left, right) => right.hitCount - left.hitCount)
       .slice(0, 25),
   }
+}
+
+async function summarizeCallCoverage(session, coverage) {
+  const functions = []
+  for (const script of coverage) {
+    if (!script.url.includes('/assets/index-')) continue
+    const { scriptSource } = await session.send('Debugger.getScriptSource', {
+      scriptId: script.scriptId,
+    })
+    const lineStarts = [0]
+    for (let index = 0; index < scriptSource.length; index += 1) {
+      if (scriptSource.charCodeAt(index) === 10) lineStarts.push(index + 1)
+    }
+    for (const entry of script.functions) {
+      if (!PROFILE_FUNCTIONS.has(entry.functionName)) continue
+      const range = entry.ranges[0]
+      if (range === undefined) continue
+      functions.push({
+        functionName: entry.functionName,
+        lineNumber: lineForOffset(lineStarts, range.startOffset),
+        callCount: range.count,
+      })
+    }
+  }
+  const aggregated = Object.fromEntries(
+    [...PROFILE_FUNCTIONS].map((name) => [
+      name,
+      functions
+        .filter(({ functionName }) => functionName === name)
+        .reduce((sum, { callCount }) => sum + callCount, 0),
+    ]),
+  )
+  return { aggregated, functions }
+}
+
+function lineForOffset(lineStarts, offset) {
+  let low = 0
+  let high = lineStarts.length
+  while (low + 1 < high) {
+    const middle = Math.floor((low + high) / 2)
+    if (lineStarts[middle] <= offset) low = middle
+    else high = middle
+  }
+  return low + 1
 }

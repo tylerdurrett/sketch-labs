@@ -16,6 +16,9 @@ packages/core/node_modules/.bin/vitest run \
 
 node packages/core/benchmarks/flowing-contours-browser-cli.js --samples=3
 node packages/core/benchmarks/flowing-contours-browser-cli.js --profile=pinecone
+node packages/core/benchmarks/flowing-contours-browser-cli.js \
+  --profile=pinecone \
+  --precise-call-coverage
 ```
 
 The Node benchmark refuses any result whose complete Scene-plus-diagnostics
@@ -23,7 +26,18 @@ checksum changes. The Chrome probe additionally pins the submitted Scene, the
 1000 × 1000 pixel readback, primitive count, and point count. Browser timing
 alternates Flower/Pinecone order between samples. The optional named-function
 CDP profile is diagnostic and intentionally unminified; ordinary browser timing
-uses a minified production bundle.
+uses a minified production bundle. `--precise-call-coverage` requires a named
+`--profile` case and adds `callCoverage.aggregated` totals plus source-line
+entries in `callCoverage.functions`. Each named profile now refuses output,
+pixel, primitive-count, or point-count drift before returning evidence.
+
+Precise V8 coverage disables some normal JIT optimization and materially slows
+the workload. Use its integer call counts to reproduce amplification only; do
+not compare its observation timings, CPU-profile duration, or sampled shares
+with ordinary profile or benchmark results. The recorded closeout used
+Headless Chrome 144 on macOS with 12 logical CPUs. Function counts are
+deterministic for the pinned fixture and controls, while source line numbers
+may move as the bundle changes.
 
 ## Baseline
 
@@ -197,9 +211,12 @@ top 25 functions. Precise call coverage explains the removed amplification:
 
 Before authentication, every `hasValidField` call scanned all planes and
 samples. The retained path preserves the same call boundary but answers it from
-the field's authenticated state. Precise coverage materially slows execution,
-so its timing and sampled shares are deliberately excluded; only its exact
-call counts are retained here.
+the field's authenticated state. Reproduce either workload with the documented
+`--profile=<case> --precise-call-coverage` command and read
+`callCoverage.aggregated`; the command exact-gates the Scene and rendered
+pixels. Precise coverage materially slows execution, so its timing and sampled
+shares are deliberately excluded; only its exact call counts are retained
+here.
 
 The remaining hotspots are workload-specific. Pinecone's `gaussianSmooth`
 self time is 5.02%, but it is only 1.52% for Flower and the complete Flower

@@ -153,7 +153,7 @@ async function runOne(caseName, detail = defaultFlowingContoursControls.curveDet
     longTaskStartIndex: _longTaskStartIndex,
     ...plain
   } = measurement
-  return Object.freeze({
+  const observation = Object.freeze({
     ...plain,
     heartbeatDelayMs,
     firstAnimationFrameAfterHandlerMs: firstFrameMs,
@@ -162,6 +162,8 @@ async function runOne(caseName, detail = defaultFlowingContoursControls.curveDet
     pixelChecksum,
     longTasks: observedLongTasks,
   })
+  assertExpected(caseName, observation)
+  return observation
 }
 
 async function runAll(samples = 3) {
@@ -179,19 +181,7 @@ async function runAll(samples = 3) {
   const summaries = Object.fromEntries(
     Object.entries(observations).map(([caseName, caseObservations]) => {
       const summary = summarize(caseObservations)
-      const expected = EXPECTED[caseName]
-      for (const name of [
-        'outputChecksum',
-        'pixelChecksum',
-        'primitiveCount',
-        'pointCount',
-      ]) {
-        if (summary[name] !== expected[name]) {
-          throw new Error(
-            `${caseName} ${name} changed: expected ${expected[name]}, received ${summary[name]}`,
-          )
-        }
-      }
+      assertExpected(caseName, summary)
       return [caseName, summary]
     }),
   )
@@ -208,6 +198,22 @@ async function runAll(samples = 3) {
     summaries,
     observations,
   })
+}
+
+function assertExpected(caseName, observed) {
+  const expected = EXPECTED[caseName]
+  for (const name of [
+    'outputChecksum',
+    'pixelChecksum',
+    'primitiveCount',
+    'pointCount',
+  ]) {
+    if (observed[name] !== expected[name]) {
+      throw new Error(
+        `${caseName} ${name} changed: expected ${expected[name]}, received ${observed[name]}`,
+      )
+    }
+  }
 }
 
 function summarize(observations) {
