@@ -19,6 +19,10 @@ node packages/core/benchmarks/flowing-contours-browser-cli.js --profile=pinecone
 node packages/core/benchmarks/flowing-contours-browser-cli.js \
   --profile=pinecone \
   --precise-call-coverage
+
+node packages/core/benchmarks/flowing-contours-studio-worker-cli.js \
+  --samples=3 \
+  --out=/tmp/flowing-contours-studio-worker.json
 ```
 
 The Node benchmark refuses any result whose complete Scene-plus-diagnostics
@@ -143,7 +147,60 @@ row is a responsiveness result and is not counted as a core-compute win.
 | Elide duplicate fair-proof work | end-to-end median 4.65% | end-to-end median 0.94% | Reject: below the 5% worthwhile threshold in both cases |
 | Fuse tube evidence sampling | pipeline median 24,058.13 → 18,977.90 ms (21.12%), p95 25,379.33 → 22,191.16 ms (12.56%); end-to-end median 24,500.28 → 19,232.75 ms (21.50%), p95 25,813.60 → 19,311.50 ms (25.19%) | pipeline median 5,935.54 → 4,292.20 ms (27.69%), p95 6,122.90 → 4,345.19 ms (29.03%); end-to-end median 6,112.36 → 4,690.64 ms (23.26%), p95 8,292.40 → 4,692.74 ms (43.41%) | Retain |
 | Replace scalar-distance proof records with scalars | end-to-end median 19,263.11 → 17,922.48 ms (6.96%), p95 19,331.32 → 18,069.91 ms (6.53%) | end-to-end median 4,629.97 → 4,256.05 ms (8.08%), but p95 4,635.15 → 5,398.65 ms (16.47% regression) | Reject: Pinecone p95 gate failed |
-| Move generation to a latest-input-wins worker | edit handlers at or below 0.1 ms; heartbeat p95 at or below 13 ms | edit handlers at or below 0.1 ms; heartbeat p95 at or below 13 ms | Retain as responsiveness architecture |
+| Move generation to a latest-input-wins worker | edit handlers at or below 0.1 ms; heartbeat p95 at or below 15.4 ms | edit handlers at or below 0.1 ms; heartbeat p95 at or below 15.4 ms | Retain as responsiveness architecture |
+
+### Studio worker responsiveness method
+
+The committed Studio worker command above builds the minified production
+Studio and a minified synchronous oracle into a private temporary directory,
+serves both plus the managed Image Assets on an ephemeral localhost port, and
+launches the installed Puppeteer-managed Chrome. `--chrome`,
+`--puppeteer-module`, `--vite`, `--port`, and paired external
+`--studio-url`/`--oracle-url` overrides make each runtime boundary explicit.
+The evidence JSON records the browser version and every raw observation.
+Self-launching mode requires the repository's locked dependency install and an
+installed Puppeteer package and browser; it does not require an already-running
+Studio or oracle server. The retained Chrome 144 evidence below was reproduced
+from the repository root with:
+
+```sh
+node packages/core/benchmarks/flowing-contours-studio-worker-cli.js \
+  --samples=3 \
+  --out=/tmp/flowing-contours-studio-worker.json \
+  --puppeteer-module="$PWD/.agents/skills/chrome-devtools/scripts/node_modules/puppeteer/lib/esm/puppeteer/puppeteer.js" \
+  --chrome="$HOME/.cache/puppeteer/chrome/mac_arm-144.0.7559.96/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+```
+
+For each workload, n=3 means three real Base UI Curve-detail `ArrowRight`
+edits: Flower `1.01`, `1.02`, `1.03`, then Pinecone `1.04`, `1.05`, `1.06`.
+Document-level keydown capture starts the measurement; a queued microtask after
+the synchronous handler ends it. A 50 ms timer scheduled at capture measures
+heartbeat lateness beyond its target, and `PerformanceObserver` records
+overlapping Long Tasks. Percentiles use nearest rank, so p95 at n=3 is the
+largest raw observation.
+
+| Workload / responsiveness metric | three raw observations (ms) | median | p95 |
+| --- | --- | ---: | ---: |
+| Flower edit handler | `0`, `0`, `0.09999990463256836` | 0 | 0.10 |
+| Flower 50 ms heartbeat delay | `12.300000190734863`, `4.299999713897705`, `0.40000009536743164` | 4.30 | 12.30 |
+| Flower per-edit Long Task maximum | `58`, `0`, `0` | 0 | 58.00 |
+| Pinecone edit handler | `0`, `0`, `0` | 0 | 0 |
+| Pinecone 50 ms heartbeat delay | `15.400000095367432`, `8.099999904632568`, `10.799999713897705` | 10.80 | 15.40 |
+| Pinecone per-edit Long Task maximum | `0`, `0`, `0` | 0 | 0 |
+
+Completion is deliberately separate and n=1 per workload because each exact
+run takes seconds. It is a single final worker request after the three rapid
+edits, not a p95 claim. The final request-to-response windows contained no Long
+Tasks. Six superseded worker requests were terminated, no cancelled worker
+returned a stale terminal response, all exports stayed disabled while the
+retained Scene was stale and became enabled after the current Scene painted.
+The completed worker Scenes exactly matched the independent production-browser
+oracle:
+
+| Workload | wall / worker compute (n=1) | Scene SHA-256 | primitives / points |
+| --- | ---: | --- | ---: |
+| Flower | 16,571.2 / 16,500.2 ms | `45e5bf28d70effc5626921020d9086d8af926e7b61b717732ff05371614470ce` | 112 / 1,405 |
+| Pinecone | 5,569.0 / 5,479.9 ms | `3e305fe44b0666d9b4d5d15a822e84d2e8b688203dd7bc85ef71a5ed323089eb` | 27 / 321 |
 
 ## Final retained core
 
@@ -166,27 +223,28 @@ Small preparation-phase p95 movement is immaterial to the retained candidate
 gate: the expensive pipeline and end-to-end p95 values improve substantially,
 and exact outputs remain unchanged.
 
-Worker instrumentation separated wall time from worker compute:
+Worker instrumentation separated wall time from worker compute. Each completion
+cell below is one final observation (n=1), not a percentile:
 
 | Revision / workload | wall completion | worker compute |
 | --- | ---: | ---: |
 | Before retained core wins / Flower | 27,123.1 ms | 27,047.9 ms |
 | Before retained core wins / Pinecone | 9,524.8 ms | 9,417.0 ms |
-| Integrated retained core / Flower | 16,581.7 ms | 16,515.4 ms |
-| Integrated retained core / Pinecone | 5,663.8 ms | 5,575.1 ms |
+| Integrated retained core / Flower | 16,571.2 ms | 16,500.2 ms |
+| Integrated retained core / Pinecone | 5,569.0 ms | 5,479.9 ms |
 
 The worker does not make computation free, but it removes generation from the
 UI edit handler: handler observations were at or below 0.1 ms and heartbeat p95
-was at or below 13 ms, versus baseline Long Tasks of 7–27 seconds.
+was at or below 15.4 ms, versus baseline Long Tasks of 7–27 seconds.
 
 ## Target status
 
 | Target | Status | Evidence |
 | --- | --- | --- |
 | Preserve output, diagnostics, ordering, and controls | Met | Node Scene-plus-diagnostics, Chrome Scene, pixel, primitive, and point-count gates stayed exact |
-| Latest-input-wins worker and main-thread edit-handler p95 below 50 ms | Met | handler observations <= 0.1 ms; heartbeat p95 <= 13 ms |
-| Flower completion p95 below 5 seconds | Not met | final Node end-to-end p95 19,544.00 ms; integrated worker compute observation 16,515.4 ms |
-| Pinecone completion p95 below 2 seconds | Not met | final Node end-to-end p95 4,688.76 ms; integrated worker compute observation 5,575.1 ms |
+| Latest-input-wins worker and main-thread edit-handler p95 below 50 ms | Met | committed production-Studio probe: n=3 real edits per workload; handler p95 <= 0.1 ms; heartbeat p95 <= 15.4 ms |
+| Flower completion p95 below 5 seconds | Not met | final Node end-to-end p95 19,544.00 ms; integrated worker compute observation 16,500.2 ms |
+| Pinecone completion p95 below 2 seconds | Not met | final Node end-to-end p95 4,688.76 ms; integrated worker compute observation 5,479.9 ms |
 | Continue only for safe candidates expected to clear 5% without p95 regression | Met: stop | residual profile and rejected experiments leave no qualifying cross-workload candidate |
 
 ## Residual profile and closeout
