@@ -114,3 +114,107 @@ in Studio's static-Fill edit path.
 The five-plane Gaussian field build is currently only about 0.3–0.4 seconds, so
 it is not an initial optimization target. Re-profile it after the pipeline
 dominance is removed.
+
+## Campaign results
+
+All retained and rejected experiments preserved the exact Node and Chrome
+checksums and work inventories above. Percentage changes are reductions unless
+marked as regressions. The field-authentication and fused-tube rows report
+separate n=3 comparisons at their respective experiment boundaries; the worker
+row is a responsiveness result and is not counted as a core-compute win.
+
+| Candidate | Flower result | Pinecone result | Decision |
+| --- | --- | --- | --- |
+| Authenticate production fields after one public-boundary validation | pipeline median 15.28%; end-to-end median 12.59%; no p95 regression | pipeline median 18.74%; end-to-end median 16.25%; end-to-end p95 16.07% | Retain |
+| Elide duplicate fair-proof work | end-to-end median 4.65% | end-to-end median 0.94% | Reject: below the 5% worthwhile threshold in both cases |
+| Fuse tube evidence sampling | pipeline median 24,058.13 → 18,977.90 ms (21.12%), p95 25,379.33 → 22,191.16 ms (12.56%); end-to-end median 24,500.28 → 19,232.75 ms (21.50%), p95 25,813.60 → 19,311.50 ms (25.19%) | pipeline median 5,935.54 → 4,292.20 ms (27.69%), p95 6,122.90 → 4,345.19 ms (29.03%); end-to-end median 6,112.36 → 4,690.64 ms (23.26%), p95 8,292.40 → 4,692.74 ms (43.41%) | Retain |
+| Replace scalar-distance proof records with scalars | end-to-end median 19,263.11 → 17,922.48 ms (6.96%), p95 19,331.32 → 18,069.91 ms (6.53%) | end-to-end median 4,629.97 → 4,256.05 ms (8.08%), but p95 4,635.15 → 5,398.65 ms (16.47% regression) | Reject: Pinecone p95 gate failed |
+| Move generation to a latest-input-wins worker | edit handlers at or below 0.1 ms; heartbeat p95 at or below 13 ms | edit handlers at or below 0.1 ms; heartbeat p95 at or below 13 ms | Retain as responsiveness architecture |
+
+## Final retained core
+
+Revision `42f1966` includes field authentication, fused tube sampling, and the
+Studio worker integration. The final Node run used one warmup and n=5 measured
+samples:
+
+| Workload / phase | median | p95 | change from baseline median | change from baseline p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Flower raster preparation | 3.71 ms | 4.88 ms | 24.44% | 31.94% |
+| Flower field ensemble | 403.14 ms | 429.65 ms | 0.15% regression | 1.82% regression |
+| Flower whole-curve pipeline | 18,667.95 ms | 18,708.43 ms | 38.36% | 38.34% |
+| Flower end-to-end generation | 19,246.79 ms | 19,544.00 ms | 36.11% | 35.16% |
+| Pinecone raster preparation | 2.51 ms | 4.10 ms | 22.77% | 5.13% regression |
+| Pinecone field ensemble | 305.45 ms | 336.52 ms | 1.47% | 7.79% regression |
+| Pinecone whole-curve pipeline | 4,321.41 ms | 4,355.86 ms | 42.64% | 50.54% |
+| Pinecone end-to-end generation | 4,666.49 ms | 4,688.76 ms | 39.65% | 39.38% |
+
+Small preparation-phase p95 movement is immaterial to the retained candidate
+gate: the expensive pipeline and end-to-end p95 values improve substantially,
+and exact outputs remain unchanged.
+
+Worker instrumentation separated wall time from worker compute:
+
+| Revision / workload | wall completion | worker compute |
+| --- | ---: | ---: |
+| Before retained core wins / Flower | 27,123.1 ms | 27,047.9 ms |
+| Before retained core wins / Pinecone | 9,524.8 ms | 9,417.0 ms |
+| Integrated retained core / Flower | 16,581.7 ms | 16,515.4 ms |
+| Integrated retained core / Pinecone | 5,663.8 ms | 5,575.1 ms |
+
+The worker does not make computation free, but it removes generation from the
+UI edit handler: handler observations were at or below 0.1 ms and heartbeat p95
+was at or below 13 ms, versus baseline Long Tasks of 7–27 seconds.
+
+## Target status
+
+| Target | Status | Evidence |
+| --- | --- | --- |
+| Preserve output, diagnostics, ordering, and controls | Met | Node Scene-plus-diagnostics, Chrome Scene, pixel, primitive, and point-count gates stayed exact |
+| Latest-input-wins worker and main-thread edit-handler p95 below 50 ms | Met | handler observations <= 0.1 ms; heartbeat p95 <= 13 ms |
+| Flower completion p95 below 5 seconds | Not met | final Node end-to-end p95 19,544.00 ms; integrated worker compute observation 16,515.4 ms |
+| Pinecone completion p95 below 2 seconds | Not met | final Node end-to-end p95 4,688.76 ms; integrated worker compute observation 5,575.1 ms |
+| Continue only for safe candidates expected to clear 5% without p95 regression | Met: stop | residual profile and rejected experiments leave no qualifying cross-workload candidate |
+
+## Residual profile and closeout
+
+An uninstrumented named-function CDP profile of the retained core recorded
+16,702.50 ms / 11,254 samples for Flower and 4,537.04 ms / 3,065 samples for
+Pinecone. In the original Pinecone profile, `hasValidField` accounted for
+10.83% of sampled self time. It no longer appears among the retained profile's
+top 25 functions. Precise call coverage explains the removed amplification:
+
+| Function | Flower calls | Pinecone calls |
+| --- | ---: | ---: |
+| `searchFlowingContoursCandidateDetailed` | 1,184 | 428 |
+| `certifyFlowingContoursCandidateAgainstField` | 576 | 213 |
+| `hasValidField` | 1,760 | 641 |
+| `evaluate` | 8,511,347 | 2,387,400 |
+| `sampleFlowingContoursEvidenceInto` | 8,246,184 | 2,315,047 |
+| `locateArc` | 8,109,661 | 2,282,064 |
+| `segmentDistance` | 46,661,555 | 14,424,413 |
+| `canonicalNumber` | 10,896,360 | 563,916 |
+| `occupancyKey` | 2,724,090 | 140,979 |
+
+Before authentication, every `hasValidField` call scanned all planes and
+samples. The retained path preserves the same call boundary but answers it from
+the field's authenticated state. Precise coverage materially slows execution,
+so its timing and sampled shares are deliberately excluded; only its exact
+call counts are retained here.
+
+The remaining hotspots are workload-specific. Pinecone's `gaussianSmooth`
+self time is 5.02%, but it is only 1.52% for Flower and the complete Flower
+field phase is only about 2.1% of final end-to-end time. Flower instead spends
+6.39% in `canonicalNumber`, at least 3.01% in `occupancyKey`, and additional
+time rebuilding suppression state; those costs are much smaller in Pinecone.
+The common tube-proof work is distributed across `evaluate`,
+`sampleFlowingContoursEvidenceInto`, `locateArc`, and `segmentDistance` after
+the retained fusion, and further removal changes proof semantics.
+
+There is therefore no remaining exact, safe candidate reasonably expected to
+improve both workloads by at least 5% without a p95 regression. The duplicate
+fair-proof experiment failed the gain threshold, and the scalar-distance
+experiment demonstrated the p95 risk in the next proof-level simplification.
+The campaign closes here even though the absolute compute targets remain
+unmet. A future campaign may pursue Flower-specific incremental suppression
+state, or a broader algorithmic redesign with separately approved output
+changes; neither is an exact cross-workload optimization for this campaign.
