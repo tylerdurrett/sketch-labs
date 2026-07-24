@@ -519,6 +519,33 @@ describe("PlotStageCoordinator", () => {
     expect(coordinator.busy).toBe(false);
   });
 
+  it("preserves synchronous success when listener cleanup and termination re-enter lifecycle methods", async () => {
+    const worker = new FakeWorker();
+    let coordinator!: PlotStageCoordinator;
+    const cancelDuringRemoval = vi.fn(() => coordinator.cancel());
+    const remove = worker.removeEventListener.bind(worker);
+    worker.removeEventListener = vi.fn((type, listener) => {
+      remove(type, listener);
+      cancelDuringRemoval();
+    });
+    worker.terminate.mockImplementation(() => coordinator.dispose());
+    worker.postMessage = vi.fn((request) => {
+      worker.posted.push(request);
+      worker.emit("message", success(request));
+    });
+    coordinator = new PlotStageCoordinator(() => worker);
+
+    const result = coordinator.start(input());
+
+    expect(cancelDuringRemoval).toHaveReturnedWith(false);
+    await expect(result).resolves.toMatchObject({
+      status: "success",
+      jobId: 1,
+    });
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    await expect(coordinator.start(input())).rejects.toThrow("disposed");
+  });
+
   it("honors reentrant cancellation during worker construction", async () => {
     const worker = new FakeWorker();
     let coordinator!: PlotStageCoordinator;
@@ -532,8 +559,25 @@ describe("PlotStageCoordinator", () => {
 
     expect(cancel).toHaveReturnedWith(true);
     await expect(result).resolves.toEqual({ status: "cancelled", jobId: 1 });
+    expect(worker.posted).toEqual([]);
     expect(worker.terminate).toHaveBeenCalledOnce();
     expect(coordinator.busy).toBe(false);
+  });
+
+  it("honors reentrant disposal during worker construction without posting", async () => {
+    const worker = new FakeWorker();
+    let coordinator!: PlotStageCoordinator;
+    coordinator = new PlotStageCoordinator(() => {
+      coordinator.dispose();
+      return worker;
+    });
+
+    const result = coordinator.start(input());
+
+    await expect(result).resolves.toEqual({ status: "cancelled", jobId: 1 });
+    expect(worker.posted).toEqual([]);
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    await expect(coordinator.start(input())).rejects.toThrow("disposed");
   });
 
   it("honors reentrant disposal during listener construction", async () => {
@@ -549,8 +593,28 @@ describe("PlotStageCoordinator", () => {
     const result = coordinator.start(input());
 
     await expect(result).resolves.toEqual({ status: "cancelled", jobId: 1 });
+    expect(worker.posted).toEqual([]);
     expect(worker.terminate).toHaveBeenCalledOnce();
     await expect(coordinator.start(input())).rejects.toThrow("disposed");
+  });
+
+  it("honors reentrant cancellation during listener construction without posting", async () => {
+    const worker = new FakeWorker();
+    let coordinator!: PlotStageCoordinator;
+    const cancel = vi.fn(() => coordinator.cancel());
+    const add = worker.addEventListener.bind(worker);
+    worker.addEventListener = vi.fn((type, listener) => {
+      add(type, listener);
+      if (type === "message") cancel();
+    });
+    coordinator = new PlotStageCoordinator(() => worker);
+
+    const result = coordinator.start(input());
+
+    expect(cancel).toHaveReturnedWith(true);
+    await expect(result).resolves.toEqual({ status: "cancelled", jobId: 1 });
+    expect(worker.posted).toEqual([]);
+    expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
   it("does not let reentrant cancellation overwrite synchronous settlement", async () => {

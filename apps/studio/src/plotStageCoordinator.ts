@@ -71,6 +71,14 @@ interface ActiveJob {
   readonly ownership: PlotStagePreparingOwnership;
   boundary: WorkerBoundarySession<PlotStagePreparationResult> | null;
   cancelPending: boolean;
+  boundaryCleaningUp: boolean;
+}
+
+interface RemovablePlotStageWorker extends PlotStageWorkerPort {
+  removeEventListener?(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+  ): void;
 }
 
 const STRUCTURAL_BOUNDARY_FALLBACKS: Readonly<
@@ -200,6 +208,7 @@ export class PlotStageCoordinator {
       ownership,
       boundary: null,
       cancelPending: false,
+      boundaryCleaningUp: false,
     };
     this.active = active;
 
@@ -207,7 +216,7 @@ export class PlotStageCoordinator {
       PlotStagePreparationRequest,
       PlotStagePreparationResult
     >({
-      createWorker: this.workerFactory,
+      createWorker: () => this.createGuardedWorker(active),
       request,
       onMessage: (message, controls) => {
         this.handleMessage(active, message, controls);
@@ -229,6 +238,7 @@ export class PlotStageCoordinator {
   cancel(): boolean {
     const active = this.currentActive();
     if (active === null) return false;
+    if (active.boundaryCleaningUp) return false;
     if (active.boundary === null) {
       active.cancelPending = true;
       this.release(active);
@@ -243,6 +253,51 @@ export class PlotStageCoordinator {
     if (this.disposed) return;
     this.disposed = true;
     this.cancel();
+  }
+
+  private createGuardedWorker(active: ActiveJob): PlotStageWorkerPort {
+    const worker = this.workerFactory() as RemovablePlotStageWorker;
+    const wrappedListeners = new Map<
+      EventListenerOrEventListenerObject,
+      EventListener
+    >();
+    const duringCleanup = (cleanup: () => void): void => {
+      active.boundaryCleaningUp = true;
+      try {
+        cleanup();
+      } finally {
+        active.boundaryCleaningUp = false;
+      }
+    };
+
+    const guarded: PlotStageWorkerPort & RemovablePlotStageWorker = {
+      postMessage: (request) => {
+        if (!active.cancelPending) worker.postMessage(request);
+      },
+      terminate: () => {
+        duringCleanup(() => worker.terminate());
+      },
+      addEventListener: (type: string, listener: EventListener) => {
+        const wrapped: EventListener = (event) => listener(event);
+        wrappedListeners.set(listener, wrapped);
+        worker.addEventListener(
+          type as "message",
+          wrapped as (event: MessageEvent<unknown>) => void,
+        );
+      },
+      removeEventListener: (
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+      ) => {
+        const wrapped = wrappedListeners.get(listener);
+        wrappedListeners.delete(listener);
+        if (wrapped === undefined || worker.removeEventListener === undefined) {
+          return;
+        }
+        duringCleanup(() => worker.removeEventListener!(type, wrapped));
+      },
+    };
+    return guarded;
   }
 
   private handleMessage(
