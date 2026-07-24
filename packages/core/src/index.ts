@@ -46,6 +46,7 @@ export {
 } from './stipplingStrategy/index'
 export * from './plotProfile'
 export * from './plotMapping'
+export * from './plotSequence'
 export * from './plotterSvg'
 export * from './outputProfile'
 export * from './paperCatalog'

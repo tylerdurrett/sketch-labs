@@ -24,6 +24,10 @@ import {
 import { applyPhotoToneControls } from '../sketches/photo-scribble/tone'
 import { scribbleMoon } from '../sketches/scribble-moon'
 import { toneCalibration } from '../sketches/tone-calibration'
+import {
+  defaultWatercolorFormsControls,
+  watercolorFormsControlSchema,
+} from '../sketches/watercolor-forms/controls'
 
 vi.mock('../scribbleStrategy', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../scribbleStrategy')>()
@@ -93,10 +97,9 @@ beforeEach(() => {
 })
 
 describe('Photo Scribble headless composition', () => {
-  it('declares Image Asset, exact tone controls, then the six Scribble controls', () => {
+  it('preserves every Ink declaration and appends the seven exact Watercolor declarations', () => {
     const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
-
-    expect(Object.keys(schema)).toEqual([
+    const inkKeys = [
       'imageAsset',
       'toneContrast',
       'tonePivot',
@@ -109,7 +112,18 @@ describe('Photo Scribble headless composition', () => {
       'chaos',
       'toneFidelity',
       'stopPoint',
-    ])
+    ]
+    const watercolorKeys = [
+      'watercolorGamma',
+      'watercolorContrast',
+      'watercolorPivot',
+      'watercolorFormDetail',
+      'watercolorColorSensitivity',
+      'watercolorBoundaryStrength',
+      'watercolorBoundarySmoothing',
+    ]
+
+    expect(Object.keys(schema)).toEqual([...inkKeys, ...watercolorKeys])
     expect(schema.imageAsset).toEqual({
       kind: 'image-asset',
       default: HEADLESS_FIXTURE_LOOKUP_KEY,
@@ -144,7 +158,34 @@ describe('Photo Scribble headless composition', () => {
       chaos: 0.25,
       toneFidelity: 0.9,
       stopPoint: 100,
+      watercolorGamma: defaultWatercolorFormsControls.gamma,
+      watercolorContrast: defaultWatercolorFormsControls.contrast,
+      watercolorPivot: defaultWatercolorFormsControls.pivot,
+      watercolorFormDetail: defaultWatercolorFormsControls.formDetail,
+      watercolorColorSensitivity:
+        defaultWatercolorFormsControls.colorSensitivity,
+      watercolorBoundaryStrength:
+        defaultWatercolorFormsControls.boundaryStrength,
+      watercolorBoundarySmoothing:
+        defaultWatercolorFormsControls.boundarySmoothing,
     })
+    expect(schema.watercolorGamma).toBe(watercolorFormsControlSchema.gamma)
+    expect(schema.watercolorContrast).toBe(
+      watercolorFormsControlSchema.contrast,
+    )
+    expect(schema.watercolorPivot).toBe(watercolorFormsControlSchema.pivot)
+    expect(schema.watercolorFormDetail).toBe(
+      watercolorFormsControlSchema.formDetail,
+    )
+    expect(schema.watercolorColorSensitivity).toBe(
+      watercolorFormsControlSchema.colorSensitivity,
+    )
+    expect(schema.watercolorBoundaryStrength).toBe(
+      watercolorFormsControlSchema.boundaryStrength,
+    )
+    expect(schema.watercolorBoundarySmoothing).toBe(
+      watercolorFormsControlSchema.boundarySmoothing,
+    )
   })
 
   it('preserves arbitrary caller-owned default Image Asset IDs', () => {
@@ -190,6 +231,79 @@ describe('Photo Scribble headless composition', () => {
     })
 
     expect(restored.params.tonePivot).toBe(0.5)
+  })
+
+  it('reconciles legacy Presets and randomizes all seven Watercolor values independently', () => {
+    const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const watercolorKeys = [
+      'watercolorGamma',
+      'watercolorContrast',
+      'watercolorPivot',
+      'watercolorFormDetail',
+      'watercolorColorSensitivity',
+      'watercolorBoundaryStrength',
+      'watercolorBoundarySmoothing',
+    ] as const
+    const legacyParams = defaultParams(schema)
+    for (const key of watercolorKeys) delete legacyParams[key]
+
+    const restored = applyPreset(schema, {
+      version: 1,
+      sketch: 'photo-scribble',
+      name: 'legacy-without-watercolor-controls',
+      seed: 'legacy-seed',
+      params: legacyParams,
+      locks: [],
+    })
+    const rolls = [0.11, 0.22, 0.33, 0.44, 0.55, 0.66, 0.77]
+    let roll = 0
+    const randomized = randomize(
+      schema,
+      restored.params,
+      new Set(
+        Object.keys(schema).filter(
+          (key) =>
+            !watercolorKeys.includes(
+              key as (typeof watercolorKeys)[number],
+            ),
+        ),
+      ),
+      () => rolls[roll++]!,
+    )
+
+    expect(
+      Object.fromEntries(
+        watercolorKeys.map((key) => [key, restored.params[key]]),
+      ),
+    ).toEqual({
+      watercolorGamma: defaultWatercolorFormsControls.gamma,
+      watercolorContrast: defaultWatercolorFormsControls.contrast,
+      watercolorPivot: defaultWatercolorFormsControls.pivot,
+      watercolorFormDetail: defaultWatercolorFormsControls.formDetail,
+      watercolorColorSensitivity:
+        defaultWatercolorFormsControls.colorSensitivity,
+      watercolorBoundaryStrength:
+        defaultWatercolorFormsControls.boundaryStrength,
+      watercolorBoundarySmoothing:
+        defaultWatercolorFormsControls.boundarySmoothing,
+    })
+    expect(
+      Object.fromEntries(
+        watercolorKeys.map((key) => [key, randomized[key]]),
+      ),
+    ).toEqual({
+      watercolorGamma: 0.11,
+      watercolorContrast: 0.22,
+      watercolorPivot: 0.33,
+      watercolorFormDetail: 0.44,
+      watercolorColorSensitivity: 0.55,
+      watercolorBoundaryStrength: 0.66,
+      watercolorBoundarySmoothing: 0.77,
+    })
+    expect(roll).toBe(watercolorKeys.length)
+    expect(randomized.toneGamma).toBe(restored.params.toneGamma)
+    expect(randomized.toneContrast).toBe(restored.params.toneContrast)
+    expect(randomized.tonePivot).toBe(restored.params.tonePivot)
   })
 
   it('reconciles, randomizes, and locks both Detail controls through the ordinary schema spine', () => {
@@ -594,6 +708,45 @@ describe('Photo Scribble headless composition', () => {
     })
     expect(artwork).not.toHaveProperty('polylines')
     expect(artwork.diagnostics).not.toHaveProperty('polylines')
+  })
+
+  it('keeps ordinary Ink Scene and diagnostics independent of Watercolor-only values', () => {
+    const schema = createPhotoScribbleSchema(HEADLESS_FIXTURE_LOOKUP_KEY)
+    const base = params()
+    const changed = {
+      ...base,
+      watercolorGamma: 0,
+      watercolorContrast: 1,
+      watercolorPivot: 0.25,
+      watercolorFormDetail: 0.1,
+      watercolorColorSensitivity: 0.9,
+      watercolorBoundaryStrength: 0.2,
+      watercolorBoundarySmoothing: 0.8,
+    }
+
+    const before = generatePhotoScribbleShadingArtwork(
+      base,
+      'ink-isolation',
+      FRAME,
+      schema,
+      undefined,
+      environment(),
+    )
+    const beforeInput = scribbleStrategyMock.mock.calls[0]![0]
+    const after = generatePhotoScribbleShadingArtwork(
+      changed,
+      'ink-isolation',
+      FRAME,
+      schema,
+      undefined,
+      environment(),
+    )
+    const afterInput = scribbleStrategyMock.mock.calls[1]![0]
+
+    expect(after.scene).toEqual(before.scene)
+    expect(after.diagnostics).toEqual(before.diagnostics)
+    expect(afterInput.controls).toEqual(beforeInput.controls)
+    expect(afterInput.seed).toBe(beforeInput.seed)
   })
 
   it('makes cold generate and prepared artwork use the same path-only Scene', () => {

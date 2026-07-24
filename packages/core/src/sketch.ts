@@ -32,6 +32,7 @@
 import type { SketchEnvironment } from './imageAssets'
 import type { DetailField } from './detailFields'
 import type { PlotProfile } from './plotProfile'
+import type { PlotSequenceDeclaration } from './plotSequence'
 import type { CoordinateSpace, Scene } from './scene'
 import type {
   ShadingObserver,
@@ -721,6 +722,14 @@ export interface SketchBase {
    * the caller's concern.
    */
   defaultOutputProfile?: PlotProfile
+  /**
+   * Optional Sketch-authored Plot Sequence in physical execution order.
+   *
+   * The declaration is additive: Sketches that omit it retain their ordinary
+   * one-Scene behavior. One Stage source is marked Primary and continues to use
+   * that ordinary output; supporting Stages may use reusable headless generators.
+   */
+  plotSequence?: PlotSequenceDeclaration
   /**
    * Optionally produce deterministic source fields for a Tone reference or a
    * reusable Shading Strategy.

@@ -36,6 +36,7 @@ import {
 } from '../../sketch'
 import type { SketchEnvironment } from '../../imageAssets'
 import { imageAssetParam, numberParam } from '../sketch-util'
+import { watercolorFormsControlSchema } from '../watercolor-forms/controls'
 import {
   applyPhotoDetailSensitivity,
   createPhotoScribbleScaleField,
@@ -53,10 +54,12 @@ import {
   PHOTO_TONE_CONTROL_MIN,
   type PhotoToneControls,
 } from './tone'
+import { photoScribblePlotSequence } from './plot-sequence'
 import { createResolvedPhotoScribbleSource } from './source'
 
 export * from './source'
 export * from './detail'
+export * from './plot-sequence'
 export * from './tone'
 
 const PHOTO_TONE_CONTROL_STEP = 0.01
@@ -109,6 +112,16 @@ export function createPhotoScribbleSchema(defaultImageAssetId: string) {
       step: PHOTO_DETAIL_INFLUENCE_STEP,
     },
     ...scribbleControlSchema,
+    watercolorGamma: watercolorFormsControlSchema.gamma,
+    watercolorContrast: watercolorFormsControlSchema.contrast,
+    watercolorPivot: watercolorFormsControlSchema.pivot,
+    watercolorFormDetail: watercolorFormsControlSchema.formDetail,
+    watercolorColorSensitivity:
+      watercolorFormsControlSchema.colorSensitivity,
+    watercolorBoundaryStrength:
+      watercolorFormsControlSchema.boundaryStrength,
+    watercolorBoundarySmoothing:
+      watercolorFormsControlSchema.boundarySmoothing,
   } satisfies Record<string, ParamSpec>)
 }
 
@@ -302,6 +315,7 @@ export function createPhotoScribble(
     id: 'photo-scribble',
     name: 'Photo Scribble',
     schema,
+    plotSequence: photoScribblePlotSequence,
     generateToneSource(params, frame, environment) {
       return createPhotoScribbleSource(params, frame, schema, environment)
     },
