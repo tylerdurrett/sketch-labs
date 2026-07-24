@@ -90,7 +90,12 @@ class FakeWorker implements ShadingWorkerPort {
   }
 
   emit(type: "message" | "error" | "messageerror", value: unknown): void {
-    const event = type === "message" ? { data: value } : value;
+    const event =
+      type === "message"
+        ? { data: value }
+        : value instanceof Event
+          ? value
+          : Object.assign(new Event(type), value);
     for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
 }
@@ -367,6 +372,22 @@ describe("ShadingCoordinator", () => {
 
     worker.emit("message", successResponse(worker));
     await expect(result).resolves.toMatchObject({ status: "success" });
+  });
+
+  it("allows a progress observer to cancel the active boundary", async () => {
+    const worker = new FakeWorker();
+    const coordinator = new ShadingCoordinator(() => worker);
+    const updates = vi.fn(() => {
+      expect(coordinator.cancel()).toBe(true);
+    });
+    const result = coordinator.start(identity(), updates);
+
+    worker.emit("message", progressResponse(worker, 10));
+
+    await expect(result).resolves.toEqual({ status: "cancelled", jobId: 1 });
+    expect(updates).toHaveBeenCalledOnce();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(coordinator.busy).toBe(false);
   });
 
   it("cancels, recreates with a fresh ETA, and ignores the old worker", async () => {
