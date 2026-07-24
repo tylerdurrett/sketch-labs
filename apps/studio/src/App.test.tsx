@@ -420,6 +420,13 @@ describe("App — Photo Scribble integration (#333)", () => {
       "control-chaos",
       "control-toneFidelity",
       "control-stopPoint",
+      "control-watercolorGamma",
+      "control-watercolorContrast",
+      "control-watercolorPivot",
+      "control-watercolorFormDetail",
+      "control-watercolorColorSensitivity",
+      "control-watercolorBoundaryStrength",
+      "control-watercolorBoundarySmoothing",
     ]);
     expect(
       document
@@ -439,6 +446,13 @@ describe("App — Photo Scribble integration (#333)", () => {
         chaos: 0.25,
         toneFidelity: 0.9,
         stopPoint: 100,
+        watercolorGamma: 0.5,
+        watercolorContrast: 0.5,
+        watercolorPivot: 0.5,
+        watercolorFormDetail: 0.5,
+        watercolorColorSensitivity: 0.5,
+        watercolorBoundaryStrength: 0.5,
+        watercolorBoundarySmoothing: 1,
       }),
     );
     expect(
@@ -487,7 +501,7 @@ describe("App — Photo Scribble integration (#333)", () => {
     ).toBe("fill-held");
     expect(
       document.querySelectorAll('#inspector input[id^="control-"]'),
-    ).toHaveLength(11);
+    ).toHaveLength(18);
     expect(
       document.querySelector(
         '[aria-label="imageAsset image asset identity"]',

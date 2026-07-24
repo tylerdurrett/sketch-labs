@@ -30,6 +30,7 @@ import {
   type PresetFraming,
   type DetailField,
   type OutlineTarget,
+  type PlotSequenceDeclaration,
   type Scene,
   type Sketch,
   type SketchEnvironment,
@@ -139,6 +140,13 @@ import {
 import { useSketchEnvironment } from "./useSketchEnvironment";
 import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
 import { useDetailPreparation } from "./useDetailPreparation";
+import type { PlotSequencePresentation } from "./plotSequencePresentation";
+import { usePlotSequencePresentation } from "./usePlotSequencePresentation";
+import {
+  useRegisteredStagePreparation,
+  type RegisteredStageAuthoredState,
+  type RegisteredStagePreparationSketch,
+} from "./useRegisteredStagePreparation";
 
 type DiagnosticSelection = null | "tone" | "detail";
 
@@ -231,7 +239,9 @@ function shadingArtworkParams(
 ): Readonly<Record<string, unknown>> {
   return shadingIdentityParams(
     sketch,
-    artworkGenerationParams(sketch, params),
+    sketch.plotSequence === undefined
+      ? artworkGenerationParams(sketch, params)
+      : params,
   );
 }
 
@@ -325,7 +335,9 @@ function classifyOutlineEdit(
   next: StudioEditState,
 ): OutlineEditChange {
   if (
-    !artworkGenerationParamsEqual(sketch, previous.params, next.params) ||
+    !(sketch.plotSequence === undefined
+      ? artworkGenerationParamsEqual(sketch, previous.params, next.params)
+      : shadingArtworkParamsEqual(sketch, previous.params, next.params)) ||
     previous.seed !== next.seed ||
     previous.tolerance !== next.tolerance ||
     !plotDrawableAspectsEquivalent(
@@ -375,6 +387,43 @@ function shadingInputsChanged(
   );
 }
 
+/** Whether an edit changes any registered Plot Stage preparation identity. */
+function plotSequenceInputsChanged(
+  previous: StudioEditState,
+  next: StudioEditState,
+): boolean {
+  return (
+    !sameParams(previous.params, next.params) ||
+    previous.seed !== next.seed ||
+    !plotDrawableAspectsEquivalent(
+      studioGenerationAspect(previous),
+      studioGenerationAspect(next),
+    )
+  );
+}
+
+/**
+ * Hook-order placeholder for non-Sequence mounts.
+ *
+ * Its sole Primary has no capability, so D3 constructs no worker or generated
+ * coordinator. Legacy rendering remains owned by its existing Shading hook.
+ */
+const INERT_PLOT_SEQUENCE: PlotSequenceDeclaration = Object.freeze({
+  sharedParameters: Object.freeze([]),
+  stages: Object.freeze([
+    Object.freeze({
+      id: "legacy-primary",
+      name: "Legacy Primary",
+      source: Object.freeze({
+        kind: "primary",
+        generatorId: "legacy-primary",
+      }),
+      parameters: Object.freeze([]),
+      dependencies: Object.freeze({ usesSeed: false, usesTime: false }),
+    }),
+  ]),
+});
+
 /**
  * Props for {@link SketchControls}.
  */
@@ -403,6 +452,11 @@ export interface SketchControlsProps {
   onHiddenLineBusyChange?: (busy: boolean) => void;
   /** Longest normalized source edge for Image Asset imports. */
   imageAssetLongEdgeCap?: number;
+  /**
+   * Internal deterministic seam for focused Plot Sequence wiring tests.
+   * Production omits it, so every keyed mount starts on Primary.
+   */
+  initialPlotSequencePresentation?: PlotSequencePresentation;
 }
 
 /**
@@ -455,6 +509,7 @@ export function SketchControls({
   onToggleCollapse,
   onHiddenLineBusyChange,
   imageAssetLongEdgeCap = STUDIO_IMAGE_ASSET_LONG_EDGE_CAP,
+  initialPlotSequencePresentation,
 }: SketchControlsProps) {
   const [history, setHistory] = useState<EditHistory>(() =>
     createEditHistory({
@@ -592,11 +647,14 @@ export function SketchControls({
     detailPreparation.unrequest,
   ]);
 
-  const hasShadingPreparation = sketch.generateShadingArtwork !== undefined;
+  const plotSequence = sketch.plotSequence;
+  const hasPlotSequence = plotSequence !== undefined;
+  const hasShadingCapability = sketch.generateShadingArtwork !== undefined;
+  const hasLegacyShadingPreparation = !hasPlotSequence && hasShadingCapability;
   const shadingInputRevisionRef = useRef(0);
   const shadingPreparation = useShadingPreparation({
     sketch,
-    enabled: hasShadingPreparation && environmentReady,
+    enabled: hasLegacyShadingPreparation && environmentReady,
     initial: {
       params: shadingArtworkParams(sketch, history.present.params),
       seed: history.present.seed,
@@ -604,41 +662,78 @@ export function SketchControls({
       inputRevision: shadingInputRevisionRef.current,
     },
   });
+  const registeredStageSketch = useMemo<RegisteredStagePreparationSketch>(
+    () =>
+      plotSequence === undefined
+        ? {
+            id: sketch.id,
+            schema: {},
+            plotSequence: INERT_PLOT_SEQUENCE,
+          }
+        : {
+            ...sketch,
+            plotSequence,
+          },
+    [plotSequence, sketch],
+  );
+  const registeredStagePreparation = useRegisteredStagePreparation({
+    sketch: registeredStageSketch,
+    enabled: hasPlotSequence && environmentReady,
+    initial: {
+      params: history.present.params,
+      seed: history.present.seed,
+      sampledT: 0,
+      compositionFrame,
+      inputRevision: shadingInputRevisionRef.current,
+    },
+  });
+  const plotSequencePresentation = usePlotSequencePresentation({
+    declaration: plotSequence ?? INERT_PLOT_SEQUENCE,
+    records: registeredStagePreparation.records,
+    demand: registeredStagePreparation.demand,
+    ...(initialPlotSequencePresentation === undefined
+      ? {}
+      : { initialPresentation: initialPlotSequencePresentation }),
+  });
+  const primaryShadingPreparation = hasPlotSequence
+    ? registeredStagePreparation.primaryShadingPreparation
+    : shadingPreparation;
   const currentShading = environmentReady
-    ? selectCurrentShadingResult(shadingPreparation.session)
+    ? selectCurrentShadingResult(primaryShadingPreparation.session)
     : null;
   const displayedShadingDiagnostics: DisplayedShadingDiagnostics | null =
-    !environmentReady || shadingPreparation.session.displayed === null
+    !environmentReady || primaryShadingPreparation.session.displayed === null
       ? null
       : {
           freshness: currentShading === null ? "stale" : "current",
-          diagnostics: shadingPreparation.session.displayed.diagnostics,
-          computeTimeMs: shadingPreparation.session.displayed.computeTimeMs,
+          diagnostics: primaryShadingPreparation.session.displayed.diagnostics,
+          computeTimeMs:
+            primaryShadingPreparation.session.displayed.computeTimeMs,
         };
   const activeShadingToken = environmentReady
-    ? (shadingPreparation.session.active?.token ??
-        shadingPreparation.session.pending?.token ??
-        null)
+    ? (primaryShadingPreparation.session.active?.token ??
+      primaryShadingPreparation.session.pending?.token ??
+      null)
     : null;
   const shadingPreparationDiagnostics: ShadingPreparationDiagnostics =
     activeShadingToken !== null
       ? {
           kind: "preparing",
           progress:
-            shadingPreparation.progress?.token === activeShadingToken
-              ? shadingPreparation.progress.update.snapshot
+            primaryShadingPreparation.progress?.token === activeShadingToken
+              ? primaryShadingPreparation.progress.update.snapshot
               : null,
           eta:
-            shadingPreparation.progress?.token === activeShadingToken
-              ? shadingPreparation.progress.update.eta
+            primaryShadingPreparation.progress?.token === activeShadingToken
+              ? primaryShadingPreparation.progress.update.eta
               : { kind: "estimating", revision: 0 },
         }
-      : shadingPreparation.session.failure === null
+      : primaryShadingPreparation.session.failure === null
         ? { kind: "idle" }
         : {
             kind: "failure",
-            message: shadingPreparation.session.failure,
-            onRetry: shadingPreparation.retry,
+            message: primaryShadingPreparation.session.failure,
+            onRetry: primaryShadingPreparation.retry,
           };
   const [acknowledgedShading, setAcknowledgedShading] =
     useState<ShadingPaintAcknowledgement | null>(null);
@@ -660,6 +755,15 @@ export function SketchControls({
   ): ShadingAuthoredState => ({
     params: shadingArtworkParams(sketch, edit.params),
     seed: edit.seed,
+    compositionFrame: resolveStudioCompositionFrame(edit),
+    inputRevision: shadingInputRevisionRef.current,
+  });
+  const authoredRegisteredStageState = (
+    edit: StudioEditState = historyRef.current.present,
+  ): RegisteredStageAuthoredState => ({
+    params: edit.params,
+    seed: edit.seed,
+    sampledT: 0,
     compositionFrame: resolveStudioCompositionFrame(edit),
     inputRevision: shadingInputRevisionRef.current,
   });
@@ -878,7 +982,7 @@ export function SketchControls({
     if (!environmentReadyNow()) return;
     dispatchOutline({
       type: "request-outline",
-      launch: !hasShadingPreparation || shadingPaintIsCurrent,
+      launch: !hasShadingCapability || shadingPaintIsCurrent,
       ...(shadingPaintIsCurrent && currentShading !== null
         ? {
             provenance: {
@@ -905,11 +1009,21 @@ export function SketchControls({
       current.present,
       next.present,
     );
-    if (hasShadingPreparation && shadingChanged) {
+    if (hasLegacyShadingPreparation && shadingChanged) {
+      shadingInputRevisionRef.current += 1;
+    }
+    const registeredStagesChanged =
+      hasPlotSequence &&
+      plotSequenceInputsChanged(current.present, next.present);
+    if (
+      hasPlotSequence &&
+      registeredStagesChanged &&
+      shadingInputsChanged(sketch, current.present, next.present)
+    ) {
       shadingInputRevisionRef.current += 1;
     }
     if (
-      hasShadingPreparation &&
+      hasLegacyShadingPreparation &&
       shadingAction === "preview" &&
       shadingChanged
     ) {
@@ -920,11 +1034,28 @@ export function SketchControls({
         authoredShadingState(next.present),
       );
     } else if (
-      hasShadingPreparation &&
+      hasLegacyShadingPreparation &&
       shadingAction === "atomic" &&
       shadingChanged
     ) {
       shadingPreparation.requestAtomic(authoredShadingState(next.present));
+    }
+    if (
+      hasPlotSequence &&
+      shadingAction === "preview" &&
+      registeredStagesChanged
+    ) {
+      registeredStagePreparation.previewAuthoredState(
+        authoredRegisteredStageState(next.present),
+      );
+    } else if (
+      hasPlotSequence &&
+      shadingAction === "atomic" &&
+      registeredStagesChanged
+    ) {
+      registeredStagePreparation.requestAtomic(
+        authoredRegisteredStageState(next.present),
+      );
     }
     const outlineChange = classifyOutlineEdit(
       sketch,
@@ -942,11 +1073,10 @@ export function SketchControls({
         dispatchOutline({ type: "transaction-began" });
       }
       const retainsPaintedShading =
-        hasShadingPreparation && !shadingChanged && shadingPaintIsCurrent;
+        hasShadingCapability && !shadingChanged && shadingPaintIsCurrent;
       dispatchOutline({
         type: "inputs-changed",
-        launch:
-          environmentReadyNow() && launchOutline && !hasShadingPreparation,
+        launch: environmentReadyNow() && launchOutline && !hasShadingCapability,
         ...(retainsPaintedShading && currentShading !== null
           ? {
               provenance: {
@@ -955,7 +1085,7 @@ export function SketchControls({
               },
             }
           : {}),
-        waitForSource: hasShadingPreparation && !retainsPaintedShading,
+        waitForSource: hasShadingCapability && !retainsPaintedShading,
       });
     }
     setHistory(next);
@@ -1143,10 +1273,11 @@ export function SketchControls({
     cancelOutlineCoordinator();
     dispatchOutline({ type: "transaction-began" });
     updateHistory(beginEditTransaction, false);
-    if (hasShadingPreparation) shadingPreparation.beginTransaction();
+    if (hasLegacyShadingPreparation) shadingPreparation.beginTransaction();
+    if (hasPlotSequence) registeredStagePreparation.beginTransaction();
   };
   const beginParamTransaction = (key: string): void => {
-    if (!isDetailReferenceOnlyParam(sketch, key)) {
+    if (hasPlotSequence || !isDetailReferenceOnlyParam(sketch, key)) {
       beginTransaction();
       return;
     }
@@ -1165,11 +1296,16 @@ export function SketchControls({
   ): void => {
     const outlineTransactionOpen = outlineSessionRef.current.transactionOpen;
     const shadingTransactionOpen =
-      hasShadingPreparation &&
+      hasLegacyShadingPreparation &&
       shadingPreparation.getSessionSnapshot().transactionOpen;
     updateHistory(transition, false);
     if (shadingTransactionOpen) {
       shadingPreparation.settleTransaction(authoredShadingState());
+    }
+    if (hasPlotSequence) {
+      registeredStagePreparation.settleTransaction(
+        authoredRegisteredStageState(),
+      );
     }
     // Settlement belongs to the session reducer: outside export it resamples the
     // final Fill exactly once; during export it retains only a deferred request,
@@ -1177,7 +1313,7 @@ export function SketchControls({
     if (outlineTransactionOpen) {
       dispatchOutline({
         type: "transaction-settled",
-        launch: environmentReadyNow() && !hasShadingPreparation,
+        launch: environmentReadyNow() && !hasShadingCapability,
       });
     }
   };
@@ -1291,8 +1427,8 @@ export function SketchControls({
     }
     diagnosticSelectionRef.current = next;
     setDiagnosticSelection(next);
-    if (previous === "detail" && hasShadingPreparation) {
-      shadingPreparation.resumeLatest();
+    if (previous === "detail" && hasShadingCapability) {
+      primaryShadingPreparation.resumeLatest();
     }
   };
 
@@ -1333,7 +1469,7 @@ export function SketchControls({
 
     // Detail owns no Shading geometry. Retire active ownership synchronously
     // before the diagnostic becomes observable or analysis can be requested.
-    if (hasShadingPreparation) shadingPreparation.suspend();
+    if (hasShadingCapability) primaryShadingPreparation.suspend();
     cancelOutlineCoordinator();
     dispatchOutline({ type: "request-fill" });
     diagnosticSelectionRef.current = "detail";
@@ -1435,7 +1571,7 @@ export function SketchControls({
   ): void => {
     if (!environmentReadyNow()) return;
     const latestShading = selectCurrentShadingResult(
-      shadingPreparation.getSessionSnapshot(),
+      primaryShadingPreparation.getSessionSnapshot(),
     );
     if (
       latestShading === null ||
@@ -1506,8 +1642,31 @@ export function SketchControls({
     if (toneSource !== undefined) {
       return { kind: "tone-reference", source: toneSource };
     }
+    if (hasPlotSequence && outlineSession.phase.kind === "fill-live") {
+      const isolatedStage =
+        plotSequencePresentation.presentation.kind === "isolated"
+          ? registeredStagePreparation.records[
+              plotSequencePresentation.presentation.stageId
+            ]
+          : undefined;
+      const primaryDisplayed = primaryShadingPreparation.session.displayed;
+      const presentedScene = plotSequencePresentation.snapshot.scene;
+      return {
+        kind: "fill-held",
+        scene: presentedScene ?? emptyShadingScene,
+        t: 0,
+        ...(isolatedStage?.sourceKind === "primary" &&
+        primaryDisplayed !== null &&
+        presentedScene === primaryDisplayed.scene
+          ? {
+              sourceInputRevision: primaryDisplayed.sourceInputRevision,
+              contentRevision: primaryDisplayed.contentRevision,
+            }
+          : {}),
+      };
+    }
     if (
-      hasShadingPreparation &&
+      hasLegacyShadingPreparation &&
       outlineSession.phase.kind === "fill-live"
     ) {
       return shadingPreparation.session.displayed === null
@@ -1605,10 +1764,10 @@ export function SketchControls({
 
   /** Re-prove Shading session and canvas provenance at an export side effect. */
   const captureCurrentShadingExport = () => {
-    if (!hasShadingPreparation) return null;
+    if (!hasShadingCapability) return null;
     const displayed = canvasHandle.current?.captureDisplayedFrame() ?? null;
     const result = acknowledgedCurrentShading(
-      shadingPreparation.getSessionSnapshot(),
+      primaryShadingPreparation.getSessionSnapshot(),
       acknowledgedShadingRef.current,
       displayed,
     );
@@ -1619,7 +1778,7 @@ export function SketchControls({
     expected: ReturnType<typeof captureCurrentShadingExport>,
   ): boolean => {
     if (!environmentReadyNow()) return false;
-    if (!hasShadingPreparation) return true;
+    if (!hasShadingCapability) return true;
     if (expected === null) return false;
     const current = captureCurrentShadingExport();
     return (
@@ -1650,7 +1809,7 @@ export function SketchControls({
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
     const shadingExport = captureCurrentShadingExport();
-    if (hasShadingPreparation && shadingExport === null) return;
+    if (hasShadingCapability && shadingExport === null) return;
     const edit = historyRef.current.present;
     // Time-gate the `-t{t}` filename segment on `sketch.time`: a time-driven
     // Sketch carries its captured moment, a static one omits `t` entirely.
@@ -1714,7 +1873,7 @@ export function SketchControls({
     const handle = canvasHandle.current;
     if (handle == null) return;
     const shadingExport = captureCurrentShadingExport();
-    if (hasShadingPreparation && shadingExport === null) return;
+    if (hasShadingCapability && shadingExport === null) return;
     const edit = historyRef.current.present;
     const pageFrame =
       edit.framing.kind === "framed" ? edit.framing.pageFrame : null;
@@ -1798,7 +1957,7 @@ export function SketchControls({
     const capturedDisplayed = handle.captureDisplayedFrame();
     if (capturedDisplayed === null) return;
     const shadingExport = captureCurrentShadingExport();
-    if (hasShadingPreparation && shadingExport === null) return;
+    if (hasShadingCapability && shadingExport === null) return;
     const displayed = shadingExport?.displayed ?? capturedDisplayed;
 
     const edit = historyRef.current.present;
@@ -2168,7 +2327,7 @@ export function SketchControls({
             onCancel: cancelTransaction,
           }}
         />
-        {hasShadingPreparation ? (
+        {hasShadingCapability ? (
           <ShadingDiagnostics
             displayed={displayedShadingDiagnostics}
             preparation={shadingPreparationDiagnostics}
@@ -2388,7 +2547,7 @@ export function SketchControls({
             disabled={
               diagnosticReferenceActive ||
               !environmentReady ||
-              (!shadingPaintIsCurrent && hasShadingPreparation)
+              (!shadingPaintIsCurrent && hasShadingCapability)
             }
           >
             Export PNG
@@ -2402,7 +2561,7 @@ export function SketchControls({
             disabled={
               diagnosticReferenceActive ||
               !environmentReady ||
-              (!shadingPaintIsCurrent && hasShadingPreparation)
+              (!shadingPaintIsCurrent && hasShadingCapability)
             }
           >
             Export SVG
@@ -2419,7 +2578,7 @@ export function SketchControls({
                   diagnosticReferenceActive ||
                   !environmentReady ||
                   hiddenLineBusy ||
-                  (!shadingPaintIsCurrent && hasShadingPreparation)
+                  (!shadingPaintIsCurrent && hasShadingCapability)
                 }
               >
                 Export Hidden-line SVG

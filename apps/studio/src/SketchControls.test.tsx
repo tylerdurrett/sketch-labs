@@ -143,6 +143,17 @@ const shadingJob = vi.hoisted(() => ({
       | undefined;
   }>,
 }));
+const plotStageJob = vi.hoisted(() => ({
+  coordinators: 0,
+  disposals: 0,
+  cancelCount: 0,
+  starts: [] as Array<{
+    input: import("./plotStageCoordinator").PlotStagePreparationInput;
+    resolve: (
+      result: import("./plotStageCoordinator").PlotStagePreparationResult,
+    ) => void;
+  }>,
+}));
 const detailJob = vi.hoisted(() => ({
   cancelCount: 0,
   resolveOnCancel: true,
@@ -256,6 +267,34 @@ vi.mock("./shadingCoordinator", () => ({
       if (this.disposed) return;
       this.disposed = true;
       shadingJob.disposals += 1;
+      this.cancel();
+    }
+  },
+}));
+
+vi.mock("./plotStageCoordinator", () => ({
+  PlotStageCoordinator: class {
+    private disposed = false;
+
+    constructor() {
+      plotStageJob.coordinators += 1;
+    }
+
+    start(input: import("./plotStageCoordinator").PlotStagePreparationInput) {
+      return new Promise((resolve) => {
+        plotStageJob.starts.push({ input, resolve });
+      });
+    }
+
+    cancel() {
+      plotStageJob.cancelCount += 1;
+      return true;
+    }
+
+    dispose() {
+      if (this.disposed) return;
+      this.disposed = true;
+      plotStageJob.disposals += 1;
       this.cancel();
     }
   },
@@ -946,6 +985,10 @@ beforeEach(() => {
   shadingJob.disposals = 0;
   shadingJob.cancelCount = 0;
   shadingJob.starts = [];
+  plotStageJob.coordinators = 0;
+  plotStageJob.disposals = 0;
+  plotStageJob.cancelCount = 0;
+  plotStageJob.starts = [];
   detailJob.cancelCount = 0;
   detailJob.resolveOnCancel = true;
   detailJob.disposals = 0;
@@ -7102,6 +7145,21 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     });
   }
 
+  async function completePlotStage(index: number, scene: Scene): Promise<void> {
+    const job = plotStageJob.starts[index];
+    if (job === undefined) throw new Error(`no Plot Stage job ${index}`);
+    await act(async () => {
+      job.resolve({
+        status: "success",
+        jobId: index + 1,
+        identity: job.input.identity,
+        registrationIdentity: job.input.registrationIdentity,
+        scene,
+      });
+      await Promise.resolve();
+    });
+  }
+
   async function completeDetail(index: number, value = 128): Promise<void> {
     const job = detailJob.starts[index];
     if (job === undefined) throw new Error(`no Detail job ${index}`);
@@ -7997,7 +8055,10 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     await resolveManagedEnvironment();
     await completeShading(0, preparedScene(40));
 
+    expect(shadingJob.coordinators).toBe(1);
     expect(shadingJob.starts).toHaveLength(1);
+    expect(plotStageJob.coordinators).toBe(0);
+    expect(plotStageJob.starts).toHaveLength(0);
     expect(
       shadingJob.starts[0]!.identity.params.some(({ key }) =>
         key.startsWith("watercolor"),
@@ -8014,6 +8075,7 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     act(() => watercolor.blur());
 
     expect(shadingJob.starts).toHaveLength(1);
+    expect(plotStageJob.starts).toHaveLength(0);
     expect(canvas.dataset.sourceInputRevision).toBe("0");
 
     const ink = paramInput(el, "pathDensity");
@@ -8026,6 +8088,74 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
       key: "pathDensity",
       value: Number(ink.value),
     });
+  });
+
+  it("demands Watercolor presentation and never falls through to cold Primary generation", async () => {
+    const generate = vi.fn(photoScribble.generate);
+    generateDuringLiveCanvasRender = true;
+    const supportingScene = preparedScene(41);
+    const el = mount(
+      <SketchControls
+        sketch={{
+          ...managedPhotoScribble(photoScribble.generateToneSource!),
+          generate,
+        }}
+        initialPlotSequencePresentation={{
+          kind: "isolated",
+          stageId: "watercolor-forms",
+        }}
+      />,
+    );
+
+    expect(plotStageJob.coordinators).toBe(1);
+    expect(plotStageJob.starts).toHaveLength(1);
+    expect(plotStageJob.starts[0]!.input.identity.stageId).toBe(
+      "watercolor-forms",
+    );
+    expect(generate).not.toHaveBeenCalled();
+
+    await resolveManagedEnvironment();
+    expect(shadingJob.coordinators).toBe(1);
+    await completePlotStage(0, supportingScene);
+    expect(lastRenderScene).toBe(supportingScene);
+    expect(renderState(el)).toBe("fill-held");
+    expect(generate).not.toHaveBeenCalled();
+
+    await completeShading(0, preparedScene(42));
+    expect(lastRenderScene).toBe(supportingScene);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("demands Combined support and paints only one coherent held Scene", async () => {
+    const generate = vi.fn(photoScribble.generate);
+    generateDuringLiveCanvasRender = true;
+    const ink = preparedScene(43);
+    const watercolor = preparedScene(44);
+    mount(
+      <SketchControls
+        sketch={{
+          ...managedPhotoScribble(photoScribble.generateToneSource!),
+          generate,
+        }}
+        initialPlotSequencePresentation={{
+          kind: "combined",
+          stageIds: ["ink-scribble", "watercolor-forms"],
+        }}
+      />,
+    );
+
+    await resolveManagedEnvironment();
+    expect(shadingJob.coordinators).toBe(1);
+    await completeShading(0, ink);
+    // Supporting has not registered yet, so Combined stays explicit and empty.
+    expect(lastRenderScene?.primitives).toEqual([]);
+    await completePlotStage(0, watercolor);
+
+    expect(lastRenderScene?.primitives).toEqual([
+      ink.primitives[0],
+      watercolor.primitives[0],
+    ]);
+    expect(generate).not.toHaveBeenCalled();
   });
 
   it("threads the exact ready environment through ordinary Fill, SVG, and Outline", async () => {
@@ -8306,15 +8436,18 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     expect(renderState(el)).toBe("detail-reference");
   });
 
-  it("keeps sensitivity-only edits outside Fill, Outline, and Shading provenance", async () => {
+  it("treats authored Ink sensitivity as Primary-only Sequence identity", async () => {
     const el = mount(
       <SketchControls
         sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
       />,
     );
     await resolveManagedEnvironment();
-    await completeShading(0, preparedScene(94));
-    const canvas = el.querySelector<HTMLElement>('[data-testid="canvas-seed"]')!;
+    const initialScene = preparedScene(94);
+    await completeShading(0, initialScene);
+    const canvas = el.querySelector<HTMLElement>(
+      '[data-testid="canvas-seed"]',
+    )!;
     const initialProvenance = {
       sourceInputRevision: canvas.dataset.sourceInputRevision,
       contentRevision: canvas.dataset.contentRevision,
@@ -8327,47 +8460,26 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     };
 
     editSensitivity("0.6");
-    expect(shadingJob.starts).toHaveLength(1);
-    expect(shadingJob.cancelCount).toBe(0);
-    expect(canvas.dataset.sourceInputRevision).toBe(
-      initialProvenance.sourceInputRevision,
-    );
-    expect(canvas.dataset.contentRevision).toBe(
-      initialProvenance.contentRevision,
-    );
-    expect(exportButton(el, "Export SVG").disabled).toBe(false);
-
-    clickButton(el, "Outline");
-    const retainedOutline = outlineJob.lastCompletedScene;
-    expect(outlineJob.starts).toBe(1);
-    expect(outlineJob.lastIdentity?.params).toContainEqual({
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(shadingJob.starts[1]!.identity.params).toContainEqual({
       key: "detailSensitivity",
-      value: 0.5,
+      value: 0.6,
     });
-    expect(canvas.dataset.renderMode).toBe("outline");
-    editSensitivity("0.7");
-    expect(outlineJob.starts).toBe(1);
-    expect(outlineJob.lastCompletedScene).toBe(retainedOutline);
-    expect(canvas.dataset.renderMode).toBe("outline");
+    // E1 keeps the retained Primary explicit while its replacement prepares.
+    expect(lastRenderScene).toBe(initialScene);
     expect(canvas.dataset.sourceInputRevision).toBe(
       initialProvenance.sourceInputRevision,
     );
     expect(canvas.dataset.contentRevision).toBe(
       initialProvenance.contentRevision,
     );
-    expect(exportButton(el, "Export Hidden-line SVG").disabled).toBe(false);
+    expect(exportButton(el, "Export SVG").disabled).toBe(true);
 
-    clickButton(el, "Detail");
-    await completeDetail(0);
-    editSensitivity("0.8");
-    clickButton(el, "Fill");
-    await flush();
-    expect(shadingJob.starts).toHaveLength(1);
-    expect(shadingJob.cancelCount).toBe(0);
-    expect(canvas.dataset.sourceInputRevision).toBe(
-      initialProvenance.sourceInputRevision,
-    );
-    expect(canvas.dataset.contentRevision).toBe(
+    const replacement = preparedScene(95);
+    await completeShading(1, replacement);
+    expect(lastRenderScene).toBe(replacement);
+    expect(canvas.dataset.sourceInputRevision).toBe("1");
+    expect(canvas.dataset.contentRevision).not.toBe(
       initialProvenance.contentRevision,
     );
     expect(exportButton(el, "Export SVG").disabled).toBe(false);

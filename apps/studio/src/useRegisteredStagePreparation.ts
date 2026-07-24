@@ -41,6 +41,7 @@ import {
   useShadingPreparation,
   type ShadingAuthoredState,
   type ShadingPreparationProgress,
+  type UseShadingPreparationResult,
 } from "./useShadingPreparation";
 
 export interface RegisteredStageAuthoredState {
@@ -109,6 +110,8 @@ export interface UseRegisteredStagePreparationOptions {
   readonly sketch: RegisteredStagePreparationSketch;
   /** The mounted edit history's initial present state. */
   readonly initial: RegisteredStageAuthoredState;
+  /** Gate Primary preparation while caller-owned resources are unavailable. */
+  readonly enabled?: boolean;
   readonly shadingWorkerFactory?: ShadingWorkerFactory;
   readonly shadingCoordinatorFactory?: ShadingPreparationCoordinatorFactory;
   readonly generatedWorkerFactory?: PlotStageWorkerFactory;
@@ -117,6 +120,13 @@ export interface UseRegisteredStagePreparationOptions {
 
 export interface UseRegisteredStagePreparationResult {
   readonly records: RegisteredStageRecordMap;
+  /**
+   * Existing Primary diagnostics/provenance seam.
+   *
+   * D3 owns this one adapted Shading session; Sequence consumers must not mount
+   * a parallel legacy owner beside it.
+   */
+  readonly primaryShadingPreparation: UseShadingPreparationResult;
   /** Rebuild records from both drivers' latest synchronous reducer mirrors. */
   readonly getSnapshot: () => RegisteredStageRecordMap;
   readonly lookup: (stageId: string) => RegisteredStageRecord | undefined;
@@ -393,6 +403,7 @@ function createRecordMap({
 export function useRegisteredStagePreparation({
   sketch,
   initial,
+  enabled = true,
   shadingWorkerFactory,
   shadingCoordinatorFactory,
   generatedWorkerFactory,
@@ -412,7 +423,7 @@ export function useRegisteredStagePreparation({
   const shading = useShadingPreparation({
     sketch,
     initial: toShadingAuthored(initial),
-    enabled: primaryAvailable,
+    enabled: primaryAvailable && enabled,
     ...(shadingWorkerFactory === undefined
       ? {}
       : { workerFactory: shadingWorkerFactory }),
@@ -553,6 +564,7 @@ export function useRegisteredStagePreparation({
 
   return {
     records,
+    primaryShadingPreparation: shading,
     getSnapshot: snapshot,
     lookup,
     demand,
