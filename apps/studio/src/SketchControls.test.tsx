@@ -21,6 +21,7 @@ import {
   DEFAULT_COMPOSITION_FRAME,
   defaultParams,
   frameScene,
+  flowingContours,
   HARNESS_FALLBACK_PLOT_PROFILE,
   hiddenLinePass,
   IMAGE_DETAIL_ANALYSIS_DEFINITION_ID,
@@ -143,6 +144,15 @@ const shadingJob = vi.hoisted(() => ({
       | undefined;
   }>,
 }));
+const flowingContoursJob = vi.hoisted(() => ({
+  coordinators: 0,
+  disposals: 0,
+  cancelCount: 0,
+  starts: [] as Array<{
+    identity: import("./flowingContoursComputeProtocol").FlowingContoursComputeIdentity;
+    resolve: (result: unknown) => void;
+  }>,
+}));
 const detailJob = vi.hoisted(() => ({
   cancelCount: 0,
   resolveOnCancel: true,
@@ -256,6 +266,36 @@ vi.mock("./shadingCoordinator", () => ({
       if (this.disposed) return;
       this.disposed = true;
       shadingJob.disposals += 1;
+      this.cancel();
+    }
+  },
+}));
+
+vi.mock("./flowingContoursCoordinator", () => ({
+  FlowingContoursCoordinator: class {
+    private disposed = false;
+
+    constructor() {
+      flowingContoursJob.coordinators += 1;
+    }
+
+    start(
+      identity: import("./flowingContoursComputeProtocol").FlowingContoursComputeIdentity,
+    ) {
+      return new Promise((resolve) => {
+        flowingContoursJob.starts.push({ identity, resolve });
+      });
+    }
+
+    cancel() {
+      flowingContoursJob.cancelCount += 1;
+      return true;
+    }
+
+    dispose() {
+      if (this.disposed) return;
+      this.disposed = true;
+      flowingContoursJob.disposals += 1;
       this.cancel();
     }
   },
@@ -946,6 +986,10 @@ beforeEach(() => {
   shadingJob.disposals = 0;
   shadingJob.cancelCount = 0;
   shadingJob.starts = [];
+  flowingContoursJob.coordinators = 0;
+  flowingContoursJob.disposals = 0;
+  flowingContoursJob.cancelCount = 0;
+  flowingContoursJob.starts = [];
   detailJob.cancelCount = 0;
   detailJob.resolveOnCancel = true;
   detailJob.disposals = 0;
@@ -4572,7 +4616,13 @@ describe("SketchControls — Plot Profile session wiring (#267)", () => {
     expect(outlineJob.lastIdentity?.compositionFrame).not.toEqual(priorFrame);
     act(() => lastOnOutlineComputed?.());
 
-    clickButton(el, "Outline");
+    act(() =>
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Toggle outline render mode"]',
+        )!
+        .click(),
+    );
     fakeCurrentT = 2.5;
     clickButton(el, "Fill");
     expect(outlineJob.starts).toBe(6);
@@ -11269,6 +11319,226 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     act(() => root!.unmount());
     root = null;
     expect(shadingJob.disposals).toBe(4);
+  });
+});
+
+describe("SketchControls — Flowing Contours worker preparation (#403)", () => {
+  function flowButton(el: HTMLElement, label: string): HTMLButtonElement {
+    const candidate = [...el.querySelectorAll("button")].find(
+      (button) => button.textContent === label,
+    );
+    if (candidate === undefined) throw new Error(`no ${label} button`);
+    return candidate;
+  }
+
+  async function resolveFlowingEnvironment(): Promise<void> {
+    const pending = sketchEnvironmentJob.starts.at(-1);
+    if (pending === undefined) throw new Error("no Image Asset resolution");
+    const imageAssetId = String(pending.params.imageAsset);
+    await act(async () => {
+      pending.resolve({
+        imageAssets(requestedId) {
+          return requestedId === imageAssetId
+            ? {
+                width: 2,
+                height: 2,
+                data: new Uint8ClampedArray([
+                  32, 32, 32, 255,
+                  96, 96, 96, 255,
+                  160, 160, 160, 255,
+                  224, 224, 224, 255,
+                ]),
+              }
+            : undefined;
+        },
+      });
+      await Promise.resolve();
+    });
+  }
+
+  async function completeFlowing(index: number, scene: Scene): Promise<void> {
+    const job = flowingContoursJob.starts[index];
+    if (job === undefined) throw new Error(`no Flowing Contours job ${index}`);
+    await act(async () => {
+      job.resolve({
+        status: "success",
+        jobId: index + 1,
+        identity: job.identity,
+        scene,
+        computeTimeMs: 15,
+      });
+      await Promise.resolve();
+    });
+  }
+
+  it("holds initial/stale Scenes, never enters live generation, and gates every export on acknowledged worker geometry", async () => {
+    autoFireOutlineComputed = false;
+    const generate = vi.fn(flowingContours.generate);
+    const el = mount(
+      <SketchControls sketch={{ ...flowingContours, generate }} />,
+    );
+    const canvas = el.querySelector<HTMLElement>(
+      '[data-testid="canvas-seed"]',
+    )!;
+    await resolveFlowingEnvironment();
+
+    expect(flowingContoursJob.starts).toHaveLength(1);
+    expect(canvas.dataset.renderState).toBe("fill-held");
+    expect(canvas.dataset.contentRevision).toBe("");
+    expect(
+      el.querySelector<HTMLElement>(".canvas-region")!.dataset
+        .flowingContoursPreparation,
+    ).toBe("pending");
+    expect(generate).not.toHaveBeenCalled();
+    const png = flowButton(el, "Export PNG");
+    const svg = flowButton(el, "Export SVG");
+    const hidden = flowButton(el, "Export Hidden-line SVG");
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+
+    const first: Scene = {
+      space: { ...lastCompositionFrame! },
+      primitives: [
+        {
+          points: [[10, 10], [30, 40]],
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+      ],
+    };
+    await completeFlowing(0, first);
+    expect(lastRenderScene).toBe(first);
+    expect(canvas.dataset.sourceInputRevision).toBe("0");
+    expect(canvas.dataset.contentRevision).toBe("1");
+    expect(
+      el.querySelector<HTMLElement>(".canvas-region")!.dataset,
+    ).toMatchObject({
+      flowingContoursPreparation: "current",
+      flowingContoursComputeMs: "15",
+    });
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+
+    clickButton(el, "Export SVG");
+    expect(exportSceneCapture.current).toBe(first);
+    clickButton(el, "Export PNG");
+    await flush();
+    clickButton(el, "Export Hidden-line SVG");
+    await flush();
+    expect(outlineJob.exportStarts).toBe(1);
+    expect(outlineJob.lastExportSnapshot?.identity).toMatchObject({
+      sketchId: "flowing-contours",
+      sourceKind: "completed-scene-sketch",
+      sourceScene: first,
+    });
+    expect(generate).not.toHaveBeenCalled();
+
+    downloadBlob.mockClear();
+    outlineJob.exportStarts = 0;
+    exportSceneCapture.current = null;
+    const detail = paramInput(el, "curveDetail");
+    act(() => detail.focus());
+    setInput(detail, "1.5");
+    expect(flowingContoursJob.starts).toHaveLength(1);
+    expect(lastRenderScene).toBe(first);
+    expect(
+      el.querySelector<HTMLElement>(".canvas-region")!.dataset
+        .flowingContoursPreparation,
+    ).toBe("stale");
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    act(() => detail.blur());
+    expect(flowingContoursJob.starts).toHaveLength(2);
+    expect(
+      flowingContoursJob.starts[1]!.identity.params.find(
+        ({ key }) => key === "curveDetail",
+      )?.value,
+    ).toBe(1.5);
+    expect(generate).not.toHaveBeenCalled();
+
+    // Even programmatic same-batch export attempts fail closed while stale.
+    act(() => {
+      for (const candidate of [png, svg, hidden]) {
+        candidate.disabled = false;
+        candidate.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      }
+    });
+    await flush();
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(outlineJob.exportStarts).toBe(0);
+    expect(exportSceneCapture.current).toBeNull();
+
+    const second: Scene = {
+      space: { ...lastCompositionFrame! },
+      primitives: [
+        {
+          points: [[50, 50], [70, 80]],
+          stroke: { color: "black", width: 1 },
+          hiddenLineRole: "source",
+        },
+      ],
+    };
+    await completeFlowing(1, second);
+    expect(lastRenderScene).toBe(second);
+    expect(canvas.dataset.contentRevision).toBe("2");
+    expect([png.disabled, svg.disabled, hidden.disabled]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+
+    act(() =>
+      el
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Toggle outline render mode"]',
+        )!
+        .click(),
+    );
+    expect(outlineJob.starts).toBe(1);
+    expect(outlineJob.lastIdentity).toMatchObject({
+      sketchId: "flowing-contours",
+      sourceKind: "completed-scene-sketch",
+      sourceScene: second,
+    });
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("retains stale geometry across failure and retries the exact identity", async () => {
+    const el = mount(<SketchControls sketch={flowingContours} />);
+    await resolveFlowingEnvironment();
+    const first: Scene = {
+      space: { ...lastCompositionFrame! },
+      primitives: [],
+    };
+    await completeFlowing(0, first);
+
+    const detail = paramInput(el, "curveDetail");
+    act(() => detail.focus());
+    setInput(detail, "1.75");
+    act(() => detail.blur());
+    const failed = flowingContoursJob.starts[1]!;
+    await act(async () => {
+      failed.resolve({
+        status: "failure",
+        jobId: 2,
+        error: "safe worker failure",
+      });
+      await Promise.resolve();
+    });
+    expect(el.textContent).toContain("safe worker failure");
+    expect(lastRenderScene).toBe(first);
+    clickButton(el, "Retry generation");
+    expect(flowingContoursJob.starts).toHaveLength(3);
+    expect(flowingContoursJob.starts[2]!.identity).toEqual(failed.identity);
   });
 });
 

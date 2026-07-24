@@ -130,17 +130,28 @@ import { SimplifyControl } from "./SimplifyControl";
 import { selectCurrentShadingResult } from "./shadingSession";
 import {
   acknowledgedCurrentShading,
-  type ShadingPaintAcknowledgement,
 } from "./shadingExportReadiness";
 import {
   useShadingPreparation,
   type ShadingAuthoredState,
 } from "./useShadingPreparation";
+import { FLOWING_CONTOURS_SKETCH_ID } from "./flowingContoursComputeProtocol";
+import { acknowledgedCurrentFlowingContours } from "./flowingContoursExportReadiness";
+import { selectCurrentFlowingContoursResult } from "./flowingContoursSession";
+import {
+  useFlowingContoursPreparation,
+  type FlowingContoursAuthoredState,
+} from "./useFlowingContoursPreparation";
 import { useSketchEnvironment } from "./useSketchEnvironment";
 import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
 import { useDetailPreparation } from "./useDetailPreparation";
 
 type DiagnosticSelection = null | "tone" | "detail";
+
+interface PreparedScenePaintAcknowledgement {
+  readonly sourceInputRevision: number;
+  readonly contentRevision: number;
+}
 
 type DetailReferenceDerivation =
   | { readonly kind: "ready"; readonly field: DetailField }
@@ -221,8 +232,8 @@ function artworkGenerationParamsEqual(
   );
 }
 
-/** Keep only the normalized controls that affect the active Shading strategy. */
-function shadingArtworkParams(
+/** Keep only the normalized controls that affect prepared artwork. */
+function preparedArtworkParams(
   sketch: Pick<Sketch, "schema" | "generateDetailField">,
   params: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
@@ -232,14 +243,14 @@ function shadingArtworkParams(
   );
 }
 
-function shadingArtworkParamsEqual(
+function preparedArtworkParamsEqual(
   sketch: Pick<Sketch, "schema" | "generateDetailField">,
   left: Readonly<Record<string, unknown>>,
   right: Readonly<Record<string, unknown>>,
 ): boolean {
   return sameParams(
-    shadingArtworkParams(sketch, left),
-    shadingArtworkParams(sketch, right),
+    preparedArtworkParams(sketch, left),
+    preparedArtworkParams(sketch, right),
   );
 }
 
@@ -351,14 +362,14 @@ function classifyOutlineEdit(
   return "none";
 }
 
-/** Whether an edit changes the time-invariant Shading worker identity. */
-function shadingInputsChanged(
+/** Whether an edit changes the time-invariant prepared-artwork identity. */
+function preparedArtworkInputsChanged(
   sketch: Sketch,
   previous: StudioEditState,
   next: StudioEditState,
 ): boolean {
   if (
-    !shadingArtworkParamsEqual(sketch, previous.params, next.params) ||
+    !preparedArtworkParamsEqual(sketch, previous.params, next.params) ||
     previous.seed !== next.seed
   ) {
     return true;
@@ -587,20 +598,56 @@ export function SketchControls({
   ]);
 
   const hasShadingPreparation = sketch.generateShadingArtwork !== undefined;
-  const shadingInputRevisionRef = useRef(0);
+  const hasFlowingContoursPreparation =
+    sketch.id === FLOWING_CONTOURS_SKETCH_ID;
+  const hasScenePreparation =
+    hasShadingPreparation || hasFlowingContoursPreparation;
+  const scenePreparationInputRevisionRef = useRef(0);
   const shadingPreparation = useShadingPreparation({
     sketch,
     enabled: hasShadingPreparation && environmentReady,
     initial: {
-      params: shadingArtworkParams(sketch, history.present.params),
+      params: preparedArtworkParams(sketch, history.present.params),
       seed: history.present.seed,
       compositionFrame,
-      inputRevision: shadingInputRevisionRef.current,
+      inputRevision: scenePreparationInputRevisionRef.current,
     },
   });
   const currentShading = environmentReady
     ? selectCurrentShadingResult(shadingPreparation.session)
     : null;
+  const flowingContoursPreparation = useFlowingContoursPreparation({
+    sketch,
+    enabled: hasFlowingContoursPreparation && environmentReady,
+    initial: {
+      params: preparedArtworkParams(sketch, history.present.params),
+      seed: history.present.seed,
+      compositionFrame,
+      inputRevision: scenePreparationInputRevisionRef.current,
+    },
+  });
+  const currentFlowingContours = environmentReady
+    ? selectCurrentFlowingContoursResult(flowingContoursPreparation.session)
+    : null;
+  const currentPreparedScene = currentShading ?? currentFlowingContours;
+  const displayedPreparedScene =
+    hasShadingPreparation
+      ? shadingPreparation.session.displayed
+      : hasFlowingContoursPreparation
+        ? flowingContoursPreparation.session.displayed
+        : null;
+  const flowingContoursPreparationState = !hasFlowingContoursPreparation
+    ? undefined
+    : flowingContoursPreparation.session.failure !== null
+      ? "failure"
+      : currentFlowingContours !== null
+        ? "current"
+        : flowingContoursPreparation.session.displayed !== null
+          ? "stale"
+          : flowingContoursPreparation.session.active !== null ||
+              flowingContoursPreparation.session.pending !== null
+            ? "pending"
+            : "idle";
   const displayedShadingDiagnostics: DisplayedShadingDiagnostics | null =
     !environmentReady || shadingPreparation.session.displayed === null
       ? null
@@ -634,17 +681,18 @@ export function SketchControls({
             message: shadingPreparation.session.failure,
             onRetry: shadingPreparation.retry,
           };
-  const [acknowledgedShading, setAcknowledgedShading] =
-    useState<ShadingPaintAcknowledgement | null>(null);
-  const acknowledgedShadingRef = useRef(acknowledgedShading);
-  acknowledgedShadingRef.current = acknowledgedShading;
-  const shadingPaintIsCurrent =
+  const [acknowledgedPreparedScene, setAcknowledgedPreparedScene] =
+    useState<PreparedScenePaintAcknowledgement | null>(null);
+  const acknowledgedPreparedSceneRef = useRef(acknowledgedPreparedScene);
+  acknowledgedPreparedSceneRef.current = acknowledgedPreparedScene;
+  const preparedScenePaintIsCurrent =
     environmentReady &&
-    currentShading !== null &&
-    acknowledgedShading?.sourceInputRevision ===
-      currentShading.sourceInputRevision &&
-    acknowledgedShading.contentRevision === currentShading.contentRevision;
-  const emptyShadingScene = useMemo<Scene>(
+    currentPreparedScene !== null &&
+    acknowledgedPreparedScene?.sourceInputRevision ===
+      currentPreparedScene.sourceInputRevision &&
+    acknowledgedPreparedScene.contentRevision ===
+      currentPreparedScene.contentRevision;
+  const emptyPreparedScene = useMemo<Scene>(
     () => ({ space: compositionFrame, primitives: [] }),
     [compositionFrame],
   );
@@ -652,11 +700,51 @@ export function SketchControls({
   const authoredShadingState = (
     edit: StudioEditState = historyRef.current.present,
   ): ShadingAuthoredState => ({
-    params: shadingArtworkParams(sketch, edit.params),
+    params: preparedArtworkParams(sketch, edit.params),
     seed: edit.seed,
     compositionFrame: resolveStudioCompositionFrame(edit),
-    inputRevision: shadingInputRevisionRef.current,
+    inputRevision: scenePreparationInputRevisionRef.current,
   });
+  const authoredFlowingContoursState = (
+    edit: StudioEditState = historyRef.current.present,
+  ): FlowingContoursAuthoredState => authoredShadingState(edit);
+
+  const beginScenePreparationTransaction = (): void => {
+    if (hasShadingPreparation) shadingPreparation.beginTransaction();
+    if (hasFlowingContoursPreparation) {
+      flowingContoursPreparation.beginTransaction();
+    }
+  };
+  const previewScenePreparation = (edit: StudioEditState): void => {
+    if (hasShadingPreparation) {
+      shadingPreparation.previewAuthoredState(authoredShadingState(edit));
+    }
+    if (hasFlowingContoursPreparation) {
+      flowingContoursPreparation.previewAuthoredState(
+        authoredFlowingContoursState(edit),
+      );
+    }
+  };
+  const requestAtomicScenePreparation = (edit: StudioEditState): void => {
+    if (hasShadingPreparation) {
+      shadingPreparation.requestAtomic(authoredShadingState(edit));
+    }
+    if (hasFlowingContoursPreparation) {
+      flowingContoursPreparation.requestAtomic(
+        authoredFlowingContoursState(edit),
+      );
+    }
+  };
+  const settleScenePreparation = (): void => {
+    if (hasShadingPreparation) {
+      shadingPreparation.settleTransaction(authoredShadingState());
+    }
+    if (hasFlowingContoursPreparation) {
+      flowingContoursPreparation.settleTransaction(
+        authoredFlowingContoursState(),
+      );
+    }
+  };
 
   // Sample-source derivation intentionally reads the live transaction preview
   // params and Composition Frame directly. Seed, timeline, profile magnitude,
@@ -872,12 +960,12 @@ export function SketchControls({
     if (!environmentReadyNow()) return;
     dispatchOutline({
       type: "request-outline",
-      launch: !hasShadingPreparation || shadingPaintIsCurrent,
-      ...(shadingPaintIsCurrent && currentShading !== null
+      launch: !hasScenePreparation || preparedScenePaintIsCurrent,
+      ...(preparedScenePaintIsCurrent && currentPreparedScene !== null
         ? {
             provenance: {
-              sourceInputRevision: currentShading.sourceInputRevision,
-              contentRevision: currentShading.contentRevision,
+              sourceInputRevision: currentPreparedScene.sourceInputRevision,
+              contentRevision: currentPreparedScene.contentRevision,
             },
           }
         : {}),
@@ -887,38 +975,39 @@ export function SketchControls({
   const updateHistory = (
     transition: (current: EditHistory) => EditHistory,
     launchOutline = true,
-    shadingAction: "preview" | "atomic" | null = null,
+    scenePreparationAction: "preview" | "atomic" | null = null,
   ): void => {
     const current = historyRef.current;
     const next = transition(current);
     if (next === current) return;
     historyRef.current = next;
     cancelUnavailableEnvironmentWork();
-    const shadingChanged = shadingInputsChanged(
+    const preparedArtworkChanged = preparedArtworkInputsChanged(
       sketch,
       current.present,
       next.present,
     );
-    if (hasShadingPreparation && shadingChanged) {
-      shadingInputRevisionRef.current += 1;
+    if (hasScenePreparation && preparedArtworkChanged) {
+      scenePreparationInputRevisionRef.current += 1;
     }
     if (
-      hasShadingPreparation &&
-      shadingAction === "preview" &&
-      shadingChanged
+      hasScenePreparation &&
+      scenePreparationAction === "preview" &&
+      preparedArtworkChanged
     ) {
-      if (!shadingPreparation.getSessionSnapshot().transactionOpen) {
-        shadingPreparation.beginTransaction();
+      const transactionOpen = hasShadingPreparation
+        ? shadingPreparation.getSessionSnapshot().transactionOpen
+        : flowingContoursPreparation.getSessionSnapshot().transactionOpen;
+      if (!transactionOpen) {
+        beginScenePreparationTransaction();
       }
-      shadingPreparation.previewAuthoredState(
-        authoredShadingState(next.present),
-      );
+      previewScenePreparation(next.present);
     } else if (
-      hasShadingPreparation &&
-      shadingAction === "atomic" &&
-      shadingChanged
+      hasScenePreparation &&
+      scenePreparationAction === "atomic" &&
+      preparedArtworkChanged
     ) {
-      shadingPreparation.requestAtomic(authoredShadingState(next.present));
+      requestAtomicScenePreparation(next.present);
     }
     const outlineChange = classifyOutlineEdit(
       sketch,
@@ -935,21 +1024,25 @@ export function SketchControls({
       ) {
         dispatchOutline({ type: "transaction-began" });
       }
-      const retainsPaintedShading =
-        hasShadingPreparation && !shadingChanged && shadingPaintIsCurrent;
+      const retainsPaintedPreparedScene =
+        hasScenePreparation &&
+        !preparedArtworkChanged &&
+        preparedScenePaintIsCurrent;
       dispatchOutline({
         type: "inputs-changed",
         launch:
-          environmentReadyNow() && launchOutline && !hasShadingPreparation,
-        ...(retainsPaintedShading && currentShading !== null
+          environmentReadyNow() && launchOutline && !hasScenePreparation,
+        ...(retainsPaintedPreparedScene && currentPreparedScene !== null
           ? {
               provenance: {
-                sourceInputRevision: currentShading.sourceInputRevision,
-                contentRevision: currentShading.contentRevision,
+                sourceInputRevision:
+                  currentPreparedScene.sourceInputRevision,
+                contentRevision: currentPreparedScene.contentRevision,
               },
             }
           : {}),
-        waitForSource: hasShadingPreparation && !retainsPaintedShading,
+        waitForSource:
+          hasScenePreparation && !retainsPaintedPreparedScene,
       });
     }
     setHistory(next);
@@ -1137,7 +1230,7 @@ export function SketchControls({
     cancelOutlineCoordinator();
     dispatchOutline({ type: "transaction-began" });
     updateHistory(beginEditTransaction, false);
-    if (hasShadingPreparation) shadingPreparation.beginTransaction();
+    if (hasScenePreparation) beginScenePreparationTransaction();
   };
   const beginParamTransaction = (key: string): void => {
     if (!isDetailReferenceOnlyParam(sketch, key)) {
@@ -1158,12 +1251,14 @@ export function SketchControls({
     transition: (current: EditHistory) => EditHistory,
   ): void => {
     const outlineTransactionOpen = outlineSessionRef.current.transactionOpen;
-    const shadingTransactionOpen =
-      hasShadingPreparation &&
-      shadingPreparation.getSessionSnapshot().transactionOpen;
+    const scenePreparationTransactionOpen = hasShadingPreparation
+      ? shadingPreparation.getSessionSnapshot().transactionOpen
+      : hasFlowingContoursPreparation
+        ? flowingContoursPreparation.getSessionSnapshot().transactionOpen
+        : false;
     updateHistory(transition, false);
-    if (shadingTransactionOpen) {
-      shadingPreparation.settleTransaction(authoredShadingState());
+    if (scenePreparationTransactionOpen) {
+      settleScenePreparation();
     }
     // Settlement belongs to the session reducer: outside export it resamples the
     // final Fill exactly once; during export it retains only a deferred request,
@@ -1171,7 +1266,7 @@ export function SketchControls({
     if (outlineTransactionOpen) {
       dispatchOutline({
         type: "transaction-settled",
-        launch: environmentReadyNow() && !hasShadingPreparation,
+        launch: environmentReadyNow() && !hasScenePreparation,
       });
     }
   };
@@ -1325,7 +1420,7 @@ export function SketchControls({
       return;
     }
 
-    // Detail owns no Shading geometry. Retire active ownership synchronously
+    // Detail owns no prepared artwork. Retire active ownership synchronously
     // before the diagnostic becomes observable or analysis can be requested.
     if (hasShadingPreparation) shadingPreparation.suspend();
     cancelOutlineCoordinator();
@@ -1428,23 +1523,28 @@ export function SketchControls({
     snapshot: DisplayedSceneSnapshot,
   ): void => {
     if (!environmentReadyNow()) return;
-    const latestShading = selectCurrentShadingResult(
-      shadingPreparation.getSessionSnapshot(),
-    );
+    const latestPreparedScene = hasShadingPreparation
+      ? selectCurrentShadingResult(shadingPreparation.getSessionSnapshot())
+      : hasFlowingContoursPreparation
+        ? selectCurrentFlowingContoursResult(
+            flowingContoursPreparation.getSessionSnapshot(),
+          )
+        : null;
     if (
-      latestShading === null ||
+      latestPreparedScene === null ||
       snapshot.renderMode !== "fill" ||
-      snapshot.sourceInputRevision !== latestShading.sourceInputRevision ||
-      snapshot.contentRevision !== latestShading.contentRevision
+      snapshot.sourceInputRevision !==
+        latestPreparedScene.sourceInputRevision ||
+      snapshot.contentRevision !== latestPreparedScene.contentRevision
     ) {
       return;
     }
     const provenance = {
-      sourceInputRevision: latestShading.sourceInputRevision,
-      contentRevision: latestShading.contentRevision,
+      sourceInputRevision: latestPreparedScene.sourceInputRevision,
+      contentRevision: latestPreparedScene.contentRevision,
     };
-    acknowledgedShadingRef.current = provenance;
-    setAcknowledgedShading((current) =>
+    acknowledgedPreparedSceneRef.current = provenance;
+    setAcknowledgedPreparedScene((current) =>
       current?.sourceInputRevision === provenance.sourceInputRevision &&
       current.contentRevision === provenance.contentRevision
         ? current
@@ -1500,20 +1600,17 @@ export function SketchControls({
     if (toneSource !== undefined) {
       return { kind: "tone-reference", source: toneSource };
     }
-    if (
-      hasShadingPreparation &&
-      outlineSession.phase.kind === "fill-live"
-    ) {
-      return shadingPreparation.session.displayed === null
-        ? { kind: "fill-held", scene: emptyShadingScene, t: 0 }
+    if (hasScenePreparation && outlineSession.phase.kind === "fill-live") {
+      return displayedPreparedScene === null
+        ? { kind: "fill-held", scene: emptyPreparedScene, t: 0 }
         : {
             kind: "fill-held",
-            scene: shadingPreparation.session.displayed.scene,
+            scene: displayedPreparedScene.scene,
             t: 0,
             sourceInputRevision:
-              shadingPreparation.session.displayed.sourceInputRevision,
+              displayedPreparedScene.sourceInputRevision,
             contentRevision:
-              shadingPreparation.session.displayed.contentRevision,
+              displayedPreparedScene.contentRevision,
           };
     }
     if (outlineSession.phase.kind === "fill-live") {
@@ -1597,25 +1694,31 @@ export function SketchControls({
     );
   };
 
-  /** Re-prove Shading session and canvas provenance at an export side effect. */
-  const captureCurrentShadingExport = () => {
-    if (!hasShadingPreparation) return null;
+  /** Re-prove prepared-Scene session and canvas provenance at export time. */
+  const captureCurrentPreparedSceneExport = () => {
+    if (!hasScenePreparation) return null;
     const displayed = canvasHandle.current?.captureDisplayedFrame() ?? null;
-    const result = acknowledgedCurrentShading(
-      shadingPreparation.getSessionSnapshot(),
-      acknowledgedShadingRef.current,
-      displayed,
-    );
+    const result = hasShadingPreparation
+      ? acknowledgedCurrentShading(
+          shadingPreparation.getSessionSnapshot(),
+          acknowledgedPreparedSceneRef.current,
+          displayed,
+        )
+      : acknowledgedCurrentFlowingContours(
+          flowingContoursPreparation.getSessionSnapshot(),
+          acknowledgedPreparedSceneRef.current,
+          displayed,
+        );
     return result === null || displayed === null ? null : { result, displayed };
   };
 
-  const sameShadingExportRevision = (
-    expected: ReturnType<typeof captureCurrentShadingExport>,
+  const samePreparedSceneExportRevision = (
+    expected: ReturnType<typeof captureCurrentPreparedSceneExport>,
   ): boolean => {
     if (!environmentReadyNow()) return false;
-    if (!hasShadingPreparation) return true;
+    if (!hasScenePreparation) return true;
     if (expected === null) return false;
-    const current = captureCurrentShadingExport();
+    const current = captureCurrentPreparedSceneExport();
     return (
       current !== null &&
       current.result.sourceInputRevision ===
@@ -1643,8 +1746,8 @@ export function SketchControls({
     const handle = canvasHandle.current;
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
-    const shadingExport = captureCurrentShadingExport();
-    if (hasShadingPreparation && shadingExport === null) return;
+    const preparedSceneExport = captureCurrentPreparedSceneExport();
+    if (hasScenePreparation && preparedSceneExport === null) return;
     const edit = historyRef.current.present;
     // Time-gate the `-t{t}` filename segment on `sketch.time`: a time-driven
     // Sketch carries its captured moment, a static one omits `t` entirely.
@@ -1662,10 +1765,10 @@ export function SketchControls({
       framing: persistedFramingFor(edit),
     });
     // Re-read the synchronous session and the canvas at the pixel side effect.
-    if (!sameShadingExportRevision(shadingExport)) return;
+    if (!samePreparedSceneExportRevision(preparedSceneExport)) return;
     canvas.toBlob((blob) => {
       if (blob === null) return;
-      if (!sameShadingExportRevision(shadingExport)) return;
+      if (!samePreparedSceneExportRevision(preparedSceneExport)) return;
       const filename = exportFilename(
         { sketchId: sketch.id, seed: edit.seed, t },
         "png",
@@ -1674,7 +1777,7 @@ export function SketchControls({
       // the downloaded file traces back to this exact frame. Byte work is core's
       // (`insertPngMetadata`); the Studio only does the Blob ⇄ ArrayBuffer dance.
       void blob.arrayBuffer().then((buffer) => {
-        if (!sameShadingExportRevision(shadingExport)) return;
+        if (!samePreparedSceneExportRevision(preparedSceneExport)) return;
         const withMeta = insertPngMetadata(new Uint8Array(buffer), metadata);
         // `withMeta` spans its whole backing buffer (core's `concat` allocates a
         // fresh, offset-0 array), so `.buffer` is exactly these bytes.
@@ -1692,7 +1795,7 @@ export function SketchControls({
   // geometry with core's `renderToSVG`. Unframed ordinary Sketches retain their
   // cold `generate` path exactly. A committed Page Frame instead transforms the
   // exact retained full-Composition Fill, without preparation, sampling, or
-  // generation. Shading-capable Sketches use that same final framing pass on
+  // generation. Scene-prepared Sketches use that same final framing pass on
   // their acknowledged worker Scene and never regenerate expensive artwork on
   // the main thread.
   //
@@ -1707,16 +1810,20 @@ export function SketchControls({
     ) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
-    const shadingExport = captureCurrentShadingExport();
-    if (hasShadingPreparation && shadingExport === null) return;
+    const preparedSceneExport = captureCurrentPreparedSceneExport();
+    if (hasScenePreparation && preparedSceneExport === null) return;
     const edit = historyRef.current.present;
     const pageFrame =
       edit.framing.kind === "framed" ? edit.framing.pageFrame : null;
     const framedExport = pageFrame !== null;
-    const retainedFill = framedExport && shadingExport === null
+    const retainedFill = framedExport && preparedSceneExport === null
       ? handle.captureDisplayedFillFrame()
       : null;
-    if (framedExport && shadingExport === null && retainedFill === null) {
+    if (
+      framedExport &&
+      preparedSceneExport === null &&
+      retainedFill === null
+    ) {
       return;
     }
     const sampledT = retainedFill?.t ?? handle.getCurrentT();
@@ -1726,7 +1833,9 @@ export function SketchControls({
     // ignore it); the gated `t` above — `undefined` for a static Sketch — is the
     // filename's time-segment source, so both reflect the same displayed moment.
     const sourceScene =
-      shadingExport?.result.scene ?? retainedFill?.sourceScene ?? null;
+      preparedSceneExport?.result.scene ??
+      retainedFill?.sourceScene ??
+      null;
     const scene =
       pageFrame !== null && sourceScene !== null
         ? frameScene(sourceScene, pageFrame)
@@ -1744,7 +1853,7 @@ export function SketchControls({
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
     const exportScene =
-      shadingExport === null && !framedExport
+      preparedSceneExport === null && !framedExport
         ? clipSceneToBounds(scene)
         : scene;
     // Embed the same whole authored-state snapshot as a <metadata> element.
@@ -1759,10 +1868,10 @@ export function SketchControls({
       profile: edit.profile,
       framing: persistedFramingFor(edit),
     });
-    if (!sameShadingExportRevision(shadingExport)) return;
+    if (!samePreparedSceneExportRevision(preparedSceneExport)) return;
     const svg = renderToSVG(exportScene, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
-    if (!sameShadingExportRevision(shadingExport)) return;
+    if (!samePreparedSceneExportRevision(preparedSceneExport)) return;
     downloadBlob(
       blob,
       exportFilename(
@@ -1791,9 +1900,9 @@ export function SketchControls({
     if (handle == null) return;
     const capturedDisplayed = handle.captureDisplayedFrame();
     if (capturedDisplayed === null) return;
-    const shadingExport = captureCurrentShadingExport();
-    if (hasShadingPreparation && shadingExport === null) return;
-    const displayed = shadingExport?.displayed ?? capturedDisplayed;
+    const preparedSceneExport = captureCurrentPreparedSceneExport();
+    if (hasScenePreparation && preparedSceneExport === null) return;
+    const displayed = preparedSceneExport?.displayed ?? capturedDisplayed;
 
     const edit = historyRef.current.present;
     const cachedOutline = outlineSessionRef.current.cache;
@@ -1806,7 +1915,7 @@ export function SketchControls({
         ? mutableScene(cachedOutline.identity.sourceScene)
         : undefined;
     const sourceScene =
-      shadingExport?.result.scene ??
+      preparedSceneExport?.result.scene ??
       (displayed.renderMode !== "outline"
         ? displayed.sourceScene
         : cachedSourceScene ??
@@ -1861,7 +1970,7 @@ export function SketchControls({
           }
         : {}),
     });
-    if (!sameShadingExportRevision(shadingExport)) return;
+    if (!samePreparedSceneExportRevision(preparedSceneExport)) return;
     const requested = dispatchOutline({
       type: "request-export",
       snapshot,
@@ -1923,7 +2032,7 @@ export function SketchControls({
             token: active.token,
             completedOutline: result.completedOutline,
           });
-          if (!sameShadingExportRevision(shadingExport)) return;
+          if (!samePreparedSceneExportRevision(preparedSceneExport)) return;
           downloadBlob(
             new Blob([result.svg], { type: "image/svg+xml" }),
             result.filename,
@@ -1980,7 +2089,19 @@ export function SketchControls({
   // slot renders at the sidebar top.
   return (
     <div className="studio-shell">
-      <section className="canvas-region" aria-label="Canvas">
+      <section
+        className="canvas-region"
+        aria-label="Canvas"
+        {...(flowingContoursPreparationState === undefined
+          ? {}
+          : {
+              "data-flowing-contours-preparation":
+                flowingContoursPreparationState,
+              "data-flowing-contours-compute-ms":
+                flowingContoursPreparation.session.displayed?.computeTimeMs ??
+                "",
+            })}
+      >
         {/*
          * The collapse toggle lives in the canvas region — NOT inside the
          * collapsing sidebar — so it stays visible (and the sidebar re-openable)
@@ -2167,6 +2288,23 @@ export function SketchControls({
             displayed={displayedShadingDiagnostics}
             preparation={shadingPreparationDiagnostics}
           />
+        ) : null}
+        {hasFlowingContoursPreparation &&
+        flowingContoursPreparation.session.failure !== null ? (
+          <div className="space-y-2 text-sm">
+            <p role="alert" className="text-destructive">
+              <strong>Flowing Contours failed</strong>
+              {`: ${flowingContoursPreparation.session.failure}`}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={flowingContoursPreparation.retry}
+            >
+              Retry generation
+            </Button>
+          </div>
         ) : null}
         {/*
          * Render-mode toggle (#219) — swaps the whole preview between the live
@@ -2367,7 +2505,7 @@ export function SketchControls({
         {/*
          * Export controls — the shared home for every export path (PNG snapshots
          * the live canvas frame; SVG serializes ordinary cold geometry or the
-         * acknowledged Shading Scene; Hidden-line SVG reuses an exact displayed
+         * acknowledged prepared Scene; Hidden-line SVG reuses an exact displayed
          * Scene when available, then occlusion-clips as needed for plotting). The
          * buttons split the row
          * (`flex-1`) and wrap as the group grows.
@@ -2382,7 +2520,7 @@ export function SketchControls({
             disabled={
               diagnosticReferenceActive ||
               !environmentReady ||
-              (!shadingPaintIsCurrent && hasShadingPreparation)
+              (!preparedScenePaintIsCurrent && hasScenePreparation)
             }
           >
             Export PNG
@@ -2396,7 +2534,7 @@ export function SketchControls({
             disabled={
               diagnosticReferenceActive ||
               !environmentReady ||
-              (!shadingPaintIsCurrent && hasShadingPreparation)
+              (!preparedScenePaintIsCurrent && hasScenePreparation)
             }
           >
             Export SVG
@@ -2413,7 +2551,7 @@ export function SketchControls({
                   diagnosticReferenceActive ||
                   !environmentReady ||
                   hiddenLineBusy ||
-                  (!shadingPaintIsCurrent && hasShadingPreparation)
+                  (!preparedScenePaintIsCurrent && hasScenePreparation)
                 }
               >
                 Export Hidden-line SVG

@@ -560,7 +560,7 @@ describe("App — Photo Scribble integration (#333)", () => {
 });
 
 describe("App — Flowing Contours integration (#403 FC21)", () => {
-  it("opens as the newest Sketch with its managed source, exact seven controls, and an ordinary live preview", async () => {
+  it("opens as the newest Sketch with its managed source, exact seven controls, and a worker-held preview", async () => {
     const generate = vi.spyOn(flowingContours, "generate");
     mountApp();
     await act(async () => Promise.resolve());
@@ -607,8 +607,8 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
       document
         .querySelector('[data-testid="canvas"]')
         ?.getAttribute("data-render-state"),
-    ).toBe("fill-live");
-    expect(generate).toHaveBeenCalled();
+    ).toBe("fill-held");
+    expect(generate).not.toHaveBeenCalled();
 
     setNumberInput(
       document.querySelector<HTMLInputElement>("#control-continuity")!,
