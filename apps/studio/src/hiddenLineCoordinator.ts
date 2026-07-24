@@ -99,6 +99,7 @@ interface ActiveJob {
     | undefined;
   readonly eta: RollingEtaEstimator;
   boundary: WorkerBoundarySession<HiddenLineJobResult> | null;
+  cancelPending: boolean;
   lastProgress: HiddenLineProgress | null;
   finalizing: boolean;
 }
@@ -205,7 +206,12 @@ export class HiddenLineCoordinator {
   cancel(): boolean {
     const active = this.currentActive();
     if (active === null) return false;
-    const cancelled = active.boundary?.cancel() ?? false;
+    if (active.boundary === null) {
+      active.cancelPending = true;
+      this.release(active);
+      return true;
+    }
+    const cancelled = active.boundary.cancel();
     if (cancelled) this.release(active);
     return cancelled;
   }
@@ -243,6 +249,7 @@ export class HiddenLineCoordinator {
       observeProgress,
       eta: createRollingEtaEstimator(),
       boundary: null,
+      cancelPending: false,
       lastProgress: null,
       finalizing: false,
     };
@@ -259,10 +266,14 @@ export class HiddenLineCoordinator {
       },
     });
     active.boundary = boundary;
+    if (active.cancelPending) boundary.cancel();
     if (!boundary.active) this.release(active);
 
     return boundary.outcome.then((outcome) => {
       this.release(active);
+      if (active.cancelPending) {
+        return { status: "cancelled", jobId };
+      }
       if (outcome.status === "completed") return outcome.value;
       if (outcome.status === "cancelled") {
         return { status: "cancelled", jobId };
