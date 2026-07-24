@@ -1,0 +1,39 @@
+{
+  "version": 3,
+  "sketch": "watercolor-forms",
+  "name": "flower",
+  "seed": 6599547589177026,
+  "params": {
+    "imageAsset": "img-0670-199fe1e787f1",
+    "gamma": 0.55,
+    "contrast": 0.52,
+    "pivot": 0.65,
+    "formDetail": 0.69,
+    "colorSensitivity": 0.53,
+    "boundaryStrength": 0.07,
+    "boundarySmoothing": 1
+  },
+  "locks": [],
+  "profile": {
+    "width": 152.39999999999998,
+    "height": 228.6,
+    "insets": {
+      "top": 10,
+      "right": 10,
+      "bottom": 10,
+      "left": 10
+    },
+    "includeFrame": true,
+    "toolWidthMillimeters": 0.3
+  },
+  "framing": {
+    "pageFrame": {
+      "x": 58.62621698928206,
+      "y": 6.068356991950508,
+      "width": 727.7524401549905,
+      "height": 1146.5948566188142
+    },
+    "generationAspect": 0.75,
+    "aspectLocked": true
+  }
+}
