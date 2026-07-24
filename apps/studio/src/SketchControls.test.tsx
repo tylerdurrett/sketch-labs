@@ -7986,6 +7986,48 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     });
   }
 
+  it("keeps Watercolor-only edits out of Ink identity and source revision", async () => {
+    const generateToneSource = vi.fn(photoScribble.generateToneSource!);
+    const el = mount(
+      <SketchControls sketch={managedPhotoScribble(generateToneSource)} />,
+    );
+    const canvas = el.querySelector<HTMLElement>(
+      '[data-testid="canvas-seed"]',
+    )!;
+    await resolveManagedEnvironment();
+    await completeShading(0, preparedScene(40));
+
+    expect(shadingJob.starts).toHaveLength(1);
+    expect(
+      shadingJob.starts[0]!.identity.params.some(({ key }) =>
+        key.startsWith("watercolor"),
+      ),
+    ).toBe(false);
+    expect(canvas.dataset.sourceInputRevision).toBe("0");
+
+    const watercolor = paramInput(el, "watercolorGamma");
+    act(() => watercolor.focus());
+    setInput(
+      watercolor,
+      String(Number(watercolor.value) + 0.25),
+    );
+    act(() => watercolor.blur());
+
+    expect(shadingJob.starts).toHaveLength(1);
+    expect(canvas.dataset.sourceInputRevision).toBe("0");
+
+    const ink = paramInput(el, "pathDensity");
+    act(() => ink.focus());
+    setInput(ink, String(Number(ink.value) + 0.25));
+    act(() => ink.blur());
+
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(shadingJob.starts[1]!.identity.params).toContainEqual({
+      key: "pathDensity",
+      value: Number(ink.value),
+    });
+  });
+
   it("threads the exact ready environment through ordinary Fill, SVG, and Outline", async () => {
     const schema = {
       image: { kind: "image-asset", default: assetA },

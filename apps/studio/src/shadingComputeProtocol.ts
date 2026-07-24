@@ -8,7 +8,13 @@ import {
   type ShadingDiagnostics,
   type ShadingProgress,
   type Seed,
+  type Sketch,
 } from "@harness/core";
+
+import {
+  plotStageSchemaView,
+  primaryPlotStage,
+} from "./plotSequenceProjection";
 
 /** A schema-backed authored value that can cross the Worker boundary. */
 export type ShadingParamValue = string | number;
@@ -69,6 +75,39 @@ export interface CreateShadingComputeIdentityInput {
   readonly params: Params;
   readonly seed: Seed;
   readonly compositionFrame: CoordinateSpace;
+}
+
+export type ShadingSchemaSketch = Pick<
+  Sketch,
+  "schema" | "plotSequence"
+>;
+
+/**
+ * Resolve the owning-Sketch schema view that affects Primary Shading.
+ *
+ * Sequence Sketches use the unique Primary Stage's shared-plus-owned bindings
+ * in exact authored order. Ordinary Sketches retain their complete schema.
+ */
+export function shadingIdentitySchema(
+  sketch: ShadingSchemaSketch,
+): Readonly<ParamSchema> {
+  if (sketch.plotSequence === undefined) {
+    return plotStageSchemaView(sketch.schema, undefined);
+  }
+  const primary = primaryPlotStage(sketch.plotSequence);
+  return plotStageSchemaView(
+    sketch.schema,
+    sketch.plotSequence,
+    primary.id,
+  );
+}
+
+/** Project active Primary Shading params without sibling-Stage values. */
+export function shadingIdentityParams(
+  sketch: ShadingSchemaSketch,
+  params: Params,
+): Readonly<Params> {
+  return activeParams(shadingIdentitySchema(sketch), params);
 }
 
 const hasOwn = (value: object, key: PropertyKey): boolean =>

@@ -9,7 +9,6 @@ import {
 } from "react";
 
 import {
-  activeParams,
   applyPreset,
   buildReproMetadata,
   clipSceneToBounds,
@@ -132,6 +131,7 @@ import {
   acknowledgedCurrentShading,
   type ShadingPaintAcknowledgement,
 } from "./shadingExportReadiness";
+import { shadingIdentityParams } from "./shadingComputeProtocol";
 import {
   useShadingPreparation,
   type ShadingAuthoredState,
@@ -221,19 +221,25 @@ function artworkGenerationParamsEqual(
   );
 }
 
-/** Keep only the normalized controls that affect the active Shading strategy. */
+/** Keep only normalized controls that affect the Primary Shading Stage. */
 function shadingArtworkParams(
-  sketch: Pick<Sketch, "schema" | "generateDetailField">,
+  sketch: Pick<
+    Sketch,
+    "schema" | "plotSequence" | "generateDetailField"
+  >,
   params: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
-  return activeParams(
-    sketch.schema,
+  return shadingIdentityParams(
+    sketch,
     artworkGenerationParams(sketch, params),
   );
 }
 
 function shadingArtworkParamsEqual(
-  sketch: Pick<Sketch, "schema" | "generateDetailField">,
+  sketch: Pick<
+    Sketch,
+    "schema" | "plotSequence" | "generateDetailField"
+  >,
   left: Readonly<Record<string, unknown>>,
   right: Readonly<Record<string, unknown>>,
 ): boolean {

@@ -8,6 +8,7 @@ import {
   toneCalibration,
   type DecodedPixels,
   type ParamSchema,
+  type PlotSequenceDeclaration,
   type Scene,
   type ShadingArtwork,
   type ShadingProgress,
@@ -16,6 +17,7 @@ import {
 
 import {
   createShadingComputeIdentity,
+  shadingIdentitySchema,
   type ShadingComputeRequest,
   type ShadingWorkerMessage,
 } from "./shadingComputeProtocol";
@@ -53,17 +55,27 @@ function request(
     sketchId: string;
     schema: ParamSchema;
     params: Record<string, string | number>;
+    plotSequence: PlotSequenceDeclaration;
     frame: { width: number; height: number };
     seed: string | number;
   }> = {},
 ): ShadingComputeRequest {
   const sketchId = overrides.sketchId ?? toneCalibration.id;
+  const schema = overrides.schema ?? toneCalibration.schema;
+  const plotSequence =
+    overrides.plotSequence ??
+    (sketchId === photoScribble.id
+      ? photoScribble.plotSequence
+      : undefined);
   return {
     type: "compute",
     jobId: 7,
     identity: createShadingComputeIdentity({
       sketchId,
-      schema: overrides.schema ?? toneCalibration.schema,
+      schema: shadingIdentitySchema({
+        schema,
+        ...(plotSequence === undefined ? {} : { plotSequence }),
+      }),
       params: overrides.params ?? defaultParams(toneCalibration.schema),
       seed: overrides.seed ?? "seed",
       compositionFrame: overrides.frame ?? scene.space,
@@ -477,6 +489,55 @@ describe("Shading worker runtime", () => {
     });
   });
 
+  it.each([
+    [
+      "a sibling Watercolor parameter",
+      (params: any[]) =>
+        params.push({ key: "watercolorGamma", value: 1 }),
+    ],
+    [
+      "non-authored Primary order",
+      (params: any[]) => params.reverse(),
+    ],
+  ])(
+    "rejects Sequence Shading identity with %s before environment resolution",
+    async (_case, mutate) => {
+      const input = structuredClone(
+        request({
+          sketchId: photoScribble.id,
+          schema: photoScribble.schema,
+          params: defaultParams(photoScribble.schema) as Record<
+            string,
+            string | number
+          >,
+        }),
+      ) as Record<string, any>;
+      mutate(input.identity.params);
+      const execute = vi.fn(
+        (..._args: Parameters<ShadingArtworkExecutor>) => artwork,
+      );
+      const resolveEnvironment = vi.fn(async (): Promise<SketchEnvironment> => ({
+        imageAssets: () => undefined,
+      }));
+
+      expect(
+        await handleShadingWorkerMessage(
+          input,
+          execute,
+          undefined,
+          () => 0,
+          resolveEnvironment,
+        ),
+      ).toMatchObject({
+        type: "failure",
+        error:
+          "Shading request parameters do not match photo-scribble schema",
+      });
+      expect(resolveEnvironment).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+
   it(
     "validates first, resolves opaque IDs per job, and enters compute with only worker-owned pixels",
     async () => {
@@ -534,7 +595,7 @@ describe("Shading worker runtime", () => {
       await Promise.resolve();
 
       expect(resolveEnvironment).toHaveBeenCalledWith(
-        photoScribble.schema,
+        shadingIdentitySchema(photoScribble),
         expect.objectContaining({
           imageAsset: PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
         }),

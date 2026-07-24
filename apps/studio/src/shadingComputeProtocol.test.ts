@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { ParamSchema, Scene } from "@harness/core";
+import {
+  defaultParams,
+  photoScribble,
+  type ParamSchema,
+  type Scene,
+} from "@harness/core";
 
 import {
   copyShadingComputeIdentity,
@@ -12,6 +17,8 @@ import {
   isShadingComputeResponse,
   isShadingComputeSuccess,
   isShadingWorkerMessage,
+  shadingIdentityParams,
+  shadingIdentitySchema,
   shadingComputeIdentitiesEqual,
   type ShadingComputeIdentity,
 } from "./shadingComputeProtocol";
@@ -156,6 +163,86 @@ function changed(
 }
 
 describe("Shading compute identity", () => {
+  it("isolates Sequence Shading to the unique Primary shared-plus-owned schema", () => {
+    const params = defaultParams(photoScribble.schema);
+    const schemaView = shadingIdentitySchema(photoScribble);
+    const current = createShadingComputeIdentity({
+      sketchId: photoScribble.id,
+      schema: schemaView,
+      params,
+      seed: "seed",
+      compositionFrame: { width: 120, height: 90 },
+    });
+    const watercolorEdit = createShadingComputeIdentity({
+      sketchId: photoScribble.id,
+      schema: schemaView,
+      params: {
+        ...params,
+        watercolorGamma:
+          (params.watercolorGamma as number) + 0.25,
+      },
+      seed: "seed",
+      compositionFrame: { width: 120, height: 90 },
+    });
+    const primaryEdit = createShadingComputeIdentity({
+      sketchId: photoScribble.id,
+      schema: schemaView,
+      params: {
+        ...params,
+        pathDensity: (params.pathDensity as number) + 0.25,
+      },
+      seed: "seed",
+      compositionFrame: { width: 120, height: 90 },
+    });
+
+    expect(Object.keys(schemaView)).toEqual([
+      "imageAsset",
+      "toneContrast",
+      "tonePivot",
+      "toneGamma",
+      "detailSensitivity",
+      "detailInfluence",
+      "pathDensity",
+      "scribbleScale",
+      "momentum",
+      "chaos",
+      "toneFidelity",
+      "stopPoint",
+    ]);
+    expect(current.params.map(({ key }) => key)).toEqual(
+      Object.keys(schemaView),
+    );
+    expect(
+      shadingIdentityParams(photoScribble, {
+        ...params,
+        watercolorGamma: -999,
+      }),
+    ).toEqual(shadingIdentityParams(photoScribble, params));
+    expect(shadingComputeIdentitiesEqual(current, watercolorEdit)).toBe(true);
+    expect(shadingComputeIdentitiesEqual(current, primaryEdit)).toBe(false);
+    expect(
+      shadingComputeIdentitiesEqual(
+        current,
+        createShadingComputeIdentity({
+          sketchId: photoScribble.id,
+          schema: schemaView,
+          params: { ...params, imageAsset: "other-asset" },
+          seed: "seed",
+          compositionFrame: { width: 120, height: 90 },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps non-Sequence Shading on the complete schema", () => {
+    expect(shadingIdentitySchema({ schema })).toBe(schema);
+    expect(Object.keys(shadingIdentityParams({ schema }, {}))).toEqual([
+      "zeta",
+      "alpha",
+      "middle",
+    ]);
+  });
+
   it("uses canonical schema declaration order, independent of params order", () => {
     const first = identity();
     const reordered = identity({
