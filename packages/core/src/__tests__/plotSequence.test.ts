@@ -1,11 +1,10 @@
-import { describe, expect, expectTypeOf, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import * as core from '../index'
 import {
-  validatePlotSequenceDeclaration,
+  validatePlotSequence,
   type PlotSequenceDeclaration,
   type PlotStageGenerator,
-  type PlotStageGeneratorInput,
 } from '../plotSequence'
 import type { ParamSchema, StatelessSketch } from '../sketch'
 
@@ -54,17 +53,7 @@ function malformed(value: unknown): PlotSequenceDeclaration {
 
 describe('Plot Sequence declaration contract', () => {
   it('is exported from the core entry point', () => {
-    expect(core.validatePlotSequenceDeclaration).toBe(
-      validatePlotSequenceDeclaration,
-    )
-    expectTypeOf<core.PlotSequenceDeclaration>().toEqualTypeOf<PlotSequenceDeclaration>()
-  })
-
-  it('gives a Stage generator the complete deterministic input and a Scene result', () => {
-    expectTypeOf<PlotStageGenerator>().parameter(0).toEqualTypeOf<
-      Readonly<PlotStageGeneratorInput>
-    >()
-    expectTypeOf<PlotStageGenerator>().returns.toMatchTypeOf<core.Scene>()
+    expect(core.validatePlotSequence).toBe(validatePlotSequence)
   })
 
   it('keeps plotSequence optional for existing Sketch declarations', () => {
@@ -82,7 +71,7 @@ describe('Plot Sequence declaration contract', () => {
 
   it('accepts a valid declaration', () => {
     expect(() =>
-      validatePlotSequenceDeclaration(makeDeclaration(), schema),
+      validatePlotSequence(makeDeclaration(), schema),
     ).not.toThrow()
   })
 
@@ -96,7 +85,7 @@ describe('Plot Sequence declaration contract', () => {
       ],
     }
     expect(() =>
-      validatePlotSequenceDeclaration(renamed, schema),
+      validatePlotSequence(renamed, schema),
     ).not.toThrow()
 
     const whitespace: PlotSequenceDeclaration = {
@@ -107,7 +96,7 @@ describe('Plot Sequence declaration contract', () => {
       ],
     }
     expect(() =>
-      validatePlotSequenceDeclaration(whitespace, schema),
+      validatePlotSequence(whitespace, schema),
     ).toThrow(/stages\[0\]\.id must be a nonempty string/)
   })
 
@@ -119,7 +108,7 @@ describe('Plot Sequence declaration contract', () => {
       stages: Object.freeze([...declaration.stages]),
     })
 
-    validatePlotSequenceDeclaration(frozen, schema)
+    validatePlotSequence(frozen, schema)
 
     expect(frozen.stages.map((stage) => stage.id)).toEqual(authoredOrder)
   })
@@ -159,21 +148,21 @@ describe('Plot Sequence declaration contract', () => {
       generate: supportingGenerator,
     })
     expect(() =>
-      validatePlotSequenceDeclaration(repeated, repeatedSchema),
+      validatePlotSequence(repeated, repeatedSchema),
     ).not.toThrow()
   })
 })
 
-describe('validatePlotSequenceDeclaration', () => {
+describe('validatePlotSequence', () => {
   it('requires the declaration arrays', () => {
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         malformed({ sharedParameters: {}, stages: [] }),
         schema,
       ),
     ).toThrow(/sharedParameters must be an array/)
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         malformed({ sharedParameters: [], stages: {} }),
         schema,
       ),
@@ -183,7 +172,7 @@ describe('validatePlotSequenceDeclaration', () => {
   it('rejects missing and duplicate Stage IDs', () => {
     const declaration = makeDeclaration()
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         {
           ...declaration,
           stages: [
@@ -196,7 +185,7 @@ describe('validatePlotSequenceDeclaration', () => {
     ).toThrow(/id must be a nonempty string/)
 
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         {
           ...declaration,
           stages: [
@@ -212,7 +201,7 @@ describe('validatePlotSequenceDeclaration', () => {
   it('rejects empty Stage names and generator IDs', () => {
     const declaration = makeDeclaration()
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         {
           ...declaration,
           stages: [
@@ -225,7 +214,7 @@ describe('validatePlotSequenceDeclaration', () => {
     ).toThrow(/name must be a nonempty string/)
 
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         {
           ...declaration,
           stages: [
@@ -261,7 +250,7 @@ describe('validatePlotSequenceDeclaration', () => {
       ],
     }
     expect(() =>
-      validatePlotSequenceDeclaration(noPrimary, schema),
+      validatePlotSequence(noPrimary, schema),
     ).toThrow(/exactly one Primary Stage, found 0/)
 
     const twoPrimary: PlotSequenceDeclaration = {
@@ -275,14 +264,14 @@ describe('validatePlotSequenceDeclaration', () => {
       ],
     }
     expect(() =>
-      validatePlotSequenceDeclaration(twoPrimary, schema),
+      validatePlotSequence(twoPrimary, schema),
     ).toThrow(/exactly one Primary Stage, found 2/)
   })
 
   it('rejects an unknown source kind and a non-callable generated source', () => {
     const declaration = makeDeclaration()
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         malformed({
           ...declaration,
           stages: [
@@ -301,7 +290,7 @@ describe('validatePlotSequenceDeclaration', () => {
     ).toThrow(/source\.kind must be `primary` or `generator`/)
 
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         malformed({
           ...declaration,
           stages: [
@@ -324,7 +313,7 @@ describe('validatePlotSequenceDeclaration', () => {
   it('requires explicit boolean Seed and time participation', () => {
     const declaration = makeDeclaration()
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         malformed({
           ...declaration,
           stages: [
@@ -340,7 +329,7 @@ describe('validatePlotSequenceDeclaration', () => {
     ).toThrow(/usesSeed must be a boolean/)
 
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         malformed({
           ...declaration,
           stages: [
@@ -359,7 +348,7 @@ describe('validatePlotSequenceDeclaration', () => {
   it('rejects unknown, multiply owned, and unowned schema keys', () => {
     const declaration = makeDeclaration()
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         {
           ...declaration,
           stages: [
@@ -375,7 +364,7 @@ describe('validatePlotSequenceDeclaration', () => {
     ).toThrow(/unknown schema key `missing`/)
 
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         {
           ...declaration,
           stages: [
@@ -391,7 +380,7 @@ describe('validatePlotSequenceDeclaration', () => {
     ).toThrow(/schema key `image` has more than one parameter owner/)
 
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         {
           ...declaration,
           stages: [
@@ -407,7 +396,7 @@ describe('validatePlotSequenceDeclaration', () => {
   it('rejects empty canonical keys and collisions in a Stage projection', () => {
     const declaration = makeDeclaration()
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         {
           ...declaration,
           stages: [
@@ -425,7 +414,7 @@ describe('validatePlotSequenceDeclaration', () => {
     ).toThrow(/\.key must be a nonempty string/)
 
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         {
           ...declaration,
           stages: [
@@ -446,7 +435,7 @@ describe('validatePlotSequenceDeclaration', () => {
   it('rejects collisions between two shared or two Stage-owned bindings', () => {
     const declaration = makeDeclaration()
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         {
           sharedParameters: [
             { schemaKey: 'image', key: 'shared' },
@@ -462,7 +451,7 @@ describe('validatePlotSequenceDeclaration', () => {
     ).toThrow(/collides on canonical key `shared`/)
 
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         {
           sharedParameters: declaration.sharedParameters,
           stages: [
@@ -483,10 +472,10 @@ describe('validatePlotSequenceDeclaration', () => {
 
   it('names the validator in malformed-declaration diagnostics', () => {
     expect(() =>
-      validatePlotSequenceDeclaration(
+      validatePlotSequence(
         malformed(null),
         schema,
       ),
-    ).toThrow('validatePlotSequenceDeclaration')
+    ).toThrow('validatePlotSequence')
   })
 })

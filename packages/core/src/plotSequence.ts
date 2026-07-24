@@ -74,7 +74,7 @@ export interface PlotSequenceDeclaration {
   readonly stages: readonly PlotStageDeclaration[]
 }
 
-const OPERATION = 'validatePlotSequenceDeclaration'
+const OPERATION = 'validatePlotSequence'
 
 function fail(message: string): never {
   throw new Error(`${OPERATION}: ${message}`)
@@ -156,7 +156,7 @@ function validateBindingArray(
  * @throws For malformed identities, sources, dependency declarations, parameter
  *   ownership/projection, or a Primary Stage count other than exactly one.
  */
-export function validatePlotSequenceDeclaration(
+export function validatePlotSequence(
   declaration: PlotSequenceDeclaration,
   schema: ParamSchema,
 ): void {
