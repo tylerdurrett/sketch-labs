@@ -7,7 +7,10 @@
  * to their respective callers.
  */
 
-import type { PlotStageGenerator } from '../../plotSequence'
+import type {
+  PlotSequenceDeclaration,
+  PlotStageGenerator,
+} from '../../plotSequence'
 import { createScene } from '../../scene'
 import type { Params } from '../../sketch'
 import type { WatercolorFormsControls } from '../watercolor-forms/controls'
@@ -54,3 +57,74 @@ export const generatePhotoScribbleWatercolorStage: PlotStageGenerator = ({
     controls: controlsFromStageParams(params),
   }).scene
 }
+
+/** Photo Scribble's authored supporting-Watercolor then primary-Ink plot order. */
+export const photoScribblePlotSequence: PlotSequenceDeclaration = Object.freeze({
+  sharedParameters: Object.freeze([
+    Object.freeze({ schemaKey: 'imageAsset', key: 'imageAsset' }),
+  ]),
+  stages: Object.freeze([
+    Object.freeze({
+      id: 'watercolor-forms',
+      name: 'Watercolor Forms',
+      source: Object.freeze({
+        kind: 'generator',
+        generatorId: 'watercolor-forms',
+        generate: generatePhotoScribbleWatercolorStage,
+      }),
+      parameters: Object.freeze([
+        Object.freeze({ schemaKey: 'watercolorGamma', key: 'gamma' }),
+        Object.freeze({
+          schemaKey: 'watercolorContrast',
+          key: 'contrast',
+        }),
+        Object.freeze({ schemaKey: 'watercolorPivot', key: 'pivot' }),
+        Object.freeze({
+          schemaKey: 'watercolorFormDetail',
+          key: 'formDetail',
+        }),
+        Object.freeze({
+          schemaKey: 'watercolorColorSensitivity',
+          key: 'colorSensitivity',
+        }),
+        Object.freeze({
+          schemaKey: 'watercolorBoundaryStrength',
+          key: 'boundaryStrength',
+        }),
+        Object.freeze({
+          schemaKey: 'watercolorBoundarySmoothing',
+          key: 'boundarySmoothing',
+        }),
+      ]),
+      dependencies: Object.freeze({ usesSeed: false, usesTime: false }),
+    }),
+    Object.freeze({
+      id: 'ink-scribble',
+      name: 'Ink Scribble',
+      source: Object.freeze({
+        kind: 'primary',
+        generatorId: 'photo-scribble',
+      }),
+      parameters: Object.freeze([
+        Object.freeze({ schemaKey: 'toneContrast', key: 'toneContrast' }),
+        Object.freeze({ schemaKey: 'tonePivot', key: 'tonePivot' }),
+        Object.freeze({ schemaKey: 'toneGamma', key: 'toneGamma' }),
+        Object.freeze({
+          schemaKey: 'detailSensitivity',
+          key: 'detailSensitivity',
+        }),
+        Object.freeze({
+          schemaKey: 'detailInfluence',
+          key: 'detailInfluence',
+        }),
+        Object.freeze({ schemaKey: 'pathDensity', key: 'pathDensity' }),
+        Object.freeze({ schemaKey: 'scribbleScale', key: 'scribbleScale' }),
+        Object.freeze({ schemaKey: 'momentum', key: 'momentum' }),
+        Object.freeze({ schemaKey: 'chaos', key: 'chaos' }),
+        Object.freeze({ schemaKey: 'toneFidelity', key: 'toneFidelity' }),
+        Object.freeze({ schemaKey: 'stopPoint', key: 'stopPoint' }),
+      ]),
+      dependencies: Object.freeze({ usesSeed: true, usesTime: false }),
+    }),
+  ]),
+})

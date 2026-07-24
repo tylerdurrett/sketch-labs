@@ -54,10 +54,12 @@ import {
   PHOTO_TONE_CONTROL_MIN,
   type PhotoToneControls,
 } from './tone'
+import { photoScribblePlotSequence } from './plot-sequence'
 import { createResolvedPhotoScribbleSource } from './source'
 
 export * from './source'
 export * from './detail'
+export * from './plot-sequence'
 export * from './tone'
 
 const PHOTO_TONE_CONTROL_STEP = 0.01
@@ -313,6 +315,7 @@ export function createPhotoScribble(
     id: 'photo-scribble',
     name: 'Photo Scribble',
     schema,
+    plotSequence: photoScribblePlotSequence,
     generateToneSource(params, frame, environment) {
       return createPhotoScribbleSource(params, frame, schema, environment)
     },

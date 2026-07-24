@@ -2,16 +2,28 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { DecodedPixels, SketchEnvironment } from '../imageAssets'
-import type {
-  PlotStageGenerator,
-  PlotStageGeneratorInput,
-} from '../plotSequence'
-import type { Params } from '../sketch'
 import {
+  createPlotStageGeneratorInput,
+  invokePlotStageGenerator,
+  projectPlotSequenceRegistrationIdentity,
+  projectPlotStageParams,
+  projectPlotStagePreparationIdentity,
+  validatePlotSequence,
+  type PlotStageGenerator,
+  type PlotStageGeneratorInput,
+} from '../plotSequence'
+import {
+  createPhotoScribble,
+  createPhotoScribbleSchema,
+  generatePhotoScribbleShadingArtwork,
   generatePhotoScribbleWatercolorStage,
-} from '../sketches/photo-scribble/plot-sequence'
+  photoScribble,
+  photoScribblePlotSequence,
+} from '../sketches/photo-scribble'
+import { defaultParams, type Params } from '../sketch'
 import type { WatercolorFormsControls } from '../sketches/watercolor-forms/controls'
 import { generateWatercolorForms } from '../sketches/watercolor-forms/generator'
+import { createWatercolorForms } from '../sketches/watercolor-forms'
 
 const FRAME = Object.freeze({ width: 80, height: 60 })
 const SELECTED_ID = 'selected-0123456789ab'
@@ -67,6 +79,313 @@ function inputFor(
     ...(environment === undefined ? {} : { environment }),
   })
 }
+
+function photoParams(extra: Readonly<Params> = {}): Params {
+  return {
+    ...defaultParams(createPhotoScribbleSchema(SELECTED_ID)),
+    watercolorGamma: CONTROLS.gamma,
+    watercolorContrast: CONTROLS.contrast,
+    watercolorPivot: CONTROLS.pivot,
+    watercolorFormDetail: CONTROLS.formDetail,
+    watercolorColorSensitivity: CONTROLS.colorSensitivity,
+    watercolorBoundaryStrength: CONTROLS.boundaryStrength,
+    watercolorBoundarySmoothing: CONTROLS.boundarySmoothing,
+    ...extra,
+  }
+}
+
+describe('Photo Scribble Plot Sequence declaration', () => {
+  it('declares exact physical order, source metadata, dependencies, and complete ownership', () => {
+    const schema = createPhotoScribbleSchema(SELECTED_ID)
+    const declaration = photoScribblePlotSequence
+
+    expect(() => validatePlotSequence(declaration, schema)).not.toThrow()
+    expect(declaration.sharedParameters).toEqual([
+      { schemaKey: 'imageAsset', key: 'imageAsset' },
+    ])
+    expect(
+      declaration.stages.map(({ id, name, source, dependencies }) => ({
+        id,
+        name,
+        source: {
+          kind: source.kind,
+          generatorId: source.generatorId,
+        },
+        dependencies,
+      })),
+    ).toEqual([
+      {
+        id: 'watercolor-forms',
+        name: 'Watercolor Forms',
+        source: { kind: 'generator', generatorId: 'watercolor-forms' },
+        dependencies: { usesSeed: false, usesTime: false },
+      },
+      {
+        id: 'ink-scribble',
+        name: 'Ink Scribble',
+        source: { kind: 'primary', generatorId: 'photo-scribble' },
+        dependencies: { usesSeed: true, usesTime: false },
+      },
+    ])
+    expect(
+      declaration.stages.filter(({ source }) => source.kind === 'primary'),
+    ).toHaveLength(1)
+    expect(declaration.stages[0]?.parameters).toEqual([
+      { schemaKey: 'watercolorGamma', key: 'gamma' },
+      { schemaKey: 'watercolorContrast', key: 'contrast' },
+      { schemaKey: 'watercolorPivot', key: 'pivot' },
+      { schemaKey: 'watercolorFormDetail', key: 'formDetail' },
+      {
+        schemaKey: 'watercolorColorSensitivity',
+        key: 'colorSensitivity',
+      },
+      { schemaKey: 'watercolorBoundaryStrength', key: 'boundaryStrength' },
+      {
+        schemaKey: 'watercolorBoundarySmoothing',
+        key: 'boundarySmoothing',
+      },
+    ])
+    expect(declaration.stages[1]?.parameters).toEqual([
+      { schemaKey: 'toneContrast', key: 'toneContrast' },
+      { schemaKey: 'tonePivot', key: 'tonePivot' },
+      { schemaKey: 'toneGamma', key: 'toneGamma' },
+      { schemaKey: 'detailSensitivity', key: 'detailSensitivity' },
+      { schemaKey: 'detailInfluence', key: 'detailInfluence' },
+      { schemaKey: 'pathDensity', key: 'pathDensity' },
+      { schemaKey: 'scribbleScale', key: 'scribbleScale' },
+      { schemaKey: 'momentum', key: 'momentum' },
+      { schemaKey: 'chaos', key: 'chaos' },
+      { schemaKey: 'toneFidelity', key: 'toneFidelity' },
+      { schemaKey: 'stopPoint', key: 'stopPoint' },
+    ])
+
+    const ownedKeys = [
+      ...declaration.sharedParameters,
+      ...declaration.stages.flatMap(({ parameters }) => parameters),
+    ].map(({ schemaKey }) => schemaKey)
+    expect(new Set(ownedKeys)).toEqual(new Set(Object.keys(schema)))
+    expect(ownedKeys).toHaveLength(Object.keys(schema).length)
+  })
+
+  it('attaches the equivalent declaration to factory and named instances with exact callback identity', () => {
+    const factorySketch = createPhotoScribble('factory-asset')
+    const watercolorStage = photoScribblePlotSequence.stages[0]
+
+    expect(factorySketch.plotSequence).toBe(photoScribblePlotSequence)
+    expect(photoScribble.plotSequence).toBe(photoScribblePlotSequence)
+    expect(() =>
+      validatePlotSequence(factorySketch.plotSequence!, factorySketch.schema),
+    ).not.toThrow()
+    expect(() =>
+      validatePlotSequence(photoScribble.plotSequence!, photoScribble.schema),
+    ).not.toThrow()
+    expect(watercolorStage?.source.kind).toBe('generator')
+    if (watercolorStage?.source.kind !== 'generator') {
+      throw new Error('expected generated Watercolor Stage')
+    }
+    expect(watercolorStage.source.generate).toBe(
+      generatePhotoScribbleWatercolorStage,
+    )
+  })
+
+  it('isolates shared registration and each Stage projection from aliases and sibling values', () => {
+    const schema = createPhotoScribbleSchema(SELECTED_ID)
+    const frame = Object.freeze({ width: 640, height: 480 })
+    const params = photoParams({
+      toneGamma: 0.2,
+      watercolorGamma: 0.8,
+      gamma: 0.1,
+      unexpected: 'ignored',
+    })
+
+    const registration = projectPlotSequenceRegistrationIdentity(
+      schema,
+      photoScribblePlotSequence,
+      params,
+      frame,
+    )
+    const watercolor = projectPlotStageParams(
+      schema,
+      photoScribblePlotSequence,
+      'watercolor-forms',
+      params,
+    )
+    const ink = projectPlotStageParams(
+      schema,
+      photoScribblePlotSequence,
+      'ink-scribble',
+      params,
+    )
+
+    expect(registration).toEqual({
+      params: { imageAsset: SELECTED_ID },
+      frame,
+    })
+    expect(registration.frame).toBe(frame)
+    expect(watercolor).toEqual({
+      imageAsset: SELECTED_ID,
+      ...CONTROLS,
+      gamma: 0.8,
+    })
+    expect(ink).toEqual({
+      imageAsset: SELECTED_ID,
+      toneContrast: 0.5,
+      tonePivot: 0.5,
+      toneGamma: 0.2,
+      detailSensitivity: 0.5,
+      detailInfluence: 0,
+      pathDensity: 1,
+      scribbleScale: 1,
+      momentum: 0.75,
+      chaos: 0.25,
+      toneFidelity: 0.9,
+      stopPoint: 100,
+    })
+    expect(watercolor).not.toHaveProperty('watercolorGamma')
+    expect(watercolor).not.toHaveProperty('toneGamma')
+    expect(ink).not.toHaveProperty('watercolorGamma')
+    expect(ink).not.toHaveProperty('unexpected')
+  })
+
+  it('passes unchanged Sequence seed/time to generation while dependency identities stay authored', () => {
+    const schema = createPhotoScribbleSchema(SELECTED_ID)
+    const params = photoParams()
+    const environment = environmentFor(() => transition())
+    const generatorInput = createPlotStageGeneratorInput(
+      schema,
+      photoScribblePlotSequence,
+      'watercolor-forms',
+      params,
+      'sequence-seed',
+      123,
+      FRAME,
+      environment,
+    )
+    const watercolorIdentity = projectPlotStagePreparationIdentity(
+      schema,
+      photoScribblePlotSequence,
+      'watercolor-forms',
+      params,
+      'sequence-seed',
+      123,
+      FRAME,
+    )
+    const inkIdentity = projectPlotStagePreparationIdentity(
+      schema,
+      photoScribblePlotSequence,
+      'ink-scribble',
+      params,
+      'ink-seed-a',
+      123,
+      FRAME,
+    )
+    const reseededInkIdentity = projectPlotStagePreparationIdentity(
+      schema,
+      photoScribblePlotSequence,
+      'ink-scribble',
+      params,
+      'ink-seed-b',
+      999,
+      FRAME,
+    )
+
+    expect(generatorInput.seed).toBe('sequence-seed')
+    expect(generatorInput.t).toBe(123)
+    expect(generatorInput.environment).toBe(environment)
+    expect(watercolorIdentity).not.toHaveProperty('seed')
+    expect(watercolorIdentity).not.toHaveProperty('t')
+    expect(inkIdentity).toMatchObject({ seed: 'ink-seed-a' })
+    expect(inkIdentity).not.toHaveProperty('t')
+    expect(reseededInkIdentity.params).toEqual(inkIdentity.params)
+    expect(reseededInkIdentity.frame).toBe(inkIdentity.frame)
+    expect(reseededInkIdentity.seed).not.toBe(inkIdentity.seed)
+  })
+
+  it('invokes Watercolor generically with parity to direct and independent generation', () => {
+    const pixels = transition()
+    const environment = environmentFor((id) =>
+      id === SELECTED_ID ? pixels : undefined,
+    )
+    const schema = createPhotoScribbleSchema(SELECTED_ID)
+    const params = photoParams()
+    const direct = generateWatercolorForms({
+      pixels,
+      frame: FRAME,
+      controls: CONTROLS,
+    }).scene
+    const invoked = invokePlotStageGenerator(
+      schema,
+      photoScribblePlotSequence,
+      'watercolor-forms',
+      params,
+      'sequence-seed',
+      321,
+      FRAME,
+      environment,
+    )
+    const independent = createWatercolorForms(SELECTED_ID).generate(
+      {
+        imageAsset: SELECTED_ID,
+        ...CONTROLS,
+      },
+      'independent-seed',
+      654,
+      FRAME,
+      environment,
+    )
+
+    expect(invoked).toEqual(direct)
+    expect(independent).toEqual(direct)
+    expect(invoked.primitives.length).toBeGreaterThan(0)
+  })
+
+  it('leaves ordinary Ink output and diagnostics unchanged by declaration attachment or Watercolor values', () => {
+    const sketch = createPhotoScribble(SELECTED_ID)
+    const schema = sketch.schema
+    const environment = environmentFor((id) =>
+      id === SELECTED_ID ? transition() : undefined,
+    )
+    const params = photoParams()
+    const watercolorChanged = photoParams({
+      watercolorGamma: 1,
+      watercolorContrast: 0,
+      watercolorPivot: 0,
+      watercolorFormDetail: 0,
+      watercolorColorSensitivity: 1,
+      watercolorBoundaryStrength: 1,
+      watercolorBoundarySmoothing: 0,
+    })
+    const direct = generatePhotoScribbleShadingArtwork(
+      params,
+      'ink-seed',
+      FRAME,
+      schema,
+      undefined,
+      environment,
+    )
+    const ordinary = sketch.generateShadingArtwork!(
+      params,
+      'ink-seed',
+      FRAME,
+      undefined,
+      environment,
+    )
+    const changed = sketch.generateShadingArtwork!(
+      watercolorChanged,
+      'ink-seed',
+      FRAME,
+      undefined,
+      environment,
+    )
+
+    expect(ordinary).toEqual(direct)
+    expect(
+      sketch.generate(params, 'ink-seed', 99, FRAME, environment),
+    ).toEqual(direct.scene)
+    expect(changed.scene).toEqual(ordinary.scene)
+    expect(changed.diagnostics).toEqual(ordinary.diagnostics)
+  })
+})
 
 describe('Photo Scribble Watercolor Plot Stage adapter', () => {
   it('is a PlotStageGenerator and resolves only the exact selected asset without fallback', () => {
