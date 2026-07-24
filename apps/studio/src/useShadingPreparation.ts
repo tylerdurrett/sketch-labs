@@ -5,6 +5,7 @@ import type { CoordinateSpace, Params, Seed, Sketch } from "@harness/core";
 import { createShadingWorker } from "./createShadingWorker";
 import {
   createShadingComputeIdentity,
+  shadingIdentityProjection,
   shadingComputeIdentitiesEqual,
   type ShadingComputeIdentity,
 } from "./shadingComputeProtocol";
@@ -30,7 +31,10 @@ export interface ShadingAuthoredState {
   readonly inputRevision: number;
 }
 
-export type ShadingIdentitySketch = Pick<Sketch, "id" | "schema">;
+export type ShadingIdentitySketch = Pick<
+  Sketch,
+  "id" | "schema" | "plotSequence"
+>;
 
 /** Minimal coordinator seam used by the hook and its deterministic tests. */
 export interface ShadingPreparationCoordinator {
@@ -91,9 +95,11 @@ export function createShadingIdentityForAuthoredState(
   sketch: ShadingIdentitySketch,
   authored: ShadingAuthoredState,
 ): ShadingComputeIdentity {
+  const projection = shadingIdentityProjection(sketch);
   return createShadingComputeIdentity({
     sketchId: sketch.id,
-    schema: sketch.schema,
+    schema: projection.schema,
+    schemaKeys: projection.schemaKeys,
     params: authored.params,
     seed: authored.seed,
     compositionFrame: authored.compositionFrame,

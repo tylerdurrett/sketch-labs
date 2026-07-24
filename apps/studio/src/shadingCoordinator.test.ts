@@ -90,8 +90,60 @@ class FakeWorker implements ShadingWorkerPort {
   }
 
   emit(type: "message" | "error" | "messageerror", value: unknown): void {
-    const event = type === "message" ? { data: value } : value;
+    const event =
+      type === "message"
+        ? { data: value }
+        : value instanceof Event
+          ? value
+          : Object.assign(new Event(type), value);
     for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
+/**
+ * Mirrors an in-process worker runtime: progress and completion can both arrive
+ * synchronously while the coordinator is still posting its initial request.
+ */
+class RuntimeBackedWorker implements ShadingWorkerPort {
+  readonly terminate = vi.fn();
+  private readonly listeners = new Map<
+    string,
+    Array<(event: MessageEvent<unknown>) => void>
+  >();
+
+  postMessage(message: ShadingComputeRequest): void {
+    this.emitMessage({
+      type: "progress",
+      jobId: message.jobId,
+      snapshot: {
+        completedWorkUnits: 1,
+        totalWorkUnits: 2,
+        terminal: false,
+      },
+    });
+    this.emitMessage({
+      type: "success",
+      jobId: message.jobId,
+      identity: message.identity,
+      scene,
+      diagnostics,
+      computeTimeMs: 250,
+    });
+  }
+
+  addEventListener(
+    type: string,
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  private emitMessage(data: unknown): void {
+    for (const listener of this.listeners.get("message") ?? []) {
+      listener({ data } as MessageEvent<unknown>);
+    }
   }
 }
 
@@ -367,6 +419,39 @@ describe("ShadingCoordinator", () => {
 
     worker.emit("message", successResponse(worker));
     await expect(result).resolves.toMatchObject({ status: "success" });
+  });
+
+  it("allows same-stack runtime progress to cancel before success", async () => {
+    const worker = new RuntimeBackedWorker();
+    let coordinator!: ShadingCoordinator;
+    const updates = vi.fn(() => {
+      expect(coordinator.cancel()).toBe(true);
+    });
+    coordinator = new ShadingCoordinator(() => worker);
+
+    const result = coordinator.start(identity(), updates);
+
+    expect(coordinator.busy).toBe(false);
+    await expect(result).resolves.toEqual({ status: "cancelled", jobId: 1 });
+    expect(updates).toHaveBeenCalledOnce();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it("allows same-stack runtime progress to dispose before success", async () => {
+    const worker = new RuntimeBackedWorker();
+    let coordinator!: ShadingCoordinator;
+    const updates = vi.fn(() => {
+      coordinator.dispose();
+    });
+    coordinator = new ShadingCoordinator(() => worker);
+
+    const result = coordinator.start(identity(), updates);
+
+    expect(coordinator.busy).toBe(false);
+    await expect(result).resolves.toEqual({ status: "cancelled", jobId: 1 });
+    expect(updates).toHaveBeenCalledOnce();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    await expect(coordinator.start(identity(2))).rejects.toThrow("disposed");
   });
 
   it("cancels, recreates with a fresh ETA, and ignores the old worker", async () => {

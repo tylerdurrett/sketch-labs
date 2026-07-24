@@ -9,9 +9,12 @@ import {
   type DetailPreparationRequest,
 } from "./detailPreparationProtocol";
 import {
-  terminateWorkerOnce,
+  createWorkerBoundary,
   workerErrorDetail,
-  workerEventDetail,
+  type WorkerBoundaryControls,
+  type WorkerBoundaryFailure,
+  type WorkerBoundaryOutcome,
+  type WorkerBoundarySession,
   type WorkerFactory,
   type WorkerPort,
 } from "./workerBoundary";
@@ -43,8 +46,129 @@ export type DetailWorkerFactory = WorkerFactory<DetailPreparationRequest>;
 interface ActiveJob {
   readonly jobId: number;
   readonly identity: DetailPreparationIdentity;
-  readonly terminateWorker: () => void;
-  readonly resolve: (result: DetailPreparationResult) => void;
+  boundary: WorkerBoundarySession<DetailPreparationResult> | null;
+  cancelPending: boolean;
+}
+
+interface RemovableDetailWorker {
+  removeEventListener(type: string, listener: EventListener): void;
+}
+
+function errorOrFallback(error: unknown, fallback: string): Error {
+  return error instanceof Error ? error : new Error(fallback);
+}
+
+function withSettlementRelease(
+  worker: DetailWorkerPort,
+  release: () => void,
+): DetailWorkerPort & RemovableDetailWorker {
+  const messageErrorListeners = new WeakMap<
+    (event: Event) => void,
+    (event: Event) => void
+  >();
+  const addEventListener = ((
+    type: "message" | "error" | "messageerror",
+    listener:
+      | ((event: MessageEvent<unknown>) => void)
+      | ((event: Event) => void),
+  ) => {
+    if (type === "message") {
+      try {
+        worker.addEventListener(
+          type,
+          listener as (event: MessageEvent<unknown>) => void,
+        );
+      } catch (error) {
+        throw errorOrFallback(error, "Detail worker could not start");
+      }
+    } else {
+      const eventListener = listener as (event: Event) => void;
+      if (type === "messageerror") {
+        const sanitizedListener = () =>
+          eventListener(new Event("messageerror"));
+        messageErrorListeners.set(eventListener, sanitizedListener);
+        try {
+          worker.addEventListener(type, sanitizedListener);
+        } catch (error) {
+          throw errorOrFallback(error, "Detail worker could not start");
+        }
+        return;
+      }
+      try {
+        worker.addEventListener(type, eventListener);
+      } catch (error) {
+        throw errorOrFallback(error, "Detail worker could not start");
+      }
+    }
+  }) as DetailWorkerPort["addEventListener"];
+  const removable = worker as DetailWorkerPort &
+    Partial<RemovableDetailWorker>;
+
+  return {
+    postMessage: (message) => {
+      try {
+        worker.postMessage(message);
+      } catch (error) {
+        throw errorOrFallback(error, "Detail worker could not start");
+      }
+    },
+    terminate: () => {
+      release();
+      worker.terminate();
+    },
+    addEventListener,
+    removeEventListener: (type, listener) => {
+      // A synchronous settlement can clean up before the boundary session is
+      // returned. Release first so cleanup reentrancy sees the job as terminal.
+      release();
+      const delegatedListener =
+        type === "messageerror"
+          ? (messageErrorListeners.get(
+              listener as (event: Event) => void,
+            ) ?? listener)
+          : listener;
+      removable.removeEventListener?.(type, delegatedListener);
+    },
+  };
+}
+
+const DETAIL_BOUNDARY_FALLBACKS: Readonly<
+  Record<WorkerBoundaryFailure["kind"], string>
+> = {
+  construction: "Detail worker failed",
+  listener: "Detail worker could not start",
+  "post-message": "Detail worker could not start",
+  "worker-error": "Detail worker failed",
+  "message-error": "Detail worker response could not be decoded",
+  "invalid-message": "Detail worker returned an invalid response",
+  "message-handler": "Detail worker failed",
+};
+
+const STRUCTURAL_BOUNDARY_FALLBACKS: Readonly<
+  Record<WorkerBoundaryFailure["kind"], string>
+> = {
+  construction: "Worker construction failed",
+  listener: "Worker listener registration failed",
+  "post-message": "Worker request could not be posted",
+  "worker-error": "Worker failed",
+  "message-error": "Worker response could not be decoded",
+  "invalid-message": "Worker returned an invalid response",
+  "message-handler": "Worker message handler failed",
+};
+
+function detailBoundaryError(failure: WorkerBoundaryFailure): string {
+  return failure.detail === STRUCTURAL_BOUNDARY_FALLBACKS[failure.kind]
+    ? DETAIL_BOUNDARY_FALLBACKS[failure.kind]
+    : failure.detail;
+}
+
+function failureResult(jobId: number, error: string): FailureResult {
+  return {
+    status: "failure",
+    jobId,
+    error:
+      error.trim() === "" ? "Detail preparation failed" : error.slice(0, 500),
+  };
 }
 
 /** Owns the independent one-worker-per-job Detail preparation lifecycle. */
@@ -56,7 +180,7 @@ export class DetailCoordinator {
   constructor(private readonly workerFactory: DetailWorkerFactory) {}
 
   get busy(): boolean {
-    return this.active !== null;
+    return this.currentActive() !== null;
   }
 
   start(
@@ -65,7 +189,7 @@ export class DetailCoordinator {
     if (this.disposed) {
       return Promise.reject(new Error("Detail coordinator is disposed"));
     }
-    if (this.active !== null) {
+    if (this.currentActive() !== null) {
       return Promise.reject(
         new Error("A Detail preparation job is already active"),
       );
@@ -86,87 +210,67 @@ export class DetailCoordinator {
       });
     }
 
-    let worker: DetailWorkerPort;
-    try {
-      worker = this.workerFactory();
-    } catch (error) {
-      return Promise.resolve({
-        status: "failure",
-        jobId,
-        error: workerErrorDetail(error, "Detail worker failed"),
-      });
+    const request: DetailPreparationRequest = {
+      type: "compute",
+      jobId,
+      identity,
+    };
+    if (!isDetailPreparationRequest(request)) {
+      return Promise.resolve(
+        failureResult(jobId, "Detail preparation request is invalid"),
+      );
     }
 
-    return new Promise((resolve) => {
-      const active: ActiveJob = {
-        jobId,
-        identity,
-        terminateWorker: terminateWorkerOnce(worker),
-        resolve,
-      };
-      this.active = active;
+    const active: ActiveJob = {
+      jobId,
+      identity,
+      boundary: null,
+      cancelPending: false,
+    };
+    this.active = active;
 
-      try {
-        worker.addEventListener("message", (event) => {
-          if (this.active !== active) return;
-          if (!isDetailPreparationWorkerMessage(event.data)) {
-            this.fail(active, "Detail worker returned an invalid response");
-            return;
-          }
-          if (event.data.jobId !== active.jobId) return;
-          if (
-            !detailPreparationIdentitiesEqual(
-              event.data.identity,
-              active.identity,
-            )
-          ) {
-            return;
-          }
-          if (event.data.type === "failure") {
-            this.fail(active, event.data.error);
-            return;
-          }
-          this.finish(active, {
-            status: "success",
-            jobId: active.jobId,
-            identity: active.identity,
-            prepared: event.data.prepared,
-          });
-        });
-        worker.addEventListener("error", (event) => {
-          if (this.active === active) {
-            this.fail(active, workerEventDetail(event, "Detail worker failed"));
-          }
-        });
-        worker.addEventListener("messageerror", () => {
-          if (this.active === active) {
-            this.fail(active, "Detail worker response could not be decoded");
-          }
-        });
-
-        const request: DetailPreparationRequest = {
-          type: "compute",
-          jobId,
-          identity,
-        };
-        if (!isDetailPreparationRequest(request)) {
-          throw new TypeError("Detail preparation request is invalid");
+    const boundary = createWorkerBoundary<
+      DetailPreparationRequest,
+      DetailPreparationResult
+    >({
+      createWorker: () => {
+        try {
+          return withSettlementRelease(this.workerFactory(), () =>
+            this.release(active),
+          );
+        } catch (error) {
+          throw errorOrFallback(error, "Detail worker failed");
         }
-        worker.postMessage(request);
-      } catch (error) {
-        this.fail(
-          active,
-          workerErrorDetail(error, "Detail worker could not start"),
-        );
+      },
+      request,
+      onMessage: (message, controls) => {
+        this.handleMessage(active, message, controls);
+      },
+    });
+    active.boundary = boundary;
+    if (active.cancelPending) boundary.cancel();
+    if (!boundary.active) this.release(active);
+
+    return boundary.outcome.then((outcome) => {
+      this.release(active);
+      if (active.cancelPending) {
+        return { status: "cancelled", jobId };
       }
+      return this.resultForOutcome(jobId, outcome);
     });
   }
 
   cancel(): boolean {
-    const active = this.active;
+    const active = this.currentActive();
     if (active === null) return false;
-    this.finish(active, { status: "cancelled", jobId: active.jobId });
-    return true;
+    if (active.boundary === null) {
+      active.cancelPending = true;
+      this.release(active);
+      return true;
+    }
+    const cancelled = active.boundary.cancel();
+    if (cancelled) this.release(active);
+    return cancelled;
   }
 
   dispose(): void {
@@ -175,23 +279,76 @@ export class DetailCoordinator {
     this.cancel();
   }
 
-  private fail(active: ActiveJob, error: string): void {
-    this.finish(active, {
-      status: "failure",
-      jobId: active.jobId,
-      error:
-        error.trim() === "" ? "Detail preparation failed" : error.slice(0, 500),
-    });
+  private handleMessage(
+    active: ActiveJob,
+    message: unknown,
+    controls: WorkerBoundaryControls<DetailPreparationResult>,
+  ): void {
+    if (this.active !== active) return;
+    if (!isDetailPreparationWorkerMessage(message)) {
+      this.completeBoundary(active, () =>
+        controls.rejectMessage(
+          "Detail worker returned an invalid response",
+        ),
+      );
+      return;
+    }
+    if (message.jobId !== active.jobId) return;
+    if (
+      !detailPreparationIdentitiesEqual(message.identity, active.identity)
+    ) {
+      return;
+    }
+    if (message.type === "failure") {
+      this.completeBoundary(active, () =>
+        controls.complete(failureResult(active.jobId, message.error)),
+      );
+      return;
+    }
+    this.completeBoundary(active, () =>
+      controls.complete({
+        status: "success",
+        jobId: active.jobId,
+        identity: active.identity,
+        prepared: message.prepared,
+      }),
+    );
   }
 
-  private finish(active: ActiveJob, result: DetailPreparationResult): void {
+  private completeBoundary(
+    active: ActiveJob,
+    complete: () => boolean,
+  ): void {
     if (this.active !== active) return;
-    this.active = null;
-    try {
-      active.terminateWorker();
-    } catch {
-      // Worker termination is best-effort; the typed outcome must still settle.
+    this.release(active);
+    complete();
+  }
+
+  private resultForOutcome(
+    jobId: number,
+    outcome: WorkerBoundaryOutcome<DetailPreparationResult>,
+  ): DetailPreparationResult {
+    if (outcome.status === "completed") return outcome.value;
+    if (outcome.status === "cancelled") {
+      return { status: "cancelled", jobId };
     }
-    active.resolve(result);
+    return failureResult(jobId, detailBoundaryError(outcome.failure));
+  }
+
+  private currentActive(): ActiveJob | null {
+    const active = this.active;
+    if (
+      active !== null &&
+      active.boundary !== null &&
+      active.boundary.active === false
+    ) {
+      this.release(active);
+      return null;
+    }
+    return active;
+  }
+
+  private release(active: ActiveJob): void {
+    if (this.active === active) this.active = null;
   }
 }

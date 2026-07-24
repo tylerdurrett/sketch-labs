@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { ParamSchema, Scene } from "@harness/core";
+import {
+  defaultParams,
+  photoScribble,
+  type ParamSchema,
+  type PlotSequenceDeclaration,
+  type Scene,
+} from "@harness/core";
 
 import {
   copyShadingComputeIdentity,
@@ -12,6 +18,9 @@ import {
   isShadingComputeResponse,
   isShadingComputeSuccess,
   isShadingWorkerMessage,
+  shadingIdentityParams,
+  shadingIdentityProjection,
+  shadingIdentitySchema,
   shadingComputeIdentitiesEqual,
   type ShadingComputeIdentity,
 } from "./shadingComputeProtocol";
@@ -156,6 +165,137 @@ function changed(
 }
 
 describe("Shading compute identity", () => {
+  it("isolates Sequence Shading to the unique Primary shared-plus-owned schema", () => {
+    const params = defaultParams(photoScribble.schema);
+    const schemaView = shadingIdentitySchema(photoScribble);
+    const current = createShadingComputeIdentity({
+      sketchId: photoScribble.id,
+      schema: schemaView,
+      params,
+      seed: "seed",
+      compositionFrame: { width: 120, height: 90 },
+    });
+    const watercolorEdit = createShadingComputeIdentity({
+      sketchId: photoScribble.id,
+      schema: schemaView,
+      params: {
+        ...params,
+        watercolorGamma:
+          (params.watercolorGamma as number) + 0.25,
+      },
+      seed: "seed",
+      compositionFrame: { width: 120, height: 90 },
+    });
+    const primaryEdit = createShadingComputeIdentity({
+      sketchId: photoScribble.id,
+      schema: schemaView,
+      params: {
+        ...params,
+        pathDensity: (params.pathDensity as number) + 0.25,
+      },
+      seed: "seed",
+      compositionFrame: { width: 120, height: 90 },
+    });
+
+    expect(Object.keys(schemaView)).toEqual([
+      "imageAsset",
+      "toneContrast",
+      "tonePivot",
+      "toneGamma",
+      "detailSensitivity",
+      "detailInfluence",
+      "pathDensity",
+      "scribbleScale",
+      "momentum",
+      "chaos",
+      "toneFidelity",
+      "stopPoint",
+    ]);
+    expect(current.params.map(({ key }) => key)).toEqual(
+      Object.keys(schemaView),
+    );
+    expect(
+      shadingIdentityParams(photoScribble, {
+        ...params,
+        watercolorGamma: -999,
+      }),
+    ).toEqual(shadingIdentityParams(photoScribble, params));
+    expect(shadingComputeIdentitiesEqual(current, watercolorEdit)).toBe(true);
+    expect(shadingComputeIdentitiesEqual(current, primaryEdit)).toBe(false);
+    expect(
+      shadingComputeIdentitiesEqual(
+        current,
+        createShadingComputeIdentity({
+          sketchId: photoScribble.id,
+          schema: schemaView,
+          params: { ...params, imageAsset: "other-asset" },
+          seed: "seed",
+          compositionFrame: { width: 120, height: 90 },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps non-Sequence Shading on the complete schema", () => {
+    expect(shadingIdentitySchema({ schema })).toBe(schema);
+    expect(Object.keys(shadingIdentityParams({ schema }, {}))).toEqual([
+      "zeta",
+      "alpha",
+      "middle",
+    ]);
+  });
+
+  it("preserves authored Primary order through final integer-like protocol keys", () => {
+    const indexedSchema = {
+      "2": { kind: "number", min: 0, max: 10, default: 2 },
+      "10": { kind: "number", min: 0, max: 10, default: 10 },
+      alpha: { kind: "number", min: 0, max: 10, default: 1 },
+    } satisfies ParamSchema;
+    const plotSequence: PlotSequenceDeclaration = {
+      sharedParameters: [{ schemaKey: "10", key: "shared" }],
+      stages: [
+        {
+          id: "ink",
+          name: "Ink",
+          source: { kind: "primary", generatorId: "indexed-ink" },
+          parameters: [
+            { schemaKey: "2", key: "two" },
+            { schemaKey: "alpha", key: "alpha" },
+          ],
+          dependencies: { usesSeed: true, usesTime: false },
+        },
+      ],
+    };
+    const projection = shadingIdentityProjection({
+      schema: indexedSchema,
+      plotSequence,
+    });
+
+    expect(projection.schemaKeys).toEqual(["10", "2", "alpha"]);
+    expect(
+      Object.keys(
+        shadingIdentityParams(
+          { schema: indexedSchema, plotSequence },
+          { "2": 4, "10": 8, alpha: 3 },
+        ),
+      ),
+    ).toEqual(["10", "2", "alpha"]);
+    expect(
+      createShadingComputeIdentity({
+        sketchId: "indexed-ink",
+        schema: projection.schema,
+        schemaKeys: projection.schemaKeys,
+        params: { "2": 4, "10": 8, alpha: 3 },
+        seed: "seed",
+        compositionFrame: { width: 120, height: 90 },
+      }).params,
+    ).toEqual([
+      { key: "10", value: 8 },
+      { key: "2", value: 4 },
+      { key: "alpha", value: 3 },
+    ]);
+  });
+
   it("uses canonical schema declaration order, independent of params order", () => {
     const first = identity();
     const reordered = identity({

@@ -12,9 +12,11 @@ import {
   type RollingEtaEstimator,
 } from "./rollingEta";
 import {
-  terminateWorkerOnce,
-  workerErrorDetail,
-  workerEventDetail,
+  createWorkerBoundary,
+  type WorkerBoundaryControls,
+  type WorkerBoundaryFailure,
+  type WorkerBoundaryOutcome,
+  type WorkerBoundarySession,
   type WorkerFactory,
   type WorkerPort,
 } from "./workerBoundary";
@@ -58,16 +60,46 @@ export type ShadingProgressObserver = (
 interface ActiveJob {
   readonly jobId: number;
   readonly identity: ShadingComputeIdentity;
-  readonly terminateWorker: () => void;
-  readonly resolve: (result: ShadingComputeResult) => void;
   readonly observeProgress: ShadingProgressObserver | undefined;
   readonly capEta: RollingEtaEstimator;
   readonly convergenceEta: RollingEtaEstimator;
+  boundary: WorkerBoundarySession<ShadingComputeResult> | null;
+  cancelDuringMessage: (() => boolean) | null;
   etaRevision: number;
   lastProgress: ShadingProgress | null;
 }
 
 const defaultClock: ShadingMonotonicClock = () => performance.now();
+
+const SHADING_BOUNDARY_FALLBACKS: Readonly<
+  Record<WorkerBoundaryFailure["kind"], string>
+> = {
+  construction: "Shading worker failed",
+  listener: "Shading worker could not start",
+  "post-message": "Shading worker could not start",
+  "worker-error": "Shading worker failed",
+  "message-error": "Shading worker response could not be decoded",
+  "invalid-message": "Shading worker returned an invalid response",
+  "message-handler": "Shading worker failed",
+};
+
+const STRUCTURAL_BOUNDARY_FALLBACKS: Readonly<
+  Record<WorkerBoundaryFailure["kind"], string>
+> = {
+  construction: "Worker construction failed",
+  listener: "Worker listener registration failed",
+  "post-message": "Worker request could not be posted",
+  "worker-error": "Worker failed",
+  "message-error": "Worker response could not be decoded",
+  "invalid-message": "Worker returned an invalid response",
+  "message-handler": "Worker message handler failed",
+};
+
+function shadingFailureDetail(failure: WorkerBoundaryFailure): string {
+  return failure.detail === STRUCTURAL_BOUNDARY_FALLBACKS[failure.kind]
+    ? SHADING_BOUNDARY_FALLBACKS[failure.kind]
+    : failure.detail;
+}
 
 function earliestEstimate(
   revision: number,
@@ -102,7 +134,11 @@ export class ShadingCoordinator {
   ) {}
 
   get busy(): boolean {
-    return this.active !== null;
+    const active = this.active;
+    return (
+      active !== null &&
+      (active.boundary === null || active.boundary.active)
+    );
   }
 
   start(
@@ -112,91 +148,59 @@ export class ShadingCoordinator {
     if (this.disposed) {
       return Promise.reject(new Error("Shading coordinator is disposed"));
     }
-    if (this.active !== null) {
+    if (this.busy) {
       return Promise.reject(new Error("A Shading job is already active"));
     }
 
     const jobId = this.nextJobId++;
-    let worker: ShadingWorkerPort;
-    try {
-      worker = this.workerFactory();
-    } catch (error) {
-      return Promise.resolve({
-        status: "failure",
-        jobId,
-        error: workerErrorDetail(error, "Shading worker failed"),
-      });
+    const active: ActiveJob = {
+      jobId,
+      identity,
+      observeProgress,
+      capEta: createRollingEtaEstimator(),
+      convergenceEta: createRollingEtaEstimator(),
+      boundary: null,
+      cancelDuringMessage: null,
+      etaRevision: 0,
+      lastProgress: null,
+    };
+    this.active = active;
+
+    const boundary = createWorkerBoundary<
+      ShadingComputeRequest,
+      ShadingComputeResult
+    >({
+      createWorker: this.workerFactory,
+      request: { type: "compute", jobId, identity },
+      onMessage: (message, controls) => {
+        if (this.active !== active) return;
+        active.cancelDuringMessage = () =>
+          controls.complete({ status: "cancelled", jobId });
+        try {
+          this.handleMessage(active, message, controls);
+        } finally {
+          active.cancelDuringMessage = null;
+        }
+      },
+    });
+    active.boundary = boundary;
+
+    if (!boundary.active && this.active === active) {
+      this.active = null;
     }
-
-    return new Promise((resolve) => {
-      const active: ActiveJob = {
-        jobId,
-        identity,
-        terminateWorker: terminateWorkerOnce(worker),
-        resolve,
-        observeProgress,
-        capEta: createRollingEtaEstimator(),
-        convergenceEta: createRollingEtaEstimator(),
-        etaRevision: 0,
-        lastProgress: null,
-      };
-      this.active = active;
-
-      try {
-        worker.addEventListener("message", (event) => {
-          if (this.active !== active) return;
-          if (!isShadingWorkerMessage(event.data)) {
-            this.fail(active, "Shading worker returned an invalid response");
-            return;
-          }
-          if (event.data.jobId !== active.jobId) return;
-          if (event.data.type === "progress") {
-            this.reportProgress(active, event.data.snapshot);
-            return;
-          }
-          if (
-            !shadingComputeIdentitiesEqual(event.data.identity, active.identity)
-          ) {
-            return;
-          }
-          if (event.data.type === "failure") {
-            this.fail(active, event.data.error);
-            return;
-          }
-          this.finish(active, {
-            status: "success",
-            jobId,
-            identity,
-            scene: event.data.scene,
-            diagnostics: event.data.diagnostics,
-            computeTimeMs: event.data.computeTimeMs,
-          });
-        });
-        worker.addEventListener("error", (event) => {
-          if (this.active === active) {
-            this.fail(active, workerEventDetail(event, "Shading worker failed"));
-          }
-        });
-        worker.addEventListener("messageerror", () => {
-          if (this.active === active) {
-            this.fail(active, "Shading worker response could not be decoded");
-          }
-        });
-        worker.postMessage({ type: "compute", jobId, identity });
-      } catch (error) {
-        this.fail(
-          active,
-          workerErrorDetail(error, "Shading worker could not start"),
-        );
-      }
+    return boundary.outcome.then((outcome) => {
+      if (this.active === active) this.active = null;
+      return this.resultForOutcome(jobId, outcome);
     });
   }
 
   cancel(): boolean {
     const active = this.active;
     if (active === null) return false;
-    this.finish(active, { status: "cancelled", jobId: active.jobId });
-    return true;
+    const cancelled =
+      active.cancelDuringMessage?.() ?? active.boundary?.cancel() ?? false;
+    if (cancelled && this.active === active) this.active = null;
+    return cancelled;
   }
 
   dispose(): void {
@@ -208,6 +212,7 @@ export class ShadingCoordinator {
   private reportProgress(
     active: ActiveJob,
     candidate: ShadingProgress,
+    controls: WorkerBoundaryControls<ShadingComputeResult>,
   ): void {
     const previous = active.lastProgress;
     if (
@@ -250,32 +255,65 @@ export class ShadingCoordinator {
                 }),
               ]),
         ]);
-    try {
+    controls.observe(() => {
       active.observeProgress?.({ snapshot, eta });
-    } catch {
-      // Progress is observational: callback failures cannot own worker state.
-    }
+    });
   }
 
-  private fail(active: ActiveJob, error: string): void {
-    this.finish(active, {
+  private failureResult(active: ActiveJob, error: string): FailureResult {
+    return {
       status: "failure",
       jobId: active.jobId,
       error:
         error.trim() === ""
           ? "Shading computation failed"
           : error.slice(0, 500),
+    };
+  }
+
+  private handleMessage(
+    active: ActiveJob,
+    message: unknown,
+    controls: WorkerBoundaryControls<ShadingComputeResult>,
+  ): void {
+    if (!isShadingWorkerMessage(message)) {
+      controls.rejectMessage("Shading worker returned an invalid response");
+      return;
+    }
+    if (message.jobId !== active.jobId) return;
+    if (message.type === "progress") {
+      this.reportProgress(active, message.snapshot, controls);
+      return;
+    }
+    if (!shadingComputeIdentitiesEqual(message.identity, active.identity)) {
+      return;
+    }
+    if (message.type === "failure") {
+      controls.complete(this.failureResult(active, message.error));
+      return;
+    }
+    controls.complete({
+      status: "success",
+      jobId: active.jobId,
+      identity: active.identity,
+      scene: message.scene,
+      diagnostics: message.diagnostics,
+      computeTimeMs: message.computeTimeMs,
     });
   }
 
-  private finish(active: ActiveJob, result: ShadingComputeResult): void {
-    if (this.active !== active) return;
-    this.active = null;
-    try {
-      active.terminateWorker();
-    } catch {
-      // Worker termination is best-effort; the typed outcome must still settle.
+  private resultForOutcome(
+    jobId: number,
+    outcome: WorkerBoundaryOutcome<ShadingComputeResult>,
+  ): ShadingComputeResult {
+    if (outcome.status === "completed") return outcome.value;
+    if (outcome.status === "cancelled") {
+      return { status: "cancelled", jobId };
     }
-    active.resolve(result);
+    return {
+      status: "failure",
+      jobId,
+      error: shadingFailureDetail(outcome.failure),
+    };
   }
 }

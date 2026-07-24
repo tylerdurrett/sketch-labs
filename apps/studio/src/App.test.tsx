@@ -422,6 +422,11 @@ describe("App — Photo Scribble integration (#333)", () => {
       "control-stopPoint",
     ]);
     expect(
+      document.querySelector(
+        '[role="group"][aria-label="Plot Stage view"] button[aria-pressed="true"]',
+      )?.textContent,
+    ).toBe("Ink Scribble");
+    expect(
       document
         .querySelector('[data-testid="canvas"]')
         ?.getAttribute("data-params"),
@@ -439,6 +444,13 @@ describe("App — Photo Scribble integration (#333)", () => {
         chaos: 0.25,
         toneFidelity: 0.9,
         stopPoint: 100,
+        watercolorGamma: 0.5,
+        watercolorContrast: 0.5,
+        watercolorPivot: 0.5,
+        watercolorFormDetail: 0.5,
+        watercolorColorSensitivity: 0.5,
+        watercolorBoundaryStrength: 0.5,
+        watercolorBoundarySmoothing: 1,
       }),
     );
     expect(
@@ -453,6 +465,9 @@ describe("App — Photo Scribble integration (#333)", () => {
     );
     expect(buttonLabels).toEqual(
       expect.arrayContaining([
+        "Ink Scribble",
+        "Watercolor Forms",
+        "Combined",
         "New seed",
         "Randomize",
         "Export PNG",
@@ -461,6 +476,21 @@ describe("App — Photo Scribble integration (#333)", () => {
       ]),
     );
 
+    const combined = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "Combined")!;
+    act(() => combined.click());
+    expect(
+      document.querySelectorAll('#inspector input[id^="control-"]'),
+    ).toHaveLength(18);
+    expect(
+      document.querySelectorAll(
+        '[aria-label="imageAsset image asset identity"]',
+      ),
+    ).toHaveLength(1);
+
+    const ink = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "Ink Scribble")!;
+    act(() => ink.click());
     const tone = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent === "Tone",
     )!;
@@ -488,6 +518,11 @@ describe("App — Photo Scribble integration (#333)", () => {
     expect(
       document.querySelectorAll('#inspector input[id^="control-"]'),
     ).toHaveLength(11);
+    expect(
+      document.querySelector(
+        '[role="group"][aria-label="Plot Stage view"] button[aria-pressed="true"]',
+      )?.textContent,
+    ).toBe("Ink Scribble");
     expect(
       document.querySelector(
         '[aria-label="imageAsset image asset identity"]',

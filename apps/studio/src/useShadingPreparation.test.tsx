@@ -3,10 +3,12 @@ import { act, StrictMode, useLayoutEffect, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type {
-  ParamSchema,
-  Scene,
-  ShadingDiagnostics,
+import {
+  defaultParams,
+  photoScribble,
+  type ParamSchema,
+  type Scene,
+  type ShadingDiagnostics,
 } from "@harness/core";
 
 import type { ShadingComputeIdentity } from "./shadingComputeProtocol";
@@ -15,6 +17,7 @@ import type {
   ShadingProgressObserver,
 } from "./shadingCoordinator";
 import {
+  createShadingIdentityForAuthoredState,
   useShadingPreparation,
   type ShadingAuthoredState,
   type ShadingIdentitySketch,
@@ -138,6 +141,37 @@ afterEach(() => {
 });
 
 describe("useShadingPreparation", () => {
+  it("builds Sequence identities from only the Primary shared-plus-owned view", () => {
+    const params = defaultParams(photoScribble.schema);
+    const current = createShadingIdentityForAuthoredState(
+      photoScribble,
+      {
+        params,
+        seed: "seed",
+        compositionFrame: { width: 20, height: 10 },
+        inputRevision: 1,
+      },
+    );
+    const watercolorEdit = createShadingIdentityForAuthoredState(
+      photoScribble,
+      {
+        params: {
+          ...params,
+          watercolorBoundaryStrength:
+            (params.watercolorBoundaryStrength as number) + 0.25,
+        },
+        seed: "seed",
+        compositionFrame: { width: 20, height: 10 },
+        inputRevision: 2,
+      },
+    );
+
+    expect(current.params.map(({ key }) => key)).not.toContain(
+      "watercolorBoundaryStrength",
+    );
+    expect(watercolorEdit).toEqual(current);
+  });
+
   it("builds the canonical initial identity and starts it automatically", () => {
     const coordinators: FakeCoordinator[] = [];
     mount(

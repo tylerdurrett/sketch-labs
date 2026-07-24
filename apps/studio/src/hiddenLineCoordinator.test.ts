@@ -4,6 +4,7 @@ import type { ParamSchema, PlotProfile, Scene } from "@harness/core";
 
 import {
   HiddenLineCoordinator,
+  type HiddenLineExportProgressUpdate,
   type OutlineWorkerPort,
 } from "./hiddenLineCoordinator";
 import {
@@ -14,7 +15,10 @@ import {
   type OutlineComputeIdentity,
   type OutlineComputeRequest,
 } from "./outlineComputeProtocol";
-import { handleOutlineWorkerMessage } from "./outlineWorkerRuntime";
+import {
+  handleHiddenLineWorkerMessage,
+  handleOutlineWorkerMessage,
+} from "./outlineWorkerRuntime";
 
 const source: Scene = {
   space: { width: 20, height: 20 },
@@ -73,11 +77,14 @@ class RuntimeBackedWorker implements OutlineWorkerPort {
   private readonly listeners = new Map<string, Array<(event: any) => void>>();
 
   postMessage(message: HiddenLineWorkerRequest | OutlineComputeRequest): void {
-    const response = handleOutlineWorkerMessage(
-      message,
-      undefined,
-      (progress) => this.emitMessage(progress),
-    );
+    const response =
+      message.type === "compute"
+        ? handleOutlineWorkerMessage(message, undefined, (progress) =>
+            this.emitMessage(progress),
+          )
+        : handleHiddenLineWorkerMessage(message, undefined, (event) =>
+            this.emitMessage(event),
+          );
     if (response !== null) this.emitMessage(response);
   }
 
@@ -204,6 +211,37 @@ describe("HiddenLineCoordinator", () => {
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
+  it("honors cancellation requested by a synchronous preview progress observer", async () => {
+    const worker = new RuntimeBackedWorker();
+    const coordinator = new HiddenLineCoordinator(() => worker);
+    const cancel = vi.fn(() => coordinator.cancel());
+
+    const result = coordinator.startOutline(identity(), cancel);
+
+    expect(cancel).toHaveReturnedWith(true);
+    await expect(result).resolves.toEqual({ status: "cancelled", jobId: 1 });
+    expect(coordinator.busy).toBe(false);
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it("honors disposal requested during synchronous export finalization", async () => {
+    const worker = new RuntimeBackedWorker();
+    const coordinator = new HiddenLineCoordinator(() => worker);
+    const observe = vi.fn((update: HiddenLineExportProgressUpdate) => {
+      if (update.phase === "finalizing") coordinator.dispose();
+    });
+
+    const result = coordinator.startExport(exportSnapshot(), observe);
+
+    expect(observe).toHaveBeenLastCalledWith({ phase: "finalizing" });
+    await expect(result).resolves.toEqual({ status: "cancelled", jobId: 1 });
+    expect(coordinator.busy).toBe(false);
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    await expect(coordinator.startExport(exportSnapshot())).rejects.toThrow(
+      "disposed",
+    );
+  });
+
   it("ignores well-formed stale ids and identities until the current result arrives", async () => {
     const worker = new FakeWorker();
     const coordinator = new HiddenLineCoordinator(() => worker);
@@ -272,6 +310,22 @@ describe("HiddenLineCoordinator", () => {
 
     worker.emit("message", successfulResponse(worker));
     await expect(result).resolves.toMatchObject({ status: "success" });
+  });
+
+  it("keeps progress observation from owning the Outline worker lifecycle", async () => {
+    const worker = new FakeWorker();
+    const coordinator = new HiddenLineCoordinator(() => worker);
+    const result = coordinator.start(identity(), () => {
+      throw new Error("observer failed");
+    });
+
+    worker.emit("message", progressResponse(worker, 10));
+    expect(coordinator.busy).toBe(true);
+    expect(worker.terminate).not.toHaveBeenCalled();
+
+    worker.emit("message", successfulResponse(worker));
+    await expect(result).resolves.toMatchObject({ status: "success" });
+    expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
   it("ignores foreign, duplicate, regressive, and unstable-total progress", async () => {
@@ -532,8 +586,12 @@ describe("HiddenLineCoordinator", () => {
     if (mismatchedIdentity.sourceKind !== "legacy-scene") {
       throw new Error("expected legacy identity");
     }
-    (mismatchedIdentity.sourceScene.primitives[0]!.points[0] as [number, number])[0] =
-      999;
+    (
+      mismatchedIdentity.sourceScene.primitives[0]!.points[0] as [
+        number,
+        number,
+      ]
+    )[0] = 999;
     worker.emit("message", {
       ...terminal,
       identity: mismatchedIdentity,
@@ -573,7 +631,10 @@ describe("HiddenLineCoordinator", () => {
     const second = coordinator.startOutline(identity(2));
     secondWorker.emit("message", successfulResponse(secondWorker));
     secondWorker.emit("message", successfulResponse(secondWorker));
-    await expect(second).resolves.toMatchObject({ status: "success", jobId: 2 });
+    await expect(second).resolves.toMatchObject({
+      status: "success",
+      jobId: 2,
+    });
     expect(secondWorker.terminate).toHaveBeenCalledOnce();
   });
 

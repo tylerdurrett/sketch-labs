@@ -9,7 +9,6 @@ import {
 } from "react";
 
 import {
-  activeParams,
   applyPreset,
   buildReproMetadata,
   clipSceneToBounds,
@@ -31,12 +30,13 @@ import {
   type PresetFraming,
   type DetailField,
   type OutlineTarget,
+  type PlotSequenceDeclaration,
   type Scene,
   type Sketch,
   type SketchEnvironment,
 } from "@harness/core";
 
-import { ControlPanel } from "./ControlPanel";
+import { ControlPanel, type ControlPanelProps } from "./ControlPanel";
 import type { ImageAssetControlRecomposeRequest } from "./ImageAssetControl";
 import { Button } from "./components/ui/button";
 import { downloadBlob } from "./downloadBlob";
@@ -115,6 +115,7 @@ import {
 import { readPaperDisplayUnit } from "./paperDisplayUnit";
 import { PageFrameEditor } from "./PageFrameEditor";
 import type { PageFrameAspectConstraint } from "./pageFrameManipulation";
+import { PlotSequenceStageControls } from "./PlotSequenceStageControls";
 import {
   readPlotterSvgIncludePaperMargins,
   writePlotterSvgIncludePaperMargins,
@@ -132,6 +133,7 @@ import {
   acknowledgedCurrentShading,
   type ShadingPaintAcknowledgement,
 } from "./shadingExportReadiness";
+import { shadingIdentityParams } from "./shadingComputeProtocol";
 import {
   useShadingPreparation,
   type ShadingAuthoredState,
@@ -139,8 +141,30 @@ import {
 import { useSketchEnvironment } from "./useSketchEnvironment";
 import { STUDIO_IMAGE_ASSET_LONG_EDGE_CAP } from "./studioConfig";
 import { useDetailPreparation } from "./useDetailPreparation";
+import type { PlotSequencePresentation } from "./plotSequencePresentation";
+import { usePlotSequencePresentation } from "./usePlotSequencePresentation";
+import {
+  useRegisteredStagePreparation,
+  type RegisteredStageAuthoredState,
+  type RegisteredStagePreparationSketch,
+} from "./useRegisteredStagePreparation";
 
 type DiagnosticSelection = null | "tone" | "detail";
+
+function presentationIsIsolatedPrimary(
+  declaration: PlotSequenceDeclaration | undefined,
+  presentation: PlotSequencePresentation,
+): boolean {
+  if (declaration === undefined) return true;
+  const primary = declaration.stages.find(
+    (stage) => stage.source.kind === "primary",
+  );
+  return (
+    primary !== undefined &&
+    presentation.kind === "isolated" &&
+    presentation.stageId === primary.id
+  );
+}
 
 type DetailReferenceDerivation =
   | { readonly kind: "ready"; readonly field: DetailField }
@@ -221,19 +245,27 @@ function artworkGenerationParamsEqual(
   );
 }
 
-/** Keep only the normalized controls that affect the active Shading strategy. */
+/** Keep only normalized controls that affect the Primary Shading Stage. */
 function shadingArtworkParams(
-  sketch: Pick<Sketch, "schema" | "generateDetailField">,
+  sketch: Pick<
+    Sketch,
+    "schema" | "plotSequence" | "generateDetailField"
+  >,
   params: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
-  return activeParams(
-    sketch.schema,
-    artworkGenerationParams(sketch, params),
+  return shadingIdentityParams(
+    sketch,
+    sketch.plotSequence === undefined
+      ? artworkGenerationParams(sketch, params)
+      : params,
   );
 }
 
 function shadingArtworkParamsEqual(
-  sketch: Pick<Sketch, "schema" | "generateDetailField">,
+  sketch: Pick<
+    Sketch,
+    "schema" | "plotSequence" | "generateDetailField"
+  >,
   left: Readonly<Record<string, unknown>>,
   right: Readonly<Record<string, unknown>>,
 ): boolean {
@@ -319,7 +351,9 @@ function classifyOutlineEdit(
   next: StudioEditState,
 ): OutlineEditChange {
   if (
-    !artworkGenerationParamsEqual(sketch, previous.params, next.params) ||
+    !(sketch.plotSequence === undefined
+      ? artworkGenerationParamsEqual(sketch, previous.params, next.params)
+      : shadingArtworkParamsEqual(sketch, previous.params, next.params)) ||
     previous.seed !== next.seed ||
     previous.tolerance !== next.tolerance ||
     !plotDrawableAspectsEquivalent(
@@ -370,6 +404,28 @@ function shadingInputsChanged(
 }
 
 /**
+ * Hook-order placeholder for non-Sequence mounts.
+ *
+ * Its sole Primary has no capability, so D3 constructs no worker or generated
+ * coordinator. Legacy rendering remains owned by its existing Shading hook.
+ */
+const INERT_PLOT_SEQUENCE: PlotSequenceDeclaration = Object.freeze({
+  sharedParameters: Object.freeze([]),
+  stages: Object.freeze([
+    Object.freeze({
+      id: "legacy-primary",
+      name: "Legacy Primary",
+      source: Object.freeze({
+        kind: "primary",
+        generatorId: "legacy-primary",
+      }),
+      parameters: Object.freeze([]),
+      dependencies: Object.freeze({ usesSeed: false, usesTime: false }),
+    }),
+  ]),
+});
+
+/**
  * Props for {@link SketchControls}.
  */
 export interface SketchControlsProps {
@@ -397,6 +453,11 @@ export interface SketchControlsProps {
   onHiddenLineBusyChange?: (busy: boolean) => void;
   /** Longest normalized source edge for Image Asset imports. */
   imageAssetLongEdgeCap?: number;
+  /**
+   * Internal deterministic seam for focused Plot Sequence wiring tests.
+   * Production omits it, so every keyed mount starts on Primary.
+   */
+  initialPlotSequencePresentation?: PlotSequencePresentation;
 }
 
 /**
@@ -449,6 +510,7 @@ export function SketchControls({
   onToggleCollapse,
   onHiddenLineBusyChange,
   imageAssetLongEdgeCap = STUDIO_IMAGE_ASSET_LONG_EDGE_CAP,
+  initialPlotSequencePresentation,
 }: SketchControlsProps) {
   const [history, setHistory] = useState<EditHistory>(() =>
     createEditHistory({
@@ -586,11 +648,14 @@ export function SketchControls({
     detailPreparation.unrequest,
   ]);
 
-  const hasShadingPreparation = sketch.generateShadingArtwork !== undefined;
+  const plotSequence = sketch.plotSequence;
+  const hasPlotSequence = plotSequence !== undefined;
+  const hasShadingCapability = sketch.generateShadingArtwork !== undefined;
+  const hasLegacyShadingPreparation = !hasPlotSequence && hasShadingCapability;
   const shadingInputRevisionRef = useRef(0);
   const shadingPreparation = useShadingPreparation({
     sketch,
-    enabled: hasShadingPreparation && environmentReady,
+    enabled: hasLegacyShadingPreparation && environmentReady,
     initial: {
       params: shadingArtworkParams(sketch, history.present.params),
       seed: history.present.seed,
@@ -598,41 +663,95 @@ export function SketchControls({
       inputRevision: shadingInputRevisionRef.current,
     },
   });
+  const registeredStageSketch = useMemo<RegisteredStagePreparationSketch>(
+    () =>
+      plotSequence === undefined
+        ? {
+            id: sketch.id,
+            schema: {},
+            plotSequence: INERT_PLOT_SEQUENCE,
+          }
+        : {
+            ...sketch,
+            plotSequence,
+          },
+    [plotSequence, sketch],
+  );
+  const registeredStagePreparation = useRegisteredStagePreparation({
+    sketch: registeredStageSketch,
+    enabled: hasPlotSequence && environmentReady,
+    initial: {
+      params: history.present.params,
+      seed: history.present.seed,
+      sampledT: 0,
+      compositionFrame,
+      inputRevision: shadingInputRevisionRef.current,
+    },
+  });
+  const plotSequencePresentation = usePlotSequencePresentation({
+    declaration: plotSequence ?? INERT_PLOT_SEQUENCE,
+    records: registeredStagePreparation.records,
+    demand: registeredStagePreparation.demand,
+    ...(initialPlotSequencePresentation === undefined
+      ? {}
+      : { initialPresentation: initialPlotSequencePresentation }),
+  });
+  // Plot Stage selection is transient presentation state, but legacy actions
+  // need an imperative authority just like authored history. A Stage-button
+  // click updates this mirror before React renders so another click in the same
+  // batch cannot capture, generate, launch, or download Primary Ink output.
+  const plotSequencePresentationRef = useRef(
+    plotSequencePresentation.presentation,
+  );
+  plotSequencePresentationRef.current = plotSequencePresentation.presentation;
+  const primaryLegacyActionsAvailable = presentationIsIsolatedPrimary(
+    plotSequence,
+    plotSequencePresentation.presentation,
+  );
+  const primaryLegacyActionsAvailableNow = (): boolean =>
+    presentationIsIsolatedPrimary(
+      plotSequence,
+      plotSequencePresentationRef.current,
+    );
+  const primaryShadingPreparation = hasPlotSequence
+    ? registeredStagePreparation.primaryShadingPreparation
+    : shadingPreparation;
   const currentShading = environmentReady
-    ? selectCurrentShadingResult(shadingPreparation.session)
+    ? selectCurrentShadingResult(primaryShadingPreparation.session)
     : null;
   const displayedShadingDiagnostics: DisplayedShadingDiagnostics | null =
-    !environmentReady || shadingPreparation.session.displayed === null
+    !environmentReady || primaryShadingPreparation.session.displayed === null
       ? null
       : {
           freshness: currentShading === null ? "stale" : "current",
-          diagnostics: shadingPreparation.session.displayed.diagnostics,
-          computeTimeMs: shadingPreparation.session.displayed.computeTimeMs,
+          diagnostics: primaryShadingPreparation.session.displayed.diagnostics,
+          computeTimeMs:
+            primaryShadingPreparation.session.displayed.computeTimeMs,
         };
   const activeShadingToken = environmentReady
-    ? (shadingPreparation.session.active?.token ??
-        shadingPreparation.session.pending?.token ??
-        null)
+    ? (primaryShadingPreparation.session.active?.token ??
+      primaryShadingPreparation.session.pending?.token ??
+      null)
     : null;
   const shadingPreparationDiagnostics: ShadingPreparationDiagnostics =
     activeShadingToken !== null
       ? {
           kind: "preparing",
           progress:
-            shadingPreparation.progress?.token === activeShadingToken
-              ? shadingPreparation.progress.update.snapshot
+            primaryShadingPreparation.progress?.token === activeShadingToken
+              ? primaryShadingPreparation.progress.update.snapshot
               : null,
           eta:
-            shadingPreparation.progress?.token === activeShadingToken
-              ? shadingPreparation.progress.update.eta
+            primaryShadingPreparation.progress?.token === activeShadingToken
+              ? primaryShadingPreparation.progress.update.eta
               : { kind: "estimating", revision: 0 },
         }
-      : shadingPreparation.session.failure === null
+      : primaryShadingPreparation.session.failure === null
         ? { kind: "idle" }
         : {
             kind: "failure",
-            message: shadingPreparation.session.failure,
-            onRetry: shadingPreparation.retry,
+            message: primaryShadingPreparation.session.failure,
+            onRetry: primaryShadingPreparation.retry,
           };
   const [acknowledgedShading, setAcknowledgedShading] =
     useState<ShadingPaintAcknowledgement | null>(null);
@@ -657,13 +776,22 @@ export function SketchControls({
     compositionFrame: resolveStudioCompositionFrame(edit),
     inputRevision: shadingInputRevisionRef.current,
   });
+  const authoredRegisteredStageState = (
+    edit: StudioEditState = historyRef.current.present,
+  ): RegisteredStageAuthoredState => ({
+    params: edit.params,
+    seed: edit.seed,
+    sampledT: 0,
+    compositionFrame: resolveStudioCompositionFrame(edit),
+    inputRevision: shadingInputRevisionRef.current,
+  });
 
   // Sample-source derivation intentionally reads the live transaction preview
   // params and Composition Frame directly. Seed, timeline, profile magnitude,
   // and the Outline session are absent from this capability seam.
   const toneSource = useMemo(
     () =>
-      toneReferenceActive
+      toneReferenceActive && primaryLegacyActionsAvailable
         ? environmentReady
           ? sketch.generateToneSource?.(
               params,
@@ -674,6 +802,7 @@ export function SketchControls({
         : undefined,
     [
       toneReferenceActive,
+      primaryLegacyActionsAvailable,
       sketch,
       params,
       compositionFrame,
@@ -687,7 +816,12 @@ export function SketchControls({
   // a malformed prepared record or binding assertion becomes an honest Detail
   // failure instead of escaping through React or silently substituting zero.
   const detailReferenceDerivation: DetailReferenceDerivation | null = (() => {
-    if (diagnosticSelection !== "detail") return null;
+    if (
+      diagnosticSelection !== "detail" ||
+      !primaryLegacyActionsAvailable
+    ) {
+      return null;
+    }
     if (!environmentReady || detailIdentity === null) {
       return { kind: "loading" };
     }
@@ -869,10 +1003,10 @@ export function SketchControls({
   }, [environmentReady]);
 
   const requestOutlineForCurrentInputs = (): void => {
-    if (!environmentReadyNow()) return;
+    if (!primaryLegacyActionsAvailableNow() || !environmentReadyNow()) return;
     dispatchOutline({
       type: "request-outline",
-      launch: !hasShadingPreparation || shadingPaintIsCurrent,
+      launch: !hasShadingCapability || shadingPaintIsCurrent,
       ...(shadingPaintIsCurrent && currentShading !== null
         ? {
             provenance: {
@@ -899,11 +1033,26 @@ export function SketchControls({
       current.present,
       next.present,
     );
-    if (hasShadingPreparation && shadingChanged) {
+    if (hasLegacyShadingPreparation && shadingChanged) {
+      shadingInputRevisionRef.current += 1;
+    }
+    const changedRegisteredStageIds = hasPlotSequence
+      ? registeredStagePreparation.changedStageIds(
+          authoredRegisteredStageState(next.present),
+        )
+      : [];
+    if (
+      hasPlotSequence &&
+      changedRegisteredStageIds.some(
+        (stageId) =>
+          plotSequence?.stages.find((stage) => stage.id === stageId)?.source
+            .kind === "primary",
+      )
+    ) {
       shadingInputRevisionRef.current += 1;
     }
     if (
-      hasShadingPreparation &&
+      hasLegacyShadingPreparation &&
       shadingAction === "preview" &&
       shadingChanged
     ) {
@@ -914,11 +1063,28 @@ export function SketchControls({
         authoredShadingState(next.present),
       );
     } else if (
-      hasShadingPreparation &&
+      hasLegacyShadingPreparation &&
       shadingAction === "atomic" &&
       shadingChanged
     ) {
       shadingPreparation.requestAtomic(authoredShadingState(next.present));
+    }
+    if (
+      hasPlotSequence &&
+      shadingAction === "preview" &&
+      changedRegisteredStageIds.length > 0
+    ) {
+      registeredStagePreparation.previewAuthoredState(
+        authoredRegisteredStageState(next.present),
+      );
+    } else if (
+      hasPlotSequence &&
+      shadingAction === "atomic" &&
+      changedRegisteredStageIds.length > 0
+    ) {
+      registeredStagePreparation.requestAtomic(
+        authoredRegisteredStageState(next.present),
+      );
     }
     const outlineChange = classifyOutlineEdit(
       sketch,
@@ -936,11 +1102,10 @@ export function SketchControls({
         dispatchOutline({ type: "transaction-began" });
       }
       const retainsPaintedShading =
-        hasShadingPreparation && !shadingChanged && shadingPaintIsCurrent;
+        hasShadingCapability && !shadingChanged && shadingPaintIsCurrent;
       dispatchOutline({
         type: "inputs-changed",
-        launch:
-          environmentReadyNow() && launchOutline && !hasShadingPreparation,
+        launch: environmentReadyNow() && launchOutline && !hasShadingCapability,
         ...(retainsPaintedShading && currentShading !== null
           ? {
               provenance: {
@@ -949,7 +1114,7 @@ export function SketchControls({
               },
             }
           : {}),
-        waitForSource: hasShadingPreparation && !retainsPaintedShading,
+        waitForSource: hasShadingCapability && !retainsPaintedShading,
       });
     }
     setHistory(next);
@@ -1137,9 +1302,14 @@ export function SketchControls({
     cancelOutlineCoordinator();
     dispatchOutline({ type: "transaction-began" });
     updateHistory(beginEditTransaction, false);
-    if (hasShadingPreparation) shadingPreparation.beginTransaction();
+    if (hasLegacyShadingPreparation) shadingPreparation.beginTransaction();
   };
   const beginParamTransaction = (key: string): void => {
+    if (hasPlotSequence) {
+      beginTransaction();
+      registeredStagePreparation.beginParamTransaction(key);
+      return;
+    }
     if (!isDetailReferenceOnlyParam(sketch, key)) {
       beginTransaction();
       return;
@@ -1147,6 +1317,10 @@ export function SketchControls({
     // Sensitivity is a live Detail remap in #367, so merely focusing it must
     // not relinquish retained Fill/Outline ownership or suspend artwork work.
     updateHistory(beginEditTransaction, false);
+  };
+  const beginSeedTransaction = (): void => {
+    beginTransaction();
+    if (hasPlotSequence) registeredStagePreparation.beginSeedTransaction();
   };
   const beginProfileTransaction = (): void => {
     // A profile gesture may prove to be physical style or Page placement only.
@@ -1159,11 +1333,16 @@ export function SketchControls({
   ): void => {
     const outlineTransactionOpen = outlineSessionRef.current.transactionOpen;
     const shadingTransactionOpen =
-      hasShadingPreparation &&
+      hasLegacyShadingPreparation &&
       shadingPreparation.getSessionSnapshot().transactionOpen;
     updateHistory(transition, false);
     if (shadingTransactionOpen) {
       shadingPreparation.settleTransaction(authoredShadingState());
+    }
+    if (hasPlotSequence) {
+      registeredStagePreparation.settleTransaction(
+        authoredRegisteredStageState(),
+      );
     }
     // Settlement belongs to the session reducer: outside export it resamples the
     // final Fill exactly once; during export it retains only a deferred request,
@@ -1171,7 +1350,7 @@ export function SketchControls({
     if (outlineTransactionOpen) {
       dispatchOutline({
         type: "transaction-settled",
-        launch: environmentReadyNow() && !hasShadingPreparation,
+        launch: environmentReadyNow() && !hasShadingCapability,
       });
     }
   };
@@ -1269,6 +1448,7 @@ export function SketchControls({
   // exact displayed Fill, then the session's worker coordinator derives geometry;
   // LiveCanvas only paints the held Fill or atomically completed Outline.
   const toggleRenderMode = () => {
+    if (!primaryLegacyActionsAvailableNow()) return;
     if (outlineSessionRef.current.desired === "outline") {
       cancelOutlineCoordinator();
       dispatchOutline({ type: "request-fill" });
@@ -1285,12 +1465,13 @@ export function SketchControls({
     }
     diagnosticSelectionRef.current = next;
     setDiagnosticSelection(next);
-    if (previous === "detail" && hasShadingPreparation) {
-      shadingPreparation.resumeLatest();
+    if (previous === "detail" && hasShadingCapability) {
+      primaryShadingPreparation.resumeLatest();
     }
   };
 
   const selectFill = (): void => {
+    if (!primaryLegacyActionsAvailableNow()) return;
     leaveDetailFor(null);
     if (outlineSessionRef.current.desired === "outline") {
       cancelOutlineCoordinator();
@@ -1299,6 +1480,7 @@ export function SketchControls({
   };
 
   const selectOutline = (): void => {
+    if (!primaryLegacyActionsAvailableNow()) return;
     leaveDetailFor(null);
     if (!environmentReadyNow()) return;
     if (outlineSessionRef.current.desired !== "outline") {
@@ -1307,7 +1489,12 @@ export function SketchControls({
   };
 
   const selectToneReference = (): void => {
-    if (sketch.generateToneSource === undefined) return;
+    if (
+      !primaryLegacyActionsAvailableNow() ||
+      sketch.generateToneSource === undefined
+    ) {
+      return;
+    }
     // Tone has no Outline phase of its own. Relinquish preview ownership and
     // reset intent to Fill before switching LiveCanvas to the pixel source.
     cancelOutlineCoordinator();
@@ -1317,6 +1504,7 @@ export function SketchControls({
 
   const selectDetailReference = (): void => {
     if (
+      !primaryLegacyActionsAvailableNow() ||
       sketch.generateDetailField === undefined ||
       !environmentReadyNow() ||
       detailIdentity === null ||
@@ -1327,7 +1515,7 @@ export function SketchControls({
 
     // Detail owns no Shading geometry. Retire active ownership synchronously
     // before the diagnostic becomes observable or analysis can be requested.
-    if (hasShadingPreparation) shadingPreparation.suspend();
+    if (hasShadingCapability) primaryShadingPreparation.suspend();
     cancelOutlineCoordinator();
     dispatchOutline({ type: "request-fill" });
     diagnosticSelectionRef.current = "detail";
@@ -1335,7 +1523,44 @@ export function SketchControls({
     detailPreparation.request(detailIdentity);
   };
 
+  const retirePrimaryLegacyActions = (): void => {
+    const current = outlineSessionRef.current;
+    if (current.slot !== null) cancelCoordinator();
+    if (current.exportActive !== null) {
+      dispatchOutline({
+        type: "export-cancelled",
+        token: current.exportActive.token,
+      });
+    }
+    // Resetting to Fill clears capture, active work, deferred intent, and any
+    // retained Outline phase before the supporting/Combined Scene can paint.
+    dispatchOutline({ type: "request-fill" });
+
+    const previousDiagnostic = diagnosticSelectionRef.current;
+    if (previousDiagnostic === "detail") detailPreparation.unrequest();
+    diagnosticSelectionRef.current = null;
+    setDiagnosticSelection(null);
+    if (previousDiagnostic === "detail" && hasShadingCapability) {
+      primaryShadingPreparation.resumeLatest();
+    }
+  };
+
+  const setPlotSequencePresentation = (
+    next: PlotSequencePresentation,
+  ): void => {
+    const leavingPrimary =
+      primaryLegacyActionsAvailableNow() &&
+      !presentationIsIsolatedPrimary(plotSequence, next);
+    // Establish the transient authority before teardown or React state. Any
+    // already-queued worker/export callback therefore observes non-Primary and
+    // fails closed even if it runs in this event batch.
+    plotSequencePresentationRef.current = next;
+    if (leavingPrimary) retirePrimaryLegacyActions();
+    plotSequencePresentation.setPresentation(next);
+  };
+
   const onFillCaptured = (capture: FillCapture): void => {
+    if (!primaryLegacyActionsAvailableNow()) return;
     if (!environmentReadyNow()) {
       cancelUnavailableEnvironmentWork();
       return;
@@ -1384,13 +1609,23 @@ export function SketchControls({
       });
     };
     const coordinator = coordinatorRef.current;
-    if (coordinator === null) return;
+    if (
+      coordinator === null ||
+      !primaryLegacyActionsAvailableNow()
+    ) {
+      return;
+    }
     void coordinator
       .start(identity, (update) => {
         // Worker callbacks can already be queued when a job is replaced. The
         // session token, rather than coordinator/job identity alone, owns UI
         // progress so an old worker can never repaint a newer request.
-        if (outlineSessionRef.current.active?.token !== capture.token) return;
+        if (
+          !primaryLegacyActionsAvailableNow() ||
+          outlineSessionRef.current.active?.token !== capture.token
+        ) {
+          return;
+        }
         if (!environmentReadyNow()) {
           cancelUnavailableEnvironmentWork();
           return;
@@ -1398,7 +1633,12 @@ export function SketchControls({
         setOutlineProgress({ token: capture.token, update });
       })
       .then((result) => {
-        if (coordinatorRef.current !== coordinator) return;
+        if (
+          coordinatorRef.current !== coordinator ||
+          !primaryLegacyActionsAvailableNow()
+        ) {
+          return;
+        }
         if (!environmentReadyNow()) {
           cancelUnavailableEnvironmentWork();
           return;
@@ -1415,7 +1655,12 @@ export function SketchControls({
         }
       })
       .catch((error: unknown) => {
-        if (coordinatorRef.current !== coordinator) return;
+        if (
+          coordinatorRef.current !== coordinator ||
+          !primaryLegacyActionsAvailableNow()
+        ) {
+          return;
+        }
         if (!environmentReadyNow()) {
           cancelUnavailableEnvironmentWork();
           return;
@@ -1427,9 +1672,14 @@ export function SketchControls({
   const onDisplayedSceneCommitted = (
     snapshot: DisplayedSceneSnapshot,
   ): void => {
-    if (!environmentReadyNow()) return;
+    if (
+      !primaryLegacyActionsAvailableNow() ||
+      !environmentReadyNow()
+    ) {
+      return;
+    }
     const latestShading = selectCurrentShadingResult(
-      shadingPreparation.getSessionSnapshot(),
+      primaryShadingPreparation.getSessionSnapshot(),
     );
     if (
       latestShading === null ||
@@ -1500,8 +1750,31 @@ export function SketchControls({
     if (toneSource !== undefined) {
       return { kind: "tone-reference", source: toneSource };
     }
+    if (hasPlotSequence && outlineSession.phase.kind === "fill-live") {
+      const isolatedStage =
+        plotSequencePresentation.presentation.kind === "isolated"
+          ? registeredStagePreparation.records[
+              plotSequencePresentation.presentation.stageId
+            ]
+          : undefined;
+      const primaryDisplayed = primaryShadingPreparation.session.displayed;
+      const presentedScene = plotSequencePresentation.snapshot.scene;
+      return {
+        kind: "fill-held",
+        scene: presentedScene ?? emptyShadingScene,
+        t: 0,
+        ...(isolatedStage?.sourceKind === "primary" &&
+        primaryDisplayed !== null &&
+        presentedScene === primaryDisplayed.scene
+          ? {
+              sourceInputRevision: primaryDisplayed.sourceInputRevision,
+              contentRevision: primaryDisplayed.contentRevision,
+            }
+          : {}),
+      };
+    }
     if (
-      hasShadingPreparation &&
+      hasLegacyShadingPreparation &&
       outlineSession.phase.kind === "fill-live"
     ) {
       return shadingPreparation.session.displayed === null
@@ -1599,10 +1872,12 @@ export function SketchControls({
 
   /** Re-prove Shading session and canvas provenance at an export side effect. */
   const captureCurrentShadingExport = () => {
-    if (!hasShadingPreparation) return null;
+    if (!primaryLegacyActionsAvailableNow() || !hasShadingCapability) {
+      return null;
+    }
     const displayed = canvasHandle.current?.captureDisplayedFrame() ?? null;
     const result = acknowledgedCurrentShading(
-      shadingPreparation.getSessionSnapshot(),
+      primaryShadingPreparation.getSessionSnapshot(),
       acknowledgedShadingRef.current,
       displayed,
     );
@@ -1612,8 +1887,13 @@ export function SketchControls({
   const sameShadingExportRevision = (
     expected: ReturnType<typeof captureCurrentShadingExport>,
   ): boolean => {
-    if (!environmentReadyNow()) return false;
-    if (!hasShadingPreparation) return true;
+    if (
+      !primaryLegacyActionsAvailableNow() ||
+      !environmentReadyNow()
+    ) {
+      return false;
+    }
+    if (!hasShadingCapability) return true;
     if (expected === null) return false;
     const current = captureCurrentShadingExport();
     return (
@@ -1638,13 +1918,14 @@ export function SketchControls({
       // LiveCanvas stays mounted in Detail mode, so this handler gate is the
       // final authority preventing its diagnostic backing pixels from escaping.
       diagnosticSelectionRef.current !== null ||
+      !primaryLegacyActionsAvailableNow() ||
       !environmentReadyNow()
     ) return;
     const handle = canvasHandle.current;
     const canvas = handle?.getCanvas();
     if (handle == null || canvas == null) return;
     const shadingExport = captureCurrentShadingExport();
-    if (hasShadingPreparation && shadingExport === null) return;
+    if (hasShadingCapability && shadingExport === null) return;
     const edit = historyRef.current.present;
     // Time-gate the `-t{t}` filename segment on `sketch.time`: a time-driven
     // Sketch carries its captured moment, a static one omits `t` entirely.
@@ -1678,6 +1959,7 @@ export function SketchControls({
         const withMeta = insertPngMetadata(new Uint8Array(buffer), metadata);
         // `withMeta` spans its whole backing buffer (core's `concat` allocates a
         // fresh, offset-0 array), so `.buffer` is exactly these bytes.
+        if (!primaryLegacyActionsAvailableNow()) return;
         downloadBlob(
           new Blob([withMeta.buffer as ArrayBuffer], { type: "image/png" }),
           filename,
@@ -1703,12 +1985,13 @@ export function SketchControls({
   const exportSvg = () => {
     if (
       diagnosticSelectionRef.current !== null ||
+      !primaryLegacyActionsAvailableNow() ||
       !environmentReadyNow()
     ) return;
     const handle = canvasHandle.current;
     if (handle == null) return;
     const shadingExport = captureCurrentShadingExport();
-    if (hasShadingPreparation && shadingExport === null) return;
+    if (hasShadingCapability && shadingExport === null) return;
     const edit = historyRef.current.present;
     const pageFrame =
       edit.framing.kind === "framed" ? edit.framing.pageFrame : null;
@@ -1727,19 +2010,26 @@ export function SketchControls({
     // filename's time-segment source, so both reflect the same displayed moment.
     const sourceScene =
       shadingExport?.result.scene ?? retainedFill?.sourceScene ?? null;
-    const scene =
-      pageFrame !== null && sourceScene !== null
-        ? frameScene(sourceScene, pageFrame)
-        : sourceScene ??
-          (environment === undefined
-            ? sketch.generate(params, seed, t ?? 0, compositionFrame)
-            : sketch.generate(
-                params,
-                seed,
-                t ?? 0,
-                compositionFrame,
-                environment,
-              ));
+    let scene: Scene;
+    if (pageFrame !== null && sourceScene !== null) {
+      scene = frameScene(sourceScene, pageFrame);
+    } else if (sourceScene !== null) {
+      scene = sourceScene;
+    } else {
+      // Cold generation is a legacy Primary Ink fallback. Re-prove the
+      // transient view at the exact side-effect boundary.
+      if (!primaryLegacyActionsAvailableNow()) return;
+      scene =
+        environment === undefined
+          ? sketch.generate(params, seed, t ?? 0, compositionFrame)
+          : sketch.generate(
+              params,
+              seed,
+              t ?? 0,
+              compositionFrame,
+              environment,
+            );
+    }
     // Clip the generated geometry to the canvas rectangle so the exported plot
     // contains nothing beyond the Scene's own `space` (issue #237). Export-time
     // ONLY — this pure Scene→Scene transform never runs in the live fill loop.
@@ -1763,6 +2053,7 @@ export function SketchControls({
     const svg = renderToSVG(exportScene, metadata);
     const blob = new Blob([svg], { type: "image/svg+xml" });
     if (!sameShadingExportRevision(shadingExport)) return;
+    if (!primaryLegacyActionsAvailableNow()) return;
     downloadBlob(
       blob,
       exportFilename(
@@ -1782,6 +2073,7 @@ export function SketchControls({
   const exportHiddenLineSvg = () => {
     if (
       diagnosticSelectionRef.current !== null ||
+      !primaryLegacyActionsAvailableNow() ||
       hiddenLineBusy ||
       !environmentReadyNow()
     ) {
@@ -1792,7 +2084,7 @@ export function SketchControls({
     const capturedDisplayed = handle.captureDisplayedFrame();
     if (capturedDisplayed === null) return;
     const shadingExport = captureCurrentShadingExport();
-    if (hasShadingPreparation && shadingExport === null) return;
+    if (hasShadingCapability && shadingExport === null) return;
     const displayed = shadingExport?.displayed ?? capturedDisplayed;
 
     const edit = historyRef.current.present;
@@ -1878,7 +2170,10 @@ export function SketchControls({
     const active = requested.exportActive;
     if (active === null || active.snapshot !== snapshot) return;
     const coordinator = coordinatorRef.current;
-    if (coordinator === null) {
+    if (
+      coordinator === null ||
+      !primaryLegacyActionsAvailableNow()
+    ) {
       console.error(
         "Hidden-line export failed",
         "Hidden-line export is unavailable",
@@ -1896,6 +2191,7 @@ export function SketchControls({
         if (outlineSessionRef.current.exportActive?.token !== active.token) {
           return;
         }
+        if (!primaryLegacyActionsAvailableNow()) return;
         if (!environmentReadyNow()) {
           cancelUnavailableEnvironmentWork();
           return;
@@ -1909,6 +2205,7 @@ export function SketchControls({
       .then((result) => {
         if (
           coordinatorRef.current !== coordinator ||
+          !primaryLegacyActionsAvailableNow() ||
           outlineSessionRef.current.exportActive?.token !== active.token
         ) {
           return;
@@ -1924,6 +2221,7 @@ export function SketchControls({
             completedOutline: result.completedOutline,
           });
           if (!sameShadingExportRevision(shadingExport)) return;
+          if (!primaryLegacyActionsAvailableNow()) return;
           downloadBlob(
             new Blob([result.svg], { type: "image/svg+xml" }),
             result.filename,
@@ -1942,6 +2240,7 @@ export function SketchControls({
       .catch((error: unknown) => {
         if (
           coordinatorRef.current !== coordinator ||
+          !primaryLegacyActionsAvailableNow() ||
           outlineSessionRef.current.exportActive?.token !== active.token
         ) {
           return;
@@ -1967,6 +2266,36 @@ export function SketchControls({
     cancelCoordinator();
     dispatchOutline({ type: "export-cancelled", token: active.token });
   };
+
+  const controlPanelProps = {
+    schema: sketch.schema,
+    params,
+    locks,
+    onChange: setParam,
+    editHistory: {
+      onBegin: beginTransaction,
+      onPreview: (next) => previewLeaf("params", next),
+      onCommit: commitTransaction,
+      onCancel: cancelTransaction,
+    },
+    onParamEditBegin: beginParamTransaction,
+    onToggleLock: toggleLock,
+    imageAssetLongEdgeCap,
+    imageAssetResolution: {
+      status: sketchEnvironment.status,
+      failedId: sketchEnvironment.failedId,
+      retry: sketchEnvironment.retry,
+    },
+    getImageAssetDimensions: (imageAssetId: string) => {
+      if (!environmentReadyNow()) return undefined;
+      const record =
+        sketchEnvironmentRef.current.environment?.imageAssets(imageAssetId);
+      return record === undefined
+        ? undefined
+        : { width: record.width, height: record.height };
+    },
+    onRecomposeToImageAspect: recomposeToImageAspect,
+  } satisfies ControlPanelProps;
 
   // TWO-REGION SHELL (#154): the canvas region (left) fills the remaining space
   // and centers the live canvas; the fixed-width inspector sidebar (right,
@@ -2085,36 +2414,19 @@ export function SketchControls({
           includePaperMargins={includePaperMargins}
           onIncludePaperMarginsChange={commitIncludePaperMargins}
         />
-        <ControlPanel
-          schema={sketch.schema}
-          params={params}
-          locks={locks}
-          onChange={setParam}
-          editHistory={{
-            onBegin: beginTransaction,
-            onPreview: (next) => previewLeaf("params", next),
-            onCommit: commitTransaction,
-            onCancel: cancelTransaction,
-          }}
-          onParamEditBegin={beginParamTransaction}
-          onToggleLock={toggleLock}
-          imageAssetLongEdgeCap={imageAssetLongEdgeCap}
-          imageAssetResolution={{
-            status: sketchEnvironment.status,
-            failedId: sketchEnvironment.failedId,
-            retry: sketchEnvironment.retry,
-          }}
-          getImageAssetDimensions={(imageAssetId) => {
-            if (!environmentReadyNow()) return undefined;
-            const record = sketchEnvironmentRef.current.environment?.imageAssets(
-              imageAssetId,
-            );
-            return record === undefined
-              ? undefined
-              : { width: record.width, height: record.height };
-          }}
-          onRecomposeToImageAspect={recomposeToImageAspect}
-        />
+        {plotSequence === undefined ? (
+          <ControlPanel {...controlPanelProps} />
+        ) : (
+          <PlotSequenceStageControls
+            {...controlPanelProps}
+            declaration={plotSequence}
+            presentation={plotSequencePresentation.presentation}
+            records={registeredStagePreparation.records}
+            onPresentationChange={setPlotSequencePresentation}
+            onCancelStage={registeredStagePreparation.cancel}
+            onRetryStage={registeredStagePreparation.retry}
+          />
+        )}
         <Button
           ref={cropButtonRef}
           type="button"
@@ -2156,13 +2468,13 @@ export function SketchControls({
         <SeedControl
           value={seed}
           editHistory={{
-            onBegin: beginTransaction,
+            onBegin: beginSeedTransaction,
             onPreview: (next) => previewLeaf("seed", next),
             onCommit: commitTransaction,
             onCancel: cancelTransaction,
           }}
         />
-        {hasShadingPreparation ? (
+        {hasShadingCapability ? (
           <ShadingDiagnostics
             displayed={displayedShadingDiagnostics}
             preparation={shadingPreparationDiagnostics}
@@ -2180,7 +2492,25 @@ export function SketchControls({
          * `aria-busy` covers capture plus worker compute, while the toggle remains
          * usable as the immediate cancel/back-to-Fill action.
          */}
-        <div className="mt-auto flex items-center gap-2">
+        {hasPlotSequence ? (
+          <p
+            className="mt-auto text-xs text-muted-foreground"
+            data-primary-ink-actions={
+              primaryLegacyActionsAvailable ? "available" : "unavailable"
+            }
+          >
+            {primaryLegacyActionsAvailable
+              ? "Primary Ink render actions"
+              : "Primary Ink actions are available only in the isolated Primary Ink view."}
+          </p>
+        ) : null}
+        <div
+          hidden={!primaryLegacyActionsAvailable}
+          aria-label={hasPlotSequence ? "Primary Ink render actions" : undefined}
+        >
+        <div
+          className={`${hasPlotSequence ? "" : "mt-auto "}flex items-center gap-2`}
+        >
           <span className="flex-none min-w-16 text-sm text-muted-foreground">
             render
           </span>
@@ -2364,6 +2694,7 @@ export function SketchControls({
             onCancel: cancelTransaction,
           }}
         />
+        </div>
         {/*
          * Export controls — the shared home for every export path (PNG snapshots
          * the live canvas frame; SVG serializes ordinary cold geometry or the
@@ -2372,17 +2703,27 @@ export function SketchControls({
          * buttons split the row
          * (`flex-1`) and wrap as the group grows.
          */}
-        <div className="flex flex-wrap gap-2">
+        <div
+          className="flex flex-wrap gap-2"
+          role="group"
+          aria-label={hasPlotSequence ? "Primary Ink legacy exports" : "Exports"}
+        >
           <Button
             type="button"
             variant="outline"
             size="sm"
             className="flex-1"
             onClick={exportPng}
+            title={
+              hasPlotSequence && !primaryLegacyActionsAvailable
+                ? "Export PNG is available only in the isolated Primary Ink view."
+                : undefined
+            }
             disabled={
+              !primaryLegacyActionsAvailable ||
               diagnosticReferenceActive ||
               !environmentReady ||
-              (!shadingPaintIsCurrent && hasShadingPreparation)
+              (!shadingPaintIsCurrent && hasShadingCapability)
             }
           >
             Export PNG
@@ -2393,10 +2734,16 @@ export function SketchControls({
             size="sm"
             className="flex-1"
             onClick={exportSvg}
+            title={
+              hasPlotSequence && !primaryLegacyActionsAvailable
+                ? "Export SVG is available only in the isolated Primary Ink view."
+                : undefined
+            }
             disabled={
+              !primaryLegacyActionsAvailable ||
               diagnosticReferenceActive ||
               !environmentReady ||
-              (!shadingPaintIsCurrent && hasShadingPreparation)
+              (!shadingPaintIsCurrent && hasShadingCapability)
             }
           >
             Export SVG
@@ -2409,11 +2756,17 @@ export function SketchControls({
                 size="sm"
                 className="flex-1"
                 onClick={exportHiddenLineSvg}
+                title={
+                  hasPlotSequence && !primaryLegacyActionsAvailable
+                    ? "Hidden-line export is available only in the isolated Primary Ink view."
+                    : undefined
+                }
                 disabled={
+                  !primaryLegacyActionsAvailable ||
                   diagnosticReferenceActive ||
                   !environmentReady ||
                   hiddenLineBusy ||
-                  (!shadingPaintIsCurrent && hasShadingPreparation)
+                  (!shadingPaintIsCurrent && hasShadingCapability)
                 }
               >
                 Export Hidden-line SVG
