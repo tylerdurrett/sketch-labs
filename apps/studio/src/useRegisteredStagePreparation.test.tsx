@@ -130,6 +130,7 @@ function authored(
     seed: string | number;
     sampledT: number;
     inputRevision: number;
+    compositionFrame: { width: number; height: number };
   }> = {},
 ): RegisteredStageAuthoredState {
   return {
@@ -141,7 +142,7 @@ function authored(
     },
     seed: changes.seed ?? "seed-a",
     sampledT: changes.sampledT ?? 0.25,
-    compositionFrame: frame,
+    compositionFrame: changes.compositionFrame ?? frame,
     inputRevision: changes.inputRevision ?? 1,
   };
 }
@@ -425,6 +426,139 @@ describe("useRegisteredStagePreparation", () => {
 
     act(() => latest!.demand("wash-a"));
     expect(generatedCoordinator.starts).toHaveLength(4);
+  });
+
+  it("keeps Primary ownership untouched through a supporting-only numeric transaction", async () => {
+    const shadingCoordinator = new FakeShadingCoordinator();
+    const generatedCoordinator = new FakeGeneratedCoordinator();
+    mount(
+      <Probe
+        shadingFactory={() => shadingCoordinator}
+        generatedFactory={() => generatedCoordinator}
+      />,
+    );
+    succeedShading(shadingCoordinator.starts[0]!);
+    act(() => latest!.demand("wash-a"));
+    succeedGenerated(generatedCoordinator.starts[0]!);
+    await flush();
+    const primaryIdentity = latest!.lookup("ink")!.preparationIdentity;
+
+    act(() => {
+      latest!.beginParamTransaction("washA");
+      latest!.previewAuthoredState(authored({ washA: 8 }));
+    });
+    expect(shadingCoordinator.cancelCount).toBe(0);
+    expect(shadingCoordinator.starts).toHaveLength(1);
+    expect(generatedCoordinator.starts).toHaveLength(1);
+
+    act(() => latest!.settleTransaction(authored({ washA: 8 })));
+    expect(generatedCoordinator.starts).toHaveLength(2);
+    expect(shadingCoordinator.starts).toHaveLength(1);
+    expect(latest!.lookup("ink")!.preparationIdentity).toEqual(primaryIdentity);
+  });
+
+  it("keeps demanded supporting ownership untouched through a Primary-only numeric transaction", async () => {
+    const shadingCoordinator = new FakeShadingCoordinator();
+    const generatedCoordinator = new FakeGeneratedCoordinator();
+    mount(
+      <Probe
+        shadingFactory={() => shadingCoordinator}
+        generatedFactory={() => generatedCoordinator}
+      />,
+    );
+    succeedShading(shadingCoordinator.starts[0]!);
+    act(() => latest!.demand("wash-a"));
+    succeedGenerated(generatedCoordinator.starts[0]!);
+    await flush();
+    const supportingIdentity =
+      latest!.lookup("wash-a")!.preparationIdentity;
+
+    act(() => {
+      latest!.beginParamTransaction("ink");
+      latest!.previewAuthoredState(authored({ ink: 9, inputRevision: 2 }));
+    });
+    expect(generatedCoordinator.cancelCount).toBe(0);
+    expect(generatedCoordinator.starts).toHaveLength(1);
+    expect(shadingCoordinator.starts).toHaveLength(1);
+
+    act(() =>
+      latest!.settleTransaction(authored({ ink: 9, inputRevision: 2 })),
+    );
+    expect(shadingCoordinator.starts).toHaveLength(2);
+    expect(generatedCoordinator.starts).toHaveLength(1);
+    expect(latest!.lookup("wash-a")!.preparationIdentity).toEqual(
+      supportingIdentity,
+    );
+  });
+
+  it("lazily coalesces Paper composition-frame previews into one replacement per demanded owner", async () => {
+    const shadingCoordinator = new FakeShadingCoordinator();
+    const generatedCoordinator = new FakeGeneratedCoordinator();
+    mount(
+      <Probe
+        shadingFactory={() => shadingCoordinator}
+        generatedFactory={() => generatedCoordinator}
+      />,
+    );
+    succeedShading(shadingCoordinator.starts[0]!);
+    act(() => latest!.demand("wash-a"));
+    succeedGenerated(generatedCoordinator.starts[0]!);
+    await flush();
+
+    act(() => {
+      latest!.previewAuthoredState(
+        authored({
+          compositionFrame: { width: 30, height: 10 },
+          inputRevision: 2,
+        }),
+      );
+      latest!.previewAuthoredState(
+        authored({
+          compositionFrame: { width: 40, height: 10 },
+          inputRevision: 3,
+        }),
+      );
+    });
+    expect(shadingCoordinator.starts).toHaveLength(1);
+    expect(generatedCoordinator.starts).toHaveLength(1);
+
+    act(() =>
+      latest!.settleTransaction(
+        authored({
+          compositionFrame: { width: 40, height: 10 },
+          inputRevision: 3,
+        }),
+      ),
+    );
+    expect(shadingCoordinator.starts).toHaveLength(2);
+    expect(generatedCoordinator.starts).toHaveLength(2);
+    expect(generatedCoordinator.starts[1]!.input.identity.compositionFrame).toEqual(
+      { width: 40, height: 10 },
+    );
+  });
+
+  it("opens no preparation owner for presentation-only authored state", async () => {
+    const shadingCoordinator = new FakeShadingCoordinator();
+    const generatedCoordinator = new FakeGeneratedCoordinator();
+    mount(
+      <Probe
+        shadingFactory={() => shadingCoordinator}
+        generatedFactory={() => generatedCoordinator}
+      />,
+    );
+    succeedShading(shadingCoordinator.starts[0]!);
+    act(() => latest!.demand("wash-a"));
+    succeedGenerated(generatedCoordinator.starts[0]!);
+    await flush();
+
+    act(() => {
+      latest!.previewAuthoredState(authored());
+      latest!.settleTransaction(authored());
+    });
+    expect(shadingCoordinator.cancelCount).toBe(0);
+    expect(shadingCoordinator.starts).toHaveLength(1);
+    expect(generatedCoordinator.cancelCount).toBe(0);
+    expect(generatedCoordinator.starts).toHaveLength(1);
   });
 
   it("routes Primary cancel, demand, and retry only through retained Shading", async () => {

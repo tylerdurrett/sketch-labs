@@ -8074,6 +8074,7 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
     );
     act(() => watercolor.blur());
 
+    expect(shadingJob.cancelCount).toBe(0);
     expect(shadingJob.starts).toHaveLength(1);
     expect(plotStageJob.starts).toHaveLength(0);
     expect(canvas.dataset.sourceInputRevision).toBe("0");
@@ -8088,6 +8089,99 @@ describe("SketchControls — Shading preparation composition (#318)", () => {
       key: "pathDensity",
       value: Number(ink.value),
     });
+  });
+
+  it("keeps demanded Watercolor untouched through an Ink-only numeric transaction", async () => {
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+        initialPlotSequencePresentation={{
+          kind: "isolated",
+          stageId: "watercolor-forms",
+        }}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await completeShading(0, preparedScene(45));
+    await completePlotStage(0, preparedScene(46));
+    const supportingIdentity = plotStageJob.starts[0]!.input.identity;
+
+    const ink = paramInput(el, "pathDensity");
+    act(() => ink.focus());
+    setInput(ink, String(Number(ink.value) + 0.25));
+    expect(plotStageJob.starts).toHaveLength(1);
+    expect(plotStageJob.cancelCount).toBe(0);
+    act(() => ink.blur());
+
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(plotStageJob.starts).toHaveLength(1);
+    expect(plotStageJob.cancelCount).toBe(0);
+    expect(plotStageJob.starts[0]!.input.identity).toBe(supportingIdentity);
+  });
+
+  it("coalesces Paper frame previews until one settled replacement per demanded Sequence owner", async () => {
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+        initialPlotSequencePresentation={{
+          kind: "combined",
+          stageIds: ["ink-scribble", "watercolor-forms"],
+        }}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await completeShading(0, preparedScene(47));
+    await completePlotStage(0, preparedScene(48));
+    const width = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Paper width (mm)"]',
+    )!;
+
+    act(() => width.focus());
+    setInput(width, "280");
+    setInput(width, "320");
+    expect(shadingJob.starts).toHaveLength(1);
+    expect(plotStageJob.starts).toHaveLength(1);
+    act(() => width.blur());
+
+    expect(shadingJob.starts).toHaveLength(2);
+    expect(plotStageJob.starts).toHaveLength(2);
+    expect(shadingJob.starts[1]!.identity.compositionFrame).toEqual(
+      plotStageJob.starts[1]!.input.identity.compositionFrame,
+    );
+  });
+
+  it("keeps Sequence preparation idle for physical style and Page placement edits", async () => {
+    const el = mount(
+      <SketchControls
+        sketch={managedPhotoScribble(photoScribble.generateToneSource!)}
+        initialPlotSequencePresentation={{
+          kind: "combined",
+          stageIds: ["ink-scribble", "watercolor-forms"],
+        }}
+      />,
+    );
+    await resolveManagedEnvironment();
+    await completeShading(0, preparedScene(49));
+    await completePlotStage(0, preparedScene(50));
+
+    const includeFrame = [
+      ...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ].find((input) =>
+      input.closest("label")?.textContent?.includes("Include composition frame"),
+    );
+    if (includeFrame === undefined) {
+      throw new Error("no Include composition frame control");
+    }
+    act(() => includeFrame.click());
+
+    clickButton(el, "Crop");
+    setInput(el.querySelector<HTMLInputElement>('input[name="x"]')!, "12");
+    clickButton(el, "Apply");
+
+    expect(shadingJob.cancelCount).toBe(0);
+    expect(shadingJob.starts).toHaveLength(1);
+    expect(plotStageJob.cancelCount).toBe(0);
+    expect(plotStageJob.starts).toHaveLength(1);
   });
 
   it("demands Watercolor presentation and never falls through to cold Primary generation", async () => {

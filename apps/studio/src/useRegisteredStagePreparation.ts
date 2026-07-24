@@ -133,7 +133,16 @@ export interface UseRegisteredStagePreparationResult {
   readonly demand: (stageId: string) => void;
   readonly cancel: (stageId: string) => void;
   readonly retry: (stageId: string) => void;
-  readonly beginTransaction: () => void;
+  /** Open preparation ownership only for the named Stage instances. */
+  readonly beginTransaction: (stageIds: readonly string[]) => void;
+  /** Open only the Stages whose declared identity binds this schema key. */
+  readonly beginParamTransaction: (schemaKey: string) => void;
+  /** Open only Stages whose preparation identity depends on Seed. */
+  readonly beginSeedTransaction: () => void;
+  /** Compare against the facade's latest authored identity snapshot. */
+  readonly changedStageIds: (
+    authored: RegisteredStageAuthoredState,
+  ) => readonly string[];
   readonly previewAuthoredState: (
     authored: RegisteredStageAuthoredState,
   ) => void;
@@ -270,6 +279,24 @@ function identitiesAreCurrent(
       expected.registrationIdentity,
     )
   );
+}
+
+function changedStageIdsForAuthoredState(
+  sketch: RegisteredStagePreparationSketch,
+  previous: RegisteredStageAuthoredState,
+  next: RegisteredStageAuthoredState,
+): readonly string[] {
+  return sketch.plotSequence.stages
+    .filter((stage) => {
+      const previousIdentities = expectedIdentities(
+        sketch,
+        stage.id,
+        previous,
+      );
+      const nextIdentities = expectedIdentities(sketch, stage.id, next);
+      return !identitiesAreCurrent(previousIdentities, nextIdentities);
+    })
+    .map((stage) => stage.id);
 }
 
 function primaryActivity(
@@ -443,6 +470,7 @@ export function useRegisteredStagePreparation({
   });
   const shadingProgressRef = useRef(shading.progress);
   shadingProgressRef.current = shading.progress;
+  const transactionStageIdsRef = useRef(new Set<string>());
 
   const snapshot = useCallback(
     (): RegisteredStageRecordMap =>
@@ -522,36 +550,170 @@ export function useRegisteredStagePreparation({
     ],
   );
 
-  const beginTransaction = useCallback((): void => {
-    shading.beginTransaction();
-    generated.beginTransaction();
-  }, [generated.beginTransaction, shading.beginTransaction]);
+  const sourceStageIds = useCallback(
+    (
+      stageIds: readonly string[],
+      sourceKind: "primary" | "generator",
+    ): readonly string[] =>
+      stageIds.filter(
+        (stageId) =>
+          stageByIdRef.current.get(stageId)?.source.kind === sourceKind,
+      ),
+    [],
+  );
+
+  const beginTransaction = useCallback(
+    (stageIds: readonly string[]): void => {
+      const newlyOpened = stageIds.filter((stageId) => {
+        if (
+          !stageByIdRef.current.has(stageId) ||
+          transactionStageIdsRef.current.has(stageId)
+        ) {
+          return false;
+        }
+        transactionStageIdsRef.current.add(stageId);
+        return true;
+      });
+      if (sourceStageIds(newlyOpened, "primary").length > 0) {
+        shading.beginTransaction();
+      }
+      const generatedStageIds = sourceStageIds(newlyOpened, "generator");
+      if (generatedStageIds.length > 0) {
+        generated.beginTransaction(generatedStageIds);
+      }
+    },
+    [generated.beginTransaction, shading.beginTransaction, sourceStageIds],
+  );
+
+  const beginParamTransaction = useCallback(
+    (schemaKey: string): void => {
+      const declaration = sketchRef.current.plotSequence;
+      const shared = declaration.sharedParameters.some(
+        (binding) => binding.schemaKey === schemaKey,
+      );
+      beginTransaction(
+        declaration.stages
+          .filter(
+            (stage) =>
+              shared ||
+              stage.parameters.some(
+                (binding) => binding.schemaKey === schemaKey,
+              ),
+          )
+          .map((stage) => stage.id),
+      );
+    },
+    [beginTransaction],
+  );
+
+  const beginSeedTransaction = useCallback((): void => {
+    beginTransaction(
+      sketchRef.current.plotSequence.stages
+        .filter((stage) => stage.dependencies.usesSeed)
+        .map((stage) => stage.id),
+    );
+  }, [beginTransaction]);
+
+  const changedStageIds = useCallback(
+    (authored: RegisteredStageAuthoredState): readonly string[] =>
+      changedStageIdsForAuthoredState(
+        sketchRef.current,
+        authoredRef.current,
+        authored,
+      ),
+    [],
+  );
 
   const previewAuthoredState = useCallback(
     (authored: RegisteredStageAuthoredState): void => {
+      const changed = changedStageIds(authored);
+      beginTransaction(changed);
       authoredRef.current = authored;
-      shading.previewAuthoredState(toShadingAuthored(authored));
-      generated.previewAuthoredState(toGeneratedAuthored(authored));
+      if (sourceStageIds(changed, "primary").length > 0) {
+        shading.previewAuthoredState(toShadingAuthored(authored));
+      }
+      const generatedStageIds = sourceStageIds(changed, "generator");
+      if (generatedStageIds.length > 0) {
+        generated.previewAuthoredState(
+          toGeneratedAuthored(authored),
+          generatedStageIds,
+        );
+      }
     },
-    [generated.previewAuthoredState, shading.previewAuthoredState],
+    [
+      beginTransaction,
+      changedStageIds,
+      generated.previewAuthoredState,
+      shading.previewAuthoredState,
+      sourceStageIds,
+    ],
   );
 
   const settleTransaction = useCallback(
     (authored: RegisteredStageAuthoredState): void => {
+      const changed = changedStageIds(authored);
+      const opened = [...transactionStageIdsRef.current];
+      const changedWithoutTransaction = changed.filter(
+        (stageId) => !transactionStageIdsRef.current.has(stageId),
+      );
       authoredRef.current = authored;
-      shading.settleTransaction(toShadingAuthored(authored));
-      generated.settleTransaction(toGeneratedAuthored(authored));
+      if (sourceStageIds(opened, "primary").length > 0) {
+        shading.settleTransaction(toShadingAuthored(authored));
+      } else if (
+        sourceStageIds(changedWithoutTransaction, "primary").length > 0
+      ) {
+        shading.requestAtomic(toShadingAuthored(authored));
+      }
+      const openedGenerated = sourceStageIds(opened, "generator");
+      if (openedGenerated.length > 0) {
+        generated.settleTransaction(
+          toGeneratedAuthored(authored),
+          openedGenerated,
+        );
+      }
+      const atomicGenerated = sourceStageIds(
+        changedWithoutTransaction,
+        "generator",
+      );
+      if (atomicGenerated.length > 0) {
+        generated.requestAtomic(
+          toGeneratedAuthored(authored),
+          atomicGenerated,
+        );
+      }
+      transactionStageIdsRef.current.clear();
     },
-    [generated.settleTransaction, shading.settleTransaction],
+    [
+      changedStageIds,
+      generated.requestAtomic,
+      generated.settleTransaction,
+      shading.requestAtomic,
+      shading.settleTransaction,
+      sourceStageIds,
+    ],
   );
 
   const requestAtomic = useCallback(
     (authored: RegisteredStageAuthoredState): void => {
+      const changed = changedStageIds(authored);
       authoredRef.current = authored;
-      shading.requestAtomic(toShadingAuthored(authored));
-      generated.requestAtomic(toGeneratedAuthored(authored));
+      if (sourceStageIds(changed, "primary").length > 0) {
+        shading.requestAtomic(toShadingAuthored(authored));
+      }
+      const generatedStageIds = sourceStageIds(changed, "generator");
+      if (generatedStageIds.length > 0) {
+        generated.requestAtomic(
+          toGeneratedAuthored(authored),
+          generatedStageIds,
+        );
+      }
     },
-    [generated.requestAtomic, shading.requestAtomic],
+    [
+      changedStageIds,
+      generated.requestAtomic,
+      shading.requestAtomic,
+      sourceStageIds,
+    ],
   );
 
   const lookup = useCallback(
@@ -571,6 +733,9 @@ export function useRegisteredStagePreparation({
     cancel,
     retry,
     beginTransaction,
+    beginParamTransaction,
+    beginSeedTransaction,
+    changedStageIds,
     previewAuthoredState,
     settleTransaction,
     requestAtomic,

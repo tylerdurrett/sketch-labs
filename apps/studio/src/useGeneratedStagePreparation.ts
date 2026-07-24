@@ -73,18 +73,26 @@ export interface UseGeneratedStagePreparationResult {
   readonly cancel: (stageId: string) => void;
   /** Retry one current Stage-local failure. */
   readonly retry: (stageId: string) => void;
-  /** Gate replacement launches while an edit transaction previews values. */
-  readonly beginTransaction: () => void;
+  /**
+   * Gate replacement launches while an edit transaction previews values.
+   * Omit Stage IDs to preserve the legacy all-generator transaction.
+   */
+  readonly beginTransaction: (stageIds?: readonly string[]) => void;
   /** Record a transaction preview without launching its replacement work. */
   readonly previewAuthoredState: (
     authored: GeneratedStageAuthoredState,
+    stageIds?: readonly string[],
   ) => void;
   /** Launch at most the latest identity after commit or revert settles. */
   readonly settleTransaction: (
     authored: GeneratedStageAuthoredState,
+    stageIds?: readonly string[],
   ) => void;
   /** Apply one already-atomic edit. */
-  readonly requestAtomic: (authored: GeneratedStageAuthoredState) => void;
+  readonly requestAtomic: (
+    authored: GeneratedStageAuthoredState,
+    stageIds?: readonly string[],
+  ) => void;
 }
 
 interface CoordinatorOwner {
@@ -202,9 +210,8 @@ export function useGeneratedStagePreparation({
   );
   const sessionRef = useRef(session);
   sessionRef.current = session;
-  const [transactionOpen, setTransactionOpen] = useState(false);
-  const transactionOpenRef = useRef(transactionOpen);
-  transactionOpenRef.current = transactionOpen;
+  const transactionStageIdsRef = useRef(new Set<string>());
+  const [transactionRevision, setTransactionRevision] = useState(0);
   const ownersRef = useRef(new Map<string, CoordinatorOwner>());
   const nextGenerationRef = useRef(1);
   const startedRef = useRef(
@@ -243,20 +250,37 @@ export function useGeneratedStagePreparation({
     [],
   );
 
+  const generatedStageIds = useCallback(
+    (stageIds?: readonly string[]): readonly string[] =>
+      stageIds === undefined
+        ? (sketchRef.current.plotSequence?.stages
+            .filter((stage) => stage.source.kind === "generator")
+            .map((stage) => stage.id) ?? [])
+        : stageIds.filter((stageId) =>
+            isGeneratedStage(sketchRef.current, stageId),
+          ),
+    [],
+  );
+
   const recordAuthoredState = useCallback(
-    (authored: GeneratedStageAuthoredState): void => {
+    (
+      authored: GeneratedStageAuthoredState,
+      stageIds?: readonly string[],
+    ): void => {
       authoredRef.current = authored;
       const expectedByStage = createGeneratedStageExpectedIdentities(
         sketchRef.current,
         authored,
       );
-      for (const [stageId, expected] of Object.entries(expectedByStage)) {
+      for (const stageId of generatedStageIds(stageIds)) {
+        const expected = expectedByStage[stageId];
+        if (expected === undefined) continue;
         const previous = sessionRef.current;
         const next = dispatch({ type: "identity-changed", ...expected });
         cancelReplacedActive(stageId, previous, next);
       }
     },
-    [cancelReplacedActive, dispatch],
+    [cancelReplacedActive, dispatch, generatedStageIds],
   );
 
   const demand = useCallback(
@@ -290,30 +314,51 @@ export function useGeneratedStagePreparation({
     [dispatch],
   );
 
-  const beginTransaction = useCallback((): void => {
-    transactionOpenRef.current = true;
-    setTransactionOpen(true);
-  }, []);
+  const beginTransaction = useCallback(
+    (stageIds?: readonly string[]): void => {
+      let changed = false;
+      for (const stageId of generatedStageIds(stageIds)) {
+        if (transactionStageIdsRef.current.has(stageId)) continue;
+        transactionStageIdsRef.current.add(stageId);
+        changed = true;
+      }
+      if (changed) setTransactionRevision((revision) => revision + 1);
+    },
+    [generatedStageIds],
+  );
 
   const previewAuthoredState = useCallback(
-    (authored: GeneratedStageAuthoredState): void => {
-      recordAuthoredState(authored);
+    (
+      authored: GeneratedStageAuthoredState,
+      stageIds?: readonly string[],
+    ): void => {
+      recordAuthoredState(authored, stageIds);
     },
     [recordAuthoredState],
   );
 
   const settleTransaction = useCallback(
-    (authored: GeneratedStageAuthoredState): void => {
-      recordAuthoredState(authored);
-      transactionOpenRef.current = false;
-      setTransactionOpen(false);
+    (
+      authored: GeneratedStageAuthoredState,
+      stageIds?: readonly string[],
+    ): void => {
+      const settledStageIds = generatedStageIds(stageIds);
+      recordAuthoredState(authored, settledStageIds);
+      let changed = false;
+      for (const stageId of settledStageIds) {
+        changed = transactionStageIdsRef.current.delete(stageId) || changed;
+      }
+      if (changed) setTransactionRevision((revision) => revision + 1);
     },
-    [recordAuthoredState],
+    [generatedStageIds, recordAuthoredState],
   );
 
   const requestAtomic = useCallback(
-    (authored: GeneratedStageAuthoredState): void => {
-      recordAuthoredState(authored);
+    (
+      authored: GeneratedStageAuthoredState,
+      stageIds?: readonly string[],
+    ): void => {
+      recordAuthoredState(authored, stageIds);
     },
     [recordAuthoredState],
   );
@@ -349,9 +394,8 @@ export function useGeneratedStagePreparation({
   }, [dispatch]);
 
   useEffect(() => {
-    if (transactionOpenRef.current) return;
-
     for (const [stageId, stage] of Object.entries(sessionRef.current.stages)) {
+      if (transactionStageIdsRef.current.has(stageId)) continue;
       const pending = stage.pending;
       if (pending === null) continue;
 
@@ -464,7 +508,7 @@ export function useGeneratedStagePreparation({
         })
         .catch(fail);
     }
-  }, [dispatch, session.stages, transactionOpen]);
+  }, [dispatch, session.stages, transactionRevision]);
 
   return {
     session,

@@ -387,21 +387,6 @@ function shadingInputsChanged(
   );
 }
 
-/** Whether an edit changes any registered Plot Stage preparation identity. */
-function plotSequenceInputsChanged(
-  previous: StudioEditState,
-  next: StudioEditState,
-): boolean {
-  return (
-    !sameParams(previous.params, next.params) ||
-    previous.seed !== next.seed ||
-    !plotDrawableAspectsEquivalent(
-      studioGenerationAspect(previous),
-      studioGenerationAspect(next),
-    )
-  );
-}
-
 /**
  * Hook-order placeholder for non-Sequence mounts.
  *
@@ -1012,13 +997,18 @@ export function SketchControls({
     if (hasLegacyShadingPreparation && shadingChanged) {
       shadingInputRevisionRef.current += 1;
     }
-    const registeredStagesChanged =
-      hasPlotSequence &&
-      plotSequenceInputsChanged(current.present, next.present);
+    const changedRegisteredStageIds = hasPlotSequence
+      ? registeredStagePreparation.changedStageIds(
+          authoredRegisteredStageState(next.present),
+        )
+      : [];
     if (
       hasPlotSequence &&
-      registeredStagesChanged &&
-      shadingInputsChanged(sketch, current.present, next.present)
+      changedRegisteredStageIds.some(
+        (stageId) =>
+          plotSequence?.stages.find((stage) => stage.id === stageId)?.source
+            .kind === "primary",
+      )
     ) {
       shadingInputRevisionRef.current += 1;
     }
@@ -1043,7 +1033,7 @@ export function SketchControls({
     if (
       hasPlotSequence &&
       shadingAction === "preview" &&
-      registeredStagesChanged
+      changedRegisteredStageIds.length > 0
     ) {
       registeredStagePreparation.previewAuthoredState(
         authoredRegisteredStageState(next.present),
@@ -1051,7 +1041,7 @@ export function SketchControls({
     } else if (
       hasPlotSequence &&
       shadingAction === "atomic" &&
-      registeredStagesChanged
+      changedRegisteredStageIds.length > 0
     ) {
       registeredStagePreparation.requestAtomic(
         authoredRegisteredStageState(next.present),
@@ -1274,16 +1264,24 @@ export function SketchControls({
     dispatchOutline({ type: "transaction-began" });
     updateHistory(beginEditTransaction, false);
     if (hasLegacyShadingPreparation) shadingPreparation.beginTransaction();
-    if (hasPlotSequence) registeredStagePreparation.beginTransaction();
   };
   const beginParamTransaction = (key: string): void => {
-    if (hasPlotSequence || !isDetailReferenceOnlyParam(sketch, key)) {
+    if (hasPlotSequence) {
+      beginTransaction();
+      registeredStagePreparation.beginParamTransaction(key);
+      return;
+    }
+    if (!isDetailReferenceOnlyParam(sketch, key)) {
       beginTransaction();
       return;
     }
     // Sensitivity is a live Detail remap in #367, so merely focusing it must
     // not relinquish retained Fill/Outline ownership or suspend artwork work.
     updateHistory(beginEditTransaction, false);
+  };
+  const beginSeedTransaction = (): void => {
+    beginTransaction();
+    if (hasPlotSequence) registeredStagePreparation.beginSeedTransaction();
   };
   const beginProfileTransaction = (): void => {
     // A profile gesture may prove to be physical style or Page placement only.
@@ -2321,7 +2319,7 @@ export function SketchControls({
         <SeedControl
           value={seed}
           editHistory={{
-            onBegin: beginTransaction,
+            onBegin: beginSeedTransaction,
             onPreview: (next) => previewLeaf("seed", next),
             onCommit: commitTransaction,
             onCancel: cancelTransaction,
