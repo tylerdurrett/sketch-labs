@@ -441,7 +441,9 @@ function snapshotSupport(
         source.exitEvidence < 0 ||
         source.exitEvidence > 1 ||
         !Number.isFinite(source.directionalAlignment) ||
-        source.directionalAlignment < 0 ||
+        (source.kind === 'direct-evidence'
+          ? source.directionalAlignment < -1
+          : source.directionalAlignment < 0) ||
         source.directionalAlignment > 1 ||
         !nearlyEqual(
           source.entryEvidence,

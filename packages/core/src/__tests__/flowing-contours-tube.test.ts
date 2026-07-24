@@ -110,6 +110,7 @@ function directSpan(
   source: readonly Readonly<CorrectedFlowingRidgeSample>[],
   start = 0,
   end = source.length - 1,
+  directionalAlignment = 1,
 ): FlowingContoursSpanSupportProvenance {
   return Object.freeze({
     kind: 'direct-evidence',
@@ -120,7 +121,7 @@ function directSpan(
     ),
     entryEvidence: source[start]!.evidence,
     exitEvidence: source[end]!.evidence,
-    directionalAlignment: 1,
+    directionalAlignment,
   })
 }
 
@@ -187,6 +188,44 @@ function canonicalGapAlignment(
 }
 
 describe('Flowing Contours corrected-trajectory evidence tube', () => {
+  it('accepts signed direct alignment but rejects hostile values outside its contract', () => {
+    const source = field(12, 9)
+    const raw = trajectory(source, [
+      [2, 4],
+      [6, 4],
+    ])
+    const withAlignment = (directionalAlignment: number) => ({
+      ...raw,
+      spanSupport: Object.freeze([
+        directSpan(
+          raw.samples,
+          0,
+          raw.samples.length - 1,
+          directionalAlignment,
+        ),
+      ]),
+    })
+
+    expect(
+      createFlowingContoursEvidenceTube(source, withAlignment(-1)),
+    ).not.toBeNull()
+    expect(
+      createFlowingContoursEvidenceTube(
+        source,
+        withAlignment(-1 - Number.EPSILON),
+      ),
+    ).toBeNull()
+    expect(
+      createFlowingContoursEvidenceTube(
+        source,
+        withAlignment(1 + Number.EPSILON),
+      ),
+    ).toBeNull()
+    expect(
+      createFlowingContoursEvidenceTube(source, withAlignment(Number.NaN)),
+    ).toBeNull()
+  })
+
   it('preserves the final monotonic correspondence of a repeated loop endpoint', () => {
     const source = field(12, 12)
     const raw = trajectory(source, [

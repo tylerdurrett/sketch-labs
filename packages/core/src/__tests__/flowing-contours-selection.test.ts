@@ -19,6 +19,7 @@ import {
   selectFlowingContoursCandidate,
   type FlowingContoursSelectionOptions,
 } from '../sketches/flowing-contours/selection'
+import { createFlowingContoursEvidenceTube } from '../sketches/flowing-contours/tube'
 import type {
   CorrectedFlowingRidgeSample,
   FlowingContoursCandidate,
@@ -372,8 +373,20 @@ describe('Flowing Contours atomic candidate selection', () => {
 
   it('accepts the exact signed adjacent-tangent dot in direct support', () => {
     const samples = [
-      sample(0, { tangent: [1, 0] }),
-      sample(10, { tangent: [-1, 0] }),
+      sample(0, {
+        point: [0, 1],
+        tangent: [1, 0],
+        evidence: 1,
+        coherence: 1,
+        ambiguity: 0,
+      }),
+      sample(10, {
+        point: [10, 1],
+        tangent: [-1, 0],
+        evidence: 1,
+        coherence: 1,
+        ambiguity: 0,
+      }),
     ]
     const spans = [support(samples, 'direct-evidence', 0, 1)]
     const source = candidate(undefined, {
@@ -382,8 +395,39 @@ describe('Flowing Contours atomic candidate selection', () => {
       score: candidateScore(samples, spans),
     })
 
+    const result = select(source).result
+
     expect(spans[0]!.directionalAlignment).toBe(-1)
-    expect(select(source).result.kind).toBe('accepted')
+    expect(result.kind).toBe('accepted')
+    if (result.kind !== 'accepted') return
+    expect(
+      createFlowingContoursEvidenceTube(
+        straightField(11, 3),
+        result.trajectory,
+      ),
+    ).not.toBeNull()
+  })
+
+  it('rejects hostile direct alignments outside the signed contract', () => {
+    const samples = [
+      sample(0, { tangent: [1, 0] }),
+      sample(10, { tangent: [-1, 0] }),
+    ]
+    const direct = support(samples, 'direct-evidence', 0, 1)
+    for (const directionalAlignment of [
+      -1 - Number.EPSILON,
+      1 + Number.EPSILON,
+      Number.NaN,
+    ]) {
+      expect(
+        select(
+          candidate(undefined, {
+            samples,
+            support: [{ ...direct, directionalAlignment }],
+          }),
+        ).result,
+      ).toEqual({ kind: 'rejected', reason: 'invalid-input' })
+    }
   })
 
   it('uses exact recomputed composition-relative length below and at the threshold', () => {

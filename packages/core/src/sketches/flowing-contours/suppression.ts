@@ -147,6 +147,18 @@ function finiteUnit(value: unknown): value is number {
   )
 }
 
+function finiteSpanAlignment(
+  kind: 'direct-evidence' | 'bounded-gap',
+  value: unknown,
+): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value <= 1 &&
+    (kind === 'direct-evidence' ? value >= -1 : value >= 0)
+  )
+}
+
 function finitePositive(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
 }
@@ -532,7 +544,7 @@ function snapshotSpans(
         !finitePositive(spanLength) ||
         !finiteUnit(entryEvidence) ||
         !finiteUnit(exitEvidence) ||
-        !finiteUnit(directionalAlignment)
+        !finiteSpanAlignment(kind, directionalAlignment)
       ) {
         return null
       }
@@ -879,7 +891,7 @@ function trajectoryShape(
         !finitePositive(span.length) ||
         !finiteUnit(span.entryEvidence) ||
         !finiteUnit(span.exitEvidence) ||
-        !finiteUnit(span.directionalAlignment)
+        !finiteSpanAlignment(span.kind, span.directionalAlignment)
       ) {
         return 'invalid-input'
       }
