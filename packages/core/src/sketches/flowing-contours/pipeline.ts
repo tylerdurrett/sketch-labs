@@ -481,7 +481,16 @@ export function runFlowingContoursPipeline(
           currentFittedPointCount: fittedPointCount,
         },
       )
-      if (provisionalFit.status === 'invalid-input') return invalidResult()
+      if (provisionalFit.status === 'invalid-input') {
+        // Search and selection can yield an authentic whole candidate that
+        // cannot produce an evidence-tube-valid fitted curve. Reject it before
+        // occupancy publication so later independent anchors remain eligible.
+        if (!recomputeAcceptedAggregates(accounting, accepted)) {
+          return invalidResult()
+        }
+        applyPriorSearchExhaustion(accounting, searchCapExhausted)
+        continue
+      }
       if (provisionalFit.status === 'limit-reached') {
         if (!recomputeAcceptedAggregates(accounting, accepted)) {
           return invalidResult()
