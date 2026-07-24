@@ -54,10 +54,18 @@ interface RemovableDetailWorker {
   removeEventListener(type: string, listener: EventListener): void;
 }
 
+function errorOrFallback(error: unknown, fallback: string): Error {
+  return error instanceof Error ? error : new Error(fallback);
+}
+
 function withSettlementRelease(
   worker: DetailWorkerPort,
   release: () => void,
 ): DetailWorkerPort & RemovableDetailWorker {
+  const messageErrorListeners = new WeakMap<
+    (event: Event) => void,
+    (event: Event) => void
+  >();
   const addEventListener = ((
     type: "message" | "error" | "messageerror",
     listener:
@@ -65,19 +73,45 @@ function withSettlementRelease(
       | ((event: Event) => void),
   ) => {
     if (type === "message") {
-      worker.addEventListener(
-        type,
-        listener as (event: MessageEvent<unknown>) => void,
-      );
+      try {
+        worker.addEventListener(
+          type,
+          listener as (event: MessageEvent<unknown>) => void,
+        );
+      } catch (error) {
+        throw errorOrFallback(error, "Detail worker could not start");
+      }
     } else {
-      worker.addEventListener(type, listener as (event: Event) => void);
+      const eventListener = listener as (event: Event) => void;
+      if (type === "messageerror") {
+        const sanitizedListener = () =>
+          eventListener(new Event("messageerror"));
+        messageErrorListeners.set(eventListener, sanitizedListener);
+        try {
+          worker.addEventListener(type, sanitizedListener);
+        } catch (error) {
+          throw errorOrFallback(error, "Detail worker could not start");
+        }
+        return;
+      }
+      try {
+        worker.addEventListener(type, eventListener);
+      } catch (error) {
+        throw errorOrFallback(error, "Detail worker could not start");
+      }
     }
   }) as DetailWorkerPort["addEventListener"];
   const removable = worker as DetailWorkerPort &
     Partial<RemovableDetailWorker>;
 
   return {
-    postMessage: (message) => worker.postMessage(message),
+    postMessage: (message) => {
+      try {
+        worker.postMessage(message);
+      } catch (error) {
+        throw errorOrFallback(error, "Detail worker could not start");
+      }
+    },
     terminate: () => {
       release();
       worker.terminate();
@@ -87,7 +121,13 @@ function withSettlementRelease(
       // A synchronous settlement can clean up before the boundary session is
       // returned. Release first so cleanup reentrancy sees the job as terminal.
       release();
-      removable.removeEventListener?.(type, listener);
+      const delegatedListener =
+        type === "messageerror"
+          ? (messageErrorListeners.get(
+              listener as (event: Event) => void,
+            ) ?? listener)
+          : listener;
+      removable.removeEventListener?.(type, delegatedListener);
     },
   };
 }
@@ -193,10 +233,15 @@ export class DetailCoordinator {
       DetailPreparationRequest,
       DetailPreparationResult
     >({
-      createWorker: () =>
-        withSettlementRelease(this.workerFactory(), () =>
-          this.release(active),
-        ),
+      createWorker: () => {
+        try {
+          return withSettlementRelease(this.workerFactory(), () =>
+            this.release(active),
+          );
+        } catch (error) {
+          throw errorOrFallback(error, "Detail worker failed");
+        }
+      },
       request,
       onMessage: (message, controls) => {
         this.handleMessage(active, message, controls);

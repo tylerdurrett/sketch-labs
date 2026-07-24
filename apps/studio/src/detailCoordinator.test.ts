@@ -185,6 +185,12 @@ describe("DetailCoordinator", () => {
       "worker exploded",
     ],
     ["message decode error", "messageerror", {}, "could not be decoded"],
+    [
+      "message decode error with detail",
+      "messageerror",
+      { message: "decoder leaked implementation detail" },
+      "could not be decoded",
+    ],
   ])(
     "settles and terminates once after a %s",
     async (_name, type, candidate, error) => {
@@ -401,5 +407,31 @@ describe("DetailCoordinator", () => {
     worker.emit("message", success(worker));
     await expect(result).resolves.toMatchObject({ status: "success" });
     expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it("preserves Detail fallbacks for non-Error transport failures", async () => {
+    await expect(
+      new DetailCoordinator(() => {
+        throw "raw construction detail";
+      }).start(identity),
+    ).resolves.toEqual({
+      status: "failure",
+      jobId: 1,
+      error: "Detail worker failed",
+    });
+
+    for (const property of ["listenError", "postError"] as const) {
+      const worker = new FakeWorker();
+      worker[property] = "raw transport detail";
+
+      await expect(
+        new DetailCoordinator(() => worker).start(identity),
+      ).resolves.toEqual({
+        status: "failure",
+        jobId: 1,
+        error: "Detail worker could not start",
+      });
+      expect(worker.terminate).toHaveBeenCalledOnce();
+    }
   });
 });
