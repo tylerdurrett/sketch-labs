@@ -16,7 +16,11 @@
  */
 
 import type { Point } from '../../types'
-import { sampleFlowingContoursField } from './field'
+import {
+  sampleFlowingContoursEvidenceInto,
+  sampleFlowingContoursField,
+  type FlowingContoursEvidenceSampleScratch,
+} from './field'
 import { FLOWING_CONTOURS_LIMITS } from './limits'
 import type {
   AcceptedFlowingTrajectory,
@@ -295,7 +299,7 @@ function snapshotAndVerifySample(
 }
 
 function isResolvedEvidence(
-  sample: Readonly<CorrectedFlowingRidgeSample>,
+  sample: Readonly<FlowingContoursEvidenceSampleScratch>,
 ): boolean {
   return (
     sample.evidence >= DIRECT_MINIMUM_EVIDENCE &&
@@ -549,6 +553,11 @@ function verifyRawCorridor(
   segmentSupport: readonly Readonly<FlowingContoursSpanSupportProvenance>[],
   budget: MutableBudget,
 ): boolean {
+  const sampled: FlowingContoursEvidenceSampleScratch = {
+    evidence: 0,
+    coherence: 0,
+    ambiguity: 0,
+  }
   for (let index = 0; index < samples.length - 1; index += 1) {
     const start = samples[index]!
     const end = samples[index + 1]!
@@ -560,14 +569,18 @@ function verifyRawCorridor(
     if (parameters === null) return false
     for (const progress of parameters) {
       if (!consume(budget)) return false
-      const sampled = sampleFlowingContoursField(field, [
-        start.point[0] +
-          (end.point[0] - start.point[0]) * progress,
-        start.point[1] +
-          (end.point[1] - start.point[1]) * progress,
-      ])
+      const hasSample = sampleFlowingContoursEvidenceInto(
+        field,
+        [
+          start.point[0] +
+            (end.point[0] - start.point[0]) * progress,
+          start.point[1] +
+            (end.point[1] - start.point[1]) * progress,
+        ],
+        sampled,
+      )
       if (
-        sampled === null ||
+        !hasSample ||
         (segmentSupport[index]!.kind === 'direct-evidence' &&
           !isResolvedEvidence(sampled))
       ) {
@@ -1391,9 +1404,16 @@ export function validateFlowingContoursTubePoint(
           point,
           data.samples.at(-1)!.point,
           ENDPOINT_TOLERANCE,
-        )) ||
-      sampleFlowingContoursField(field, point) === null
+        ))
     ) {
+      return null
+    }
+    const sampled: FlowingContoursEvidenceSampleScratch = {
+      evidence: 0,
+      coherence: 0,
+      ambiguity: 0,
+    }
+    if (!sampleFlowingContoursEvidenceInto(field, point, sampled)) {
       return null
     }
     const budget: MutableBudget = {
@@ -1414,10 +1434,14 @@ export function validateFlowingContoursTubePoint(
     const start = Math.max(0, sourceIndex - 1)
     const end = Math.min(data.samples.length - 1, sourceIndex + 1)
     const located = locateArc(data, point, start, end, budget)
-    const sampled = sampleFlowingContoursField(field, point)
+    const hasResolvedSample = sampleFlowingContoursEvidenceInto(
+      field,
+      point,
+      sampled,
+    )
     if (
       located === null ||
-      sampled === null ||
+      !hasResolvedSample ||
       located.deviation > located.radius + VALUE_TOLERANCE ||
       (located.support.kind === 'direct-evidence' &&
         !isResolvedEvidence(sampled))
@@ -1491,6 +1515,11 @@ function validateSegment(
 
   let maximumDeviation = 0
   const cache = new Map<number, Readonly<SegmentEvaluation>>()
+  const sampled: FlowingContoursEvidenceSampleScratch = {
+    evidence: 0,
+    coherence: 0,
+    ambiguity: 0,
+  }
   const evaluate = (
     progress: number,
   ): Readonly<SegmentEvaluation> | null => {
@@ -1498,10 +1527,10 @@ function validateSegment(
     if (cached !== undefined) return cached
     if (!consume(budget)) return null
     const point = frozenPoint(start[0] + dx * progress, start[1] + dy * progress)
-    const sampled = sampleFlowingContoursField(field, point)
+    const hasSample = sampleFlowingContoursEvidenceInto(field, point, sampled)
     const located = locateArc(data, point, startIndex, endIndex, budget)
     if (
-      sampled === null ||
+      !hasSample ||
       located === null ||
       located.deviation > located.radius + VALUE_TOLERANCE ||
       direction[0] * located.tangent[0] +

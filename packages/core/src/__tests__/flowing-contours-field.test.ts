@@ -5,8 +5,10 @@ import {
   buildFlowingContoursField,
   buildFlowingContoursFieldEnsemble,
   isAuthenticatedFlowingContoursField,
+  sampleFlowingContoursEvidenceInto,
   sampleFlowingContoursField,
   sampleFlowingContoursTangent,
+  type FlowingContoursEvidenceSampleScratch,
 } from '../sketches/flowing-contours/field'
 import { createFlowingContoursTestLimits } from '../sketches/flowing-contours/limits'
 import type { PreparedFlowingContoursRaster } from '../sketches/flowing-contours/raster'
@@ -88,6 +90,59 @@ function orientationPair(overrides: {
     ambiguity: Object.freeze(Array.from(overrides.ambiguity ?? [0, 0])),
     ridgeScale: Object.freeze(Array.from(overrides.scale ?? [1, 1])),
   })
+}
+
+function sampledEvidence(
+  field: Readonly<FlowingContoursField>,
+  point: readonly [number, number],
+): Readonly<FlowingContoursEvidenceSampleScratch> | null {
+  const target: FlowingContoursEvidenceSampleScratch = {
+    evidence: Number.NaN,
+    coherence: Number.NaN,
+    ambiguity: Number.NaN,
+  }
+  return sampleFlowingContoursEvidenceInto(field, point, target)
+    ? { ...target }
+    : null
+}
+
+function expectEvidenceSamplerEquivalent(
+  field: Readonly<FlowingContoursField>,
+  point: readonly [number, number],
+): void {
+  const complete = sampleFlowingContoursField(field, point)
+  const evidence = sampledEvidence(field, point)
+  expect(evidence).toEqual(
+    complete === null
+      ? null
+      : {
+          evidence: complete.evidence,
+          coherence: complete.coherence,
+          ambiguity: complete.ambiguity,
+        },
+  )
+}
+
+function evidenceChecksum(
+  samples: readonly (
+    | Readonly<FlowingContoursEvidenceSampleScratch>
+    | null
+  )[],
+): string {
+  let checksum = 2_166_136_261
+  for (const sample of samples) {
+    const token =
+      sample === null
+        ? 'null;'
+        : `${sample.evidence.toPrecision(17)},${sample.coherence.toPrecision(
+            17,
+          )},${sample.ambiguity.toPrecision(17)};`
+    for (let index = 0; index < token.length; index += 1) {
+      checksum ^= token.charCodeAt(index)
+      checksum = Math.imul(checksum, 16_777_619)
+    }
+  }
+  return (checksum >>> 0).toString(16).padStart(8, '0')
 }
 
 describe('Flowing Contours multiscale field', () => {
@@ -372,6 +427,132 @@ describe('Flowing Contours multiscale field', () => {
     expect(Math.abs(tangent![1])).toBeCloseTo(Math.SQRT1_2, 12)
     expect(Math.hypot(tangent![0], tangent![1])).toBeCloseTo(1, 12)
     expect(sampleFlowingContoursField(manual, [-0.01, 0])).toBeNull()
+  })
+
+  it('keeps the tube evidence sampler exactly equivalent on edges, interiors, and transparent support', () => {
+    const synthetic = build(
+      preparedRaster(
+        13,
+        11,
+        (x, y) =>
+          Math.max(
+            0,
+            Math.min(
+              1,
+              0.5 +
+                0.31 * Math.sin(x * 0.71) -
+                0.27 * Math.cos(y * 0.43),
+            ),
+          ),
+        (x, y) =>
+          x >= 10 ? 0 : x === 9 ? (y % 2 === 0 ? 0.25 : 0.75) : 1,
+      ),
+    ).field
+
+    for (let quarterY = -1; quarterY <= synthetic.height * 4; quarterY += 1) {
+      for (
+        let quarterX = -1;
+        quarterX <= synthetic.width * 4;
+        quarterX += 1
+      ) {
+        expectEvidenceSamplerEquivalent(synthetic, [
+          quarterX / 4,
+          quarterY / 4,
+        ])
+      }
+    }
+  })
+
+  it('preserves fail-closed null semantics for every malformed sampled channel', () => {
+    const valid = orientationPair({
+      evidence: [0.8, 0.4],
+      tangentX: [Math.SQRT1_2, 0],
+      tangentY: [Math.SQRT1_2, 1],
+      coherence: [0.9, 0.6],
+      ambiguity: [0.1, 0.35],
+      scale: [2, 4],
+    })
+    const sampledChannels = [
+      'alpha',
+      'contourEvidence',
+      'tangentX',
+      'tangentY',
+      'tangentCoherence',
+      'ambiguity',
+      'ridgeScale',
+    ] as const
+
+    expectEvidenceSamplerEquivalent(valid, [0.25, 0])
+    for (const channel of sampledChannels) {
+      const malformed = {
+        ...valid,
+        [channel]: Object.freeze([Number.NaN, valid[channel][1]!]),
+      } as FlowingContoursField
+      expectEvidenceSamplerEquivalent(malformed, [0.25, 0])
+      expect(sampledEvidence(malformed, [0.25, 0])).toBeNull()
+    }
+
+    const truncated = {
+      ...valid,
+      tangentX: Object.freeze([1]),
+    } as FlowingContoursField
+    const noSupport = {
+      ...valid,
+      positiveSupport: Object.freeze([false, false]),
+    } as FlowingContoursField
+    const noAlpha = {
+      ...valid,
+      alpha: Object.freeze([0, 0]),
+    } as FlowingContoursField
+    for (const malformed of [truncated, noSupport, noAlpha]) {
+      expectEvidenceSamplerEquivalent(malformed, [0.25, 0])
+      expect(sampledEvidence(malformed, [0.25, 0])).toBeNull()
+    }
+    for (const point of [
+      [Number.NaN, 0],
+      [0, Number.POSITIVE_INFINITY],
+      [-Number.EPSILON, 0],
+      [2, 0],
+    ] as const) {
+      expectEvidenceSamplerEquivalent(valid, point)
+      expect(sampledEvidence(valid, point)).toBeNull()
+    }
+  })
+
+  it('holds an exact scalar checksum across a synthetic orientation field', () => {
+    const synthetic = build(
+      preparedRaster(
+        19,
+        17,
+        (x, y) =>
+          Math.sin(x * 0.37 + y * 0.19) * 0.22 +
+          Math.cos(x * 0.11 - y * 0.41) * 0.18 +
+          0.5,
+        (x, y) => (x + y > 30 ? 0 : (x * 7 + y * 5) % 11 === 0 ? 0.4 : 1),
+      ),
+    ).field
+    const points = Array.from({ length: 257 }, (_value, index) => {
+      const x = ((index * 37) % 181) / 10 - 0.5
+      const y = ((index * 61) % 161) / 10 - 0.5
+      return [x, y] as const
+    })
+    const lightweight = points.map((point) =>
+      sampledEvidence(synthetic, point),
+    )
+    const complete = points.map((point) => {
+      const sample = sampleFlowingContoursField(synthetic, point)
+      return sample === null
+        ? null
+        : {
+            evidence: sample.evidence,
+            coherence: sample.coherence,
+            ambiguity: sample.ambiguity,
+          }
+    })
+
+    expect(lightweight).toEqual(complete)
+    expect(evidenceChecksum(lightweight)).toBe('833667e3')
+    expect(evidenceChecksum(complete)).toBe('833667e3')
   })
 
   it('makes an orthogonal coherent midpoint explicitly unresolved', () => {

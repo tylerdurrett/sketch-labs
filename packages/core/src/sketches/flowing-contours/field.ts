@@ -135,6 +135,19 @@ interface SampledOrientation {
   readonly ambiguity: number
 }
 
+/**
+ * @internal Mutable scratch owned by the evidence-tube proof.
+ *
+ * This is intentionally not part of the public Flowing Contours contract.
+ * Reusing one instance lets dense tube validation avoid allocating a complete
+ * corrected-ridge sample (and its point/tangent arrays) at every proof point.
+ */
+export interface FlowingContoursEvidenceSampleScratch {
+  evidence: number
+  coherence: number
+  ambiguity: number
+}
+
 function clampUnit(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0
   if (value >= 1) return 1
@@ -746,6 +759,21 @@ function bilinearDerivedValue(
   return Number.isFinite(value) ? value : null
 }
 
+function bilinearCellValue(
+  topLeft: number,
+  topRight: number,
+  bottomLeft: number,
+  bottomRight: number,
+  horizontal: number,
+  vertical: number,
+): number {
+  const topValue =
+    topLeft * (1 - horizontal) + topRight * horizontal
+  const bottomValue =
+    bottomLeft * (1 - horizontal) + bottomRight * horizontal
+  return topValue * (1 - vertical) + bottomValue * vertical
+}
+
 function supportValue(
   field: Readonly<FlowingContoursField>,
   point: Readonly<Point>,
@@ -847,6 +875,190 @@ function sampledOrientation(
     concentration,
     coherence,
     ambiguity,
+  }
+}
+
+/**
+ * @internal Sample only the confidence channels consumed by evidence tubes.
+ *
+ * The returned boolean has exactly the general sampler's null semantics:
+ * malformed shape, out-of-bounds points, zero permission, or non-finite
+ * interpolated channels fail closed. Each bilinear scalar retains the general
+ * sampler's top-row, bottom-row, then vertical operation order. Successful
+ * calls overwrite `target`; failed calls leave it unspecified.
+ */
+export function sampleFlowingContoursEvidenceInto(
+  field: Readonly<FlowingContoursField>,
+  point: Readonly<Point>,
+  target: FlowingContoursEvidenceSampleScratch,
+): boolean {
+  try {
+    if (!hasSampleShape(field)) return false
+    const x = point[0]
+    const y = point[1]
+    if (
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      x < 0 ||
+      y < 0 ||
+      x > field.width - 1 ||
+      y > field.height - 1
+    ) {
+      return false
+    }
+
+    const left = Math.floor(x)
+    const top = Math.floor(y)
+    const right = Math.min(left + 1, field.width - 1)
+    const bottom = Math.min(top + 1, field.height - 1)
+    const horizontal = x - left
+    const vertical = y - top
+    const topLeft = top * field.width + left
+    const topRight = top * field.width + right
+    const bottomLeft = bottom * field.width + left
+    const bottomRight = bottom * field.width + right
+
+    const alpha = bilinearCellValue(
+      field.alpha[topLeft]!,
+      field.alpha[topRight]!,
+      field.alpha[bottomLeft]!,
+      field.alpha[bottomRight]!,
+      horizontal,
+      vertical,
+    )
+    const support = bilinearCellValue(
+      field.positiveSupport[topLeft] ? 1 : 0,
+      field.positiveSupport[topRight] ? 1 : 0,
+      field.positiveSupport[bottomLeft] ? 1 : 0,
+      field.positiveSupport[bottomRight] ? 1 : 0,
+      horizontal,
+      vertical,
+    )
+    if (
+      !Number.isFinite(alpha) ||
+      !Number.isFinite(support) ||
+      alpha <= 0 ||
+      support <= 0
+    ) {
+      return false
+    }
+
+    const evidenceMass = bilinearCellValue(
+      field.contourEvidence[topLeft]!,
+      field.contourEvidence[topRight]!,
+      field.contourEvidence[bottomLeft]!,
+      field.contourEvidence[bottomRight]!,
+      horizontal,
+      vertical,
+    )
+    // The general sampler rejects a non-finite scale before sampling
+    // orientation. Preserve that fail-closed behavior without returning scale.
+    const scale = bilinearCellValue(
+      field.ridgeScale[topLeft]!,
+      field.ridgeScale[topRight]!,
+      field.ridgeScale[bottomLeft]!,
+      field.ridgeScale[bottomRight]!,
+      horizontal,
+      vertical,
+    )
+    if (!Number.isFinite(evidenceMass) || !Number.isFinite(scale)) {
+      return false
+    }
+
+    const topLeftConfidence =
+      field.contourEvidence[topLeft]! *
+      field.tangentCoherence[topLeft]!
+    const topRightConfidence =
+      field.contourEvidence[topRight]! *
+      field.tangentCoherence[topRight]!
+    const bottomLeftConfidence =
+      field.contourEvidence[bottomLeft]! *
+      field.tangentCoherence[bottomLeft]!
+    const bottomRightConfidence =
+      field.contourEvidence[bottomRight]! *
+      field.tangentCoherence[bottomRight]!
+    const orientationMass = bilinearCellValue(
+      topLeftConfidence,
+      topRightConfidence,
+      bottomLeftConfidence,
+      bottomRightConfidence,
+      horizontal,
+      vertical,
+    )
+    const cosine = bilinearCellValue(
+      topLeftConfidence *
+        (field.tangentX[topLeft]! * field.tangentX[topLeft]! -
+          field.tangentY[topLeft]! * field.tangentY[topLeft]!),
+      topRightConfidence *
+        (field.tangentX[topRight]! * field.tangentX[topRight]! -
+          field.tangentY[topRight]! * field.tangentY[topRight]!),
+      bottomLeftConfidence *
+        (field.tangentX[bottomLeft]! * field.tangentX[bottomLeft]! -
+          field.tangentY[bottomLeft]! * field.tangentY[bottomLeft]!),
+      bottomRightConfidence *
+        (field.tangentX[bottomRight]! * field.tangentX[bottomRight]! -
+          field.tangentY[bottomRight]! * field.tangentY[bottomRight]!),
+      horizontal,
+      vertical,
+    )
+    const sine = bilinearCellValue(
+      topLeftConfidence *
+        2 *
+        field.tangentX[topLeft]! *
+        field.tangentY[topLeft]!,
+      topRightConfidence *
+        2 *
+        field.tangentX[topRight]! *
+        field.tangentY[topRight]!,
+      bottomLeftConfidence *
+        2 *
+        field.tangentX[bottomLeft]! *
+        field.tangentY[bottomLeft]!,
+      bottomRightConfidence *
+        2 *
+        field.tangentX[bottomRight]! *
+        field.tangentY[bottomRight]!,
+      horizontal,
+      vertical,
+    )
+    const ambiguityMass = bilinearCellValue(
+      field.contourEvidence[topLeft]! * field.ambiguity[topLeft]!,
+      field.contourEvidence[topRight]! * field.ambiguity[topRight]!,
+      field.contourEvidence[bottomLeft]! * field.ambiguity[bottomLeft]!,
+      field.contourEvidence[bottomRight]! * field.ambiguity[bottomRight]!,
+      horizontal,
+      vertical,
+    )
+    if (
+      !Number.isFinite(orientationMass) ||
+      !Number.isFinite(cosine) ||
+      !Number.isFinite(sine) ||
+      !Number.isFinite(ambiguityMass)
+    ) {
+      return false
+    }
+
+    const resultant = Math.hypot(cosine, sine)
+    const concentration =
+      orientationMass > ORIENTATION_EPSILON
+        ? clampUnit(resultant / orientationMass)
+        : 0
+    const localCoherence =
+      evidenceMass > EVIDENCE_EPSILON
+        ? clampUnit(orientationMass / evidenceMass)
+        : 0
+    const coherence = clampUnit(localCoherence * concentration)
+    const localAmbiguity =
+      evidenceMass > EVIDENCE_EPSILON
+        ? clampUnit(ambiguityMass / evidenceMass)
+        : 1
+
+    target.evidence = clampUnit(evidenceMass)
+    target.coherence = coherence
+    target.ambiguity = clampUnit(Math.max(localAmbiguity, 1 - coherence))
+    return true
+  } catch {
+    return false
   }
 }
 
