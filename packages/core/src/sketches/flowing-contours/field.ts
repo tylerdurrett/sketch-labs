@@ -65,6 +65,9 @@ const FIELD_ENSEMBLE_SCALE_PLANE_COUNTS = new WeakMap<
   Readonly<FlowingContoursFieldEnsemble>,
   number
 >()
+const AUTHENTIC_FLOWING_CONTOURS_FIELDS = new WeakSet<
+  Readonly<FlowingContoursField>
+>()
 
 interface ScalePolicyEntry {
   readonly sigma: number
@@ -75,6 +78,29 @@ export function flowingContoursFieldEnsembleScalePlaneCount(
   ensemble: Readonly<FlowingContoursFieldEnsemble>,
 ): number | null {
   return FIELD_ENSEMBLE_SCALE_PLANE_COUNTS.get(ensemble) ?? null
+}
+
+/**
+ * Identify an exact immutable field minted by this module's production builders.
+ *
+ * The predicate exposes no minting seam: structural clones and caller-created
+ * fields remain untrusted even when every value is equivalent.
+ */
+export function isAuthenticatedFlowingContoursField(
+  field: Readonly<FlowingContoursField>,
+): boolean {
+  try {
+    return AUTHENTIC_FLOWING_CONTOURS_FIELDS.has(field)
+  } catch {
+    return false
+  }
+}
+
+function authenticateFlowingContoursField(
+  field: FlowingContoursField,
+): FlowingContoursField {
+  AUTHENTIC_FLOWING_CONTOURS_FIELDS.add(field)
+  return field
 }
 
 const EMPTY_VALUES = Object.freeze([]) as readonly number[]
@@ -446,21 +472,23 @@ function buildFieldFromScalePolicy(
       (count, evidence) => count + (evidence > 0 ? 1 : 0),
       0,
     )
-    return Object.freeze({
-      sourceWidth: raster.sourceWidth,
-      sourceHeight: raster.sourceHeight,
-      width: raster.width,
-      height: raster.height,
-      luminance: Object.freeze(Array.from(raster.luminance)),
-      alpha: Object.freeze(Array.from(raster.alpha)),
-      positiveSupport: Object.freeze(Array.from(raster.positiveSupport)),
-      contourEvidence: Object.freeze(contourEvidence),
-      tangentX: Object.freeze(tangentX),
-      tangentY: Object.freeze(tangentY),
-      tangentCoherence: Object.freeze(tangentCoherence),
-      ambiguity: Object.freeze(ambiguity),
-      ridgeScale: Object.freeze(ridgeScale),
-    })
+    return authenticateFlowingContoursField(
+      Object.freeze({
+        sourceWidth: raster.sourceWidth,
+        sourceHeight: raster.sourceHeight,
+        width: raster.width,
+        height: raster.height,
+        luminance: Object.freeze(Array.from(raster.luminance)),
+        alpha: Object.freeze(Array.from(raster.alpha)),
+        positiveSupport: Object.freeze(Array.from(raster.positiveSupport)),
+        contourEvidence: Object.freeze(contourEvidence),
+        tangentX: Object.freeze(tangentX),
+        tangentY: Object.freeze(tangentY),
+        tangentCoherence: Object.freeze(tangentCoherence),
+        ambiguity: Object.freeze(ambiguity),
+        ridgeScale: Object.freeze(ridgeScale),
+      }),
+    )
   } catch {
     invalidate(accounting)
     return EMPTY_FLOWING_CONTOURS_FIELD
@@ -477,51 +505,55 @@ function combineFlowingContoursFields(
   const useMid = fine.contourEvidence.map(
     (evidence, index) => mid.contourEvidence[index]! > evidence,
   )
-  return Object.freeze({
-    ...fine,
-    contourEvidence: Object.freeze(contourEvidence),
-    tangentX: Object.freeze(
-      fine.tangentX.map((value, index) =>
-        useMid[index] ? mid.tangentX[index]! : value,
+  return authenticateFlowingContoursField(
+    Object.freeze({
+      ...fine,
+      contourEvidence: Object.freeze(contourEvidence),
+      tangentX: Object.freeze(
+        fine.tangentX.map((value, index) =>
+          useMid[index] ? mid.tangentX[index]! : value,
+        ),
       ),
-    ),
-    tangentY: Object.freeze(
-      fine.tangentY.map((value, index) =>
-        useMid[index] ? mid.tangentY[index]! : value,
+      tangentY: Object.freeze(
+        fine.tangentY.map((value, index) =>
+          useMid[index] ? mid.tangentY[index]! : value,
+        ),
       ),
-    ),
-    tangentCoherence: Object.freeze(
-      fine.tangentCoherence.map((value, index) =>
-        useMid[index] ? mid.tangentCoherence[index]! : value,
+      tangentCoherence: Object.freeze(
+        fine.tangentCoherence.map((value, index) =>
+          useMid[index] ? mid.tangentCoherence[index]! : value,
+        ),
       ),
-    ),
-    ambiguity: Object.freeze(
-      fine.ambiguity.map((value, index) =>
-        useMid[index] ? mid.ambiguity[index]! : value,
+      ambiguity: Object.freeze(
+        fine.ambiguity.map((value, index) =>
+          useMid[index] ? mid.ambiguity[index]! : value,
+        ),
       ),
-    ),
-    ridgeScale: Object.freeze(
-      fine.ridgeScale.map((value, index) =>
-        useMid[index] ? mid.ridgeScale[index]! : value,
+      ridgeScale: Object.freeze(
+        fine.ridgeScale.map((value, index) =>
+          useMid[index] ? mid.ridgeScale[index]! : value,
+        ),
       ),
-    ),
-  })
+    }),
+  )
 }
 
 function locallyGatedGuideField(
   source: Readonly<FlowingContoursField>,
   local: Readonly<FlowingContoursField>,
 ): FlowingContoursField {
-  return Object.freeze({
-    ...source,
-    contourEvidence: Object.freeze(
-      source.contourEvidence.map((evidence, index) =>
-        local.contourEvidence[index]! >= BROAD_FORM_LOCAL_SUPPORT_FLOOR
-          ? Math.min(evidence, local.contourEvidence[index]!)
-          : 0,
+  return authenticateFlowingContoursField(
+    Object.freeze({
+      ...source,
+      contourEvidence: Object.freeze(
+        source.contourEvidence.map((evidence, index) =>
+          local.contourEvidence[index]! >= BROAD_FORM_LOCAL_SUPPORT_FLOOR
+            ? Math.min(evidence, local.contourEvidence[index]!)
+            : 0,
+        ),
       ),
-    ),
-  })
+    }),
+  )
 }
 
 /**

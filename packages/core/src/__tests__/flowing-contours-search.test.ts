@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import { createFlowingContoursAccounting } from '../sketches/flowing-contours/accounting'
 import { buildFlowingContoursAnchorInventory } from '../sketches/flowing-contours/anchors'
-import { sampleFlowingContoursField } from '../sketches/flowing-contours/field'
+import {
+  buildFlowingContoursField,
+  isAuthenticatedFlowingContoursField,
+  sampleFlowingContoursField,
+} from '../sketches/flowing-contours/field'
 import { createFlowingContoursTestLimits } from '../sketches/flowing-contours/limits'
 import {
   certifyFlowingContoursCandidateAgainstField,
@@ -77,6 +81,25 @@ function gaussian(distance: number, width = 0.55): number {
   return Math.exp(-(distance * distance) / (2 * width * width))
 }
 
+function productionField(width = 33, height = 21): FlowingContoursField {
+  const sampleCount = width * height
+  const luminance = Array.from({ length: sampleCount }, (_value, index) =>
+    Math.floor(index / width) < Math.floor(height / 2) ? 0.1 : 0.9,
+  )
+  return buildFlowingContoursField(
+    {
+      sourceWidth: width,
+      sourceHeight: height,
+      width,
+      height,
+      luminance,
+      alpha: new Array<number>(sampleCount).fill(1),
+      positiveSupport: new Array<boolean>(sampleCount).fill(true),
+    },
+    createFlowingContoursAccounting(),
+  )
+}
+
 function sampled(
   source: Readonly<FlowingContoursField>,
   point: Readonly<Point>,
@@ -115,6 +138,83 @@ function limits(overrides: Record<string, number> = {}) {
 }
 
 describe('Flowing Contours bidirectional whole-candidate search', () => {
+  it('keeps authenticated production fields exactly equal to full validation', () => {
+    const source = productionField()
+    const structuralClone = Object.freeze({ ...source })
+    const owned = buildFlowingContoursAnchorInventory(
+      source,
+      createFlowingContoursAccounting(),
+    ).anchors[0]!
+
+    expect(isAuthenticatedFlowingContoursField(source)).toBe(true)
+    expect(isAuthenticatedFlowingContoursField(structuralClone)).toBe(false)
+    const authenticated = searchFlowingContoursCandidateDetailed(
+      source,
+      owned,
+      OPTIONS,
+      limits(),
+    )
+    const fullyValidated = searchFlowingContoursCandidateDetailed(
+      structuralClone,
+      owned,
+      OPTIONS,
+      limits(),
+    )
+
+    expect(authenticated?.candidate).not.toBeNull()
+    expect(fullyValidated).toEqual(authenticated)
+  })
+
+  it('does not trust a structural clone or its later mutation', () => {
+    const source = productionField()
+    const tangentX = Array.from(source.tangentX)
+    const mutableClone = { ...source, tangentX }
+    const owned = buildFlowingContoursAnchorInventory(
+      source,
+      createFlowingContoursAccounting(),
+    ).anchors[0]!
+    tangentX[0] = Number.NaN
+
+    expect(isAuthenticatedFlowingContoursField(mutableClone)).toBe(false)
+    expect(
+      searchFlowingContoursCandidateDetailed(
+        mutableClone,
+        owned,
+        OPTIONS,
+        limits(),
+      ),
+    ).toBeNull()
+  })
+
+  it('retains array-length and configured-limit checks for authenticated fields', () => {
+    const source = productionField()
+    const owned = buildFlowingContoursAnchorInventory(
+      source,
+      createFlowingContoursAccounting(),
+    ).anchors[0]!
+    const malformed = Object.freeze({
+      ...source,
+      ambiguity: Object.freeze(source.ambiguity.slice(1)),
+    })
+
+    expect(
+      searchFlowingContoursCandidateDetailed(
+        malformed,
+        owned,
+        OPTIONS,
+        limits(),
+      ),
+    ).toBeNull()
+    expect(
+      searchFlowingContoursCandidateDetailed(
+        source,
+        owned,
+        OPTIONS,
+        limits({ 'analysis-dimension': source.width - 1 }),
+      ),
+    ).toBeNull()
+  })
+
   it('re-certifies broad weak labels as exact direct local support', () => {
     const broad = field(25, 11, (x, y) => ({
       evidence:

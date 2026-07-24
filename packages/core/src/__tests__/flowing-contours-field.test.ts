@@ -4,6 +4,7 @@ import { createFlowingContoursAccounting } from '../sketches/flowing-contours/ac
 import {
   buildFlowingContoursField,
   buildFlowingContoursFieldEnsemble,
+  isAuthenticatedFlowingContoursField,
   sampleFlowingContoursField,
   sampleFlowingContoursTangent,
 } from '../sketches/flowing-contours/field'
@@ -111,6 +112,12 @@ describe('Flowing Contours multiscale field', () => {
     const broad = ensemble.hypotheses[0]!.field
     const mid = ensemble.hypotheses[1]!.field
     const local = ensemble.hypotheses[2]!.field
+    expect(
+      ensemble.hypotheses.every(({ field }) =>
+        isAuthenticatedFlowingContoursField(field),
+      ),
+    ).toBe(true)
+    expect(isAuthenticatedFlowingContoursField({ ...local })).toBe(false)
     const legacyLocal = buildFlowingContoursField(
       raster,
       createFlowingContoursAccounting(),

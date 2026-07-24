@@ -8,7 +8,10 @@
  */
 
 import type { Point } from '../../types'
-import { sampleFlowingContoursField } from './field'
+import {
+  isAuthenticatedFlowingContoursField,
+  sampleFlowingContoursField,
+} from './field'
 import {
   growFlowingContoursDirection,
   isFlowingContoursSupportedSelfLoopTrace,
@@ -619,6 +622,7 @@ function hasValidField(
       field.ridgeScale,
     ]
     if (arrays.some((values) => values.length !== sampleCount)) return false
+    if (isAuthenticatedFlowingContoursField(field)) return true
     for (let index = 0; index < sampleCount; index += 1) {
       const luminance = field.luminance[index]
       const alpha = field.alpha[index]
