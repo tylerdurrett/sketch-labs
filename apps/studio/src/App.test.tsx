@@ -560,7 +560,7 @@ describe("App — Photo Scribble integration (#333)", () => {
 });
 
 describe("App — Flowing Contours integration (#403 FC21)", () => {
-  it("opens as the newest Sketch with its managed source, exact four controls, and an ordinary live preview", async () => {
+  it("opens as the newest Sketch with its managed source, exact seven controls, and an ordinary live preview", async () => {
     const generate = vi.spyOn(flowingContours, "generate");
     mountApp();
     await act(async () => Promise.resolve());
@@ -579,6 +579,9 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
         (input) => input.id,
       ),
     ).toEqual([
+      "control-gamma",
+      "control-contrast",
+      "control-pivot",
       "control-curveDetail",
       "control-continuity",
       "control-flowSmoothing",
@@ -591,8 +594,11 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
     ).toBe(
       JSON.stringify({
         imageAsset: FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID,
-        curveDetail: 0.45,
-        continuity: 0.45,
+        gamma: 0.5,
+        contrast: 0.5,
+        pivot: 0.5,
+        curveDetail: 1,
+        continuity: 0.08,
         flowSmoothing: 0.7,
         minimumStrokeLength: 0.04,
       }),
@@ -629,13 +635,19 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
     generate.mockRestore();
   });
 
-  it("round-trips all four independent controls through Presets and honors locks when Randomizing", async () => {
+  it("round-trips all seven independent controls through Presets and honors locks when Randomizing", async () => {
     appPresetClient.list
       .mockResolvedValueOnce([])
       .mockResolvedValue(["flowing-authored"]);
     mountApp();
     await act(async () => Promise.resolve());
 
+    const gamma =
+      document.querySelector<HTMLInputElement>("#control-gamma")!;
+    const contrast =
+      document.querySelector<HTMLInputElement>("#control-contrast")!;
+    const pivot =
+      document.querySelector<HTMLInputElement>("#control-pivot")!;
     const curveDetail =
       document.querySelector<HTMLInputElement>("#control-curveDetail")!;
     const continuity =
@@ -646,6 +658,9 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
       "#control-minimumStrokeLength",
     )!;
 
+    setNumberInput(gamma, "0.67");
+    setNumberInput(contrast, "0.74");
+    setNumberInput(pivot, "0.39");
     setNumberInput(curveDetail, "0.61");
     setNumberInput(continuity, "0.72");
     setNumberInput(flowSmoothing, "0.83");
@@ -667,11 +682,14 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
 
     const random = vi.spyOn(Math, "random").mockReturnValue(0.2);
     act(() => button("Randomize").click());
+    expect(gamma.value).toBe("0.2");
+    expect(contrast.value).toBe("0.2");
+    expect(pivot.value).toBe("0.2");
     expect(curveDetail.value).toBe("0.61");
     expect(continuity.value).toBe("0.2");
     expect(flowSmoothing.value).toBe("0.2");
     expect(Number(minimumStrokeLength.value)).toBeCloseTo(0.054);
-    expect(random).toHaveBeenCalledTimes(3);
+    expect(random).toHaveBeenCalledTimes(6);
     random.mockRestore();
 
     setTextInput(
@@ -694,6 +712,9 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
       locks: ["curveDetail"],
       params: {
         imageAsset: FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID,
+        gamma: 0.2,
+        contrast: 0.2,
+        pivot: 0.2,
         curveDetail: 0.61,
         continuity: 0.2,
         flowSmoothing: 0.2,
@@ -701,6 +722,9 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
       },
     });
 
+    setNumberInput(gamma, "0.91");
+    setNumberInput(contrast, "0.92");
+    setNumberInput(pivot, "0.93");
     setNumberInput(curveDetail, "0.12");
     setNumberInput(continuity, "0.13");
     setNumberInput(flowSmoothing, "0.14");
@@ -733,6 +757,9 @@ describe("App — Flowing Contours integration (#403 FC21)", () => {
       "flowing-contours",
       "flowing-authored",
     );
+    expect(gamma.value).toBe("0.2");
+    expect(contrast.value).toBe("0.2");
+    expect(pivot.value).toBe("0.2");
     expect(curveDetail.value).toBe("0.61");
     expect(continuity.value).toBe("0.2");
     expect(flowSmoothing.value).toBe("0.2");

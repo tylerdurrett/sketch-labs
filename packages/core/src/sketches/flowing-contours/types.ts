@@ -87,6 +87,40 @@ export interface FlowingContoursField {
 }
 
 /**
+ * Stable artistic signal hypotheses searched without collapsing their
+ * orientations into one per-pixel winner.
+ *
+ * `broad-form` owns the widest bounded tangent scale, `mid-form` reuses the
+ * existing intermediate responses, and `local-detail` retains the established
+ * multiscale proof field. All share one prepared-raster extent and support mask.
+ */
+export const FLOWING_CONTOURS_FIELD_HYPOTHESIS_KINDS = Object.freeze([
+  'broad-form',
+  'mid-form',
+  'local-detail',
+] as const)
+
+export type FlowingContoursFieldHypothesisKind =
+  (typeof FLOWING_CONTOURS_FIELD_HYPOTHESIS_KINDS)[number]
+
+export interface FlowingContoursFieldHypothesis {
+  readonly kind: FlowingContoursFieldHypothesisKind
+  readonly field: Readonly<FlowingContoursField>
+}
+
+/**
+ * Bounded, stable-order field ensemble.
+ *
+ * Search remains whole-candidate-first inside each member. The pipeline owns
+ * one global accounting record and projects only accepted geometry into shared
+ * occupancy; candidate, fitting, and evidence-tube provenance stay bound to
+ * the exact member field that produced them.
+ */
+export interface FlowingContoursFieldEnsemble {
+  readonly hypotheses: readonly Readonly<FlowingContoursFieldHypothesis>[]
+}
+
+/**
  * One subpixel ridge observation corrected away from the analysis lattice.
  *
  * Keeping the continuous tangent with each sample prevents later stages from

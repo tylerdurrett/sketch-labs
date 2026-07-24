@@ -370,6 +370,22 @@ describe('Flowing Contours atomic candidate selection', () => {
     expect(select(source).result.kind).toBe('accepted')
   })
 
+  it('accepts the exact signed adjacent-tangent dot in direct support', () => {
+    const samples = [
+      sample(0, { tangent: [1, 0] }),
+      sample(10, { tangent: [-1, 0] }),
+    ]
+    const spans = [support(samples, 'direct-evidence', 0, 1)]
+    const source = candidate(undefined, {
+      samples,
+      support: spans,
+      score: candidateScore(samples, spans),
+    })
+
+    expect(spans[0]!.directionalAlignment).toBe(-1)
+    expect(select(source).result.kind).toBe('accepted')
+  })
+
   it('uses exact recomputed composition-relative length below and at the threshold', () => {
     const nextBelowTen = 10 - Number.EPSILON * 10
     const below = select(candidate([0, 5, nextBelowTen]))
@@ -389,12 +405,12 @@ describe('Flowing Contours atomic candidate selection', () => {
     const exactSamples = [
       sample(0, {
         tangent: [1, 0],
-        evidence: 0.175,
+        evidence: 0.125,
         ambiguity: 0,
       }),
       sample(10, {
         tangent: [0, 1],
-        evidence: 0.175,
+        evidence: 0.125,
         ambiguity: 0,
       }),
     ]
@@ -414,6 +430,73 @@ describe('Flowing Contours atomic candidate selection', () => {
       reason: 'below-minimum-score',
     })
     expect(select(exactCandidate).result.kind).toBe('accepted')
+  })
+
+  it('applies evolving represented overlap before the score gate', () => {
+    const source = candidate([0, 5, 10])
+    const overlapAtFloor =
+      (source.score.total - 1) / 5
+    const exact = select(source, {
+      representedOverlap: overlapAtFloor,
+      representedCollisionFraction: 0.25,
+    })
+    const below = select(source, {
+      representedOverlap: overlapAtFloor + Number.EPSILON,
+      representedCollisionFraction: 0.25,
+    })
+
+    expect(exact.result.kind).toBe('accepted')
+    if (exact.result.kind === 'accepted') {
+      expect(exact.result.trajectory.score.total).toBe(1)
+      expect(
+        exact.result.trajectory.score.representedOverlapPenalty,
+      ).toBe(5 * overlapAtFloor)
+    }
+    expect(below.result).toEqual({
+      kind: 'rejected',
+      reason: 'below-minimum-score',
+    })
+    expect(below.accounting).toMatchObject({
+      candidateCount: 1,
+      acceptedCandidateCount: 0,
+      rejectedCandidateCount: 1,
+      rawTrajectoryCount: 0,
+    })
+  })
+
+  it('rejects a represented whole candidate once before minting an id', () => {
+    const accounting = createFlowingContoursAccounting()
+    const represented = select(
+      candidate([0, 5, 10]),
+      {
+        representedOverlap: 0.1,
+        representedCollisionFraction: 0.5,
+      },
+      accounting,
+    )
+    const independent = select(
+      candidate([0, 5, 10], { anchorId: 5 }),
+      {
+        representedOverlap: 0,
+        representedCollisionFraction: 0,
+      },
+      accounting,
+    )
+
+    expect(represented.result).toEqual({
+      kind: 'rejected',
+      reason: 'represented-overlap',
+    })
+    expect(independent.result.kind).toBe('accepted')
+    if (independent.result.kind === 'accepted') {
+      expect(independent.result.trajectory.id).toBe(0)
+    }
+    expect(accounting).toMatchObject({
+      candidateCount: 2,
+      acceptedCandidateCount: 1,
+      rejectedCandidateCount: 1,
+      rawTrajectoryCount: 1,
+    })
   })
 
   it('gates on canonical unsupported penalty after a tolerance-only comparison', () => {

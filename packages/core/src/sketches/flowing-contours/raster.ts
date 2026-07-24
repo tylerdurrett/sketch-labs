@@ -26,6 +26,11 @@ import {
   isWithinFlowingContoursLimit,
   type FlowingContoursLimits,
 } from './limits'
+import {
+  createNormalizedFlowingContoursToneTransform,
+  defaultFlowingContoursControls,
+  type FlowingContoursControls,
+} from './controls'
 
 const CHANNELS_PER_PIXEL = 4
 const BYTE_MAX = 255
@@ -75,6 +80,30 @@ const EMPTY_PREPARED_RASTER: PreparedFlowingContoursRaster = Object.freeze({
   alpha: EMPTY_VALUES,
   positiveSupport: EMPTY_SUPPORT,
 })
+
+/**
+ * Apply the artist's visible-luminance transform once before field analysis.
+ *
+ * Identity defaults return the exact prepared raster. Non-identity controls
+ * replace only the frozen luminance array; sampled alpha and exact support
+ * permission retain their original identities and values.
+ */
+export function applyFlowingContoursToneControls(
+  raster: Readonly<PreparedFlowingContoursRaster>,
+  controls: Readonly<FlowingContoursControls>,
+): Readonly<PreparedFlowingContoursRaster> {
+  if (
+    controls.gamma === defaultFlowingContoursControls.gamma &&
+    controls.contrast === defaultFlowingContoursControls.contrast
+  ) {
+    return raster
+  }
+  const applyTone = createNormalizedFlowingContoursToneTransform(controls)
+  return Object.freeze({
+    ...raster,
+    luminance: Object.freeze(raster.luminance.map(applyTone)),
+  })
+}
 
 function validateRasterFailClosed(
   pixels: Readonly<DecodedPixels>,

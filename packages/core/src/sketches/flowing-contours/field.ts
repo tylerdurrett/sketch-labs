@@ -13,6 +13,7 @@
 
 import type { Point } from '../../types'
 import {
+  createFlowingContoursAccounting,
   terminateFlowingContoursAtSafetyLimit,
   type FlowingContoursAccounting,
 } from './accounting'
@@ -22,7 +23,11 @@ import {
   type FlowingContoursLimits,
 } from './limits'
 import type { PreparedFlowingContoursRaster } from './raster'
-import type { CorrectedFlowingRidgeSample, FlowingContoursField } from './types'
+import type {
+  CorrectedFlowingRidgeSample,
+  FlowingContoursField,
+  FlowingContoursFieldEnsemble,
+} from './types'
 
 const SCHARR_AXIS_WEIGHT = 10
 const SCHARR_DIAGONAL_WEIGHT = 3
@@ -47,6 +52,30 @@ const SCALE_POLICY = Object.freeze([
   Object.freeze({ sigma: 4, preference: 0.9 }),
   Object.freeze({ sigma: 8, preference: 0.82 }),
 ] as const)
+/**
+ * The broad plane is deliberately separate rather than appended to
+ * `SCALE_POLICY`: a wide form tangent must remain searchable even where a
+ * stronger local texture response wins at the same sample.
+ */
+const BROAD_FORM_SCALE_POLICY = Object.freeze([
+  Object.freeze({ sigma: 16, preference: 1 }),
+] as const)
+const BROAD_FORM_LOCAL_SUPPORT_FLOOR = 0.04
+const FIELD_ENSEMBLE_SCALE_PLANE_COUNTS = new WeakMap<
+  Readonly<FlowingContoursFieldEnsemble>,
+  number
+>()
+
+interface ScalePolicyEntry {
+  readonly sigma: number
+  readonly preference: number
+}
+
+export function flowingContoursFieldEnsembleScalePlaneCount(
+  ensemble: Readonly<FlowingContoursFieldEnsemble>,
+): number | null {
+  return FIELD_ENSEMBLE_SCALE_PLANE_COUNTS.get(ensemble) ?? null
+}
 
 const EMPTY_VALUES = Object.freeze([]) as readonly number[]
 const EMPTY_SUPPORT = Object.freeze([]) as readonly boolean[]
@@ -266,7 +295,7 @@ function canonicalTangent(
 
 function updateFromScale(
   raster: Readonly<PreparedFlowingContoursRaster>,
-  scale: (typeof SCALE_POLICY)[number],
+  scale: Readonly<ScalePolicyEntry>,
   contourEvidence: number[],
   tangentX: number[],
   tangentY: number[],
@@ -337,17 +366,11 @@ function updateFromScale(
   }
 }
 
-/**
- * Build one immutable, bounded contour field from FC04's prepared raster.
- *
- * Production always uses the four fixed scale bands. A lowered FC03 scale cap
- * fails before allocating scale planes. Exact positive-alpha permission is
- * retained independently from interpolated alpha and contour evidence.
- */
-export function buildFlowingContoursField(
+function buildFieldFromScalePolicy(
   raster: Readonly<PreparedFlowingContoursRaster>,
   accounting: FlowingContoursAccounting,
-  limits: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
+  limits: Readonly<FlowingContoursLimits>,
+  scalePolicy: readonly Readonly<ScalePolicyEntry>[],
 ): FlowingContoursField {
   try {
     if (
@@ -390,7 +413,7 @@ export function buildFlowingContoursField(
     if (
       !isWithinFlowingContoursLimit(
         'scale-plane-count',
-        SCALE_POLICY.length,
+        scalePolicy.length,
         limits,
       )
     ) {
@@ -406,7 +429,7 @@ export function buildFlowingContoursField(
     const ambiguity = new Array<number>(sampleCount).fill(0)
     const ridgeScale = new Array<number>(sampleCount).fill(0)
 
-    for (const scale of SCALE_POLICY) {
+    for (const scale of scalePolicy) {
       updateFromScale(
         raster,
         scale,
@@ -441,6 +464,190 @@ export function buildFlowingContoursField(
   } catch {
     invalidate(accounting)
     return EMPTY_FLOWING_CONTOURS_FIELD
+  }
+}
+
+function combineFlowingContoursFields(
+  fine: Readonly<FlowingContoursField>,
+  mid: Readonly<FlowingContoursField>,
+): FlowingContoursField {
+  const contourEvidence = fine.contourEvidence.map((evidence, index) =>
+    Math.max(evidence, mid.contourEvidence[index]!),
+  )
+  const useMid = fine.contourEvidence.map(
+    (evidence, index) => mid.contourEvidence[index]! > evidence,
+  )
+  return Object.freeze({
+    ...fine,
+    contourEvidence: Object.freeze(contourEvidence),
+    tangentX: Object.freeze(
+      fine.tangentX.map((value, index) =>
+        useMid[index] ? mid.tangentX[index]! : value,
+      ),
+    ),
+    tangentY: Object.freeze(
+      fine.tangentY.map((value, index) =>
+        useMid[index] ? mid.tangentY[index]! : value,
+      ),
+    ),
+    tangentCoherence: Object.freeze(
+      fine.tangentCoherence.map((value, index) =>
+        useMid[index] ? mid.tangentCoherence[index]! : value,
+      ),
+    ),
+    ambiguity: Object.freeze(
+      fine.ambiguity.map((value, index) =>
+        useMid[index] ? mid.ambiguity[index]! : value,
+      ),
+    ),
+    ridgeScale: Object.freeze(
+      fine.ridgeScale.map((value, index) =>
+        useMid[index] ? mid.ridgeScale[index]! : value,
+      ),
+    ),
+  })
+}
+
+function locallyGatedGuideField(
+  source: Readonly<FlowingContoursField>,
+  local: Readonly<FlowingContoursField>,
+): FlowingContoursField {
+  return Object.freeze({
+    ...source,
+    contourEvidence: Object.freeze(
+      source.contourEvidence.map((evidence, index) =>
+        local.contourEvidence[index]! >= BROAD_FORM_LOCAL_SUPPORT_FLOOR
+          ? Math.min(evidence, local.contourEvidence[index]!)
+          : 0,
+      ),
+    ),
+  })
+}
+
+/**
+ * Build one immutable, bounded contour field from FC04's prepared raster.
+ *
+ * Production always uses the four fixed scale bands. A lowered FC03 scale cap
+ * fails before allocating scale planes. Exact positive-alpha permission is
+ * retained independently from interpolated alpha and contour evidence.
+ */
+export function buildFlowingContoursField(
+  raster: Readonly<PreparedFlowingContoursRaster>,
+  accounting: FlowingContoursAccounting,
+  limits: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
+): FlowingContoursField {
+  return buildFieldFromScalePolicy(raster, accounting, limits, SCALE_POLICY)
+}
+
+/**
+ * Build the three-member bounded field ensemble used by production generation.
+ *
+ * The five total planes consume the existing FC03 ceiling exactly: four local
+ * detail planes plus one broad-form plane. Mid form reuses the sigma 2/4/8
+ * responses already consumed by local detail. Evidence accounting is the
+ * union of occupied lattice samples across all hypotheses.
+ */
+export function buildFlowingContoursFieldEnsemble(
+  raster: Readonly<PreparedFlowingContoursRaster>,
+  accounting: FlowingContoursAccounting,
+  limits: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
+): Readonly<FlowingContoursFieldEnsemble> {
+  const empty = Object.freeze({
+    hypotheses: Object.freeze([]),
+  }) as Readonly<FlowingContoursFieldEnsemble>
+  try {
+    const totalScalePlanes =
+      SCALE_POLICY.length + BROAD_FORM_SCALE_POLICY.length
+    if (
+      !isWithinFlowingContoursLimit(
+        'scale-plane-count',
+        totalScalePlanes,
+        limits,
+      )
+    ) {
+      terminateFlowingContoursAtSafetyLimit(accounting, 'scale-plane-count')
+      accounting.contourEvidenceSampleCount = 0
+      return empty
+    }
+    const broadAccounting = createFlowingContoursAccounting()
+    const scaleAccountings = SCALE_POLICY.map(() =>
+      createFlowingContoursAccounting(),
+    )
+    const broadSource = buildFieldFromScalePolicy(
+      raster,
+      broadAccounting,
+      limits,
+      BROAD_FORM_SCALE_POLICY,
+    )
+    const scaleFields = SCALE_POLICY.map((scale, index) =>
+      buildFieldFromScalePolicy(
+        raster,
+        scaleAccountings[index]!,
+        limits,
+        Object.freeze([scale]),
+      ),
+    )
+    if (
+      broadAccounting.termination !== 'complete' ||
+      scaleAccountings.some(
+        ({ termination }) => termination !== 'complete',
+      )
+    ) {
+      accounting.termination =
+        broadAccounting.termination === 'invalid-input' ||
+        scaleAccountings.some(
+          ({ termination }) => termination === 'invalid-input',
+        )
+          ? 'invalid-input'
+          : 'limit-reached'
+      accounting.limitedBy =
+        broadAccounting.limitedBy ??
+        scaleAccountings.find(({ limitedBy }) => limitedBy !== null)
+          ?.limitedBy ??
+        null
+      accounting.contourEvidenceSampleCount = 0
+      return empty
+    }
+    const [sigma1, sigma2, sigma4, sigma8] = scaleFields as [
+      FlowingContoursField,
+      FlowingContoursField,
+      FlowingContoursField,
+      FlowingContoursField,
+    ]
+    const fine = combineFlowingContoursFields(sigma1, sigma2)
+    const coarseLocalSource = combineFlowingContoursFields(sigma4, sigma8)
+    const midSource = combineFlowingContoursFields(
+      sigma2,
+      coarseLocalSource,
+    )
+    const local = combineFlowingContoursFields(fine, coarseLocalSource)
+    // Broad form contributes orientation, not a detached blurred contour.
+    // Local evidence gates and caps its magnitude on the visible ridge so
+    // sigma 16 cannot create detached parallel marks around one feature.
+    const broad = locallyGatedGuideField(broadSource, local)
+    const mid = locallyGatedGuideField(midSource, local)
+    let evidenceUnionCount = 0
+    for (let index = 0; index < broad.contourEvidence.length; index += 1) {
+      if (
+        broad.contourEvidence[index]! > 0 ||
+        local.contourEvidence[index]! > 0
+      ) {
+        evidenceUnionCount += 1
+      }
+    }
+    accounting.contourEvidenceSampleCount = evidenceUnionCount
+    const ensemble = Object.freeze({
+      hypotheses: Object.freeze([
+        Object.freeze({ kind: 'broad-form' as const, field: broad }),
+        Object.freeze({ kind: 'mid-form' as const, field: mid }),
+        Object.freeze({ kind: 'local-detail' as const, field: local }),
+      ]),
+    })
+    FIELD_ENSEMBLE_SCALE_PLANE_COUNTS.set(ensemble, totalScalePlanes)
+    return ensemble
+  } catch {
+    invalidate(accounting)
+    return empty
   }
 }
 

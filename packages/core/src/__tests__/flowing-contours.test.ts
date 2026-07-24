@@ -78,13 +78,16 @@ function withoutStrokeWidth(scene: Readonly<Scene>) {
 }
 
 describe('Flowing Contours registered Sketch', () => {
-  it('publishes stable metadata and one managed asset plus exactly four controls', () => {
+  it('publishes stable metadata and one managed asset plus exactly seven controls', () => {
     const sketch = createFlowingContours(SELECTED_ID)
 
     expect(sketch.id).toBe('flowing-contours')
     expect(sketch.name).toBe('Flowing Contours')
     expect(Object.keys(sketch.schema)).toEqual([
       'imageAsset',
+      'gamma',
+      'contrast',
+      'pivot',
       'curveDetail',
       'continuity',
       'flowSmoothing',
@@ -247,10 +250,13 @@ describe('Flowing Contours registered Sketch', () => {
     }
   })
 
-  it('round-trips its asset and four controls through the generic Preset spine', () => {
+  it('round-trips its asset and seven controls through the generic Preset spine', () => {
     const schema = createFlowingContoursSchema(DEFAULT_ID)
     const params = {
       imageAsset: SELECTED_ID,
+      gamma: 0.68,
+      contrast: 0.73,
+      pivot: 0.42,
       curveDetail: 0.17,
       continuity: 0.31,
       flowSmoothing: 0.79,
@@ -261,13 +267,17 @@ describe('Flowing Contours registered Sketch', () => {
       'round-trip',
       params,
       'ignored-by-v1-geometry',
-      new Set(['continuity', 'flowSmoothing']),
+      new Set(['contrast', 'continuity', 'flowSmoothing']),
     )
 
     const applied = applyPreset(schema, preset)
     expect(applied.params).toEqual(params)
     expect(applied.seed).toBe('ignored-by-v1-geometry')
-    expect(applied.locks).toEqual(['continuity', 'flowSmoothing'])
+    expect(applied.locks).toEqual([
+      'continuity',
+      'contrast',
+      'flowSmoothing',
+    ])
   })
 
   it('does not import Pencil Contour or Watercolor Forms artistic modules', () => {

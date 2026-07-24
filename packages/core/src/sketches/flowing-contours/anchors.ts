@@ -1,11 +1,10 @@
 /**
  * Stable anchor inventory and authored-detail admission for Flowing Contours.
  *
- * Anchor discovery is deliberately independent of Curve detail. It finds
- * subpixel ridge maxima, ranks them by contour support, and greedily keeps a
- * spatially separated set. Curve detail can then expose only a nested prefix
- * of that fixed inventory. This prevents a detail change from moving, dropping,
- * or reordering an already eligible strong starting point.
+ * Anchor discovery preserves a detail-independent legacy inventory through
+ * Curve Detail 1. Above 1 it appends a bounded lower-evidence extension after
+ * that exact legacy prefix. Admission always exposes a nested prefix, so a
+ * detail change cannot move, drop, or reorder an already eligible start.
  */
 
 import type { Point } from '../../types'
@@ -27,6 +26,7 @@ import type {
 } from './types'
 
 const EVIDENCE_EPSILON = 1e-12
+const MINIMUM_EXTENDED_SCORE = 0.02
 const MINIMUM_SECONDARY_SCORE = 0.04
 const MINIMUM_STRONG_SCORE = 0.16
 const MINIMUM_COHERENCE = 0.2
@@ -36,13 +36,16 @@ const MAXIMUM_SEPARATION = 8
 const SEPARATION_DIAGONAL_DIVISOR = 48
 const NORMAL_CORRECTION_SAMPLE_COUNT = 3
 
-export type FlowingContoursAnchorStrength = 'strong' | 'secondary'
+export type FlowingContoursAnchorStrength =
+  | 'strong'
+  | 'secondary'
+  | 'extended'
 
 /**
  * One ranked FC01 anchor with its immutable admission evidence.
  *
  * `selectionScore` is not a trajectory score. It exists only to establish the
- * detail-independent anchor order and primary/secondary admission boundary.
+ * stable anchor order and strong/secondary/extended admission boundaries.
  */
 export interface RankedFlowingContoursAnchor extends FlowingContoursAnchor {
   readonly rank: number
@@ -55,6 +58,7 @@ export interface FlowingContoursAnchorInventory {
   readonly anchors: readonly Readonly<RankedFlowingContoursAnchor>[]
   readonly correctedRidgeSampleCount: number
   readonly strongAnchorCount: number
+  readonly legacyAnchorCount: number
   readonly minimumSeparation: number
 }
 
@@ -84,6 +88,7 @@ const EMPTY_INVENTORY: FlowingContoursAnchorInventory = Object.freeze({
   anchors: EMPTY_ANCHORS,
   correctedRidgeSampleCount: 0,
   strongAnchorCount: 0,
+  legacyAnchorCount: 0,
   minimumSeparation: MINIMUM_SEPARATION,
 })
 
@@ -94,10 +99,29 @@ const EMPTY_ADMISSION: FlowingContoursAnchorAdmission = Object.freeze({
   minimumSelectionScore: MINIMUM_STRONG_SCORE,
 })
 
+function clampCurveDetail(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0
+  if (value >= 2) return 2
+  return value
+}
+
 function clampUnit(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0
   if (value >= 1) return 1
   return value
+}
+
+/** Exact anchor-score floor shared by high-detail admission and search. */
+export function flowingContoursAnchorAdmissionFloor(
+  curveDetail: number,
+): number {
+  const detail = clampCurveDetail(curveDetail)
+  return detail <= 1
+    ? MINIMUM_STRONG_SCORE -
+        detail * (MINIMUM_STRONG_SCORE - MINIMUM_SECONDARY_SCORE)
+    : MINIMUM_SECONDARY_SCORE -
+        (detail - 1) *
+          (MINIMUM_SECONDARY_SCORE - MINIMUM_EXTENDED_SCORE)
 }
 
 function invalidate(accounting: FlowingContoursAccounting): void {
@@ -240,6 +264,7 @@ function selectionScore(
 function correctedCandidate(
   field: Readonly<FlowingContoursField>,
   fieldSampleIndex: number,
+  minimumScore: number,
 ): AnchorCandidate | null {
   if (
     !field.positiveSupport[fieldSampleIndex] ||
@@ -298,7 +323,7 @@ function correctedCandidate(
     return null
   }
   const score = selectionScore(sample)
-  if (score + EVIDENCE_EPSILON < MINIMUM_SECONDARY_SCORE) return null
+  if (score + EVIDENCE_EPSILON < minimumScore) return null
   return { fieldSampleIndex, sample, selectionScore: score }
 }
 
@@ -366,13 +391,16 @@ function isSpatiallySeparated(
  *
  * Ridge correction samples the continuous field along the local normal. The
  * final rank and separation pass use corrected points, never grid-neighbor
- * connectivity. A lowered FC03 anchor cap returns the strongest stable prefix
- * and records the exact limiting policy.
+ * connectivity. Detail through 1 builds the exact legacy inventory; detail
+ * above 1 may append only the bounded extended evidence band. A lowered FC03
+ * anchor cap returns the strongest stable prefix and records the limiting
+ * policy.
  */
 export function buildFlowingContoursAnchorInventory(
   field: Readonly<FlowingContoursField>,
   accounting: FlowingContoursAccounting,
   limits: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
+  maximumCurveDetail = 1,
 ): Readonly<FlowingContoursAnchorInventory> {
   try {
     accounting.correctedRidgeSampleCount = 0
@@ -400,13 +428,21 @@ export function buildFlowingContoursAnchorInventory(
       return EMPTY_INVENTORY
     }
 
+    const extendedAdmission = maximumCurveDetail > 1
+    const minimumScore = extendedAdmission
+      ? MINIMUM_EXTENDED_SCORE
+      : MINIMUM_SECONDARY_SCORE
     const candidates: AnchorCandidate[] = []
     for (
       let fieldSampleIndex = 0;
       fieldSampleIndex < field.contourEvidence.length;
       fieldSampleIndex += 1
     ) {
-      const candidate = correctedCandidate(field, fieldSampleIndex)
+      const candidate = correctedCandidate(
+        field,
+        fieldSampleIndex,
+        minimumScore,
+      )
       if (candidate !== null) candidates.push(candidate)
     }
     candidates.sort(compareCandidates)
@@ -452,18 +488,26 @@ export function buildFlowingContoursAnchorInventory(
             candidate.selectionScore + EVIDENCE_EPSILON >=
             MINIMUM_STRONG_SCORE
               ? ('strong' as const)
-              : ('secondary' as const),
+              : candidate.selectionScore + EVIDENCE_EPSILON >=
+                  MINIMUM_SECONDARY_SCORE
+                ? ('secondary' as const)
+                : ('extended' as const),
         }),
       ),
     )
     const strongAnchorCount = anchors.findIndex(
-      (anchor) => anchor.strength === 'secondary',
+      (anchor) => anchor.strength !== 'strong',
+    )
+    const legacyAnchorCount = anchors.findIndex(
+      (anchor) => anchor.strength === 'extended',
     )
     const inventory = Object.freeze({
       anchors,
       correctedRidgeSampleCount: candidates.length,
       strongAnchorCount:
         strongAnchorCount < 0 ? anchors.length : strongAnchorCount,
+      legacyAnchorCount:
+        legacyAnchorCount < 0 ? anchors.length : legacyAnchorCount,
       minimumSeparation: separation,
     })
     return inventory
@@ -477,7 +521,7 @@ export function buildFlowingContoursAnchorInventory(
  * Admit a nested prefix of a previously built anchor inventory.
  *
  * Curve detail simultaneously grows the maximum prefix and lowers the weakest
- * secondary score. Since the inventory is sorted by that score, their
+ * admitted score. Since the inventory is sorted by that score, their
  * intersection is still a literal prefix; increasing detail can only append.
  */
 export function admitFlowingContoursAnchors(
@@ -490,14 +534,30 @@ export function admitFlowingContoursAnchors(
     if (!Number.isFinite(curveDetail) || curveDetail <= 0) {
       return EMPTY_ADMISSION
     }
-    const detail = clampUnit(curveDetail)
-    const detailPrefixLength = Math.min(
-      inventory.anchors.length,
-      Math.ceil(inventory.anchors.length * detail),
-    )
+    const detail = clampCurveDetail(curveDetail)
+    const legacyAnchorCount =
+      Number.isSafeInteger(inventory.legacyAnchorCount) &&
+      inventory.legacyAnchorCount >= 0 &&
+      inventory.legacyAnchorCount <= inventory.anchors.length
+        ? inventory.legacyAnchorCount
+        : inventory.anchors.length
+    const extendedDetail = Math.max(0, detail - 1)
+    const detailPrefixLength =
+      detail <= 1
+        ? Math.min(
+            legacyAnchorCount,
+            Math.ceil(legacyAnchorCount * detail),
+          )
+        : Math.min(
+            inventory.anchors.length,
+            legacyAnchorCount +
+              Math.ceil(
+                (inventory.anchors.length - legacyAnchorCount) *
+                  extendedDetail,
+              ),
+          )
     const minimumSelectionScore =
-      MINIMUM_STRONG_SCORE -
-      detail * (MINIMUM_STRONG_SCORE - MINIMUM_SECONDARY_SCORE)
+      flowingContoursAnchorAdmissionFloor(detail)
     let scorePrefixLength = 0
     while (
       scorePrefixLength < inventory.anchors.length &&

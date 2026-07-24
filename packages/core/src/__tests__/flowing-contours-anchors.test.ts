@@ -96,11 +96,16 @@ function preparedRaster(
   }
 }
 
-function inventory(field: FlowingContoursField) {
+function inventory(field: FlowingContoursField, maximumCurveDetail = 1) {
   const accounting = createFlowingContoursAccounting()
   return {
     accounting,
-    inventory: buildFlowingContoursAnchorInventory(field, accounting),
+    inventory: buildFlowingContoursAnchorInventory(
+      field,
+      accounting,
+      undefined,
+      maximumCurveDetail,
+    ),
   }
 }
 
@@ -265,6 +270,72 @@ describe('Flowing Contours anchor inventory', () => {
     }
   })
 
+  it('preserves the exact legacy prefix through 1 and adds a nested coherent extension at 1.5 and 2', () => {
+    const strengths = new Map([
+      ['4,4', { evidence: 0.9, coherence: 1, ambiguity: 0 }],
+      ['12,4', { evidence: 0.5, coherence: 1, ambiguity: 0 }],
+      ['20,4', { evidence: 0.2, coherence: 1, ambiguity: 0 }],
+      ['4,12', { evidence: 0.11, coherence: 0.25, ambiguity: 0.6 }],
+      ['12,12', { evidence: 0.095, coherence: 0.25, ambiguity: 0.6 }],
+      ['20,12', { evidence: 0.07, coherence: 0.25, ambiguity: 0.6 }],
+    ])
+    const source = manualField(
+      25,
+      17,
+      (x, y) => strengths.get(`${x},${y}`) ?? {},
+    )
+    const legacy = inventory(source, 1).inventory
+    const extended = inventory(source, 2).inventory
+    const legacyHalf = admitFlowingContoursAnchors(
+      legacy,
+      0.5,
+      createFlowingContoursAccounting(),
+    )
+    const extendedHalf = admitFlowingContoursAnchors(
+      extended,
+      0.5,
+      createFlowingContoursAccounting(),
+    )
+    const atOne = admitFlowingContoursAnchors(
+      extended,
+      1,
+      createFlowingContoursAccounting(),
+    )
+    const atOneAndHalf = admitFlowingContoursAnchors(
+      extended,
+      1.5,
+      createFlowingContoursAccounting(),
+    )
+    const atTwo = admitFlowingContoursAnchors(
+      extended,
+      2,
+      createFlowingContoursAccounting(),
+    )
+
+    expect(extended.anchors.slice(0, legacy.anchors.length)).toEqual(
+      legacy.anchors,
+    )
+    expect(extendedHalf.anchors).toEqual(legacyHalf.anchors)
+    expect(atOne.anchors).toEqual(legacy.anchors)
+    expect(atOneAndHalf.anchors.slice(0, atOne.anchors.length)).toEqual(
+      atOne.anchors,
+    )
+    expect(atTwo.anchors.slice(0, atOneAndHalf.anchors.length)).toEqual(
+      atOneAndHalf.anchors,
+    )
+    expect(atOneAndHalf.anchors.length).toBeGreaterThan(
+      atOne.anchors.length,
+    )
+    expect(atTwo.anchors.length).toBeGreaterThan(
+      atOneAndHalf.anchors.length,
+    )
+    expect(
+      atTwo.anchors.slice(extended.legacyAnchorCount).every(
+        (anchor) => anchor.strength === 'extended',
+      ),
+    ).toBe(true)
+  })
+
   it('is independent of authored detail before admission', () => {
     const field = manualField(33, 25, (x, y) => ({
       evidence:
@@ -318,6 +389,35 @@ describe('Flowing Contours anchor inventory', () => {
     const admitted = admitFlowingContoursAnchors(capped, 1, accounting)
     expect(admitted.anchors.length).toBeLessThanOrEqual(7)
     expect(accounting.eligibleAnchorCount).toBe(admitted.anchors.length)
+  })
+
+  it('keeps the high-detail extension bounded by the same noisy-field anchor cap', () => {
+    const source = manualField(67, 61, (x, y) => {
+      const phase = (x * 73 + y * 151 + x * y * 17) % 997
+      const angle = ((phase % 180) * Math.PI) / 180
+      return {
+        evidence: 0.06 + (phase % 23) / 100,
+        tangent: [Math.cos(angle), Math.sin(angle)],
+        coherence: 0.3,
+        ambiguity: 0.6,
+      }
+    })
+    const uncapped = inventory(source, 2).inventory
+    const accounting = createFlowingContoursAccounting()
+    const limits = createFlowingContoursTestLimits({ 'anchor-count': 7 })!
+    const capped = buildFlowingContoursAnchorInventory(
+      source,
+      accounting,
+      limits,
+      2,
+    )
+    const admitted = admitFlowingContoursAnchors(capped, 2, accounting)
+
+    expect(capped.anchors).toHaveLength(7)
+    expect(capped.anchors).toEqual(uncapped.anchors.slice(0, 7))
+    expect(admitted.anchors.length).toBeLessThanOrEqual(7)
+    expect(accounting.termination).toBe('limit-reached')
+    expect(accounting.limitedBy).toBe('anchor-count')
   })
 
   it('returns deterministic finite deeply frozen results and exact accounting', () => {

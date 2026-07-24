@@ -38,6 +38,7 @@ const LOOP_SAMPLE_SPACING = 0.25
 const MAXIMUM_LOOP_SAMPLES = 12
 const OVERLAP_SAMPLE_SPACING = 0.25
 const MAXIMUM_OVERLAP_SAMPLES_PER_SEGMENT = 64
+const DEFAULT_REPRESENTED_COLLISION_THRESHOLD = 0.7
 const DEFAULT_MINIMUM_EVIDENCE = 0.04
 const DEFAULT_MINIMUM_COHERENCE = 0.25
 const DEFAULT_MAXIMUM_AMBIGUITY = 0.7
@@ -47,13 +48,19 @@ const ANCHOR_MATCH_TOLERANCE = 1e-10
 const ANCHOR_MINIMUM_COHERENCE = 0.2
 const ANCHOR_MAXIMUM_AMBIGUITY = 0.82
 const ANCHOR_MINIMUM_SELECTION_SCORE = 0.04
+const LOCAL_CERTIFICATE_ALIGNMENT_FLOOR = 0.75
+const LOCAL_CERTIFICATE_SAMPLE_SPACING = 0.25
+const MAXIMUM_LOCAL_CERTIFICATE_SAMPLES_PER_SEGMENT = 64
 
 const CANDIDATE_SOURCE_FIELDS = new WeakMap<
   Readonly<FlowingContoursCandidate>,
   Readonly<FlowingContoursField>
 >()
-
-export interface FlowingContoursSearchOptions extends FlowingContoursDirectionalGrowthOptions {}
+export interface FlowingContoursSearchOptions
+  extends FlowingContoursDirectionalGrowthOptions {
+  /** Internal high-detail admission floor; ordinary callers retain `0.04`. */
+  readonly minimumAnchorSelectionScore?: number
+}
 
 interface ResolvedSearchOptions {
   readonly forward: Readonly<FlowingContoursDirectionalGrowthOptions>
@@ -77,6 +84,42 @@ export function flowingContoursCandidateSourceField(
 ): Readonly<FlowingContoursField> | null {
   try {
     return CANDIDATE_SOURCE_FIELDS.get(candidate) ?? null
+  } catch {
+    return null
+  }
+}
+
+export interface FlowingContoursCandidateOverlapMeasurement {
+  readonly mean: number
+  readonly representedCollisionFraction: number
+}
+
+/**
+ * Measure one authentic whole candidate against evolving occupancy.
+ *
+ * The candidate is never cloned or rebound: callers retain the exact FC10
+ * object and pass this bounded tangent-aware measurement into FC11.
+ */
+export function measureFlowingContoursCandidateRepresentedOverlap(
+  candidate: Readonly<FlowingContoursCandidate>,
+  sampler: FlowingContoursRepresentedOverlapSampler,
+): Readonly<FlowingContoursCandidateOverlapMeasurement> | null {
+  try {
+    if (
+      CANDIDATE_SOURCE_FIELDS.get(candidate) === undefined ||
+      !Object.isFrozen(candidate)
+    ) {
+      return null
+    }
+    const measurement = measureRepresentedOverlap(
+      sampler,
+      candidate.samples,
+    )
+    if (measurement === null) return null
+    return Object.freeze({
+      mean: measurement.mean,
+      representedCollisionFraction: measurement.collisionFraction,
+    })
   } catch {
     return null
   }
@@ -216,6 +259,7 @@ function matchesSample(
 function ownedAnchorSample(
   field: Readonly<FlowingContoursField>,
   fieldSampleIndex: number,
+  minimumSelectionScore: number,
 ): Readonly<CorrectedFlowingRidgeSample> | null {
   if (
     !field.positiveSupport[fieldSampleIndex] ||
@@ -261,7 +305,7 @@ function ownedAnchorSample(
       (0.45 + 0.55 * expected.coherence) *
       (1 - 0.7 * expected.ambiguity) +
       ANCHOR_EVIDENCE_EPSILON <
-      ANCHOR_MINIMUM_SELECTION_SCORE
+      minimumSelectionScore
   ) {
     return null
   }
@@ -271,6 +315,7 @@ function ownedAnchorSample(
 function snapshotAnchor(
   source: Readonly<FlowingContoursAnchor>,
   field: Readonly<FlowingContoursField>,
+  minimumSelectionScore: number,
 ): Readonly<FlowingContoursAnchor> | null {
   try {
     const sample = snapshotSample(source.sample)
@@ -284,7 +329,11 @@ function snapshotAnchor(
     ) {
       return null
     }
-    const expected = ownedAnchorSample(field, source.fieldSampleIndex)
+    const expected = ownedAnchorSample(
+      field,
+      source.fieldSampleIndex,
+      minimumSelectionScore,
+    )
     if (expected === null || !matchesSample(sample, expected)) return null
     return Object.freeze({
       id: source.id,
@@ -387,6 +436,7 @@ function resolveOptions(
       ridgeSource,
       'predictorHeadingInfluence',
     )
+    const maximumOwnershipRadius = ridgeSource.maximumOwnershipRadius
     if (
       (stepLength !== undefined &&
         (typeof stepLength !== 'number' ||
@@ -403,7 +453,12 @@ function resolveOptions(
       maximumAmbiguity === null ||
       ambiguityMargin === null ||
       minimumTangentAlignment === null ||
-      predictorHeadingInfluence === null
+      predictorHeadingInfluence === null ||
+      (maximumOwnershipRadius !== undefined &&
+        (typeof maximumOwnershipRadius !== 'number' ||
+          !Number.isFinite(maximumOwnershipRadius) ||
+          maximumOwnershipRadius <= 0 ||
+          maximumOwnershipRadius > 0.75))
     ) {
       return null
     }
@@ -420,6 +475,9 @@ function resolveOptions(
       ...(predictorHeadingInfluence === undefined
         ? {}
         : { predictorHeadingInfluence }),
+      ...(maximumOwnershipRadius === undefined
+        ? {}
+        : { maximumOwnershipRadius }),
     })
 
     const sourceSampler = source.representedOverlapSampler ?? null
@@ -847,11 +905,19 @@ function singletonBackwardLoopTrace(
       })
 }
 
-function sampleRepresentedOverlap(
+interface RepresentedOverlapMeasurement {
+  readonly mean: number
+  readonly collisionFraction: number
+}
+
+function measureRepresentedOverlap(
   sampler: FlowingContoursRepresentedOverlapSampler | null,
   samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
-): number | null {
-  if (sampler === null) return 0
+  collisionThreshold = DEFAULT_REPRESENTED_COLLISION_THRESHOLD,
+): Readonly<RepresentedOverlapMeasurement> | null {
+  if (sampler === null) {
+    return Object.freeze({ mean: 0, collisionFraction: 0 })
+  }
   try {
     const segmentTangents: Readonly<Point>[] = []
     for (let index = 1; index < samples.length; index += 1) {
@@ -866,10 +932,12 @@ function sampleRepresentedOverlap(
 
     let sum = 0
     let count = 0
+    let collisionCount = 0
     const initial = sampler(samples[0]!.point, initialTangent)
     if (!isUnitInterval(initial)) return null
     sum += initial
     count += 1
+    if (initial >= collisionThreshold) collisionCount += 1
     for (let index = 1; index < samples.length; index += 1) {
       const start = samples[index - 1]!.point
       const end = samples[index]!.point
@@ -896,13 +964,24 @@ function sampleRepresentedOverlap(
         if (!isUnitInterval(value)) return null
         sum += value
         count += 1
+        if (value >= collisionThreshold) collisionCount += 1
       }
     }
     const mean = sum / count
-    return Number.isFinite(mean) ? mean : null
+    const collisionFraction = collisionCount / count
+    return Number.isFinite(mean) && Number.isFinite(collisionFraction)
+      ? Object.freeze({ mean, collisionFraction })
+      : null
   } catch {
     return null
   }
+}
+
+function sampleRepresentedOverlap(
+  sampler: FlowingContoursRepresentedOverlapSampler | null,
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+): number | null {
+  return measureRepresentedOverlap(sampler, samples)?.mean ?? null
 }
 
 function directionalCoherence(
@@ -917,6 +996,366 @@ function directionalCoherence(
     )
   }
   return sum / (samples.length - 1)
+}
+
+type LocalSegmentCertificate = 'direct' | 'weak' | 'contradiction'
+
+function locallyResolved(
+  sample: Readonly<CorrectedFlowingRidgeSample>,
+): boolean {
+  return (
+    sample.evidence >= DEFAULT_MINIMUM_EVIDENCE &&
+    sample.coherence >= DEFAULT_MINIMUM_COHERENCE &&
+    sample.ambiguity <= DEFAULT_MAXIMUM_AMBIGUITY
+  )
+}
+
+function certifyLocalSegment(
+  field: Readonly<FlowingContoursField>,
+  start: Readonly<CorrectedFlowingRidgeSample>,
+  end: Readonly<CorrectedFlowingRidgeSample>,
+): LocalSegmentCertificate | null {
+  const dx = end.point[0] - start.point[0]
+  const dy = end.point[1] - start.point[1]
+  const length = Math.hypot(dx, dy)
+  const chord = unit([dx, dy])
+  if (!Number.isFinite(length) || length <= VECTOR_EPSILON || chord === null) {
+    return null
+  }
+  const intervalCount = Math.max(
+    1,
+    Math.ceil(length / LOCAL_CERTIFICATE_SAMPLE_SPACING),
+  )
+  if (intervalCount > MAXIMUM_LOCAL_CERTIFICATE_SAMPLES_PER_SEGMENT) {
+    return null
+  }
+  let direct = true
+  for (let index = 0; index <= intervalCount; index += 1) {
+    const amount = index / intervalCount
+    const sampled = sampleFlowingContoursField(
+      field,
+      frozenPoint(start.point[0] + dx * amount, start.point[1] + dy * amount),
+    )
+    if (sampled === null) return 'contradiction'
+    if (!locallyResolved(sampled)) {
+      direct = false
+      continue
+    }
+    if (
+      Math.abs(alignment(sampled.tangent, chord)) <
+      LOCAL_CERTIFICATE_ALIGNMENT_FLOOR
+    ) {
+      return 'contradiction'
+    }
+  }
+  return direct ? 'direct' : 'weak'
+}
+
+function localTraceSample(
+  field: Readonly<FlowingContoursField>,
+  proposal: Readonly<CorrectedFlowingRidgeSample>,
+): Readonly<CorrectedFlowingRidgeSample> | null {
+  const sampled = sampleFlowingContoursField(field, proposal.point)
+  if (sampled === null) return null
+  const sign =
+    alignment(sampled.tangent, proposal.tangent) < 0 ? -1 : 1
+  return snapshotSample(
+    {
+      ...sampled,
+      tangent: frozenPoint(
+        sampled.tangent[0] * sign,
+        sampled.tangent[1] * sign,
+      ),
+    },
+  )
+}
+
+function certifiedGapAlignment(
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+  start: number,
+  end: number,
+): number | null {
+  const entry = samples[start]
+  if (entry === undefined || end <= start || end >= samples.length) return null
+  let minimum = 1
+  for (let index = start + 1; index <= end; index += 1) {
+    const previous = samples[index - 1]!
+    const sample = samples[index]!
+    const displacement = unit([
+      sample.point[0] - entry.point[0],
+      sample.point[1] - entry.point[1],
+    ])
+    if (displacement === null) return null
+    minimum = Math.min(
+      minimum,
+      alignment(previous.tangent, sample.tangent),
+      alignment(entry.tangent, sample.tangent),
+      alignment(entry.tangent, displacement),
+      alignment(sample.tangent, displacement),
+    )
+  }
+  return minimum
+}
+
+function appendCertifiedDirectSupport(
+  spans: Readonly<FlowingContoursSpanSupportProvenance>[],
+  start: number,
+  end: number,
+  samples: readonly Readonly<CorrectedFlowingRidgeSample>[],
+  length: number,
+): void {
+  const entry = samples[start]!
+  const exit = samples[end]!
+  const directionalAlignment = alignment(entry.tangent, exit.tangent)
+  const previous = spans[spans.length - 1]
+  if (
+    previous?.kind === 'direct-evidence' &&
+    previous.endSampleIndex === start
+  ) {
+    spans[spans.length - 1] = Object.freeze({
+      ...previous,
+      endSampleIndex: end,
+      length: previous.length + length,
+      exitEvidence: exit.evidence,
+      directionalAlignment: Math.min(
+        previous.directionalAlignment,
+        directionalAlignment,
+      ),
+    })
+    return
+  }
+  spans.push(
+    Object.freeze({
+      kind: 'direct-evidence',
+      startSampleIndex: start,
+      endSampleIndex: end,
+      length,
+      entryEvidence: entry.evidence,
+      exitEvidence: exit.evidence,
+      directionalAlignment,
+    }),
+  )
+}
+
+function certifyLocalTrace(
+  field: Readonly<FlowingContoursField>,
+  proposal: Readonly<FlowingContoursDirectionalTrace>,
+  continuity: number,
+  limits: Readonly<FlowingContoursLimits>,
+): Readonly<FlowingContoursDirectionalTrace> | null {
+  const samples: Readonly<CorrectedFlowingRidgeSample>[] = []
+  for (const source of proposal.samples) {
+    const sample = localTraceSample(field, source)
+    if (sample === null) return null
+    samples.push(sample)
+  }
+  if (samples.length < 1) return null
+  const allowedWeakSteps = Math.min(
+    limits['weak-span-step-count'],
+    Math.floor(
+      continuity * FLOWING_CONTOURS_LIMITS['weak-span-step-count'],
+    ),
+  )
+  const allowedWeakDistance = Math.min(
+    limits['weak-span-distance'],
+    continuity * FLOWING_CONTOURS_LIMITS['weak-span-distance'],
+  )
+  const spans: Readonly<FlowingContoursSpanSupportProvenance>[] = []
+  let gapStart: number | null = null
+  let gapStepCount = 0
+  let gapLength = 0
+  for (let index = 1; index < samples.length; index += 1) {
+    const first = samples[index - 1]!
+    const second = samples[index]!
+    const length = segmentLength(first, second)
+    const certificate = certifyLocalSegment(field, first, second)
+    if (certificate === 'contradiction') return null
+    if (
+      certificate === null ||
+      !Number.isFinite(length) ||
+      length <= VECTOR_EPSILON
+    ) {
+      return null
+    }
+    if (certificate === 'weak') {
+      gapStart ??= index - 1
+      gapStepCount += 1
+      gapLength += length
+      if (
+        gapStepCount > allowedWeakSteps ||
+        gapLength > allowedWeakDistance
+      ) {
+        return null
+      }
+      continue
+    }
+    if (gapStart !== null) {
+      const gapEnd = index
+      const certifiedLength = gapLength + length
+      const gapAlignment = certifiedGapAlignment(samples, gapStart, gapEnd)
+      if (
+        gapAlignment === null ||
+        gapAlignment < LOCAL_CERTIFICATE_ALIGNMENT_FLOOR ||
+        certifiedLength > allowedWeakDistance
+      ) {
+        return null
+      }
+      spans.push(
+        Object.freeze({
+          kind: 'bounded-gap',
+          startSampleIndex: gapStart,
+          endSampleIndex: gapEnd,
+          length: certifiedLength,
+          entryEvidence: samples[gapStart]!.evidence,
+          exitEvidence: samples[gapEnd]!.evidence,
+          directionalAlignment: gapAlignment,
+        }),
+      )
+      gapStart = null
+      gapStepCount = 0
+      gapLength = 0
+      continue
+    }
+    appendCertifiedDirectSupport(
+      spans,
+      index - 1,
+      index,
+      samples,
+      length,
+    )
+  }
+  // Weak travel must be bounded by recovered direct evidence on both sides.
+  if (gapStart !== null) return null
+  return Object.freeze({
+    direction: proposal.direction,
+    samples: Object.freeze(samples),
+    spanSupport: Object.freeze(spans),
+    endpointReason: proposal.endpointReason,
+    searchStepCount: proposal.searchStepCount,
+  })
+}
+
+/**
+ * Re-certify a broad geometric proposal against one exact local proof field.
+ *
+ * Geometry is retained, but every stored sample, support label, objective
+ * component, durable field brand, and later evidence tube comes from `field`.
+ * Strong locally aligned travel becomes direct support; unresolved travel may
+ * survive only through the existing bounded-gap policy. A resolved local
+ * tangent contradiction rejects the whole proposal.
+ */
+export function certifyFlowingContoursCandidateAgainstField(
+  proposal: Readonly<FlowingContoursCandidate>,
+  field: Readonly<FlowingContoursField>,
+  continuity: number,
+  flowSmoothing: number,
+  limitsSource: Readonly<FlowingContoursLimits> = FLOWING_CONTOURS_LIMITS,
+): Readonly<FlowingContoursCandidate> | null {
+  try {
+    if (
+      CANDIDATE_SOURCE_FIELDS.get(proposal) === undefined ||
+      !Number.isFinite(continuity) ||
+      continuity < 0 ||
+      continuity > 1 ||
+      !Number.isFinite(flowSmoothing) ||
+      flowSmoothing < 0 ||
+      flowSmoothing > 1
+    ) {
+      return null
+    }
+    const limits = snapshotLimits(limitsSource)
+    if (limits === null || !hasValidField(field, limits)) return null
+    const backward = certifyLocalTrace(
+      field,
+      proposal.backward,
+      continuity,
+      limits,
+    )
+    const forward = certifyLocalTrace(
+      field,
+      proposal.forward,
+      continuity,
+      limits,
+    )
+    if (backward === null || forward === null) return null
+    const backwardSamples = reverseBackwardSamples(backward)
+    const forwardSamples = snapshotForwardSamples(forward)
+    const backwardSupport = reverseBackwardSupport(backward)
+    const forwardSupport = shiftedForwardSupport(
+      forward,
+      backward.samples.length - 1,
+    )
+    if (
+      backwardSamples === null ||
+      forwardSamples === null ||
+      backwardSupport === null ||
+      forwardSupport === null
+    ) {
+      return null
+    }
+    const samples = Object.freeze([
+      ...backwardSamples,
+      ...forwardSamples.slice(1),
+    ])
+    const spanSupport = Object.freeze([
+      ...backwardSupport,
+      ...forwardSupport,
+    ])
+    // Closed broad proposals require an independently certified closing span;
+    // fail closed rather than inheriting the proposal field's loop proof.
+    if (samples.length !== proposal.samples.length || samples.length < 2) {
+      return null
+    }
+    const length = polylineLength(samples)
+    if (length === null || length <= 0) return null
+    const unsupportedLength = spanSupport.reduce(
+      (sum, span) =>
+        sum + (span.kind === 'bounded-gap' ? span.length : 0),
+      0,
+    )
+    const sampleCount = samples.length
+    const segmentCount = Math.max(1, sampleCount - 1)
+    const score = scoreFlowingContoursCandidate(
+      {
+        accumulatedEvidence:
+          samples.reduce((sum, sample) => sum + sample.evidence, 0) /
+          sampleCount,
+        usefulLength:
+          length / Math.max(1, Math.hypot(field.width, field.height)),
+        directionalCoherence: directionalCoherence(samples),
+        curvatureChange:
+          measureFlowingContoursCurvatureChange(
+            samples.map((sample) => sample.point),
+          ) / segmentCount,
+        unsupportedTravel:
+          unsupportedLength /
+          Math.max(1, Math.hypot(field.width, field.height)),
+        ambiguity:
+          samples.reduce((sum, sample) => sum + sample.ambiguity, 0) /
+          sampleCount,
+        representedOverlap: 0,
+      },
+      flowSmoothing,
+    )
+    const anchor = Object.freeze({
+      id: proposal.anchor.id,
+      fieldSampleIndex: proposal.anchor.fieldSampleIndex,
+      sample: forward.samples[0]!,
+    })
+    const certified = Object.freeze({
+      anchor,
+      backward,
+      forward,
+      samples,
+      spanSupport,
+      length,
+      score,
+    })
+    CANDIDATE_SOURCE_FIELDS.set(certified, field)
+    return certified
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -959,7 +1398,15 @@ export function searchFlowingContoursCandidateDetailed(
   try {
     const limits = snapshotLimits(limitsSource)
     if (limits === null || !hasValidField(field, limits)) return null
-    const anchor = snapshotAnchor(anchorSource, field)
+    const minimumAnchorSelectionScore =
+      optionsSource.minimumAnchorSelectionScore ??
+      ANCHOR_MINIMUM_SELECTION_SCORE
+    if (!isUnitInterval(minimumAnchorSelectionScore)) return null
+    const anchor = snapshotAnchor(
+      anchorSource,
+      field,
+      minimumAnchorSelectionScore,
+    )
     if (
       anchor === null ||
       anchor.sample.point[0] < 0 ||

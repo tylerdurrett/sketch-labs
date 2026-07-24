@@ -4,13 +4,13 @@ import type { DecodedPixels } from '../imageAssets'
 import { createRasterContainFit } from '../rasterSampling'
 import { resolveCompositionFrame } from '../compositionFrame'
 import { createFlowingContoursAccounting } from '../sketches/flowing-contours/accounting'
-import { buildFlowingContoursField } from '../sketches/flowing-contours/field'
+import { buildFlowingContoursFieldEnsemble } from '../sketches/flowing-contours/field'
 import {
   flowingContoursPathIsClosedForTest,
   generateFlowingContours,
   type FlowingContoursGeneratorInput,
 } from '../sketches/flowing-contours/generator'
-import { runFlowingContoursPipeline } from '../sketches/flowing-contours/pipeline'
+import { runFlowingContoursFieldEnsemblePipeline } from '../sketches/flowing-contours/pipeline'
 import { prepareFlowingContoursRaster } from '../sketches/flowing-contours/raster'
 import type { FlowingContoursControls } from '../sketches/flowing-contours/controls'
 import type { Point } from '../types'
@@ -415,10 +415,10 @@ describe('Flowing Contours generator', () => {
       fittedCurvePointCount: 0,
     })
     expect(fittedLimited.diagnostics.eligibleAnchorCount).toBeGreaterThan(0)
-    expect(fittedLimited.diagnostics.processedAnchorCount).toBeGreaterThan(0)
-    expect(fittedLimited.diagnostics.directionalTraceCount).toBeGreaterThan(0)
-    expect(fittedLimited.diagnostics.searchStepCount).toBeGreaterThan(0)
-    expect(fittedLimited.diagnostics.candidateCount).toBeGreaterThan(0)
+    expect(fittedLimited.diagnostics.processedAnchorCount).toBe(0)
+    expect(fittedLimited.diagnostics.directionalTraceCount).toBe(0)
+    expect(fittedLimited.diagnostics.searchStepCount).toBe(0)
+    expect(fittedLimited.diagnostics.candidateCount).toBe(0)
   })
 
   it('rejects malformed or raised limit policies instead of falling back', () => {
@@ -440,8 +440,11 @@ describe('Flowing Contours generator', () => {
     const source = boundaryRaster(70, 50, (y) => 34 + 6 * Math.sin(y / 8))
     const accounting = createFlowingContoursAccounting()
     const prepared = prepareFlowingContoursRaster(source, accounting)
-    const field = buildFlowingContoursField(prepared, accounting)
-    const pipeline = runFlowingContoursPipeline(field, CONTROLS)
+    const ensemble = buildFlowingContoursFieldEnsemble(prepared, accounting)
+    const pipeline = runFlowingContoursFieldEnsemblePipeline(
+      ensemble,
+      CONTROLS,
+    )
     const generated = generate(source)
 
     for (const name of [

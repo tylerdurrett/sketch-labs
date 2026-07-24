@@ -678,9 +678,39 @@ describe('Flowing Contours directional growth', () => {
     expect(trace.searchStepCount).toBe(9)
     expect(trace.samples.length).toBeGreaterThan(2)
     expect(trace.samples.at(-1)!.point[1]).toBeLessThan(7)
+  })
+
+  it('records adjacent tangent alignment for a static directional alternative', () => {
+    const vertical = field(9, 15, (x, _y) => ({
+      evidence: gaussian(x - 4),
+      tangent: [0, 1],
+    }))
+    const trace = growFlowingContoursDirection(
+      vertical,
+      at(vertical, [4, 7]),
+      [1, 0],
+      'forward',
+      {
+        ...OPTIONS,
+        directionAlternatives: [
+          [0.1, 1],
+          [0.1, -1],
+        ],
+        representedOverlapSampler(point) {
+          return point[1] > 7 ? 0.6 : 0
+        },
+      },
+      createFlowingContoursTestLimits({
+        'search-breadth': 3,
+        'search-step-count': 9,
+      })!,
+    )
+
+    expect(trace.samples.length).toBeGreaterThan(2)
+    expect(trace.samples.at(-1)!.point[1]).toBeLessThan(7)
     expect(trace.spanSupport).toHaveLength(1)
     expect(trace.spanSupport[0]!.kind).toBe('direct-evidence')
-    expect(trace.spanSupport[0]!.directionalAlignment).toBe(1)
+    expect(trace.spanSupport[0]!.directionalAlignment).toBe(-1)
   })
 
   it('accounts total deterministic beam work and resolves exact ties stably', () => {

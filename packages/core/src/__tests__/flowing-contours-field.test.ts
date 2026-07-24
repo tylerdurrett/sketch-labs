@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createFlowingContoursAccounting } from '../sketches/flowing-contours/accounting'
 import {
   buildFlowingContoursField,
+  buildFlowingContoursFieldEnsemble,
   sampleFlowingContoursField,
   sampleFlowingContoursTangent,
 } from '../sketches/flowing-contours/field'
@@ -89,6 +90,100 @@ function orientationPair(overrides: {
 }
 
 describe('Flowing Contours multiscale field', () => {
+  it('preserves broad, mid, and local orientations without adding scale planes', () => {
+    const raster = preparedRaster(81, 81, (x, y) =>
+      Math.max(
+        0,
+        Math.min(
+          1,
+          (x < 40 ? 0.2 : 0.75) + 0.12 * Math.sin(y * Math.PI * 0.5),
+        ),
+      ),
+    )
+    const accounting = createFlowingContoursAccounting()
+    const ensemble = buildFlowingContoursFieldEnsemble(raster, accounting)
+
+    expect(ensemble.hypotheses.map(({ kind }) => kind)).toEqual([
+      'broad-form',
+      'mid-form',
+      'local-detail',
+    ])
+    const broad = ensemble.hypotheses[0]!.field
+    const mid = ensemble.hypotheses[1]!.field
+    const local = ensemble.hypotheses[2]!.field
+    const legacyLocal = buildFlowingContoursField(
+      raster,
+      createFlowingContoursAccounting(),
+    )
+    expect(local).toEqual(legacyLocal)
+    expect(broad.positiveSupport).toEqual(local.positiveSupport)
+    expect(mid.positiveSupport).toEqual(local.positiveSupport)
+    expect(broad.ridgeScale.every((scale) => scale === 0 || scale === 16)).toBe(
+      true,
+    )
+    expect(
+      local.ridgeScale.every((scale) => [0, 1, 2, 4, 8].includes(scale)),
+    ).toBe(true)
+    expect(
+      mid.ridgeScale.every((scale) => [0, 2, 4, 8].includes(scale)),
+    ).toBe(true)
+    expect(mid.ridgeScale).toContain(2)
+    expect(
+      mid.contourEvidence.every(
+        (evidence, sampleIndex) =>
+          evidence === 0 ||
+          (local.contourEvidence[sampleIndex]! >= 0.04 &&
+            evidence <= local.contourEvidence[sampleIndex]!),
+      ),
+    ).toBe(true)
+    expect(
+      broad.contourEvidence.every(
+        (evidence, sampleIndex) =>
+          evidence === 0 ||
+          (local.contourEvidence[sampleIndex]! >= 0.04 &&
+            evidence <= local.contourEvidence[sampleIndex]!),
+      ),
+    ).toBe(true)
+    expect(
+      broad.contourEvidence.some((evidence, sampleIndex) => {
+        if (evidence <= 0 || local.contourEvidence[sampleIndex]! < 0.04) {
+          return false
+        }
+        return (
+          Math.abs(
+            broad.tangentX[sampleIndex]! * local.tangentX[sampleIndex]! +
+              broad.tangentY[sampleIndex]! * local.tangentY[sampleIndex]!,
+          ) < 0.7
+        )
+      }),
+    ).toBe(true)
+    expect(accounting.termination).toBe('complete')
+    expect(accounting.contourEvidenceSampleCount).toBeLessThanOrEqual(
+      raster.width * raster.height,
+    )
+  })
+
+  it('accounts the ensemble five-plane ceiling as one bounded transaction', () => {
+    const raster = preparedRaster(41, 41, (x) => (x < 20 ? 0.1 : 0.9))
+    const accounting = createFlowingContoursAccounting()
+    const limits = createFlowingContoursTestLimits({
+      'scale-plane-count': 4,
+    })!
+
+    const ensemble = buildFlowingContoursFieldEnsemble(
+      raster,
+      accounting,
+      limits,
+    )
+
+    expect(ensemble.hypotheses).toEqual([])
+    expect(accounting).toMatchObject({
+      termination: 'limit-reached',
+      limitedBy: 'scale-plane-count',
+      contourEvidenceSampleCount: 0,
+    })
+  })
+
   it('keeps flat opaque and fully transparent inputs evidence-free', () => {
     const opaque = build(preparedRaster(25, 21, () => 0.42))
     const transparent = build(

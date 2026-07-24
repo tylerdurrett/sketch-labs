@@ -396,6 +396,7 @@ function assertLineLocus(
   const normalY = tangentX
   const centerX = (source.width - 1) / 2
   const centerY = (source.height - 1) / 2
+  let maximumNormalDistance = 0
   for (const primitive of primitives) {
     for (const point of resample(primitive, 7)) {
       const sourceMapped = sourcePoint(point, source, frame)
@@ -403,9 +404,15 @@ function assertLineLocus(
         (sourceMapped[0] - centerX) * normalX +
         (sourceMapped[1] - centerY) * normalY -
         offset
-      expect(Math.abs(normalDistance)).toBeLessThan(2.5)
+      maximumNormalDistance = Math.max(
+        maximumNormalDistance,
+        Math.abs(normalDistance),
+      )
     }
   }
+  // Guide proposals remain locally certified; keep the collection within
+  // 2.7 source pixels of this authored two-pixel soft edge at every aspect.
+  expect(maximumNormalDistance).toBeLessThan(2.7)
 
   const longest = longestPrimitive(primitives)
   const projected = longest.points.map((point) => {

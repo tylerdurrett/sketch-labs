@@ -23,14 +23,20 @@ import {
   type FlowingContoursControlName,
   type FlowingContoursControls,
 } from './controls'
-import { buildFlowingContoursField } from './field'
+import { buildFlowingContoursFieldEnsemble } from './field'
 import {
   FLOWING_CONTOURS_LIMITS,
   createFlowingContoursTestLimits,
   type FlowingContoursLimits,
 } from './limits'
-import { runFlowingContoursPipeline } from './pipeline'
-import { prepareFlowingContoursRaster } from './raster'
+import {
+  flowingContoursAcceptedTrajectorySourceField,
+  runFlowingContoursFieldEnsemblePipeline,
+} from './pipeline'
+import {
+  applyFlowingContoursToneControls,
+  prepareFlowingContoursRaster,
+} from './raster'
 import {
   createFlowingContoursEvidenceTube,
   validateFlowingContoursTubeCurve,
@@ -109,6 +115,9 @@ function snapshotControls(
   }
   try {
     const names: readonly FlowingContoursControlName[] = Object.freeze([
+      'gamma',
+      'contrast',
+      'pivot',
       'curveDetail',
       'continuity',
       'flowSmoothing',
@@ -449,7 +458,12 @@ export function generateFlowingContours(
         snapshotFlowingContoursDiagnostics(accounting),
       )
     }
-    const field = buildFlowingContoursField(raster, accounting, limits)
+    const analysisRaster = applyFlowingContoursToneControls(raster, controls)
+    const ensemble = buildFlowingContoursFieldEnsemble(
+      analysisRaster,
+      accounting,
+      limits,
+    )
     if (accounting.termination !== 'complete') {
       return freezeResult(
         frame,
@@ -468,7 +482,7 @@ export function generateFlowingContours(
     }
 
     const pipeline: Readonly<FlowingContoursPipelineResult> =
-      runFlowingContoursPipeline(field, controls, limits)
+      runFlowingContoursFieldEnsemblePipeline(ensemble, controls, limits)
     if (pipeline.diagnostics.termination === 'invalid-input') {
       return freezeResult(frame, pipeline.diagnostics)
     }
@@ -483,6 +497,15 @@ export function generateFlowingContours(
 
     const mapped: Readonly<MappedCurve>[] = []
     for (let index = 0; index < pipeline.fittedCurves.length; index += 1) {
+      const field = flowingContoursAcceptedTrajectorySourceField(
+        pipeline.acceptedTrajectories[index]!,
+      )
+      if (field === null) {
+        return freezeResult(
+          frame,
+          invalidDiagnostics(pipeline.diagnostics),
+        )
+      }
       const item = mappedCurve(
         field,
         pipeline.acceptedTrajectories[index]!,

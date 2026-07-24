@@ -3,10 +3,18 @@ import { describe, expect, it } from 'vitest'
 import type { DecodedPixels } from '../imageAssets'
 import { createFlowingContoursAccounting } from '../sketches/flowing-contours/accounting'
 import {
+  defaultFlowingContoursControls,
+  normalizeFlowingContoursControls,
+} from '../sketches/flowing-contours/controls'
+import { buildFlowingContoursFieldEnsemble } from '../sketches/flowing-contours/field'
+import {
   FLOWING_CONTOURS_LIMITS,
   createFlowingContoursTestLimits,
 } from '../sketches/flowing-contours/limits'
-import { prepareFlowingContoursRaster } from '../sketches/flowing-contours/raster'
+import {
+  applyFlowingContoursToneControls,
+  prepareFlowingContoursRaster,
+} from '../sketches/flowing-contours/raster'
 
 function pixels(
   width: number,
@@ -37,6 +45,105 @@ function prepare(source: DecodedPixels) {
 }
 
 describe('Flowing Contours raster preparation', () => {
+  it('preserves the exact prepared baseline at identity tone defaults', () => {
+    const { raster } = prepare(
+      pixels(2, 1, Uint8Array.of(32, 64, 96, 128, 192, 160, 128, 255)),
+    )
+
+    expect(
+      applyFlowingContoursToneControls(
+        raster,
+        defaultFlowingContoursControls,
+      ),
+    ).toBe(raster)
+  })
+
+  it.each([
+    {
+      name: 'gamma',
+      first: { gamma: 0.5 },
+      second: { gamma: 0.75 },
+    },
+    {
+      name: 'contrast',
+      first: { contrast: 0.5 },
+      second: { contrast: 0.8 },
+    },
+    {
+      name: 'pivot',
+      first: { contrast: 0.9, pivot: 0.25 },
+      second: { contrast: 0.9, pivot: 0.75 },
+    },
+  ])(
+    'changes visible luminance and evidence with $name alone while alpha permission is exact',
+    ({ first, second }) => {
+      const source = new Uint8ClampedArray(65 * 65 * 4)
+      for (let y = 0; y < 65; y += 1) {
+        for (let x = 0; x < 65; x += 1) {
+          const value = Math.max(
+            0,
+            Math.min(
+              255,
+              Math.round(
+                24 +
+                  x * 2.8 +
+                  42 * Math.sin(y / 5) +
+                  28 * Math.sin((x + y) / 7),
+              ),
+            ),
+          )
+          const offset = (y * 65 + x) * 4
+          source.set(
+            [value, value, value, (x + y) % 11 === 0 ? 96 : 255],
+            offset,
+          )
+        }
+      }
+      const prepared = prepare(pixels(65, 65, source)).raster
+      const firstRaster = applyFlowingContoursToneControls(
+        prepared,
+        normalizeFlowingContoursControls({
+          ...defaultFlowingContoursControls,
+          ...first,
+        }),
+      )
+      const secondRaster = applyFlowingContoursToneControls(
+        prepared,
+        normalizeFlowingContoursControls({
+          ...defaultFlowingContoursControls,
+          ...second,
+        }),
+      )
+      const firstAccounting = createFlowingContoursAccounting()
+      const secondAccounting = createFlowingContoursAccounting()
+      const firstFields = buildFlowingContoursFieldEnsemble(
+        firstRaster,
+        firstAccounting,
+      )
+      const secondFields = buildFlowingContoursFieldEnsemble(
+        secondRaster,
+        secondAccounting,
+      )
+
+      expect(secondRaster.luminance).not.toEqual(firstRaster.luminance)
+      expect(firstRaster.alpha).toBe(prepared.alpha)
+      expect(secondRaster.alpha).toBe(prepared.alpha)
+      expect(firstRaster.positiveSupport).toBe(prepared.positiveSupport)
+      expect(secondRaster.positiveSupport).toBe(prepared.positiveSupport)
+      expect(firstRaster.alpha).toEqual(secondRaster.alpha)
+      expect(firstRaster.positiveSupport).toEqual(
+        secondRaster.positiveSupport,
+      )
+      expect(
+        secondFields.hypotheses.map(({ field }) => field.contourEvidence),
+      ).not.toEqual(
+        firstFields.hypotheses.map(({ field }) => field.contourEvidence),
+      )
+      expect(firstAccounting.termination).toBe('complete')
+      expect(secondAccounting.termination).toBe('complete')
+    },
+  )
+
   it('prepares a one-pixel straight-alpha raster without fabricated samples', () => {
     const { accounting, raster } = prepare(
       pixels(1, 1, Uint8Array.of(255, 0, 0, 128)),

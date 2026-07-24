@@ -854,9 +854,9 @@ async function browserDependencies(primaryRoot) {
 function captureModuleSource() {
   return `import { decodeImageAsset } from '/src/imageAssetResolver.ts'
 import { createFlowingContoursAccounting } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/accounting.ts'
-import { prepareFlowingContoursRaster } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/raster.ts'
-import { buildFlowingContoursField } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/field.ts'
-import { runFlowingContoursPipeline } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/pipeline.ts'
+import { applyFlowingContoursToneControls, prepareFlowingContoursRaster } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/raster.ts'
+import { buildFlowingContoursFieldEnsemble } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/field.ts'
+import { flowingContoursAcceptedTrajectorySourceField, runFlowingContoursFieldEnsemblePipeline } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/pipeline.ts'
 import { generateFlowingContours } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/generator.ts'
 import { createFlowingContoursEvidenceTube, validateFlowingContoursTubeCurve } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/tube.ts'
 import { FLOWING_CONTOURS_LIMITS } from '/@fs${workspaceRoot}/packages/core/src/sketches/flowing-contours/limits.ts'
@@ -1286,15 +1286,36 @@ const mapFlowingStages = (pixels, controls, frame) => {
   if (accounting.termination !== 'complete') {
     throw new Error('Flowing preparation did not complete')
   }
-  const field = buildFlowingContoursField(raster, accounting)
+  const analysisRaster = applyFlowingContoursToneControls(raster, controls)
+  const toneStageProof = {
+    controls: {
+      gamma: controls.gamma,
+      contrast: controls.contrast,
+      pivot: controls.pivot,
+    },
+    applicationCount: 1,
+    exactAlphaIdentity: analysisRaster.alpha === raster.alpha,
+    exactPositiveSupportIdentity:
+      analysisRaster.positiveSupport === raster.positiveSupport,
+  }
+  if (
+    !toneStageProof.exactAlphaIdentity ||
+    !toneStageProof.exactPositiveSupportIdentity
+  ) {
+    throw new Error('Flowing tone transform changed alpha permission')
+  }
+  const ensemble = buildFlowingContoursFieldEnsemble(analysisRaster, accounting)
   if (accounting.termination !== 'complete') {
     throw new Error('Flowing field construction did not complete')
   }
-  const suppression = createFlowingContoursSuppressionState({
-    field,
-    limits: FLOWING_CONTOURS_LIMITS,
-  })
-  if (suppression === null) {
+  const invalidHypothesis = ensemble.hypotheses.find(({ field }) =>
+    createFlowingContoursSuppressionState({
+      field,
+      limits: FLOWING_CONTOURS_LIMITS,
+    }) === null,
+  )
+  if (invalidHypothesis !== undefined) {
+    const field = invalidHypothesis.field
     throw new Error(
       'Flowing suppression rejected field: ' +
         JSON.stringify({
@@ -1328,8 +1349,8 @@ const mapFlowingStages = (pixels, controls, frame) => {
         }),
     )
   }
-  const pipeline = runFlowingContoursPipeline(
-    field,
+  const pipeline = runFlowingContoursFieldEnsemblePipeline(
+    ensemble,
     controls,
     FLOWING_CONTOURS_LIMITS,
   )
@@ -1347,6 +1368,7 @@ const mapFlowingStages = (pixels, controls, frame) => {
       generated: direct,
       retainedTrajectories: [],
       stageProof: {
+        tone: toneStageProof,
         pipelineTermination: 'invalid-input',
         acceptedTrajectoryCount: 0,
         retainedTrajectoryCount: 0,
@@ -1370,7 +1392,9 @@ const mapFlowingStages = (pixels, controls, frame) => {
   for (let index = 0; index < pipeline.fittedCurves.length; index += 1) {
     const trajectory = pipeline.acceptedTrajectories[index]
     const curve = pipeline.fittedCurves[index]
+    const field = flowingContoursAcceptedTrajectorySourceField(trajectory)
     if (
+      field === null ||
       curve.provenance.sourceTrajectoryId !== trajectory.id ||
       curve.points.length !== curve.provenance.sourceSampleIndices.length
     ) {
@@ -1475,6 +1499,7 @@ const mapFlowingStages = (pixels, controls, frame) => {
     generated,
     retainedTrajectories: retained.map((item) => item.trajectory),
     stageProof: {
+      tone: toneStageProof,
       pipelineTermination: pipeline.diagnostics.termination,
       acceptedTrajectoryCount: pipeline.acceptedTrajectories.length,
       retainedTrajectoryCount: retained.length,
@@ -1529,6 +1554,12 @@ const topologyEvidence = (name, reference, flowing) => {
         path[second] &&
         (!supportedOnly || unsupported[index] === 0),
     )
+  const unsupportedConnections = (first, second) =>
+    hits.flatMap((path, index) =>
+      path[first] && path[second] && unsupported[index] > 0
+        ? [index]
+        : [],
+    )
   if (name === 'flower') {
     return [
       {
@@ -1544,12 +1575,10 @@ const topologyEvidence = (name, reference, flowing) => {
           anyHit('flower-center') && anyHit('lower-gesture'),
         forbiddenBridgeObserved:
           connected('flower-center', 'lower-gesture', false) &&
-          hits.some(
-            (path, index) =>
-              path['flower-center'] &&
-              path['lower-gesture'] &&
-              unsupported[index] > 0,
-          ),
+          unsupportedConnections(
+            'flower-center',
+            'lower-gesture',
+          ).length > 0,
       },
     ]
   }
@@ -1567,12 +1596,10 @@ const topologyEvidence = (name, reference, flowing) => {
         anyHit('left-interior') && anyHit('right-interior'),
       forbiddenBridgeObserved:
         connected('left-interior', 'right-interior', false) &&
-        hits.some(
-          (path, index) =>
-            path['left-interior'] &&
-            path['right-interior'] &&
-            unsupported[index] > 0,
-        ),
+        unsupportedConnections(
+          'left-interior',
+          'right-interior',
+        ).length > 0,
     },
   ]
 }
@@ -1739,6 +1766,15 @@ const captureSynthetic = async () => {
     FLOWING_CONTOURS_REFERENCE_CONTROLS,
     FLOWING_CONTOURS_REFERENCE_FRAME,
   )
+  const highDetailControls = {
+    ...FLOWING_CONTOURS_REFERENCE_CONTROLS,
+    curveDetail: 2,
+  }
+  const highDetail = mapFlowingStages(
+    pixels,
+    highDetailControls,
+    FLOWING_CONTOURS_REFERENCE_FRAME,
+  )
   const metrics = measureFlowingContoursReference({
     scene: flowing.generated.scene,
     acceptedTrajectories: flowing.retainedTrajectories,
@@ -1790,6 +1826,23 @@ const captureSynthetic = async () => {
     ),
     diagnostics: flowing.generated.diagnostics,
     stageProof: flowing.stageProof,
+    highDetailWitness: {
+      controls: highDetailControls,
+      eligibleAnchorCount:
+        highDetail.generated.diagnostics.eligibleAnchorCount,
+      candidateCount: highDetail.generated.diagnostics.candidateCount,
+      primitiveCount: highDetail.generated.scene.primitives.length,
+      minimumLengthProtected:
+        highDetail.generated.scene.primitives.every(
+          (primitive) =>
+            pathLength(primitive.points, primitive.closed) >=
+            highDetailControls.minimumStrokeLength *
+              Math.hypot(
+                highDetail.generated.scene.space.width,
+                highDetail.generated.scene.space.height,
+              ),
+        ),
+    },
     collectionEvidence,
     antiStaircaseMetrics: {
       pathCount: metrics.pathCount,
@@ -2638,8 +2691,9 @@ async function selfTest() {
     'generatePencilContour',
     'generateWatercolorForms',
     'prepareFlowingContoursRaster',
-    'buildFlowingContoursField',
-    'runFlowingContoursPipeline',
+    'applyFlowingContoursToneControls',
+    'buildFlowingContoursFieldEnsemble',
+    'runFlowingContoursFieldEnsemblePipeline',
     'measureFlowingContoursReference',
     'flowingContoursReferenceGateFindings',
     'comparisonPng',

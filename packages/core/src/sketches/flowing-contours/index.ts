@@ -36,7 +36,7 @@ export * from './types'
 export const FLOWING_CONTOURS_DEFAULT_IMAGE_ASSET_ID =
   PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID
 
-/** Build Flowing Contours' managed Image Asset and four-control schema. */
+/** Build Flowing Contours' managed Image Asset and seven-control schema. */
 export function createFlowingContoursSchema(defaultImageAssetId: string) {
   return Object.freeze({
     imageAsset: Object.freeze({
@@ -59,6 +59,9 @@ function controlsFromParams(
   schema: FlowingContoursSchema,
 ): FlowingContoursControls {
   return {
+    gamma: numberParam(params, schema, 'gamma'),
+    contrast: numberParam(params, schema, 'contrast'),
+    pivot: numberParam(params, schema, 'pivot'),
     curveDetail: numberParam(params, schema, 'curveDetail'),
     continuity: numberParam(params, schema, 'continuity'),
     flowSmoothing: numberParam(params, schema, 'flowSmoothing'),

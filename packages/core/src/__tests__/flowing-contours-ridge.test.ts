@@ -529,6 +529,23 @@ describe('Flowing Contours predictor-corrector ridge step', () => {
     )
 
     expect(result.kind).toBe('weak')
+    const widened = stepFlowingContoursRidge(
+      ridge,
+      at(ridge, [4, 5.45]),
+      [1, 0],
+      { ...ONE_PIXEL_STEP, maximumOwnershipRadius: 0.75 },
+      limits!,
+    )
+    expect(widened.kind).toBe('corrected')
+    expect(
+      stepFlowingContoursRidge(
+        ridge,
+        at(ridge, [4, 5.45]),
+        [1, 0],
+        { ...ONE_PIXEL_STEP, maximumOwnershipRadius: 0.751 },
+        limits!,
+      ).kind,
+    ).toBe('safety-limit')
   })
 
   it('classifies source and exact alpha boundaries separately', () => {

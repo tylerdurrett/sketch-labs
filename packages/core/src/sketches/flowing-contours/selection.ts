@@ -39,13 +39,14 @@ const GAP_ALIGNMENT_FLOOR = 0.75
 const LOOP_ALIGNMENT_FLOOR = 0.75
 
 const ACCUMULATED_EVIDENCE_WEIGHT = 4
-const USEFUL_LENGTH_WEIGHT = 3
+const USEFUL_LENGTH_WEIGHT = 5
 const DIRECTIONAL_COHERENCE_WEIGHT = 2
 const MINIMUM_CURVATURE_WEIGHT = 0.5
 const MAXIMUM_CURVATURE_WEIGHT = 3
 const UNSUPPORTED_TRAVEL_WEIGHT = 4.5
 const AMBIGUITY_WEIGHT = 3
 const REPRESENTED_OVERLAP_WEIGHT = 5
+const REPRESENTED_COLLISION_FRACTION_CEILING = 0.5
 
 interface AcceptedSelectionProvenance {
   readonly field: Readonly<FlowingContoursField>
@@ -81,12 +82,19 @@ export interface FlowingContoursSelectionOptions {
   readonly analysisHeight: number
   /** Authored fraction of the analysis diagonal. */
   readonly minimumStrokeLength: number
+  /** Current tangent-aware mean occupancy for this exact whole candidate. */
+  readonly representedOverlap?: number
+  /** Fraction of canonical samples at or above FC12's collision threshold. */
+  readonly representedCollisionFraction?: number
+  /** Whether FC12 already owns this candidate's exact anchor. */
+  readonly representedAnchorSuppressed?: boolean
 }
 
 export type FlowingContoursSelectionRejectionReason =
   | 'invalid-input'
   | 'candidate-count-limit'
   | 'below-minimum-length'
+  | 'represented-overlap'
   | 'below-minimum-score'
   | 'accepted-curve-count-limit'
   | 'raw-trajectory-point-count-limit'
@@ -122,6 +130,17 @@ export function isFlowingContoursAcceptedSelectionFromField(
     )
   } catch {
     return false
+  }
+}
+
+/** Read the exact immutable source field retained for one accepted trajectory. */
+export function flowingContoursAcceptedTrajectorySourceField(
+  trajectory: Readonly<AcceptedFlowingTrajectory>,
+): Readonly<FlowingContoursField> | null {
+  try {
+    return ACCEPTED_TRAJECTORY_SOURCE_FIELDS.get(trajectory) ?? null
+  } catch {
+    return null
   }
 }
 
@@ -953,6 +972,9 @@ interface SelectionOptionsSnapshot {
   readonly analysisSampleCount: number
   readonly diagonal: number
   readonly minimumStrokeLength: number
+  readonly representedOverlap: number | null
+  readonly representedCollisionFraction: number
+  readonly representedAnchorSuppressed: boolean
 }
 
 function snapshotOptions(
@@ -962,6 +984,21 @@ function snapshotOptions(
   const analysisWidth = ownDataValue(source, 'analysisWidth')
   const analysisHeight = ownDataValue(source, 'analysisHeight')
   const minimumStrokeLength = ownDataValue(source, 'minimumStrokeLength')
+  const representedOverlap = hasOwnDataProperty(source, 'representedOverlap')
+    ? ownDataValue(source, 'representedOverlap')
+    : null
+  const representedCollisionFraction = hasOwnDataProperty(
+    source,
+    'representedCollisionFraction',
+  )
+    ? ownDataValue(source, 'representedCollisionFraction')
+    : 0
+  const representedAnchorSuppressed = hasOwnDataProperty(
+    source,
+    'representedAnchorSuppressed',
+  )
+    ? ownDataValue(source, 'representedAnchorSuppressed')
+    : false
   if (
     !Number.isSafeInteger(analysisWidth) ||
     (analysisWidth as number) <= 0 ||
@@ -980,7 +1017,10 @@ function snapshotOptions(
     typeof minimumStrokeLength !== 'number' ||
     !Number.isFinite(minimumStrokeLength) ||
     minimumStrokeLength < 0 ||
-    minimumStrokeLength > 1
+    minimumStrokeLength > 1 ||
+    (representedOverlap !== null && !unitInterval(representedOverlap)) ||
+    !unitInterval(representedCollisionFraction) ||
+    typeof representedAnchorSuppressed !== 'boolean'
   ) {
     return null
   }
@@ -1003,6 +1043,36 @@ function snapshotOptions(
     analysisSampleCount,
     diagonal,
     minimumStrokeLength,
+    representedOverlap,
+    representedCollisionFraction,
+    representedAnchorSuppressed,
+  })
+}
+
+function applyRepresentedOverlap(
+  candidate: Readonly<CandidateSnapshot>,
+  representedOverlap: number | null,
+): Readonly<CandidateSnapshot> | null {
+  if (representedOverlap === null) return candidate
+  const representedOverlapPenalty =
+    REPRESENTED_OVERLAP_WEIGHT * representedOverlap
+  const score = candidate.score
+  const total =
+    score.accumulatedEvidence +
+    score.usefulLength +
+    score.directionalCoherence -
+    score.curvaturePenalty -
+    score.unsupportedTravelPenalty -
+    score.ambiguityPenalty -
+    representedOverlapPenalty
+  if (!Number.isFinite(total)) return null
+  return Object.freeze({
+    ...candidate,
+    score: Object.freeze({
+      ...score,
+      representedOverlapPenalty,
+      total: Object.is(total, -0) ? 0 : total,
+    }),
   })
 }
 
@@ -1382,12 +1452,17 @@ export function selectFlowingContoursCandidate(
       return rejected('candidate-count-limit')
     }
 
-    const candidate = snapshotCandidate(
+    const candidateSnapshot = snapshotCandidate(
       candidateSource,
       options.analysisWidth,
       options.analysisHeight,
       options.diagonal,
       limits,
+    )
+    if (candidateSnapshot === null) return rejected('invalid-input')
+    const candidate = applyRepresentedOverlap(
+      candidateSnapshot,
+      options.representedOverlap,
     )
     if (candidate === null) return rejected('invalid-input')
 
@@ -1403,6 +1478,22 @@ export function selectFlowingContoursCandidate(
         return rejected('invalid-input')
       }
       return rejected('below-minimum-length')
+    }
+    if (
+      options.representedAnchorSuppressed ||
+      options.representedCollisionFraction >=
+        REPRESENTED_COLLISION_FRACTION_CEILING
+    ) {
+      if (
+        !commitAccounting(accounting, accountingSnapshot, {
+          accepted: false,
+          candidate,
+          limitedBy: null,
+        })
+      ) {
+        return rejected('invalid-input')
+      }
+      return rejected('represented-overlap')
     }
     if (candidate.score.total < MINIMUM_WHOLE_CANDIDATE_SCORE) {
       if (

@@ -183,6 +183,41 @@ describe('Flowing Contours whole-candidate objective', () => {
       -1,
     )
   })
+
+  it('ranks the authenticated long Pine gesture ahead of its local stump', () => {
+    const longGesture = scoreFlowingContoursCandidate(
+      {
+        accumulatedEvidence: 0.16881187357524569,
+        usefulLength: 0.1049110096032276,
+        directionalCoherence: 0.9877999761530706,
+        curvatureChange: 0.18347369746147085,
+        unsupportedTravel: 0,
+        ambiguity: 0.09818704410265563,
+        representedOverlap: 0,
+      },
+      0.7,
+    )
+    const localStump = scoreFlowingContoursCandidate(
+      {
+        accumulatedEvidence: 0.18382386765961609,
+        usefulLength: 0.04297554615941678,
+        directionalCoherence: 0.995488939068596,
+        curvatureChange: 0.1445972830132843,
+        unsupportedTravel: 0,
+        ambiguity: 0.05913826218601343,
+        representedOverlap: 0,
+      },
+      0.7,
+    )
+
+    expect(longGesture.usefulLength).toBeGreaterThan(
+      localStump.usefulLength,
+    )
+    expect(longGesture.total).toBeGreaterThan(localStump.total)
+    expect(
+      compareFlowingContoursCandidateScores(longGesture, localStump),
+    ).toBe(-1)
+  })
 })
 
 describe('Flowing Contours deterministic objective ordering', () => {

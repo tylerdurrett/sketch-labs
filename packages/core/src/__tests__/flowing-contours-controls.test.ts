@@ -8,6 +8,9 @@ import {
 } from '../sketches/flowing-contours/controls'
 
 const AUTHORED_ORDER = [
+  'gamma',
+  'contrast',
+  'pivot',
   'curveDetail',
   'continuity',
   'flowSmoothing',
@@ -15,21 +18,42 @@ const AUTHORED_ORDER = [
 ] as const
 
 describe('Flowing Contours authored controls', () => {
-  it('declares exactly four independent controls in stable authored order', () => {
+  it('declares exactly seven independent controls in stable authored order', () => {
     expect(Object.keys(flowingContoursControlSchema)).toEqual(AUTHORED_ORDER)
     expect(flowingContoursControlSchema).toEqual({
-      curveDetail: {
+      gamma: {
         kind: 'number',
         min: 0,
         max: 1,
-        default: 0.45,
+        default: 0.5,
+        step: 0.01,
+      },
+      contrast: {
+        kind: 'number',
+        min: 0,
+        max: 1,
+        default: 0.5,
+        step: 0.01,
+      },
+      pivot: {
+        kind: 'number',
+        min: 0,
+        max: 1,
+        default: 0.5,
+        step: 0.01,
+      },
+      curveDetail: {
+        kind: 'number',
+        min: 0,
+        max: 2,
+        default: 1,
         step: 0.01,
       },
       continuity: {
         kind: 'number',
         min: 0,
         max: 1,
-        default: 0.45,
+        default: 0.08,
         step: 0.01,
       },
       flowSmoothing: {
@@ -56,13 +80,10 @@ describe('Flowing Contours authored controls', () => {
     expect(Object.isFrozen(flowingContoursControlSchema)).toBe(true)
   })
 
-  it('does not inherit Pencil Contour or Watercolor Forms keys', () => {
+  it('does not inherit sibling geometry or region controls', () => {
     const keys = new Set(Object.keys(flowingContoursControlSchema))
 
     for (const siblingKey of [
-      'gamma',
-      'contrast',
-      'pivot',
       'contourDetail',
       'contourSmoothing',
       'formDetail',
@@ -72,13 +93,16 @@ describe('Flowing Contours authored controls', () => {
     ]) {
       expect(keys.has(siblingKey), siblingKey).toBe(false)
     }
-    expect(keys.size).toBe(4)
+    expect(keys.size).toBe(7)
   })
 
   it('derives stable frozen defaults from the authored schema', () => {
     expect(defaultFlowingContoursControls).toEqual({
-      curveDetail: 0.45,
-      continuity: 0.45,
+      gamma: 0.5,
+      contrast: 0.5,
+      pivot: 0.5,
+      curveDetail: 1,
+      continuity: 0.08,
       flowSmoothing: 0.7,
       minimumStrokeLength: 0.04,
     })
@@ -96,6 +120,9 @@ describe('Flowing Contours authored controls', () => {
 
   it('defaults missing, malformed, and non-finite values independently', () => {
     const malformed = {
+      gamma: Number.NaN,
+      contrast: '0.2',
+      pivot: Number.POSITIVE_INFINITY,
       curveDetail: Number.NaN,
       continuity: '0.8',
       flowSmoothing: Number.POSITIVE_INFINITY,
@@ -122,12 +149,18 @@ describe('Flowing Contours authored controls', () => {
   it('clamps each finite value only to its own declared bounds', () => {
     expect(
       normalizeFlowingContoursControls({
+        gamma: -10,
+        contrast: 10,
+        pivot: -20,
         curveDetail: -10,
         continuity: 10,
         flowSmoothing: -20,
         minimumStrokeLength: 20,
       }),
     ).toEqual({
+      gamma: 0,
+      contrast: 1,
+      pivot: 0,
       curveDetail: 0,
       continuity: 1,
       flowSmoothing: 0,
@@ -136,13 +169,19 @@ describe('Flowing Contours authored controls', () => {
 
     expect(
       normalizeFlowingContoursControls({
+        gamma: 10,
+        contrast: -10,
+        pivot: 20,
         curveDetail: 10,
         continuity: -10,
         flowSmoothing: 20,
         minimumStrokeLength: -20,
       }),
     ).toEqual({
-      curveDetail: 1,
+      gamma: 1,
+      contrast: 0,
+      pivot: 1,
+      curveDetail: 2,
       continuity: 0,
       flowSmoothing: 1,
       minimumStrokeLength: 0.005,
@@ -151,6 +190,9 @@ describe('Flowing Contours authored controls', () => {
 
   it('retains independently authored in-range values and freezes output', () => {
     const authored = {
+      gamma: 0.21,
+      contrast: 0.37,
+      pivot: 0.62,
       curveDetail: 0.13,
       continuity: 0.29,
       flowSmoothing: 0.83,

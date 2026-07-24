@@ -5,6 +5,7 @@ import { buildFlowingContoursAnchorInventory } from '../sketches/flowing-contour
 import { sampleFlowingContoursField } from '../sketches/flowing-contours/field'
 import { createFlowingContoursTestLimits } from '../sketches/flowing-contours/limits'
 import {
+  certifyFlowingContoursCandidateAgainstField,
   flowingContoursCandidateSourceField,
   searchFlowingContoursCandidate,
   searchFlowingContoursCandidateDetailed,
@@ -114,6 +115,138 @@ function limits(overrides: Record<string, number> = {}) {
 }
 
 describe('Flowing Contours bidirectional whole-candidate search', () => {
+  it('re-certifies broad weak labels as exact direct local support', () => {
+    const broad = field(25, 11, (x, y) => ({
+      evidence:
+        gaussian(y - 5) * (x >= 9 && x <= 11 ? 0.02 : 1),
+      tangent: [1, 0],
+    }))
+    const local = field(25, 11, (_x, y) => ({
+      evidence: gaussian(y - 5),
+      tangent: [1, 0],
+    }))
+    const proposal = searchFlowingContoursCandidate(
+      broad,
+      anchor(broad, [5, 5]),
+      { ...OPTIONS, continuity: 1 },
+      limits(),
+    )
+
+    expect(proposal).not.toBeNull()
+    expect(
+      proposal!.spanSupport.some(({ kind }) => kind === 'bounded-gap'),
+    ).toBe(true)
+    const certified = certifyFlowingContoursCandidateAgainstField(
+      proposal!,
+      local,
+      1,
+      OPTIONS.flowSmoothing,
+      limits(),
+    )
+
+    expect(certified).not.toBeNull()
+    expect(flowingContoursCandidateSourceField(certified!)).toBe(local)
+    expect(certified!.samples.map(({ point }) => point)).toEqual(
+      proposal!.samples.map(({ point }) => point),
+    )
+    expect(
+      certified!.spanSupport.every(
+        ({ kind }) => kind === 'direct-evidence',
+      ),
+    ).toBe(true)
+    expect(certified!.score.unsupportedTravelPenalty).toBe(0)
+    expect(
+      selectFlowingContoursCandidate(
+        certified!,
+        {
+          analysisWidth: local.width,
+          analysisHeight: local.height,
+          minimumStrokeLength: 0,
+        },
+        createFlowingContoursAccounting(),
+        limits(),
+      ).kind,
+    ).toBe('accepted')
+  })
+
+  it('retains unresolved local travel only as an authenticated bounded gap', () => {
+    const broad = field(25, 11, (_x, y) => ({
+      evidence: gaussian(y - 5),
+      tangent: [1, 0],
+    }))
+    const local = field(25, 11, (x, y) => ({
+      evidence: gaussian(y - 5),
+      tangent: [1, 0],
+      coherence: x >= 9 && x <= 11 ? 0.01 : 1,
+      ambiguity: x >= 9 && x <= 11 ? 1 : 0,
+    }))
+    const proposal = searchFlowingContoursCandidate(
+      broad,
+      anchor(broad, [5, 5]),
+      { ...OPTIONS, continuity: 1 },
+      limits(),
+    )
+    expect(proposal).not.toBeNull()
+    const certified =
+      proposal === null
+        ? null
+        : certifyFlowingContoursCandidateAgainstField(
+            proposal,
+            local,
+            1,
+            OPTIONS.flowSmoothing,
+            limits(),
+          )
+
+    expect(certified).not.toBeNull()
+    expect(
+      certified!.spanSupport.some(
+        ({ kind }) => kind === 'bounded-gap',
+      ),
+    ).toBe(true)
+    expect(flowingContoursCandidateSourceField(certified!)).toBe(local)
+    expect(
+      selectFlowingContoursCandidate(
+        certified!,
+        {
+          analysisWidth: local.width,
+          analysisHeight: local.height,
+          minimumStrokeLength: 0,
+        },
+        createFlowingContoursAccounting(),
+        limits(),
+      ).kind,
+    ).toBe('accepted')
+  })
+
+  it('rejects a broad proposal contradicted by strong local tangents', () => {
+    const broad = field(25, 11, (_x, y) => ({
+      evidence: gaussian(y - 5),
+      tangent: [1, 0],
+    }))
+    const contradictoryLocal = field(25, 11, (_x, y) => ({
+      evidence: gaussian(y - 5),
+      tangent: [0, 1],
+    }))
+    const proposal = searchFlowingContoursCandidate(
+      broad,
+      anchor(broad, [12, 5]),
+      OPTIONS,
+      limits(),
+    )
+
+    expect(proposal).not.toBeNull()
+    expect(
+      certifyFlowingContoursCandidateAgainstField(
+        proposal!,
+        contradictoryLocal,
+        OPTIONS.continuity,
+        OPTIONS.flowSmoothing,
+        limits(),
+      ),
+    ).toBeNull()
+  })
+
   it('brands only the exact FC10 return with its exact field identity', () => {
     const source = field(21, 11, (_x, y) => ({
       evidence: gaussian(y - 5),
@@ -232,6 +365,29 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
         endSampleIndex: candidate.samples.length - 1,
       },
     ])
+    for (const span of candidate.spanSupport) {
+      if (span.kind !== 'direct-evidence') continue
+      let exactSignedMinimum = 1
+      for (
+        let index = span.startSampleIndex + 1;
+        index <= span.endSampleIndex;
+        index += 1
+      ) {
+        const previous = candidate.samples[index - 1]!.tangent
+        const current = candidate.samples[index]!.tangent
+        exactSignedMinimum = Math.min(
+          exactSignedMinimum,
+          Math.max(
+            -1,
+            Math.min(
+              1,
+              previous[0] * current[0] + previous[1] * current[1],
+            ),
+          ),
+        )
+      }
+      expect(span.directionalAlignment).toBe(exactSignedMinimum)
+    }
   })
 
   it('accepts an off-lattice anchor produced by FC06 ownership correction', () => {
@@ -773,7 +929,7 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     expect(candidate.length).toBeCloseTo(measuredLength, 12)
     expect(candidate.score.accumulatedEvidence).toBeCloseTo(4 * evidence, 12)
     expect(candidate.score.usefulLength).toBeCloseTo(
-      3 * Math.min(1, measuredLength / Math.hypot(11, 7)),
+      5 * Math.min(1, measuredLength / Math.hypot(11, 7)),
       12,
     )
     expect(candidate.score.directionalCoherence).toBeCloseTo(2, 12)
@@ -1008,6 +1164,8 @@ describe('Flowing Contours bidirectional whole-candidate search', () => {
     const module = await import('../sketches/flowing-contours/search')
     expect(Object.keys(module)).toEqual([
       'flowingContoursCandidateSourceField',
+      'measureFlowingContoursCandidateRepresentedOverlap',
+      'certifyFlowingContoursCandidateAgainstField',
       'searchFlowingContoursCandidateDetailed',
       'searchFlowingContoursCandidate',
     ])

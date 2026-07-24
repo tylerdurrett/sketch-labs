@@ -1192,6 +1192,101 @@ export function commitAcceptedFlowingTrajectorySuppression(
   })
 }
 
+function fieldsShareAnalysisSupport(
+  first: Readonly<FlowingContoursField>,
+  second: Readonly<FlowingContoursField>,
+): boolean {
+  if (
+    first.sourceWidth !== second.sourceWidth ||
+    first.sourceHeight !== second.sourceHeight ||
+    first.width !== second.width ||
+    first.height !== second.height ||
+    first.alpha.length !== second.alpha.length ||
+    first.positiveSupport.length !== second.positiveSupport.length
+  ) {
+    return false
+  }
+  for (let index = 0; index < first.alpha.length; index += 1) {
+    if (
+      !Object.is(first.alpha[index], second.alpha[index]) ||
+      first.positiveSupport[index] !== second.positiveSupport[index]
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Project one authenticated accepted trajectory into a sibling hypothesis.
+ *
+ * This capability shares only continuous geometric occupancy. It never
+ * rebrands samples, selection, fitting, or evidence-tube provenance as coming
+ * from the target field. Exact source extent and alpha/support identity are
+ * required before the immutable target occupancy transaction is attempted.
+ */
+export function projectAcceptedFlowingTrajectorySuppression(
+  state: Readonly<FlowingContoursSuppressionState>,
+  registration: Readonly<RegisteredFlowingTrajectorySuppression>,
+): FlowingContoursSuppressionCommitResult {
+  const data = stateData(state)
+  if (data === null) {
+    return Object.freeze({ kind: 'rejected', reason: 'field-mismatch' })
+  }
+  const registered = REGISTRATION_DATA.get(registration)
+  if (
+    registered === undefined ||
+    !Object.isFrozen(registration) ||
+    registration.field !== registered.field ||
+    registration.trajectoryId !== registered.trajectory.id ||
+    registration.rawSampleCount !== registered.trajectory.samples.length
+  ) {
+    return Object.freeze({ kind: 'rejected', reason: 'invalid-input' })
+  }
+  if (!fieldsShareAnalysisSupport(registered.field, data.field)) {
+    return Object.freeze({ kind: 'rejected', reason: 'field-mismatch' })
+  }
+  if (registered.field === data.field) {
+    return commitAcceptedFlowingTrajectorySuppression(state, registration)
+  }
+
+  const additions = trajectoryOccupancy(
+    registered.trajectory,
+    data.occupancyLimit,
+  )
+  if (additions === null) {
+    return Object.freeze({ kind: 'rejected', reason: 'occupancy-limit' })
+  }
+  const occupancy = mergeOccupancy(data.occupancy, additions)
+  if (occupancy.length > data.occupancyLimit) {
+    return Object.freeze({ kind: 'rejected', reason: 'occupancy-limit' })
+  }
+  const prospectiveData: Readonly<SuppressionData> = Object.freeze({
+    ...data,
+    occupancy,
+    spatialIndex: buildSpatialIndex(occupancy),
+  })
+  const suppressedEvidence = newlySuppressedEvidence(prospectiveData, additions)
+  if (suppressedEvidence.size > data.occupancyLimit) {
+    return Object.freeze({ kind: 'rejected', reason: 'occupancy-limit' })
+  }
+  const nextData: Readonly<SuppressionData> = Object.freeze({
+    ...prospectiveData,
+    suppressedEvidence,
+  })
+  const nextState =
+    occupancy === data.occupancy &&
+    suppressedEvidence.size === data.suppressedEvidence.size
+      ? state
+      : createState(nextData)
+  return Object.freeze({
+    kind: 'committed',
+    state: nextState,
+    suppressedEvidenceSampleCount:
+      suppressedEvidence.size - data.suppressedEvidence.size,
+  })
+}
+
 /** Decide whether one exact-field anchor is already represented. */
 export function isFlowingContoursAnchorSuppressed(
   query: Readonly<FlowingContoursSuppressionQuery>,

@@ -55,6 +55,9 @@ interface FieldValue {
 }
 
 const CONTROL_NAMES = Object.freeze([
+  'gamma',
+  'contrast',
+  'pivot',
   'curveDetail',
   'continuity',
   'flowSmoothing',
@@ -62,6 +65,9 @@ const CONTROL_NAMES = Object.freeze([
 ] as const)
 
 const BASE_CONTROLS: Readonly<FlowingContoursControls> = Object.freeze({
+  gamma: 0.5,
+  contrast: 0.5,
+  pivot: 0.5,
   curveDetail: 1,
   continuity: 0.45,
   flowSmoothing: 0.7,
@@ -434,12 +440,15 @@ function raster(
 }
 
 describe('Flowing Contours artist-control semantics', () => {
-  it('exposes exactly four ordered controls and normalizes each boundary independently', () => {
+  it('exposes exactly seven ordered controls and normalizes each boundary independently', () => {
     expect(Object.keys(flowingContoursControlSchema)).toEqual(CONTROL_NAMES)
     expect(Object.keys(defaultFlowingContoursControls)).toEqual(CONTROL_NAMES)
 
     expect(
       normalizeFlowingContoursControls({
+        gamma: Number.NaN,
+        contrast: Number.NEGATIVE_INFINITY,
+        pivot: 'middle',
         curveDetail: Number.NaN,
         continuity: Number.POSITIVE_INFINITY,
         flowSmoothing: 'smooth',
@@ -448,12 +457,18 @@ describe('Flowing Contours artist-control semantics', () => {
     ).toEqual(defaultFlowingContoursControls)
     expect(
       normalizeFlowingContoursControls({
+        gamma: -2,
+        contrast: 2,
+        pivot: -1,
         curveDetail: -1,
         continuity: 2,
         flowSmoothing: -2,
         minimumStrokeLength: 2,
       }),
     ).toEqual({
+      gamma: 0,
+      contrast: 1,
+      pivot: 0,
       curveDetail: 0,
       continuity: 1,
       flowSmoothing: 0,
@@ -461,12 +476,18 @@ describe('Flowing Contours artist-control semantics', () => {
     })
     expect(
       normalizeFlowingContoursControls({
+        gamma: 1,
+        contrast: 0,
+        pivot: 1,
         curveDetail: 1,
         continuity: 0,
         flowSmoothing: 1,
         minimumStrokeLength: 0.005,
       }),
     ).toEqual({
+      gamma: 1,
+      contrast: 0,
+      pivot: 1,
       curveDetail: 1,
       continuity: 0,
       flowSmoothing: 1,
@@ -606,6 +627,61 @@ describe('Flowing Contours artist-control semantics', () => {
         grow(coherent, BASE_CONTROLS.continuity, BASE_CONTROLS.flowSmoothing),
       )
     }
+  })
+
+  it('uses the high-detail band to add coherent whole candidates monotonically', () => {
+    const ridges = [
+      { row: 4, evidence: 0.8, coherence: 1, ambiguity: 0 },
+      { row: 11, evidence: 0.2, coherence: 1, ambiguity: 0 },
+      { row: 18, evidence: 0.1, coherence: 0.35, ambiguity: 0.6 },
+      { row: 25, evidence: 0.09, coherence: 0.35, ambiguity: 0.6 },
+    ]
+    const source = field(49, 31, (_x, y) => {
+      const ridge = ridges.reduce((best, candidate) =>
+        Math.abs(y - candidate.row) < Math.abs(y - best.row)
+          ? candidate
+          : best,
+      )
+      return {
+        evidence: ridge.evidence * gaussian(y - ridge.row),
+        tangent: [1, 0],
+        coherence: ridge.coherence,
+        ambiguity: ridge.ambiguity,
+      }
+    })
+    const results = [1, 1.5, 2].map((curveDetail) =>
+      runFlowingContoursPipeline(source, {
+        ...BASE_CONTROLS,
+        curveDetail,
+        minimumStrokeLength: 0.1,
+      }),
+    )
+    expect(results[1]!.diagnostics.eligibleAnchorCount).toBeGreaterThan(
+      results[0]!.diagnostics.eligibleAnchorCount,
+    )
+    expect(results[2]!.diagnostics.eligibleAnchorCount).toBeGreaterThan(
+      results[1]!.diagnostics.eligibleAnchorCount,
+    )
+    expect(results[1]!.diagnostics.candidateCount).toBeGreaterThan(
+      results[0]!.diagnostics.candidateCount,
+    )
+    expect(results[2]!.diagnostics.candidateCount).toBeGreaterThan(
+      results[1]!.diagnostics.candidateCount,
+    )
+    expect(results[1]!.acceptedTrajectories.length).toBeGreaterThan(
+      results[0]!.acceptedTrajectories.length,
+    )
+    expect(results[2]!.acceptedTrajectories.length).toBeGreaterThan(
+      results[1]!.acceptedTrajectories.length,
+    )
+    const minimumLength = 0.1 * Math.hypot(source.width, source.height)
+    expect(
+      results.every((result) =>
+        result.acceptedTrajectories.every(
+          (candidate) => candidate.length >= minimumLength,
+        ),
+      ),
+    ).toBe(true)
   })
 
   it('uses Continuity only for bounded weak travel under unchanged hard policy', () => {

@@ -1153,8 +1153,16 @@ export function growFlowingContoursDirection(
         const previousSample = state.currentTail.sample
         const sampleAlignment = aligned(
           sample.tangent,
-          previousSample.tangent,
+          state.travelDirection,
         )?.alignment
+        const directSupportAlignment = Math.max(
+          -1,
+          Math.min(
+            1,
+            previousSample.tangent[0] * sample.tangent[0] +
+              previousSample.tangent[1] * sample.tangent[1],
+          ),
+        )
         const segmentLength = distance(previousSample, sample)
         const nextMetrics = extendMetrics(
           state.currentMetrics,
@@ -1296,7 +1304,7 @@ export function growFlowingContoursDirection(
             previousSample,
             sample,
             segmentLength,
-            sampleAlignment,
+            directSupportAlignment,
           ),
           committedMetrics: nextMetrics,
           currentMetrics: nextMetrics,

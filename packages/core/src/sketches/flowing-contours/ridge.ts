@@ -27,8 +27,15 @@ const MINIMUM_NORMAL_RADIUS = 0.5
 const MAXIMUM_ADJACENT_SCALE_RATIO = 2 + 1e-6
 /** Beam headings may bias prediction, but never by more than 25 degrees. */
 const HARD_MAXIMUM_PREDICTOR_HEADING_RADIANS = (25 * Math.PI) / 180
-/** Correction ownership is always narrower than half an analysis pixel. */
-const HARD_MAXIMUM_OWNERSHIP_RADIUS = 0.49
+/** Native local correction remains narrower than half an analysis pixel. */
+const DEFAULT_MAXIMUM_OWNERSHIP_RADIUS = 0.49
+/**
+ * A guide may inspect exactly one adjacent 0.75px stencil sample.
+ *
+ * This equals the ordinary predictor step, remains subpixel, and cannot reach
+ * the next guide stencil ring. Exact local certification still decides proof.
+ */
+const HARD_MAXIMUM_GUIDE_OWNERSHIP_RADIUS = 0.75
 /** Covers bounded bilinear/chord error without admitting a visible turn. */
 const ENDPOINT_CHORD_TOLERANCE_RADIANS = (1.25 * Math.PI) / 180
 const SUPPORT_TRAVERSAL_SPACING = 0.25
@@ -45,6 +52,7 @@ const DEFAULT_OPTIONS = Object.freeze({
   ambiguityMargin: 0.04,
   minimumTangentAlignment: 0,
   predictorHeadingInfluence: 0,
+  maximumOwnershipRadius: DEFAULT_MAXIMUM_OWNERSHIP_RADIUS,
 })
 
 /**
@@ -68,6 +76,11 @@ export interface FlowingRidgeStepOptions {
    * 25-degree cone. It cannot expand search radius or ridge ownership.
    */
   readonly predictorHeadingInfluence?: number
+  /**
+   * Internal guide-only correction radius. Ordinary local search omits this
+   * and retains the narrower default ownership tube.
+   */
+  readonly maximumOwnershipRadius?: number
 }
 
 interface ResolvedFlowingRidgeStepOptions {
@@ -79,6 +92,7 @@ interface ResolvedFlowingRidgeStepOptions {
   readonly ambiguityMargin: number
   readonly minimumTangentAlignment: number
   readonly predictorHeadingInfluence: number
+  readonly maximumOwnershipRadius: number
 }
 
 interface RidgeStepBase {
@@ -194,7 +208,11 @@ function resolveOptions(
       resolved.maximumTurnRadians > Math.PI / 2 ||
       !isUnitInterval(resolved.ambiguityMargin) ||
       !isUnitInterval(resolved.minimumTangentAlignment) ||
-      !isUnitInterval(resolved.predictorHeadingInfluence)
+      !isUnitInterval(resolved.predictorHeadingInfluence) ||
+      !Number.isFinite(resolved.maximumOwnershipRadius) ||
+      resolved.maximumOwnershipRadius <= 0 ||
+      resolved.maximumOwnershipRadius >
+        HARD_MAXIMUM_GUIDE_OWNERSHIP_RADIUS
     ) {
       return null
     }
@@ -686,7 +704,7 @@ export function stepFlowingContoursRidge(
     // The outer stencil is detection space, not automatic ownership space.
     // A sole strong maximum out there is exactly how a fading ridge can hop
     // to a close parallel ridge; leave it to FC09 as weak travel instead.
-    if (Math.abs(strongest.offset) > HARD_MAXIMUM_OWNERSHIP_RADIUS) {
+    if (Math.abs(strongest.offset) > resolved.maximumOwnershipRadius) {
       return weak(
         predictedPoint,
         sampleCount,
@@ -695,7 +713,7 @@ export function stepFlowingContoursRidge(
     }
 
     const correctedOffset = parabolicPeakOffset(stencil, strongest, spacing)
-    if (Math.abs(correctedOffset) > HARD_MAXIMUM_OWNERSHIP_RADIUS) {
+    if (Math.abs(correctedOffset) > resolved.maximumOwnershipRadius) {
       return weak(
         predictedPoint,
         sampleCount,
@@ -714,7 +732,7 @@ export function stepFlowingContoursRidge(
     )
     if (
       !Number.isFinite(tangentBaselineNormalDisplacement) ||
-      tangentBaselineNormalDisplacement > HARD_MAXIMUM_OWNERSHIP_RADIUS
+      tangentBaselineNormalDisplacement > resolved.maximumOwnershipRadius
     ) {
       return weak(
         predictedPoint,

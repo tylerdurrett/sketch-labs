@@ -566,7 +566,6 @@ function expectLimitAttemptSemantics(
       expect(diagnostics.candidateCount).toBe(0)
       break
     case 'candidate-count':
-    case 'primitive-count':
       expect(diagnostics.eligibleAnchorCount).toBeGreaterThan(0)
       expect(diagnostics.processedAnchorCount).toBe(1)
       expect(diagnostics.directionalTraceCount).toBe(0)
@@ -575,12 +574,14 @@ function expectLimitAttemptSemantics(
       break
     case 'accepted-curve-count':
     case 'fitted-curve-point-count':
-      expect(diagnostics.processedAnchorCount).toBe(1)
-      expect(diagnostics.directionalTraceCount).toBe(2)
-      expect(diagnostics.searchStepCount).toBeGreaterThan(0)
-      expect(diagnostics.candidateCount).toBe(1)
+    case 'primitive-count':
+      expect(diagnostics.eligibleAnchorCount).toBeGreaterThan(0)
+      expect(diagnostics.processedAnchorCount).toBe(0)
+      expect(diagnostics.directionalTraceCount).toBe(0)
+      expect(diagnostics.searchStepCount).toBe(0)
+      expect(diagnostics.candidateCount).toBe(0)
       expect(diagnostics.acceptedCandidateCount).toBe(0)
-      expect(diagnostics.rejectedCandidateCount).toBe(1)
+      expect(diagnostics.rejectedCandidateCount).toBe(0)
       break
     case 'weak-span-step-count':
     case 'weak-span-distance':
@@ -1203,7 +1204,7 @@ describe('Flowing Contours exact safety-limit accounting', () => {
     },
   )
 
-  it('keeps the chronologically first limit when later caps are also zero', () => {
+  it('keeps the first zero-output preflight limit before search work', () => {
     const limits = Object.freeze({
       'search-step-count': 2,
       'accepted-curve-count': 0,
@@ -1214,8 +1215,8 @@ describe('Flowing Contours exact safety-limit accounting', () => {
     })
 
     expect(result.diagnostics.termination).toBe('limit-reached')
-    expect(result.diagnostics.limitedBy).toBe('search-step-count')
-    expect(result.diagnostics.searchStepCount).toBe(2)
+    expect(result.diagnostics.limitedBy).toBe('accepted-curve-count')
+    expect(result.diagnostics.searchStepCount).toBe(0)
     expect(result.scene.primitives).toEqual([])
     expectWholeOutput(result)
     expectSafeResult(result, limits)
