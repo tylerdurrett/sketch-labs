@@ -1,10 +1,10 @@
 /**
  * Supporting Plot Stage adapters owned by Photo Scribble.
  *
- * This module stays below both registered Sketches: it resolves the projected
- * Stage inputs and delegates directly to Watercolor Forms' headless generator.
- * Plot Sequence declaration, scheduling, presentation, and finalization belong
- * to their respective callers.
+ * This module owns Photo Scribble's supporting Stage adapter and authored Plot
+ * Sequence declaration. It stays below both registered Sketches by delegating
+ * projected inputs directly to Watercolor Forms' headless generator; scheduling,
+ * presentation, and finalization remain downstream.
  */
 
 import type {
