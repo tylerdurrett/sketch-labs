@@ -12,6 +12,7 @@ import {
 } from "@harness/core";
 
 import {
+  plotStageProjection,
   plotStageSchemaView,
   primaryPlotStage,
 } from "./plotSequenceProjection";
@@ -72,6 +73,8 @@ export type ShadingWorkerMessage =
 export interface CreateShadingComputeIdentityInput {
   readonly sketchId: string;
   readonly schema: ParamSchema;
+  /** Exact projection order when an ordinary schema object cannot retain it. */
+  readonly schemaKeys?: readonly string[];
   readonly params: Params;
   readonly seed: Seed;
   readonly compositionFrame: CoordinateSpace;
@@ -82,24 +85,44 @@ export type ShadingSchemaSketch = Pick<
   "schema" | "plotSequence"
 >;
 
+export interface ShadingIdentitySchemaProjection {
+  readonly schema: Readonly<ParamSchema>;
+  readonly schemaKeys: readonly string[];
+}
+
 /**
- * Resolve the owning-Sketch schema view that affects Primary Shading.
+ * Resolve the ordered owning-Sketch schema projection that affects Shading.
  *
  * Sequence Sketches use the unique Primary Stage's shared-plus-owned bindings
  * in exact authored order. Ordinary Sketches retain their complete schema.
  */
-export function shadingIdentitySchema(
+export function shadingIdentityProjection(
   sketch: ShadingSchemaSketch,
-): Readonly<ParamSchema> {
+): ShadingIdentitySchemaProjection {
   if (sketch.plotSequence === undefined) {
-    return plotStageSchemaView(sketch.schema, undefined);
+    const schema = plotStageSchemaView(sketch.schema, undefined);
+    return Object.freeze({
+      schema,
+      schemaKeys: Object.freeze(Object.keys(schema)),
+    });
   }
   const primary = primaryPlotStage(sketch.plotSequence);
-  return plotStageSchemaView(
+  const projection = plotStageProjection(
     sketch.schema,
     sketch.plotSequence,
     primary.id,
-  );
+  ).combined;
+  return Object.freeze({
+    schema: projection.schema,
+    schemaKeys: projection.schemaKeys,
+  });
+}
+
+/** Resolve only the Primary Shading schema view. */
+export function shadingIdentitySchema(
+  sketch: ShadingSchemaSketch,
+): Readonly<ParamSchema> {
+  return shadingIdentityProjection(sketch).schema;
 }
 
 /** Project active Primary Shading params without sibling-Stage values. */
@@ -107,7 +130,22 @@ export function shadingIdentityParams(
   sketch: ShadingSchemaSketch,
   params: Params,
 ): Readonly<Params> {
-  return activeParams(shadingIdentitySchema(sketch), params);
+  const projection = shadingIdentityProjection(sketch);
+  const active = activeParams(projection.schema, params);
+  const keys = projection.schemaKeys.filter((key) => hasOwn(active, key));
+  const ordered: Params = {};
+  for (const key of keys) {
+    Object.defineProperty(ordered, key, {
+      value: active[key],
+      enumerable: true,
+      configurable: false,
+      writable: false,
+    });
+  }
+  Object.freeze(ordered);
+  return new Proxy(ordered, {
+    ownKeys: () => [...keys],
+  });
 }
 
 const hasOwn = (value: object, key: PropertyKey): boolean =>
@@ -173,12 +211,23 @@ export function createShadingComputeIdentity(
   input: CreateShadingComputeIdentityInput,
 ): ShadingComputeIdentity {
   const projectedParams = activeParams(input.schema, input.params);
-  const params = Object.keys(projectedParams).map((key) =>
-    Object.freeze({
-      key,
-      value: copyParamValue(projectedParams[key], key, input.schema[key]!),
-    }),
-  );
+  const schemaKeys = input.schemaKeys ?? Object.keys(input.schema);
+  const schemaKeySet = new Set(schemaKeys);
+  if (
+    schemaKeySet.size !== schemaKeys.length ||
+    schemaKeys.length !== Object.keys(input.schema).length ||
+    schemaKeys.some((key) => !hasOwn(input.schema, key))
+  ) {
+    throw new TypeError("Shading schema keys do not match its schema");
+  }
+  const params = schemaKeys
+    .filter((key) => hasOwn(projectedParams, key))
+    .map((key) =>
+      Object.freeze({
+        key,
+        value: copyParamValue(projectedParams[key], key, input.schema[key]!),
+      }),
+    );
   const identity = Object.freeze({
     sketchId: input.sketchId,
     params: Object.freeze(params),

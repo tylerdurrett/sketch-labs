@@ -4,6 +4,7 @@ import {
   defaultParams,
   photoScribble,
   type ParamSchema,
+  type PlotSequenceDeclaration,
   type Scene,
 } from "@harness/core";
 
@@ -18,6 +19,7 @@ import {
   isShadingComputeSuccess,
   isShadingWorkerMessage,
   shadingIdentityParams,
+  shadingIdentityProjection,
   shadingIdentitySchema,
   shadingComputeIdentitiesEqual,
   type ShadingComputeIdentity,
@@ -240,6 +242,57 @@ describe("Shading compute identity", () => {
       "zeta",
       "alpha",
       "middle",
+    ]);
+  });
+
+  it("preserves authored Primary order through final integer-like protocol keys", () => {
+    const indexedSchema = {
+      "2": { kind: "number", min: 0, max: 10, default: 2 },
+      "10": { kind: "number", min: 0, max: 10, default: 10 },
+      alpha: { kind: "number", min: 0, max: 10, default: 1 },
+    } satisfies ParamSchema;
+    const plotSequence: PlotSequenceDeclaration = {
+      sharedParameters: [{ schemaKey: "10", key: "shared" }],
+      stages: [
+        {
+          id: "ink",
+          name: "Ink",
+          source: { kind: "primary", generatorId: "indexed-ink" },
+          parameters: [
+            { schemaKey: "2", key: "two" },
+            { schemaKey: "alpha", key: "alpha" },
+          ],
+          dependencies: { usesSeed: true, usesTime: false },
+        },
+      ],
+    };
+    const projection = shadingIdentityProjection({
+      schema: indexedSchema,
+      plotSequence,
+    });
+
+    expect(projection.schemaKeys).toEqual(["10", "2", "alpha"]);
+    expect(
+      Object.keys(
+        shadingIdentityParams(
+          { schema: indexedSchema, plotSequence },
+          { "2": 4, "10": 8, alpha: 3 },
+        ),
+      ),
+    ).toEqual(["10", "2", "alpha"]);
+    expect(
+      createShadingComputeIdentity({
+        sketchId: "indexed-ink",
+        schema: projection.schema,
+        schemaKeys: projection.schemaKeys,
+        params: { "2": 4, "10": 8, alpha: 3 },
+        seed: "seed",
+        compositionFrame: { width: 120, height: 90 },
+      }).params,
+    ).toEqual([
+      { key: "10", value: 8 },
+      { key: "2", value: 4 },
+      { key: "alpha", value: 3 },
     ]);
   });
 

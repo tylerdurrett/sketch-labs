@@ -16,7 +16,7 @@ import {
   isShadingComputeProgress,
   isShadingComputeRequest,
   isShadingComputeResponse,
-  shadingIdentitySchema,
+  shadingIdentityProjection,
   shadingComputeIdentitiesEqual,
   type ShadingComputeIdentity,
   type ShadingComputeProgress,
@@ -114,10 +114,12 @@ function resolveShadingRequest(
   let schema: Readonly<ParamSchema>;
   let canonicalIdentity: ShadingComputeIdentity;
   try {
-    schema = shadingIdentitySchema(sketch);
+    const projection = shadingIdentityProjection(sketch);
+    schema = projection.schema;
     canonicalIdentity = createShadingComputeIdentity({
       sketchId: sketch.id,
       schema,
+      schemaKeys: projection.schemaKeys,
       params,
       seed: identity.seed,
       compositionFrame: identity.compositionFrame,

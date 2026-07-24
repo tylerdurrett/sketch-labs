@@ -4,6 +4,7 @@ import {
   defaultParams,
   photoScribble,
   PHOTO_SCRIBBLE_DEFAULT_IMAGE_ASSET_ID,
+  registry,
   scribbleMoon,
   toneCalibration,
   type DecodedPixels,
@@ -13,10 +14,12 @@ import {
   type ShadingArtwork,
   type ShadingProgress,
   type SketchEnvironment,
+  type StatelessSketch,
 } from "@harness/core";
 
 import {
   createShadingComputeIdentity,
+  shadingIdentityProjection,
   shadingIdentitySchema,
   type ShadingComputeRequest,
   type ShadingWorkerMessage,
@@ -67,15 +70,17 @@ function request(
     (sketchId === photoScribble.id
       ? photoScribble.plotSequence
       : undefined);
+  const projection = shadingIdentityProjection({
+    schema,
+    ...(plotSequence === undefined ? {} : { plotSequence }),
+  });
   return {
     type: "compute",
     jobId: 7,
     identity: createShadingComputeIdentity({
       sketchId,
-      schema: shadingIdentitySchema({
-        schema,
-        ...(plotSequence === undefined ? {} : { plotSequence }),
-      }),
+      schema: projection.schema,
+      schemaKeys: projection.schemaKeys,
       params: overrides.params ?? defaultParams(toneCalibration.schema),
       seed: overrides.seed ?? "seed",
       compositionFrame: overrides.frame ?? scene.space,
@@ -537,6 +542,102 @@ describe("Shading worker runtime", () => {
       expect(execute).not.toHaveBeenCalled();
     },
   );
+
+  it("canonicalizes integer-like Sequence keys in authored order", async () => {
+    const schema = {
+      "2": { kind: "number", min: 0, max: 10, default: 2 },
+      "10": { kind: "number", min: 0, max: 10, default: 10 },
+      alpha: { kind: "number", min: 0, max: 10, default: 1 },
+    } satisfies ParamSchema;
+    const plotSequence: PlotSequenceDeclaration = {
+      sharedParameters: [{ schemaKey: "10", key: "shared" }],
+      stages: [
+        {
+          id: "ink",
+          name: "Ink",
+          source: { kind: "primary", generatorId: "indexed-ink" },
+          parameters: [
+            { schemaKey: "2", key: "two" },
+            { schemaKey: "alpha", key: "alpha" },
+          ],
+          dependencies: { usesSeed: true, usesTime: false },
+        },
+      ],
+    };
+    const sketch: StatelessSketch = {
+      id: "indexed-ink",
+      name: "Indexed Ink",
+      schema,
+      plotSequence,
+      generate: () => scene,
+      generateShadingArtwork: () => artwork,
+    };
+    const projection = shadingIdentityProjection(sketch);
+    const input: ShadingComputeRequest = {
+      type: "compute",
+      jobId: 7,
+      identity: createShadingComputeIdentity({
+        sketchId: sketch.id,
+        schema: projection.schema,
+        schemaKeys: projection.schemaKeys,
+        params: { "2": 4, "10": 8, alpha: 3 },
+        seed: "seed",
+        compositionFrame: scene.space,
+      }),
+    };
+    const get = vi.spyOn(registry, "get").mockReturnValue(sketch);
+    const execute = vi.fn(
+      (..._args: Parameters<ShadingArtworkExecutor>) => artwork,
+    );
+    const resolveEnvironment = vi.fn(async (): Promise<SketchEnvironment> => ({
+      imageAssets: () => undefined,
+    }));
+
+    try {
+      expect(input.identity.params.map(({ key }) => key)).toEqual([
+        "10",
+        "2",
+        "alpha",
+      ]);
+      expect(
+        await handleShadingWorkerMessage(
+          input,
+          execute,
+          undefined,
+          () => 0,
+          resolveEnvironment,
+        ),
+      ).toMatchObject({ type: "success" });
+      expect(resolveEnvironment).toHaveBeenCalledOnce();
+      expect(execute).toHaveBeenCalledOnce();
+
+      const reordered = structuredClone(input) as Record<string, any>;
+      reordered.identity.params = [
+        reordered.identity.params[1],
+        reordered.identity.params[0],
+        reordered.identity.params[2],
+      ];
+      resolveEnvironment.mockClear();
+      execute.mockClear();
+
+      expect(
+        await handleShadingWorkerMessage(
+          reordered,
+          execute,
+          undefined,
+          () => 0,
+          resolveEnvironment,
+        ),
+      ).toMatchObject({
+        type: "failure",
+        error: "Shading request parameters do not match indexed-ink schema",
+      });
+      expect(resolveEnvironment).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      get.mockRestore();
+    }
+  });
 
   it(
     "validates first, resolves opaque IDs per job, and enters compute with only worker-owned pixels",

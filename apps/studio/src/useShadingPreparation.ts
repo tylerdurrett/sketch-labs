@@ -5,7 +5,7 @@ import type { CoordinateSpace, Params, Seed, Sketch } from "@harness/core";
 import { createShadingWorker } from "./createShadingWorker";
 import {
   createShadingComputeIdentity,
-  shadingIdentitySchema,
+  shadingIdentityProjection,
   shadingComputeIdentitiesEqual,
   type ShadingComputeIdentity,
 } from "./shadingComputeProtocol";
@@ -95,9 +95,11 @@ export function createShadingIdentityForAuthoredState(
   sketch: ShadingIdentitySketch,
   authored: ShadingAuthoredState,
 ): ShadingComputeIdentity {
+  const projection = shadingIdentityProjection(sketch);
   return createShadingComputeIdentity({
     sketchId: sketch.id,
-    schema: shadingIdentitySchema(sketch),
+    schema: projection.schema,
+    schemaKeys: projection.schemaKeys,
     params: authored.params,
     seed: authored.seed,
     compositionFrame: authored.compositionFrame,
