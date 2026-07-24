@@ -678,6 +678,9 @@ describe('Flowing Contours directional growth', () => {
     expect(trace.searchStepCount).toBe(9)
     expect(trace.samples.length).toBeGreaterThan(2)
     expect(trace.samples.at(-1)!.point[1]).toBeLessThan(7)
+    expect(trace.spanSupport).toHaveLength(1)
+    expect(trace.spanSupport[0]!.kind).toBe('direct-evidence')
+    expect(trace.spanSupport[0]!.directionalAlignment).toBe(1)
   })
 
   it('accounts total deterministic beam work and resolves exact ties stably', () => {
