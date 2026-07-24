@@ -132,6 +132,104 @@ describe('Plot Sequence parameter projection', () => {
     })
   })
 
+  it('projects __proto__ as a frozen own data property without replacing the record prototype', () => {
+    const protoSchema: ParamSchema = {
+      dangerous: {
+        kind: 'image-asset',
+        default: 'default-value',
+      },
+    }
+    const protoDeclaration: PlotSequenceDeclaration = {
+      sharedParameters: [
+        { schemaKey: 'dangerous', key: '__proto__' },
+      ],
+      stages: [
+        {
+          id: 'primary',
+          name: 'Primary',
+          source: { kind: 'primary', generatorId: 'owning-sketch' },
+          parameters: [],
+          dependencies: { usesSeed: false, usesTime: false },
+        },
+      ],
+    }
+    const objectValue = { shouldNotBecomePrototype: true }
+
+    const projected = projectPlotStageParams(
+      protoSchema,
+      protoDeclaration,
+      'primary',
+      { dangerous: objectValue },
+    )
+    const projectedDefault = projectPlotStageParams(
+      protoSchema,
+      protoDeclaration,
+      'primary',
+      {},
+    )
+
+    expect(Object.getPrototypeOf(projected)).toBe(Object.prototype)
+    expect(
+      Object.prototype.hasOwnProperty.call(projected, '__proto__'),
+    ).toBe(true)
+    expect(Object.keys(projected)).toEqual(['__proto__'])
+    expect(projected['__proto__']).toBe(objectValue)
+    expect(projectedDefault['__proto__']).toBe('default-value')
+    expect(Object.isFrozen(projected)).toBe(true)
+  })
+
+  it('rejects inherited schema keys and never reads inherited parameter values', () => {
+    const inheritedSchema = Object.create({
+      inherited: {
+        kind: 'image-asset',
+        default: 'inherited-default',
+      },
+    }) as ParamSchema
+    const inheritedDeclaration: PlotSequenceDeclaration = {
+      sharedParameters: [
+        { schemaKey: 'inherited', key: 'source' },
+      ],
+      stages: [
+        {
+          id: 'primary',
+          name: 'Primary',
+          source: { kind: 'primary', generatorId: 'owning-sketch' },
+          parameters: [],
+          dependencies: { usesSeed: false, usesTime: false },
+        },
+      ],
+    }
+
+    expect(() =>
+      projectPlotStageParams(
+        inheritedSchema,
+        inheritedDeclaration,
+        'primary',
+        {},
+      ),
+    ).toThrow(
+      'projectPlotStageParams: binding references unknown schema key `inherited`',
+    )
+
+    const inheritedParams = Object.create({
+      image: 'prototype-image',
+      commonTone: 1,
+      firstDetail: 1,
+    }) as Params
+    expect(
+      projectPlotStageParams(
+        schema,
+        makeDeclaration(),
+        'first-pass',
+        inheritedParams,
+      ),
+    ).toEqual({
+      source: 'default-image',
+      tone: 0.4,
+      detail: 0.5,
+    })
+  })
+
   it('rejects a missing Stage by instance ID', () => {
     expect(() =>
       projectPlotStageParams(schema, makeDeclaration(), 'reusable-generator', {}),

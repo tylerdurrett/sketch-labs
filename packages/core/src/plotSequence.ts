@@ -114,18 +114,31 @@ function projectBindings(
   const projected: Params = {}
 
   for (const binding of bindings) {
+    if (
+      !Object.prototype.hasOwnProperty.call(schema, binding.schemaKey)
+    ) {
+      throw new Error(
+        `${operation}: binding references unknown schema key \`${binding.schemaKey}\``,
+      )
+    }
     const spec = schema[binding.schemaKey]
     if (spec === undefined) {
       throw new Error(
         `${operation}: binding references unknown schema key \`${binding.schemaKey}\``,
       )
     }
-    projected[binding.key] = Object.prototype.hasOwnProperty.call(
+    const value = Object.prototype.hasOwnProperty.call(
       params,
       binding.schemaKey,
     )
       ? params[binding.schemaKey]
       : spec.default
+    Object.defineProperty(projected, binding.key, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
   }
 
   return Object.freeze(projected)
