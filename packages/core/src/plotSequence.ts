@@ -33,6 +33,25 @@ export interface PlotStageGeneratorInput {
   readonly environment?: SketchEnvironment
 }
 
+/** Shared inputs that make independently prepared Stages registration-compatible. */
+export interface PlotSequenceRegistrationIdentity {
+  readonly params: Readonly<Params>
+  readonly frame: Readonly<CoordinateSpace>
+}
+
+/**
+ * Inputs that make one Stage's retained generated geometry current.
+ *
+ * Seed and time are present only when the Stage explicitly declares that they
+ * affect its output. The generator invocation still receives both values.
+ */
+export interface PlotStagePreparationIdentity {
+  readonly params: Readonly<Params>
+  readonly frame: Readonly<CoordinateSpace>
+  readonly seed?: Seed
+  readonly t?: number
+}
+
 /** A reusable, headless Scene-producing capability with no Stage identity. */
 export type PlotStageGenerator = (
   input: Readonly<PlotStageGeneratorInput>,
@@ -72,6 +91,208 @@ export interface PlotSequenceDeclaration {
   readonly sharedParameters: readonly PlotParameterBinding[]
   /** Authored physical execution order. Validation never sorts this array. */
   readonly stages: readonly PlotStageDeclaration[]
+}
+
+function findStage(
+  declaration: PlotSequenceDeclaration,
+  stageId: string,
+  operation: string,
+): PlotStageDeclaration {
+  const stage = declaration.stages.find((candidate) => candidate.id === stageId)
+  if (stage === undefined) {
+    throw new Error(`${operation}: missing Stage \`${stageId}\``)
+  }
+  return stage
+}
+
+function projectBindings(
+  schema: ParamSchema,
+  bindings: readonly PlotParameterBinding[],
+  params: Readonly<Params>,
+  operation: string,
+): Readonly<Params> {
+  const projected: Params = {}
+
+  for (const binding of bindings) {
+    const spec = schema[binding.schemaKey]
+    if (spec === undefined) {
+      throw new Error(
+        `${operation}: binding references unknown schema key \`${binding.schemaKey}\``,
+      )
+    }
+    projected[binding.key] = Object.prototype.hasOwnProperty.call(
+      params,
+      binding.schemaKey,
+    )
+      ? params[binding.schemaKey]
+      : spec.default
+  }
+
+  return Object.freeze(projected)
+}
+
+function projectStageParams(
+  schema: ParamSchema,
+  declaration: PlotSequenceDeclaration,
+  stage: PlotStageDeclaration,
+  params: Readonly<Params>,
+  operation: string,
+): Readonly<Params> {
+  return projectBindings(
+    schema,
+    [...declaration.sharedParameters, ...stage.parameters],
+    params,
+    operation,
+  )
+}
+
+/**
+ * Project only the resolved shared values that register every Stage to the same
+ * source and coordinate basis.
+ *
+ * The canonical parameter record and outer identity are fresh and frozen. The
+ * exact caller-owned Composition Frame is retained rather than cloned.
+ */
+export function projectPlotSequenceRegistrationIdentity(
+  schema: ParamSchema,
+  declaration: PlotSequenceDeclaration,
+  params: Readonly<Params>,
+  frame: Readonly<CoordinateSpace>,
+): Readonly<PlotSequenceRegistrationIdentity> {
+  const operation = 'projectPlotSequenceRegistrationIdentity'
+  return Object.freeze({
+    params: projectBindings(
+      schema,
+      declaration.sharedParameters,
+      params,
+      operation,
+    ),
+    frame,
+  })
+}
+
+/**
+ * Project resolved shared and Stage-owned values into canonical runtime keys.
+ *
+ * Flat owning-Sketch aliases, unknown values, and sibling-owned values are not
+ * exposed. Missing own values resolve through their Parameter Schema defaults.
+ */
+export function projectPlotStageParams(
+  schema: ParamSchema,
+  declaration: PlotSequenceDeclaration,
+  stageId: string,
+  params: Readonly<Params>,
+): Readonly<Params> {
+  const operation = 'projectPlotStageParams'
+  const stage = findStage(declaration, stageId, operation)
+  return projectStageParams(schema, declaration, stage, params, operation)
+}
+
+/**
+ * Build the retained preparation identity for one uniquely addressed Stage.
+ *
+ * Seed and time participate only when declared by that Stage. The Composition
+ * Frame always participates and is retained by exact reference.
+ */
+export function projectPlotStagePreparationIdentity(
+  schema: ParamSchema,
+  declaration: PlotSequenceDeclaration,
+  stageId: string,
+  params: Readonly<Params>,
+  seed: Seed,
+  t: number,
+  frame: Readonly<CoordinateSpace>,
+): Readonly<PlotStagePreparationIdentity> {
+  const operation = 'projectPlotStagePreparationIdentity'
+  const stage = findStage(declaration, stageId, operation)
+  const identity: PlotStagePreparationIdentity = {
+    params: projectStageParams(
+      schema,
+      declaration,
+      stage,
+      params,
+      operation,
+    ),
+    frame,
+    ...(stage.dependencies.usesSeed ? { seed } : {}),
+    ...(stage.dependencies.usesTime ? { t } : {}),
+  }
+  return Object.freeze(identity)
+}
+
+/**
+ * Build the complete deterministic input for a Stage generator.
+ *
+ * Dependency flags control retained identity only: every actual invocation gets
+ * the unchanged Sequence Seed and time, exact frame, and identical environment.
+ */
+export function createPlotStageGeneratorInput(
+  schema: ParamSchema,
+  declaration: PlotSequenceDeclaration,
+  stageId: string,
+  params: Readonly<Params>,
+  seed: Seed,
+  t: number,
+  frame: Readonly<CoordinateSpace>,
+  environment?: SketchEnvironment,
+): Readonly<PlotStageGeneratorInput> {
+  const operation = 'createPlotStageGeneratorInput'
+  const stage = findStage(declaration, stageId, operation)
+  return Object.freeze({
+    params: projectStageParams(
+      schema,
+      declaration,
+      stage,
+      params,
+      operation,
+    ),
+    seed,
+    t,
+    frame,
+    ...(environment === undefined ? {} : { environment }),
+  })
+}
+
+/**
+ * Invoke the declared generated source for one Stage instance.
+ *
+ * Addressing is by Stage instance ID, never reusable generator ID. Primary
+ * remains the owning Sketch's ordinary output and therefore has no callback to
+ * invoke through this seam.
+ */
+export function invokePlotStageGenerator(
+  schema: ParamSchema,
+  declaration: PlotSequenceDeclaration,
+  stageId: string,
+  params: Readonly<Params>,
+  seed: Seed,
+  t: number,
+  frame: Readonly<CoordinateSpace>,
+  environment?: SketchEnvironment,
+): Scene {
+  const operation = 'invokePlotStageGenerator'
+  const stage = findStage(declaration, stageId, operation)
+  if (stage.source.kind === 'primary') {
+    throw new Error(
+      `${operation}: Stage \`${stageId}\` is Primary and has no declared generator callback`,
+    )
+  }
+
+  return stage.source.generate(
+    Object.freeze({
+      params: projectStageParams(
+        schema,
+        declaration,
+        stage,
+        params,
+        operation,
+      ),
+      seed,
+      t,
+      frame,
+      ...(environment === undefined ? {} : { environment }),
+    }),
+  )
 }
 
 const OPERATION = 'validatePlotSequence'
