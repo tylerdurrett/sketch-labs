@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   ownedPlotStageBindings,
   plotCanonicalKeys,
+  plotSchemaEntries,
   plotSchemaKeys,
   plotSchemaView,
   plotStageBindings,
@@ -134,6 +135,9 @@ describe("Plot Sequence Studio projection", () => {
     expect(projection.stage.id).toBe("ink");
     expect(projection.shared.schemaKeys).toEqual(["image"]);
     expect(projection.shared.canonicalKeys).toEqual(["imageAsset"]);
+    expect(projection.shared.schemaEntries).toEqual([
+      ["image", schema.image],
+    ]);
     expect(Object.keys(projection.shared.schema)).toEqual(["image"]);
 
     expect(projection.owned.schemaKeys).toEqual([
@@ -141,6 +145,10 @@ describe("Plot Sequence Studio projection", () => {
       "inkDensity",
     ]);
     expect(projection.owned.canonicalKeys).toEqual(["chaos", "density"]);
+    expect(projection.owned.schemaEntries).toEqual([
+      ["inkChaos", schema.inkChaos],
+      ["inkDensity", schema.inkDensity],
+    ]);
     expect(Object.keys(projection.owned.schema)).toEqual([
       "inkChaos",
       "inkDensity",
@@ -174,6 +182,78 @@ describe("Plot Sequence Studio projection", () => {
     expect(Object.keys(plotStageSchemaView(schema, declaration(), "ink"))).toEqual(
       ["image", "inkChaos", "inkDensity"],
     );
+  });
+
+  it("keeps authored order when schema keys look like array indexes", () => {
+    const indexedSchema = {
+      "2": {
+        kind: "number",
+        default: 2,
+        min: 0,
+        max: 10,
+        step: 1,
+      },
+      "10": {
+        kind: "number",
+        default: 10,
+        min: 0,
+        max: 10,
+        step: 1,
+      },
+      alpha: {
+        kind: "number",
+        default: 1,
+        min: 0,
+        max: 10,
+        step: 1,
+      },
+    } satisfies ParamSchema;
+    const indexedDeclaration: PlotSequenceDeclaration = {
+      sharedParameters: [],
+      stages: [
+        {
+          id: "indexed",
+          name: "Indexed",
+          source: { kind: "primary", generatorId: "indexed" },
+          parameters: [
+            { schemaKey: "10", key: "ten" },
+            { schemaKey: "2", key: "two" },
+            { schemaKey: "alpha", key: "alpha" },
+          ],
+          dependencies: { usesSeed: false, usesTime: false },
+        },
+      ],
+    };
+
+    const projection = plotStageProjection(
+      indexedSchema,
+      indexedDeclaration,
+      "indexed",
+    ).combined;
+
+    expect(projection.schemaKeys).toEqual(["10", "2", "alpha"]);
+    expect(projection.schemaEntries.map(([key]) => key)).toEqual([
+      "10",
+      "2",
+      "alpha",
+    ]);
+    expect(
+      plotSchemaEntries(indexedSchema, projection.bindings).map(([key]) => key),
+    ).toEqual(["10", "2", "alpha"]);
+    expect(Object.entries(projection.schema).map(([key]) => key)).toEqual([
+      "10",
+      "2",
+      "alpha",
+    ]);
+    expect(
+      Object.entries(
+        plotStageSchemaView(
+          indexedSchema,
+          indexedDeclaration,
+          "indexed",
+        ),
+      ).map(([key]) => key),
+    ).toEqual(["10", "2", "alpha"]);
   });
 
   it("fails loudly for unknown or duplicate Stage ids", () => {

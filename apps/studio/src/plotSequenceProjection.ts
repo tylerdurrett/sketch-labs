@@ -2,10 +2,14 @@ import {
   validateParamSchema,
   validatePlotSequence,
   type ParamSchema,
+  type ParamSpec,
   type PlotParameterBinding,
   type PlotSequenceDeclaration,
   type PlotStageDeclaration,
 } from "@harness/core";
+
+/** One owning-Sketch ParamSpec paired with its authored schema key. */
+export type PlotSchemaEntry = readonly [schemaKey: string, spec: ParamSpec];
 
 /**
  * An ordered Parameter Schema view projected from Plot Sequence bindings.
@@ -17,6 +21,8 @@ export interface PlotParameterProjection {
   readonly bindings: readonly PlotParameterBinding[];
   readonly schemaKeys: readonly string[];
   readonly canonicalKeys: readonly string[];
+  /** The unambiguous iteration path for ordered Studio consumers. */
+  readonly schemaEntries: readonly PlotSchemaEntry[];
   readonly schema: Readonly<ParamSchema>;
 }
 
@@ -228,18 +234,11 @@ export function plotSchemaView(
   schema: ParamSchema,
   bindings: readonly PlotParameterBinding[],
 ): Readonly<ParamSchema> {
-  validateParamSchema(schema);
-  const keys = plotSchemaKeys(bindings);
+  const entries = plotSchemaEntries(schema, bindings);
+  const keys = entries.map(([key]) => key);
   const view: ParamSchema = {};
 
-  for (const key of keys) {
-    if (!Object.prototype.hasOwnProperty.call(schema, key)) {
-      fail(`binding references unknown schema key \`${key}\``);
-    }
-    const spec = schema[key];
-    if (spec === undefined) {
-      fail(`binding references unknown schema key \`${key}\``);
-    }
+  for (const [key, spec] of entries) {
     Object.defineProperty(view, key, {
       value: spec,
       enumerable: true,
@@ -248,7 +247,37 @@ export function plotSchemaView(
     });
   }
 
-  return Object.freeze(view);
+  Object.freeze(view);
+  return new Proxy(view, {
+    // Ordinary objects reorder array-index keys numerically. Bindings, not
+    // ECMAScript property buckets, are the Studio ordering authority.
+    ownKeys: () => [...keys],
+  });
+}
+
+/**
+ * Project exact ParamSpec entries in authored binding order.
+ *
+ * Ordered consumers should prefer these entries to reconstructing order from a
+ * schema object's property buckets.
+ */
+export function plotSchemaEntries(
+  schema: ParamSchema,
+  bindings: readonly PlotParameterBinding[],
+): readonly PlotSchemaEntry[] {
+  validateParamSchema(schema);
+  const keys = plotSchemaKeys(bindings);
+  const entries = keys.map((key): PlotSchemaEntry => {
+    if (!Object.prototype.hasOwnProperty.call(schema, key)) {
+      fail(`binding references unknown schema key \`${key}\``);
+    }
+    const spec = schema[key];
+    if (spec === undefined) {
+      fail(`binding references unknown schema key \`${key}\``);
+    }
+    return Object.freeze([key, spec] as const);
+  });
+  return Object.freeze(entries);
 }
 
 function parameterProjection(
@@ -259,6 +288,7 @@ function parameterProjection(
     bindings,
     schemaKeys: plotSchemaKeys(bindings),
     canonicalKeys: plotCanonicalKeys(bindings),
+    schemaEntries: plotSchemaEntries(schema, bindings),
     schema: plotSchemaView(schema, bindings),
   });
 }
